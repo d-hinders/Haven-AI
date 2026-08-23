@@ -17,14 +17,43 @@
  *      as a database invariant (partial unique index, migration 066);
  *   4. capped pending queue — a flood cannot grow the pending set unboundedly.
  *
+ *   5. body-size ceiling (`MAX_BODY_BYTES`) — the public path does not accept
+ *      Fastify's 1 MB default;
+ *   6. input normalization — https-only, length caps, and embedded
+ *      credentials refused rather than stored.
+ *
+ * A queued row is INERT. It is a claim, not a fact: nothing in this slice
+ * grants a submission any standing, and nothing here reads a row back out to
+ * a public surface. `GET /catalog` is untouched.
+ *
+ * ## What this slice does NOT defend against (stated, not silently absent)
+ *
+ * - **Full SSRF host classification.** Only the cheapest junk is refused here
+ *   (localhost, loopback, link-local, unspecified, IPv4-mapped forms of the
+ *   same). RFC1918 literals — `https://10.0.0.5/x` — are ACCEPTED into the
+ *   queue. That is deliberate: hostname-shaped blocking at submit time is
+ *   cosmetic, because a perfectly public name can resolve to a private
+ *   address, and resolving it here would be the outbound request this slice
+ *   is forbidden to make. The real gate belongs where the fetch happens, on
+ *   the resolved address, in #1712/#1713. A stored private-range row is
+ *   harmless precisely because nothing in this slice ever dials it.
+ * - **Per-IP fairness inside the queue cap.** The cap is global, so an
+ *   attacker spread across many source addresses can fill the pending set to
+ *   `QUEUE_CAP` with junk hostnames and make legitimate merchants see 429
+ *   until #1714's lifecycle expires those rows. Bounded and self-healing, but
+ *   real: a per-subnet quota within the cap is the fix if it is ever observed.
+ * - **The rate limit when the deployment does not trust its proxy.** The tier
+ *   self-disarms without `TRUST_PROXY_HOPS` (#1670), because a per-IP limit
+ *   keyed on a proxy's own address is a shared-bucket DoS on every client.
+ *   Disarmed, layers 3-6 carry the endpoint alone.
+ * - **Anything about the merchant's honesty.** Verification catches broken
+ *   endpoints, never dishonest ones.
+ *
  * Heavier controls ride on later slices: the `verify_token` + well-known-file
  * ownership proof (#1712) is the single load-bearing anti-abuse gate (it
  * collapses the "Haven as DDoS cannon" vector — an attacker cannot enroll a
  * victim's domain), and the probe's SSRF hardening lands with the probe
- * (#1713). This slice deliberately does NOT attempt full SSRF host
- * classification; it blocks only the cheapest junk (localhost, loopback,
- * link-local, unspecified literals). RFC1918/private ranges are rejected by
- * the SI2/SI3 fetch hardening where the outbound request actually happens.
+ * (#1713).
  */
 import { randomBytes, randomUUID } from 'node:crypto'
 import { isIP } from 'node:net'
@@ -41,12 +70,46 @@ import { catalogSubmitRateLimit } from '../middleware/rate-limit.js'
 const QUEUE_CAP = 500
 const MAX_RESOURCE_URL_LENGTH = 2048
 const MAX_HOSTNAME_LENGTH = 253
+/** Request-body ceiling for the public submit path (Fastify defaults to 1 MB). */
+const MAX_BODY_BYTES = 8 * 1024
 
 /** A plausible-looking field bots tend to autofill; humans leave it empty. */
 interface SubmitBody {
   resource_url?: unknown
   /** Honeypot. Presence + non-empty → bot, dropped with a fake success. */
   website?: unknown
+}
+
+/** 127/8 loopback, 0/8 unspecified, 169.254/16 link-local (metadata service). */
+function isLocallyBoundIpv4(ip: string): boolean {
+  const octets = ip.split('.').map(Number)
+  if (octets[0] === 127 || octets[0] === 0) return true
+  // Narrowly 169.254/16 — the metadata range. NOT all of 169/8, which is
+  // ordinary public address space (169.99.99.99 is a legitimate merchant).
+  return octets[0] === 169 && octets[1] === 254
+}
+
+/**
+ * The IPv4 address embedded in an IPv4-mapped IPv6 literal, else `null`.
+ *
+ * This exists because `new URL()` REWRITES the readable form into its
+ * compressed hex twin: `https://[::ffff:127.0.0.1]/` arrives as
+ * `[::ffff:7f00:1]`, which matches none of the textual IPv6 prefixes below.
+ * Without this, `::ffff:127.0.0.1` walked straight past the loopback filter —
+ * proven by the mutation test that removes this call.
+ */
+function mappedIpv4(lower: string): string | null {
+  const match = /^::(?:ffff:)?([0-9a-f.:]+)$/.exec(lower)
+  if (!match) return null
+  const tail = match[1]
+  if (isIP(tail) === 4) return tail // ::ffff:127.0.0.1, if ever seen unnormalized
+  const groups = tail.split(':')
+  if (groups.length !== 2) return null
+  const high = Number.parseInt(groups[0], 16)
+  const low = Number.parseInt(groups[1], 16)
+  if (!Number.isInteger(high) || !Number.isInteger(low)) return null
+  if (high > 0xffff || low > 0xffff || high < 0 || low < 0) return null
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff].join('.')
 }
 
 /**
@@ -64,12 +127,12 @@ function isLocallyBoundHost(hostname: string): boolean {
   const ipCandidate = hostname.replace(/^\[|\]$/g, '')
   const version = isIP(ipCandidate)
   if (version === 4) {
-    const first = Number(ipCandidate.split('.')[0])
-    // 127/8 loopback, 0/8 unspecified, 169.254/16 link-local (metadata service).
-    return first === 127 || first === 0 || first === 169
+    return isLocallyBoundIpv4(ipCandidate)
   }
   if (version === 6) {
     const lower = ipCandidate.toLowerCase()
+    const mapped = mappedIpv4(lower)
+    if (mapped) return isLocallyBoundIpv4(mapped)
     return (
       lower.startsWith('::1') || // loopback
       lower === '::' || // unspecified
@@ -100,6 +163,17 @@ function normalizeSubmitTarget(
   if (parsed.protocol !== 'https:') {
     return { error: 'Only https resource_url values are accepted' }
   }
+  // Reject embedded credentials rather than storing them. Two distinct harms,
+  // both of which would otherwise be this slice handing a loaded gun to a
+  // later one:
+  //   1. `https://user:pass@host/` persists a secret in `resource_url` and
+  //      would send it as Basic auth the moment #1713's probe fetches the row;
+  //   2. `https://attacker.com@victim.com/` reads as attacker.com to a human
+  //      skimming the string, while the real host is victim.com — a display
+  //      spoof aimed at whoever reviews or renders the queue (#1715).
+  if (parsed.username !== '' || parsed.password !== '') {
+    return { error: 'resource_url must not contain embedded credentials' }
+  }
 
   const hostname = parsed.hostname.toLowerCase()
   if (!hostname || hostname.length > MAX_HOSTNAME_LENGTH) {
@@ -123,7 +197,15 @@ export default async function catalogSubmissionRoutes(
 
   app.post<{ Body: SubmitBody | undefined }>(
     '/submit',
-    { config: { ...catalogSubmitRateLimit(trustProxyHops) } },
+    {
+      // A public, unauthenticated endpoint should not accept Fastify's default
+      // 1 MB body. The largest legitimate submission is a 2 KB URL plus a
+      // couple of short fields, so 8 KB is generous; anything larger is
+      // refused (413) before the JSON parser allocates it, which keeps the
+      // endpoint from doubling as a cheap memory-amplification target.
+      bodyLimit: MAX_BODY_BYTES,
+      config: { ...catalogSubmitRateLimit(trustProxyHops) },
+    },
     async (request, reply) => {
       const body = request.body
 

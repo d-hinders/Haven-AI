@@ -5959,7 +5959,7 @@ export const openapiSpec = {
         operationId: 'submitCatalogEntry',
         summary: 'Submit a payable (x402/MCP) endpoint for verification and listing.',
         description:
-          'Public, unauthenticated self-service submission (epic #1717). Writes a queue row only and returns a `verify_token`; the request path makes **no outbound request of any kind** — nothing here probes, signs, or pays. The seller proves domain control (well-known token / DNS TXT) and a leader-locked, SSRF-hardened, read-only probe watches a real 402 challenge before anything is listed; listed means domain-controlled AND verified-payable, and verification exercises the 402 challenge only, never settlement. Submitting a host that already has a pending/active submission is a no-op returning the same id. A flood is bound by a per-IP rate limit and a capped pending queue (429). Money-path: none; no payment, signature, or authority change.',
+          'Public, unauthenticated self-service submission (epic #1717). Writes a queue row only and returns a `verify_token`; the request path makes **no outbound request of any kind** — nothing here probes, signs, or pays. The seller proves domain control (well-known token / DNS TXT) and a leader-locked, SSRF-hardened, read-only probe watches a real 402 challenge before anything is listed; listed means domain-controlled AND verified-payable, and verification exercises the 402 challenge only, never settlement. Submitting a host that already has a pending/active submission is a no-op returning the same id. A flood is bound by a per-IP rate limit and a capped pending queue (429), and the request body is capped at 8 KB (413). `resource_url` must be https and must NOT carry embedded credentials (`https://user:pass@host/`) — those are refused (400) rather than stored, so nothing downstream can replay them. A queued row is inert: it confers no listing and no standing until domain control and a live 402 challenge have both been observed. Money-path: none; no payment, signature, or authority change.',
         security: [],
         requestBody: {
           required: true,
@@ -5979,6 +5979,7 @@ export const openapiSpec = {
             },
           },
           '400': errorResponse,
+          '413': errorResponse,
           '429': errorResponse,
         },
       },

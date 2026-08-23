@@ -74,10 +74,13 @@ import {
   RENAME_CONTACT_FOR_USER_SQL,
 } from '../src/infra/repositories/contacts.js'
 import {
+  CLAIM_REANCHOR_REVOCATION_SQL,
   CLAIM_REVOCATION_SQL,
   FIND_BY_AGENT_ADDRESS_SQL,
   FIND_BY_ATTESTATION_UID_SQL,
+  LIST_REANCHORS_DUE_SQL,
   LIST_REVOCATIONS_DUE_SQL,
+  LIST_STUCK_REANCHORS_SQL,
   LIST_STUCK_REVOCATIONS_SQL,
 } from '../src/infra/repositories/agent-passports.js'
 import {
@@ -617,6 +620,41 @@ const QUERIES: SmokeQuery[] = [
   {
     name: 'passport: listStuckRevocations — the stuck-revoke alarm (#973)',
     sql: LIST_STUCK_REVOCATIONS_SQL,
+  },
+  {
+    // The re-anchor trio (#1699). Same argument as their revocation cousins,
+    // one step further: these are the ONLY thing that notices a live agent
+    // whose attestation names the delegate key a re-key retired. A schema
+    // mismatch here fails silently and permanently — the queue simply returns
+    // nothing, which is indistinguishable from "no agent needs re-anchoring".
+    name: 'passport: claimReanchorRevocation — the stale-anchor gate (#1699)',
+    sql: CLAIM_REANCHOR_REVOCATION_SQL,
+  },
+  {
+    name: 'passport: listReanchorsDue — the re-anchor queue (#1699)',
+    sql: LIST_REANCHORS_DUE_SQL,
+  },
+  {
+    name: 'passport: listStuckReanchors — the stuck-re-anchor alarm (#1699)',
+    sql: LIST_STUCK_REANCHORS_SQL,
+  },
+  {
+    name: 'passport: resetForReanchor — hands the row back to issuance (#1699)',
+    sql: `UPDATE agent_passports
+             SET status = 'pending',
+                 attestation_uid = NULL, tx_hash = NULL,
+                 agent_eoa = NULL, smart_account = NULL,
+                 anchored_at = NULL, anchoring_started_at = NULL,
+                 attempts = 0, last_error = NULL,
+                 revocation_status = 'none',
+                 revocation_requested_at = NULL, revocation_confirmed_at = NULL,
+                 revocation_tx_hash = NULL, revocation_attempts = 0,
+                 revocation_last_error = NULL, revocation_next_attempt_at = NULL,
+                 updated_at = NOW()
+           WHERE agent_id = $1
+             AND status = 'anchored'
+             AND revocation_status = 'confirmed'
+             AND attestation_uid = $2`,
   },
   {
     // The merchant-facing lookup. A schema mismatch here means verification

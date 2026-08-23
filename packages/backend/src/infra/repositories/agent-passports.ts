@@ -46,6 +46,14 @@ export interface PassportRow {
   last_error: string | null
   requested_at: Date
   anchored_at: Date | null
+  /**
+   * The delegate EOA the LIVE attestation names — written by `markAnchored`,
+   * never re-derived (#974). After a re-key this is the RETIRED key until the
+   * re-anchor completes, and that disagreement with `agents.delegate_address`
+   * IS the re-anchor queue's invariant (#1699).
+   */
+  agent_eoa: string | null
+  smart_account: string | null
   revocation_status: RevocationStatus
   revocation_requested_at: Date | null
   revocation_confirmed_at: Date | null
@@ -70,6 +78,7 @@ export async function findByAgent(agentId: string, db: Executor = pool): Promise
   const { rows } = await db.query<PassportRow>(
     `SELECT agent_id, chain_id, status, assurance_level, attestation_uid, tx_hash,
             attempts, last_error, requested_at, anchored_at,
+            agent_eoa, smart_account,
             revocation_status, revocation_requested_at, revocation_confirmed_at,
             revocation_tx_hash, revocation_attempts, revocation_last_error,
             revocation_next_attempt_at
@@ -348,6 +357,14 @@ export interface VerificationRow {
   agent_eoa: string | null
   smart_account: string | null
   chain_id: number | null
+  /**
+   * The agent's CURRENT delegate address (#1699). Internal to the anchor
+   * comparison — NOT disclosed. It differs from `agent_eoa` exactly while a
+   * re-key has rotated the key underneath a still-live attestation, and that
+   * difference is what lets the verifier say `re_anchoring` instead of
+   * `anchored` for a credential naming a retired key.
+   */
+  current_delegate_address: string | null
   execution_rail: string | null
   /** Presence only — the verifier reports "treasury-bound", never the address. */
   safe_address: string | null
@@ -382,6 +399,7 @@ const VERIFICATION_SELECT = `
          p.assurance_level, p.status AS passport_status, p.attestation_uid,
          p.revocation_status, p.revocation_confirmed_at,
          p.agent_eoa, p.smart_account, p.chain_id,
+         a.delegate_address AS current_delegate_address,
          s.execution_rail, s.safe_address
     FROM agent_passports p
     JOIN agents a ON a.id = p.agent_id
@@ -451,6 +469,10 @@ export interface AgentStanding {
   attestation_uid: string | null
   revocation_status: RevocationStatus | null
   revocation_confirmed_at: Date | null
+  /** The address the LIVE attestation names. Null until the first anchor. */
+  agent_eoa: string | null
+  /** The agent's CURRENT delegate. Differs from `agent_eoa` after a re-key. */
+  delegate_address: string | null
 }
 
 export async function standingForAgent(
@@ -460,7 +482,8 @@ export async function standingForAgent(
   const { rows } = await db.query<AgentStanding>(
     `SELECT a.id AS agent_id, a.status AS agent_status,
             p.status AS passport_status, p.attestation_uid,
-            p.revocation_status, p.revocation_confirmed_at
+            p.revocation_status, p.revocation_confirmed_at,
+            p.agent_eoa, a.delegate_address
        FROM agents a
        LEFT JOIN agent_passports p ON p.agent_id = a.id
       WHERE a.id = $1`,
@@ -634,5 +657,189 @@ export async function listStuckRevocations(
     revocation_attempts: number
     revocation_last_error: string | null
   }>(LIST_STUCK_REVOCATIONS_SQL, [olderThanSeconds])
+  return rows
+}
+
+
+// ── Re-anchoring after a re-key (#1699, epic #1694) ─────────────────────
+//
+// A re-key rotates `agents.delegate_address` in place. `PASSPORT_SCHEMA`'s
+// first field is `address agentEoa` and EAS attestations are IMMUTABLE, so the
+// live attestation keeps naming the retired key until it is revoked and a new
+// one is issued.
+//
+// The queue for that work is defined by the INVARIANT — "the anchored
+// attestation names an address the agent no longer uses" — for the same reason
+// `LIST_REVOCATIONS_DUE_SQL` is: a flag would have to be written by whoever
+// completes the re-key, and anything that never got the flag written (a crash
+// between the credential swap and the enqueue, a re-key completed before this
+// code existed) would strand a live credential for a retired key forever. The
+// invariant is self-healing; a flag is not.
+//
+// `agent_eoa IS NOT NULL` matters: it is written only by `markAnchored`, so a
+// row that has never anchored cannot enter this queue and be mistaken for a
+// stale one.
+const STALE_ANCHOR_PREDICATE = `p.status = 'anchored'
+        AND a.status <> 'revoked'
+        AND p.agent_eoa IS NOT NULL
+        AND a.delegate_address IS NOT NULL
+        AND LOWER(p.agent_eoa) <> LOWER(a.delegate_address)`
+
+/**
+ * Atomically claim the right to revoke a STALE anchor, leasing the row.
+ *
+ * Deliberately a separate gate from {@link claimRevocation} rather than a
+ * loosened one. That function's `a.status = 'revoked'` clause is a security
+ * property — it is what makes "this cannot revoke a live agent's anchor no
+ * matter who calls it" true, and it is relied on by an unconditional
+ * fire-and-forget call on the anchor-completion path. Relaxing it in place
+ * would silently widen every existing caller. This gate instead swaps that
+ * clause for a DIFFERENT, equally specific invariant: the agent is live, and
+ * its attestation names a key it no longer holds.
+ *
+ * The two are mutually exclusive by construction (`a.status = 'revoked'` vs
+ * `a.status <> 'revoked'`), so one agent can never be in both queues, and a
+ * revoke that arrives mid-re-anchor moves the row from this queue to that one
+ * rather than racing inside it.
+ *
+ * The lease reuses `revocation_next_attempt_at`, exactly as `claimRevocation`
+ * does — pushing it into the future IS the claim, and a crashed holder is
+ * reclaimed when it expires.
+ */
+export const CLAIM_REANCHOR_REVOCATION_SQL = `UPDATE agent_passports p
+        SET revocation_status = 'pending',
+            revocation_requested_at = COALESCE(p.revocation_requested_at, NOW()),
+            revocation_next_attempt_at = NOW() + MAKE_INTERVAL(secs => $2),
+            updated_at = NOW()
+       FROM agents a
+      WHERE a.id = p.agent_id
+        AND p.agent_id = $1
+        AND ${STALE_ANCHOR_PREDICATE}
+        AND p.revocation_status <> 'confirmed'
+        AND (p.revocation_next_attempt_at IS NULL OR p.revocation_next_attempt_at <= NOW())`
+
+export async function claimReanchorRevocation(
+  agentId: string,
+  leaseSeconds = 300,
+  db: Executor = pool,
+): Promise<boolean> {
+  const { rowCount } = await db.query(CLAIM_REANCHOR_REVOCATION_SQL, [agentId, leaseSeconds])
+  return (rowCount ?? 0) > 0
+}
+
+/**
+ * Hand the row back to the ISSUANCE state machine, once the retired
+ * attestation is provably dead.
+ *
+ * Two preconditions, both load-bearing and both checked in the statement
+ * rather than by the caller:
+ *
+ * - `revocation_status = 'confirmed'` — the retired attestation is revoked
+ *   on-chain. Clearing `attestation_uid` before that would erase the only
+ *   pointer Haven holds to a credential that is still live, stranding it
+ *   permanently. This is why the epic's revoke-before-issue order is not
+ *   merely mirrored at the passport layer but ENFORCED here.
+ * - `attestation_uid = $2` — the caller revoked THAT uid. Without it a
+ *   concurrent re-anchor could reset a row whose newer attestation is the one
+ *   actually live.
+ *
+ * Everything anchor-shaped is cleared, `attempts` included: the next issuance
+ * is a fresh attempt at a NEW attestation, not a continuation of the old
+ * one's backoff, and carrying the count forward would put a healthy re-anchor
+ * straight into the hour-long cap and trip the attention alarm.
+ *
+ * The row keeps its `agent_id`, `requested_at`, `chain_id` and
+ * `assurance_level` — the passport's IDENTITY and history run unbroken across
+ * the rotation, which is the whole point of #1699. `standing` is untouched
+ * here because it is not a column of this table: it derives from
+ * `agents.status`, which a re-key never changes.
+ */
+export async function resetForReanchor(
+  agentId: string,
+  revokedAttestationUid: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `UPDATE agent_passports
+        SET status = 'pending',
+            attestation_uid = NULL, tx_hash = NULL,
+            agent_eoa = NULL, smart_account = NULL,
+            anchored_at = NULL, anchoring_started_at = NULL,
+            attempts = 0, last_error = NULL,
+            revocation_status = 'none',
+            revocation_requested_at = NULL, revocation_confirmed_at = NULL,
+            revocation_tx_hash = NULL, revocation_attempts = 0,
+            revocation_last_error = NULL, revocation_next_attempt_at = NULL,
+            updated_at = NOW()
+      WHERE agent_id = $1
+        AND status = 'anchored'
+        AND revocation_status = 'confirmed'
+        AND attestation_uid = $2`,
+    [agentId, revokedAttestationUid],
+  )
+  return (rowCount ?? 0) > 0
+}
+
+/** Stale anchors due for another re-anchor attempt, oldest first. */
+export const LIST_REANCHORS_DUE_SQL = `SELECT p.agent_id, a.user_id, p.revocation_attempts
+       FROM agent_passports p
+       JOIN agents a ON a.id = p.agent_id
+      WHERE ${STALE_ANCHOR_PREDICATE}
+        AND p.revocation_status <> 'confirmed'
+        AND (p.revocation_next_attempt_at IS NULL OR p.revocation_next_attempt_at <= NOW())
+      ORDER BY COALESCE(p.revocation_requested_at, p.anchored_at) ASC
+      LIMIT $1`
+
+export async function listReanchorsDue(
+  limit: number,
+  db: Executor = pool,
+): Promise<Array<{ agent_id: string; user_id: string; revocation_attempts: number }>> {
+  const { rows } = await db.query<{
+    agent_id: string
+    user_id: string
+    revocation_attempts: number
+  }>(LIST_REANCHORS_DUE_SQL, [limit])
+  return rows
+}
+
+/**
+ * Stale anchors unreconciled past a threshold — the re-anchor half of the
+ * stuck alarm.
+ *
+ * A separate query from {@link LIST_STUCK_REVOCATIONS_SQL} rather than a
+ * widened one, because the two are different incidents with different
+ * remedies: a stuck REVOCATION means a revoked agent still holds a live
+ * credential, a stuck RE-ANCHOR means a live agent's credential names a key it
+ * no longer holds. Folding them into one count would make the alarm
+ * unreadable at the moment it fires.
+ */
+export const LIST_STUCK_REANCHORS_SQL = `SELECT p.agent_id, p.agent_eoa, a.delegate_address,
+              p.revocation_attempts, p.revocation_last_error
+       FROM agent_passports p
+       JOIN agents a ON a.id = p.agent_id
+      WHERE ${STALE_ANCHOR_PREDICATE}
+        AND COALESCE(p.revocation_requested_at, p.anchored_at) < NOW() - MAKE_INTERVAL(secs => $1)
+      ORDER BY COALESCE(p.revocation_requested_at, p.anchored_at) ASC
+      LIMIT 100`
+
+export async function listStuckReanchors(
+  olderThanSeconds: number,
+  db: Executor = pool,
+): Promise<
+  Array<{
+    agent_id: string
+    agent_eoa: string | null
+    delegate_address: string | null
+    revocation_attempts: number
+    revocation_last_error: string | null
+  }>
+> {
+  const { rows } = await db.query<{
+    agent_id: string
+    agent_eoa: string | null
+    delegate_address: string | null
+    revocation_attempts: number
+    revocation_last_error: string | null
+  }>(LIST_STUCK_REANCHORS_SQL, [olderThanSeconds])
   return rows
 }

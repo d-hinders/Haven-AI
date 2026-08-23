@@ -5,9 +5,15 @@
  *
  * Issuance is opt-in and asynchronous, so this card renders the two-layer
  * truth honestly: `standing` (active / suspended / revoked, DB-authoritative,
- * live) alongside `anchor` (not_anchored / anchored / revocation_pending /
- * revoked_onchain, the on-chain lag). Never collapse the two into one badge —
- * see `lib/passport/revocation.ts`.
+ * live) alongside `anchor` (not_anchored / anchored / re_anchoring /
+ * revocation_pending / revoked_onchain, the on-chain lag). Never collapse the
+ * two into one badge — see `lib/passport/revocation.ts`.
+ *
+ * `re_anchoring` (#1699) is the re-key window, and it is the case that makes
+ * the two-layer split earn its keep: the agent is fully live and authorised —
+ * standing `active` — while the attestation on-chain still names the delegate
+ * key the re-key retired. One badge would have to pick a side and would be
+ * wrong either way.
  *
  * Naming discipline (docs/product/agent-passport.md, copy-guidelines.md):
  * say issued / governed / revocable. Never "verified" — that word is reserved
@@ -18,7 +24,7 @@
  * nothing here for a button to do.
  */
 
-import { useAgentPassport } from '@/hooks/useAgentPassport'
+import { useAgentPassport, type PassportAnchorState } from '@/hooks/useAgentPassport'
 import { getExplorerUrl } from '@/lib/chains'
 import { timeAgo } from '@/lib/format'
 import { Card } from './ui/Card'
@@ -34,12 +40,16 @@ interface Props {
 
 function headlineBadge(
   status: 'pending' | 'anchored' | 'failed' | null,
-  anchor: 'not_anchored' | 'anchored' | 'revocation_pending' | 'revoked_onchain' | null,
+  anchor: PassportAnchorState | null,
 ): { label: string; tone: StatusTone } {
   if (status === null) return { label: 'Not issued', tone: 'neutral' }
   if (status === 'failed') return { label: 'Issuance failed', tone: 'danger' }
   if (status === 'pending') return { label: 'Issuing…', tone: 'neutral' }
   if (anchor === 'revoked_onchain') return { label: 'Revoked on-chain', tone: 'danger' }
+  // Above `revocation_pending`, mirroring the backend's ordering: a re-anchor
+  // claims the row through the same revocation columns, so without this the
+  // whole re-key window would read "Revoking…" on a live, authorised agent.
+  if (anchor === 're_anchoring') return { label: 'Updating on-chain', tone: 'warning' }
   if (anchor === 'revocation_pending') return { label: 'Revoking…', tone: 'warning' }
   return { label: 'Issued', tone: 'success' }
 }
@@ -153,6 +163,12 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
             <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
               Revoked in Haven; the on-chain record has not caught up yet. Treat the agent as
               revoked now.
+            </p>
+          ) : null}
+          {standing?.anchor === 're_anchoring' ? (
+            <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+              This agent&apos;s signing key was replaced. The on-chain record still names the old
+              key and is being reissued; the agent stays active the whole time.
             </p>
           ) : null}
         </Card.Section>

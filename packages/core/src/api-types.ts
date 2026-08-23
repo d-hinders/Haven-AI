@@ -6977,10 +6977,10 @@ export interface operations {
                              */
                             standing: "active" | "suspended" | "revoked" | "unknown";
                             /**
-                             * @description Describes the chain, for transparency — not for deciding.
+                             * @description Describes the chain, for transparency — not for deciding. `re_anchoring` means a re-key rotated the delegate key and the attestation naming the old one is being retired and reissued (#1699); standing is unaffected.
                              * @enum {string}
                              */
-                            anchor: "not_anchored" | "anchored" | "revocation_pending" | "revoked_onchain";
+                            anchor: "not_anchored" | "anchored" | "re_anchoring" | "revocation_pending" | "revoked_onchain";
                             attestationUid: string | null;
                             /** @description True when the database says revoked but the chain has not caught up — a merchant reading only the chain in this window would be WRONG. */
                             chainLagging: boolean;
@@ -7286,10 +7286,10 @@ export interface operations {
                              */
                             standing: "active" | "suspended" | "revoked" | "unknown";
                             /**
-                             * @description The on-chain anchor's progress, for transparency. Never the authority.
+                             * @description The on-chain anchor's progress, for transparency. Never the authority. `re_anchoring` is the re-key window (#1699): the attestation on-chain is live but names the agent's RETIRED delegate key, because EAS attestations are immutable — the agent's standing is unaffected.
                              * @enum {string}
                              */
-                            anchor: "not_anchored" | "anchored" | "revocation_pending" | "revoked_onchain";
+                            anchor: "not_anchored" | "anchored" | "re_anchoring" | "revocation_pending" | "revoked_onchain";
                             evidenceUid: string | null;
                             chainId: number | null;
                             controls: {

@@ -2,8 +2,11 @@
  * Agent re-key — owner-authorised credential rotation (#1698, epic #1694).
  *
  * Same agent identity, new delegate key, new API key, old authority revoked.
- * The agent row keeps its id, name, history and passport; only its
- * credentials change. This is what "I lost my key" should do, and it is why
+ * The agent row keeps its id, name, history and passport IDENTITY; only its
+ * credentials change. The passport's on-chain ANCHOR does change — an EAS
+ * attestation names the delegate EOA and is immutable, so completion kicks a
+ * revoke-and-reissue (#1699). Standing is untouched throughout: it derives
+ * from `agents.status`, which a re-key never writes. This is what "I lost my key" should do, and it is why
  * losing a delegate key is recoverable at all: the delegate never held owner
  * authority, so the account owner can replace it.
  *
@@ -113,6 +116,7 @@ import {
   type DelegationTerms,
   type RekeyStage,
 } from '../modules/agents/index.js'
+import { reanchorPassportBestEffort } from '../modules/passport/index.js'
 
 function safeDetails(err: unknown): string {
   return redactVendorSecrets(err instanceof Error ? err.message : String(err))
@@ -828,6 +832,23 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       // the owner can retry the completion with the signatures already held.
       return reply.code(409).send({ error: 'rekey_completion_failed', details: safeDetails(err) })
     }
+
+    // Re-anchor the Agent Passport on the NEW key (#1699).
+    //
+    // Deliberately OUTSIDE the completion transaction and deliberately
+    // fire-and-forget. `PASSPORT_SCHEMA`'s first field is `address agentEoa`
+    // and EAS attestations are immutable, so this is a chain round-trip —
+    // revoke the old attestation, mint a new one — and #1699's acceptance is
+    // explicit that a chain problem must not cost an agent its standing. Doing
+    // it inside the transaction would invert that: an EAS outage would roll
+    // back a re-key that had already succeeded, leaving the owner holding
+    // signatures for delegations that never activated.
+    //
+    // Nothing is lost if this call never runs. The re-anchor queue is defined
+    // by the INVARIANT "the anchored attestation names an address the agent no
+    // longer uses", which is now true of this agent's own row, so the passport
+    // sweep picks it up regardless. This is the fast path, not the mechanism.
+    reanchorPassportBestEffort(request.params.id, sub)
 
     return {
       completed: true,

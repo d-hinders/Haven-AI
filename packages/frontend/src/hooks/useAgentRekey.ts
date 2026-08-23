@@ -12,6 +12,20 @@
  * delegation payloads. This hook is the only client that exists for that
  * route — before it, `grep -rli rekey packages/frontend/` returned nothing.
  *
+ * ## Which signer, and who decides (#1890)
+ *
+ * Both owner-signed steps run on either scheme. The DEVICE picks — an account
+ * with an EOA owner AND enrolled passkeys signs with whichever is reachable
+ * here — and `pickSigningPath` is the same decision the budget hook makes.
+ * The revoke tells the server that choice up front (`signature_scheme`) so the
+ * UserOperation is estimated for the signature it will really carry, then
+ * branches on the scheme the SERVER resolved.
+ *
+ * Both halves matter, and the second is the quiet one: `complete` runs past
+ * the revoke, so a passkey path that stopped at the revoke would strand the
+ * owner on the far side of the irreversible step. There is no scheme this hook
+ * will start that it cannot finish.
+ *
  * ## Two rules this file exists to hold
  *
  * **1. The revoke is a point of no return, and the state machine says so.**
@@ -46,7 +60,7 @@ import { api, ApiRequestError } from '@/lib/api'
 import { useActiveSigner } from '@/lib/signer'
 import { isPasskeyCancellation } from '@/lib/passkeyErrors'
 import { pickSigningPath } from '@/hooks/useDelegationBudget'
-import type { AccountSigners } from '@/lib/delegationPasskeySigner'
+import type { AccountSigners, DelegationMessage } from '@/lib/delegationPasskeySigner'
 
 /** Mirrors `agent_rekeys.stage`. `idle` is client-only: nothing opened yet. */
 export type RekeyStage = 'idle' | 'preflight' | 'revoked' | 'metered' | 'issued' | 'completed'
@@ -117,20 +131,26 @@ interface TypedDataPayload {
  */
 export type PreflightResult = ApiSchema<'AgentRekeyPreflight'>
 
-// The spec types this 200 as an open object (additionalProperties) because it
-// carries a bundler-shaped UserOperation this client only relays back
-// verbatim. There is no generated type to import, and inventing a narrower one
-// here would be a second, weaker contract.
-// ui-local: no generated type exists — the spec types this response as an open object
-interface RevokePrepare {
-  signing_payload: TypedDataPayload
-  user_op_hash: string
-  user_operation: unknown
-  delegation_hashes: string[]
-  /** The no-authority shortcut: nothing on-chain to revoke (never granted). */
-  revoked?: boolean
-  stage?: RekeyStage
-}
+/**
+ * The revoke prepare, imported rather than restated (#1890).
+ *
+ * This was a hand-rolled interface until PR #1891 added the named schema, and
+ * the copy was not merely redundant — it declared `signing_payload` as always
+ * present. On the WebAuthn branch the server deliberately emits only
+ * `user_op_hash`, so a client cannot sign the wrong artefact for the scheme it
+ * was handed. A local type asserting otherwise would hand this file
+ * compile-time confidence about the exact field the passkey path does not
+ * have, on the step that revokes spend authority.
+ *
+ * It is a THREE-branch union: the two signing branches discriminated by
+ * `signature_scheme`, plus the no-authority short-circuit carrying `revoked`.
+ * Narrowing on the discriminant is what makes `signing_payload` /
+ * `user_op_hash` reachable at all.
+ */
+export type RevokePrepare = ApiSchema<'AgentRekeyRevokePrepare'>
+
+/** What this device will sign with, sent so the server can size the UserOp. */
+export type RekeySignatureScheme = 'eip712_userop' | 'webauthn_userop'
 
 export type IssuedDelegation = ApiSchema<'AgentRekeyIssuedDelegation'>
 export type IssueResult = ApiSchema<'AgentRekeyIssueResponse'>
@@ -237,22 +257,31 @@ export function useAgentRekey(agentId: string, chainId: number) {
   /**
    * Whether this device can sign the re-key at all.
    *
-   * NOT the same question as `useDelegationBudget`'s `ready`, and the
-   * difference is #1870: the re-key revoke prepares its UserOperation without
-   * passing `signWith`, and returns no `signature_scheme`. So the op is
-   * estimated for an EOA-sized signature, and there is no field telling a
-   * client otherwise. Signing it with a passkey means a WebAuthn signature of
-   * several hundred bytes validated against a `verificationGasLimit`
-   * estimated for 65 — on the operation that revokes spend authority.
+   * ONE reason remains, and it is the real one: no signer of any kind is
+   * reachable here. The second reason — `passkey_unsupported` — was correct
+   * only while the backend was signing-scheme-blind (#1870): it prepared the
+   * revoke UserOperation without `signWith`, so a WebAuthn signature of
+   * several hundred bytes would have been validated against a
+   * `verificationGasLimit` estimated for 65, and the failure would have landed
+   * AFTER the revoke — #1868's permanent wedge. Refusing up front was the only
+   * safe answer to a scheme the server could not be told about.
    *
-   * Guessing would put the failure AFTER the revoke, which is exactly
-   * #1868's permanent wedge. So this refuses up front instead.
+   * PR #1891 removed that condition. The prepare now takes a
+   * `signature_scheme`, sizes the op for the signer that will actually sign
+   * it, and reports the resolved scheme back to branch on. A scheme this
+   * account cannot produce is a 409 raised in the prepare handler — BEFORE
+   * anything is revoked and with nothing written — so the retry is free.
+   * Refusing the passkey path here would now block a population the backend
+   * serves correctly, which is the whole of #1890.
    */
-  const signingBlockedReason = useMemo<'no_signer' | 'passkey_unsupported' | null>(() => {
-    if (signingPath === null) return 'no_signer'
-    if (signingPath !== 'eoa') return 'passkey_unsupported'
-    return null
-  }, [signingPath])
+  const signingBlockedReason = useMemo<'no_signer' | null>(
+    () => (signingPath === null ? 'no_signer' : null),
+    [signingPath],
+  )
+
+  /** The scheme THIS device will produce — a device decision, never the account's shape. */
+  const signatureScheme: RekeySignatureScheme =
+    signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop'
 
   async function signTypedData(payload: TypedDataPayload): Promise<`0x${string}`> {
     if (!signer || signer.type !== 'eoa') {
@@ -267,6 +296,30 @@ export function useAgentRekey(agentId: string, chainId: number) {
       primaryType: payload.primaryType,
       message: payload.message,
     } as never)
+  }
+
+  /**
+   * Sign one replacement DELEGATION — the `/issue` payloads, signed at
+   * `complete`.
+   *
+   * This branch is not optional decoration on #1890, it is load-bearing for
+   * the #1868 boundary. `complete` runs AFTER the revoke has landed on-chain.
+   * Removing the passkey gate while leaving `signTypedData` as the only path
+   * would let a passkey owner cross the point of no return and then hit
+   * "connect your owner wallet" — a failure introduced by this change, sitting
+   * on the far side of the irreversible step, with recovery a manual owner
+   * re-grant. Every failure this change can introduce lands before the revoke;
+   * that is what this function buys.
+   *
+   * Mirrors `useDelegationBudget`'s `grant`: the typed-data message IS the
+   * delegation, and the kit signs it in one ceremony.
+   */
+  async function signDelegationPayload(payload: TypedDataPayload): Promise<string> {
+    if (signingPath === 'passkey' && signers) {
+      const { signDelegationWithPasskey } = await import('@/lib/delegationPasskeySigner')
+      return signDelegationWithPasskey(signers, payload.message as unknown as DelegationMessage)
+    }
+    return signTypedData(payload)
   }
 
   /** Step 0 — nothing is revoked, nothing is signed, and this is retryable. */
@@ -308,14 +361,37 @@ export function useAgentRekey(agentId: string, chainId: number) {
     if (!rekeyId) return { ok: false, failure: { kind: 'unknown', message: 'No re-key in progress.' } }
     setBusy(true)
     try {
-      const prep = await api.post<RevokePrepare>(`/agents/${agentId}/rekey/${rekeyId}/revoke`)
+      // Tell the backend which signer this device will use (#1870/#1891). The
+      // prepared op's gas estimation is shaped by the signature kind and the
+      // server cannot know what is reachable here; a scheme this account
+      // cannot produce is refused in the prepare handler, before the revoke.
+      const prep = await api.post<RevokePrepare>(`/agents/${agentId}/rekey/${rekeyId}/revoke`, {
+        signature_scheme: signatureScheme,
+      })
       // An agent that never held a budget has nothing on-chain to revoke; the
-      // backend walks it straight to `metered` and there is no signature.
-      if (prep.revoked === true) {
-        setStage(prep.stage ?? 'metered')
+      // backend walks it straight to `metered` and there is no signature. This
+      // is the union's third branch — no `signature_scheme`, so it is
+      // discriminated by the server's own marker rather than by absence.
+      if ('revoked' in prep) {
+        setStage((prep.stage as RekeyStage) ?? 'metered')
         return { ok: true, value: null }
       }
-      const signature = await signTypedData(prep.signing_payload)
+      // Branch on what the SERVER resolved, not on local state. The two are
+      // normally equal, but only one of them is the scheme the UserOperation
+      // was actually estimated for.
+      let signature: string
+      if (prep.signature_scheme === 'webauthn_userop') {
+        if (!signers) {
+          return { ok: false, failure: { kind: 'unknown', message: 'Account signers are still loading.' } }
+        }
+        // ONE passkey ceremony over the prepared UserOperation — the account
+        // signs its own op, so the signature covers exactly the `user_op_hash`
+        // the prepare returned. Same mechanism as the budget revoke sibling.
+        const { signUserOpWithPasskey } = await import('@/lib/delegationPasskeySigner')
+        signature = await signUserOpWithPasskey(signers, prep.user_operation)
+      } else {
+        signature = await signTypedData(prep.signing_payload as unknown as TypedDataPayload)
+      }
       const res = await api.post<{ stage: RekeyStage }>(
         `/agents/${agentId}/rekey/${rekeyId}/revoke/submit`,
         {
@@ -331,7 +407,7 @@ export function useAgentRekey(agentId: string, chainId: number) {
     } finally {
       setBusy(false)
     }
-  }, [agentId, rekeyId, signer])
+  }, [agentId, rekeyId, signer, signers, signatureScheme])
 
   /** Builds the replacement delegations. Owner signs them in `complete`. */
   const issue = useCallback(async (): Promise<RekeyResult<IssueResult>> => {
@@ -364,8 +440,10 @@ export function useAgentRekey(agentId: string, chainId: number) {
           signatures.push({
             delegation_hash: d.delegation_hash,
             // The spec types the payload as an open object; it is relayed to
-            // the wallet verbatim, exactly as the account will validate it.
-            signature: await signTypedData(d.signing_payload as unknown as TypedDataPayload),
+            // the signer verbatim, exactly as the account will validate it.
+            signature: await signDelegationPayload(
+              d.signing_payload as unknown as TypedDataPayload,
+            ),
           })
         }
         const res = await api.post<CompleteResult>(
@@ -380,7 +458,7 @@ export function useAgentRekey(agentId: string, chainId: number) {
         setBusy(false)
       }
     },
-    [agentId, rekeyId, signer],
+    [agentId, rekeyId, signer, signers, signingPath],
   )
 
   /**

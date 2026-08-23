@@ -85,6 +85,20 @@ type ButtonProps = {
   target?: AnchorHTMLAttributes<HTMLAnchorElement>['target']
   rel?: AnchorHTMLAttributes<HTMLAnchorElement>['rel']
   type?: ButtonHTMLAttributes<HTMLButtonElement>['type']
+  /**
+   * Associates a submit button with a `<form>` elsewhere in the document, by
+   * that form's `id` (#1946).
+   *
+   * Needed because `ui/Modal`'s `footer` renders OUTSIDE the scrolling body —
+   * it is a flex sibling, not a descendant — so a dialog whose fields live in
+   * a `<form>` in the body cannot put its submit button in the footer by
+   * nesting. The HTML `form` attribute is the standard answer, and it keeps
+   * implicit submission (Enter in a text field) working, which rewiring the
+   * button to `type="button"` + `onClick` would silently drop.
+   *
+   * Ignored on the `href` branch below: an anchor has no form owner.
+   */
+  form?: string
   disabled?: boolean
   onClick?: ButtonHTMLAttributes<HTMLButtonElement>['onClick']
   variant?: Variant
@@ -99,6 +113,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   target,
   rel,
   type = 'button',
+  form,
   disabled,
   onClick,
   variant = 'primary',
@@ -120,7 +135,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 
   if (!href) {
     return (
-      <button ref={ref} type={type} disabled={disabled} onClick={onClick} className={classes}>
+      <button ref={ref} type={type} form={form} disabled={disabled} onClick={onClick} className={classes}>
         {content}
       </button>
     )

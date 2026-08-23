@@ -44,6 +44,45 @@ function labelerMoneyPathGlobs() {
   return globs
 }
 
+/**
+ * The Merge Gate's annotated file list, WITHOUT the prose that frames it.
+ *
+ * Scoped deliberately. The surrounding prose legitimately names source files
+ * while talking *about* the mechanism (`scripts/ci/money-path.test.mjs`,
+ * `index.ts`), and a token scan over the whole section would read those as
+ * perimeter claims and fail on a sentence. The bullet list between the
+ * "Classify" line and the "The label matters" line is the list itself.
+ */
+function mergeGateFileList(skill) {
+  const gate = skill.slice(skill.indexOf('## Merge Gate'), skill.indexOf('Route the merge:'))
+  assert.ok(gate.length > 200, 'could not locate the Merge Gate section in SKILL.md')
+  const start = gate.indexOf('Classify a change as money-path')
+  const end = gate.indexOf('The label matters because')
+  assert.ok(start !== -1 && end > start, 'could not locate the Merge Gate file list boundaries')
+  return gate.slice(start, end)
+}
+
+/** Backticked, path-shaped tokens (anything containing a `/`). */
+function listedTokens(list) {
+  return [...list.matchAll(/`([^`]+)`/g)]
+    .map((m) => m[1])
+    .filter((t) => t.includes('/'))
+}
+
+/**
+ * Does a backend-relative prose token name this repo-root-relative glob?
+ * Suffix match, with `*` treated as a single path segment's wildcard so
+ * `rails/delegation-*.ts` covers `packages/backend/src/rails/delegation-*.ts`.
+ */
+function tokenNamesGlob(token, glob) {
+  const needle = token.replace(/\/$/, '')
+  const stripped = glob.replace(/\/\*\*$/, '')
+  if (stripped.endsWith(needle) || glob.endsWith(needle)) return true
+  if (!needle.includes('*')) return false
+  const pattern = needle.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')
+  return new RegExp(`(?:^|/)${pattern}$`).test(stripped)
+}
+
 describe('money-path list stays in one piece', () => {
   test('labeler.yml matches the UNION of globs + controlGlobs', () => {
     // labeler.yml labels BOTH lists: runtime money-path code, and the
@@ -61,12 +100,9 @@ describe('money-path list stays in one piece', () => {
   })
 
   test('every money-path file named in the SKILL.md Merge Gate is in the canonical list', () => {
-    // This is the dangerous direction: someone documents a new money-path file
-    // in the prose everyone reads, and the machinery never learns about it.
-    const skill = read('.agents/skills/ship-next/SKILL.md')
-    const gate = skill.slice(skill.indexOf('## Merge Gate'), skill.indexOf('Route the merge:'))
-    assert.ok(gate.length > 200, 'could not locate the Merge Gate file list in SKILL.md')
-
+    // Direction 1: someone documents a new money-path file in the prose
+    // everyone reads, and the machinery never learns about it.
+    //
     // The Merge Gate prose describes CLASSIFICATION (which diffs are
     // money-path), and classification is the UNION — controlGlobs are
     // labelled money-path too, they just skip the QA-freshness re-run. A
@@ -74,23 +110,11 @@ describe('money-path list stays in one piece', () => {
     // has it (#1045 moved release-bump/publish.yml to controlGlobs, which
     // is where this distinction first bit).
     const globs = [...loadMoneyPathGlobs(), ...loadMoneyPathControlGlobs()]
-    // Backticked tokens that look like source paths. The prose uses
-    // backend-relative shorthand (`routes/x402.ts`, `db/migrations/`), so match
-    // by suffix against the repo-root-relative canonical globs.
-    const tokens = [...gate.matchAll(/`([^`]+)`/g)]
-      .map((m) => m[1])
-      .filter((t) => /\.(ts|mjs|yml)$|\/$/.test(t))
-      .filter((t) => !t.startsWith('.github/CODEOWNERS'))
+    const tokens = listedTokens(mergeGateFileList(read('.agents/skills/ship-next/SKILL.md')))
 
     assert.ok(tokens.length >= 10, `expected the Merge Gate to name many files, saw ${tokens.length}`)
 
-    const missing = tokens.filter((token) => {
-      const needle = token.replace(/\/$/, '')
-      return !globs.some((g) => {
-        const stripped = g.replace(/\/\*\*$/, '')
-        return stripped.endsWith(needle) || g.endsWith(needle)
-      })
-    })
+    const missing = tokens.filter((token) => !globs.some((g) => tokenNamesGlob(token, g)))
 
     assert.deepEqual(
       missing,
@@ -98,6 +122,34 @@ describe('money-path list stays in one piece', () => {
       'SKILL.md names money-path files absent from .github/money-path-globs.json. ' +
         'Add them to the JSON and to labeler.yml — prose that the machinery does not ' +
         'know about is the exact drift #1030 closed.',
+    )
+  })
+
+  test('every canonical glob is named in the SKILL.md Merge Gate', () => {
+    // Direction 2, and the one that actually bit (#1892).
+    //
+    // Direction 1 above called itself "the dangerous direction" and guarded
+    // only SKILL.md ⊆ JSON. But SKILL.md is the file an agent reads WHILE
+    // classifying its own diff, so a glob the JSON has and the prose lacks is
+    // a perimeter the human half of the process cannot see. Seven runtime
+    // globs and five control globs had accumulated in exactly that state, and
+    // the Merge Gate still described routes/x402.ts and routes/machine-payments.ts
+    // as "dissolved" while both were registered in index.ts and listed here.
+    //
+    // Subset in one direction is not agreement. Both directions, or neither.
+    const skill = read('.agents/skills/ship-next/SKILL.md')
+    const tokens = listedTokens(mergeGateFileList(skill))
+    const globs = [...loadMoneyPathGlobs(), ...loadMoneyPathControlGlobs()]
+
+    const unnamed = globs.filter((g) => !tokens.some((token) => tokenNamesGlob(token, g)))
+
+    assert.deepEqual(
+      unnamed,
+      [],
+      'the canonical money-path list has globs the SKILL.md Merge Gate never names. ' +
+        'Add them to the Merge Gate list — an agent classifying its own diff reads ' +
+        'that prose, not this JSON, so a perimeter missing from it is a perimeter ' +
+        'the human half of the union cannot apply (#1892).',
     )
   })
 

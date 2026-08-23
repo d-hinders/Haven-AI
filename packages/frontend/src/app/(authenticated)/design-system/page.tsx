@@ -1763,8 +1763,42 @@ export default function DesignSystemPage() {
           </>
         }
       >
-        Confirm the agent budget before connecting your agent. Requests above the remaining
-        budget will wait for approval.
+        {/*
+          Long enough to overflow the body at ordinary viewport heights, on
+          purpose (#1893). The section above already claims "the panel caps at
+          the viewport and only its body scrolls" — until this demo could
+          actually overflow, that claim had nothing behind it, and the scroll
+          continuation cue had nowhere on `/design-system` to be seen.
+
+          This does NOT move the committed visual baselines: `Modal` returns
+          `null` while closed, and the page is captured with this dialog shut.
+        */}
+        <div className="space-y-3">
+          <p>
+            Confirm the agent budget before connecting your agent. Requests above the remaining
+            budget will wait for approval.
+          </p>
+          <p>
+            The agent can spend up to the budget you set here, from this Haven wallet only. It
+            cannot move funds anywhere else, and it never holds a key of its own.
+          </p>
+          <p>
+            The budget refills at the end of each period. Nothing carries over, so an unspent
+            budget does not stack up into a larger one next period.
+          </p>
+          <p>
+            You can pause or revoke this agent at any time. Revoking takes effect on-chain, so it
+            stops the agent whether or not Haven is reachable.
+          </p>
+          <p>
+            Anything the agent pays for shows up in your transaction history with the merchant, the
+            amount, and the rule that allowed it.
+          </p>
+          <p>
+            Requests above the remaining budget are not refused outright — they wait for you to
+            approve or reject them, and nothing moves until you decide.
+          </p>
+        </div>
       </Modal>
 
       <InfoModal

@@ -771,3 +771,328 @@ describe('classification correctness (#1697 review)', () => {
     expect(check?.repair).not.toContain('agent-10')
   })
 })
+
+/**
+ * #1910 — `--repair` used to call `writeRuntimeConfig` with no `serverName`,
+ * so `serverNamesFor(undefined)` handed it the BARE `haven` / `haven-signer`
+ * pair. Repairing a NAMED agent therefore left that agent untouched AND
+ * overwrote a co-wired bare agent's entries with the named agent's
+ * credentials — a repair tool breaking a second, working agent.
+ */
+describe('runRepair writes the NAMED pair, not the bare one (#1910)', () => {
+  const BARE_KEY = 'sk_agent_bareagentkey000000000000'
+  const NAMED_KEY = 'sk_agent_namedagentkey00000000000'
+
+  /** The `[mcp_servers.<name>]` block, verbatim, for a byte-identical comparison. */
+  function codexTable(text: string, name: string): string {
+    const lines = text.split('\n')
+    const start = lines.findIndex((line) => line.trim() === `[mcp_servers.${name}]`)
+    if (start === -1) return ''
+    const rest = lines.slice(start + 1)
+    const end = rest.findIndex((line) => line.trimStart().startsWith('['))
+    return [lines[start], ...(end === -1 ? rest : rest.slice(0, end))].join('\n').trimEnd()
+  }
+
+  async function seedNamedAgent(homeDir: string, slug: string, agentId: string, apiKey: string) {
+    const dir = join(homeDir, '.haven', 'agents', slug)
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'identity.json'), JSON.stringify({
+      api_key: apiKey,
+      agent_id: agentId,
+      api_url: 'https://api.haven.example',
+      hosted_mcp_url: HOSTED,
+    }))
+    await writeFile(join(dir, 'signer.json'), JSON.stringify({
+      version: 1, delegate_key: '0x' + '22'.repeat(32), delegate_address: '0x' + 'ef'.repeat(20),
+      agent_id: agentId, chain_id: 84532, network: 'eip155:84532',
+    }), { mode: 0o600 })
+    const runtime = await seedRuntime(homeDir, dir)
+    // The sidecar is where the slug lives (#1696) — the fix reads it from here
+    // rather than asking the user to repeat --name on every repair.
+    await writeFile(join(dir, 'signer-runtime.json'), JSON.stringify({
+      server_name: slug,
+      signer_package: MCP_RUNTIME_MANIFEST.signerPackage,
+      signer_version: MCP_RUNTIME_MANIFEST.signerVersion,
+      sdk_package: MCP_RUNTIME_MANIFEST.sdkPackage,
+      sdk_version: MCP_RUNTIME_MANIFEST.sdkVersion,
+      wrapper_path: runtime.wrapperPath,
+      runtime_directory: runtime.runtimeDirectory,
+      npm_cache_directory: join(homeDir, '.haven', 'npm-cache'),
+      cli_path: runtime.cliPath,
+    }))
+    return { dir, ...runtime }
+  }
+
+  async function twoAgentHome() {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-repair-named-'))
+    const bareDir = await seedCredentials(homeDir, 'agent-bare')
+    await writeFile(join(bareDir, 'identity.json'), JSON.stringify({
+      api_key: BARE_KEY, agent_id: 'agent-bare',
+      api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+    const bareRuntime = await seedRuntime(homeDir, bareDir)
+    const named = await seedNamedAgent(homeDir, 'research', 'agent-research', NAMED_KEY)
+    // Both pairs co-wired in one Codex config, exactly as #1696 intends.
+    await mkdir(join(homeDir, '.codex'), { recursive: true })
+    await writeFile(join(homeDir, '.codex', 'config.toml'), [
+      '[mcp_servers.haven]',
+      `url = "${HOSTED}"`,
+      `bearer_token = "${BARE_KEY}"`,
+      '',
+      '[mcp_servers.haven_signer]',
+      `command = "${bareRuntime.wrapperPath}"`,
+      '',
+      '[mcp_servers.haven-research]',
+      `url = "${HOSTED}"`,
+      `bearer_token = "${NAMED_KEY}"`,
+      '',
+      '[mcp_servers.haven-signer-research]',
+      `command = "${named.wrapperPath}"`,
+      '',
+    ].join('\n'))
+    return { homeDir, bareDir, bareRuntime, named }
+  }
+
+  it('repairing a NAMED agent rewrites only haven-<slug> / haven-signer-<slug>', async () => {
+    const { homeDir, named } = await twoAgentHome()
+    const configPath = join(homeDir, '.codex', 'config.toml')
+
+    const repair = await runRepair(
+      { runtime: 'codex-cli', credentialsDir: named.dir },
+      { homeDir, runCommand: vi.fn() },
+    )
+    expect(repair.ok).toBe(true)
+
+    const after = await readFile(configPath, 'utf8')
+    // The named pair is the one that was written, and it carries the NAMED
+    // agent's key and wrapper.
+    expect(codexTable(after, 'haven-research')).toContain(NAMED_KEY)
+    expect(codexTable(after, 'haven-signer-research')).toContain(join(named.dir, 'bin', 'haven-signer.mjs'))
+  })
+
+  it('leaves a co-wired BARE agent\'s haven / haven_signer entries byte-identical', async () => {
+    const { homeDir, bareRuntime, named } = await twoAgentHome()
+    const configPath = join(homeDir, '.codex', 'config.toml')
+    const before = await readFile(configPath, 'utf8')
+    const bareHostedBefore = codexTable(before, 'haven')
+    const bareSignerBefore = codexTable(before, 'haven_signer')
+    expect(bareHostedBefore).toContain(BARE_KEY)
+
+    await runRepair({ runtime: 'codex-cli', credentialsDir: named.dir }, { homeDir, runCommand: vi.fn() })
+
+    const after = await readFile(configPath, 'utf8')
+    // The clobbering half, asserted on its own: the bare pair is not merely
+    // "still there", it is unchanged down to the bytes.
+    expect(codexTable(after, 'haven')).toBe(bareHostedBefore)
+    expect(codexTable(after, 'haven_signer')).toBe(bareSignerBefore)
+    // And specifically: the named agent's credentials did not land in it.
+    expect(codexTable(after, 'haven')).not.toContain(NAMED_KEY)
+    expect(codexTable(after, 'haven_signer')).toContain(bareRuntime.wrapperPath)
+  })
+
+  it('preserves the slug in the sidecar — prepareSignerRuntime rewrites it and must be told', async () => {
+    const { homeDir, named } = await twoAgentHome()
+    await runRepair({ runtime: 'codex-cli', credentialsDir: named.dir }, { homeDir, runCommand: vi.fn() })
+    const sidecar = JSON.parse(await readFile(join(named.dir, 'signer-runtime.json'), 'utf8'))
+    // Without this, a repaired named agent reads as UNNAMED to every later
+    // --doctor and to every later --repair, which re-arms the same defect.
+    expect(sidecar.server_name).toBe('research')
+  })
+
+  it('repairing a BARE agent is unchanged (characterization)', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await rm(join(homeDir, '.codex', 'config.toml'))
+    const repair = await runRepair({ runtime: 'codex-cli' }, { homeDir, runCommand: vi.fn() })
+    expect(repair.ok).toBe(true)
+    const after = await readFile(join(homeDir, '.codex', 'config.toml'), 'utf8')
+    expect(after).toContain('[mcp_servers.haven]')
+    expect(after).toContain('[mcp_servers.haven_signer]')
+    expect(after).toContain(join(dir, 'bin', 'haven-signer.mjs'))
+    expect(after).not.toContain('haven-signer-')
+  })
+})
+
+/**
+ * #1911 — a started-but-unfinished `--rekey` parks a private key in the
+ * credential directory and nothing reported it. These pin what the diagnostic
+ * says, what it refuses to say (the private half), and the one backend
+ * distinction it can actually make.
+ */
+describe('pending re-key reporting (#1911)', () => {
+  // SYNTHETIC throwaway values — not a real key, never used to sign anything,
+  // present only so the "never printed" assertion has something to look for.
+  const SYNTHETIC_PENDING_KEY = '0x' + 'ee'.repeat(32)
+  const PENDING_ADDRESS = '0x' + 'a1'.repeat(20)
+  const NOW = Date.parse('2026-08-23T12:00:00.000Z')
+
+  async function seedPending(dir: string, overrides: Record<string, unknown> = {}) {
+    await writeFile(join(dir, 'rekey-pending.json'), JSON.stringify({
+      agent_id: 'agent-1',
+      new_delegate_address: PENDING_ADDRESS,
+      new_delegate_key: SYNTHETIC_PENDING_KEY,
+      started_at: '2026-08-23T09:00:00.000Z',
+      expires_at: '2026-08-24T09:00:00.000Z',
+      ...overrides,
+    }), { mode: 0o600 })
+  }
+
+  it('reports an open pending re-key: address, path, timing — and does not fail the doctor', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await seedPending(dir)
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, now: () => NOW, ...healthyDeps() })
+
+    const check = report.checks.find((c) => c.id === 'rekey_pending')
+    expect(check?.ok).toBe(true)
+    expect(check?.detail).toContain(PENDING_ADDRESS)
+    expect(check?.detail).toContain(join(dir, 'rekey-pending.json'))
+    expect(check?.detail).toContain('2026-08-23T09:00:00.000Z')
+    // An open re-key is a normal mid-flow state, not a fault.
+    expect(report.ok).toBe(true)
+    // Re-printable: this IS the recovery for a scrolled-away terminal.
+    expect(check?.detail).toContain('Replace signing key')
+  })
+
+  it('says plainly that it cannot tell whether the on-chain revoke already ran (#1868)', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await seedPending(dir)
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, now: () => NOW, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'rekey_pending')
+    expect(check?.detail).toContain('cannot tell')
+    expect(check?.detail).toContain('#1868')
+    // It must not imply the reassuring half on its own.
+    expect(check?.detail).toContain('owner re-grant')
+  })
+
+  it('an EXPIRED pending re-key is a distinct, actionable failure', async () => {
+    const { homeDir } = await healthyHome()
+    const dir = join(homeDir, '.haven', 'agents', 'agent-1')
+    await seedPending(dir, { expires_at: '2026-08-22T09:00:00.000Z' })
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, now: () => NOW, ...healthyDeps() })
+
+    const check = report.checks.find((c) => c.id === 'rekey_pending')
+    expect(check?.ok).toBe(false)
+    expect(check?.detail).toContain('EXPIRED')
+    expect(check?.repair).toContain('rekey-pending.json')
+    expect(check?.repair).toContain('--rekey')
+    // Not folded into a generic warning: the doctor now exits non-zero on it.
+    expect(report.ok).toBe(false)
+  })
+
+  it('distinguishes a backend re-key that COMPLETED — only the local finish is outstanding', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await seedPending(dir)
+    const deps = healthyDeps()
+    // Haven already reports the address this machine generated: agents.
+    // delegate_address is swapped at the `complete` stage, so this proves the
+    // whole owner-signed sequence ran.
+    deps.probeHostedIdentity = vi.fn(async () => ({
+      status: 'ok' as const, agentId: 'agent-1', delegateAddress: PENDING_ADDRESS,
+    }))
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, now: () => NOW, ...deps })
+
+    const check = report.checks.find((c) => c.id === 'rekey_pending')
+    expect(check?.ok).toBe(false)
+    expect(check?.detail).toContain('COMPLETED on Haven')
+    expect(check?.repair).toContain('--rekey-finish')
+    // The wedge language is exactly what must NOT appear here — nothing is
+    // wedged when the sequence finished.
+    expect(check?.detail).not.toContain('#1868')
+  })
+
+  it('never puts the private half in the report, plain or --json', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await seedPending(dir)
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, now: () => NOW, ...healthyDeps() })
+    const serialized = JSON.stringify(report)
+    expect(serialized).not.toContain(SYNTHETIC_PENDING_KEY)
+    expect(serialized).not.toContain('ee'.repeat(32))
+    expect(serialized).not.toContain('new_delegate_key')
+    // The public address IS reported — the assertion above must be failing for
+    // the right reason, not because nothing was read at all.
+    expect(serialized).toContain(PENDING_ADDRESS)
+  })
+
+  it('carries the same fields per-agent in the agents[] shape (#1697)', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await seedPending(dir)
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, now: () => NOW, ...healthyDeps() })
+    const entry = report.agents.find((a) => a.directory === dir)
+    expect(entry?.rekeyPending).toMatchObject({
+      state: 'pending',
+      newDelegateAddress: PENDING_ADDRESS,
+      startedAt: '2026-08-23T09:00:00.000Z',
+    })
+    expect(Object.keys(entry?.rekeyPending ?? {})).not.toContain('newDelegateKey')
+  })
+
+  it('reports a pending re-key in a SUPERSEDED directory — nothing else looks there', async () => {
+    const { homeDir } = await healthyHome()
+    const otherDir = await seedCredentials(homeDir, 'agent-old')
+    await seedPending(otherDir, { agent_id: 'agent-old' })
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, now: () => NOW, ...healthyDeps() })
+    const entry = report.agents.find((a) => a.directory === otherDir)
+    expect(entry?.classification).not.toBe('wired')
+    expect(entry?.rekeyPending?.state).toBe('pending')
+    expect(entry?.checks.some((c) => c.id === 'rekey_pending')).toBe(true)
+  })
+
+  it('an unparseable pending file is still reported — it holds what was a key', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, 'rekey-pending.json'), 'not json at all', { mode: 0o600 })
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, now: () => NOW, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'rekey_pending')
+    expect(check?.ok).toBe(false)
+    expect(check?.detail).toContain('does not parse')
+  })
+
+  it('--repair does NOT delete a pending re-key', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await seedPending(dir)
+    await runRepair({ runtime: 'codex-cli' }, { homeDir, runCommand: vi.fn() })
+    // The TTL is a refusal to USE the key, not a licence to destroy key
+    // material the owner may still be mid-flow on. Deleting is their call.
+    const still = await readFile(join(dir, 'rekey-pending.json'), 'utf8')
+    expect(still).toContain(PENDING_ADDRESS)
+  })
+
+  it('no pending file: no check, and the report is untouched', async () => {
+    const { homeDir } = await healthyHome()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, now: () => NOW, ...healthyDeps() })
+    expect(report.checks.find((c) => c.id === 'rekey_pending')).toBeUndefined()
+    expect(report.agents.every((a) => a.rekeyPending === undefined)).toBe(true)
+    expect(report.ok).toBe(true)
+  })
+})
+
+/**
+ * Regression guard for the seam #1911 opened. The flat check list falls back
+ * to running `checksForAgent` for an UNWIRED primary directory, and that
+ * fallback used to key off "no checks collected yet". A pending re-key now
+ * contributes one check from the inventory pass, so the old predicate would
+ * have read a single `rekey_pending` entry as "already done" and skipped every
+ * real check for the directory the user explicitly pointed at.
+ */
+describe('unwired primary with a pending re-key still gets its full checks (#1911)', () => {
+  it('runs credentials / hosted_mcp / signer_process, not just rekey_pending', async () => {
+    const { homeDir } = await healthyHome()
+    const otherDir = await seedCredentials(homeDir, 'agent-unwired')
+    await writeFile(join(otherDir, 'rekey-pending.json'), JSON.stringify({
+      agent_id: 'agent-unwired',
+      new_delegate_address: '0x' + 'b2'.repeat(20),
+      // SYNTHETIC throwaway — not a real key.
+      new_delegate_key: '0x' + 'dd'.repeat(32),
+      started_at: '2026-08-23T09:00:00.000Z',
+      expires_at: '2026-08-24T09:00:00.000Z',
+    }), { mode: 0o600 })
+
+    const report = await runDoctor(
+      { runtime: 'codex-cli', credentialsDir: otherDir },
+      { homeDir, now: () => Date.parse('2026-08-23T12:00:00.000Z'), ...healthyDeps() },
+    )
+    const ids = report.checks.map((c) => c.id)
+    expect(ids).toContain('rekey_pending')
+    expect(ids).toContain('credentials')
+    expect(ids).toContain('hosted_mcp')
+    expect(ids).toContain('signer_process')
+  })
+})

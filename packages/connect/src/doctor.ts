@@ -173,10 +173,17 @@ export interface AgentInventoryEntry {
   checks: DoctorCheck[]
   /**
    * #1911: a started-but-unfinished `--rekey` in this directory, when there is
-   * one. Reported for EVERY classification, including `superseded` and
+   * one. Populated for EVERY classification, including `superseded` and
    * `orphaned` — the whole point is that the file holds live key material in a
    * directory nothing else is looking at. Address and timing only; the private
    * half is not in this shape (see `RekeyPendingStatus`).
+   *
+   * "Populated", not "gates the exit code": `report.ok` rolls up the flat
+   * `checks` array plus WIRED entries' checks only, so this field and a
+   * non-wired entry's `checks` are reporting surfaces, not gates. An abandoned
+   * parked key outside the primary directory reaches the exit code through the
+   * flat `rekey_pending_elsewhere` check instead — see its comment in
+   * `runDoctor` for why that check exists rather than a cascade rule change.
    */
   rekeyPending?: RekeyPendingStatus
 }
@@ -267,9 +274,13 @@ function agentIsWired(
  * - **Cannot distinguish: before the revoke vs. after it,** within the
  *   not-completed case. `rekey-pending.json` is written before the owner opens
  *   the dashboard and is never touched again, so it records nothing about how
- *   far the backend got; and the identity endpoint this connector reads
- *   (`/machine-payments/agent`) exposes id and delegate address only — no
- *   re-key stage. So "never started on the agent page" and "started, revoked,
+ *   far the backend got; and the identity probe this connector makes reads two
+ *   fields (`id`, `delegate_address`) from `GET /machine-payments/agent`, whose
+ *   response is `id`, `name`, `status`, `safe_address`, `delegate_address`,
+ *   `delegate_account_address`, `chain_id` and `execution_rail` — **none of
+ *   which is a re-key stage**. The absent field is what matters here, not the
+ *   count: there is nothing on this endpoint to read the stage from, so
+ *   widening the probe would not help. So "never started on the agent page" and "started, revoked,
  *   abandoned — the #1868 wedge" are the same observation from here. The check
  *   says so, and points at the agent page, rather than implying the reassuring
  *   half.
@@ -815,6 +826,54 @@ export async function runDoctor(
             repair:
               `Revoke ${supersededLive.join(', ')} on the Haven agent page, then remove the old ` +
               'director(y/ies) under ~/.haven/agents. Connect never revokes or deletes for you.',
+          }
+        : {}),
+    })
+  }
+
+  // ── Parked re-keys in OTHER directories (#1911) ───────────────────────────
+  //
+  // Why this is a FLAT check and not merely a nested one. `report.ok` rolls up
+  // the flat list plus every WIRED agent's checks, so a hazard found only in a
+  // non-wired entry does not reach the exit code — and `--json` + `report.ok`
+  // is the obvious way a CI health-check consumes this. Leaving an abandoned
+  // private key visible only in `agents[]` would reproduce, one layer up,
+  // exactly the invisibility #1911 exists to remove: reported, but not
+  // reported anywhere that gates anything.
+  //
+  // The precedent is `superseded_agents` directly above: it is a flat check
+  // that FAILS on a credential hazard found in a directory that is explicitly
+  // not wired. This repo already treats "spend-capable key material in a
+  // directory you are not using" as exit-code-worthy, and a parked private key
+  // is the same kind of fact — arguably more so, since a superseded agent is
+  // at least an agent the owner once chose to create.
+  //
+  // Severity matches the per-agent check rather than inventing a second scale:
+  // an OPEN pending re-key elsewhere is someone mid-flow on another agent and
+  // stays informational; an EXPIRED or UNREADABLE one is the abandoned case
+  // and fails. Deleting is still nobody's call but the owner's.
+  const parkedElsewhere = inventory
+    .filter((entry) => entry.directory !== primaryDirectory && entry.rekeyPending)
+    .map((entry) => ({ entry, pending: entry.rekeyPending as RekeyPendingStatus }))
+  if (parkedElsewhere.length > 0) {
+    const abandoned = parkedElsewhere.filter((item) => item.pending.state !== 'pending')
+    const describe = (item: (typeof parkedElsewhere)[number]): string =>
+      `${item.entry.slug ?? item.entry.agentId ?? basename(item.entry.directory)} (${item.pending.state}, ${item.pending.path})`
+    checks.push({
+      id: 'rekey_pending_elsewhere',
+      label: 'Parked re-keys in other credential directories',
+      ok: abandoned.length === 0,
+      detail:
+        abandoned.length > 0
+          ? `ABANDONED re-key key material outside the agent this report describes: ${abandoned.map(describe).join(', ')}. ` +
+            'Each holds a private key that was generated for a re-key nobody finished.'
+          : `${parkedElsewhere.length} other director(y/ies) hold an open pending re-key: ${parkedElsewhere.map(describe).join(', ')}.`,
+      ...(abandoned.length > 0
+        ? {
+            repair:
+              'Check the Haven agent page for each before deleting: if its on-chain revoke already ran, the agent ' +
+              'has no spend authority until you re-grant it (#1868), and that is not visible from this machine. ' +
+              'Connect never deletes key material for you.',
           }
         : {}),
     })

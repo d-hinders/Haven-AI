@@ -1096,3 +1096,98 @@ describe('unwired primary with a pending re-key still gets its full checks (#191
     expect(ids).toContain('signer_process')
   })
 })
+
+/**
+ * Review nit 3, resolved by cascading rather than by clarifying alone.
+ *
+ * `report.ok` rolls up the flat check list plus WIRED entries only, so an
+ * abandoned parked key in a superseded directory would be *reported* in
+ * `agents[]` and still leave `--json` + `report.ok` green — the obvious CI
+ * health-check would pass over live private-key material. `superseded_agents`
+ * is the precedent for the other answer: a flat check that fails on a
+ * credential hazard in a directory that is explicitly not wired.
+ */
+describe('an abandoned parked key elsewhere reaches the exit code (#1911, review nit 3)', () => {
+  const NOW = Date.parse('2026-08-23T12:00:00.000Z')
+  const OTHER_KEY = 'sk_agent_otherdirectorykey0000000'
+  const PARKED_ADDRESS = '0x' + 'c3'.repeat(20)
+  // SYNTHETIC throwaway — not a real key, never used to sign anything.
+  const SYNTHETIC_KEY = '0x' + 'ab'.repeat(32)
+
+  async function seedOther(homeDir: string, agentId: string, expiresAt: string) {
+    const otherDir = await seedCredentials(homeDir, agentId)
+    // A DISTINCT, already-revoked key. Without this the extra directory trips
+    // `superseded_agents`, which fails the report on its own — and then every
+    // `report.ok` assertion below would pass for a reason that has nothing to
+    // do with the parked key. Isolating the exit code is the whole point of
+    // these tests, so the co-tenant hazard is deliberately made benign.
+    await writeFile(join(otherDir, 'identity.json'), JSON.stringify({
+      api_key: OTHER_KEY, agent_id: agentId,
+      api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+    await writeFile(join(otherDir, 'rekey-pending.json'), JSON.stringify({
+      agent_id: agentId,
+      new_delegate_address: PARKED_ADDRESS,
+      new_delegate_key: SYNTHETIC_KEY,
+      started_at: '2026-08-21T09:00:00.000Z',
+      expires_at: expiresAt,
+    }), { mode: 0o600 })
+    return otherDir
+  }
+
+  /** Healthy deps, except the other directory's key reads as already revoked. */
+  function depsWithRevokedOther() {
+    const deps = healthyDeps()
+    deps.probeHosted = vi.fn(async (apiKey: string) => (
+      apiKey === OTHER_KEY ? { status: 'unauthorized' as const } : { status: 'ok' as const }
+    ))
+    return deps
+  }
+
+  it('fails the doctor when a SUPERSEDED directory holds an expired parked key', async () => {
+    const { homeDir } = await healthyHome()
+    const otherDir = await seedOther(homeDir, 'agent-abandoned', '2026-08-22T09:00:00.000Z')
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, now: () => NOW, ...depsWithRevokedOther() })
+
+    const check = report.checks.find((c) => c.id === 'rekey_pending_elsewhere')
+    expect(check?.ok).toBe(false)
+    expect(check?.detail).toContain('ABANDONED')
+    expect(check?.detail).toContain(join(otherDir, 'rekey-pending.json'))
+    // Non-vacuous: this check is the ONLY failing one, so report.ok being
+    // false is attributable to it and not to a co-tenant hazard.
+    expect(report.checks.filter((c) => !c.ok).map((c) => c.id)).toEqual(['rekey_pending_elsewhere'])
+    expect(report.ok).toBe(false)
+    // And it must still not tell the owner to delete blindly.
+    expect(check?.repair).toContain('#1868')
+  })
+
+  it('stays informational for an OPEN pending re-key elsewhere', async () => {
+    const { homeDir } = await healthyHome()
+    await seedOther(homeDir, 'agent-midflow', '2026-08-24T09:00:00.000Z')
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, now: () => NOW, ...depsWithRevokedOther() })
+
+    const check = report.checks.find((c) => c.id === 'rekey_pending_elsewhere')
+    expect(check?.ok).toBe(true)
+    expect(check?.repair).toBeUndefined()
+    expect(report.checks.filter((c) => !c.ok)).toEqual([])
+    expect(report.ok).toBe(true)
+  })
+
+  it('still carries the private half nowhere, even on this path', async () => {
+    const { homeDir } = await healthyHome()
+    await seedOther(homeDir, 'agent-abandoned', '2026-08-22T09:00:00.000Z')
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, now: () => NOW, ...depsWithRevokedOther() })
+    const serialized = JSON.stringify(report)
+    expect(serialized).not.toContain(SYNTHETIC_KEY)
+    // Positively assert the address IS there, so the negative cannot pass by
+    // the check simply not having run.
+    expect(serialized).toContain(PARKED_ADDRESS)
+  })
+
+  it('no check at all when no other directory holds one', async () => {
+    const { homeDir } = await healthyHome()
+    await seedCredentials(homeDir, 'agent-plain')
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, now: () => NOW, ...healthyDeps() })
+    expect(report.checks.find((c) => c.id === 'rekey_pending_elsewhere')).toBeUndefined()
+  })
+})

@@ -787,8 +787,13 @@ what each server's instructions say and why they differ in length.
   completed — Haven already reporting the parked address proves it did, and the
   fix is `--rekey-finish`. What it **cannot** settle is, within a re-key that
   did *not* complete, whether the owner got as far as the on-chain revoke:
-  nothing local records the backend stage and `GET /machine-payments/agent`
-  carries none, so "never started on the agent page" and "started, revoked,
+  nothing local records the backend stage, and the doctor's identity probe
+  reads two fields (`id`, `delegate_address`) from `GET
+  /machine-payments/agent` — whose response carries `id`, `name`, `status`,
+  `safe_address`, `delegate_address`, `delegate_account_address`, `chain_id`
+  and `execution_rail`, **none of them a re-key stage**. Widening the probe
+  would not help, because the field does not exist on that endpoint to read.
+  So "never started on the agent page" and "started, revoked,
   abandoned" look identical from the machine. The second is
   [#1868](https://github.com/d-hinders/Haven-AI/issues/1868)'s wedge — old
   delegations revoked, no new ones issued, recoverable only by an owner

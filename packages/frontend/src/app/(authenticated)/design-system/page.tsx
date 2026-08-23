@@ -1206,8 +1206,9 @@ export default function DesignSystemPage() {
           </div>
 
           <div>
-            <ApprovalRequiredBanner title="There is money on the old signing address" tone="warning">
-              Move it before you finish, or it stays where the agent can no longer reach it.
+            <ApprovalRequiredBanner title="This agent has no budget left" tone="warning">
+              Its next request will wait for your approval until you raise the budget or the period
+              resets.
             </ApprovalRequiredBanner>
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
               <span className="font-semibold text-[var(--v2-ink-2)]">warning</span> — the default. Something

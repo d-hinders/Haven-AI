@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — no direct code mirror
-last-verified: "2026-08-15" # #1459: the #946 EIP-3009 bridge was described as "planned"; it has been built and live-proven since 2026-07, and #1450 made erc7710 the preferred scheme with the bridge as the merchant-reach fallback.
+last-verified: "2026-08-23" # #1702: the delegate-key-loss answer here was the PRE-#1694 one — "pause or revoke the agent and create a new key path". Epic #1694 made a delegation-rail agent's key REPLACEABLE (re-key: same agent, new key, budget remainder and period boundary carried), so the guidance is now split by rail rather than stated as one blanket answer. Found by the cross-epic doc sweep #1702's acceptance criteria asked for, not by the coupling gate — no `covers:` glob connects this file to `routes/agent-rekey.ts`. Scope: that one sentence; no other capability claim re-tested. Prior: #1459: the #946 EIP-3009 bridge was described as "planned"; it has been built and live-proven since 2026-07, and #1450 made erc7710 the preferred scheme with the bridge as the merchant-reach fallback.
 ---
 
 # About Haven
@@ -59,7 +59,7 @@ Current credential context should include:
 
 If the user brings their own credential address, Haven must not invent, recover, or store the private key. The generated instructions should tell the user or agent runtime to provide the matching delegate key through their own secret handling.
 
-Haven stores only API-key hashes and display prefixes. Rotating an API key creates a new one-time-visible key and invalidates the old API key immediately. API-key rotation is useful when the API key was exposed or lost; it does not rotate the delegate signing key. If the delegate private key was exposed or lost, the user should pause or revoke the agent and create a new key path.
+Haven stores only API-key hashes and display prefixes. Rotating an API key creates a new one-time-visible key and invalidates the old API key immediately. API-key rotation is useful when the API key was exposed or lost; it does not rotate the delegate signing key. If the delegate private key was exposed or lost, a delegation-rail agent is **re-keyed** (epic #1694): the owner authorises a rotation that revokes the old delegation, issues a new one to a freshly generated key, and rotates the API key alongside it — the agent keeps its id, name and history, and its budget remainder and period boundary carry over. The delegate never held owner authority, which is why losing it is recoverable at all. Legacy AllowanceModule agents have no delegation to revoke, so those are paused or revoked and re-onboarded.
 
 ## Connect-Agent And MCP
 

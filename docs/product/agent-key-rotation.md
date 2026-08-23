@@ -162,9 +162,11 @@ because it too can only see what is on disk and what a fresh process reports.
 
 - **Delegation-rail accounts only.** Agents on the legacy Safe AllowanceModule rail
   cannot be re-keyed: their authority is per-token allowances rather than a signed
-  delegation, so there is nothing to revoke and re-issue. Haven refuses these
-  explicitly and names re-onboarding as the path; the dashboard shows the action as
-  unavailable with that reason rather than a button that fails.
+  delegation, so there is nothing to revoke and re-issue. Re-onboarding is the path
+  instead. **Replace signing key** stays reachable on those agents and explains this
+  when you open it — deliberately, rather than being greyed out: if your key is lost
+  you need to be told what to do instead, and a disabled menu item cannot tell you
+  anything.
 - **A key is never moved between machines.** There is no "restore my key here". The
   new keypair is generated on the target machine, and any design that transported one
   would break the non-custody the whole system rests on.

@@ -45,6 +45,17 @@
  * same reasoning as the mislabeled-PNG case below: evidence that cannot show a
  * defect is worse than no evidence, because it gets reviewed anyway.
  *
+ * ── A deletion is never silent (#1936 / #1939 / #1943) ───────────────────────
+ * That deletion used to be the whole report: three different defects — a
+ * marketing route with no app shell at all, an authenticated shell that had not
+ * mounted YET, and a page that never finished compiling — printed one sentence
+ * blaming the shell selector, and left an empty `.screenshots/` behind. An
+ * absence of a result then reads exactly like a clean result. So: every removed
+ * PNG is now named, with its cause, on stderr AND in
+ * `.screenshots/capture-manifest.json` (`deleted_captures`); marketing routes
+ * capture for real, with `captured_without_unclip` saying so; and a shell that
+ * arrived late is reported under `shell_waits` rather than failing at random.
+ *
  * ── Scenarios (#1409) ────────────────────────────────────────────────────────
  * Some surfaces no URL can reach: the connect-agent modal lives behind a
  * four-step dialog AND a connection state machine that only advances on a
@@ -91,12 +102,12 @@
  */
 import { chromium } from '@playwright/test'
 import { spawn } from 'node:child_process'
-import { rm, writeFile } from 'node:fs/promises'
+import { rm, stat, writeFile } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { VIEWPORTS } from './evidence-viewports.mjs'
-import { captureFullPage } from './full-page-capture.mjs'
+import { SHELL_MODE, captureFullPage } from './full-page-capture.mjs'
 import { CLIP_TOLERANCE_PX, measureHiddenBelowFold } from './clip-guard.mjs'
 import { ARCHIVE_DIR_NAME, resolveKeepRuns, retainPreviousRun } from './capture-retention.mjs'
 import {
@@ -155,6 +166,68 @@ const ROUTES = ['/design-system', ...extra]
 // the route parser above already ignores it. `--keep=0` is the pre-#1888
 // destructive behaviour, kept reachable for a disk-pinched machine.
 const KEEP_RUNS = resolveKeepRuns(ARGS, process.env)
+
+/**
+ * Turn a failed capture into a RECORD of the PNG that was removed (#1936/#1939/
+ * #1943).
+ *
+ * Exported and pure so the reporting half can be tested — it is the half that
+ * was actually broken. The capture failures were three different defects, but
+ * what a reader got was one sentence about a selector and an empty
+ * `.screenshots/`, which is indistinguishable from a run that had nothing to
+ * capture. `cause` is the machine-readable discriminator:
+ *
+ *   'missing-scroll-root'  the shell is there and no longer matches — real
+ *   'not-rendered'         cold `next dev` / failed hydration — not a selector
+ *   'blank-below-fold'     the PNG came back empty below the first viewport
+ *   'unknown'              anything else, never silently folded into the above
+ */
+export function describeDeletedCapture(err, { route, viewport, file, written = true }) {
+  const message = String(err?.message ?? err)
+  const cause =
+    err?.shellCause ??
+    err?.captureCause ??
+    // A `page.screenshot` timeout on a 36,000px image is a LOADED MACHINE, not
+    // a blank capture — observed on this very change, on the same box that had
+    // just spent 315s compiling `/` under agent contention. Folding it into 'blank-below-fold'
+    // would recreate the defect being fixed one level up.
+    (/Timeout \d+ms exceeded|timeout/i.test(message) ? 'capture-timeout' : 'unknown')
+  return {
+    route,
+    viewport,
+    file,
+    // "Deleted" and "never written" are different facts, and a change whose
+    // entire subject is precise causal reporting should not blur them: a shell
+    // verdict throws BEFORE `page.screenshot`, so there was no PNG to remove.
+    disposition: written ? 'deleted' : 'never written',
+    cause,
+    shell_mode: err?.shell?.mode ?? null,
+    waited_ms: err?.waitedMs ?? err?.shell?.waitedMs ?? null,
+    // Never dropped: the message is the only place the specific measurement
+    // (painted ratio, offending box, wait duration) survives.
+    text: message.slice(0, 600),
+  }
+}
+
+/**
+ * The lines printed for deleted captures. One per PNG, each naming the FILE
+ * that no longer exists and WHY — "we deleted something and will not say what"
+ * is the failure this whole change is about.
+ */
+export function formatDeletionReport(deleted) {
+  if (deleted.length === 0) return []
+  return [
+    `\n✗ ${deleted.length} capture(s) FAILED and produced NO usable PNG:`,
+    ...deleted.flatMap((e) => [
+      `  [${e.route} · ${e.viewport}] ${
+        e.disposition === 'never written' ? 'NEVER WRITTEN' : 'DELETED'
+      } ${e.file} — cause: ${e.cause}`,
+      `    ${e.text}`,
+    ]),
+    '  (these are recorded in .screenshots/capture-manifest.json under "deleted_captures" —\n' +
+      '   an empty .screenshots/ is never evidence that there was nothing to capture)',
+  ]
+}
 
 // Authenticated-session fixture — mirrors the e2e `testUser` shape so
 // `/auth/me` resolves and the app shell renders. No secrets, no live backend.
@@ -2040,7 +2113,18 @@ async function main() {
   const consoleErrors = []
   const gotoFailures = []
   const clipped = []
-  const blankCaptures = []
+  // Every capture whose PNG was REMOVED, with the reason it was removed and
+  // which of the three causes it was (#1936/#1939/#1943). A deletion that is
+  // not recorded leaves an absence that reads as "nothing to capture", which
+  // is how three different defects produced one indistinguishable symptom.
+  const deletedCaptures = []
+  // Routes captured WITHOUT un-clipping because they legitimately have no app
+  // shell (marketing). Reported, so "no un-clip" is a stated fact rather than
+  // something a reader has to infer from silence.
+  const shellless = []
+  // Captures that only succeeded after waiting for the shell to mount — the
+  // ProtectedRoute race, made visible instead of intermittent (#1936).
+  const raced = []
   try {
     for (const vp of VIEWPORTS) {
       const context = await newFixtureContext(browser, vp, null)
@@ -2072,22 +2156,42 @@ async function main() {
         // Un-clips the h-screen/overflow-hidden shell so `fullPage` paints the
         // whole route, then reads the PNG back and refuses a blank one (#1738).
         try {
-          await captureFullPage(page, {
+          const { shell } = await captureFullPage(page, {
             path: file,
             label: `${routePath} · ${vp.name}`,
             viewportDevicePx: vp.height * DEVICE_SCALE_FACTOR,
           })
           captured.push(path.relative(ROOT, file))
+          if (shell.mode === SHELL_MODE.NO_SCROLL_SHELL) {
+            shellless.push({ route: routePath, viewport: vp.name, height: shell.height })
+          } else if (shell.raced) {
+            raced.push({ route: routePath, viewport: vp.name, waitedMs: shell.waitedMs })
+          }
         } catch (err) {
           // Same stance as the navigation failure above: a PNG that looks like
           // evidence and is not is worse than no PNG, so remove it rather than
           // leave it for someone to attach to a PR.
+          //
+          // But NEVER delete silently. The deletion, the file it removed and
+          // the cause all go on the record — in the console AND in the
+          // manifest — so an empty `.screenshots/` can be read as "this is why
+          // there is nothing here" rather than "there was nothing to capture".
+          // Was there anything to remove? A shell verdict throws before
+          // `page.screenshot` runs, so reporting that one as DELETED would be
+          // a small lie in the middle of the honesty this change is about.
+          const written = await stat(file).then(
+            () => true,
+            () => false,
+          )
           await rm(file, { force: true })
-          blankCaptures.push({
-            route: routePath,
-            viewport: vp.name,
-            text: String(err?.message ?? err).slice(0, 400),
-          })
+          deletedCaptures.push(
+            describeDeletedCapture(err, {
+              route: routePath,
+              viewport: vp.name,
+              file: path.relative(ROOT, file),
+              written,
+            }),
+          )
           continue
         }
       }
@@ -2193,6 +2297,13 @@ async function main() {
         routes: ROUTES,
         scenarios: scenarios.map((s) => s.name),
         files: captured,
+        // The absences, on the record. A capture that was written and then
+        // removed is a different fact from a capture that was never attempted,
+        // and the manifest is the only place a later reader can tell them apart
+        // (#1936/#1939/#1943).
+        deleted_captures: deletedCaptures,
+        captured_without_unclip: shellless,
+        shell_waits: raced,
         // Retention, recorded so the live manifest can be read as "this is the
         // current run, and here is where the one before it went" (#1888). A
         // reader who finds PNGs under `previous/` can tell from HERE that they
@@ -2222,12 +2333,24 @@ async function main() {
     console.error(`\n✗ ${gotoFailures.length} capture(s) FAILED — their PNGs were NOT written:`)
     for (const e of gotoFailures) console.error(`  [${e.route} · ${e.viewport}] ${e.text}`)
   }
-  if (blankCaptures.length > 0) {
-    console.error(
-      `\n✗ ${blankCaptures.length} capture(s) came back BLANK below the fold — their PNGs were DELETED:`,
+  if (shellless.length > 0) {
+    console.log(
+      `\nℹ ${shellless.length} capture(s) had NO app scroll shell and were captured directly (#1939):`,
     )
-    for (const e of blankCaptures) console.error(`  [${e.route} · ${e.viewport}] ${e.text}`)
+    for (const e of shellless) {
+      console.log(
+        `  [${e.route} · ${e.viewport}] no "#main-content" on this route, and nothing is clipping ` +
+          `content — the page scrolls natively (${e.height}px). Un-clipping was skipped, the PNG is complete.`,
+      )
+    }
   }
+  if (raced.length > 0) {
+    console.log(
+      `\nℹ ${raced.length} capture(s) had to WAIT for the app shell to mount (ProtectedRoute race, #1936):`,
+    )
+    for (const e of raced) console.log(`  [${e.route} · ${e.viewport}] shell appeared after ${e.waitedMs}ms`)
+  }
+  for (const line of formatDeletionReport(deletedCaptures)) console.error(line)
   if (clipped.length > 0) {
     console.log(
       `\n⚠ ${clipped.length} capture(s) had content BELOW THE FOLD — the plain PNG shows only what a user sees without scrolling:`,
@@ -2246,7 +2369,7 @@ async function main() {
   // artifact in this run that looks like complete evidence and is not.
   //
   // It is REPORTED, not fatal, and that is a decision rather than an oversight
-  // (#1879 review). `blankCaptures` deletes its file and exits 1; this does
+  // (#1879 review). `deletedCaptures` deletes its file and exits 1; this does
   // neither, because the two are not the same situation. A blank PNG has no
   // evidentiary value at all. A `-full.png` that is 203px short is still the
   // most complete render of that screen this run can produce, and deleting it
@@ -2317,7 +2440,7 @@ async function main() {
   // Broken evidence must not exit 0 — a failed navigation means missing PNGs,
   // and a blank capture means the run produced something that LOOKS like
   // evidence (#1738).
-  if (gotoFailures.length > 0 || blankCaptures.length > 0) process.exit(1)
+  if (gotoFailures.length > 0 || deletedCaptures.length > 0) process.exit(1)
 }
 
 // Run only as a CLI (fixtureFor is imported by tests).

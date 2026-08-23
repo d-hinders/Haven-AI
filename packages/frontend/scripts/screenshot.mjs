@@ -10,6 +10,20 @@
  *   npm run screenshot -w packages/frontend                 # /design-system only
  *   npm run screenshot -w packages/frontend -- /dashboard,/agents
  *   npm run screenshot -w packages/frontend -- --scenario=connect-agent
+ *   npm run screenshot -w packages/frontend -- --keep=5   # retain 5 old runs
+ *
+ * ── The previous run survives this one (#1888) ───────────────────────────────
+ * This run writes FLAT into `.screenshots/`, exactly as before, so every literal
+ * `.screenshots/<name>.png` in the playbooks, the reviewer roles and the PR
+ * template still resolves to the NEWEST run. What changed is the other end: the
+ * run that was there before is moved into `.screenshots/previous/<run-id>/` and
+ * its manifest stamped `stale: true` + `superseded_by`, instead of being
+ * `rm -rf`'d. A second pass over one scenario no longer destroys the wide run a
+ * reviewer is mid-way through reading (#1879's review lost its largest claim to
+ * exactly that), and a same-code control run can be held alongside the candidate
+ * it is a control for. Capped at 3 previous runs; `--keep=<n>` /
+ * `SCREENSHOT_KEEP_RUNS` overrides, `--keep=0` restores the old behaviour.
+ * Mechanism and the rejected `latest`-symlink shape: `scripts/capture-retention.mjs`.
  *
  * ── One server per worktree, and it has to prove it (#1800) ──────────────────
  * The port is DERIVED FROM THE WORKTREE PATH and proven free before the dev
@@ -77,13 +91,14 @@
  */
 import { chromium } from '@playwright/test'
 import { spawn } from 'node:child_process'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { VIEWPORTS } from './evidence-viewports.mjs'
 import { captureFullPage } from './full-page-capture.mjs'
 import { CLIP_TOLERANCE_PX, measureHiddenBelowFold } from './clip-guard.mjs'
+import { ARCHIVE_DIR_NAME, resolveKeepRuns, retainPreviousRun } from './capture-retention.mjs'
 import {
   buildRunIdentity,
   derivePort,
@@ -136,6 +151,10 @@ const extra = ARGS.filter((a) => !a.startsWith('--'))
   .filter(Boolean)
   .map((r) => (r.startsWith('/') ? r : `/${r}`))
 const ROUTES = ['/design-system', ...extra]
+// How many PREVIOUS runs survive this one (#1888). `--keep=` is a `--` flag, so
+// the route parser above already ignores it. `--keep=0` is the pre-#1888
+// destructive behaviour, kept reachable for a disk-pinched machine.
+const KEEP_RUNS = resolveKeepRuns(ARGS, process.env)
 
 // Authenticated-session fixture — mirrors the e2e `testUser` shape so
 // `/auth/me` resolves and the app shell renders. No secrets, no live backend.
@@ -1650,16 +1669,39 @@ async function main() {
   // leaks both (the try/finally that cleans them up starts further down).
   const scenarios = resolveScenarios(SCENARIO_ARGS)
 
-  await rm(OUT_DIR, { recursive: true, force: true })
-  await mkdir(OUT_DIR, { recursive: true })
-
   // Provenance, printed before anything is captured and stamped into the
   // manifest afterwards: a PNG on its own cannot say which branch it shows.
+  // Resolved BEFORE retention runs, because the archived run's manifest records
+  // which branch/commit displaced it.
   const identity = buildRunIdentity(worktreeIdentity(ROOT))
   console.log(`screenshot: worktree ${identity.worktree}`)
   console.log(
     `screenshot: branch ${identity.branch} @ ${identity.commit.slice(0, 12)}${identity.dirty ? ' (dirty working tree)' : ''}`,
   )
+
+  // This used to be `rm -rf OUT_DIR`, which destroyed the previous run
+  // unconditionally — including the case that motivated #1888, a narrow
+  // `--scenario=X` run after a wide one. The previous run is now moved aside
+  // into `.screenshots/previous/<run-id>/` and stamped stale, and THIS run still
+  // writes flat into `.screenshots/` so every literal `.screenshots/<name>.png`
+  // reference in the playbooks and reviewer roles keeps resolving to the newest
+  // run. See `scripts/capture-retention.mjs` for why the `latest`-symlink shape
+  // was rejected.
+  const retention = await retainPreviousRun(OUT_DIR, { identity, keep: KEEP_RUNS })
+  if (retention.archived) {
+    console.log(
+      `screenshot: previous run (${retention.files.length} file(s)) archived to ` +
+        `.screenshots/${ARCHIVE_DIR_NAME}/${retention.archived}/ — its manifest is stamped stale`,
+    )
+  }
+  if (retention.pruned.length > 0) {
+    console.log(
+      `screenshot: pruned ${retention.pruned.length} archived run(s) beyond --keep=${retention.keep}: ${retention.pruned.join(', ')}`,
+    )
+  }
+  if (retention.keep <= 0) {
+    console.log('screenshot: --keep=0 — no previous run was retained (destructive mode)')
+  }
 
   // The marker the server serves back at /capture-identity.json. Written
   // BEFORE the server starts so it is on disk for the first probe, and torn
@@ -1910,6 +1952,16 @@ async function main() {
         routes: ROUTES,
         scenarios: scenarios.map((s) => s.name),
         files: captured,
+        // Retention, recorded so the live manifest can be read as "this is the
+        // current run, and here is where the one before it went" (#1888). A
+        // reader who finds PNGs under `previous/` can tell from HERE that they
+        // were displaced by this commit, without opening the archived manifest.
+        stale: false,
+        keep_runs: retention.keep,
+        previous_run: retention.archived
+          ? `${ARCHIVE_DIR_NAME}/${retention.archived}`
+          : null,
+        pruned_runs: retention.pruned,
       },
       null,
       2,
@@ -1919,6 +1971,12 @@ async function main() {
 
   console.log(`\nscreenshot: wrote ${captured.length} PNGs to .screenshots/`)
   for (const f of captured) console.log(`  ${f}`)
+  if (retention.archived) {
+    console.log(
+      `  (the previous run is still on disk at .screenshots/${ARCHIVE_DIR_NAME}/${retention.archived}/ — ` +
+        'stamped stale, so do not attach it as evidence for this commit)',
+    )
+  }
   if (gotoFailures.length > 0) {
     console.error(`\n✗ ${gotoFailures.length} capture(s) FAILED — their PNGs were NOT written:`)
     for (const e of gotoFailures) console.error(`  [${e.route} · ${e.viewport}] ${e.text}`)

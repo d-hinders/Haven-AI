@@ -12,7 +12,7 @@ covers:
   - packages/connect/src/args.ts
   - packages/connect/src/storage.ts
   - packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx
-last-verified: "2026-08-23" # #1702: written against epic #1694 as merged — #1698 (backend stages), #1699 (passport re-anchor), #1700 (connect --rekey), #1701's shipped half (dashboard). Every claim checked against code rather than the epic's prose; the residual-funds and fresh-process-check cautions are stated because the code says so and nothing user-facing did.
+last-verified: "2026-08-23" # #1849: "What carries over" gains the boundary-crossing edge — a re-key started in one budget period and finished in the next drops the stale carry and hands you the full budget for the period you are actually in. The old "two edges" paragraph was not wrong so much as silent on the case, and silence there reads as a broken re-key when the client shows one grant where the table promises two. Scope: that paragraph only; the carry table, the revoke-before-issue ordering, the residual caution and the passport-lag section were re-read against `modules/agents/rekey-carry.ts` and `routes/agent-rekey.ts` and stand unchanged. Prior: #1702: written against epic #1694 as merged — #1698 (backend stages), #1699 (passport re-anchor), #1700 (connect --rekey), #1701's shipped half (dashboard). Every claim checked against code rather than the epic's prose; the residual-funds and fresh-process-check cautions are stated because the code says so and nothing user-facing did.
 ---
 
 # Replacing an agent's signing key
@@ -70,9 +70,14 @@ account*, which nothing recovers by retrying.
 | **The period boundary** | The carried 40 expires when the original period would have, and the full budget resumes then. Re-key is not a way to refill a budget. |
 | **Passport standing** | If the agent has an [Agent Passport](agent-passport.md), its standing is unbroken. |
 
-Two edges the example skips, both in your favour: a budget whose first period had not
-started yet is simply reissued whole, and a grant that had already expired carries
-nothing because there was nothing live to carry.
+Three edges the example skips, all in your favour. A budget whose first period had
+not started yet is simply reissued whole, and a grant that had already expired carries
+nothing because there was nothing live to carry. And if you start a re-key in one
+period but finish it in the next — you left the signing prompt open overnight, say —
+the carried remainder belongs to a period that has ended, so it is dropped and you are
+asked to sign only the full budget for the period you are now in. You will see the
+dropped grant listed with the window that closed; that is the flow working, not a
+grant that went missing.
 
 The budget carry is the part people expect to work differently, so it is worth being
 exact. Carrying only the *amount* would mean an agent on a daily budget could be

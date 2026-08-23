@@ -19,7 +19,7 @@ covers:
   - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
-last-verified: "2026-08-23" # #1702: re-verified, NOT edited. Implicated only because `packages/connect/**` is in `covers:` and #1702 rewrites that package's README; the body makes no claim about credential-overwrite semantics, `--name`, or re-key, and its review-checklist line "API-key rotation changes identity credentials, not signing authority" is about the separate `POST /agents/:id/rotate-key` route and stays true. Recorded so the coupling-gate loop is closed in the audit trail rather than left as an unaddressed flag. Prior: #1813: dropped the `covers:` entry for `lib/hosted-connect.ts`, deleted as unreachable. No claim in the body named it — the flow described here is served by ConnectAgentModal, not the retired hosted card. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
+last-verified: "2026-08-23" # #1878: two claims corrected, both of the same shape — an exhaustive list of what registration sends. Step 4 said the connector sends "only" the setup token, runtime/version, public address and proof, and API-key hash/prefix, and the review checklist said registration contains "public proof and hashed API-key metadata only". Both are now false: the connector also sends the resolved MCP server name it wired the agent as. It is a non-secret display label and the custody half of each sentence is untouched — no private key, no plaintext API key — but "only" is a strong word and a reader auditing the wire boundary against this page would have found a field the page denies exists. Both now name it AND say what it is not (never authority, not unique, nothing keys off it), because a new field in a custody checklist reads as a custody change unless the doc says otherwise. Scope: those two lines; the rest of the flow, the hosted/local topology split and the remaining checklist items were re-read only for contradiction, and none contradicts. Prior: #1702: re-verified, NOT edited. Implicated only because `packages/connect/**` is in `covers:` and #1702 rewrites that package's README; the body makes no claim about credential-overwrite semantics, `--name`, or re-key, and its review-checklist line "API-key rotation changes identity credentials, not signing authority" is about the separate `POST /agents/:id/rotate-key` route and stays true. Recorded so the coupling-gate loop is closed in the audit trail rather than left as an unaddressed flag. Prior: #1813: dropped the `covers:` entry for `lib/hosted-connect.ts`, deleted as unreachable. No claim in the body named it — the flow described here is served by ConnectAgentModal, not the retired hosted card. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -55,8 +55,10 @@ Staged Connect Agent pairing is the only current dashboard flow:
 3. The connector runs locally, generates the delegate signing key and API key,
    and stores both in protected local runtime configuration.
 4. Registration sends only the setup token, runtime/version metadata, public
-   signing address and proof, and API-key hash/prefix. No private key or
-   plaintext API key is registered.
+   signing address and proof, API-key hash/prefix, and the MCP server name the
+   connector wired this agent as (`haven`, or `haven-<slug>` — a display label
+   the dashboard shows so several agents in one harness can be told apart;
+   #1878). No private key or plaintext API key is registered.
 5. The user approves, in the modal, with one signature — and that signature is
    the authority. On the legacy rail it is a wallet approval, and the agent
    cannot spend until the AllowanceModule permission exists on-chain. On the
@@ -145,7 +147,9 @@ The edge signer exposes four local, no-network tools:
 ## Review checklist
 
 - Hosted services never receive a delegate key.
-- Setup registration contains public proof and hashed API-key metadata only.
+- Setup registration contains public proof, hashed API-key metadata, and the
+  connector-reported MCP server name — a display label only, never authority
+  (nothing keys off it, and it is not unique).
 - API-key rotation changes identity credentials, not signing authority.
 - Queued or insufficient requests expose no signable hash.
 - x402 authorization is bound to amount, merchant, resource, asset, and network.

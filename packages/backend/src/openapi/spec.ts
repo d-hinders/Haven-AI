@@ -6629,6 +6629,23 @@ export const openapiSpec = {
           /** Timestamp of the most recent MCP tool call from this agent. Null until first call. */
           mcp_last_seen_at: { anyOf: [isoDateTime, { type: 'null' }] },
           /**
+           * #1878: the hosted MCP server name this agent is wired as, exactly
+           * as it appears in the user's MCP config — `haven` for the unnamed
+           * pair, `haven-<slug>` for one connected with `--name`. Its signer
+           * counterpart is `haven-signer` / `haven-signer-<slug>`.
+           *
+           * SELF-REPORTED by the connector at registration and a DISPLAY AID
+           * ONLY: nothing keys off it, it is not unique, and it is not
+           * identity. Use `id` for that.
+           *
+           * Null means never reported — an agent created straight through
+           * `POST /agents`, one that predates #1878, or one connected by an
+           * older connector. Null must NOT be rendered as the bare `haven`
+           * pair: `--name` shipped in #1696, so named agents exist with no
+           * recorded name, and guessing would mislabel exactly them.
+           */
+          mcp_server_name: { type: ['string', 'null'] },
+          /**
            * True when open reconciliation events indicate stranded delegate
            * funds (#1445). Derived by the list and detail reads, so it is NOT
            * required: the creation response is built from the freshly inserted

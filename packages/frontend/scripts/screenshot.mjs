@@ -232,6 +232,8 @@ export const FIXTURE_AGENTS = [
     safe_chain_id: FIXTURE_SAFE.chain_id, account_type: 'delegator_hybrid',
     api_key_prefix: 'hvn_a1b2c3', status: 'active',
     created_at: '2026-06-02T10:00:00.000Z',
+    // #1878: a NAMED pair — the case multi-agent wiring exists for.
+    mcp_server_name: 'haven-research',
     mcp_last_seen_at: '2026-07-10T08:12:00.000Z', allowances: [],
   },
   {
@@ -242,6 +244,9 @@ export const FIXTURE_AGENTS = [
     safe_chain_id: FIXTURE_SAFE.chain_id, account_type: null,
     api_key_prefix: 'hvn_d4e5f6', status: 'active',
     created_at: '2026-05-18T10:00:00.000Z',
+    // #1878: the BARE pair, reported — must not read like the agent below,
+    // which reported nothing at all.
+    mcp_server_name: 'haven',
     mcp_last_seen_at: '2026-07-09T16:40:00.000Z',
     allowances: [{
       id: 'alw-1', agent_id: 'agent-ops',

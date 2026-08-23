@@ -2912,6 +2912,7 @@ export type components = {
             archived_at?: string | null;
             allowances: components["schemas"]["AgentAllowance"][];
             mcp_last_seen_at?: string | null;
+            mcp_server_name?: string | null;
             has_stranded_funds?: boolean;
         } & {
             [key: string]: unknown;

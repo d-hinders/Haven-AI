@@ -1455,6 +1455,76 @@ describe('--name wiring slug through runConnect (#1696)', () => {
     )
   })
 
+  it('#1878 reports the RESOLVED hosted name for a named pair, not the raw slug', async () => {
+    // The dashboard renders this verbatim as the MCP config entry, so the
+    // slug alone would be wrong there — a user looking for `work` in their
+    // config finds nothing.
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1878-named-'))
+    const api = namedApi()
+    await runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir,
+      serverName: 'work',
+      waitForApproval: false,
+    }, {
+      api: api as never,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_supersecret',
+      preflightStorage: vi.fn(async () => credentialsDir),
+      writeCredentials: vi.fn(async () => ({
+        directory: join(credentialsDir, 'work'),
+        identityPath: join(credentialsDir, 'work', 'identity.json'),
+        signerPath: join(credentialsDir, 'work', 'signer.json'),
+        agentPath: join(credentialsDir, 'work', 'agent.json'),
+      })) as never,
+      installRuntime: namedInstallMock() as never,
+      log: () => undefined,
+    })
+
+    expect(api.registerSetup).toHaveBeenCalledWith(
+      expect.objectContaining({ mcpServerName: 'haven-work' }),
+    )
+  })
+
+  it('#1878 reports the BARE pair explicitly rather than sending nothing', async () => {
+    // The load-bearing one. If the unnamed pair sent nothing, "absent" on the
+    // server would mean both "this is the bare pair" and "an older connector
+    // said nothing" — and only the second may render as unknown. Since #1696
+    // shipped --name before this, agents wired with a named pair already
+    // exist with nothing recorded, so collapsing the two would mislabel
+    // exactly the agents this feature is for.
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1878-bare-'))
+    const api = namedApi()
+    await runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir,
+      waitForApproval: false,
+    }, {
+      api: api as never,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_supersecret',
+      preflightStorage: vi.fn(async () => credentialsDir),
+      writeCredentials: vi.fn(async () => ({
+        directory: credentialsDir,
+        identityPath: join(credentialsDir, 'identity.json'),
+        signerPath: join(credentialsDir, 'signer.json'),
+        agentPath: join(credentialsDir, 'agent.json'),
+      })) as never,
+      installRuntime: namedInstallMock() as never,
+      log: () => undefined,
+    })
+
+    const input = api.registerSetup.mock.calls[0][0] as { mcpServerName?: string }
+    expect(input.mcpServerName).toBe('haven')
+    expect(input.mcpServerName).not.toBeUndefined()
+  })
+
   it('MUTATION PROOF: runConnect validates the slug ITSELF — a library caller cannot register an agent under a reserved name', async () => {
     // runConnect is exported (index.ts), so CLI-side validation is not the
     // boundary. Before this guard a reserved slug passed the availability

@@ -38,7 +38,7 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/sweep.ts
   - packages/signer/src/core.ts
-last-verified: "2026-08-23" # #1700: Provisioning Paths gains a fourth entry — re-key REPLACES an agent's delegate key, and its credential split is asymmetric where every other path's is not: the delegate key is generated locally, the API key is minted by the backend under owner authorisation and pasted in. The existing three entries were re-read against the diff and none is contradicted (the Connect flow's "generates both locally" is still true OF the Connect flow); this is a missing path rather than a wrong claim. Custody Invariants re-read and unchanged — Haven still never receives a delegate private key and nothing here moves one between machines. Prior: #1199: signer-removal recovery change re-verified; client-signing and custody claims unchanged
+last-verified: "2026-08-23" # #1878: the "Default Connect Agent flow" bullet listed what the connector sends Haven as a closed set ("only the API-key hash/prefix, public delegate address, and challenge proof") and the resolved MCP server name is now also on that wire. Corrected in place, and its second "sends only" — which was about the API KEY specifically, not the payload as a whole — is reworded to say so, since the two "only"s sat one line apart and the first becoming wrong made the second read as wrong too. The custody claim itself does not move: the delegate private key and the plaintext API key still never reach Haven. Scope: that bullet; no other custody, key-handling or passkey claim re-verified. Prior: #1700: Provisioning Paths gains a fourth entry — re-key REPLACES an agent's delegate key, and its credential split is asymmetric where every other path's is not: the delegate key is generated locally, the API key is minted by the backend under owner authorisation and pasted in. The existing three entries were re-read against the diff and none is contradicted (the Connect flow's "generates both locally" is still true OF the Connect flow); this is a missing path rather than a wrong claim. Custody Invariants re-read and unchanged — Haven still never receives a delegate private key and nothing here moves one between machines. Prior: #1199: signer-removal recovery change re-verified; client-signing and custody claims unchanged
 ---
 
 # Haven — Identity & Key/Credential Custody
@@ -149,9 +149,11 @@ flowchart TB
 
 - **Default Connect Agent flow:** the connector generates both the API key and
   delegate key locally. It sends Haven only the API-key hash/prefix, public
-  delegate address, and challenge proof, then writes separate owner-only
-  `identity.json` and `signer.json` files. Registration sends only the API-key
-  hash/prefix; later API calls present the plaintext API key as a bearer
+  delegate address, challenge proof, and the MCP server name it wired the agent
+  as (#1878 — a non-secret display label, never authority), then writes separate
+  owner-only `identity.json` and `signer.json` files. Of the API key itself,
+  registration sends only the hash/prefix; later API calls present the plaintext
+  API key as a bearer
   credential that Haven hashes for lookup. Haven never stores that plaintext
   API key and never receives the delegate key
   ([connector runtime](../../packages/connect/src/runtime.ts),

@@ -64,7 +64,7 @@ export default function ApprovalNotifications() {
       >
         <Icon icon={Bell} className="h-4 w-4" />
         {actionableCount > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 rounded-full bg-[var(--v2-warning)] text-white text-xs font-bold flex items-center justify-center shadow-[var(--v2-shadow-button)] v2-tabular">
+          <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 rounded-full bg-[var(--v2-warning)] text-white text-xs font-bold flex items-center justify-center shadow-button v2-tabular">
             {actionableCount > 99 ? '99+' : actionableCount}
           </span>
         )}
@@ -75,7 +75,7 @@ export default function ApprovalNotifications() {
           ref={panelRef}
           role="dialog"
           aria-label="Pending approvals"
-          className="absolute right-0 top-full mt-3 w-[360px] max-w-[calc(100vw-2rem)] z-[120] isolate overflow-hidden rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-[var(--v2-shadow-modal)]"
+          className="absolute right-0 top-full mt-3 w-[360px] max-w-[calc(100vw-2rem)] z-[120] isolate overflow-hidden rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal"
         >
           <div className="absolute inset-0 bg-[var(--v2-bg)]" aria-hidden="true" />
           <div className="relative px-4 py-3 border-b border-[var(--v2-border)] bg-white flex items-center justify-between">

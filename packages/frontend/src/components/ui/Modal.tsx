@@ -190,7 +190,7 @@ export function Modal({
 
       <div
         ref={panelRef}
-        className={`relative flex w-full flex-col overflow-hidden rounded-[14px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)] ${maxHeightClasses[maxHeight]} ${widthClasses[width]}`}
+        className={`relative flex w-full flex-col overflow-hidden rounded-[14px] border border-[var(--v2-border)] bg-white shadow-modal ${maxHeightClasses[maxHeight]} ${widthClasses[width]}`}
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--v2-border)] px-5 py-4">
           <div className="min-w-0">

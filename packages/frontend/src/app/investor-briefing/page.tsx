@@ -158,7 +158,7 @@ export default function InvestorBriefingPage() {
         <div className="relative max-w-6xl mx-auto px-6 pt-20 md:pt-28 pb-16 md:pb-24">
           <div className="grid grid-cols-1 lg:grid-cols-[0.95fr_1.05fr] gap-12 lg:gap-16 items-center">
             <div>
-              <div className="inline-flex items-center gap-2 mb-6 px-2.5 py-1 rounded-full border border-[var(--v2-border)] bg-white/80 backdrop-blur text-[12px] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+              <div className="inline-flex items-center gap-2 mb-6 px-2.5 py-1 rounded-full border border-[var(--v2-border)] bg-white/80 backdrop-blur text-[12px] text-[var(--v2-ink-2)] shadow-card">
                 <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
                 Unlisted investor briefing
               </div>
@@ -197,7 +197,7 @@ export default function InvestorBriefingPage() {
                 {SIGNAL_CARDS.map((card) => (
                   <div
                     key={card.label}
-                    className="rounded-[10px] border border-[var(--v2-border)] bg-white/80 backdrop-blur px-4 py-3 shadow-[var(--v2-shadow-card)]"
+                    className="rounded-[10px] border border-[var(--v2-border)] bg-white/80 backdrop-blur px-4 py-3 shadow-card"
                   >
                     <div className="text-[11px] text-[var(--v2-ink-3)] mb-1">{card.label}</div>
                     <div className="text-[14px] font-semibold tracking-tight text-[var(--v2-ink)]">
@@ -539,7 +539,7 @@ function InvestorButton({
   const sizeClass = size === 'sm' ? 'h-9 px-3.5 text-[13px]' : 'h-11 px-5 text-[15px]'
   const variantClass =
     variant === 'primary'
-      ? 'bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)] shadow-[var(--v2-shadow-button)]'
+      ? 'bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)] shadow-button'
       : 'bg-white text-[var(--v2-ink)] border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)]'
 
   return (

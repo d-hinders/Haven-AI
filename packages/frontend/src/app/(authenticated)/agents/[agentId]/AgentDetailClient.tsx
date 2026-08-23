@@ -384,7 +384,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   if (!agent) {
     return (
       <div className="max-w-3xl">
-        <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-8 text-center shadow-[var(--v2-shadow-card)]">
+        <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-8 text-center shadow-card">
           <h1 className="text-xl font-semibold text-[var(--v2-ink)]">Agent not found</h1>
           <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
             This agent may have been removed or you may no longer have access to it.

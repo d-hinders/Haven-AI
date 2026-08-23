@@ -195,7 +195,7 @@ export function DropdownMenuContent({
       role="menu"
       aria-labelledby={triggerId}
       onKeyDown={handleKeyDown}
-      className={`absolute top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white py-1 shadow-[var(--v2-shadow-modal)] ${
+      className={`absolute top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white py-1 shadow-modal ${
         align === 'right' ? 'right-0' : 'left-0'
       }`}
     >

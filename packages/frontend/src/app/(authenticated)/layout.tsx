@@ -39,7 +39,7 @@ export default function AuthenticatedLayout({
           */}
           <a
             href="#main-content"
-            className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[var(--v2-z-toast)] focus:rounded-md focus:bg-[var(--v2-ink)] focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus:shadow-[var(--v2-shadow-popover)] focus:outline-none focus:ring-2 focus:ring-white/80"
+            className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[var(--v2-z-toast)] focus:rounded-md focus:bg-[var(--v2-ink)] focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus:shadow-popover focus:outline-none focus:ring-2 focus:ring-white/80"
           >
             Skip to main content
           </a>

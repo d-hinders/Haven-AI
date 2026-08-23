@@ -93,6 +93,40 @@ test('...and does NOT bind to the next commit, where the marker is merely still 
   assert.deepEqual(c.stillLost, ['#1860'])
 })
 
+test('half 2, review counterexample: a PROSE mention of the declaring issue excuses nothing', () => {
+  // Found by `haven-reviewer` against the first implementation, which bound a
+  // retroactive declaration to "the first commit to cite #N". `issueRefs`
+  // cannot tell an entry from a citation, and this repo's notes cite older
+  // issues in prose constantly (`chain-integrity.mjs` documents that habit as
+  // the reason the check is containment rather than a subsequence).
+  //
+  // So this commit — which performed NO compaction, merely name-checked #1496
+  // while silently dropping #200 — was reported as a declared reset. Verbatim
+  // from the review, and it returned
+  // { status: 'declared-reset', stillLost: ['#200'], declaredBy: '#1496' }.
+  const c = classifyBreak({
+    prevLine: 'last-verified: "2026-01-01" # #100: base. #200: extra.',
+    nextLine: 'last-verified: "2026-02-01" # #1500: rewritten, plan tracked in #1496 for later cleanup. #100: base.',
+    nowLine: 'last-verified: "2026-03-01" # chain-reset(#1496): unrelated real compaction, see shards. #1500: rewritten, plan tracked in #1496 for later cleanup. #100: base.',
+  })
+  assert.equal(c.status, 'unrestored', 'a prose citation is not a compaction')
+  assert.deepEqual(c.stillLost, ['#200'])
+  assert.equal(c.declaredBy, null)
+})
+
+test('a partial compaction does not bind — it fails toward reporting', () => {
+  // #N survives but so does #1300, so this is not "compacted to #N alone".
+  // Reported as unrestored; `main()` additionally prints the declaration as
+  // unmatched. Narrow and loud beats broad and quiet.
+  const c = classifyBreak({
+    prevLine: 'last-verified: "2026-08-15" # #1300: kept. #1200: dropped.',
+    nextLine: 'last-verified: "2026-08-16" # #1496: partial compaction. #1300: kept.',
+    nowLine: 'last-verified: "2026-08-22" # chain-reset(#1496): partial compaction.',
+  })
+  assert.equal(c.status, 'unrestored')
+  assert.deepEqual(c.stillLost, ['#1200'])
+})
+
 test('a drop restored by a later commit is ok, declaration or not', () => {
   const c = classifyBreak({
     prevLine: 'last-verified: "2026-08-20" # #1500: a. #1400: b.',

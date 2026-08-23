@@ -256,12 +256,23 @@ compaction would then excuse every break in that doc's history, before and
 after it, and a false negative in the one tool built to find silent losses is
 worse than the false positive it tidies. Instead a declaration is bound to the
 single commit that **introduced** it — the commit that wrote the marker, or,
-for a retroactive declaration, the first commit to cite the declaring issue.
-Every other break in the same doc is still reported. "Introduced" is doing the
-work: a marker persists on the line for good, so a drop made a week later still
-carries it on both sides of its pair. A declaration matching no break is
-reported too, as an unmatched declaration, so an inert escape hatch cannot pass
-for a used one.
+for a retroactive declaration, the commit that compacted the chain down to the
+declaring issue's entry alone. Every other break in the same doc is still
+reported. "Introduced" is doing the work: a marker persists on the line for
+good, so a drop made a week later still carries it on both sides of its pair.
+
+The retroactive half is deliberately keyed on the compaction *shape* — `#N` as
+the line's only reference — and not on "the first commit to cite `#N`", which
+was the first attempt and had a hole review found: a note that merely mentions
+an issue in prose ("#1500: … plan tracked in #1496") is indistinguishable from
+an entry to `issueRefs`, so an unrelated commit that dropped a reference while
+name-checking #1496 got excused by #1496's declaration. A prose mention always
+sits alongside the entries it did not delete, which is what standing alone
+rules out. The rule is narrow on purpose and fails toward reporting: a partial
+compaction does not match, and is then listed as unrestored **and** as an
+unmatched declaration — a readable "your marker did not bind", never silence.
+A declaration matching no break is likewise reported, so an inert escape hatch
+cannot pass for a used one.
 
 **The sweep does not use `--follow`**, so a doc renamed inside the `--since`
 window hides the breaks it took under its old path — the same blind spot as the

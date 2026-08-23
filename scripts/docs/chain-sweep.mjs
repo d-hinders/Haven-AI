@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // Repo-wide sweep for PRE-EXISTING `last-verified` chain breaks (#1876).
 //
 // `scripts/docs/chain-integrity.mjs` is DIFF-SCOPED: it only compares docs a
@@ -37,9 +36,10 @@
 //
 // So the reset is bound to the ONE commit it describes: the commit that
 // INTRODUCED the declaration — either by writing the marker itself, or, for
-// the pre-#1843 compactions whose syntax did not exist yet, by being the first
-// commit to cite the declaring issue. Every other break in the doc was
-// authored by some other issue and stays reported.
+// the pre-#1843 compactions whose syntax did not exist yet, by being the
+// commit that compacted the chain down to the declaring issue's entry alone.
+// Every other break in the doc was authored by some other issue and stays
+// reported.
 //
 // "Introduced" is the load-bearing word, not belt-and-braces. The marker
 // persists on the line for good, so a genuine drop made a week LATER still has
@@ -113,9 +113,26 @@ export function classifyBreak({ prevLine, nextLine, nowLine }) {
     const marker = `chain-reset(${issue})`
     if (nextLine.includes(marker) && !prevLine.includes(marker)) return true
     // (b) The marker arrived later (the pre-#1843 compactions, whose syntax
-    // did not exist yet). Then the declaring issue is bound to the commit that
-    // first CITED it — the commit that issue made.
-    return nextRefs.includes(issue) && !prevRefs.includes(issue)
+    // did not exist yet), so nothing on the historical line can name it. The
+    // binding is then the COMPACTION SHAPE itself: the commit that replaced
+    // the chain with the declaring issue's entry alone, leaving `#N` as the
+    // line's only reference.
+    //
+    // "First commit to cite #N" was the first attempt and is WRONG — review
+    // found the hole and it is reproduced verbatim in the test suite. This
+    // repo's notes routinely cite an older issue in prose ("#1500: … plan
+    // tracked in #1496"), which `issueRefs` cannot tell from an entry. So an
+    // unrelated commit that merely MENTIONED #1496 while silently dropping
+    // #200 became the commit #1496's declaration excused, and the drop
+    // vanished from the report. A prose mention always sits alongside the
+    // entries it did not delete, so requiring `#N` to stand alone is exactly
+    // what a mention cannot satisfy.
+    //
+    // Deliberately narrow, and it fails toward REPORTING: a partial
+    // compaction does not match, so it is listed as unrestored AND as an
+    // unmatched declaration — a human-readable "your marker did not bind",
+    // never silence.
+    return nextRefs.length === 1 && nextRefs[0] === issue && !prevRefs.includes(issue)
   }
   const candidates = [...new Set([...declaredResetIssues(nextLine), ...declaredResetIssues(nowLine)])]
   const declaredBy = candidates.find(introducedHere)
@@ -124,7 +141,14 @@ export function classifyBreak({ prevLine, nextLine, nowLine }) {
   return { status: 'unrestored', stillLost, declaredBy: null }
 }
 
-const arg = (n, d) => (process.argv.find((a) => a.startsWith(`--${n}=`)) || `=${d}`).split('=').pop()
+// Slice at the FIRST `=`, never `split('=').pop()`: that helper was safe while
+// the only argument was a date, and silently truncates `--ref=release=1.0` to
+// `1.0` — a ref that does not resolve, an empty doc list, and a clean-looking
+// run that checked nothing.
+const arg = (n, d) => {
+  const hit = process.argv.find((a) => a.startsWith(`--${n}=`))
+  return hit === undefined ? d : hit.slice(n.length + 3)
+}
 const g = (a) => { try { return execFileSync('git', a, { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) } catch { return null } }
 
 function main() {

@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-23" # #1712: `infra/http/` is a new KIND of infra — an SSRF-guarded outbound reader for untrusted, submitter-chosen hosts — and both enumerations of what infra/ holds (Target structure, and the "what belongs where" table) listed only repositories/chain clients/relayer/explorers, so each was incomplete rather than wrong. Both corrected, and the "rules 2 and 5 still await the `http/` directory" note disambiguated: that is the TOP-LEVEL routes directory, which still does not exist, not `infra/http/`, which now does — a reader skimming for "has http/ landed" would otherwise conflate them. Only the infra/ enumerations and that note were re-read; the dependency rules were NOT re-verified in this pass (they are unaffected — `npm run lint:deps` passes with zero violations and no new waiver). Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Module Boundaries
@@ -23,7 +23,9 @@ last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no cl
 > [#999](https://github.com/d-hinders/Haven-AI/issues/999) the epic closed and
 > every enabled rule became absolute. The "Today" section records the achieved
 > end state (with the deliberate, inline-waived exceptions); rules 2 and 5
-> still await the `http/` directory and remain future work.
+> still await the top-level `http/` routes directory and remain future work —
+> which is a different thing from `infra/http/`, the outbound SSRF-guarded
+> reader added by #1712. That one exists; the routes directory does not.
 
 Structure is cosmetic; the dependency graph is the architecture. A folder
 reshuffle that leaves the graph unchanged buys nothing. This doc therefore
@@ -83,7 +85,8 @@ packages/backend/src/
   modules/    accounts, agents, policy, payments, x402, mpp, reporting, fee
   rails/      allowance-module/, delegation/, registry.ts
   infra/      repositories (SQL lives here only), chain clients, relayer,
-              explorers
+              explorers, outbound HTTP (the SSRF-guarded reader in
+              infra/http/ — NOT the top-level http/ routes directory below)
   http/       thin fastify routes: validate -> call module -> serialize
 ```
 
@@ -100,7 +103,7 @@ most maintainable code in the backend. The target generalises them.
 | `domain/` | Pure functions and types: money arithmetic, address validation, the chain registry, policy predicates, the rail *decision*, payment-state taxonomy | I/O of any kind |
 | `modules/` | One directory per domain capability, each with a public `index.ts` | Another module's internals |
 | `rails/` | Rail implementations behind one interface, plus the registry that selects between them | Rail selection scattered elsewhere |
-| `infra/` | Everything that talks to the outside world: repositories, chain clients, relayer, block explorers | Business rules |
+| `infra/` | Everything that talks to the outside world: repositories, chain clients, relayer, block explorers, outbound HTTP to untrusted hosts (`infra/http/`'s SSRF-guarded reader) | Business rules |
 | `http/` | Request validation, auth wiring, rate limiting, serialization | Orchestration or persistence |
 
 ## The dependency rules

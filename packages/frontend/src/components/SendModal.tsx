@@ -424,7 +424,7 @@ export default function SendModal({
       />
 
       {/* Modal */}
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Send payment" className="relative w-full max-w-md mx-4 max-h-[calc(100vh-2rem)] overflow-y-auto bg-white border border-[var(--v2-border)] rounded-xl shadow-[var(--v2-shadow-modal)]">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Send payment" className="relative w-full max-w-md mx-4 max-h-[calc(100vh-2rem)] overflow-y-auto bg-white border border-[var(--v2-border)] rounded-xl shadow-modal">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--v2-border)]">
           <h2 className="text-base font-semibold text-[var(--v2-ink)]">
@@ -662,7 +662,7 @@ export default function SendModal({
               )}
 
               {!contactsError && contacts.length === 0 && (
-                <div className="mt-3 rounded-lg border border-[var(--v2-border)] bg-white px-3 py-3 text-xs leading-relaxed text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+                <div className="mt-3 rounded-lg border border-[var(--v2-border)] bg-white px-3 py-3 text-xs leading-relaxed text-[var(--v2-ink-2)] shadow-card">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <span>No saved recipients yet. Add contacts for people or services you pay often.</span>
                     <Button href="/contacts" variant="ghost" size="sm" className="sm:flex-shrink-0">
@@ -797,7 +797,7 @@ export default function SendModal({
             )}
 
             {needsConnectedWallet && (
-              <div className="rounded-lg border border-[var(--v2-border)] bg-white px-4 py-3 text-sm text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+              <div className="rounded-lg border border-[var(--v2-border)] bg-white px-4 py-3 text-sm text-[var(--v2-ink-2)] shadow-card">
                 Connect wallet to send from this account.
               </div>
             )}
@@ -876,7 +876,7 @@ export default function SendModal({
             )}
 
             {needsConnectedWallet && (
-              <div className="rounded-lg border border-[var(--v2-border)] bg-white px-4 py-3 text-sm text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+              <div className="rounded-lg border border-[var(--v2-border)] bg-white px-4 py-3 text-sm text-[var(--v2-ink-2)] shadow-card">
                 Connect wallet to send from this account.
               </div>
             )}

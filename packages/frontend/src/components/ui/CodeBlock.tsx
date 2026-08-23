@@ -43,7 +43,7 @@ export function CodeBlock({
   const showHeader = !!(filename || onCopy)
 
   return (
-    <div className="rounded-[10px] overflow-hidden border border-[var(--v2-border)] shadow-[var(--v2-shadow-card)] bg-[var(--v2-surface-code)]">
+    <div className="rounded-[10px] overflow-hidden border border-[var(--v2-border)] shadow-card bg-[var(--v2-surface-code)]">
       {showHeader && (
         <div className="flex items-center justify-between px-4 h-9 border-b border-white/10">
           <span className="text-[12px] text-white/50 font-mono">

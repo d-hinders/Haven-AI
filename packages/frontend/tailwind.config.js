@@ -54,10 +54,32 @@ module.exports = {
           soft: 'rgb(var(--v2-danger-soft-rgb) / <alpha-value>)',
         },
       },
+      // The elevation scale, and the ONLY supported way to spell it (#1945).
+      //
+      // Three of these entries existed and were unused: every call site wrote
+      // `shadow-[var(--v2-shadow-card)]` instead, which is DEAD. A bare `var()`
+      // inside `shadow-[…]` is ambiguous, so Tailwind's arbitrary-value type
+      // inference takes the COLOUR branch and emits
+      // `--tw-shadow-color: var(…); --tw-shadow: var(--tw-shadow-colored)` —
+      // and nothing ever sets `--tw-shadow-colored`, so the computed
+      // `box-shadow` is `none`. Cards, Modal panels and popovers rendered flat
+      // app-wide, silently, for as long as the tokens had existed.
+      //
+      // `card-raised` and `popover` are added here for the same reason #1708
+      // moved the palette into `colors` above: a theme entry compiles from ONE
+      // place, works under variants (`hover:shadow-card-raised`), and removes
+      // the arbitrary-value syntax that was the defect. It is the same fix for
+      // the same class of bug, so it gets the same shape.
+      //
+      // `--v2-shadow-scroll-edge` is deliberately NOT here — it is a single
+      // inset continuation cue, not an elevation tier, and lives as
+      // `.v2-scroll-edge-cue` in globals.css (#1893).
       boxShadow: {
         card: 'var(--v2-shadow-card)',
+        'card-raised': 'var(--v2-shadow-card-raised)',
         button: 'var(--v2-shadow-button)',
         modal: 'var(--v2-shadow-modal)',
+        popover: 'var(--v2-shadow-popover)',
       },
       borderRadius: {
         card: '10px',

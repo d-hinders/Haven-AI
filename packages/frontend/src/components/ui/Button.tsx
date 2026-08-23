@@ -70,13 +70,13 @@ const TAP_TARGET_CLASS: Record<Size, string> = {
  */
 const VARIANT_CLASS: Record<Variant, string> = {
   primary:
-    'bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)] shadow-[var(--v2-shadow-button)] focus-visible:ring-brand/80',
+    'bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)] shadow-button focus-visible:ring-brand/80',
   ghost:
     'bg-white text-[var(--v2-ink)] border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] focus-visible:ring-brand/80',
   tertiary:
     'bg-transparent text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)] focus-visible:ring-brand/80',
   danger:
-    'bg-[var(--v2-danger)] text-white hover:bg-danger/90 shadow-[var(--v2-shadow-button)] focus-visible:ring-danger/80',
+    'bg-[var(--v2-danger)] text-white hover:bg-danger/90 shadow-button focus-visible:ring-danger/80',
 }
 
 type ButtonProps = {

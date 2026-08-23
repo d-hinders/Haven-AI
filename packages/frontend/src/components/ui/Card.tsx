@@ -32,10 +32,10 @@ function CardRoot({
       : 'bg-white border border-[var(--v2-border)]'
   const shadowClass =
     elevation === 'raised'
-      ? 'shadow-[var(--v2-shadow-card-raised)]'
+      ? 'shadow-card-raised'
       : elevation === 'anchor'
-        ? 'shadow-[var(--v2-shadow-card-raised)]'
-        : 'shadow-[var(--v2-shadow-card)]'
+        ? 'shadow-card-raised'
+        : 'shadow-card'
   // Raised + anchor surfaces don't need a second hover lift — they're already prominent.
   const hoverClass =
     elevation !== 'flat' || !hover

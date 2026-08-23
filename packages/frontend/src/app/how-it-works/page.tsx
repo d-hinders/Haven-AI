@@ -197,7 +197,7 @@ export default function HowItWorks() {
       <section className="relative overflow-hidden">
         <HeroBackdrop variant="soft" />
         <div className="max-w-6xl mx-auto px-6 pt-20 md:pt-24 pb-12 relative">
-        <div className="inline-flex items-center gap-2 mb-6 px-2.5 py-1 rounded-full border border-[var(--v2-border)] bg-white/80 backdrop-blur text-[12px] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+        <div className="inline-flex items-center gap-2 mb-6 px-2.5 py-1 rounded-full border border-[var(--v2-border)] bg-white/80 backdrop-blur text-[12px] text-[var(--v2-ink-2)] shadow-card">
           <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
           Get started in minutes
         </div>

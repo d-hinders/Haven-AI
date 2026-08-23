@@ -411,7 +411,7 @@ export default function ContactsPage() {
           aria-busy="true"
           aria-live="polite"
           aria-label="Loading contacts"
-          className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]"
+          className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card"
         >
           {[0, 1, 2].map((item) => (
             <div key={item} className="flex items-center gap-3 border-b border-[var(--v2-border)] px-4 py-3 last:border-b-0">
@@ -435,7 +435,7 @@ export default function ContactsPage() {
       )}
 
       {!loading && !error && filtered.length > 0 && (
-        <div className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]">
+        <div className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card">
           <div className="divide-y divide-[var(--v2-border)]">
             {filtered.map((contact) => (
               <ContactRow

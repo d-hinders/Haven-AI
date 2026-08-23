@@ -1191,6 +1191,52 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
+        title="ApprovalRequiredBanner — the tone ladder"
+        description="Three steps, and the step itself is part of the message. Read them together: a ladder can only be judged side by side, which is why all three live here rather than one per screen. Warning is the default, so picking a tone is a deliberate act — reach down to neutral when nothing is at stake, and up to danger only when the next action cannot be undone."
+      >
+        <div className="max-w-2xl space-y-5">
+          <div>
+            <ApprovalRequiredBanner title="You stay in control" tone="neutral">
+              Anything above the remaining budget waits for your approval before it is paid.
+            </ApprovalRequiredBanner>
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              <span className="font-semibold text-[var(--v2-ink-2)]">neutral</span> — states a fact the
+              user should have, and asks nothing of them. Nothing is wrong and nothing is pending.
+            </p>
+          </div>
+
+          <div>
+            <ApprovalRequiredBanner title="There is money on the old signing address" tone="warning">
+              Move it before you finish, or it stays where the agent can no longer reach it.
+            </ApprovalRequiredBanner>
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              <span className="font-semibold text-[var(--v2-ink-2)]">warning</span> — the default. Something
+              needs attention and the user can still act on it. This is the tone you get by saying nothing,
+              which is why the other two have to be asked for.
+            </p>
+          </div>
+
+          <div>
+            <ApprovalRequiredBanner title="The next step cannot be undone" tone="danger">
+              Replacing the signing key revokes the old one on-chain. Haven cannot give it back.
+            </ApprovalRequiredBanner>
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              <span className="font-semibold text-[var(--v2-ink-2)]">danger</span> — the action is
+              irreversible, not merely important. Its treatment is a structural break rather than a hue
+              swap — doubled border and a solid left rule — because pale pink and pale yellow at the same
+              border weight read as two shades of “notice” to a skimming reader, and as one shade to a
+              red/green-colour-blind one.
+            </p>
+          </div>
+
+          <ApprovalRequiredBanner title="Do not close this" tone="danger" density="compact">
+            The compact density is the same ladder in a tighter box. Use it inside a dialog or a card that
+            is already dense — never to soften a step you were not entitled to take.
+          </ApprovalRequiredBanner>
+        </div>
+      </Section>
+
+      <Section
         title="Manual payment review"
         description="Manual sends use the same money-first review structure as approvals: amount first, then the wallet-to-recipient path and approval context."
       >

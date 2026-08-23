@@ -232,7 +232,20 @@ export function AgentCard({
       )}
 
       {/* Actions */}
-      <div className="flex items-center gap-2 pt-3 border-t border-[var(--v2-border)]" onClick={stopCardClick}>
+      {/* #1909: `pb-1` is load-bearing, not spacing taste. These controls carry
+          `ring-2` with NO offset, so ~2px of every focus ring falls outside the
+          control's own box. The clearance the operational branches appeared to
+          have was an ACCIDENT of the `|` separators below: they carry no
+          `text-xs`, so they inherit 16px/24px and become the tallest flex item,
+          and `items-center` then centres the 16px controls inside that 24px band
+          — 4px above and below, for free. The archived branch renders no
+          separator, so its tallest item IS the 16px control and the row's box
+          ended exactly at the control's box: ring flush against the boundary,
+          zero clearance, identically on macOS and Linux (measured 29px vs the
+          siblings' 37px). Stating the padding makes the clearance a property of
+          the row rather than of which children happen to render. 4px is the
+          sibling clearance exactly — 2px of ring, 2px clear. */}
+      <div className="flex items-center gap-2 pt-3 pb-1 border-t border-[var(--v2-border)]" onClick={stopCardClick}>
         {isOperational && (
           <>
             {canUseWalletActions ? (
@@ -327,11 +340,34 @@ export function AgentCard({
         )}
         {isArchived && (
           <>
+            {/* #1909: `whitespace-nowrap` on the action label, with the sentence
+                beside it left free to wrap. Under CI's (Linux) font metrics
+                `Restore to list` broke across two lines at DESKTOP width — the
+                committed baseline was 438x45 where macOS rendered 438x29 — so
+                this is a real wrap, not a rendering-judge quirk.
+
+                The 390px budget says this costs nothing. Row content width
+                there is 300px (342px card less `p-5` and borders), gap 8px, so
+                the two children share 292px. Unwrapped the label is 77px and
+                the sentence is 340px — the sentence CANNOT fit on one line at
+                this width whatever the label does, and its `min-content` is
+                53px. Pinning the label therefore leaves 300 - 77 - 8 - 53 =
+                162px of slack before the row could overflow, and the measured
+                overflow at 390px is 0. A two-word action label is an atomic
+                phrase; the explanatory sentence is the thing that should reflow.
+
+                Rejected: shortening to `Restore` (43px unwrapped) — a shorter
+                label is still a wrappable one, so it buys probability where the
+                whole lesson of this defect is that macOS metrics mispredicted
+                Linux by 16px, and it drops the object from a control whose
+                destination is the point (`aria-label` says "to the list").
+                Rejected: widening the container — it is the agents grid column,
+                so every card on the page moves to fix one label. */}
             <button
               onClick={() => onRestore(agent)}
               disabled={isBusy}
               aria-label={`Restore ${agent.name} to the list`}
-              className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+              className="text-xs whitespace-nowrap text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
             >
               {busyAction === 'restore' ? 'Restoring...' : 'Restore to list'}
             </button>

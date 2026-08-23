@@ -65,6 +65,9 @@ import { getChain } from '../domain/chains.js'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
 import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
+// One copy of the multi-signer rule (#1086), shared with agent-delegations.ts:
+// "has an owner" must never mean "must sign as the owner".
+import { resolveSignatureScheme } from '../rails/hybrid-signer-actions.js'
 import {
   buildBudgetDelegation,
   buildRevocation,
@@ -322,7 +325,27 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
   })
 
   // ── POST /:id/rekey/:rekeyId/revoke — prepare the owner-signed revoke ──
-  app.post<{ Params: { id: string; rekeyId: string } }>(
+  //
+  // The account is told WHICH signer will sign, and the client is told which
+  // scheme was resolved (#1870). Both mirror `routes/agent-delegations.ts`,
+  // which does the same job for ordinary budget revocation — same helper,
+  // same `signWith` mapping, same two response branches.
+  //
+  // Why it is not cosmetic: `createTreasuryOps` estimates gas against a dummy
+  // signature sized for the signer it was told about, and falls back to
+  // inferring `owner` whenever an EOA owner exists. On a multi-signer account
+  // — an EOA owner AND enrolled passkeys — that inference is a guess, so a
+  // passkey signature (several hundred bytes) was being validated against a
+  // `verificationGasLimit` estimated for 65 bytes.
+  //
+  // Every refusal added here lands in the PREPARE step, which writes nothing
+  // and leaves the re-key at `preflight`. That is deliberate: #1868 makes any
+  // failure AFTER the revoke a permanent wedge, so a scheme the account
+  // cannot sign must be refused before the point of no return, not after it.
+  app.post<{
+    Params: { id: string; rekeyId: string }
+    Body: { signature_scheme?: string }
+  }>(
     '/:id/rekey/:rekeyId/revoke',
     async (request, reply) => {
       const loaded = await loadStep(request, reply)
@@ -372,6 +395,12 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
       if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
 
+      // Resolved BEFORE the treasury is built — a scheme this account cannot
+      // sign is a cheap 409 rather than a 502 from the kit, and nothing about
+      // the re-key has moved.
+      const resolved = resolveSignatureScheme(request.body?.signature_scheme, owner.config)
+      if ('error' in resolved) return reply.code(409).send({ error: resolved.error })
+
       try {
         const treasury = await createTreasuryOps({
           ownerAddress: owner.config.ownerAddress,
@@ -381,19 +410,37 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
           bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
           rpcUrl: getChain(agent.chain_id).rpcUrl,
           sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
+          signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
         })
         const calls = targets.map((t) => buildRevocation(JSON.parse(t.delegation_json), agent.chain_id))
         const prepared = await treasury.prepareCalls(calls)
         const user_operation = JSON.parse(
           JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
         )
+        const delegation_hashes = targets.map((t) => t.delegation_hash)
+        const submitStep = `POST /agents/${request.params.id}/rekey/${rekey.id}/revoke/submit`
+        if (resolved.scheme === 'webauthn_userop') {
+          // The account passkey signs the userOpHash via WebAuthn (#887).
+          // No EIP-712 payload is emitted, so a client cannot accidentally
+          // sign the wrong artefact for the scheme it was handed.
+          return {
+            signature_scheme: 'webauthn_userop',
+            user_op_hash: prepared.userOpHash,
+            user_operation,
+            treasury_address: prepared.treasuryAddress,
+            delegation_hashes,
+            instructions: `Sign user_op_hash with the account passkey (WebAuthn), then ${submitStep}`,
+          }
+        }
         return {
+          // The EOA owner signs THIS typed data (the account validates it),
+          // not the bare hash — the #829 lesson, shared with the sibling.
+          signature_scheme: 'eip712_userop',
           signing_payload: prepared.signingTypedData,
-          user_op_hash: prepared.userOpHash,
           user_operation,
           treasury_address: prepared.treasuryAddress,
-          delegation_hashes: targets.map((t) => t.delegation_hash),
-          instructions: `Sign, then POST /agents/${request.params.id}/rekey/${rekey.id}/revoke/submit`,
+          delegation_hashes,
+          instructions: `Sign signing_payload (EIP-712) with the treasury owner key, then ${submitStep}`,
         }
       } catch (err) {
         return reply

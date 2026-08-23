@@ -126,6 +126,17 @@ export const config = {
     'https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources',
   ),
 
+  // HMAC key behind the catalogue domain-ownership proof (epic #1717, #1712).
+  // Deliberately NOT `requireEnv`: an existing deployment must not fail to
+  // boot for a feature it has not enabled. It is deliberately NOT given a
+  // fallback value either — an empty secret makes `verifyDomainOwnership`
+  // refuse everything with `not_configured`, so ingestion fails CLOSED and no
+  // domain can ever reach `ownership_verified` on an unconfigured host. A
+  // derived-from-something-else default would be worse than no default: it
+  // would let a deployment believe it was verifying domains while producing
+  // proofs an attacker who knows the derivation could compute.
+  catalogOwnershipSecret: process.env.CATALOG_OWNERSHIP_SECRET ?? '',
+
   // Platform fee module (#386). Dark by default — when false the fee is always
   // zero and no funds move. Real pricing + on-chain collection are deferred.
   feeEnabled: process.env.HAVEN_FEE_ENABLED === 'true',

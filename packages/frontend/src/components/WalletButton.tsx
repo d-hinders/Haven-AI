@@ -9,6 +9,8 @@ import {
   type RefObject,
 } from 'react'
 import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit'
+import { TriangleAlert, Wallet } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useAccount, useDisconnect } from 'wagmi'
 import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
@@ -63,6 +65,61 @@ function AddressAvatar({ address }: { address: string }) {
     />
   )
 }
+
+/**
+ * Below `sm`, every state of this control collapses to a 40px square: the icon
+ * or the address avatar, and no label (#1803, owner decision 2026-08-23).
+ *
+ * `TopBar` is over-subscribed at 320px and always was. #1767 stopped the
+ * controls OVERLAPPING by making the account chip the only compressible item,
+ * which paid for the whole deficit out of one label: measured on `/dashboard`
+ * under Pixel 5 emulation, the account name rendered **17px** wide — present,
+ * orderly, unreadable. This control is the widest thing in the bar (88.64px as
+ * "Connect wallet" at 320, 119.33px at 390) and the biggest single saving
+ * available, so it is what gets dropped. Measured with the collapse applied:
+ * the account name goes 17px -> **66px** at 320 and 57px -> 68px at 390, which
+ * is within 2px of never truncating at all in the screenshot fixture.
+ *
+ * Dropped, not squeezed, and PRESENTATION rather than capability: the control
+ * stays in the bar and stays reachable, only its label goes. At 320 the label
+ * was not readable in the first place — the brand pill wrapped to two lines
+ * ("Connect" / "wallet") and painted taller than the 56px band.
+ *
+ * Same rule #1767 applied one control over, where the chain segment is dropped
+ * below `sm` and carried by the coloured dot plus the trigger's `aria-label`.
+ *
+ * Two things the collapse must not break, both asserted:
+ *
+ *  1. **The accessible name.** A label hidden by `hidden sm:inline` is
+ *     `display: none` in a real engine, so it stops contributing to the
+ *     accessible name and an icon-only button would announce as "button".
+ *     Every state therefore carries an EXPLICIT `aria-label` (and a matching
+ *     `title`, which is also the pointer-hover mitigation for the lost label).
+ *     `WalletButton.test.tsx` pins the accessible name of each state; jsdom
+ *     applies no CSS, so those tests would keep passing on the visible text
+ *     alone — they assert the `aria-label` attribute itself for that reason.
+ *  2. **The 40px footprint**, which is the notification bell's exactly. Not
+ *     44px painted: matching the adjacent control is what keeps the bar a row
+ *     rather than a set of differently-sized squares, and the bell's own 40px
+ *     box is what shipped. The 44px COMFORT TARGET
+ *     `docs/product/design-system.md` § Buttons asks for is met the way #1726
+ *     and #1766 met it — a transparent `::after` that extends the hit area
+ *     without moving a painted pixel. This is the third borrower of that
+ *     mechanism outside `Button`, and the rule it follows is the one #1766
+ *     wrote down: an icon-only square has no long axis, so it grows in both.
+ *     It fits: the 44px target is 2px wider per side than the box, against a
+ *     12px `gap-3` to the bell, so 10px of clearance remain — above the 8px
+ *     § Buttons asks between adjacent targets. `sm:after:content-none` retires
+ *     it the moment the label comes back and the control is wide anyway.
+ *     `e2e/mobile-nav-tap-target.mobile.spec.ts` measures both the ≥8px border
+ *     gap and this hit rectangle, in a real engine — jsdom has neither layout
+ *     nor hit-testing, so a pseudo-element that silently no-ops is invisible
+ *     to every unit test in the repo.
+ */
+const COLLAPSE_BELOW_SM =
+  "relative h-10 w-10 justify-center rounded-xl p-0 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-[''] sm:h-auto sm:w-auto sm:justify-start sm:rounded-md sm:after:content-none"
+/** The label itself — rendered from `sm` up, and in `aria-label` always. */
+const LABEL_BELOW_SM = 'hidden sm:inline'
 
 interface AddressSection {
   label: string
@@ -395,10 +452,12 @@ export default function WalletButton() {
                 onClick={() => setPopoverOpen((v) => !v)}
                 aria-haspopup="dialog"
                 aria-expanded={popoverOpen}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                aria-label={passkeyAlias ?? 'Passkey'}
+                title={passkeyAlias ?? 'Passkey'}
+                className={`flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
               >
                 <AddressAvatar address={passkeySigner.address} />
-                <span>{passkeyAlias ?? 'Passkey'}</span>
+                <span className={LABEL_BELOW_SM}>{passkeyAlias ?? 'Passkey'}</span>
               </button>
 
               <WalletPopover
@@ -455,10 +514,12 @@ export default function WalletButton() {
                 onClick={() => setPopoverOpen((v) => !v)}
                 aria-haspopup="dialog"
                 aria-expanded={popoverOpen}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                aria-label="Passkey"
+                title="Passkey"
+                className={`flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
               >
                 <AddressAvatar address={delegatorSigner.accountAddress} />
-                <span>Passkey</span>
+                <span className={LABEL_BELOW_SM}>Passkey</span>
               </button>
 
               <WalletPopover
@@ -487,12 +548,20 @@ export default function WalletButton() {
             <button
               type="button"
               onClick={openConnectModal}
+              // The label lives in `aria-label` because it is not rendered
+              // below `sm` (#1803). `title` is the pointer-hover half of the
+              // same mitigation — and the accepted cost is that a touch user
+              // meeting this control for the first time gets neither: see
+              // COLLAPSE_BELOW_SM.
+              aria-label="Connect wallet"
+              title="Connect wallet"
               // Offset against the page, as ui/Button does: on a brand-FILLED
               // control an un-offset brand ring composites brand-over-brand and
               // measures ~1.0:1 — invisible at any opacity (#1741).
-              className="px-4 py-2 rounded-md text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white shadow-[var(--v2-shadow-button)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]"
+              className={`inline-flex items-center gap-2 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white shadow-[var(--v2-shadow-button)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] sm:px-4 sm:py-2 ${COLLAPSE_BELOW_SM}`}
             >
-              Connect wallet
+              <Icon icon={Wallet} className="h-4 w-4 shrink-0 sm:hidden" />
+              <span className={LABEL_BELOW_SM}>Connect wallet</span>
             </button>
           )
         }
@@ -505,14 +574,20 @@ export default function WalletButton() {
             <button
               type="button"
               onClick={openChainModal}
-              className="px-3 py-2 rounded-md text-sm font-medium bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] border border-danger/25 hover:border-danger/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80"
+              aria-label="Wrong network"
+              title="Wrong network"
+              className={`inline-flex items-center gap-2 text-sm font-medium bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] border border-danger/25 hover:border-danger/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 sm:px-3 sm:py-2 ${COLLAPSE_BELOW_SM}`}
             >
-              Wrong network
+              <Icon icon={TriangleAlert} className="h-4 w-4 shrink-0 sm:hidden" />
+              <span className={LABEL_BELOW_SM}>Wrong network</span>
             </button>
           )
         }
 
         const accountAlias = getOwnerAlias(account.address)
+        // One expression, used for the visible label AND the accessible name,
+        // so the two cannot drift once the label stops rendering below `sm`.
+        const walletLabel = accountAlias ?? account.ensName ?? truncateAddress(account.address)
 
         return (
           <div className="relative">
@@ -522,7 +597,9 @@ export default function WalletButton() {
               onClick={() => setPopoverOpen((v) => !v)}
               aria-haspopup="dialog"
               aria-expanded={popoverOpen}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+              aria-label={walletLabel}
+              title={walletLabel}
+              className={`flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
             >
               {account.ensAvatar ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -534,8 +611,8 @@ export default function WalletButton() {
               ) : (
                 <AddressAvatar address={account.address} />
               )}
-              <span className={accountAlias ? undefined : 'font-mono'}>
-                {accountAlias ?? account.ensName ?? truncateAddress(account.address)}
+              <span className={`${LABEL_BELOW_SM} ${accountAlias ? '' : 'font-mono'}`}>
+                {walletLabel}
               </span>
             </button>
 

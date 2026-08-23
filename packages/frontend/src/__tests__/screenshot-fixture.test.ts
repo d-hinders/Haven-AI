@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs script; typed via the cast below
 import {
@@ -6,6 +6,7 @@ import {
   SEED_STORAGE_KEYS,
   FIXTURE_EMPTY_FALLBACK,
   SCENARIOS,
+  ScenarioHttpError,
 } from '../../scripts/screenshot.mjs'
 import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
 import { getStoredPasskeySigner, passkeyStorageKey } from '../lib/signer'
@@ -23,6 +24,11 @@ type ScenarioShape = {
 /** A scenario that also seeds device-local state before app code runs (#1856). */
 type SeedingScenarioShape = ScenarioShape & {
   seed: () => Record<string, string> | undefined
+}
+/** A scenario that shoots one surface at several states (#1725). */
+type StagedScenarioShape = ScenarioShape & {
+  stage: (next: string) => void
+  stages: Record<string, Record<string, unknown> | null>
 }
 /** Kept in step with FIXTURE_SAFE in screenshot.mjs. */
 const FIXTURE_SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
@@ -148,7 +154,19 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     const approve = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent-approve']
     const approveLegacy = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent-approve-legacy']
     const signerRemoval = (SCENARIOS as Record<string, ScenarioShape>)['account-signer-removal']
-    const backupRecovery = (SCENARIOS as Record<string, ScenarioShape>)['account-backup-recovery']
+    // Cast the ENTRY, not the registry: `Record<string, StagedScenarioShape>`
+    // would claim every scenario is staged, and only this one is.
+    const backupRecovery = (SCENARIOS as Record<string, ScenarioShape>)[
+      'account-backup-recovery'
+    ] as StagedScenarioShape
+
+    // The stage is module state in screenshot.mjs (the scenario's `run` resets
+    // it per viewport for the same reason). Leaving it moved would make every
+    // assertion below depend on which test ran last.
+    afterEach(() => backupRecovery.stage('healthy'))
+
+    const signersOf = (scenario: ScenarioShape) =>
+      scenario.api(`/accounts/hybrid/${FIXTURE_SAFE_ADDRESS}/signers`, 'GET')
 
     it('overrides only the account signer set needed to reach the removal confirmation (#1199)', () => {
       const signers = signerRemoval.api('/accounts/hybrid/0x111/signers', 'GET')
@@ -195,6 +213,62 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     it('leaves everything but the signer set to the shared fixture (#1693)', () => {
       expect(backupRecovery.api('/auth/me', 'GET')).toBeUndefined()
       expect(backupRecovery.api('/agents', 'GET')).toBeUndefined()
+    })
+
+    // ── The two states #1725 added to the same scenario ──────────────────────
+
+    it('opens on the healthy set, whatever the last run left behind (#1725)', () => {
+      // The stage is module state and `run` resets it per viewport. Pinned
+      // here because the reset is the difference between the mobile pass
+      // shooting the healthy card and shooting whatever the desktop pass
+      // finished on — under the healthy capture's filename either way.
+      backupRecovery.stage('load-error')
+      backupRecovery.stage('healthy')
+      expect(signersOf(backupRecovery)).toMatchObject({ owner_address: '0x' + 'ee'.repeat(20) })
+    })
+
+    it('serves exactly ONE way to approve for the warning capture (#1725)', () => {
+      // `AccountSignersCard` renders the amber banner on
+      // `wayCount < 2`, where `wayCount = passkeys.length + (owner_address ? 1 : 0)`.
+      // Asserting that arithmetic rather than the shape it happens to take, so
+      // a fixture that grew a second passkey fails HERE instead of quietly
+      // filing a healthy render under the one-way name.
+      backupRecovery.stage('one-way')
+      const signers = signersOf(backupRecovery) as {
+        owner_address: string | null
+        passkeys: unknown[]
+      }
+      expect(signers.owner_address).toBeNull()
+      expect(signers.passkeys).toHaveLength(1)
+      expect(signers.passkeys.length + (signers.owner_address ? 1 : 0)).toBeLessThan(2)
+    })
+
+    it('reaches loadError the only way the product can — a non-2xx (#1725)', () => {
+      // `useAccountSigners`'s `reload` sets `loadError` in its `catch`, and
+      // `lib/api.ts` throws only on `!response.ok`. So NO 200 body reaches this
+      // branch, however it is shaped — which is what the `ScenarioHttpError`
+      // plumbing exists for, and why this test asserts the failure rather than
+      // a payload. A regression that turned this back into a body would make
+      // the capture a silent duplicate of the healthy one.
+      backupRecovery.stage('load-error')
+      const answer = signersOf(backupRecovery)
+      expect(answer).toBeInstanceOf(ScenarioHttpError)
+      expect((answer as unknown as { status: number }).status).toBeGreaterThanOrEqual(500)
+    })
+
+    it('still answers only the signer route in every stage (#1725)', () => {
+      for (const stage of Object.keys(backupRecovery.stages)) {
+        backupRecovery.stage(stage)
+        expect(backupRecovery.api('/auth/me', 'GET'), stage).toBeUndefined()
+        expect(backupRecovery.api('/agents', 'GET'), stage).toBeUndefined()
+      }
+    })
+
+    it('refuses an unknown stage instead of serving the previous one (#1725)', () => {
+      // A typo'd stage name that silently left the fixture where it was would
+      // shoot the wrong state under the right filename — the exact
+      // confidently-wrong-evidence shape the capture harness fails loudly for.
+      expect(() => backupRecovery.stage('one-way-warning')).toThrow(/unknown stage/)
     })
 
     it('pins the setup at awaiting_connection for the whole capture', () => {

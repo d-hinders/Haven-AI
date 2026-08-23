@@ -261,7 +261,7 @@ export function Modal({
             <div
               data-modal-scroll-cue=""
               aria-hidden="true"
-              className="shadow-[var(--v2-shadow-scroll-edge)] pointer-events-none absolute inset-x-0 bottom-0 h-1.5"
+              className="v2-scroll-edge-cue pointer-events-none absolute inset-x-0 bottom-0 h-1.5"
             />
           )}
         </div>

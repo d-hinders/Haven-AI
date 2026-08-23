@@ -205,6 +205,11 @@ function cardFor(page: Page, name: string) {
  * banners are byte-identical in every class they carry — so the wrong one, or
  * one too many, would produce a plausible capture that silently duplicates a
  * sibling baseline. An ordered set-equality assertion fails loudly instead.
+ *
+ * Scans ALL `<p>` descendants of the card, not just direct banner children —
+ * so it carries an implicit invariant: fixture copy (name, description,
+ * safe_name, etc.) must never collide with a `BANNER_TITLES` string, or it
+ * would be counted as a banner here.
  */
 async function expectCardBanners(card: Locator, expected: readonly string[], label: string) {
   const present = await card.evaluate(
@@ -224,10 +229,17 @@ async function expectCardBanners(card: Locator, expected: readonly string[], lab
  * the two counts to agree.
  *
  * Without this, `expectCardBanners` is only ever as complete as its own hard-
- * coded list: a THIRD banner added to `AgentCard` would render, be captured,
- * and pass — the assertion would look at the two titles it knows, find them,
- * and say nothing about the newcomer. That is the "coverage is a file count"
- * failure one level in.
+ * coded list: a THIRD banner added to `AgentCard` with the SAME warning tone
+ * would render, be captured, and pass — the assertion would look at the two
+ * titles it knows, find them, and say nothing about the newcomer. That is the
+ * "coverage is a file count" failure one level in.
+ *
+ * Narrower than it may look: this only defends against a same-tone warning
+ * banner slipping in unlisted. It compares against the resolved
+ * `--v2-warning-soft` fill specifically, so a differently-toned banner (e.g. a
+ * danger-toned banner using a different token) is NOT counted here and is NOT
+ * detected by this check — it would need `expectCardBanners`'s title list (or
+ * a parallel tone-specific count) to be caught.
  *
  * This is the one place a class string is used as a locator, and it is used
  * deliberately as a CROSS-CHECK rather than as the subject: it does not decide
@@ -245,6 +257,10 @@ async function expectKnownBannerCount(card: Locator, expected: number, label: st
   const shaped = await card.evaluate((el) => {
     const soft = getComputedStyle(el).getPropertyValue('--v2-warning-soft').trim()
     if (!soft) return -1
+    // Transient scratch probe — appended, measured, and removed synchronously
+    // within this `page.evaluate`. It MUST stay synchronous: moving this into
+    // an async evaluate could leave the probe mounted in the DOM during a
+    // `toHaveScreenshot` capture.
     const probe = document.createElement('div')
     probe.style.backgroundColor = soft
     el.appendChild(probe)

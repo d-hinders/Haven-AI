@@ -5,25 +5,49 @@ covers:
   - packages/backend/src/routes/agent-rekey.ts
   - packages/backend/src/infra/repositories/agent-rekeys.ts
   - packages/backend/src/modules/agents/rekey-carry.ts
+  - packages/backend/src/modules/agents/rekey-guards.ts
   - packages/backend/src/modules/passport/reanchor.ts
   - packages/connect/src/rekey.ts
   - packages/connect/src/rekey-restart.ts
+  - packages/connect/src/args.ts
+  - packages/connect/src/storage.ts
+  - packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx
 last-verified: "2026-08-23" # #1702: written against epic #1694 as merged — #1698 (backend stages), #1699 (passport re-anchor), #1700 (connect --rekey), #1701's shipped half (dashboard). Every claim checked against code rather than the epic's prose; the residual-funds and fresh-process-check cautions are stated because the code says so and nothing user-facing did.
 ---
 
 # Replacing an agent's signing key
 
-An agent signs with a **delegate key** that lives on the machine running it. If that
-key is lost or exposed, you replace it: same agent, same name, same history, new key.
-This is **re-key**, and it is why losing a delegate key is a bad afternoon rather than
-a disaster.
+An agent signs with a **private signing key** that lives on the machine running it. If
+that key is lost or exposed, you replace it: same agent, same name, same history, new
+key.
+This is **re-key**, and it is why losing one is a bad afternoon rather than a
+disaster.
 
-> **Re-key is not account recovery, and confusing the two is expensive.** A delegate
-> key never held authority over your account — it can only *request* payments inside
-> a budget you granted. Losing one is recoverable because you, the owner, are still
+> **Re-key is not account recovery, and confusing the two is expensive.** An agent's
+> signing key never held authority over your account — it can only *request* payments
+> inside a budget you granted. Losing one is recoverable because you, the owner, are still
 > there to replace it. Losing your account's only signer is a different situation with
 > a different answer, and re-key does not help: see
 > [account recovery](account-recovery.md).
+
+## Before you start: money on the old key
+
+**Read this one before anything else if the key is lost.**
+
+An agent's own wallet address can hold a small balance — the x402 EIP-3009
+path funds it briefly to settle with a merchant. Sweeping that balance back to your
+Haven wallet requires a signature **from that signing key itself**. Haven cannot sign
+it for you; that is the same non-custody that keeps your funds yours.
+
+So the order matters, and it is not recoverable afterwards:
+
+- **Key still works?** Sweep it back first, then re-key. Ask the agent to do it — the
+  key is on its machine, so it is the only thing that can sign the transfer
+  (`haven_sweep_delegate` over MCP, or `sweepDelegate()` if you drive the SDK
+  directly).
+- **Key lost?** Anything left on that address is **permanently stranded** — by you and
+  by Haven alike. Haven's preflight reads the balance and refuses to continue until
+  you say what happened to it, so you find out now rather than later.
 
 ## What re-key does
 
@@ -46,6 +70,10 @@ account*, which nothing recovers by retrying.
 | **The period boundary** | The carried 40 expires when the original period would have, and the full budget resumes then. Re-key is not a way to refill a budget. |
 | **Passport standing** | If the agent has an [Agent Passport](agent-passport.md), its standing is unbroken. |
 
+Two edges the example skips, both in your favour: a budget whose first period had not
+started yet is simply reissued whole, and a grant that had already expired carries
+nothing because there was nothing live to carry.
+
 The budget carry is the part people expect to work differently, so it is worth being
 exact. Carrying only the *amount* would mean an agent on a daily budget could be
 handed its remainder hourly by re-keying repeatedly — a rate limit quietly turned
@@ -53,10 +81,10 @@ into a tally. The period travels with the amount to close that.
 
 ### What stops working, immediately
 
-- **The old API key.** Rotated in the same instant as the delegate address. Any host
+- **The old API key.** Rotated in the same instant as the signing key. Any host
   still holding it starts failing authentication at once — which is the intended
   behaviour, not a bug to work around.
-- **The old delegate key.** Its delegations are revoked on-chain; a payment attempt
+- **The old signing key.** Its delegations are revoked on-chain; a payment attempt
   with it reverts.
 - **Quotes that were waiting to be signed.** Any payment quoted against the old key
   and not yet sent is cancelled — the agent will need to ask again. Payments already
@@ -70,22 +98,6 @@ revoke-and-reissue, and there is a short window where the chain is behind. The
 dashboard shows this as **Updating on-chain** while standing stays **Active** — the
 agent is fully authorised the whole time. A chain problem here delays the anchor; it
 cannot cost the agent its standing.
-
-## Before you start: money on the old key
-
-**Read this one before anything else if the key is lost.**
-
-An agent's delegate address can hold a small balance of its own — the x402 EIP-3009
-path funds it briefly to settle with a merchant. Sweeping that balance back to your
-Haven wallet requires a signature **from the delegate key itself**. Haven cannot sign
-it for you; that is the same non-custody that keeps your funds yours.
-
-So the order matters, and it is not recoverable afterwards:
-
-- **Key still works?** Sweep first, then re-key.
-- **Key lost?** Anything left on that address is **permanently stranded** — by you and
-  by Haven alike. Haven's preflight reads the balance and refuses to continue until
-  you say what happened to it, so you find out now rather than later.
 
 ## Lost versus compromised
 
@@ -118,10 +130,17 @@ Open the agent, choose **Replace signing key**, paste the address. You will sign
 times: once to revoke the old authority, then once per replacement budget. At the end
 it shows a **new API key, once**. Copy it.
 
+> **Finish this step in one sitting.** What is left of the budget is measured the
+> moment you approve the revoke, but the replacement is worked out when you finish.
+> If the agent's budget period rolls over while you are part-way through, it can come
+> back with **nothing to spend until the following period**
+> ([#1849](https://github.com/d-hinders/Haven-AI/issues/1849)). The agent also cannot
+> pay at all between the revoke and the finish. Do not start this and go to lunch.
+
 **3. Back on the machine**
 
 ```
-npx @haven_ai/connect@alpha --rekey-finish --api-key <the key> --runtime <your runtime>
+npx -y @haven_ai/connect@alpha --rekey-finish --api-key <the key> --runtime <your runtime>
 ```
 
 Add the same `--name <slug>` if you used one. This writes both new credentials in
@@ -151,7 +170,7 @@ The check that works compares what the API key authenticates as against what the
 signing key actually is:
 
 ```
-npx @haven_ai/connect@alpha --doctor --runtime <your runtime>
+npx -y @haven_ai/connect@alpha --doctor --runtime <your runtime>
 ```
 
 Its `identity_match` check fails loudly when the two disagree — the state where an

@@ -556,6 +556,131 @@ async function dismissMobileSidebar(page, vp) {
   }
 }
 
+/**
+ * Sub-pixel layout rounding tolerance for the clip guard, in CSS pixels.
+ *
+ * Deliberately left at the value the guard shipped with. The measured
+ * shortfalls this change exists to catch are 17-1060px (see #1879), so the
+ * tolerance is nowhere near the decision boundary for a real defect — and
+ * raising it to shorten the newly-honest report would be papering over exactly
+ * the truncations the fix is for.
+ */
+const CLIP_TOLERANCE_PX = 4
+
+/**
+ * How much of `target` is hidden below the fold — measured on the deepest
+ * scrolling box in its SUBTREE, not on `target` itself (#1879).
+ *
+ * `shoot()` has no selector of its own; it measures whatever locator the caller
+ * hands it, and 19 of its call sites hand it `page.getByRole('dialog')`. That
+ * role sits on `ui/Modal`'s `fixed inset-0` wrapper (`Modal.tsx:109`), which is
+ * viewport-sized and never scrolls: its `scrollHeight - clientHeight` is 0 no
+ * matter how much the nested `min-h-0 flex-1 overflow-y-auto` body at `:153` is
+ * hiding. Instrumented across ten dialog stages, the wrapper read 0px in all
+ * ten while six had genuinely hidden content, up to 1060px. `ui/SidePanel` has
+ * the same nested-scroller shape, and the two `card` call sites benefit for
+ * free — which is why the fix is to change WHAT is measured rather than which
+ * element the call sites hand in. A selector swap would have missed both.
+ *
+ * This is the vertical twin of `measureDialogOverflow` in
+ * `e2e/fixtures/haven-api.ts`, and `ship-playbooks/frontend.md` §4 already
+ * states the rule it encodes: measure the whole subtree, not the dialog node.
+ *
+ * Three exclusions, all structural or geometric rather than by class name, for
+ * the reason the e2e twin records: a class-name rule silently exempts a real
+ * defect that happens to carry the class.
+ *
+ * - `display: none` / `visibility: hidden` boxes are not laying out.
+ * - A box 1px tall or shorter is not laying out real content either. Tailwind's
+ *   `sr-only` idiom is `width: 1px; height: 1px; overflow: hidden`, so its
+ *   `scrollHeight` is the full height of the screen-reader text while its
+ *   `clientHeight` is 1 — every such element would report a large "overflow"
+ *   that is the utility working as intended. This is the horizontal helper's
+ *   measured false positive, transposed.
+ * - A DESCENDANT whose computed `overflow-y` is `visible` **hides nothing**, so
+ *   it is not measured. This is the one exclusion that needed measuring rather
+ *   than reasoning, and it is the opposite of the rule the horizontal twin
+ *   rejects. That one refuses to exempt `auto`/`scroll` boxes — the scrollers,
+ *   which are exactly where the defect lives. This exempts `visible` boxes,
+ *   which by definition do not clip: their overflow paints and propagates
+ *   outward to the nearest clipping ancestor, and that ancestor reports it.
+ *
+ *   Measured across the four scenarios that newly reported (#1879): every
+ *   genuine offender was `overflow-y: auto` (89-1060px), and every box in the
+ *   2-5px noise band was `overflow-y: visible` — `<button>` at
+ *   `clientHeight: 34, scrollHeight: 39`, flex rows at 40 vs 42. Six captures
+ *   were flagged on nothing but a 5px button. Widening the tolerance past 5
+ *   would have hidden them AND started hiding real 5px shortfalls; excluding
+ *   boxes that cannot clip removes them for the right reason and leaves the
+ *   tolerance alone.
+ *
+ * The TARGET itself is measured unconditionally, `overflow-y` and all. An
+ * element screenshot captures the target's bounding box, so content overflowing
+ * a non-clipping TARGET really is cut from the PNG — and that is precisely what
+ * the guard measured before this change. Exempting it would have narrowed
+ * existing coverage while fixing the nested case, which is a trade nobody asked
+ * for. This way the measurement is a strict superset of the old one.
+ *
+ * Returns the worst offender's shortfall plus how many boxes report one.
+ * `offenderCount` is NOT a count of distinct defects: one overflowing leaf
+ * registers at every clipping ancestor that does not absorb it.
+ *
+ * **What this still cannot see**, named because the exclusion list above
+ * otherwise reads as a complete account of the blind spots (#1879 review):
+ * `scrollHeight` is a LAYOUT measurement, so anything that hides content
+ * without changing a layout box is invisible to it — a `transform:
+ * translateY()` that moves a child out of view, a `clip-path`, and `contain:
+ * paint`. `querySelectorAll('*')` does not pierce shadow roots either; nothing
+ * in this app uses them today, which is exactly why it would be a silent gap.
+ * None of these are new here — they are inherent to measuring scroll boxes, and
+ * the horizontal twin has them too — but a guard's docstring claiming three
+ * exclusions and no limits is how the next person over-trusts it.
+ */
+async function measureHiddenBelowFold(target) {
+  return target
+    .evaluate((root) => {
+      const describe = (el) => {
+        const cls = (el.getAttribute('class') ?? '').trim().replace(/\s+/g, ' ')
+        const id = el.id ? `#${el.id}` : ''
+        const testId = el.getAttribute('data-testid')
+        return `${el.tagName.toLowerCase()}${id}${testId ? `[data-testid=${testId}]` : ''}${
+          cls ? `.${cls.slice(0, 100)}` : ''
+        }`
+      }
+
+      let hidden = 0
+      let offender = null
+      let offenderCount = 0
+
+      const consider = (el, isRoot) => {
+        const style = getComputedStyle(el)
+        if (style.display === 'none' || style.visibility === 'hidden') return
+        // `visible` is the only value that does not clip. `hidden` and `clip`
+        // are deliberately IN — a box that truncates without even offering a
+        // scrollbar is the worst version of this defect, not an exempt one.
+        if (!isRoot && style.overflowY === 'visible') return
+        const clientHeight = el.clientHeight
+        if (clientHeight <= 1) return
+        const by = el.scrollHeight - clientHeight
+        if (by <= 1) return
+        offenderCount += 1
+        if (by > hidden) {
+          hidden = by
+          offender = describe(el)
+        }
+      }
+
+      // The target itself first, measured exactly as it was before this change:
+      // the two `card` call sites and `ReceiveFundsModal`, whose `role="dialog"`
+      // sits on the scrolling content panel rather than on a wrapper.
+      consider(root, true)
+      for (const el of Array.from(root.querySelectorAll('*'))) consider(el, false)
+
+      return { hidden, offender, offenderCount }
+    })
+    .catch(() => ({ hidden: 0, offender: null, offenderCount: 0 }))
+}
+
 // ── Scenario registry (#1409) ────────────────────────────────────────────────
 
 const CONNECT_SETUP_ID = 'setup-screenshot'
@@ -718,43 +843,11 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      /**
-       * Grow the viewport until the modal's SCROLLING BODY has nothing below
-       * the fold, then shoot.
-       *
-       * `shoot`'s own clip guard cannot help here, and the first run of this
-       * scenario proved it: `ui/Modal` puts `role="dialog"` on the
-       * `fixed inset-0` container, so its `scrollHeight - clientHeight` is 0
-       * no matter how much is hidden, while the actual scroller is the nested
-       * `min-h-0 flex-1 overflow-y-auto` body. The guard measured the wrapper,
-       * read 0, and wrote a PNG that cut off the irreversibility banner, the
-       * acknowledgement checkbox and the passport disclosure — the three
-       * things this capture exists to evidence. It looked complete, which is
-       * what made it dangerous.
-       *
-       * Same class as the `measureDialogOverflow` finding in frontend.md §4:
-       * measuring a box against itself cannot see a nested scroller. Measured
-       * on the body, then ASSERTED back to zero, so a capture that is still
-       * clipped fails the run instead of being attached as evidence.
-       */
-      const shootWhole = async (dialog, name) => {
-        const body = dialog.locator('div.overflow-y-auto').first()
-        const hidden = await body.evaluate((el) => el.scrollHeight - el.clientHeight)
-        if (hidden > 0) {
-          await page.setViewportSize({ width: vp.width, height: vp.height + hidden + 64 })
-          await page.waitForTimeout(250)
-        }
-        const stillHidden = await body.evaluate((el) => el.scrollHeight - el.clientHeight)
-        if (stillHidden > 0) {
-          throw new Error(
-            `replace-signing-key/${name} at ${vp.name}: modal body still clips ${stillHidden}px ` +
-              'after growing the viewport — refusing to write a truncated capture.',
-          )
-        }
-        await shoot(dialog, name)
-        await page.setViewportSize({ width: vp.width, height: vp.height })
-        await page.waitForTimeout(150)
-      }
+      // `shoot()` measures the deepest scrolling box in the target's subtree
+      // (#1879), so this scenario no longer needs its own `shootWhole()` to see
+      // past `ui/Modal`'s non-scrolling `fixed inset-0` wrapper. The stages
+      // below that clip — `point-of-no-return` worst, at 1060px on mobile —
+      // now get the generic record-and-re-shoot every scenario gets.
 
       // ── The delegation-rail agent: the whole flow ────────────────────────
       await page.goto(`${BASE_URL}/agents/agent-research`, {
@@ -772,18 +865,18 @@ export const SCENARIOS = {
       // empty shell that still looks like a finished screen.
       await dialog.getByRole('radio', { name: /it is lost/i }).waitFor({ timeout: 15_000 })
       await dialog.getByRole('radio', { name: /someone else/i }).waitFor({ timeout: 15_000 })
-      await shootWhole(dialog, 'reason')
+      await shoot(dialog, 'reason')
 
       // Compromised surfaces the spend list — a different screen, not a
       // different toggle state, so it gets its own capture.
       await dialog.getByRole('radio', { name: /someone else/i }).click()
       await dialog.getByText(/recent spending to review/i).waitFor({ timeout: 15_000 })
-      await shootWhole(dialog, 'reason-compromised')
+      await shoot(dialog, 'reason-compromised')
 
       await dialog.getByRole('radio', { name: /it is lost/i }).click()
       await dialog.getByRole('button', { name: 'Continue' }).click()
       await dialog.getByText(/haven never receives the private key/i).waitFor({ timeout: 15_000 })
-      await shootWhole(dialog, 'address')
+      await shoot(dialog, 'address')
 
       await dialog.getByLabel(/new signing address/i).fill('0x' + '77'.repeat(20))
       await dialog.getByRole('button', { name: 'Continue' }).click()
@@ -793,7 +886,7 @@ export const SCENARIOS = {
       // fails instead of shooting a flow that lost its safety catch.
       await dialog.getByText(/the next step cannot be undone/i).waitFor({ timeout: 15_000 })
       await dialog.getByRole('checkbox').waitFor({ timeout: 15_000 })
-      await shootWhole(dialog, 'point-of-no-return')
+      await shoot(dialog, 'point-of-no-return')
 
       // ── The legacy-rail agent: the refusal ──────────────────────────────
       await page.goto(`${BASE_URL}/agents/agent-ops`, {
@@ -806,7 +899,7 @@ export const SCENARIOS = {
 
       const refusal = page.getByRole('dialog')
       await refusal.getByText(/not available for this agent/i).waitFor({ timeout: 15_000 })
-      await shootWhole(refusal, 'legacy-rail-refusal')
+      await shoot(refusal, 'legacy-rail-refusal')
     },
   },
   'account-signer-removal': {
@@ -1759,19 +1852,30 @@ async function main() {
           // so the PNG LOOKS complete. That is worse than a missing capture: a
           // reviewer would judge a screen they have only partly seen. Record
           // the shortfall and shoot the whole thing alongside it.
-          const hidden = await target
-            .evaluate((el) => el.scrollHeight - el.clientHeight)
-            .catch(() => 0)
-          if (hidden > 4) {
-            clipped.push({ capture: base, hidden })
+          const before = await measureHiddenBelowFold(target)
+          if (before.hidden > CLIP_TOLERANCE_PX) {
             await scenarioPage.setViewportSize({
               width: vp.width,
-              height: vp.height + hidden + 48,
+              height: vp.height + before.hidden + 48,
             })
             await scenarioPage.waitForTimeout(200)
+            // Re-measure BEFORE re-shooting. Growing the viewport only helps a
+            // scroller whose cap is viewport-relative (`ui/Modal`'s
+            // `max-h-[calc(100vh-2rem)]`, `ui/SidePanel`'s full-height body). A
+            // box with its own fixed `max-h` keeps clipping however tall the
+            // window gets, and the whole point of this change is that the
+            // difference must be visible instead of assumed.
+            const after = await measureHiddenBelowFold(target)
             const fullFile = path.join(OUT_DIR, `${base}-full.png`)
             await target.screenshot({ path: fullFile })
             captured.push(path.relative(ROOT, fullFile))
+            clipped.push({
+              capture: base,
+              hidden: before.hidden,
+              offender: before.offender,
+              offenderCount: before.offenderCount,
+              residual: after.hidden,
+            })
             await scenarioPage.setViewportSize({ width: vp.width, height: vp.height })
             await scenarioPage.waitForTimeout(200)
           }
@@ -1835,8 +1939,51 @@ async function main() {
     console.log(
       `\n⚠ ${clipped.length} capture(s) had content BELOW THE FOLD — the plain PNG shows only what a user sees without scrolling:`,
     )
-    for (const c of clipped) console.log(`  ${c.capture}: ${c.hidden}px hidden → also wrote ${c.capture}-full.png`)
+    for (const c of clipped) {
+      console.log(
+        `  ${c.capture}: ${c.hidden}px hidden in ${c.offender ?? 'the target'}` +
+          `${c.offenderCount > 1 ? ` (${c.offenderCount} boxes report it)` : ''}` +
+          ` → also wrote ${c.capture}-full.png`,
+      )
+    }
     console.log('  (judge content from the -full PNG; judge what is reachable without scrolling from the other)')
+  }
+  // Split out of the advisory list on purpose. "We grew the viewport and it is
+  // STILL clipped" means the -full PNG is not actually full, so it is the one
+  // artifact in this run that looks like complete evidence and is not.
+  //
+  // It is REPORTED, not fatal, and that is a decision rather than an oversight
+  // (#1879 review). `blankCaptures` deletes its file and exits 1; this does
+  // neither, because the two are not the same situation. A blank PNG has no
+  // evidentiary value at all. A `-full.png` that is 203px short is still the
+  // most complete render of that screen this run can produce, and deleting it
+  // would leave the reviewer with less. More decisively: 8 of the 16 residuals
+  // on `dev` today are a `pre.max-h-48` code block and a modal body that are
+  // SELF-CAPPED by design — no viewport is tall enough, so folding this into
+  // `process.exit(1)` would make `npm run screenshot` fail permanently, on
+  // every branch, for a layout nobody intends to change. A gate that is red on
+  // an unchanged `dev` is one people learn to ignore, which is how this repo
+  // ends up with guards that flag everything.
+  //
+  // What that costs: #1701's scenario-local `shootWhole()` THREW on a non-zero
+  // residual, and generalising the measurement to all 21 call sites means that
+  // one hard assertion becomes a warning. The exchange is deliberate — every
+  // capture gains a measurement that 19 of 21 never had, and one scenario loses
+  // a hard stop. Making the residual gating needs an allowlist of the
+  // legitimately self-capped selectors first; filed rather than guessed at.
+  const stillClipped = clipped.filter((c) => c.residual > CLIP_TOLERANCE_PX)
+  if (stillClipped.length > 0) {
+    console.error(
+      `\n⚠ ${stillClipped.length} of those are STILL clipped after growing the viewport — their -full.png is NOT full:`,
+    )
+    for (const c of stillClipped) {
+      console.error(`  ${c.capture}-full.png: ${c.residual}px still hidden in ${c.offender ?? 'the target'}`)
+    }
+    console.error(
+      '  (a box with its own fixed max-height cannot be un-clipped by a taller window — either\n' +
+        '   the scroller is legitimately self-capped, or the content genuinely does not fit. Say\n' +
+        '   which one wherever you attach these, and do NOT attach them as a whole screen.)',
+    )
   }
   if (consoleErrors.length > 0) {
     console.log(`\n⚠ ${consoleErrors.length} console error(s) during capture — the PNGs may show broken screens:`)

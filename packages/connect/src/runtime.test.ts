@@ -157,6 +157,7 @@ describe('runConnect', () => {
         registerSetup: vi.fn(),
         updateInstallStatus: vi.fn(),
         getConnectorStatus: vi.fn(),
+        getAgentIdentity: vi.fn(),
       },
       writeCredentials,
     }))
@@ -183,6 +184,7 @@ describe('runConnect', () => {
         registerSetup,
         updateInstallStatus: vi.fn(),
         getConnectorStatus: vi.fn(),
+        getAgentIdentity: vi.fn(),
       },
     })).rejects.toThrow(/expired or invalid/)
     expect(registerSetup).not.toHaveBeenCalled()
@@ -248,6 +250,7 @@ describe('runConnect', () => {
         installInputs.push(input)
       }),
       getConnectorStatus: vi.fn(),
+      getAgentIdentity: vi.fn(),
     }
 
     const result = await runConnect({
@@ -373,6 +376,7 @@ describe('runConnect', () => {
           registerSetup: vi.fn(),
           updateInstallStatus: vi.fn(),
           getConnectorStatus: vi.fn(),
+          getAgentIdentity: vi.fn(),
         } as unknown as ConnectApiClient,
         preflightStorage: vi.fn(),
         writeCredentials: vi.fn(),
@@ -467,6 +471,7 @@ describe('runConnect', () => {
           registerSetup: vi.fn(),
           updateInstallStatus: vi.fn(),
           getConnectorStatus: vi.fn(),
+          getAgentIdentity: vi.fn(),
         } as unknown as ConnectApiClient,
         preflightStorage: vi.fn(),
         writeCredentials: vi.fn(),
@@ -733,6 +738,7 @@ describe('runConnect', () => {
       })),
       updateInstallStatus: vi.fn(async () => undefined),
       getConnectorStatus: vi.fn(),
+      getAgentIdentity: vi.fn(),
     }
 
     await runConnect({
@@ -815,6 +821,7 @@ describe('runConnect', () => {
         lifecycleCalls.push('report-install-status')
         throw new Error('network down')
       }),
+      getAgentIdentity: vi.fn(),
       getConnectorStatus: vi.fn(async () => {
         lifecycleCalls.push('poll-budget-approval')
         return { status: 'active', approved_budget: null }
@@ -1079,6 +1086,7 @@ describe('waitForBudgetApproval (#1377 D)', () => {
         registerSetup,
         updateInstallStatus: vi.fn(),
         getConnectorStatus: vi.fn(),
+        getAgentIdentity: vi.fn(),
       },
       nodeVersion: SUPPORTED_NODE,
       generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
@@ -1118,6 +1126,7 @@ describe('waitForBudgetApproval (#1377 D)', () => {
         }),
         updateInstallStatus: vi.fn(),
         getConnectorStatus: vi.fn(),
+        getAgentIdentity: vi.fn(),
       },
       nodeVersion: SUPPORTED_NODE,
       generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
@@ -1171,6 +1180,7 @@ describe('waitForBudgetApproval (#1377 D)', () => {
         })),
         updateInstallStatus,
         getConnectorStatus: vi.fn(),
+        getAgentIdentity: vi.fn(),
       },
       nodeVersion: SUPPORTED_NODE,
       generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
@@ -1249,6 +1259,7 @@ describe('waitForBudgetApproval (#1377 D)', () => {
         })),
         updateInstallStatus,
         getConnectorStatus: vi.fn(),
+        getAgentIdentity: vi.fn(),
       },
       nodeVersion: SUPPORTED_NODE,
       generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
@@ -1324,6 +1335,7 @@ describe('waitForBudgetApproval (#1377 D)', () => {
           lifecycleCalls.push('report-install-status')
         }),
         getConnectorStatus,
+        getAgentIdentity: vi.fn(),
       },
       nodeVersion: SUPPORTED_NODE,
       generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
@@ -1390,6 +1402,7 @@ describe('--name wiring slug through runConnect (#1696)', () => {
       })),
       updateInstallStatus: vi.fn(async () => {}),
       getConnectorStatus: vi.fn(),
+      getAgentIdentity: vi.fn(),
     }
   }
 
@@ -1630,6 +1643,7 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
       })),
       updateInstallStatus: vi.fn(async () => {}),
       getConnectorStatus: vi.fn(),
+      getAgentIdentity: vi.fn(),
     }
   }
 

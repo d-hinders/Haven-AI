@@ -659,7 +659,26 @@ const BUTTON_BASE_SIGNATURE = /rounded-md font-medium tracking-tight/
  */
 const BASE_SIGNATURE_EXEMPT = ['src/components/ui/Button.tsx']
 
-/** `'a ' + 'b'` → `'a b'`, for adjacent literals under the SAME quote char. */
+/**
+ * `'a ' + 'b'` → `'a b'`, for adjacent literals under the SAME quote char.
+ *
+ * **Sharp edge, named because a guard's holes belong in writing.** This is
+ * un-scoped: it rewrites every same-quote `+` join in the file, not only the
+ * two halves of a class-constant declaration. The failure it could produce is a
+ * false NEGATIVE, so state exactly what it takes — the signature-bearing
+ * literal must itself be the LEFT operand of a `+` whose right operand carries
+ * a `focus-visible:ring-*`. An unrelated `+` join elsewhere in the file cannot
+ * reach the signature string, because splicing only removes the join itself and
+ * leaves everything between the two strings intact.
+ *
+ * That shape is exactly the legitimate one (`BrandBandButton`'s `BASE` splits
+ * geometry from focus clause across two literals), which is why the splice
+ * exists at all — un-spliced, this rule reports the very file that fixes #1867
+ * as an offender. Scoping it to a matched `const X = …` statement would close
+ * the theoretical hole; it is left un-scoped because a repo-wide scan finds no
+ * `+`-joined literal pair outside the signature call sites, and a narrower
+ * regex over declaration syntax is its own new class of silent miss.
+ */
 function spliceConcatenations(text: string): string {
   return text.replace(/(['"`])\s*\+\s*\1/g, '')
 }

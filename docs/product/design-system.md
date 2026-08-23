@@ -488,7 +488,7 @@ overstating it would have been the easier framing and the wrong one. Nothing cau
 because every focus guard at the time read rings that were DECLARED. The fix is the
 extraction plus the completeness rule above — not two more copies agreeing.
 
-`InvestorButton` — **pattern**, `investor-briefing/page.tsx:531-557`, used 3×. A local
+`InvestorButton` — **pattern**, `investor-briefing/page.tsx:528-554`, used 3×. A local
 mini-`Button`: it re-implements the base string, a two-value `variant` (`primary`/`ghost`)
 and a two-value `size` (`sm`/`lg`) by hand. It diverges from `Button` in four ways worth
 knowing before copying it — no `md` size, **no `disabled` handling at all**, a bare `<a>`

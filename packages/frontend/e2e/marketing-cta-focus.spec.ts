@@ -184,7 +184,17 @@ test.describe('dark-band CTAs indicate focus (#1867)', () => {
     test(`${cta.route} — "${cta.name}" (${cta.variant}) paints a white focus ring`, async ({
       page,
     }) => {
+      // `networkidle` is load-bearing here and NOT belt-and-braces: without it
+      // this spec flaked on `locator.scrollIntoViewIfNeeded: Element is not
+      // attached to the DOM`, one test in three, on a run where the other two
+      // passed. React hydration REPLACES the anchor node some milliseconds
+      // after `load`, so a locator resolved before that points at a detached
+      // element — and `toBeVisible()` cannot save it, because the assertion
+      // passes against the pre-hydration node and the detach happens in the gap
+      // before the next call. Caught by running the spec repeatedly rather than
+      // once; a green first run would have shipped it.
       await page.goto(cta.route)
+      await page.waitForLoadState('networkidle')
       await page.evaluate(() => document.fonts.ready)
 
       const band = page
@@ -198,9 +208,11 @@ test.describe('dark-band CTAs indicate focus (#1867)', () => {
       const target = band.getByRole('link', { name: cta.name, exact: true })
       await expect(target).toHaveCount(1)
       await expect(target).toBeVisible()
-      // Scroll it in before tabbing so the traversal is not racing lazy layout.
-      await target.scrollIntoViewIfNeeded()
 
+      // No explicit scroll. The browser scrolls a focused element into view on
+      // its own, so the scroll bought nothing that `tabToTarget` does not, and
+      // it was the call that surfaced the hydration race above — one fewer
+      // handle taken before hydration settles is one fewer node to detach.
       await tabToTarget(page, target, `${cta.route} · ${cta.name}`)
 
       const state = await target.evaluate((el) => {
@@ -248,6 +260,15 @@ test.describe('dark-band CTAs indicate focus (#1867)', () => {
       //
       // The ring is therefore identified by being the OUTERMOST painting layer
       // — largest spread — which is also what a user sees as the ring.
+      //
+      // **Do not copy this heuristic onto a `ring-inset` control.** It holds
+      // because these three are `ring-2 ring-offset-2`: the offset layer's
+      // spread is the offset width and the ring layer's is ring + offset, so
+      // larger spread really does mean further out. An inset ring paints
+      // INWARD (`--tw-ring-inset: inset`) and its spread orders differently;
+      // `Row` and several icon buttons use that form for the clipping reason
+      // documented in design-system.md § Focus rings. A spec covering one of
+      // those needs to read the `inset` keyword, not just the numbers.
       const outermost = painting.reduce((a, b) => (b.spread > a.spread ? b : a))
       expect(
         outermost.rgb,

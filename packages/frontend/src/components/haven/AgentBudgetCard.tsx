@@ -68,7 +68,7 @@ export function AgentBudgetCard({
                     aria-label={`Remove ${row.tokenSymbol} budget`}
                     className="rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80"
                   >
-                    <Icon icon={Trash2} className="h-[13px] w-[13px]" />
+                    <Icon icon={Trash2} className="h-3.5 w-3.5" />
                   </button>
                 )}
               </div>

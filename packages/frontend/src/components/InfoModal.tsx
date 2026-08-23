@@ -38,13 +38,13 @@ export function Arrow({ direction = 'down' }: { direction?: 'down' | 'right' }) 
   if (direction === 'right') {
     return (
       <div className="flex items-center justify-center px-1">
-        <Icon icon={MoveRight} className="h-3 w-5 text-[var(--v2-ink-3)]" />
+        <Icon icon={MoveRight} className="h-3 w-3 text-[var(--v2-ink-3)]" />
       </div>
     )
   }
   return (
     <div className="flex items-center justify-center py-1">
-      <Icon icon={MoveDown} className="h-5 w-3 text-[var(--v2-ink-3)]" />
+      <Icon icon={MoveDown} className="h-3 w-3 text-[var(--v2-ink-3)]" />
     </div>
   )
 }

@@ -104,6 +104,22 @@ function agentRow() {
   }
 }
 
+/** One metered snapshot entry. Defaults to a long-lived grant with 1 USDC left. */
+function snapshotEntry(overrides: Record<string, unknown> = {}) {
+  return {
+    delegation_hash: HASH,
+    token_address: USDC,
+    recipient_address: null,
+    budget_atomic: BUDGET.toString(),
+    period_seconds: DAY,
+    start_date: START,
+    expires_at: START + 365 * DAY,
+    remaining_atomic: REMAINING.toString(),
+    from_chain: true,
+    ...overrides,
+  }
+}
+
 /** A re-key parked at `metered`, carrying one snapshot entry. */
 function rekeyRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -116,19 +132,7 @@ function rekeyRow(overrides: Record<string, unknown> = {}) {
     residual_atomic: '0',
     residual_token_address: null,
     residual_disposition: 'none',
-    carry_snapshot: [
-      {
-        delegation_hash: HASH,
-        token_address: USDC,
-        recipient_address: null,
-        budget_atomic: BUDGET.toString(),
-        period_seconds: DAY,
-        start_date: START,
-        expires_at: START + 365 * DAY,
-        remaining_atomic: REMAINING.toString(),
-        from_chain: true,
-      },
-    ],
+    carry_snapshot: [snapshotEntry()],
     metered_at: null,
     revoke_tx_hash: '0x' + '11'.repeat(32),
     revoked_at: new Date(START * 1000).toISOString(),
@@ -175,8 +179,13 @@ describe('#1849 re-key issue — the carry is planned on the metering clock', ()
    * finishing at `now`. Both are absolute seconds so the gap is explicit at
    * every call site rather than hidden in a helper.
    */
-  async function issueAt(meteredAt: number, now: number) {
-    mockFindRekey.mockResolvedValue(rekeyRow({ metered_at: new Date(meteredAt * 1000).toISOString() }))
+  async function issueAt(meteredAt: number, now: number, entry?: Record<string, unknown>) {
+    mockFindRekey.mockResolvedValue(
+      rekeyRow({
+        metered_at: new Date(meteredAt * 1000).toISOString(),
+        carry_snapshot: [snapshotEntry(entry)],
+      }),
+    )
     // ONLY `Date` is faked. Faking the whole timer set stops Fastify's
     // `inject` from ever completing — the request sits on a `setImmediate`
     // that nothing advances, and every test in the file times out.
@@ -266,6 +275,100 @@ describe('#1849 re-key issue — the carry is planned on the metering clock', ()
         budgetAtomic: BUDGET.toString(),
       })
     })
+  })
+
+  // ── A fully spent period, which is the OTHER reason a carry is absent ───
+  //
+  // `carry: null` has two unrelated causes — nothing left to carry, and a
+  // window the delay outran — and the route must not describe one as the
+  // other. Reviewer finding on this PR: the block that chooses between those
+  // messages had no test at all, and one combination of them contradicted
+  // itself.
+
+  describe('nothing left to carry', () => {
+    it('says the period was spent, and that authority resumes at the boundary', async () => {
+      const { body } = await issueAt(START + 3600, START + 4200, { remaining_atomic: '0' })
+      // No carry to build; the steady grant still starts at the boundary,
+      // which is genuinely still ahead.
+      expect(body.delegations.map((d) => d.carry_role)).toEqual(['steady'])
+      expect(body.delegations[0].start_date).toBe(START + DAY)
+      expect(body.skipped).toHaveLength(1)
+      expect(body.skipped[0].reason).toMatch(/fully spent/i)
+      expect(body.skipped[0].reason).toMatch(/resumes at the original boundary/i)
+    })
+
+    it('says the spent period has ENDED when the delay outran it', async () => {
+      const { body } = await issueAt(START + DAY - 600, START + DAY + 7200, {
+        remaining_atomic: '0',
+      })
+      expect(body.delegations.map((d) => d.carry_role)).toEqual(['steady'])
+      expect(body.skipped).toHaveLength(1)
+      // "authority resumes at the original boundary" would be wrong here: the
+      // boundary is behind us and the replacement is already live.
+      expect(body.skipped[0].reason).toMatch(/already live/i)
+      expect(body.skipped[0].reason).not.toMatch(/resumes at the original boundary/i)
+    })
+
+    it('never promises a resumption when the whole grant died in the gap', async () => {
+      // The double drop: the period was fully spent AND the grant's own life
+      // ended during the pause. Nothing is issued at all.
+      //
+      // This is the case the reviewer caught. The spent-period message is
+      // chosen by looking at the CARRY drops, and a zero remainder produces
+      // no carry drop — so the guard let the generic branch fire, and with
+      // `steady` dropped the ternary fell to "authority resumes at the
+      // original boundary" while the very next skip entry said the grant's
+      // window had closed. Two entries for one delegation, contradicting.
+      const { body } = await issueAt(START + 3600, START + 2 * DAY, {
+        remaining_atomic: '0',
+        expires_at: START + DAY + 3600, // dies mid-period-1, before `now`
+      })
+      expect(body.delegations).toEqual([])
+      const reasons = body.skipped.map((s) => s.reason).join(' ')
+      expect(reasons).not.toMatch(/resumes at the original boundary/i)
+      expect(reasons).not.toMatch(/already live/i)
+      // What the owner needs instead: the grant is over, and the re-key did
+      // not take anything away that was still there to take.
+      expect(reasons).toMatch(/fully spent/i)
+      expect(reasons).toMatch(/window closed/i)
+      // And it must say the DELAY ended it. There WAS a period after the
+      // spent one — the pause outran it — so the sibling message ("the grant
+      // had no period after that one") would be a quieter falsehood in place
+      // of the loud one. Asserted because dropping this distinction is a
+      // mutation the coarser checks above survive.
+      expect(reasons).toMatch(/before this re-key was finished/i)
+      expect(reasons).not.toMatch(/no period after/i)
+    })
+
+    it('promises nothing when the grant had no period after the spent one', async () => {
+      // The third branch: the grant simply ends at the boundary, so there was
+      // never a steady leg to resume into. Distinct from the double drop
+      // above — nothing was outrun here, and the message must not imply a
+      // delay caused it.
+      const { body } = await issueAt(START + 3600, START + 4200, {
+        remaining_atomic: '0',
+        expires_at: START + DAY, // dies exactly at the boundary
+      })
+      expect(body.delegations).toEqual([])
+      expect(body.skipped).toHaveLength(1)
+      expect(body.skipped[0].reason).toMatch(/no period after/i)
+      expect(body.skipped[0].reason).not.toMatch(/window closed/i)
+    })
+  })
+
+  it('drops a not-yet-started grant the delay outran, and issues nothing', async () => {
+    // The `dormant` branch with `reissue: null`. Planner-level coverage
+    // existed; the route wiring had none, and it is the one branch that can
+    // push a piece with no terms at all.
+    const { status, body } = await issueAt(START - 7200, START + 2 * DAY, {
+      start_date: START + DAY, // had not started when the meter was read
+      expires_at: START + DAY + 600, // and was over before the owner finished
+    })
+    expect(status).toBe(201)
+    expect(body.delegations).toEqual([])
+    expect(mockInsertRekeyDelegation).not.toHaveBeenCalled()
+    expect(body.skipped).toHaveLength(1)
+    expect(body.skipped[0].reason).toMatch(/window closed/i)
   })
 
   // ── The guard on the clock itself ───────────────────────────────────────

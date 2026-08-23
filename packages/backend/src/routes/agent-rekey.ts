@@ -137,6 +137,38 @@ function orderingReply(reply: FastifyReply, err: RekeyOrderingError): FastifyRep
   })
 }
 
+/**
+ * The message for a carry that is absent because there was nothing to carry —
+ * as opposed to one the delay outran, which `planCarry` reports itself.
+ *
+ * All three branches exist because two independent things can have happened
+ * since the meter was read, and the owner is owed the truth about both: the
+ * old period may have ended, and the whole grant may have died. Saying
+ * "authority resumes at the original boundary" when the steady grant was
+ * itself dropped contradicts the very next line of the same response — the
+ * shape a reviewer caught on #1849 before it shipped.
+ */
+function fullySpentReason(
+  steady: { startDate: number } | null,
+  dropped: ReadonlyArray<{ role: string }>,
+  nowSec: number,
+): string {
+  const spent = 'The period was fully spent when the meter was read.'
+  if (!steady) {
+    // Either the grant had no period after this one, or the delay outran the
+    // one it had. Promise nothing: the accompanying drop reason, when there
+    // is one, says which.
+    return dropped.some((d) => d.role === 'steady')
+      ? `${spent} The grant's own life then ended before this re-key was finished, so nothing ` +
+          'is issued for it — no spend was lost that was still available to lose.'
+      : `${spent} The grant had no period after that one, so there is nothing to resume.`
+  }
+  return steady.startDate <= nowSec
+    ? `${spent} That period has since ended, so the replacement grant is already live on the ` +
+        'original budget.'
+    : `${spent} No carry grant is issued; authority resumes at the original boundary.`
+}
+
 export default async function agentRekeyRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
@@ -691,12 +723,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
           else if (plan.dropped.every((d) => d.role !== 'carry'))
             skipped.push({
               delegation_hash: entry.delegation_hash,
-              reason:
-                plan.steady && plan.steady.startDate <= nowSec
-                  ? 'The period was fully spent when the meter was read. That period has since ' +
-                    'ended, so the replacement grant is already live on the original budget.'
-                  : 'The period was fully spent — no carry grant is issued; authority resumes at ' +
-                    'the original boundary.',
+              reason: fullySpentReason(plan.steady, plan.dropped, nowSec),
             })
           if (plan.steady) pieces.push({ role: 'steady', terms: plan.steady })
         }

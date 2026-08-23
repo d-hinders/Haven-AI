@@ -5,7 +5,7 @@ covers:
   - packages/backend/src/modules/passport/revocation.ts
   - packages/backend/src/modules/passport/attestation.ts
   - packages/backend/src/infra/repositories/agent-passports.ts
-last-verified: "2026-08-22" # written for #1793, against the code as of #1758 (PR #1786): the convergence probe, the settled-block read, the mined-only evidence pointer, and `passport_revoke`'s membership of REBROADCAST_SAFE_SUBMITTERS were each read from source rather than from the issue text
+last-verified: "2026-08-23" # #1699: new §1a — there are now TWO passport alarms and this runbook described only one. #1699 added a `reanchor-alarm` phase whose meaning is the OPPOSITE of this one (a LIVE agent whose attestation names a retired delegate key, vs a REVOKED agent whose attestation is still live), and every query and remedy in §2-§4 is gated on `agents.status = 'revoked'` — so an operator who reached this page from the wrong log line would query an invariant that is false by construction and find nothing. §1a disambiguates the two and explicitly refuses §2-§4 for the re-anchor case. §1's "three independent phases / the third phase" corrected to five and fourth. Re-read §2-§5 against `revocation.ts` and `agent-passports.ts` as merged: every claim about the revocation alarm itself stands unchanged, including the #1758 convergence-probe behaviour, which the re-anchor path now shares via the extracted `retireAttestationOnChain`. Scope: §1/§1a only for new material; no §2-§5 remedy was re-executed against a live environment. Prior: written for #1793, against the code as of #1758 (PR #1786): the convergence probe, the settled-block read, the mined-only evidence pointer, and `passport_revoke`'s membership of REBROADCAST_SAFE_SUBMITTERS were each read from source rather than from the issue text
 ---
 
 # Stuck-revoke alarm — operator runbook (#1793)
@@ -33,8 +33,10 @@ narrower and, when it persists, real.
 
 The passport sweep in
 [`index.ts`](../../packages/backend/src/index.ts) runs every **5 minutes**
-(`PASSPORT_SWEEP_INTERVAL_MS`) under a leader lock, in three independent
-phases. The third phase is the alarm:
+(`PASSPORT_SWEEP_INTERVAL_MS`) under a leader lock, in five independent phases
+([#1699](https://github.com/d-hinders/Haven-AI/issues/1699) added a re-anchor
+reconciliation and a second alarm — see §1a before acting on anything). The
+**fourth** phase is this alarm:
 
 ```
 WARN  Passport revocations unreconciled past threshold — agents revoked in
@@ -68,6 +70,51 @@ transaction was ever attempted.
 
 The alarm phase runs even when the issuance and reconciliation phases above it
 throw — deliberately, because that is exactly when it matters.
+
+## 1a. There are TWO passport alarms. Check which one fired.
+
+This runbook is about **one** of them, and following it against the other will
+lead you to the wrong query and the wrong conclusion about whether the agent is
+even revoked. The log lines are adjacent and similar; the incidents are
+opposites.
+
+| | this runbook's alarm | the re-anchor alarm (#1699) |
+|---|---|---|
+| log line | `Passport revocations unreconciled past threshold — agents revoked in Haven still hold a live attestation on-chain` | `Passport re-anchors unreconciled past threshold — live agents hold an attestation naming a retired delegate key` |
+| sweep phase | `alarm` (4th) | `reanchor-alarm` (5th) |
+| the agent is | **revoked** (`agents.status = 'revoked'`) | **live and fully authorised** |
+| row set | `LIST_STUCK_REVOCATIONS_SQL` | `LIST_STUCK_REANCHORS_SQL` |
+| the invariant | a revoked agent's attestation is still live | a live agent's attestation names a key it no longer holds |
+| the exposure | a merchant reading the chain alone serves a revoked agent | a merchant resolves a passport for an address that can no longer spend |
+
+**Do not apply §2–§4 to a re-anchor alarm.** Every query and every remedy below
+is gated on `agents.status = 'revoked'`, which is false by construction for a
+re-anchor row — §2's queries will return nothing and §4's cancel remedy has no
+valid target. The re-anchor case is described in
+[`reanchor.ts`](../../packages/backend/src/modules/passport/reanchor.ts)'s
+header and in
+[`11-agent-passport-schema.md`](../architecture/11-agent-passport-schema.md)
+§ *Re-anchoring after a re-key*; the short version an operator needs:
+
+- **The agent is not at risk and neither are its funds.** Its spend authority
+  is the signed delegation, which the re-key already rotated. `standing` is
+  `active` and correct throughout, and the verifier reports the anchor as
+  `re_anchoring` rather than claiming the retired credential is current.
+- **It self-heals.** The queue is the invariant "the attestation names an
+  address the agent no longer uses", so the row stays due and the sweep keeps
+  retrying with the same 30s→1h backoff.
+- **What to look at first** is `revocation_last_error` on the row, exactly as
+  in §2 — a persistently stuck re-anchor is almost always the same underlying
+  cause as a stuck revoke (relayer, RPC, unregistered schema), because both
+  paths share `retireAttestationOnChain`.
+- **Do not hand-edit `agent_passports` to force it forward.** Clearing
+  `attestation_uid` before the retired attestation is confirmed revoked strands
+  that credential permanently — `resetForReanchor` refuses exactly this, and a
+  manual UPDATE would defeat the one guard standing in front of it.
+
+A full parallel triage section for the re-anchor case is not written yet; if
+you work one, write it here rather than leaving the next operator to re-derive
+it.
 
 ## 2. Triage, in order — check before you touch anything
 

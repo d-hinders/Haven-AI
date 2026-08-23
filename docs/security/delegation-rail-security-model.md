@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-23" # #1870: §6a gains a FIFTH security property — the revoke leg is signed by a signer the DEVICE chose, not one the server inferred. Re-read §6 and §6a in full against `routes/agent-rekey.ts` and `rails/hybrid-signer-actions.ts`: §6's "scheme selection is a device decision (`signature_scheme` on the prepare routes)" was TRUE of the delegation routes and FALSE of the re-key revoke, which passed no signer down at all; the claim is now true as written. The new bullet records the refusal ORDERING (409 in prepare, before the revoke) as the security property, not the field. Prior: #1702 (carve-out): §6a gains a FOURTH security property — the budget meter carries amount AND period boundary across a re-key, as the defence against using rotation to refill a budget. Re-read §6 and §6a in full against `modules/agents/rekey-carry.ts` and `routes/agent-rekey.ts` as merged by #1698; every existing claim stands, and the three recorded owner decisions (revoke before issue, meter read AFTER revoke, period carries over) match the code. Scope: §6/§6a only — no signer-set, enrolment, removal, threshold or recovery claim re-tested beyond what #1709 covered the same day. Prior: #1709: pulled in only because the border-token sweep touched `AccountSignersCard.tsx`. That change is a class-string rename (`border-[var(--v2-warning)]/25` -> `border-warning/25`) on one advisory callout — no signer-set, enrolment, removal, threshold, or recovery claim in this document is affected, and the diff for that file contains no logic, prop or copy change. Re-read the signer-management sections against it; they stand unchanged. Scope: that verification only — no other claim re-tested. Prior: #1698: new §6a — agent delegate-key rotation is a DIFFERENT layer from the account signer set, and its loss has the opposite answer (recoverable, because the delegate never held owner authority); revoke-before-issue, non-custody and no-self-rekey recorded as security properties; covers: widened to the re-key surface. Prior: #1679: signers read gains per-credential created_at (read-only timestamp for UI labels) — read/management boundary and every invariant unchanged; the read-surface paragraph updated to match. Prior: #1605: comment-only tense corrections in hybrid-accounts route + migrations 041/043 (stale "until #829/#834" claims) — no executable code, SQL, or boundary moves; every claim in this doc re-read against the diff stands. Prior: #1436: archiving now requires dead budgets as well as a revoked credential (one statement, refusal-only), so "Removed" cannot hide a spendable agent. #1423: revoke-all prepare reconciles crash-window orphans against disabledDelegations() and caps batches at 25; #1400: batch revoke-all — one owner-signed UserOp disables N delegations atomically (BatchDefault); DB write only after the UserOp lands; invariants unchanged. Prior: #1199 passkey/wallet removal two-to-one rule
+last-verified: "2026-08-23" # #1699: §6a gains a SIXTH security property — the passport ANCHOR is retired and reissued on a re-key while `standing` never moves. Re-read §6a in full: its opening claim that re-key keeps "the agent's id, name, history and passport" was true of the passport's IDENTITY and false of its on-chain anchor, which until #1699 kept naming the retired delegate EOA (#1847); the word *identity* is now explicit and the gap it papered over is the new bullet. The revoke-before-issue rule is restated one layer up rather than re-derived — same argument, same failure asymmetry. Scope: §6a only; no signer-set, enrolment, removal, threshold, recovery or meter-carry claim was re-tested beyond re-reading them for contradiction, and none contradicts. Prior: #1870: §6a gains a FIFTH security property — the revoke leg is signed by a signer the DEVICE chose, not one the server inferred. Re-read §6 and §6a in full against `routes/agent-rekey.ts` and `rails/hybrid-signer-actions.ts`: §6's "scheme selection is a device decision (`signature_scheme` on the prepare routes)" was TRUE of the delegation routes and FALSE of the re-key revoke, which passed no signer down at all; the claim is now true as written. The new bullet records the refusal ORDERING (409 in prepare, before the revoke) as the security property, not the field. Prior: #1702 (carve-out): §6a gains a FOURTH security property — the budget meter carries amount AND period boundary across a re-key, as the defence against using rotation to refill a budget. Re-read §6 and §6a in full against `modules/agents/rekey-carry.ts` and `routes/agent-rekey.ts` as merged by #1698; every existing claim stands, and the three recorded owner decisions (revoke before issue, meter read AFTER revoke, period carries over) match the code. Scope: §6/§6a only — no signer-set, enrolment, removal, threshold or recovery claim re-tested beyond what #1709 covered the same day. Prior: #1709: pulled in only because the border-token sweep touched `AccountSignersCard.tsx`. That change is a class-string rename (`border-[var(--v2-warning)]/25` -> `border-warning/25`) on one advisory callout — no signer-set, enrolment, removal, threshold, or recovery claim in this document is affected, and the diff for that file contains no logic, prop or copy change. Re-read the signer-management sections against it; they stand unchanged. Scope: that verification only — no other claim re-tested. Prior: #1698: new §6a — agent delegate-key rotation is a DIFFERENT layer from the account signer set, and its loss has the opposite answer (recoverable, because the delegate never held owner authority); revoke-before-issue, non-custody and no-self-rekey recorded as security properties; covers: widened to the re-key surface. Prior: #1679: signers read gains per-credential created_at (read-only timestamp for UI labels) — read/management boundary and every invariant unchanged; the read-surface paragraph updated to match. Prior: #1605: comment-only tense corrections in hybrid-accounts route + migrations 041/043 (stale "until #829/#834" claims) — no executable code, SQL, or boundary moves; every claim in this doc re-read against the diff stands. Prior: #1436: archiving now requires dead budgets as well as a revoked credential (one statement, refusal-only), so "Removed" cannot hide a spendable agent. #1423: revoke-all prepare reconciles crash-window orphans against disabledDelegations() and caps batches at 25; #1400: batch revoke-all — one owner-signed UserOp disables N delegations atomically (BatchDefault); DB write only after the UserOp lands; invariants unchanged. Prior: #1199 passkey/wallet removal two-to-one rule
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -326,12 +326,16 @@ The delegate never held owner authority. It holds only what a signed
 delegation grants it, and that grant is revocable by the account owner. So a
 lost or exposed delegate key is **recoverable**, where a lost sole account
 signer is not: the owner revokes the old delegation and issues a new one to a
-new delegate, keeping the agent's id, name, history and passport. That is
-`POST /agents/:id/rekey…` (`routes/agent-rekey.ts`), and it is the reason the
-"no recovery" limit above is scoped to the *signer set* rather than to keys in
-general.
+new delegate, keeping the agent's id, name, history and passport IDENTITY.
+That is `POST /agents/:id/rekey…` (`routes/agent-rekey.ts`), and it is the
+reason the "no recovery" limit above is scoped to the *signer set* rather than
+to keys in general.
 
-Four properties of that flow belong in this document because they are
+The word *identity* is load-bearing and was added in #1699, because the
+unqualified "keeps its passport" was read as "the attestation is untouched" and
+that is not what happens — see the re-anchoring property below.
+
+Six properties of that flow belong in this document because they are
 security properties, not implementation detail:
 
 - **Revoke precedes issue, always.** Both halves are on-chain and
@@ -389,6 +393,32 @@ security properties, not implementation detail:
   writes nothing and leaves the re-key at `preflight`. That is deliberate under
   the revoke-precedes-issue rule above — a failure after the revoke is the
   expensive direction, so a new way to fail must land before it.
+
+- **The passport ANCHOR is retired and reissued, and standing never moves**
+  (#1699). An EAS attestation is immutable and `PASSPORT_SCHEMA`'s first field
+  is `address agentEoa`, so there is no mutable-anchor option: the moment the
+  rotation completes, the live attestation names a key the agent no longer
+  holds. Re-key therefore revokes it and issues a new one naming the new key —
+  and the same revoke-before-issue rule applies for the same reason, one layer
+  up. Minting first would leave TWO live credentials for one agent, one of them
+  naming a retired key, and a partial failure would make that permanent;
+  revoking first fails to *this agent has no passport right now*, which is
+  recoverable. The window between them is real, and it is reported as
+  `re_anchoring` rather than hidden — never as `anchored`, which would tell a
+  merchant a credential is current when the address it names cannot spend.
+
+  **What does NOT move is `standing`.** It derives from `agents.status`
+  (`modules/passport/revocation.ts`), which a re-key never writes, so no chain
+  failure in this path can cost an agent its standing — the worst available
+  outcome is a stale anchor that keeps retrying. That is the two-layer split of
+  §epic #970 doing the job it was built for: the DB is authoritative and the
+  anchor is eventually consistent, and re-anchoring is the case that makes the
+  distinction observable rather than theoretical. The queue is the invariant
+  "the attestation names an address the agent no longer uses", so a re-key
+  whose process died before enqueuing anything is still picked up.
+
+  Passport remains governance metadata, never spend authority: nothing in this
+  property grants, withholds or delays what an agent may spend.
 
 One consequence the owner should hear before starting: re-key retires the key
 that could **sweep** any residual balance on the old delegate EOA, so the

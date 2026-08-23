@@ -30,7 +30,7 @@
 import * as repo from '../../infra/repositories/agent-passports.js'
 import type { VerificationRow } from '../../infra/repositories/agent-passports.js'
 import { AssuranceLevel, ISSUABLE_ASSURANCE_LEVELS } from './schema.js'
-import { standingForStatus, anchorForPassport } from './revocation.js'
+import { standingForStatus, anchorForPassport, isStaleAnchor } from './revocation.js'
 import {
   RECEIPT_TTL_SECONDS,
   RECEIPT_VERSION,
@@ -149,7 +149,16 @@ export async function buildReceipt(row: VerificationRow): Promise<SignedPassport
     // free to drift, and the failure mode is the receipt a merchant holds
     // disagreeing with Haven's own answer for the same agent.
     standing: standingForStatus(row.agent_status),
-    anchor: anchorForPassport(row.passport_status, row.revocation_status),
+    // #1699: a re-key leaves this attestation naming a RETIRED key. Reporting
+    // it as plain `anchored` would tell a merchant a credential is current
+    // when the address it names can no longer spend — the honest answer is
+    // that the anchor is mid-rotation.
+    anchor: anchorForPassport(
+      row.passport_status,
+      row.revocation_status,
+      row.agent_status !== 'revoked' &&
+        isStaleAnchor(row.agent_eoa, row.current_delegate_address),
+    ),
     evidenceUid: row.attestation_uid,
     chainId: row.chain_id,
     controls: controlsOf(row),

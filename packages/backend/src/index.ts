@@ -42,6 +42,8 @@ import {
   logPassportReadiness,
   retryPendingPassports,
   reconcilePendingRevocations,
+  reconcilePendingReanchors,
+  listStuckReanchors,
   listStuckRevocations,
 } from './modules/passport/index.js'
 import passportVerifyRoutes from './routes/passport-verify.js'
@@ -467,12 +469,30 @@ const start = async () => {
             const revocations = await reconcilePendingRevocations()
             if (revocations.attempted) app.log.info(revocations, 'Passport revocation reconciliation')
           })
+          // #1699: a re-key rotates the delegate key underneath a live
+          // attestation. Its own phase, not folded into 'revocation': the two
+          // queues are mutually exclusive by agent status, and folding them
+          // would let a failure in one silence the other — the exact coupling
+          // the phase split above exists to prevent.
+          await phase('reanchor', async () => {
+            const reanchors = await reconcilePendingReanchors()
+            if (reanchors.attempted) app.log.info(reanchors, 'Passport re-anchor reconciliation')
+          })
           await phase('alarm', async () => {
             const stuck = await listStuckRevocations(PASSPORT_STUCK_REVOKE_SECONDS)
             if (stuck.length > 0) {
               app.log.warn(
                 { count: stuck.length, agents: stuck.slice(0, 10) },
                 'Passport revocations unreconciled past threshold — agents revoked in Haven still hold a live attestation on-chain',
+              )
+            }
+          })
+          await phase('reanchor-alarm', async () => {
+            const stuck = await listStuckReanchors(PASSPORT_STUCK_REVOKE_SECONDS)
+            if (stuck.length > 0) {
+              app.log.warn(
+                { count: stuck.length, agents: stuck.slice(0, 10) },
+                'Passport re-anchors unreconciled past threshold — live agents hold an attestation naming a retired delegate key',
               )
             }
           })

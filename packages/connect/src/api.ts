@@ -43,6 +43,18 @@ export interface RegisterSetupInput extends ResolveSetupInput {
   proofSignature: string
   apiKeyHash: string
   apiKeyPrefix: string
+  /**
+   * #1878: the RESOLVED hosted MCP server name this agent is being wired as —
+   * `haven` for the bare pair, `haven-<slug>` for a named one. Sent so the
+   * dashboard can tell two agents in one harness apart; it is a display aid
+   * and Haven keys nothing off it.
+   *
+   * Always sent by a connector that supports it, bare pair included. Omitting
+   * it for the bare pair would make "absent" ambiguous between *this is the
+   * unnamed pair* and *an older connector said nothing*, and only the second
+   * of those may render as unknown.
+   */
+  mcpServerName?: string
   connectorContext?: ConnectorContext
   installCapabilities?: {
     canWriteRuntimeConfig?: boolean
@@ -167,6 +179,7 @@ export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch 
           api_key_prefix: input.apiKeyPrefix,
           runtime: input.runtime,
           connector_version: input.connectorVersion,
+          mcp_server_name: input.mcpServerName,
           connector_context: input.connectorContext,
           install_capabilities: input.installCapabilities && {
             can_write_runtime_config: input.installCapabilities.canWriteRuntimeConfig,

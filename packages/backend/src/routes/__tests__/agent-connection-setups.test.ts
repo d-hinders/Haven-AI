@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { Wallet } from 'ethers'
-import agentConnectionSetupRoutes, { CONNECTOR_PACKAGE } from '../agent-connection-setups.js'
+import agentConnectionSetupRoutes, {
+  CONNECTOR_PACKAGE,
+  normalizeMcpServerName,
+} from '../agent-connection-setups.js'
 
 const { mockQuery, mockConnect, mockClientQuery, mockClientRelease } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -2860,5 +2863,44 @@ describe('GET /:setupId/connector-status (#1377 part D)', () => {
     expect(response.statusCode).toBe(401)
     expect(response.json().error).toBe('Invalid or revoked API key')
     await app.close()
+  })
+})
+
+describe('#1878 normalizeMcpServerName — the connector\'s self-reported wiring label', () => {
+  it('accepts the bare pair and a named pair', () => {
+    expect(normalizeMcpServerName('haven')).toBe('haven')
+    expect(normalizeMcpServerName('haven-research')).toBe('haven-research')
+    expect(normalizeMcpServerName('haven-team-2')).toBe('haven-team-2')
+  })
+
+  it('degrades anything unrecognized to NULL rather than refusing the registration', () => {
+    // The direction matters. This is a LABEL: a wrong one is a wrong caption,
+    // and NULL already renders honestly as "not recorded". Throwing here would
+    // fail a whole agent registration — key minted, config written — over a
+    // display string, which is a far worse outcome than a missing caption.
+    expect(normalizeMcpServerName(undefined)).toBeNull()
+    expect(normalizeMcpServerName(null)).toBeNull()
+    expect(normalizeMcpServerName(42)).toBeNull()
+    expect(normalizeMcpServerName({ toString: () => 'haven' })).toBeNull()
+    expect(normalizeMcpServerName('')).toBeNull()
+    expect(normalizeMcpServerName('   ')).toBeNull()
+    expect(normalizeMcpServerName('not-a-haven-name')).toBeNull()
+    expect(normalizeMcpServerName('haven-Research')).toBeNull() // slugs are lowercase
+    expect(normalizeMcpServerName('haven-')).toBeNull()
+    expect(normalizeMcpServerName('haven--x')).toBeNull()
+    expect(normalizeMcpServerName('haven-' + 'x'.repeat(100))).toBeNull()
+  })
+
+  it('refuses anything that could break out of a label', () => {
+    // It reaches a dashboard and a copy button, so the shapes worth naming
+    // are the ones that would stop being text there.
+    expect(normalizeMcpServerName('haven-<script>')).toBeNull()
+    expect(normalizeMcpServerName('haven-a\nhaven-b')).toBeNull()
+    expect(normalizeMcpServerName('haven-a\u0000')).toBeNull()
+    expect(normalizeMcpServerName('../../etc/passwd')).toBeNull()
+  })
+
+  it('trims surrounding whitespace rather than storing it', () => {
+    expect(normalizeMcpServerName('  haven-work  ')).toBe('haven-work')
   })
 })

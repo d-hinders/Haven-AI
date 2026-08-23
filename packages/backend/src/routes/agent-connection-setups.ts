@@ -70,6 +70,13 @@ interface RegisterSetupBody extends ResolveSetupBody {
   proof_signature: string
   api_key_hash: string
   api_key_prefix: string
+  /**
+   * #1878: the resolved hosted MCP server name the connector wired this agent
+   * as — `haven` for the bare pair, `haven-<slug>` for a named one. Optional:
+   * connectors older than #1878 send nothing, and those agents stay NULL
+   * rather than being guessed at.
+   */
+  mcp_server_name?: string
   connector_context?: unknown
   install_capabilities?: {
     can_write_runtime_config?: boolean
@@ -115,6 +122,33 @@ interface WalletApprovalBody {
  * (or NEXT_PUBLIC_HAVEN_MCP_URL) explicitly or the setup fails LOUDLY with
  * the variable named.
  */
+/**
+ * #1878: the connector's self-reported MCP server name, reduced to something
+ * safe to store and show.
+ *
+ * This is a DISPLAY-SAFETY check, not the naming contract. That contract lives
+ * in `packages/connect/src/server-names.ts` and cannot be imported here —
+ * connect is published to npm and this package is not, so the two cannot share
+ * a module. Re-implementing the full rule (reserved words, collision families)
+ * would therefore be a second copy that silently drifts, and it would buy
+ * nothing: Haven keys nothing off this value, so a name that is wrong is a
+ * wrong label, not a wrong authorization.
+ *
+ * What is worth refusing is anything that is not plausibly one of our server
+ * names — an oversized blob, a different product's name, control characters —
+ * because that is what would land in the dashboard. Anything unrecognized
+ * becomes NULL, which the UI already renders honestly as "not recorded". A
+ * refusal would be worse: it would fail a whole registration over a label.
+ */
+const MCP_SERVER_NAME_RE = /^haven(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/
+
+export function normalizeMcpServerName(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (trimmed.length === 0 || trimmed.length > 64) return null
+  return MCP_SERVER_NAME_RE.test(trimmed) ? trimmed : null
+}
+
 const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
 const PRODUCTION_API_HOST = 'havenbackend-production-8a00.up.railway.app'
 export const CONNECTOR_PACKAGE = '@haven_ai/connect@alpha'
@@ -314,6 +348,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         }
 
         apiKeyPrefix = request.body.api_key_prefix
+        const mcpServerName = normalizeMcpServerName(request.body.mcp_server_name)
         const connectorContext = sanitizeConnectorContext(request.body.connector_context)
         const initialInstallStatus = {
           hosted_mcp_configured: false,
@@ -336,6 +371,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
             apiKeyHash: request.body.api_key_hash,
             apiKeyPrefix,
             safeId: setup.safe_id,
+            mcpServerName,
           },
           tx,
         )

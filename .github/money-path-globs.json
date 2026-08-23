@@ -83,7 +83,17 @@
     "covers ground it does not. money-path.test.mjs now asserts every glob matches",
     "at least one tracked file, so a fifth phantom cannot accumulate silently.",
     "Adding a glob AHEAD of the code it anticipates is still allowed -- see",
-    "PRE_EMPTIVE_GLOBS in that test, which is the sanctioned place to say so."
+    "PRE_EMPTIVE_GLOBS in that test, which is the sanctioned place to say so.",
+    "",
+    "2026-08-23 (#1904, from review): scripts/ci/money-path-restatement-scan.mjs",
+    "added to controlGlobs. It is a REPORTING tool that never gates -- but it",
+    "supplies the scoring functions behind an assertion inside money-path.test.mjs,",
+    "which is itself a control glob. Without this entry the invariant could be",
+    "neutered by editing the scan file alone, with no money-path label and nobody",
+    "reading money.md -- the control surface would be guarded at the front door",
+    "and open at the side. Listed for the same reason #1892 listed",
+    "infra/delegate-*.ts: which file the enforcement happens to live in is an",
+    "accident, and the perimeter should not depend on it."
   ],
   "globs": [
     "packages/backend/src/db/migrations/**",
@@ -126,6 +136,7 @@
     ".github/workflows/dev-gate.yml",
     ".github/workflows/publish.yml",
     ".github/workflows/qa-dev.yml",
+    "scripts/ci/money-path-restatement-scan.mjs",
     "scripts/ci/money-path.test.mjs",
     "scripts/ci/qa-freshness.mjs",
     "scripts/release-bump.mjs"

@@ -84,6 +84,7 @@
           - "packages/backend/src/routes/x402-resources.ts"
           - "packages/backend/src/routes/x402.ts"
           - "packages/sdk/src/signer.ts"
+          - "scripts/ci/money-path-restatement-scan.mjs"
           - "scripts/ci/money-path.test.mjs"
           - "scripts/ci/qa-freshness.mjs"
           - "scripts/release-bump.mjs"

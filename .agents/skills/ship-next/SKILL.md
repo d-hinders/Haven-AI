@@ -238,7 +238,8 @@ you need the reasoning. Never edit one without the other — CI will not let you
 - `middleware/agentAuth.ts`;
 - `db/migrations/`;
 - the safeguard's own control surface — `scripts/release-bump.mjs`,
-  `scripts/ci/qa-freshness.mjs`, `scripts/ci/money-path.test.mjs`, `.github/CODEOWNERS`,
+  `scripts/ci/qa-freshness.mjs`, `scripts/ci/money-path.test.mjs`,
+  `scripts/ci/money-path-restatement-scan.mjs`, `.github/CODEOWNERS`,
   `.github/money-path-globs.json`, `.github/workflows/publish.yml`,
   `.github/workflows/dev-gate.yml`, `.github/workflows/qa-dev.yml`. These are
   `controlGlobs` in the JSON: labelled money-path so a PR weakening the gate gets

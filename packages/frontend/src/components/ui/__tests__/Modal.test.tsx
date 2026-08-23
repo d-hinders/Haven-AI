@@ -227,4 +227,37 @@ describe('Modal scroll continuation cue', () => {
     expect(marker).toHaveAttribute('aria-hidden', 'true')
     expect(marker!.className).toContain('pointer-events-none')
   })
+
+  it('darkens the edge instead of painting a surface colour over it', () => {
+    renderLongModal()
+    const body = scrollBox()
+
+    setGeometry(body, { scrollHeight: 1060, clientHeight: 400, scrollTop: 0 })
+    fireEvent.scroll(body)
+
+    const marker = cue()!
+
+    // The first implementation was `bg-gradient-to-t from-white`, which assumes
+    // the surface behind the cue is white. Rendered over the re-key flow's
+    // amber "Before you approve" callout it bleached the callout instead of
+    // signalling overflow. A translucent inset shadow composites over whatever
+    // is actually painted, so it cannot make that assumption — and it cannot
+    // be reintroduced without this assertion going red.
+    // `v2-scroll-edge-cue`, NOT `shadow-[var(--v2-shadow-scroll-edge)]`. That
+    // Tailwind spelling is dead — a bare `var()` inside `shadow-[…]` is read as
+    // a shadow COLOUR, emitting `--tw-shadow: var(--tw-shadow-colored)` against
+    // a variable nothing sets, so the computed `box-shadow` is `none`. Measured
+    // out of the served stylesheet; the class comment in `globals.css` carries
+    // the detail. The browser spec asserts the painted result; this asserts the
+    // spelling, so a revert to the dead form fails here first and fast.
+    expect(marker.className).toContain('v2-scroll-edge-cue')
+    expect(marker.className).not.toMatch(/shadow-\[/)
+    expect(marker.className).not.toMatch(/\bbg-gradient-|\bfrom-(white|\[)/)
+
+    // A boundary, not a quantity: 6px regardless of how much is hidden. The
+    // second defect was a 32px cue over a 44px overflow, which swallowed the
+    // last line rather than hinting at it.
+    expect(marker.className).toContain('h-1.5')
+    expect(marker.className).not.toMatch(/\bh-(8|10|12|16)\b/)
+  })
 })

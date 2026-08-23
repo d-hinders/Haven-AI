@@ -231,11 +231,27 @@ export function Modal({
             {children}
           </div>
 
+          {/*
+            Non-occluding by construction: a 6px translucent inset shadow that
+            DARKENS the last sliver of the scroll box rather than painting over
+            it. Nothing is hidden and nothing is bleached, whatever surface the
+            body's last line happens to sit on. The token carries the reasoning
+            and the two rejected alternatives.
+
+            No transition, on purpose. `docs/product/design-system.md` § 4 bans
+            entrance animations on first paint, and this cue's first honest
+            reading lands in an effect after the first commit — so a fade-in
+            would animate on first paint in every overflowing dialog in the
+            app. `docs/product/design-review.md` additionally requires any
+            animation to be gated behind `prefers-reduced-motion: no-preference`.
+            At 6px the appear/disappear is a hairline, not a flash; verified by
+            scrolling a real dialog, not by looking at a still.
+          */}
           {hasContentBelow && (
             <div
               data-modal-scroll-cue=""
               aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-white to-transparent"
+              className="v2-scroll-edge-cue pointer-events-none absolute inset-x-0 bottom-0 h-1.5"
             />
           )}
         </div>

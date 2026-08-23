@@ -134,4 +134,53 @@ test.describe('ui/Modal scroll continuation cue', () => {
     expect(bodyBox).not.toBeNull()
     expect(Math.abs(cueBox!.y + cueBox!.height - (bodyBox!.y + bodyBox!.height))).toBeLessThanOrEqual(1)
   })
+
+  test('marks the edge without occluding the content behind it', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 600 })
+    const body = await openDemoDialog(page)
+
+    const measured = await page.evaluate(() => {
+      const marker = document.querySelector('[data-modal-scroll-cue]') as HTMLElement
+      const scrollBox = document.querySelector('[data-modal-body]') as HTMLElement
+      const style = getComputedStyle(marker)
+      return {
+        height: marker.getBoundingClientRect().height,
+        overflow: scrollBox.scrollHeight - scrollBox.clientHeight,
+        backgroundImage: style.backgroundImage,
+        backgroundColor: style.backgroundColor,
+        boxShadow: style.boxShadow,
+        pointerEvents: style.pointerEvents,
+      }
+    })
+
+    // #1893's first implementation faded to an assumed white backdrop and was
+    // rejected in review on two counts: it bleached the tinted callout it sat
+    // over, and at 32px it swallowed a 44px overflow whole. Both are pinned
+    // here, in the only place that can see what actually gets painted.
+    //
+    // 1. NO painted surface of its own. The cue must composite over whatever
+    //    is behind it, which a translucent shadow does and a gradient fill
+    //    does not.
+    expect(measured.backgroundImage).toBe('none')
+    expect(measured.backgroundColor).toBe('rgba(0, 0, 0, 0)')
+    expect(measured.boxShadow).toContain('inset')
+
+    // 2. A boundary, not a quantity — a fixed 6px edge, so the proportion it
+    //    covers shrinks as the overflow grows and never approaches the whole
+    //    remainder on a small one.
+    expect(measured.height).toBeLessThanOrEqual(8)
+    expect(measured.overflow).toBeGreaterThan(measured.height * 4)
+
+    // 3. Nothing under it becomes unclickable.
+    expect(measured.pointerEvents).toBe('none')
+    const elementAtCue = await page.evaluate(() => {
+      const marker = document.querySelector('[data-modal-scroll-cue]') as HTMLElement
+      const box = marker.getBoundingClientRect()
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+      return hit === marker
+    })
+    expect(elementAtCue, 'hit-testing must pass through the cue').toBe(false)
+
+    await expect(body).toBeVisible()
+  })
 })

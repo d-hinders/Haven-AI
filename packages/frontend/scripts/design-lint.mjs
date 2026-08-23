@@ -299,7 +299,56 @@ function scanAll() {
   return { counts, details }
 }
 
+/**
+ * `--icons`: the icon-size census (#1858), printed rather than asserted.
+ *
+ * The doc records a RULE, never a count, and this is why it can: the
+ * distribution is re-derivable on demand instead of being copied into
+ * Markdown where it goes stale. `UNCLASSIFIED` is the load-bearing line — a
+ * non-zero bucket means some call site was silently dropped and the totals
+ * below it are a guess, not a measurement.
+ */
+function iconCensus() {
+  const dist = new Map()
+  const off = []
+  let total = 0
+  for (const dir of SCAN_DIRS) {
+    const abs = path.join(ROOT, dir)
+    if (!existsSync(abs)) continue
+    for (const file of walk(abs)) {
+      const rel = path.relative(ROOT, file)
+      const src = readFileSync(file, 'utf8')
+      for (const el of iconElements(src)) {
+        total++
+        let key
+        if (/\b[hw]-full\b/.test(el.text)) key = 'container (h-full/w-full)'
+        else {
+          const h = el.text.match(/\bh-(\[[^\]]+\]|[\d.]+)/)
+          const w = el.text.match(/\bw-(\[[^\]]+\]|[\d.]+)/)
+          const sz = el.text.match(/\bsize=\{(\d+)\}/)
+          if (h && w) key = `h-${h[1]} w-${w[1]}`
+          else if (h || w) key = `h-${h?.[1] ?? '?'} w-${w?.[1] ?? '?'}`
+          else if (sz) key = `size={${sz[1]}}`
+          else if (/\b(?:size|className)=\{/.test(el.text)) key = 'runtime-computed'
+          else key = 'UNCLASSIFIED'
+        }
+        dist.set(key, (dist.get(key) ?? 0) + 1)
+        if (key === 'UNCLASSIFIED') off.push(`${rel}:${el.line}`)
+      }
+      for (const h of scanElements(rel, src)) off.push(`${rel}:${h.line}  ${h.match}`)
+    }
+  }
+  console.log(`TOTAL <Icon> call sites (src/{app,components}, marketing exempt): ${total}\n`)
+  for (const [k, v] of [...dist].sort((a, b) => b[1] - a[1])) {
+    console.log(`${String(v).padStart(4)}  ${k}`)
+  }
+  console.log(`\nUNCLASSIFIED: ${dist.get('UNCLASSIFIED') ?? 0}`)
+  console.log(`OFF-SCALE (what the icon-size gate would fail on): ${off.length}`)
+  if (off.length) console.log(off.map((o) => `  ${o}`).join('\n'))
+}
+
 function main() {
+  if (process.argv.includes('--icons')) return iconCensus()
   const update = process.argv.includes('--update')
   const { counts, details } = scanAll()
 

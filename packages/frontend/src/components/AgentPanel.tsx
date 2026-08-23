@@ -36,7 +36,7 @@ export default function AgentPanel() {
   if (!safeAddress) {
     return (
       <EmptyState
-        icon={<BotIcon size={24} />}
+        icon={<BotIcon size={20} />}
         title="Create a Haven account to manage agents"
         body="Agents need a Haven account before they can receive a credential and rules."
       />
@@ -150,7 +150,7 @@ export default function AgentPanel() {
         !finalizingAgent &&
         !finalizeTimedOut && (
         <EmptyState
-          icon={<BotIcon size={24} />}
+          icon={<BotIcon size={20} />}
           title="No agents yet"
           body="Set agent rules, then add your Haven credential to your agent so it can make payments within those rules."
           action={

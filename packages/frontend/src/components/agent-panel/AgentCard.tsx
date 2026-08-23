@@ -136,7 +136,7 @@ export function AgentCard({
                   : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
             }`}
           >
-            <BotIcon size={17} />
+            <BotIcon size={16} />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">

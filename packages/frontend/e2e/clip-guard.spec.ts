@@ -50,6 +50,29 @@
  * five assertions in one `test()` short-circuits at the first failure and
  * turns the blast radius into a guess (#1863). Every rule below has a
  * recorded mutation that reddens that rule and no other — see the PR body.
+ *
+ * ── Attribution, and exactly how far this gate's version of it reaches ──────
+ *
+ * A guard that gets the NUMBER right and pins it to the WRONG BOX passes any
+ * amount of number-checking. #1894 (#1887) is that defect in the flesh: the
+ * harness's report printed the BEFORE offender's name against the AFTER
+ * residual, so four `connect-agent` captures with before-values of
+ * 203/203/295/1020 all reported the same 203 — four inputs, one output, which
+ * cannot happen. The tell was arithmetic, not a red test.
+ *
+ * This spec covers that class **inside `measureHiddenBelowFold`**, and only
+ * there. Rules 1, 4 and 5 each assert the offender's identity and not merely
+ * its pixel count — rule 1 goes further and asserts the offender is the nested
+ * scroller and explicitly NOT the wrapper it was handed, which is the precise
+ * mis-attribution #1879 fixed.
+ *
+ * It does **not** cover the report-assembly layer in `screenshot.mjs` that
+ * pairs a measurement with a label — that is where #1894's defect actually
+ * lived, it is downstream of this function, and nothing here would have caught
+ * it. Said plainly rather than left implied: this gate proves the guard
+ * attributes correctly; it does not prove the harness REPORTS the guard's
+ * attribution correctly. Those are two different questions and #1894 owns the
+ * second.
  */
 import { expect, test } from '@playwright/test'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -123,6 +146,18 @@ test.describe('clip guard — measureHiddenBelowFold', () => {
    * wrong mechanism: 5 is strictly greater than the tolerance, so this button
    * WOULD be reported if the exclusion stopped working. The exclusion is doing
    * the work here, and the tolerance is not covering for it.
+   *
+   * **What this test does NOT prove on its own, stated so nobody quotes it
+   * alone (#1886 review).** It is a NEGATIVE assertion, and a guard that had
+   * stopped working entirely would also satisfy it. Measured, not reasoned:
+   * the reviewer replaced the whole function body with a constant
+   * `{ hidden: 0, offender: null, offenderCount: 0 }` and this test stayed
+   * GREEN, along with rule 3 and the tolerance lock — only rules 1, 4 and 5
+   * went red. The suite as a whole is therefore falsifiable against a dead
+   * guard, but this test is load-bearing only in COMBINATION with the
+   * positive-result tests. That is the residue of "a test that cannot fail",
+   * narrowed from any single assertion down to any single test, and it is
+   * written here rather than left for the next reader to rediscover.
    */
   test('does not fire on a non-clipping descendant whose overflow-y is visible', async ({
     page,
@@ -169,6 +204,11 @@ test.describe('clip guard — measureHiddenBelowFold', () => {
    * records. The fixture therefore carries no `sr-only` class at all: if the
    * guard ever starts matching on the name instead of the height, this box
    * stops being exempt and this test goes red.
+   *
+   * Same caveat as rule 2, for the same measured reason: this is a NEGATIVE
+   * assertion and it stayed GREEN under the reviewer's constant-return
+   * mutation. Do not quote it on its own as proof the exclusion logic runs —
+   * it is load-bearing only alongside rules 1, 4 and 5.
    */
   test('excludes a 1px-tall box by geometry, with no sr-only class present', async ({ page }) => {
     await page.setContent(

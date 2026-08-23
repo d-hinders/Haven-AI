@@ -41,7 +41,7 @@
  */
 
 import { createConnectApiClient, type AgentIdentity, type ConnectApiClient } from './api.js'
-import { writeRuntimeConfig, type RuntimeConfigInput } from './config-writers.js'
+import { writeHostedRuntimeConfig } from './runtime-install.js'
 import { prepareSignerRuntime } from './signer-runtime.js'
 import { generateDelegateKey } from './key.js'
 import { redactSecrets } from './redact.js'
@@ -75,7 +75,7 @@ export interface RekeyDeps {
   now?: () => number
   log?: (message: string) => void
   /** Injected so the config rewrite is testable without touching a real host config. */
-  writeConfig?: typeof writeRuntimeConfig
+  writeConfig?: typeof writeHostedRuntimeConfig
   prepareSigner?: typeof prepareSignerRuntime
   runCommand?: Parameters<typeof prepareSignerRuntime>[1] extends { runCommand?: infer R } ? R : never
 }
@@ -261,22 +261,40 @@ export async function finishRekey(
       },
       { runCommand: deps.runCommand },
     )
-    const configInput: RuntimeConfigInput = {
-      runtime: options.runtime as RuntimeConfigInput['runtime'],
-      hostedMcpUrl: stored.hostedMcpUrl,
-      apiKey: options.newApiKey,
-      identityPath: `${stored.directory}/identity.json`,
-      signerPath: `${stored.directory}/signer.json`,
-      credentialDirectory: stored.directory,
-      signerCommand: { command: prepared.command, args: prepared.args },
-      serverName: options.serverName,
-      homeDir: options.homeDir,
-      mode: 'hosted',
-    }
-    const result = await (deps.writeConfig ?? writeRuntimeConfig)(configInput)
+    // `writeHostedRuntimeConfig`, NOT `writeRuntimeConfig`. The latter has no
+    // `claude-code` case — that runtime is configured by shelling out to
+    // `claude mcp add-json` — so calling it directly returns a
+    // `hostedConfigured: false` result for the single most common runtime while
+    // reporting like a success. Review of this slice caught exactly that.
+    const result = await (deps.writeConfig ?? writeHostedRuntimeConfig)(
+      { runCommand: deps.runCommand, homeDir: options.homeDir },
+      {
+        runtime: options.runtime,
+        hostedMcpUrl: stored.hostedMcpUrl,
+        apiKey: options.newApiKey,
+        identityPath: `${stored.directory}/identity.json`,
+        signerPath: `${stored.directory}/signer.json`,
+        credentialDirectory: stored.directory,
+        serverName: options.serverName,
+      },
+      { command: prepared.command, args: prepared.args },
+    )
     configRewritten = result.hostedConfigured
     messages.push(`  Config:           ${result.target}`)
     messages.push(...result.messages.map((line) => `  ${line}`))
+    if (!configRewritten) {
+      // The write reported failure — a runtime with no writer, or a `claude`
+      // CLI that is not on PATH. Say what it costs, in the same words as the
+      // no-runtime case: a credential set that is correct on disk while every
+      // wired host presents the retired key reads as "the re-key broke my
+      // agent", and the generic writer message does not say that.
+      messages.push(
+        '',
+        'WARNING: the MCP config was NOT updated, so it still carries the OLD API key and every',
+        `wired host will fail with 401. Fix the cause above and re-run with --runtime ${options.runtime},`,
+        'or update the config by hand. The credential files on disk are already on the new key.',
+      )
+    }
   } else {
     // Said loudly rather than skipped quietly: without this the user has a
     // rotated credential file and a config still carrying the dead key, which

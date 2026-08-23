@@ -1,4 +1,4 @@
-import { access, chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import crypto from 'node:crypto'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -180,8 +180,7 @@ export async function readStoredCredentials(
   baseDir?: string,
 ): Promise<StoredCredentialSnapshot> {
   const key = serverName ?? agentIdOrSlug
-  if (!key) throw new Error('Cannot locate a credential directory without --name <slug> or an agent id.')
-  const directory = defaultAgentDirectory(key, baseDir)
+  const directory = key ? defaultAgentDirectory(key, baseDir) : await discoverSoleAgentDirectory(baseDir)
 
   const identity = await readJsonFile(join(directory, 'identity.json'))
   if (!identity) {
@@ -219,6 +218,51 @@ export async function readStoredCredentials(
       ? (identity.agent_budget as WriteCredentialInput['agentBudget'])
       : undefined,
   }
+}
+
+/**
+ * Find the one wired agent on this machine, when no `--name` was given.
+ *
+ * The unnamed agent's directory is keyed by its AGENT ID
+ * (`~/.haven/agents/<agent-uuid>/`), which the person running the command does
+ * not know and has no reason to — they never typed it. Requiring it was the
+ * defect review caught: `--rekey` was unusable for the DEFAULT setup, the one
+ * the help text describes as "omit --name for the bare pair", while working
+ * fine for the named case the tests happened to cover.
+ *
+ * Discovery, not guessing. Exactly one candidate is resolved; several is an
+ * ambiguity only the user can settle, so it refuses and NAMES them rather than
+ * picking the newest — "newest wins" is the heuristic #1695 removed, and
+ * silently re-keying the wrong agent is the worst outcome available here.
+ * A tombstoned directory (#1681) is skipped: it is a deliberately retired
+ * agent, never a re-key target.
+ */
+async function discoverSoleAgentDirectory(baseDir?: string): Promise<string> {
+  const root = defaultCredentialRoot(baseDir)
+  let entries: string[] = []
+  try {
+    entries = await readdir(root)
+  } catch {
+    throw new Error(`No Haven credentials found under ${root}. Connect an agent on this machine first.`)
+  }
+
+  const candidates: string[] = []
+  for (const entry of entries) {
+    const directory = join(root, entry)
+    if (!(await readJsonFile(join(directory, 'identity.json')))) continue
+    if (await readJsonFile(join(directory, 'TOMBSTONE.json'))) continue
+    candidates.push(directory)
+  }
+
+  if (candidates.length === 1) return candidates[0]
+  if (candidates.length === 0) {
+    throw new Error(`No Haven credentials found under ${root}. Connect an agent on this machine first.`)
+  }
+  throw new Error(
+    `Several agents are wired on this machine, so --rekey cannot tell which one you mean:\n` +
+      candidates.map((d) => `  ${d}`).join('\n') +
+      '\nRe-run with --name <slug> to pick one.',
+  )
 }
 
 /**

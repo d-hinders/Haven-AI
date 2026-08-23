@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { finishRekey, startRekey } from './rekey.js'
+import { runCli } from './cli.js'
 import {
   REKEY_PENDING_FILENAME,
   readRekeyPending,
@@ -11,7 +12,7 @@ import {
   writeCredentialFiles,
 } from './storage.js'
 import type { AgentIdentity, ConnectApiClient } from './api.js'
-import type { RuntimeConfigInput } from './config-writers.js'
+
 
 const AGENT_ID = 'agent-1700'
 const OLD_DELEGATE = '0x1111111111111111111111111111111111111111'
@@ -304,7 +305,7 @@ describe('finishRekey (#1700)', () => {
 
   it('rewrites only THIS agent’s MCP pair, and says so', async () => {
     const { baseDir } = await started('work')
-    const writeConfig = vi.fn(async (_input: RuntimeConfigInput) => ({
+    const writeConfig = vi.fn(async (_deps: unknown, _input: { serverName?: string; apiKey: string }) => ({
       hostedConfigured: true,
       signerConfigured: true,
       localMcpConfigured: false,
@@ -339,7 +340,7 @@ describe('finishRekey (#1700)', () => {
     // The slug is what scopes the write to one pair, and the names it produces
     // are unchanged by the rotation — that is why wired hosts need only a restart.
     expect(result.serverNames).toEqual({ hosted: 'haven-work', signer: 'haven-signer-work' })
-    const configInput = writeConfig.mock.calls[0][0]
+    const configInput = writeConfig.mock.calls[0][1]
     expect(configInput.serverName).toBe('work')
     // The NEW key reaches the config. Without this the credential files would
     // be correct and every wired host would still 401 forever.
@@ -466,5 +467,193 @@ describe('the assertDoesNotExist guard is bypassed ONLY by re-key', () => {
     const { readdir } = await import('node:fs/promises')
     const entries = await readdir(directory)
     expect(entries).not.toContain('TOMBSTONE.json')
+  })
+})
+
+
+// ── Driving the REAL CLI, which is where both blocking bugs lived ──────────
+//
+// Every test above calls startRekey/finishRekey directly with an explicit
+// agentId. That is a fine way to test those functions and a useless way to
+// test the command: the CLI never had an --agent-id flag to populate it with,
+// so `--rekey` on an unnamed agent died before doing anything and no unit test
+// could see it. These drive `runCli` end to end.
+
+describe('the --rekey command itself (#1700)', () => {
+  const io = () => {
+    const out: string[] = []
+    const err: string[] = []
+    return { io: { stdout: (m: string) => out.push(m), stderr: (m: string) => err.push(m) }, out, err }
+  }
+
+  it('works for an UNNAMED agent, with no --name and no id to type', async () => {
+    // The default setup, and the case that was broken: the unnamed directory is
+    // keyed by an agent uuid the user never typed and has no way to know.
+    //
+    // Driven through the REAL client, with only the network stubbed — the point
+    // is to exercise the argument parsing, the directory resolution and the
+    // dispatch that the unit tests above all step over.
+    const { baseDir, directory } = await seedAgent()
+    const { io: sink, out, err } = io()
+    const fetchCalls: string[] = []
+    vi.stubGlobal('fetch', async (url: string) => {
+      fetchCalls.push(String(url))
+      return new Response(JSON.stringify(identity()), { status: 200 })
+    })
+
+    const code = await runCli(['--rekey', '--credentials-dir', baseDir, '--json'], sink)
+    vi.unstubAllGlobals()
+    expect(fetchCalls[0]).toBe(`${API_URL}/machine-payments/agent`)
+
+    expect(err.join('')).toBe('')
+    expect(code).toBe(0)
+    const parsed = JSON.parse(out.join(''))
+    expect(parsed.rekey).toBe('started')
+    expect(parsed.agent_id).toBe(AGENT_ID)
+    // A real address was generated and parked.
+    expect(parsed.new_delegate_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+    expect((await readRekeyPending(directory)).new_delegate_address).toBe(parsed.new_delegate_address)
+    // …and the private half is nowhere in the output.
+    expect(out.join('')).not.toMatch(/"new_delegate_key"/)
+  })
+
+  it('refuses, and NAMES the candidates, when several agents are wired', async () => {
+    // Ambiguity only the user can settle. Picking the newest is the "newest
+    // wins" heuristic #1695 removed, and here it would re-key the wrong agent.
+    const { baseDir } = await seedAgent()
+    await writeCredentialFiles({
+      baseDir,
+      agentId: 'agent-second',
+      apiKey: 'sk_agent_second',
+      delegateKey: `0x${'44'.repeat(32)}`,
+      delegateAddress: '0x4444444444444444444444444444444444444444',
+      apiUrl: API_URL,
+      hostedMcpUrl: `${API_URL}/mcp`,
+    })
+    const { io: sink, err } = io()
+
+    expect(await runCli(['--rekey', '--credentials-dir', baseDir], sink)).toBe(1)
+    const message = err.join('')
+    expect(message).toMatch(/Several agents are wired/)
+    expect(message).toMatch(/--name <slug>/)
+    expect(message).toContain('agent-second')
+  })
+
+  it('--api-key without --rekey-finish is refused, not silently dropped', async () => {
+    const { io: sink, err } = io()
+    expect(await runCli(['--api-key', 'sk_agent_x', '--doctor', '--runtime', 'claude-code'], sink)).toBe(1)
+    expect(err.join('')).toMatch(/--api-key requires --rekey-finish/)
+  })
+
+  it('--rekey-finish without --api-key is refused', async () => {
+    const { io: sink, err } = io()
+    expect(await runCli(['--rekey-finish'], sink)).toBe(1)
+    expect(err.join('')).toMatch(/needs --api-key/)
+  })
+
+  it('--rekey with --setup is refused rather than half-honoured', async () => {
+    const { io: sink, err } = io()
+    expect(await runCli(['--rekey', '--setup', 'hv_setup_x'], sink)).toBe(1)
+    expect(err.join('')).toMatch(/does not take --setup/)
+  })
+
+  it('help documents the new flags', async () => {
+    const { io: sink, out } = io()
+    expect(await runCli(['--help'], sink)).toBe(0)
+    const help = out.join('')
+    expect(help).toMatch(/--rekey\b/)
+    expect(help).toMatch(/--rekey-finish/)
+    expect(help).toMatch(/--api-key/)
+  })
+})
+
+describe('the config rewrite reaches the REAL writer (#1700)', () => {
+  // The second blocking bug: `writeRuntimeConfig` has no `claude-code` case, so
+  // calling it directly returns hostedConfigured:false for the most common
+  // runtime while the flow reported success. These use the real dispatch and
+  // only stub the two things that would touch the machine — the signer install
+  // and the `claude` CLI.
+  async function startedFor(serverName?: string) {
+    const seeded = await seedAgent(serverName)
+    await startRekey(
+      { credentialsDir: seeded.baseDir, agentId: AGENT_ID, serverName },
+      { createApi: () => apiReturning(identity()), generateKey: generateNewKey },
+    )
+    return seeded
+  }
+
+  const preparedSigner = async () => ({
+    command: '/wrapper/haven-signer',
+    args: [] as string[],
+    messages: [] as string[],
+  })
+
+  it('configures Claude Code through `claude mcp add-json`, carrying the NEW key', async () => {
+    const { baseDir } = await startedFor()
+    const commands: Array<{ command: string; args: string[] }> = []
+
+    const result = await finishRekey(
+      { credentialsDir: baseDir, agentId: AGENT_ID, newApiKey: NEW_API_KEY, runtime: 'claude-code' },
+      {
+        createApi: () => apiReturning(identity({ delegate_address: NEW_DELEGATE })),
+        prepareSigner: preparedSigner as never,
+        runCommand: (async (command: string, args: string[]) => {
+          commands.push({ command, args })
+        }) as never,
+      },
+    )
+
+    expect(result.configRewritten).toBe(true)
+    const addJson = commands.filter((c) => c.args[1] === 'add-json')
+    expect(addJson).toHaveLength(2)
+    // The new key reaches the config. This assertion is the whole point: with
+    // the old code path this array was empty and the flow still said success.
+    expect(addJson[0].args.join(' ')).toContain(NEW_API_KEY)
+    expect(addJson[0].args.join(' ')).not.toContain(OLD_API_KEY)
+    // Only this agent's pair, by name.
+    expect(commands.filter((c) => c.args[1] === 'remove').map((c) => c.args[2])).toEqual([
+      'haven',
+      'haven-signer',
+    ])
+  })
+
+  it('scopes the Claude Code rewrite to a NAMED pair, leaving siblings alone', async () => {
+    const { baseDir } = await startedFor('work')
+    const commands: Array<string[]> = []
+    await finishRekey(
+      {
+        credentialsDir: baseDir,
+        agentId: AGENT_ID,
+        serverName: 'work',
+        newApiKey: NEW_API_KEY,
+        runtime: 'claude-code',
+      },
+      {
+        createApi: () => apiReturning(identity({ delegate_address: NEW_DELEGATE })),
+        prepareSigner: preparedSigner as never,
+        runCommand: (async (_c: string, args: string[]) => {
+          commands.push(args)
+        }) as never,
+      },
+    )
+    const touched = commands.filter((a) => a[1] === 'remove' || a[1] === 'add-json').map((a) => a[2])
+    expect(new Set(touched)).toEqual(new Set(['haven-work', 'haven-signer-work']))
+  })
+
+  it('warns loudly when the config write FAILS, instead of reporting success', async () => {
+    const { baseDir } = await startedFor()
+    const result = await finishRekey(
+      { credentialsDir: baseDir, agentId: AGENT_ID, newApiKey: NEW_API_KEY, runtime: 'claude-code' },
+      {
+        createApi: () => apiReturning(identity({ delegate_address: NEW_DELEGATE })),
+        prepareSigner: preparedSigner as never,
+        // `claude` is not installed — the ordinary way this fails in the wild.
+        runCommand: (async () => {
+          throw new Error('claude: command not found')
+        }) as never,
+      },
+    )
+    expect(result.configRewritten).toBe(false)
+    expect(result.messages.join('\n')).toMatch(/still carries the OLD API key/)
   })
 })

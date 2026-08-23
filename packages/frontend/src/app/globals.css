@@ -100,6 +100,26 @@
   --v2-shadow-button: 0 1px 1px rgba(16, 24, 40, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.12);
   --v2-shadow-modal: 0 12px 32px rgba(16, 24, 40, 0.12), 0 4px 8px rgba(16, 24, 40, 0.06);
   --v2-shadow-popover: 0 12px 24px rgba(16, 24, 40, 0.10), 0 2px 6px rgba(16, 24, 40, 0.06);
+  /*
+   * The continuation cue at the bottom edge of a scrolling dialog body (#1893).
+   *
+   * It is a SHADOW rather than a fade-to-background on purpose. The first
+   * attempt was `bg-gradient-to-t from-white`, which hardcodes "the surface
+   * behind me is white" — and rendered over the amber "Before you approve"
+   * callout in the re-key flow, that bleached the callout to near-white in a
+   * straight band and read as its background failing to paint, not as "there
+   * is more below". A translucent dark inset composites OVER whatever is
+   * actually there, so it darkens a tinted surface instead of erasing it and
+   * makes no assumption about the backdrop — including a caller that sets a
+   * tinted `bodyClassName`, which `design:lint` cannot check for (its token
+   * rule does not scan gradient stops).
+   *
+   * 6px, deliberately: this marks a BOUNDARY, not a quantity. It does not
+   * scale with how much is hidden, because the amount hidden does not change
+   * what the edge means — and a cue sized to the overflow was the second
+   * defect, a 32px fade over a 44px overflow swallowing the last line whole.
+   */
+  --v2-shadow-scroll-edge: inset 0 -6px 6px -6px rgba(16, 24, 40, 0.30);
 
   --v2-surface-hover: #f0f4f9;
   --v2-brand-gradient: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
@@ -250,6 +270,38 @@
    * overlay alone gives the same focus effect at a fraction of the cost.
    */
   background: var(--v2-modal-backdrop);
+}
+
+.v2-scroll-edge-cue {
+  /*
+   * The continuation cue at the bottom edge of a scrolling dialog body
+   * (#1893). See `--v2-shadow-scroll-edge` for why it is a shadow and why it
+   * is a fixed 6px.
+   *
+   * ── Why this is a CLASS and not `shadow-[var(--v2-shadow-scroll-edge)]` ──
+   *
+   * Because that Tailwind form is DEAD, measured rather than assumed. A bare
+   * `var()` inside `shadow-[…]` is ambiguous, so Tailwind's arbitrary-value
+   * type inference reads it as a shadow COLOUR and emits:
+   *
+   *     --tw-shadow-color: var(--v2-shadow-scroll-edge);
+   *     --tw-shadow: var(--tw-shadow-colored);
+   *
+   * `--tw-shadow-colored` is never set, so `--tw-shadow` is invalid and the
+   * computed `box-shadow` is `none`. Read straight out of the served
+   * stylesheet in a real browser on this branch.
+   *
+   * The same dead form is currently live on `--v2-shadow-card`,
+   * `--v2-shadow-card-raised`, `--v2-shadow-modal` and `--v2-shadow-popover`
+   * — so every Card, this Modal's own panel, and every popover render with no
+   * shadow at all today. That is a pre-existing app-wide defect, out of scope
+   * here, and filed as #1945; this comment exists so the next person does not
+   * "fix" this class back into the broken spelling.
+   *
+   * `.v2-modal-backdrop` directly above is the same idiom and provably
+   * resolves, which is why the cue follows it.
+   */
+  box-shadow: var(--v2-shadow-scroll-edge);
 }
 
 @keyframes v2FlowForward {

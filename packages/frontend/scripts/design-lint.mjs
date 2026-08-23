@@ -162,33 +162,88 @@ const LEGAL_HW = new Map([
 const LEGAL_SIZE_PROP = new Set(ICON_SCALE_PX)
 
 /**
- * Blank out comment BODIES, preserving length and newlines so every offset and
- * line number downstream is unchanged.
+ * Mark every offset sitting inside a COMMENT. Strings are handled elsewhere —
+ * see `isQuotedSample` for why they cannot be masked the same way.
  *
- * Not defensive tidying: `Icon.tsx`'s own JSDoc describes the rule and so
- * contains the literal text `<Icon>`. Without this, the wrapper's
- * documentation counts as three call sites and lands in the census's
- * `UNCLASSIFIED` bucket — the one number that is supposed to mean "nothing was
- * silently dropped". Caught by running the published command from a clean
- * shell rather than trusting the run that produced the figure.
+ * `Icon.tsx`'s own JSDoc documents this rule and therefore contains the
+ * literal `<Icon>` three times. Those counted as call sites and landed in the
+ * census's `UNCLASSIFIED` bucket — the one figure whose job is to certify that
+ * nothing was silently dropped. Found by re-running the published command from
+ * a clean shell against the final tree, not by the gate going red.
+ *
+ * The `//` rule refuses to fire after `:`, `"` or `'`, so neither `https://`
+ * nor a protocol-relative `href="//example.com"` is read as a comment opener
+ * that blanks the rest of a live line — a false NEGATIVE, the quiet kind.
  */
-function maskComments(source) {
-  const blank = (m) => m.replace(/[^\n]/g, ' ')
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, blank) // /* … */ and JSX {/* … */}
-    .replace(/(?<!:)\/\/[^\n]*/g, blank) // // … , but not the // in https://
+function maskNonCode(src) {
+  const mask = new Uint8Array(src.length)
+  const n = src.length
+  for (let i = 0; i < n; ) {
+    const c = src[i]
+    const d = src[i + 1]
+    if (c === '/' && d === '*') {
+      const e = src.indexOf('*/', i + 2)
+      const stop = e < 0 ? n : e + 2
+      mask.fill(1, i, stop)
+      i = stop
+    } else if (c === '/' && d === '/' && !(i > 0 && ':"\''.includes(src[i - 1]))) {
+      // Not a comment when it is the `//` of `https://` or of a
+      // protocol-relative `href="//example.com"` — treating either as one
+      // blanks the rest of a live line and hides real violations.
+      let e = src.indexOf('\n', i)
+      if (e < 0) e = n
+      mask.fill(1, i, e)
+      i = e
+    } else i++
+  }
+  return mask
+}
+
+/**
+ * Is this `<Icon` occurrence the inside of a quoted code SAMPLE?
+ *
+ * Deliberately a one-character adjacency test rather than a string-state
+ * scanner. A full scanner is what you reach for first and it is wrong here:
+ * JSX body text is full of bare apostrophes (`its own primitive's home file`,
+ * `design-system/page.tsx:183`), each of which opens a string that never
+ * closes, masking every real element after it. That version silently dropped
+ * two live call sites at `page.tsx:247` and `:364` — a FALSE NEGATIVE, which
+ * is the failure that looks like a clean run.
+ *
+ * Adjacency cannot make that mistake. Real JSX never puts a quote immediately
+ * before an element — the preceding character is `>`, `{`, `(`, `?`, `:`, `,`
+ * or whitespace. So this rejects the demonstrated case
+ * (`{'<Icon icon={Check} … />'}`) and, by construction, nothing that renders.
+ *
+ * The narrowness is the trade, and it is the right way round: a sample written
+ * with padding inside the quotes (`{'  <Icon … '}`) is still counted. That is
+ * a false POSITIVE — loud, on the line, and fixable with the escape marker —
+ * rather than a silent hole in the census.
+ */
+function isQuotedSample(src, at) {
+  const prev = at > 0 ? src[at - 1] : undefined
+  // `at > 0` guard, not `?? ''`: `''` is a substring of every string, so
+  // `includes(prev ?? '')` returns TRUE at offset 0 and rejects an element
+  // that starts the file. Caught by the existing tests, whose fixtures all
+  // begin at offset 0.
+  return prev !== undefined && '"\'`'.includes(prev)
 }
 
 /**
  * Find each `<Icon …/>` element by walking brace depth to its real `>`, so a
  * multiline element is one unit. Returns [{text, line}].
  */
-function iconElements(rawSource) {
-  const source = maskComments(rawSource)
+function iconElements(source) {
+  const mask = maskNonCode(source)
   const out = []
   for (let i = 0; ; ) {
     const m = source.indexOf('<Icon', i)
     if (m < 0) break
+    // Prose in a comment, or a quoted code sample — not markup.
+    if (mask[m] || isQuotedSample(source, m)) {
+      i = m + 5
+      continue
+    }
     // `<IconFoo` is a different component, not this wrapper.
     if (/[A-Za-z0-9_]/.test(source[m + 5] ?? '')) {
       i = m + 5
@@ -196,8 +251,25 @@ function iconElements(rawSource) {
     }
     let depth = 0
     let end = -1
+    // Quote tracking is safe HERE and only here. Inside a tag, a quote always
+    // delimits an attribute value; the bare apostrophes that make whole-file
+    // quote tracking unusable live in JSX BODY text, which cannot appear
+    // before this element's own `>`. Without it, `title="weird { case"` holds
+    // depth above zero forever, the element never terminates, and a real
+    // violation on it is dropped in silence.
+    let quote = null
     for (let j = m; j < source.length; j++) {
+      if (mask[j]) continue
       const c = source[j]
+      if (quote) {
+        if (c === '\\') j++
+        else if (c === quote) quote = null
+        continue
+      }
+      if (c === '"' || c === "'" || c === '`') {
+        quote = c
+        continue
+      }
       if (c === '{') depth++
       else if (c === '}') depth--
       else if (c === '>' && depth === 0) {
@@ -209,7 +281,9 @@ function iconElements(rawSource) {
       i = m + 5
       continue
     }
-    out.push({ text: source.slice(m, end + 1), line: source.slice(0, m).split('\n').length })
+    const text = source.slice(m, end + 1)
+    const line = source.slice(0, m).split('\n').length
+    out.push({ text, line, endLine: line + (text.split('\n').length - 1) })
     i = end + 1
   }
   return out
@@ -239,7 +313,18 @@ export function scanElements(relFile, source) {
   const lines = source.split('\n')
   const hits = []
   for (const el of iconElements(source)) {
-    if (isEscaped(lines, el.line - 1, 'design-lint-disable-line')) continue
+    // The shared escape convention is "the offending line, or the one above".
+    // For a multiline element those are two DIFFERENT places — the `<Icon`
+    // tag and the `className` line two below it — and an author following the
+    // convention will reach for the one next to the size. Accept the marker
+    // anywhere the element spans, or immediately above it, rather than
+    // shipping a rule whose escape hatch silently does nothing on exactly the
+    // elements the element-scan exists to reach.
+    let escaped = false
+    for (let ln = el.line; ln <= el.endLine && !escaped; ln++) {
+      if (isEscaped(lines, ln - 1, 'design-lint-disable-line')) escaped = true
+    }
+    if (escaped) continue
     if (/\b[hw]-full\b/.test(el.text)) continue
     const h = el.text.match(/\bh-(\[[^\]]+\]|[\d.]+)/)
     const w = el.text.match(/\bw-(\[[^\]]+\]|[\d.]+)/)
@@ -336,6 +421,12 @@ function iconCensus() {
     if (!existsSync(abs)) continue
     for (const file of walk(abs)) {
       const rel = path.relative(ROOT, file)
+      // The header says "marketing exempt", so actually exempt them. Only the
+      // off-scale half was filtered (via `scanElements`); the totals were not.
+      // Correct today only because no marketing surface uses `<Icon>` — i.e.
+      // an untested claim that would have gone quietly wrong the first time
+      // one did. That is the exact failure mode this issue is about.
+      if (isMarketingSurface(rel)) continue
       const src = readFileSync(file, 'utf8')
       for (const el of iconElements(src)) {
         total++

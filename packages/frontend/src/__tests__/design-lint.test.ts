@@ -204,6 +204,68 @@ describe('design-lint icon-size element rule (#1858)', () => {
   it('does not treat the // in a URL as a comment (shared #1204 guard)', () => {
     const src = '<Icon icon={X} className="h-[13px] w-[13px]" /> // see https://x.test/a'
     expect(scanEl(F, src)[0].match).toBe('h-[13px] w-[13px]')
+    // …nor a protocol-relative href, which is quote-preceded rather than
+    // colon-preceded. Treating it as a comment blanks the rest of the line and
+    // hides the real violation on it.
+    const rel = '<a href="//cdn.test/x"><Icon icon={X} className="h-[13px] w-[13px]" /></a>'
+    expect(scanEl(F, rel)[0].match).toBe('h-[13px] w-[13px]')
+  })
+
+  it('does not read a QUOTED CODE SAMPLE as a call site', () => {
+    // `/design-system` renders the usage example as a string. It is on-scale
+    // today, so it was invisible — but editing that documentation string to
+    // show an off-scale value would have failed CI on a pure doc change, on
+    // the page that teaches the rule.
+    const sample = `<code>{'<Icon icon={Check} className="h-[13px] w-[13px]" />'}</code>`
+    expect(scanEl(F, sample)).toEqual([])
+  })
+
+  it('an apostrophe in JSX TEXT does not hide later elements', () => {
+    // The regression that a full string-state scanner introduces, and the
+    // reason this is an adjacency test instead. A bare apostrophe in body text
+    // opens a string that never closes, masking every element after it — two
+    // live call sites went missing this way before it was caught. A false
+    // negative reads exactly like a clean file.
+    const src = [
+      "<p>its own primitive's home file</p>",
+      '<Icon icon={X} className="h-[13px] w-[13px]" />',
+    ].join('\n')
+    expect(scanEl(F, src)).toEqual([{ rule: 'icon-size', line: 2, match: 'h-[13px] w-[13px]' }])
+  })
+
+  it('terminates an element whose attribute string contains a brace', () => {
+    // A `{` inside a string used to leave brace depth permanently above zero,
+    // so the element never closed and its violation was dropped in silence.
+    const src = '<Icon icon={X} title="weird { case" className="h-[13px] w-[13px]" />'
+    expect(scanEl(F, src)[0].match).toBe('h-[13px] w-[13px]')
+  })
+
+  it('accepts the escape marker beside the SIZE, not just beside the tag', () => {
+    // The shared convention is "the offending line or the one above". On a
+    // multiline element those are different places, and an author will reach
+    // for the one next to the className — an escape hatch that silently does
+    // nothing on exactly the elements this rule exists to reach is worse than
+    // no escape hatch.
+    const atTag = [
+      '{/* design-lint-disable-line */}',
+      '<Icon',
+      '  icon={X}',
+      '  className="h-[13px] w-[13px]"',
+      '/>',
+    ].join('\n')
+    expect(scanEl(F, atTag)).toEqual([])
+    const atSize = [
+      '<Icon',
+      '  icon={X}',
+      '  {/* design-lint-disable-line */}',
+      '  className="h-[13px] w-[13px]"',
+      '/>',
+    ].join('\n')
+    expect(scanEl(F, atSize)).toEqual([])
+    // …and with no marker at all it still fires, so the two above are not
+    // passing because the fixture is inert.
+    const none = ['<Icon', '  icon={X}', '  className="h-[13px] w-[13px]"', '/>'].join('\n')
+    expect(scanEl(F, none)).toHaveLength(1)
   })
 
   it('honours the marketing exemption and the escape marker', () => {

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { HeroBackdrop } from '@/components/marketing/HeroBackdrop'
 import { Card } from '@/components/ui/Card'
 import { HavenMark } from '@/components/brand/HavenMark'
+import { BrandBandButton } from '@/components/marketing/BrandBandButton'
 
 const CONTACT_TEAM_HREF =
   'mailto:daniel.hinders@gmail.com?subject=Haven%20investor%20briefing'
@@ -433,13 +434,9 @@ export default function InvestorBriefingPage() {
             contact the team directly.
           </p>
           <div className="flex justify-center">
-            <a
-              href={CONTACT_TEAM_HREF}
-              className="inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors h-12 px-6 text-[15px] bg-white text-[var(--v2-ink)] hover:bg-white/95 shadow-[0_1px_2px_rgba(16,24,40,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-brand)]"
-            >
+            <BrandBandButton href={CONTACT_TEAM_HREF} trailingArrow>
               Contact the team
-              <ArrowIcon />
-            </a>
+            </BrandBandButton>
           </div>
         </div>
       </section>

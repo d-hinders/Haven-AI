@@ -600,6 +600,141 @@ describe('destructive controls have a focus indicator at all (#1819)', () => {
   })
 })
 
+/**
+ * A control that hand-copies `Button`'s base class string declares a focus
+ * treatment AT ALL (#1867).
+ *
+ * The third question in this file, and the one nothing asked before. #1819
+ * enumerated DESTRUCTIVE controls and checked each for an indicator, and said
+ * in its own header that "controls with NO focus ring at all" was a separate,
+ * noisier problem it was deliberately not opening. #1867 is one instance of
+ * that problem — the White-on-brand CTA pattern, whose three hand-copies
+ * disagreed about focus for as long as it had three: only
+ * `investor-briefing/page.tsx:438` declared a ring, and the two on `app/page.tsx`
+ * (the highest-traffic buttons in the product) declared nothing and fell back to
+ * the UA outline.
+ *
+ * **Read the calibration before reading the rule.** Those two were not a WCAG
+ * 2.4.7 failure: neither set `focus-visible:outline-none`, so the browser's own
+ * outline survived and a keyboard user always had an indicator. This is a
+ * design-system CONSISTENCY rule, and stating it as an accessibility rule would
+ * be the easier framing and the wrong one.
+ *
+ * ── Why this population and not a wider one ──────────────────────────────────
+ *
+ * The honest scope is decided by what can be identified without guessing.
+ * `design-system.md` § *Button-shaped controls that are not `Button`* publishes
+ * a grep for controls that copy the FULL base signature, and states its own
+ * blind spot: button-shaped controls built from scratch (`CodeBlock`'s copy
+ * button, `ApprovalNotifications.tsx`'s styled `next/link`) do not appear,
+ * because the check classifies by class-string spelling rather than by rendered
+ * role. That blind spot is inherited here deliberately — a rule over "everything
+ * that looks like a button" would need a classifier nobody has scoped, and #1819
+ * measured the cost of guessing: 99 of 139 hover-bearing class strings carry no
+ * ring, and almost all of them are non-focusable elements that merely tint.
+ *
+ * So this rule owns exactly the population the published check names, which is
+ * also the population that *chose* to inherit `Button`'s paint and can be held
+ * to `Button`'s guarantees for it.
+ *
+ * ── The splice, which is load-bearing rather than tidy ───────────────────────
+ *
+ * `QUOTED_STRINGS` splits raw source on quote characters, so a class constant
+ * assembled by `'…' + '…'` — which is how `BrandBandButton` separates its
+ * geometry from its focus clause for readability — reads as TWO strings, the
+ * first of which carries the signature and no ring. Un-spliced, this rule would
+ * report the very file that fixes #1867 as an offender: a false positive, and
+ * the kind that gets a real rule deleted. `spliceConcatenations` rejoins
+ * adjacent same-quote literals exactly as the runtime does, and nothing else.
+ */
+const BUTTON_BASE_SIGNATURE = /rounded-md font-medium tracking-tight/
+
+/**
+ * `Button` itself is the primitive being copied, not a copy, and its ring
+ * COLOUR deliberately lives in `VARIANT_CLASS` rather than in the base string
+ * (#1817) — so its base string carries the signature and no `ring-<tone>/80` by
+ * design. It is not unguarded: `Button keeps its ring colour beside its fill`
+ * above asserts the arrangement directly, and `Button keeps its offset…`
+ * asserts the geometry. Exempting it here is naming that split, not excusing it.
+ */
+const BASE_SIGNATURE_EXEMPT = ['src/components/ui/Button.tsx']
+
+/** `'a ' + 'b'` → `'a b'`, for adjacent literals under the SAME quote char. */
+function spliceConcatenations(text: string): string {
+  return text.replace(/(['"`])\s*\+\s*\1/g, '')
+}
+
+describe('hand-copies of Button declare a focus treatment (#1867)', () => {
+  function signatureStrings(): { file: string; cls: string }[] {
+    const out: { file: string; cls: string }[] = []
+    for (const file of sourceFiles(join(FRONTEND, 'src'))) {
+      const rel = relative(FRONTEND, file)
+      if (BASE_SIGNATURE_EXEMPT.includes(rel)) continue
+      const text = spliceConcatenations(readFileSync(file, 'utf8'))
+      for (const cls of text.match(QUOTED_STRINGS) ?? []) {
+        if (BUTTON_BASE_SIGNATURE.test(cls)) out.push({ file: rel, cls })
+      }
+    }
+    return out
+  }
+
+  it('every control that copies the base class string declares a focus ring', () => {
+    const offenders = signatureStrings()
+      .filter(({ cls }) => !FOCUS_INDICATOR.test(cls))
+      .map(({ file, cls }) => `${file}: ${cls.trim().slice(0, 80)}…`)
+    expect(
+      offenders,
+      'this control copied Button\'s paint but not its focus ring. Copying the class ' +
+        'string copies nothing else — add the one treatment from design-system.md ' +
+        '§ Focus rings, with the tone that matches the fill it sits on (white on a ' +
+        'dark band, brand on a light surface).',
+    ).toEqual([])
+  }, SCAN_TIMEOUT)
+
+  it('the signature scan is looking at a real population', () => {
+    // Same anti-vacuity reasoning as every other scan in this file. Two members
+    // today: `marketing/BrandBandButton.tsx` (the White-on-brand band CTA, the
+    // primitive #1867 extracted from three hand-copies) and `InvestorButton` in
+    // `investor-briefing/page.tsx`. If this drops to zero the rule above is
+    // green over an empty list.
+    const files = new Set(signatureStrings().map((s) => s.file))
+    expect(
+      files.size,
+      'the base-signature scan matched nothing — the rule above is passing vacuously',
+    ).toBeGreaterThanOrEqual(2)
+  }, SCAN_TIMEOUT)
+
+  it('a ring that lands on the brand band is white, never brand', () => {
+    // The tone half of the same defect, and NOT covered by the rule above: a
+    // control that swapped `ring-white/80` for `ring-brand/80` still "declares a
+    // focus ring" and would stay green. Brand indigo cannot reach 3:1 on a dark
+    // fill at any alpha (measured in `records why a brand ring may never sit on
+    // a dark fill` below), so the offset colour is the tell — a ring offset onto
+    // `--v2-brand` is landing on the band, where only white works.
+    const offenders: string[] = []
+    let seen = 0
+    for (const file of sourceFiles(join(FRONTEND, 'src'))) {
+      const text = spliceConcatenations(readFileSync(file, 'utf8'))
+      for (const cls of text.match(QUOTED_STRINGS) ?? []) {
+        if (!/focus-visible:ring-offset-\[var\(--v2-brand\)\]/.test(cls)) continue
+        seen++
+        if (!/focus-visible:ring-white\/\d+/.test(cls)) {
+          offenders.push(`${relative(FRONTEND, file)}: ${cls.trim().slice(0, 80)}…`)
+        }
+      }
+    }
+    expect(
+      seen,
+      'no ring is offset onto --v2-brand — the assertion below is passing vacuously',
+    ).toBeGreaterThanOrEqual(1)
+    expect(
+      offenders,
+      'a ring offset onto the brand band lands on a DARK fill; use ' +
+        'focus-visible:ring-white/80 (design-system.md § Focus rings)',
+    ).toEqual([])
+  }, SCAN_TIMEOUT)
+})
+
 describe('every focus ring actually compiles to a colour (#1741)', () => {
   // `ring-inset` is structural, not a colour — it sets --tw-ring-inset.
   const STRUCTURAL = new Set(['ring-inset'])

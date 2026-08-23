@@ -48,6 +48,25 @@
  *   Disarmed, layers 3-6 carry the endpoint alone.
  * - **Anything about the merchant's honesty.** Verification catches broken
  *   endpoints, never dishonest ones.
+ * - **Existence of another party's submission.** The de-duplicating response
+ *   necessarily reveals that a pending submission exists for a host, and its
+ *   coarse status — that is what "same id returned" means, so it cannot be
+ *   hidden without dropping the acceptance criterion. What it no longer
+ *   reveals is the `verify_token` (see `acknowledgement`).
+ *
+ * ## No reachability oracle (constraint shared with #1712)
+ *
+ * Every refusal here describes the CALLER'S OWN INPUT — bad scheme, bad
+ * length, a locally-bound literal they themselves typed. None reports whether
+ * a host resolves, what address class it resolved to, or whether Haven can
+ * reach it, because this slice performs no resolution and no connection at
+ * all. That property must survive: #1712's ownership check produces granular
+ * refusal reasons (`ipv4-private`, `ipv6-unique-local`, `dns_failure`, …), and
+ * surfacing those verbatim to an anonymous submitter would turn a status
+ * response into a blind internal-DNS-existence probe — aim a claim at a host
+ * you do not own and learn whether Haven's resolver can see it. Whoever adds
+ * the status endpoint keeps the granular reason in logs/telemetry and returns
+ * a generic "not yet verified" to untrusted callers.
  *
  * Heavier controls ride on later slices: the `verify_token` + well-known-file
  * ownership proof (#1712) is the single load-bearing anti-abuse gate (it
@@ -143,6 +162,20 @@ function isLocallyBoundHost(hostname: string): boolean {
   return false
 }
 
+/**
+ * The dedupe response: id + status, and deliberately NO `verify_token`.
+ *
+ * The token is an ownership-proof credential minted for ONE submitter. Echoing
+ * the stored row wholesale would hand it to any anonymous caller who merely
+ * names the hostname, and would turn this endpoint into a free oracle for
+ * "does a submission exist for X, and how far along is it". Only the caller
+ * whose own insert created the row ever sees the token; anyone else gets the
+ * handle they need to check status and nothing more.
+ */
+function acknowledgement(row: { id: string; status: string }): { id: string; status: string } {
+  return { id: row.id, status: row.status }
+}
+
 function normalizeSubmitTarget(
   raw: unknown,
 ): { hostname: string; resource_url: string } | { error: string } {
@@ -175,7 +208,14 @@ function normalizeSubmitTarget(
     return { error: 'resource_url must not contain embedded credentials' }
   }
 
-  const hostname = parsed.hostname.toLowerCase()
+  // Strip the FQDN root dot before ANY comparison. `new URL()` preserves it on
+  // non-IP hosts, so `https://localhost./x` arrives as the hostname
+  // `'localhost.'` — which equals none of the literals below and sailed
+  // straight through the locally-bound filter. It is also a dedupe evasion:
+  // `example.com.` and `example.com` are the same origin to every resolver but
+  // two different strings to a unique index. Canonicalising here fixes both,
+  // and is why the stored hostname is the dotless form.
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '')
   if (!hostname || hostname.length > MAX_HOSTNAME_LENGTH) {
     return { error: `resource_url host must be ${MAX_HOSTNAME_LENGTH} characters or fewer` }
   }
@@ -183,6 +223,9 @@ function normalizeSubmitTarget(
     return { error: 'resource_url host must be a public hostname' }
   }
 
+  // Canonicalise the URL to the same dotless host that is stored and deduped
+  // on, so a later slice cannot fetch a spelling this one never checked.
+  parsed.hostname = hostname
   return { hostname, resource_url: parsed.toString() }
 }
 
@@ -229,9 +272,13 @@ export default async function catalogSubmissionRoutes(
       // the dedupe airtight under a concurrent first-time submit.
       const existing = await findPendingCatalogSubmissionByHost(target.hostname)
       if (existing) {
-        return reply.code(201).send(existing)
+        return reply.code(201).send(acknowledgement(existing))
       }
 
+      // Cheap pre-check so an already-full queue is refused without opening a
+      // transaction. It is NOT the ceiling — the authoritative, serialised one
+      // lives inside `insertCatalogSubmission`, because a count read here can
+      // be stale by the time the insert runs.
       const pending = await countPendingCatalogSubmissions()
       if (pending >= QUEUE_CAP) {
         return reply.code(429).send({ error: 'The submission queue is full, try again later' })
@@ -242,18 +289,22 @@ export default async function catalogSubmissionRoutes(
         resource_url: target.resource_url,
         submitter_ip: request.ip,
         verify_token: randomBytes(24).toString('hex'),
+        queueCap: QUEUE_CAP,
       })
+      // The ONLY response that carries a verify_token: this caller just minted
+      // it by creating the row.
       if (created) {
         return reply.code(201).send(created)
       }
 
-      // A concurrent first-time submit for the same host won the race; return
-      // the winner's handle so both callers observe the same id.
+      // No row means one of two refusals, told apart by reading the host back.
+      // A winner: a concurrent first-time submit for the same host got there
+      // first, so both callers observe the same id. No winner: the cap bound.
       const winner = await findPendingCatalogSubmissionByHost(target.hostname)
       if (winner) {
-        return reply.code(201).send(winner)
+        return reply.code(201).send(acknowledgement(winner))
       }
-      return reply.code(500).send({ error: 'Could not create the submission, try again later' })
+      return reply.code(429).send({ error: 'The submission queue is full, try again later' })
     },
   )
 }

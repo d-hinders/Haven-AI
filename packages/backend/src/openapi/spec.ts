@@ -6190,15 +6190,20 @@ export const openapiSpec = {
       },
       CatalogSubmissionAccepted: {
         type: 'object',
-        required: ['id', 'verify_token', 'status'],
+        required: ['id', 'status'],
         properties: {
           id: { type: 'string', format: 'uuid' },
           verify_token: {
             type: 'string',
             description:
-              'Domain-ownership proof token. The seller proves control of the endpoint domain by serving the expected value at https://<host>/.well-known/haven-verify-<token>.txt (DNS TXT supported as fallback). Verification, and any public listing, waits for that proof; `submitted` alone guarantees nothing.',
+              'Domain-ownership proof token. The seller proves control of the endpoint domain by serving the expected value at https://<host>/.well-known/haven-verify-<token>.txt (DNS TXT supported as fallback). Verification, and any public listing, waits for that proof; `submitted` alone guarantees nothing. PRESENT ONLY on the response to the request that created the submission — it is a credential minted for that one submitter. A request that de-duplicates onto an existing pending submission gets `id` and `status` only, so naming a hostname can never disclose another party\'s token.',
           },
-          status: { type: 'string', enum: ['submitted'] },
+          status: {
+            type: 'string',
+            // The de-duplicating response echoes the EXISTING row's state, which
+            // by then may be further along than `submitted`.
+            enum: ['submitted', 'ownership_verified', 'verified_payable'],
+          },
         },
         additionalProperties: false,
       },

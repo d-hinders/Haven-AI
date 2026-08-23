@@ -7,6 +7,7 @@ import catalogSubmissionRoutes from '../catalog-submissions.js'
 import { rateLimitKeyFor } from '../../middleware/rate-limit.js'
 
 const mockQuery = vi.spyOn(pool, 'query')
+const mockConnect = vi.spyOn(pool, 'connect')
 
 const HOST = 'mcp.example.com'
 const RESOURCE_URL = 'https://mcp.example.com/service'
@@ -48,6 +49,19 @@ function primeSubmitDb(state: {
       return { rows: [] }
     }) as never,
   )
+  // The insert now runs inside `withTransaction` + an advisory lock, which
+  // takes a dedicated connection via `pool.connect()` and would otherwise walk
+  // straight past the `pool.query` spy. Route the borrowed client's queries
+  // back through the SAME spy so SQL-content routing and `insertCall()` still
+  // see every statement. BEGIN / COMMIT / pg_advisory_xact_lock fall through
+  // to the empty default above.
+  mockConnect.mockImplementation(
+    (async () => ({
+      query: (sql: unknown, params?: unknown) =>
+        (mockQuery as unknown as (s: unknown, p?: unknown) => Promise<unknown>)(sql, params),
+      release: () => {},
+    })) as never,
+  )
 }
 
 function insertCall(): { sql: string; params: unknown[] } | undefined {
@@ -73,6 +87,7 @@ describe('catalog /submit (epic #1717 #1711)', () => {
 
   beforeEach(() => {
     mockQuery.mockClear()
+    mockConnect.mockClear()
   })
 
   it('writes a queue row (normalized host, https url) and returns id + verify_token', async () => {
@@ -128,9 +143,12 @@ describe('catalog /submit (epic #1717 #1711)', () => {
     expect(response.statusCode).toBe(201)
     expect(response.json()).toMatchObject({
       id: pendingRow().id,
-      verify_token: 'a'.repeat(48),
       status: 'submitted',
     })
+    // The token belongs to the ORIGINAL submitter. A second anonymous caller
+    // who merely names the hostname must not receive it, or the endpoint is an
+    // ownership-proof-credential oracle keyed on a guessable string.
+    expect(response.json()).not.toHaveProperty('verify_token')
     // No new insert: dedupe short-circuits before the cap check and the write.
     expect(insertCall()).toBeUndefined()
   })
@@ -182,6 +200,7 @@ describe('catalog /submit (epic #1717 #1711)', () => {
 
     for (const { payload, fragment } of cases) {
       mockQuery.mockClear()
+      mockConnect.mockClear()
       primeSubmitDb({})
       const response = await app.inject({
         method: 'POST',
@@ -207,6 +226,10 @@ describe('catalog /submit (epic #1717 #1711)', () => {
     ['IPv4-mapped link-local metadata', 'https://[::ffff:169.254.169.254]/latest/meta-data'],
     ['bare link-local metadata', 'https://169.254.169.254/latest/meta-data'],
     ['unspecified v4', 'https://0.0.0.0/x'],
+    // `new URL()` PRESERVES the FQDN root dot on non-IP hosts, so this arrives
+    // as the hostname `localhost.` — equal to none of the literals.
+    ['trailing-dot localhost', 'https://localhost./x'],
+    ['trailing-dot subdomain of localhost', 'https://sub.localhost./x'],
   ])('refuses a locally-bound host: %s', async (_label, resourceUrl) => {
     primeSubmitDb({})
 
@@ -239,6 +262,25 @@ describe('catalog /submit (epic #1717 #1711)', () => {
     expect(insertCall()!.params[0]).toBe('169.99.99.99')
   })
 
+  // The dedupe key must be the ORIGIN, not the spelling. `example.com.` and
+  // `example.com` resolve identically, so if the dot survived into storage a
+  // submitter could hold two pending rows for one host.
+  it('canonicalizes a trailing dot out of the stored host and URL', async () => {
+    primeSubmitDb({
+      inserted: [{ id: 'id-dot', verify_token: 'e'.repeat(48), status: 'submitted' }],
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/catalog/submit',
+      payload: { resource_url: 'https://mcp.example.com./service' },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(insertCall()!.params[0]).toBe('mcp.example.com')
+    expect(insertCall()!.params[1]).toBe('https://mcp.example.com/service')
+  })
+
   it.each([
     ['basic-auth credentials', 'https://user:pass@mcp.example.com/x'],
     ['username-only display spoof', 'https://attacker.example.com@victim.example.com/p'],
@@ -269,6 +311,34 @@ describe('catalog /submit (epic #1717 #1711)', () => {
 
     expect(response.statusCode).toBe(413)
     expect(mockQuery).not.toHaveBeenCalled()
+  })
+
+  // Guards the property #1712 depends on: this endpoint must never become a
+  // blind reachability/DNS oracle. It resolves nothing and connects to nothing,
+  // so no refusal can describe a host's existence or address class — every
+  // message describes only what the caller themselves sent.
+  it('never reports host reachability or address class in a refusal', async () => {
+    const forbidden =
+      /resolve|resolut|dns|nxdomain|private|rfc1918|unique-local|refused|timeout|unreachable|econn|10\.\d|192\.168|169\.254/i
+
+    for (const resourceUrl of [
+      'https://10.0.0.5/x',
+      'https://169.254.169.254/x',
+      'https://[::ffff:127.0.0.1]/x',
+      'https://does-not-exist.invalid/x',
+    ]) {
+      mockQuery.mockClear()
+      mockConnect.mockClear()
+      primeSubmitDb({ inserted: [{ id: 'i', verify_token: 'f'.repeat(48), status: 'submitted' }] })
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/catalog/submit',
+        payload: { resource_url: resourceUrl },
+      })
+
+      expect(response.body).not.toMatch(forbidden)
+    }
   })
 
   it('drops honeypot-filling bots with a fake success and never touches the queue', async () => {

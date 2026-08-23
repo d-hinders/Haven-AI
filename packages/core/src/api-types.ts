@@ -2641,10 +2641,10 @@ export type components = {
         CatalogSubmissionAccepted: {
             /** Format: uuid */
             id: string;
-            /** @description Domain-ownership proof token. The seller proves control of the endpoint domain by serving the expected value at https://<host>/.well-known/haven-verify-<token>.txt (DNS TXT supported as fallback). Verification, and any public listing, waits for that proof; `submitted` alone guarantees nothing. */
-            verify_token: string;
+            /** @description Domain-ownership proof token. The seller proves control of the endpoint domain by serving the expected value at https://<host>/.well-known/haven-verify-<token>.txt (DNS TXT supported as fallback). Verification, and any public listing, waits for that proof; `submitted` alone guarantees nothing. PRESENT ONLY on the response to the request that created the submission — it is a credential minted for that one submitter. A request that de-duplicates onto an existing pending submission gets `id` and `status` only, so naming a hostname can never disclose another party's token. */
+            verify_token?: string;
             /** @enum {string} */
-            status: "submitted";
+            status: "submitted" | "ownership_verified" | "verified_payable";
         };
         /**
          * @description Stable Haven agent payment state phase.

@@ -15,7 +15,7 @@
  * the read-back for the no-op path ("same id returned").
  */
 import pool from '../../db.js'
-import type { Executor } from '../transaction.js'
+import { withTransaction, type Executor } from '../transaction.js'
 
 export interface CatalogSubmissionRow {
   id: string
@@ -31,9 +31,28 @@ export interface CatalogSubmissionRow {
 /** The statuses a host is "owned by" for dedupe / cap purposes. */
 const PENDING_STATUSES = "'submitted', 'ownership_verified', 'verified_payable'"
 
+/**
+ * Serialises the count-then-insert of the queue cap. Transaction-scoped, so
+ * Postgres releases it at COMMIT/ROLLBACK with no unlock path to leak.
+ *
+ * Why a lock rather than a cleverer statement: under READ COMMITTED every
+ * statement takes a FRESH snapshot, so folding the ceiling into the INSERT as
+ * `... WHERE (SELECT COUNT(*) ...) < cap` does NOT serialise anything — two
+ * concurrent inserts each evaluate the subquery before the other commits, both
+ * see room, and both write. Only mutual exclusion actually bounds the set.
+ *
+ * Lives in the KEYED namespace (811100) rather than `LEADER_LOCK_KEYS` so it
+ * cannot collide with the `catalogIngest` monitor key #1713 adds.
+ */
+const QUEUE_CAP_LOCK_NAMESPACE = 811100
+const QUEUE_CAP_LOCK_ID = 1711
+
 export const INSERT_CATALOG_SUBMISSION_SQL = `
   INSERT INTO catalog_submissions (hostname, resource_url, status, submitter_ip, verify_token)
-  VALUES ($1, $2, 'submitted', $3, $4)
+  SELECT $1, $2, 'submitted', $3, $4
+  WHERE (
+    SELECT COUNT(*) FROM catalog_submissions WHERE status IN (${PENDING_STATUSES})
+  ) < $5
   ON CONFLICT (hostname) WHERE status IN (${PENDING_STATUSES}) DO NOTHING
   RETURNING id, verify_token, status`
 
@@ -85,21 +104,41 @@ export async function countPendingCatalogSubmissions(
 }
 
 /**
- * Insert a new submission and return its handle. Returns `null` when a
- * pending/active row for the same host won the race between the route's
- * dedupe read and this insert — the partial unique index turned the race into
- * an `ON CONFLICT ... DO NOTHING` no-op. The caller reads the winner back.
+ * Insert a new submission and return its handle, refusing to push the pending
+ * set past `queueCap`.
+ *
+ * Returns `null` for BOTH refusal modes — a same-host row won the race (the
+ * partial unique index turned it into an `ON CONFLICT ... DO NOTHING` no-op),
+ * or the queue was full. They are distinguished by the caller, which reads the
+ * host back: a winner means dedupe, no winner means the cap.
+ *
+ * The whole check runs under `pg_advisory_xact_lock` inside one transaction,
+ * which is what makes the ceiling a real ceiling instead of a suggestion —
+ * see the note on the lock constants above.
  */
 export async function insertCatalogSubmission(
-  params: { hostname: string; resource_url: string; submitter_ip: string; verify_token: string },
+  params: {
+    hostname: string
+    resource_url: string
+    submitter_ip: string
+    verify_token: string
+    queueCap: number
+  },
   db: Executor = pool,
 ): Promise<CatalogSubmissionHandle | null> {
-  const result = await db.query<CatalogSubmissionRow>(INSERT_CATALOG_SUBMISSION_SQL, [
-    params.hostname,
-    params.resource_url,
-    params.submitter_ip,
-    params.verify_token,
-  ])
-  const row = result.rows[0]
-  return row ? toHandle(row) : null
+  return withTransaction(db, async (tx) => {
+    await tx.query('SELECT pg_advisory_xact_lock($1, $2)', [
+      QUEUE_CAP_LOCK_NAMESPACE,
+      QUEUE_CAP_LOCK_ID,
+    ])
+    const result = await tx.query<CatalogSubmissionRow>(INSERT_CATALOG_SUBMISSION_SQL, [
+      params.hostname,
+      params.resource_url,
+      params.submitter_ip,
+      params.verify_token,
+      params.queueCap,
+    ])
+    const row = result.rows[0]
+    return row ? toHandle(row) : null
+  })
 }

@@ -16,7 +16,7 @@ covers:
   - packages/demo-merchant-mcp/package.json
   - .github/workflows/publish.yml
   - scripts/release-bump.mjs
-last-verified: "2026-08-12" # #1328 — /demo/mpp/* retired from the endpoints table
+last-verified: "2026-08-23" # #1702: the delegate-key-loss answer here was the PRE-#1694 one — "pause or revoke the agent and create a new key path". Epic #1694 made a delegation-rail agent's key REPLACEABLE (re-key: same agent, new key, budget remainder and period boundary carried), so the guidance is now split by rail rather than stated as one blanket answer. Found by the cross-epic doc sweep #1702's acceptance criteria asked for, not by the coupling gate — no `covers:` glob connects this file to `routes/agent-rekey.ts`. Scope: that one sentence in the credential paragraph; the rest of the README was not re-verified. Prior: #1328 — /demo/mpp/* retired from the endpoints table
 ---
 
 # Haven
@@ -173,7 +173,7 @@ npm run dev
 6. Save the one-time Haven credential when the Done step appears
 7. Use **Connect your agent** to add Haven to Claude Code, Cursor, VS Code, Codex CLI, OpenCode, Goose, Amp, or another runtime
 
-The credential contains an agent API key and a delegate signing key. Haven stores only the API-key hash/prefix and never stores the delegate private key. If the API key is exposed or lost, use **Payment credentials** on the agent detail page to rotate it; the new key is shown once and the old key stops working. If the delegate signing key is exposed or lost, pause or revoke the agent and create a new credential path.
+The credential contains an agent API key and a delegate signing key. Haven stores only the API-key hash/prefix and never stores the delegate private key. If the API key is exposed or lost, use **Payment credentials** on the agent detail page to rotate it; the new key is shown once and the old key stops working. If the **delegate signing key** is exposed or lost, a delegation-rail agent is **re-keyed**, not replaced: the same agent gets a new signing key and a new API key, keeping its id, name, history and the remainder of its budget — see [Replacing an agent's signing key](docs/product/agent-key-rotation.md). Legacy AllowanceModule agents have no signed delegation to revoke and re-issue, so those are paused or revoked and re-onboarded.
 
 ## Agent Integration
 

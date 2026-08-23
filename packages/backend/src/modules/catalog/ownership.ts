@@ -110,6 +110,7 @@ export type OwnershipMethod = 'well-known' | 'dns-txt'
 export type OwnershipFailureReason =
   | 'not_configured'
   | 'invalid_hostname'
+  | 'invalid_token'
   | 'token_expired'
   | 'proof_not_found'
   | 'proof_mismatch'
@@ -161,6 +162,44 @@ function normalizeHostname(hostname: string): string {
 const HOSTNAME_LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 
 /**
+ * The alphabet a `verify_token` may use: base64url, which also covers the hex
+ * #1711 issues today. Bounded so the well-known path stays a sane length.
+ */
+const VERIFY_TOKEN = /^[A-Za-z0-9_-]{16,128}$/
+
+/**
+ * Is this a `verify_token` this module is willing to build a URL from?
+ *
+ * Same backstop reasoning as `isValidHostname`, and the reason it is enforced
+ * here rather than left to #1711: the token is interpolated into the
+ * well-known PATH, and an unvalidated one ESCAPES the `/.well-known/` prefix
+ * entirely. Measured against the real URL parser, not reasoned about:
+ *
+ *   '../../../etc/passwd'  ->  path /etc/passwd.txt
+ *   'abc\\..\\..\\x'       ->  path /x.txt
+ *   'abc?x=1'              ->  path /.well-known/haven-verify-abc, query ?x=1
+ *
+ * The HOST is never changed by any of these, so this is not an SSRF pivot and
+ * is not exploitable while #1711 generates 192 random bits of hex. But
+ * "non-exploitable because an unmerged sibling slice is careful" is exactly
+ * the dependency `isValidHostname` exists to refuse, and it would break the
+ * same invariant: the URL actually fetched would differ from the URL
+ * `ownershipInstructions` told the merchant to serve. Refused loudly rather
+ * than escaped quietly — a token outside this alphabet is a bug upstream,
+ * not a merchant mistake.
+ */
+export function isValidVerifyToken(token: string): boolean {
+  return VERIFY_TOKEN.test(token)
+}
+
+function assertValidVerifyToken(token: string): void {
+  if (!isValidVerifyToken(token)) {
+    // Deliberately does not echo the value.
+    throw new Error('ownership claim carries a verify token outside the permitted alphabet')
+  }
+}
+
+/**
  * Strict hostname grammar, applied as a BACKSTOP rather than as a convenience.
  *
  * The route that creates a submission (#1711) validates its input, but this
@@ -180,6 +219,22 @@ const HOSTNAME_LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
  * Rejecting every character outside `[a-z0-9.-]` also rules out C0/C1 control
  * characters, whitespace, and unicode by construction, so an IDN must arrive
  * already punycoded (`xn--…`, which satisfies the label grammar).
+ *
+ * ## The all-numeric last label, and a caveat worth keeping
+ *
+ * A final label of digits only is refused. Not for tidiness: WHATWG `URL`
+ * applies abbreviated-IPv4 parsing to such hosts, so `https://123.456/x`
+ * canonicalizes its host to `123.0.1.200` with no DNS involved. That would
+ * again make the string in the MAC differ from the string network-verified.
+ *
+ * The caveat: `assertSafeUrl` ALREADY refuses those as IP literals, so such a
+ * claim could never have reached `ok: true`. Which is the point — until this
+ * rule existed, the invariant held because of a second, independent guard
+ * rather than because this grammar enforced it, and a check that passes its
+ * own test while another layer quietly does the work is the shape of a defect
+ * nobody finds until the other layer moves. Both layers now hold it
+ * independently, and this comment records that `assertSafeUrl` is the one
+ * that would still catch it if this rule were ever relaxed.
  */
 export function isValidHostname(hostname: string): boolean {
   const host = normalizeHostname(hostname)
@@ -187,7 +242,9 @@ export function isValidHostname(hostname: string): boolean {
   const labels = host.split('.')
   // A merchant domain is never a single label; that is a search-domain lookup.
   if (labels.length < 2) return false
-  return labels.every((label) => HOSTNAME_LABEL.test(label))
+  if (!labels.every((label) => HOSTNAME_LABEL.test(label))) return false
+  // See "The all-numeric last label" above.
+  return !/^[0-9]+$/.test(labels[labels.length - 1]!)
 }
 
 function assertValidHostname(hostname: string): void {
@@ -206,6 +263,7 @@ function assertValidHostname(hostname: string): void {
  */
 export function deriveOwnershipProof(claim: OwnershipClaim, secret: string): string {
   assertValidHostname(claim.hostname)
+  assertValidVerifyToken(claim.verifyToken)
   const message = [
     'haven-domain-ownership',
     OWNERSHIP_PROOF_VERSION,
@@ -221,15 +279,26 @@ export function expectedProofPayload(claim: OwnershipClaim, secret: string): str
   return `${OWNERSHIP_PAYLOAD_PREFIX}${OWNERSHIP_PROOF_VERSION}.${claim.submissionId}.${deriveOwnershipProof(claim, secret)}`
 }
 
+/**
+ * These three exports construct the fetch target and the DNS name, so each
+ * validates its own inputs rather than trusting its caller. They are the
+ * module's most attractive exports for a neighbouring slice to reuse —
+ * #1711 wiring `wellKnownUrl` into a diagnostics response is the obvious
+ * case — and reusing them off the validated path must not reintroduce the
+ * newline or path-escape classes by the back door.
+ */
 export function wellKnownPath(claim: OwnershipClaim): string {
+  assertValidVerifyToken(claim.verifyToken)
   return `/.well-known/haven-verify-${claim.verifyToken}.txt`
 }
 
 export function wellKnownUrl(claim: OwnershipClaim): string {
+  assertValidHostname(claim.hostname)
   return `https://${normalizeHostname(claim.hostname)}${wellKnownPath(claim)}`
 }
 
 export function dnsTxtName(claim: OwnershipClaim): string {
+  assertValidHostname(claim.hostname)
   return `${OWNERSHIP_DNS_LABEL}.${normalizeHostname(claim.hostname)}`
 }
 
@@ -361,6 +430,15 @@ export async function verifyDomainOwnership(
       ok: false,
       reason: 'invalid_hostname',
       detail: 'submission hostname is not a valid DNS name',
+      attempts,
+    }
+  }
+
+  if (!isValidVerifyToken(claim.verifyToken)) {
+    return {
+      ok: false,
+      reason: 'invalid_token',
+      detail: 'submission verify token is outside the permitted alphabet',
       attempts,
     }
   }

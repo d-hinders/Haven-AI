@@ -667,8 +667,8 @@ export type paths = {
         get: operations["listUserSafes"];
         put?: never;
         /**
-         * Link (import) an existing Safe to the caller's account.
-         * @description Registration only — this moves nothing on-chain and grants Haven no authority over the Safe. The same address on the same chain cannot be linked twice (409). The first Safe a user links becomes their default.
+         * RETIRED — always answers 410. Importing a Safe is closed.
+         * @description **RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** The Safe rail is being retired outright, and importing is one of the four ways a Safe could enter Haven; all four are closed. The refusal is a route preHandler, so it precedes every read and write. The route is kept as a compatibility tombstone rather than removed — a 410 tells an old client the flow is permanently gone, where a 404 reads as a transient routing error and invites retries (the #834 session-rail / #1328 mpp_demo pattern); the route itself goes in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Existing linked Safes are unaffected: GET /user/safes, rename, re-default, unlink and every read path behave exactly as before. Historically this was registration only — it moved nothing on-chain and granted Haven no authority over the Safe.
          */
         post: operations["addUserSafe"];
         delete?: never;
@@ -687,8 +687,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Deploy a new Safe with the relayer paying gas.
-         * @description The relayer sponsors the deployment and returns the deployed address plus the transaction hash. Deployment does NOT link the Safe: registration is a separate POST /user/safes call, so onboarding and add-account take the identical path. The deployed Safe is owned by owner_address (single owner, threshold 1) and never by Haven. Note that owner_address is NOT checked against the caller: any authenticated user can have a Safe deployed for any address, so this is a relayer-gas surface bounded only by the global rate limit, not a per-caller ownership check.
+         * RETIRED — always answers 410. Haven no longer deploys Safes.
+         * @description **RETIRED (#1984, epic #1440) — always answers 410 and spends no relayer gas.** The refusal is a route preHandler, so it precedes the relayer entirely. Kept as a compatibility tombstone; removed in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Historically the relayer sponsored the deployment and returned the deployed address plus the transaction hash, and owner_address was NOT checked against the caller — an unbounded-by-ownership relayer-gas surface that this retirement closes as a side effect.
          */
         post: operations["deployUserSafe"];
         delete?: never;
@@ -874,8 +874,8 @@ export type paths = {
         };
         get?: never;
         /**
-         * Set the caller's legacy safe_address and link it as the default Safe.
-         * @description Writes the legacy users.safe_address column AND links the Safe into user_safes as the default — the multi-Safe table is the real home, this column is history. The order matters and is deliberate: the legacy column write is attempted FIRST and a vanished account refuses before anything is linked, rather than leaving a link whose owner no longer exists. Returns the narrower identity projection.
+         * RETIRED — always answers 410. This link is an import.
+         * @description **RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** This route wrote the legacy users.safe_address column AND linked the Safe into user_safes as the default, emitting the `safe_imported` funnel event: it is an IMPORT, so it retires with the rail. It is named here explicitly because no shipped client calls it, which is exactly what would have made it the hole left open. Kept as a compatibility tombstone; create a Haven account on the delegation rail instead (POST /accounts/hybrid).
          */
         put: operations["updateUserSafe"];
         post?: never;
@@ -7464,42 +7464,6 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Safe linked. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        id: string;
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        safe_address: string;
-                        chain_id: number;
-                        /** @description Display label; defaults to 'My account' when none is given. */
-                        name: string;
-                        /** @description The first Safe a user links becomes the default. */
-                        is_default: boolean;
-                        /** Format: date-time */
-                        created_at: string;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             /** @description Error response */
             401: {
                 headers: {
@@ -7515,8 +7479,8 @@ export interface operations {
                     };
                 };
             };
-            /** @description This Safe is already linked to the account. */
-            409: {
+            /** @description Always. The Safe rail is retired; the message names POST /accounts/hybrid. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7550,34 +7514,6 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Safe deployed; link it with POST /user/safes. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        safe_address: string;
-                        tx_hash: string;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             /** @description Error response */
             401: {
                 headers: {
@@ -7593,8 +7529,8 @@ export interface operations {
                     };
                 };
             };
-            /** @description Relay deployment failed. */
-            500: {
+            /** @description Always. The Safe rail is retired; the message names POST /accounts/hybrid. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8440,37 +8376,6 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The updated identity projection. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        id: string;
-                        name: string | null;
-                        email: string;
-                        wallet_address: string | null;
-                        safe_address: string | null;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             /** @description Error response */
             401: {
                 headers: {
@@ -8486,8 +8391,8 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
-            404: {
+            /** @description Always. The Safe rail is retired; the message names POST /accounts/hybrid. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };

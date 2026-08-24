@@ -190,10 +190,6 @@
     "db-mock": 1,
     "positional": 4
   },
-  "packages/backend/src/routes/__tests__/safe-deploy.test.ts": {
-    "db-mock": 1,
-    "positional": 24
-  },
   "packages/backend/src/routes/__tests__/safe-details.test.ts": {
     "db-mock": 1,
     "positional": 4
@@ -215,7 +211,7 @@
   },
   "packages/backend/src/routes/__tests__/user-safes-characterization.test.ts": {
     "db-mock": 1,
-    "positional": 11
+    "positional": 10
   },
   "packages/backend/src/routes/__tests__/user-safes-delete.test.ts": {
     "db-mock": 1
@@ -226,7 +222,7 @@
   },
   "packages/backend/src/routes/__tests__/user.test.ts": {
     "db-mock": 1,
-    "positional": 16
+    "positional": 13
   },
   "packages/backend/src/routes/__tests__/x402-consolidation.characterization.test.ts": {
     "db-mock": 1,

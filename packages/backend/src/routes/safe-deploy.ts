@@ -3,6 +3,7 @@ import { FastifyInstance } from 'fastify'
 // dep-lint-exempt: the deploy path runs one multi-statement transaction on a dedicated client (pool.connect) whose guards travel together (user upsert, safe insert, default promotion); a >100-line move deferred under #999
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { retiredSafeInflow } from '../middleware/safe-inflow-retired.js'
 import { getChain, isSupportedChain, isDeployableChain } from '../domain/chains.js'
 import { predictSafePasskeySignerAddress } from '../modules/accounts/index.js'
 import { getRelayer, warnIfRelayerLow, withRelayerSendLock } from '../infra/relayer.js'
@@ -41,7 +42,9 @@ function isInsufficientFundsError(error: unknown): boolean {
 export default async function safeDeployRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  app.post<{ Body: DeploySafeBody }>('/deploy', async (request, reply) => {
+  // INFLOW CLOSED (#1984, epic #1440): the preHandler answers 410 before this
+  // handler runs. The body below is kept verbatim for deletion slice #1988.
+  app.post<{ Body: DeploySafeBody }>('/deploy', retiredSafeInflow('deploy'), async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { chain_id, salt_nonce } = request.body ?? {}
 

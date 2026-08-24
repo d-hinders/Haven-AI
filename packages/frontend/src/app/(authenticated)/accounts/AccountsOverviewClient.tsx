@@ -1,415 +1,32 @@
 'use client'
 
-import { isAddress } from '@haven_ai/core'
-import { ArrowRight, Check, ChevronLeft, ChevronRight, CircleAlert, CreditCard, FlaskConical, Link as LinkIcon, Plus, Star, X } from 'lucide-react'
+import { ArrowRight, CircleAlert, CreditCard, FlaskConical, Star } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
 import { useUserSafes } from '@/hooks/useUserSafes'
-import { useDeployableChains } from '@/hooks/useDeployableChains'
 import { useAgents } from '@/hooks/useAgents'
 import { usePortfolio } from '@/hooks/usePortfolio'
 import { usePreferences } from '@/hooks/usePreferences'
-import { api } from '@/lib/api'
-import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useAccount } from 'wagmi'
-import { DEFAULT_CHAIN_ID, getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
-import { useEscapeToClose } from '@/hooks/useEscapeToClose'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import NetworkPill from '@/components/NetworkPill'
 import { timeAgo } from '@/lib/format'
 import { entityCardClassName } from '@/components/ui/entityCardStyles'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { truncateAddress } from '@/components/haven'
 
-// ── Add Safe Modal ──────────────────────────────────────────────────
-
-type AddMode = 'choose' | 'deploy' | 'import'
-type DeployStep = 'name' | 'wallet' | 'deploying' | 'done'
-
-function AddSafeModal({
-  open,
-  onClose,
-  onAdd,
-  loading,
-}: {
-  open: boolean
-  onClose: () => void
-  onAdd: (address: string, name: string, chainId: number) => Promise<void>
-  loading: boolean
-}) {
-  const [mode, setMode] = useState<AddMode>('choose')
-  const [name, setName] = useState('')
-  const [error, setError] = useState('')
-
-  // Import state
-  const [importAddress, setImportAddress] = useState('')
-  const [importChainId, setImportChainId] = useState(DEFAULT_CHAIN_ID)
-
-  // Deploy state
-  const [deployStep, setDeployStep] = useState<DeployStep>('name')
-  const [deploying, setDeploying] = useState(false)
-  const [deployedAddress, setDeployedAddress] = useState('')
-  const [deployTxHash, setDeployTxHash] = useState('')
-  const [deployChainId, setDeployChainId] = useState(DEFAULT_CHAIN_ID)
-
-  // Only deploy on chains the backend serves (#679); snap the selection to a
-  // served chain if the default isn't one in this environment.
-  const { chains: deployableChains } = useDeployableChains()
-  useEffect(() => {
-    if (
-      deployableChains.length > 0 &&
-      !deployableChains.some((c) => c.chainId === deployChainId)
-    ) {
-      setDeployChainId(deployableChains[0].chainId)
-    }
-  }, [deployableChains, deployChainId])
-
-  const { address: walletAddress, isConnected } = useAccount()
-
-  const resetState = () => {
-    setMode('choose')
-    setName('')
-    setError('')
-    setImportAddress('')
-    setImportChainId(DEFAULT_CHAIN_ID)
-    setDeployStep('name')
-    setDeploying(false)
-    setDeployedAddress('')
-    setDeployTxHash('')
-    setDeployChainId(DEFAULT_CHAIN_ID)
-  }
-
-  const handleClose = () => {
-    resetState()
-    onClose()
-  }
-
-  // Escape-to-close — but don't let the user bail on live account creation.
-  useEscapeToClose(open, handleClose, { enabled: !deploying })
-
-  if (!open) return null
-
-  // ── Import flow ──
-  const handleImport = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError('')
-
-    if (!isAddress(importAddress)) {
-      setError('Invalid Ethereum address')
-      return
-    }
-
-    try {
-      await onAdd(importAddress, name || 'My account', importChainId)
-      resetState()
-      onClose()
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to add account')
-    }
-  }
-
-  // ── Deploy flow ──
-  const handleDeploy = async () => {
-    if (!walletAddress) return
-
-    setDeploying(true)
-    setDeployStep('deploying')
-    setError('')
-
-    try {
-      // Relay pays gas — no wallet signature needed
-      const deployed = await api.post<{ safe_address: string; tx_hash: string }>(
-        '/user/safes/deploy',
-        { chain_id: deployChainId, owner_address: walletAddress },
-      )
-      setDeployedAddress(deployed.safe_address)
-      setDeployTxHash(deployed.tx_hash)
-
-      // Register in Haven (same as import flow)
-      await onAdd(deployed.safe_address, name || 'My account', deployChainId)
-      setDeployStep('done')
-    } catch (err: unknown) {
-      setDeployStep('wallet')
-      setError(err instanceof Error ? err.message : 'Deployment failed. Please try again.')
-    } finally {
-      setDeploying(false)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">
-      <div className="absolute inset-0 v2-modal-backdrop" onClick={handleClose} />
-      <div className="relative bg-white border border-[var(--v2-border)] rounded-xl w-full max-w-md shadow-modal overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-6 pb-0">
-          <div className="flex items-center gap-2">
-            {mode !== 'choose' && deployStep !== 'done' && (
-              <button
-                onClick={() => { setMode('choose'); setError(''); setDeployStep('name') }}
-                aria-label="Back"
-                className="p-1 -ml-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors"
-              >
-                <Icon icon={ChevronLeft} className="w-4 h-4" />
-              </button>
-            )}
-            <h2 className="text-lg font-semibold text-[var(--v2-ink)]">
-              {mode === 'choose' && 'Add account'}
-              {mode === 'deploy' && deployStep === 'done' && 'Account created'}
-              {mode === 'deploy' && deployStep !== 'done' && 'Create Haven account'}
-              {mode === 'import' && 'Import existing account'}
-            </h2>
-          </div>
-          <button
-            onClick={handleClose}
-            aria-label="Close"
-            className="p-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-          >
-            <Icon icon={X} className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="p-6">
-          {/* ── Choose mode ── */}
-          {mode === 'choose' && (
-            <div className="space-y-3">
-              <p className="text-sm text-[var(--v2-ink-3)] mb-4">
-                Create a new Haven account or import one you already use.
-              </p>
-              <button
-                onClick={() => setMode('deploy')}
-                className="w-full flex items-center gap-4 p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-brand/30 hover:bg-[var(--v2-brand-soft)] transition-all group text-left"
-              >
-                <div className="w-10 h-10 rounded-lg bg-[var(--v2-brand-soft)] border border-brand/20 flex items-center justify-center flex-shrink-0 group-hover:bg-[var(--v2-brand-soft)] transition-colors">
-                  <Icon icon={Plus} className="w-5 h-5 text-[var(--v2-brand)]" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <span className="block text-sm font-medium text-[var(--v2-ink)] transition-colors">Create Haven account</span>
-                  <span className="block text-xs text-[var(--v2-ink-3)] mt-0.5">Create a new account on Base</span>
-                </div>
-                <Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)] group-hover:text-[var(--v2-ink-2)] transition-colors flex-shrink-0" />
-              </button>
-              <button
-                onClick={() => setMode('import')}
-                className="w-full flex items-center gap-4 p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] transition-all group text-left"
-              >
-                <div className="w-10 h-10 rounded-lg bg-[var(--v2-surface-2)] border border-[var(--v2-border)] flex items-center justify-center flex-shrink-0 group-hover:bg-[var(--v2-surface-2)] transition-colors">
-                  <Icon icon={LinkIcon} className="w-5 h-5 text-[var(--v2-ink-2)]" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <span className="block text-sm font-medium text-[var(--v2-ink)] transition-colors">Import existing account</span>
-                  <span className="block text-xs text-[var(--v2-ink-3)] mt-0.5">Link an account you already use by its address</span>
-                </div>
-                <Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)] group-hover:text-[var(--v2-ink-2)] transition-colors flex-shrink-0" />
-              </button>
-            </div>
-          )}
-
-          {/* ── Deploy flow ── */}
-          {mode === 'deploy' && deployStep === 'name' && (
-            <div className="space-y-4">
-              <p className="text-sm text-[var(--v2-ink-3)]">
-                Give your new account a name and choose a network.
-              </p>
-              <div>
-                <label className="block text-xs text-[var(--v2-ink-3)] mb-1">Account Name</label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Business, Personal, Treasury"
-                  autoFocus
-                  className="w-full px-3 py-2.5 rounded-lg bg-[var(--v2-surface-2)] border border-[var(--v2-border)] text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)] transition-colors"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-[var(--v2-ink-3)] mb-1">Network</label>
-                <select
-                  value={deployChainId}
-                  onChange={(e) => setDeployChainId(Number(e.target.value))}
-                  className="w-full px-3 py-2.5 rounded-lg bg-[var(--v2-surface-2)] border border-[var(--v2-border)] text-sm text-[var(--v2-ink)] focus:outline-none focus:border-[var(--v2-brand)] transition-colors"
-                >
-                  {deployableChains.map((c) => (
-                    <option key={c.chainId} value={c.chainId}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-              <Button onClick={() => setDeployStep('wallet')} className="w-full">
-                Continue
-              </Button>
-            </div>
-          )}
-
-          {mode === 'deploy' && deployStep === 'wallet' && (
-            <div className="space-y-4">
-              <p className="text-sm text-[var(--v2-ink-3)]">
-                Your connected wallet will be the owner of this account. Network fees are paid by Haven &mdash; no wallet signature needed.
-              </p>
-
-              {/* Wallet connection */}
-              {!isConnected ? (
-                <EmptyState size="compact" title="Connect a wallet to deploy" action={<ConnectButton />} />
-              ) : (
-                <div className="p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="block text-xs text-[var(--v2-ink-3)] mb-1">Connected wallet</span>
-                      <span className="text-sm font-mono text-[var(--v2-ink)]">
-                        {walletAddress ? truncateAddress(walletAddress) : ''}
-                      </span>
-                    </div>
-                    <ConnectButton.Custom>
-                      {({ openAccountModal }) => (
-                        <button
-                          onClick={openAccountModal}
-                          className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
-                        >
-                          Change
-                        </button>
-                      )}
-                    </ConnectButton.Custom>
-                  </div>
-                </div>
-              )}
-
-              {/* Account name preview */}
-              {name && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--v2-surface)] border border-[var(--v2-border)]">
-                  <span className="text-xs text-[var(--v2-ink-3)]">Name:</span>
-                  <span className="text-xs text-[var(--v2-ink)] font-medium">{name}</span>
-                </div>
-              )}
-
-              {error && (
-                <div className="rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
-                  {error}
-                </div>
-              )}
-
-              <Button
-                onClick={handleDeploy}
-                disabled={!isConnected || deploying}
-                className="w-full"
-              >
-                Create account
-              </Button>
-              <p className="text-center text-xs text-[var(--v2-ink-3)]">
-                Network fees are paid by Haven &mdash; no wallet signature needed.
-              </p>
-            </div>
-          )}
-
-          {mode === 'deploy' && deployStep === 'deploying' && (
-            <div className="flex flex-col items-center py-8">
-              <div className="w-12 h-12 rounded-full border-2 border-brand/30 border-t-[var(--v2-brand)] animate-spin mb-6" />
-              <h3 className="text-sm font-medium text-[var(--v2-ink)] mb-2">Deploying your account</h3>
-              <p className="text-xs text-[var(--v2-ink-3)] text-center max-w-xs">
-                Haven is deploying your account on {getChainConfig(deployChainId).name}. No wallet action needed.
-              </p>
-            </div>
-          )}
-
-          {mode === 'deploy' && deployStep === 'done' && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border border-success/30 bg-[var(--v2-success-soft)]">
-                  <Icon icon={Check} className="h-5 w-5 text-[var(--v2-success)]" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-[var(--v2-ink)]">{name || 'My account'}</p>
-                  <p className="text-xs text-[var(--v2-ink-3)]">Successfully deployed on {getChainConfig(deployChainId).name}</p>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="p-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
-                  <span className="block text-xs text-[var(--v2-ink-3)] uppercase tracking-wider mb-1">Account address</span>
-                  <a
-                    href={getExplorerUrl(deployChainId, 'address', deployedAddress)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-mono text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors break-all"
-                  >
-                    {deployedAddress}
-                  </a>
-                </div>
-                <div className="p-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
-                  <span className="block text-xs text-[var(--v2-ink-3)] uppercase tracking-wider mb-1">Transaction</span>
-                  <a
-                    href={getExplorerUrl(deployChainId, 'tx', deployTxHash)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-mono text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors break-all"
-                  >
-                    {deployTxHash.slice(0, 22)}...{deployTxHash.slice(-8)}
-                  </a>
-                </div>
-              </div>
-
-              <Button onClick={handleClose} className="w-full">
-                Done
-              </Button>
-            </div>
-          )}
-
-          {/* ── Import flow ── */}
-          {mode === 'import' && (
-            <form onSubmit={handleImport} className="space-y-4">
-              <p className="text-sm text-[var(--v2-ink-3)]">
-                Link an existing account by its address and network.
-              </p>
-              <div>
-                <label className="block text-xs text-[var(--v2-ink-3)] mb-1">Account Name</label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Business, Personal"
-                  className="w-full px-3 py-2.5 rounded-lg bg-[var(--v2-surface-2)] border border-[var(--v2-border)] text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)] transition-colors"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-[var(--v2-ink-3)] mb-1">Network</label>
-                <select
-                  value={importChainId}
-                  onChange={(e) => setImportChainId(Number(e.target.value))}
-                  className="w-full px-3 py-2.5 rounded-lg bg-[var(--v2-surface-2)] border border-[var(--v2-border)] text-sm text-[var(--v2-ink)] focus:outline-none focus:border-[var(--v2-brand)] transition-colors"
-                >
-                  {SUPPORTED_CHAINS.map((c) => (
-                    <option key={c.chainId} value={c.chainId}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-[var(--v2-ink-3)] mb-1">Account address</label>
-                <input
-                  type="text"
-                  value={importAddress}
-                  onChange={(e) => setImportAddress(e.target.value)}
-                  placeholder="0x..."
-                  autoFocus
-                  className="w-full px-3 py-2.5 rounded-lg bg-[var(--v2-surface-2)] border border-[var(--v2-border)] text-sm text-[var(--v2-ink)] font-mono placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)] transition-colors"
-                />
-              </div>
-
-              {error && (
-                <p className="text-xs text-[var(--v2-danger)]">{error}</p>
-              )}
-
-              <Button type="submit" disabled={loading} className="w-full">
-                {loading ? 'Adding…' : 'Import account'}
-              </Button>
-            </form>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
+// The Safe-rail INFLOW IS CLOSED (#1984, epic #1440). `AddSafeModal` lived
+// here and was the dashboard's only Safe entry point: a three-mode modal
+// (choose / deploy / import) that POSTed /user/safes/deploy and then
+// /user/safes. Both routes now answer 410, so the modal could only ever
+// have shown the user an error — it is removed with its trigger rather than
+// left as a door into a wall. Nothing Hybrid is lost: this modal never
+// offered a delegation-rail account, and onboarding provisions one
+// unconditionally. Accounts is now a read + manage surface: list, activate,
+// set default, drill in. Shared legacy Safe COMPONENTS elsewhere are
+// deletion slice #1989's scope, not this one's.
 // ── Per-Safe card (handles its own portfolio fetch) ────────────────
 
 function formatFiat(value: number, currency: 'USD' | 'EUR'): string {
@@ -598,11 +215,9 @@ function SafeCard({
 
 export default function AccountsOverviewClient() {
   const { activeSafe, setActiveSafe } = useAuth()
-  const { safes, loading, addSafe, setDefault } = useUserSafes()
+  const { safes, setDefault } = useUserSafes()
   const { agents } = useAgents()
   const { currency } = usePreferences()
-
-  const [addModalOpen, setAddModalOpen] = useState(false)
 
   // Count agents per Safe
   const agentCountBySafe = new Map<string, number>()
@@ -626,9 +241,6 @@ export default function AccountsOverviewClient() {
             </>
           ) : undefined
         }
-        actions={safes.length > 0 ? (
-          <Button onClick={() => setAddModalOpen(true)}>Add account</Button>
-        ) : undefined}
       />
 
       {/* Orphaned agents warning */}
@@ -647,7 +259,6 @@ export default function AccountsOverviewClient() {
           icon={<Icon icon={CreditCard} className="h-5 w-5" />}
           tone="neutral"
           title="No Haven accounts yet"
-          action={<Button onClick={() => setAddModalOpen(true)}>Add your first account</Button>}
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -668,16 +279,6 @@ export default function AccountsOverviewClient() {
           ))}
         </div>
       )}
-
-      {/* Add Safe Modal */}
-      <AddSafeModal
-        open={addModalOpen}
-        onClose={() => setAddModalOpen(false)}
-        onAdd={async (address, name, chainId) => {
-          await addSafe(address, name, chainId)
-        }}
-        loading={loading}
-      />
     </div>
   )
 }

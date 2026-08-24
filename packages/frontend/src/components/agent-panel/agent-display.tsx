@@ -49,9 +49,25 @@ export function formatConfiguredAllowance(allowance: AgentAllowance, chainId: nu
   }
 }
 
-/** Format relative time until a date */
-export function timeUntil(date: Date): string {
-  const diffMs = date.getTime() - Date.now()
+/**
+ * Format the remaining time until `date`, measured against `nowMs`.
+ *
+ * `nowMs` is REQUIRED, and that is the whole point (#1995). This helper used
+ * to read `Date.now()` itself, which silently made the device clock the
+ * reference for every caller. `AllowanceBar` decides whether an allowance has
+ * reset from CHAIN time (`computeEffectiveAllowance(info, chainTimeSec)`) and
+ * then rendered the countdown for that same decision through here — so one
+ * sentence was computed against two clocks, and any device-clock skew could
+ * make the two halves contradict each other outright (a live budget whose
+ * countdown reads `now`).
+ *
+ * Making the reference time a parameter rather than an ambient read is what
+ * fixes it structurally: a caller cannot reintroduce the split by forgetting,
+ * only by explicitly passing `Date.now()` — which is then visible in the diff.
+ * Pass the SAME clock the surrounding decision was made from.
+ */
+export function timeUntil(date: Date, nowMs: number): string {
+  const diffMs = date.getTime() - nowMs
   if (diffMs <= 0) return 'now'
   const mins = Math.floor(diffMs / 60000)
   if (mins < 60) return `${mins}m`

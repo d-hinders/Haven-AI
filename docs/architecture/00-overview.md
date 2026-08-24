@@ -7,6 +7,7 @@ covers:
   - packages/backend/src/domain/chains.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
   - packages/backend/src/modules/catalog/catalog-discovery.ts
+  - packages/backend/src/modules/catalog/lifecycle.ts
   - packages/backend/src/modules/reporting/**
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
@@ -65,7 +66,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-14" # #1199: signer-removal recovery change re-verified; delegation authority overview unchanged
+last-verified: "2026-08-24" # #1714 (epic #1717): catalogue ingestion lifecycle added to the catalog module — modules/catalog/lifecycle.ts drives the self-service submission queue (ownership proof → SSRF-hardened probe → re-verification → retention) on the new leader-locked catalogIngest monitor in index.ts; the operator-curated refresh and discovery are unchanged. Prior: #1199: signer-removal recovery change re-verified; delegation authority overview unchanged
 ---
 
 # Haven — Architecture Overview

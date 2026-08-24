@@ -65,6 +65,7 @@ import * as rateLimitCounters from './063_rate_limit_counters.js'
 import * as labelStrandingFixture from './064_label_stranding_fixture.js'
 import * as agentRekeys from './065_agent_rekeys.js'
 import * as catalogSubmissions from './066_catalog_submissions.js'
+import * as catalogLifecycle from './068_catalog_lifecycle.js'
 import * as agentsMcpServerName from './067_agents_mcp_server_name.js'
 
 export interface Migration {
@@ -145,4 +146,5 @@ export const migrations: Migration[] = [
   agentRekeys,
   catalogSubmissions,
   agentsMcpServerName,
+  catalogLifecycle,
 ]

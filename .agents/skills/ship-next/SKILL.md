@@ -293,10 +293,23 @@ review confirms zero behavioral change — say so explicitly in the PR.
 Classification drives the **playbook and the testing bar**, not a merge pause. A money-path diff still loads `money.md`, still needs characterization tests before existing behavior changes, and still states its classification in the pull-request body.
 
 **Before arming anything, the reviewer verdict has to be written down.** Do not enable
-auto-merge while the pull request's `haven-reviewer:` line is unfilled — a filled
-`skipped because <reason>` is enough to proceed, a blank is not. The point is that a
-skipped pass leaves a trace a human can argue with, not that skipping is forbidden;
-`AGENTS.md` § *Run `haven-reviewer` on every pull request* is why the default is "ran".
+auto-merge while a pull request leaves either verdict line unfilled:
+
+- `haven-reviewer:` — on every pull request;
+- `haven-design-reviewer:` — on every pull request too, where `n/a (not area:frontend)`
+  is the fill for a diff that does not need the rendered pass.
+
+A filled `skipped because <reason>` is enough to proceed, a blank is not. The point is
+that a skipped pass leaves a trace a human can argue with, not that skipping is
+forbidden; `AGENTS.md` § *Run `haven-reviewer` on every pull request* is why the default
+is "ran".
+
+**Name the design pass explicitly, because the pause rule below cannot stand in for it.**
+That rule triggers on a *finding*, and a pass that never ran produces none — so a
+frontend pull request whose `haven-reviewer:` line is filled and whose
+`haven-design-reviewer:` line is simply absent sails through a finding-triggered gate
+having had no rendered review at all. That is the same "nothing records whether it ran"
+gap this check exists to close, one pass over.
 
 Route the merge:
 

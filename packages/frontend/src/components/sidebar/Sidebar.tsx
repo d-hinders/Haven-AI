@@ -22,7 +22,6 @@ import { Icon } from '@/components/ui/Icon'
 import { useAuth } from '@/context/AuthContext'
 import { displayName, userInitial as getUserInitial } from '@/lib/user'
 import { HavenMark } from '@/components/brand/HavenMark'
-import { useApprovals } from '@/hooks/useApprovals'
 import { Tooltip } from '@/components/ui/Tooltip'
 
 interface NavItem {
@@ -38,7 +37,6 @@ const icons = {
   account: <Icon icon={ShieldCheck} className="w-full h-full" />,
   transactions: <Icon icon={ArrowLeftRight} className="w-full h-full" />,
   agents: <Icon icon={Bot} className="w-full h-full" />,
-  approvals: <Icon icon={BadgeCheck} className="w-full h-full" />,
   catalog: <Icon icon={Store} className="w-full h-full" />,
   contacts: <Icon icon={Users} className="w-full h-full" />,
   profile: <Icon icon={CircleUserRound} className="w-full h-full" />,
@@ -54,7 +52,6 @@ const baseNavItems: NavItem[] = [
   { label: 'Accounts', href: '/accounts', icon: icons.account },
   { label: 'Transactions', href: '/transactions', icon: icons.transactions },
   { label: 'Agents', href: '/agents', icon: icons.agents },
-  // Approvals is injected dynamically with live badge
   { label: 'Catalog', href: '/catalog', icon: icons.catalog },
   { label: 'Contacts', href: '/contacts', icon: icons.contacts },
   { label: 'Reporting', href: '/reporting', icon: icons.accounting },
@@ -112,8 +109,6 @@ export default function Sidebar() {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
 
-  const { actionableCount } = useApprovals()
-
   const name = displayName(user)
   const userInitial = getUserInitial(user)
   const emailLine = user?.email ?? ''
@@ -121,23 +116,12 @@ export default function Sidebar() {
   const showEmailLine = emailLine !== '' && name !== emailLine
   const profileActive = pathname === '/profile'
 
-  // Build nav items — inject Approvals (with live badge) between Agents and Contacts
-  const approvalsItem: NavItem = {
-    label: 'Approvals',
-    href: '/approvals',
-    icon: icons.approvals,
-    ...(actionableCount > 0
-      ? { badge: actionableCount > 99 ? '99+' : String(actionableCount) }
-      : {}),
-  }
-
-  // #1079: the approval queue is a legacy-rail (AllowanceModule) concept — the
-  // delegation rail enforces budgets on-chain with no queue. A user whose
-  // accounts are ALL delegation accounts never has approvals, so the entry
-  // point is hidden. Any Safe-rail account keeps it (mixed users included).
-  const onlyDelegationAccounts =
-    (user?.safes?.length ?? 0) > 0 &&
-    (user?.safes ?? []).every((safe) => safe.account_type === 'delegator_hybrid')
+  // #1989 (epic #1440): the Approvals entry is GONE for every user, not hidden
+  // per-account as #1079 had it. The approval queue was a legacy-rail
+  // (AllowanceModule) concept and that rail is retired — `POST /approvals/:id/approve`
+  // answers 410 (#1986) and the queue UI is deleted, so an entry point here
+  // could only ever lead to a dead end. The delegation rail enforces budgets
+  // on-chain and produces no approvals at all.
 
   // Labeled clusters (#858): the core money loop first, tools and admin
   // after — same routes, same order within each cluster as before.
@@ -149,7 +133,6 @@ export default function Sidebar() {
         baseNavItems[1], // Accounts
         baseNavItems[2], // Transactions
         baseNavItems[3], // Agents
-        ...(onlyDelegationAccounts ? [] : [approvalsItem]), // Approvals (dynamic badge)
       ],
     },
     {

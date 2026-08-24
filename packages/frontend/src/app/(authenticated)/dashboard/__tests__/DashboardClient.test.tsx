@@ -65,10 +65,6 @@ vi.mock('@/components/ConnectAgentModal', () => ({
   default: () => null,
 }))
 
-vi.mock('@/components/SendModal', () => ({
-  default: () => null,
-}))
-
 vi.mock('@/components/DashboardActionPickerModal', () => ({
   default: () => null,
 }))
@@ -210,11 +206,11 @@ describe('DashboardClient', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument()
     expect(screen.getByText('$1,234.56')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+    // Send and the approvals attention row are DELETED (#1989) — asserted as
+    // absences in their own dedicated test below, where the fixture is set up
+    // to make a regression visible rather than merely unasserted.
     expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
-    expect(screen.getByText('Needs attention')).toBeInTheDocument()
-    expect(screen.getByText('2 agent payments need your action')).toBeInTheDocument()
     expect(screen.getByText('Agents connected')).toBeInTheDocument()
     expect(screen.getByText('Monthly agent spend')).toBeInTheDocument()
     expect(screen.getByText('$42.00')).toBeInTheDocument()
@@ -222,7 +218,24 @@ describe('DashboardClient', () => {
     expect(screen.getByText('Active accounts')).toBeInTheDocument()
   })
 
-  it('uses singular copy for one agent payment that needs action', () => {
+  /**
+   * #1989 (epic #1440): the dashboard's two legacy-Safe spend/approval
+   * affordances are GONE — the hero's Send button (it opened `SendModal`, which
+   * is deleted with the rail) and the "Needs attention" approvals row with its
+   * "Open approvals" link (`/approvals` no longer routes and
+   * `POST /approvals/:id/approve` answers 410 since #1986).
+   *
+   * This replaces `uses singular copy for one agent payment that needs action`,
+   * whose entire subject was the deleted row.
+   *
+   * The fixture is deliberately the WORST case for these absences rather than
+   * the easiest: a legacy (non-`delegator_hybrid`) Safe account — the exact
+   * account type both affordances used to render for — with a non-zero
+   * `actionableApprovals`. On `dev` before this change every one of these
+   * assertions fails. That is what stops it being a guard over the empty set:
+   * put either affordance back and it goes red here.
+   */
+  it('offers neither a Send affordance nor an approvals route, even for a funded legacy Safe with pending approvals', () => {
     mockUseDashboardOverview.mockReturnValue({
       data: {
         totals: { usd: 1234.56, eur: 1100 },
@@ -243,7 +256,7 @@ describe('DashboardClient', () => {
         actionableApprovals: 1,
         pendingApprovals: 1,
         onboardingProgress: {
-          hasFirstAgentPayment: false,
+          hasFirstAgentPayment: true,
         },
         agents: [],
         transactions: [],
@@ -255,7 +268,18 @@ describe('DashboardClient', () => {
 
     render(<DashboardClient />)
 
-    expect(screen.getByText('1 agent payment needs your action')).toBeInTheDocument()
+    // Positive control FIRST: the dashboard really rendered its funded hero.
+    // Without this the four absences below would all be satisfied by a blank
+    // screen — the failure mode #1987 paid for.
+    expect(screen.getByText('$1,234.56')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+    expect(screen.queryByText('1 agent payment needs your action')).toBeNull()
+    expect(screen.queryByRole('link', { name: /Open approvals/i })).toBeNull()
+    expect(
+      Array.from(document.querySelectorAll('a')).map((a) => a.getAttribute('href')),
+    ).not.toContain('/approvals')
   })
 
   it('does not show empty preview states while overview is loading', () => {
@@ -342,7 +366,6 @@ describe('DashboardClient', () => {
 
     render(<DashboardClient />)
 
-    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Receive funds' })).not.toBeInTheDocument()
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
@@ -358,7 +381,6 @@ describe('DashboardClient', () => {
 
     render(<DashboardClient />)
 
-    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Receive funds' })).not.toBeInTheDocument()

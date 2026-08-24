@@ -16,10 +16,6 @@
   "packages/frontend/src/hooks/useAgents.ts": {
     "CreateAgentParams": 1
   },
-  "packages/frontend/src/hooks/useApprovals.ts": {
-    "ApprovalRequest": 1,
-    "ApprovalsResponse": 1
-  },
   "packages/frontend/src/hooks/useDelegationBudget.ts": {
     "BuildResponse": 1,
     "DelegationBudget": 1,

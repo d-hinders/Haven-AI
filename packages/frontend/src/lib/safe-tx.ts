@@ -1,8 +1,32 @@
+/**
+ * Safe transaction construction and signing.
+ *
+ * ⚠️ **This file SURVIVED the Safe-rail retirement (#1989, epic #1440) on
+ * purpose — do not delete it as "the safe-tx libs".**
+ *
+ * The retirement deleted the legacy SPEND surfaces that used it (`SendModal`,
+ * `useSendTransaction`, `ApprovalQueue`) and, with them, `buildSafeTx`,
+ * `SendParams` and the ERC-20 transfer ABI they needed. What remains has
+ * consumers OUTSIDE the retired rail, in two groups, and both have to live:
+ *
+ *  - `getChainTokens` is a generic per-chain token list read by DELEGATION-rail
+ *    surfaces (`DelegationSendModal`, `useAgentConnectionSetup`,
+ *    `agent-panel/agent-display`) and by `EditAgentModal`.
+ *  - `getSafeNonce` / `getSafeTxHash` / `signSafeTx` / `executeSafeTx` /
+ *    `proposeSafeTx` / `SafeTxParams` are owner-signed Safe execution. They back
+ *    `lib/approver-tx.ts` — the #1229 passkey-Safe RECOVERY path, which is the
+ *    only way an existing Safe owner can add a backup owner — plus the agent
+ *    connect/revoke/edit flows. Owner authority is not the retired rail's agent
+ *    authority; the backend drew the same line by keeping `POST /safe/exec`
+ *    open (#1986).
+ *
+ * Mirror of the backend's `rails/allowance-module.ts`, which #1987 likewise
+ * trimmed to its shared half rather than deleting.
+ */
 import type { SafeCapableSigner } from './signer'
 import {
   encodeFunctionData,
   hashTypedData,
-  parseUnits,
   WaitForTransactionReceiptTimeoutError,
   ContractFunctionRevertedError,
   ContractFunctionExecutionError,
@@ -38,19 +62,6 @@ export class SafeTxReceiptTimeoutError extends Error {
 }
 
 // ERC-20 transfer ABI
-const ERC20_TRANSFER_ABI = [
-  {
-    name: 'transfer',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'to', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-] as const
-
 // Safe v1.3.0 execTransaction ABI
 const SAFE_EXEC_ABI = [
   {
@@ -114,21 +125,6 @@ export interface SafeTxParams {
   nonce: bigint
 }
 
-export interface SendParams {
-  token: string
-  tokenAddress: Address | null  // null = native
-  decimals: number
-  amount: string               // human-readable (e.g. "10.5")
-  recipient: Address
-}
-
-// ── Token config (Gnosis Chain — kept for backwards compat) ──────────
-export const TOKENS: Record<string, { address: Address | null; decimals: number }> = {
-  'xDAI': { address: null, decimals: 18 },
-  'EURe': { address: '0xcB444e90D8198415266c6a2724b7900fb12FC56E' as Address, decimals: 18 },
-  'USDC.e': { address: '0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0' as Address, decimals: 6 },
-}
-
 /** Get token config map for a specific chain (address -> symbol, decimals). */
 export function getChainTokens(chainId: number): Record<string, { address: Address | null; decimals: number }> {
   const tokens = getChainConfig(chainId).tokens
@@ -151,49 +147,6 @@ export async function getSafeNonce(
     abi: SAFE_NONCE_ABI,
     functionName: 'nonce',
   }) as Promise<bigint>
-}
-
-/** Build Safe transaction params for a token transfer */
-export function buildSafeTx(
-  send: SendParams,
-  nonce: bigint,
-): SafeTxParams {
-  const rawAmount = parseUnits(send.amount, send.decimals)
-
-  if (send.tokenAddress) {
-    // ERC-20 transfer: call the token contract
-    const data = encodeFunctionData({
-      abi: ERC20_TRANSFER_ABI,
-      functionName: 'transfer',
-      args: [send.recipient, rawAmount],
-    })
-    return {
-      to: send.tokenAddress,
-      value: 0n,
-      data,
-      operation: 0,
-      safeTxGas: 0n,
-      baseGas: 0n,
-      gasPrice: 0n,
-      gasToken: ZERO_ADDRESS,
-      refundReceiver: ZERO_ADDRESS,
-      nonce,
-    }
-  }
-
-  // Native xDAI transfer
-  return {
-    to: send.recipient,
-    value: rawAmount,
-    data: '0x',
-    operation: 0,
-    safeTxGas: 0n,
-    baseGas: 0n,
-    gasPrice: 0n,
-    gasToken: ZERO_ADDRESS,
-    refundReceiver: ZERO_ADDRESS,
-    nonce,
-  }
 }
 
 /** Sign the Safe transaction using EIP-712 typed data */

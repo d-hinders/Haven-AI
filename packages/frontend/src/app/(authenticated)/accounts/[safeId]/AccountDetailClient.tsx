@@ -16,10 +16,10 @@ import { useContacts } from '@/hooks/useContacts'
 import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useUserSafes } from '@/hooks/useUserSafes'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
-import SendModal from '@/components/SendModal'
 import DelegationSendModal from '@/components/DelegationSendModal'
 import AccountSignersCard from '@/components/AccountSignersCard'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
+import RetiredRailNotice from '@/components/RetiredRailNotice'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -266,12 +266,17 @@ export default function AccountDetailClient() {
             <StatusBadge>{chain.name}</StatusBadge>
             {safeAddress && (
               <>
-                {/* Send exists on BOTH rails now (#1083): Safe accounts get
-                    the Safe transaction modal, delegation accounts the
-                    sponsored owner-send. */}
-                <Button onClick={() => setSendOpen(true)}>
-                  Send
-                </Button>
+                {/* #1083 gave Send to BOTH rails. #1989 (epic #1440) took it
+                    back off the legacy Safe rail: that path signed a Safe
+                    transaction through `SendModal`, which is deleted with the
+                    rail. Delegation accounts keep the sponsored owner-send.
+                    Hidden rather than disabled, per #1079 — a legacy account
+                    stays fully readable and simply offers no spend action. */}
+                {safe.account_type === 'delegator_hybrid' ? (
+                  <Button onClick={() => setSendOpen(true)}>
+                    Send
+                  </Button>
+                ) : null}
                 <Button variant="ghost" onClick={() => setReceiveOpen(true)}>
                   Receive
                 </Button>
@@ -313,6 +318,8 @@ export default function AccountDetailClient() {
           </div>
         }
       />
+
+      {safe.account_type !== 'delegator_hybrid' ? <RetiredRailNotice /> : null}
 
       <Card hover={false} elevation="raised" className="overflow-hidden">
         <Card.Header padding="none" className="px-5 py-5 sm:px-6">
@@ -644,23 +651,6 @@ export default function AccountDetailClient() {
           accountAddress={safeAddress}
           chainId={chainId}
           onSent={handleSendSuccess}
-        />
-      )}
-      {sendOpen && safeAddress && safe.account_type !== 'delegator_hybrid' && (
-        <SendModal
-          open
-          onClose={() => setSendOpen(false)}
-          safeAddress={safeAddress}
-          safeName={safe.name}
-          safeDetails={details}
-          balances={balances}
-          onSuccess={handleSendSuccess}
-          contacts={contacts}
-          contactsError={contactsError}
-          resolveAddress={resolveAddress}
-          chainId={chainId}
-          contextLoading={detailsLoading}
-          contextError={detailsError}
         />
       )}
       <ReceiveFundsModal

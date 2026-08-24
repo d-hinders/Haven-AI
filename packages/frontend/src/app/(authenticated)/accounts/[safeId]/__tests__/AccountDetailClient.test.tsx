@@ -61,10 +61,6 @@ vi.mock('@/components/transactions/TransactionsTable', () => ({
   default: () => <div>Transactions table</div>,
 }))
 
-vi.mock('@/components/SendModal', () => ({
-  default: () => null,
-}))
-
 vi.mock('@/components/ReceiveFundsModal', () => ({
   default: () => null,
 }))
@@ -286,6 +282,53 @@ describe('AccountDetailClient', () => {
 
   // #1089: backup & recovery is an account capability — it must work before
   // any agent exists, not gate on one.
+  /**
+   * #1989 (epic #1440). Both halves in one test on purpose: the deletion is a
+   * FORK, and #1984's lesson is that a guard against a fork must name its
+   * branch. Asserting only the legacy absence would be satisfied by removing
+   * Send from every account; asserting only the delegation presence would be
+   * satisfied by leaving the legacy path in place.
+   */
+  describe('owner send after the Safe-rail retirement (#1989)', () => {
+    it('offers no Send affordance on a legacy Safe account, and says why', () => {
+      render(<AccountDetailClient />)
+
+      // Positive control: the page rendered, and rendered READABLY — the
+      // epic's hard boundary. Without this the absence below is satisfied by a
+      // blank screen.
+      expect(screen.getByRole('heading', { name: 'Main account' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+
+      expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+      expect(
+        screen.getByText(/Haven no longer sends payments from this account/i),
+      ).toBeInTheDocument()
+    })
+
+    it('keeps Send on a delegation account and shows it no retirement note', () => {
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555',
+          safes: [{ ...SAFE, account_type: 'delegator_hybrid' }],
+        },
+        activeSafe: { ...SAFE, account_type: 'delegator_hybrid' },
+        setActiveSafe: vi.fn(),
+        loading: false,
+        passkeys: [],
+      })
+
+      render(<AccountDetailClient />)
+
+      expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+      expect(
+        screen.queryByText(/Haven no longer sends payments from this account/i),
+      ).toBeNull()
+    })
+  })
+
   it('renders backup & recovery for a delegation account with zero agents', () => {
     mockUseAuth.mockReturnValue({
       user: {

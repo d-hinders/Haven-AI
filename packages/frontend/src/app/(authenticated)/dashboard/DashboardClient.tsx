@@ -33,7 +33,6 @@ import { getStoredHybridSigners } from '@/lib/signer'
 import { useSafeApprovers } from '@/hooks/useSafeApprovers'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import ConnectAgentModal from '@/components/ConnectAgentModal'
-import SendModal from '@/components/SendModal'
 import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import AddFundsModal from '@/components/AddFundsModal'
@@ -465,16 +464,26 @@ function EmptyTransactionsIcon() {
   )
 }
 
+/**
+ * The "Needs attention" panel.
+ *
+ * #1989 (epic #1440) removed its SECOND row — "N agent payments need your
+ * action" with an "Open approvals" button. That row belonged entirely to the
+ * legacy Safe rail: `POST /approvals/:id/approve` answers 410 (#1986), the
+ * queue UI is deleted, and `/approvals` no longer routes, so the row could only
+ * ever count items the user has no way to act on and send them to a dead link.
+ * The delegation rail enforces budgets on-chain and produces no approvals.
+ *
+ * The overview-error row is untouched — it is rail-independent.
+ */
 function AttentionSection({
-  approvalActionCount,
   hasOverviewError,
   onRetry,
 }: {
-  approvalActionCount: number
   hasOverviewError: boolean
   onRetry: () => void
 }) {
-  if (!hasOverviewError && approvalActionCount === 0) return null
+  if (!hasOverviewError) return null
 
   return (
     // Anchor elevation — the "Needs attention" panel is the second-most
@@ -497,21 +506,6 @@ function AttentionSection({
             </div>
             <Button variant="ghost" size="sm" onClick={onRetry}>
               Try again
-            </Button>
-          </div>
-        ) : null}
-        {approvalActionCount > 0 ? (
-          <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-medium text-[var(--v2-ink)]">
-                {approvalActionCount} agent payment{approvalActionCount === 1 ? '' : 's'} {approvalActionCount === 1 ? 'needs' : 'need'} your action
-              </p>
-              <p className="mt-1 text-sm text-[var(--v2-ink-2)]">
-                Review payments that are waiting before any money moves.
-              </p>
-            </div>
-            <Button href="/approvals" size="sm">
-              Open approvals
             </Button>
           </div>
         ) : null}
@@ -747,17 +741,17 @@ export default function DashboardClient() {
     [activeSafe, safes],
   )
 
-  // Owner-initiated send is a Safe transaction; the delegation rail has no
-  // implementation of it yet, so those accounts are excluded from the send
-  // flow entirely (#1079 — hidden, not disabled).
-  const sendCapableSafes = useMemo(
-    () => safes.filter((safe) => safe.account_type !== 'delegator_hybrid'),
-    [safes],
-  )
+  // Owner-initiated send from the DASHBOARD is gone (#1989, epic #1440). It was
+  // a legacy-Safe transaction signed through `SendModal`, and that rail is
+  // retired — the modal and its `useSendTransaction` hook are deleted. The
+  // delegation rail's owner-send lives on the account detail page
+  // (`DelegationSendModal`) and is untouched. #1079's "hidden, not disabled"
+  // mechanism is reused: the hero's `canSend` is now constantly false, so no
+  // Send affordance renders and nothing dead-ends.
+  const canSendFromDashboard = false
 
   const [connectAgentOpen, setConnectAgentOpen] = useState(false)
-  const [pickerAction, setPickerAction] = useState<'send' | 'receive' | 'add-funds' | null>(null)
-  const [sendOpen, setSendOpen] = useState(false)
+  const [pickerAction, setPickerAction] = useState<'receive' | 'add-funds' | null>(null)
   const [receiveOpen, setReceiveOpen] = useState(false)
   const [addFundsOpen, setAddFundsOpen] = useState(false)
   const [agentUsageOpen, setAgentUsageOpen] = useState(false)
@@ -854,21 +848,14 @@ export default function DashboardClient() {
     chainId: selectedActionSafe?.chain_id,
   })
   const requiresOtherDevice = actionGate.kind === 'passkey_on_other_device'
-  const sendModalDataEnabled = sendOpen && Boolean(selectedActionSafe)
+  // The per-account balance/details reads existed only to populate `SendModal`,
+  // which is deleted (#1989). They stay wired but permanently disabled so the
+  // dashboard makes no chain-fed request it cannot use; `refetchSelectedBalances`
+  // is still called by `refreshDashboardData` and is a no-op while disabled.
+  const sendModalDataEnabled = false
   const {
-    balances: selectedSafeBalances,
-    loading: selectedSafeBalancesLoading,
-    error: selectedSafeBalancesError,
     refetch: refetchSelectedBalances,
   } = useBalances(
-    selectedActionSafe?.safe_address ?? null,
-    { enabled: sendModalDataEnabled, chainId: selectedActionSafe?.chain_id },
-  )
-  const {
-    details: selectedSafeDetails,
-    loading: selectedSafeDetailsLoading,
-    error: selectedSafeDetailsError,
-  } = useSafeDetails(
     selectedActionSafe?.safe_address ?? null,
     { enabled: sendModalDataEnabled, chainId: selectedActionSafe?.chain_id },
   )
@@ -879,9 +866,8 @@ export default function DashboardClient() {
   const monthlySpend = currency === 'EUR'
     ? (overview?.metrics.monthlyAgentSpendEur ?? 0)
     : (overview?.metrics.monthlyAgentSpendUsd ?? 0)
-  const approvalActionCount = overview?.actionableApprovals ?? overview?.pendingApprovals ?? 0
   const overviewUnavailable = Boolean(overviewError && !overview)
-  const hasAttention = Boolean(overviewError || approvalActionCount > 0)
+  const hasAttention = Boolean(overviewError)
   // Render the guide whenever the user has at least one Safe and either:
   // (a) they have unfinished steps and haven't dismissed the checklist, OR
   // (b) they've just finished all three steps and haven't dismissed the celebration.
@@ -903,23 +889,9 @@ export default function DashboardClient() {
     setConnectAgentOpen(true)
   }
 
-  function openHeroAction(action: 'send' | 'receive' | 'add-funds') {
+  function openHeroAction(action: 'receive' | 'add-funds') {
     if (safes.length === 0) {
       if (action === 'add-funds') setAddFundsOpen(true)
-      return
-    }
-
-    // #1079: sending is a Safe transaction — delegation accounts have no
-    // owner-send yet (follow-up feature), so the send flow only ever sees
-    // Safe-rail accounts. The hero hides Send when none exist.
-    if (action === 'send') {
-      if (sendCapableSafes.length === 0) return
-      if (sendCapableSafes.length > 1) {
-        setPickerAction('send')
-        return
-      }
-      setActionSafeId(sendCapableSafes[0].id)
-      setSendOpen(true)
       return
     }
 
@@ -945,7 +917,6 @@ export default function DashboardClient() {
 
   function handleActionSafeSelected(safeId: string) {
     setActionSafeId(safeId)
-    if (pickerAction === 'send') setSendOpen(true)
     if (pickerAction === 'receive') setReceiveOpen(true)
     if (pickerAction === 'add-funds') setAddFundsOpen(true)
     setPickerAction(null)
@@ -976,8 +947,8 @@ export default function DashboardClient() {
       fundingStateKnown={fundingStateKnown}
       watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
-      canSend={sendCapableSafes.length > 0}
-      onSend={() => openHeroAction('send')}
+      canSend={canSendFromDashboard}
+      onSend={() => {}}
       onReceive={() => openHeroAction('receive')}
       onAddFunds={() => openHeroAction('add-funds')}
     />
@@ -985,7 +956,6 @@ export default function DashboardClient() {
 
   const attentionPanel = (
     <AttentionSection
-      approvalActionCount={approvalActionCount}
       hasOverviewError={Boolean(overviewError)}
       onRetry={refetchOverview}
     />
@@ -1146,32 +1116,12 @@ export default function DashboardClient() {
 
       <DashboardActionPickerModal
         open={pickerAction !== null}
-        action={pickerAction ?? 'send'}
-        safes={pickerAction === 'send' ? sendCapableSafes : safes}
+        action={pickerAction ?? 'receive'}
+        safes={safes}
         onClose={() => setPickerAction(null)}
         onSelect={handleActionSafeSelected}
       />
 
-      {sendOpen && selectedActionSafe && selectedActionSafe.account_type !== 'delegator_hybrid' && (
-        <SendModal
-          open
-          onClose={() => setSendOpen(false)}
-          safeAddress={selectedActionSafe.safe_address}
-          safeName={selectedActionSafe.name}
-          safeDetails={selectedSafeDetails}
-          balances={selectedSafeBalances}
-          onSuccess={() => {
-            refreshDashboardData()
-            setSendOpen(false)
-          }}
-          contacts={contacts}
-          contactsError={contactsError}
-          resolveAddress={resolveAddress}
-          chainId={selectedActionSafe.chain_id ?? DEFAULT_CHAIN_ID}
-          contextLoading={selectedSafeBalancesLoading || selectedSafeDetailsLoading}
-          contextError={selectedSafeBalancesError ?? selectedSafeDetailsError}
-        />
-      )}
 
       <ReceiveFundsModal
         open={receiveOpen}

@@ -20,6 +20,22 @@ const SENDER = '0x55C9d84427756D6f82480427Bb778F6dc0cC755E'
 const TX_HASH = '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1'
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 
+/** SQL-routing feed mock — the db-mock ratchet (#1227) forbids growing the
+ * positional resolved-once chain in this file, so new feed tests route
+ * queries by table instead (same pattern as machine-payments.test.ts). */
+function routeFeedQueries(
+  rows: { payment_intents?: unknown[]; approval_requests?: unknown[] } = {},
+) {
+  return vi.spyOn(pool, 'query').mockImplementation(
+    (async (sql: unknown) => {
+      const text = String(sql)
+      if (text.includes('FROM payment_intents')) return { rows: rows.payment_intents ?? [] }
+      if (text.includes('FROM approval_requests')) return { rows: rows.approval_requests ?? [] }
+      return { rows: [] }
+    }) as never,
+  )
+}
+
 /** A distinct Safe address per cache-behavior test avoids cross-test cache pollution — the
  * module-level cache persists for the lifetime of this test file (see `#992 caching` below). */
 const CACHE_TEST_SAFE_ADDRESS_1 = '0xCACE00000000000000000000000000000000CAC1'
@@ -741,6 +757,156 @@ describe('mergeX402Transactions', () => {
       paymentFlowStatus: 'paid',
       paymentAttentionReason: null,
     })
+  })
+
+  it('carries settlement_scheme from machine_metadata on a confirmed x402 payment intent (eip3009)', async () => {
+    const spy = routeFeedQueries({
+      payment_intents: [
+        {
+          id: 'payment-id',
+          tx_hash: TX_HASH,
+          agent_id: 'agent-id',
+          agent_name: 'Research assistant',
+          safe_id: 'safe-id',
+          safe_address: SAFE_ADDRESS,
+          safe_name: 'Main wallet',
+          chain_id: 8453,
+          token_symbol: 'USDC',
+          token_address: USDC_ADDRESS,
+          to_address: '0x1111111111111111111111111111111111111111',
+          amount_raw: '20000',
+          amount_human: '0.02',
+          x402_merchant_address: '0x2222222222222222222222222222222222222222',
+          x402_resource_url: 'https://api.example.com/data',
+          payment_proof_status: 'payment_confirmed',
+          payment_reconciliation_event_type: null,
+          settlement_scheme: 'eip3009',
+          confirmed_at: '2026-05-08T11:50:10Z',
+          created_at: '2026-05-08T11:49:55Z',
+        },
+      ],
+    })
+
+    const result = await mergeX402Transactions(
+      'user-id',
+      [{ id: 'safe-id', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+      [],
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0].settlementScheme).toBe('eip3009')
+    // The SELECT itself reads the metadata key — asserted at the SQL level,
+    // not just by passing a pre-stamped row through the mapper.
+    expect(String(spy.mock.calls[0][0])).toContain('FROM payment_intents')
+    expect(String(spy.mock.calls[0][0])).toContain("machine_metadata->>'settlement_scheme'")
+  })
+
+  it('carries settlement_scheme from machine_metadata on an executed x402 approval request (erc7710)', async () => {
+    const spy = routeFeedQueries({
+      approval_requests: [
+        {
+          id: 'approval-id',
+          tx_hash: TX_HASH,
+          agent_id: 'agent-id',
+          agent_name: 'Research assistant',
+          safe_id: 'safe-id',
+          safe_address: SAFE_ADDRESS,
+          safe_name: 'Main wallet',
+          chain_id: 8453,
+          token_symbol: 'USDC',
+          token_address: USDC_ADDRESS,
+          to_address: '0x1111111111111111111111111111111111111111',
+          amount_raw: '10000',
+          amount_human: '0.01',
+          merchant_address: '0x2222222222222222222222222222222222222222',
+          payment_resource_url: 'https://mcp.soundside.ai/mcp',
+          payment_proof_status: 'payment_confirmed',
+          payment_reconciliation_event_type: null,
+          settlement_scheme: 'erc7710',
+          executed_at: '2026-05-22T07:50:10Z',
+          created_at: '2026-05-22T07:49:55Z',
+        },
+      ],
+    })
+
+    const result = await mergeX402Transactions(
+      'user-id',
+      [{ id: 'safe-id', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+      [],
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0].settlementScheme).toBe('erc7710')
+    expect(String(spy.mock.calls[1][0])).toContain('FROM approval_requests')
+    expect(String(spy.mock.calls[1][0])).toContain("machine_metadata->>'settlement_scheme'")
+  })
+
+  it('leaves settlementScheme null-in-null-out when the metadata key is absent', async () => {
+    routeFeedQueries({
+      payment_intents: [
+        {
+          id: 'payment-id',
+          tx_hash: TX_HASH,
+          agent_id: 'agent-id',
+          agent_name: 'Research assistant',
+          safe_id: 'safe-id',
+          safe_address: SAFE_ADDRESS,
+          safe_name: 'Main wallet',
+          chain_id: 8453,
+          token_symbol: 'USDC',
+          token_address: USDC_ADDRESS,
+          to_address: '0x1111111111111111111111111111111111111111',
+          amount_raw: '20000',
+          amount_human: '0.02',
+          x402_merchant_address: '0x2222222222222222222222222222222222222222',
+          x402_resource_url: 'https://api.example.com/data',
+          payment_proof_status: 'payment_confirmed',
+          payment_reconciliation_event_type: null,
+          confirmed_at: '2026-05-08T11:50:10Z',
+          created_at: '2026-05-08T11:49:55Z',
+        },
+      ],
+    })
+
+    const result = await mergeX402Transactions(
+      'user-id',
+      [{ id: 'safe-id', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+      [],
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0].settlementScheme).toBeUndefined()
+  })
+
+  it('keeps settlementScheme on a feed row when agent enrichment does not overwrite it', async () => {
+    routeFeedQueries()
+
+    const [result] = await enrichTransactionsWithAgents('user-id', [
+      {
+        hash: TX_HASH,
+        type: 'erc20',
+        from: SAFE_ADDRESS,
+        to: '0x1111111111111111111111111111111111111111',
+        value: '20000',
+        valueFormatted: '0.02',
+        asset: 'USDC',
+        decimals: 6,
+        direction: 'out',
+        timestamp: 1778240999,
+        blockNumber: 45725826,
+        isError: false,
+        tokenAddress: USDC_ADDRESS,
+        tokenSymbol: 'USDC',
+        chainId: 8453,
+        safeId: 'safe-id',
+        safeAddress: SAFE_ADDRESS,
+        safeName: 'Main wallet',
+        source: 'x402',
+        settlementScheme: 'eip3009',
+      } as EnrichedTransaction,
+    ])
+
+    expect(result.settlementScheme).toBe('eip3009')
   })
 
   it('marks x402 transactions with open merchant reconciliation as needing attention', async () => {

@@ -69,6 +69,7 @@ export async function fetchConfirmedX402Transactions(
       paymentFlowStatus: lifecycle.paymentFlowStatus,
       paymentAttentionReason: lifecycle.paymentAttentionReason,
       amountSek: row.amount_sek,
+      settlementScheme: row.settlement_scheme,
     }
   })
 
@@ -115,6 +116,7 @@ export async function fetchConfirmedX402Transactions(
       paymentFlowStatus: lifecycle.paymentFlowStatus,
       paymentAttentionReason: lifecycle.paymentAttentionReason,
       amountSek: row.amount_sek,
+      settlementScheme: row.settlement_scheme,
     }
   })
 

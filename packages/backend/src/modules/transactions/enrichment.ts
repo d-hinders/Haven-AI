@@ -41,6 +41,7 @@ export async function enrichTransactionsWithAgents(
         paymentAttentionReason: string | null
         activityType?: 'delegate_sweep'
         amountSek: string | null
+        settlementScheme?: string | null
       }
     >()
     for (const row of piRows) {
@@ -133,6 +134,7 @@ export async function enrichTransactionsWithAgents(
         paymentAttentionReason: agent?.paymentAttentionReason ?? tx.paymentAttentionReason,
         activityType: agent?.activityType ?? tx.activityType,
         amountSek: agent?.amountSek ?? tx.amountSek,
+        settlementScheme: agent?.settlementScheme ?? tx.settlementScheme,
       }
     })
   } catch {

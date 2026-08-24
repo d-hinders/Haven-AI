@@ -1826,7 +1826,16 @@ export default function DesignSystemPage() {
             which `aria-hidden` alone would not do. Same deliberate
             treatment design-system.md § 6 records for the modal demo.
           */}
-          <div inert aria-hidden="true" className="relative h-[260px] w-72">
+          <div className="min-h-[290px]">
+            {/*
+              `h-0`, not a tall box: the popover is `absolute right-0
+              top-full`, so it hangs BELOW its positioning parent — under
+              the trigger button, in the real call site. Giving the parent
+              a height pushes the popover that far down and out of the
+              section, which rendered this showcase BLANK. The outer
+              `min-h` is what reserves the space instead.
+            */}
+            <div inert aria-hidden="true" className="relative h-0 w-72">
             <WalletPopover
               primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
               signingWith={{
@@ -1843,6 +1852,7 @@ export default function DesignSystemPage() {
               switching={false}
               anchorRef={{ current: null }}
             />
+            </div>
           </div>
           {/*
             `inert` + `aria-hidden`: these are static ILLUSTRATIONS of a
@@ -1856,7 +1866,16 @@ export default function DesignSystemPage() {
             which `aria-hidden` alone would not do. Same deliberate
             treatment design-system.md § 6 records for the modal demo.
           */}
-          <div inert aria-hidden="true" className="relative h-[260px] w-72">
+          <div className="min-h-[290px]">
+            {/*
+              `h-0`, not a tall box: the popover is `absolute right-0
+              top-full`, so it hangs BELOW its positioning parent — under
+              the trigger button, in the real call site. Giving the parent
+              a height pushes the popover that far down and out of the
+              section, which rendered this showcase BLANK. The outer
+              `min-h` is what reserves the space instead.
+            */}
+            <div inert aria-hidden="true" className="relative h-0 w-72">
             <WalletPopover
               primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
               signingWith={{
@@ -1873,6 +1892,7 @@ export default function DesignSystemPage() {
               switching={false}
               anchorRef={{ current: null }}
             />
+            </div>
           </div>
         </div>
       </Section>

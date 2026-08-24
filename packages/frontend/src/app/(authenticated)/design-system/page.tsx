@@ -1414,7 +1414,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Transaction history"
-        description="Tables render through the Table primitive: Table.Head (collapses below md, optional sticky), Table.HeaderCell (srLabel for icon columns, hideBelowMd for the responsive-collapse pattern), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews. Columns are revealed in TWO stages, not one: From / To at md, Initiator and Date at xl. The app shell's sidebar arrives at lg (240px + 1px border) and main's padding steps p-6 to lg:p-8 at the same breakpoint, so 257px is handed back at once and content width is a sawtooth in viewport width — 768px and 1024px both leave this table 718px. Revealing every column at md starved the Activity measure at both."
+        description="Tables render through the Table primitive: Table.Head (collapses below md, optional sticky), Table.HeaderCell (srLabel for icon columns, hideBelowMd for the responsive-collapse pattern), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
       >
         <Card hover={false} className="overflow-hidden">
           <Table>

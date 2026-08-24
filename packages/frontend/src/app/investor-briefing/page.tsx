@@ -4,6 +4,7 @@ import { HeroBackdrop } from '@/components/marketing/HeroBackdrop'
 import { Card } from '@/components/ui/Card'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { BrandBandButton } from '@/components/marketing/BrandBandButton'
+import { TrailingArrow } from '@/components/marketing/TrailingArrow'
 
 const CONTACT_TEAM_HREF =
   'mailto:daniel.hinders@gmail.com?subject=Haven%20investor%20briefing'
@@ -536,7 +537,30 @@ function InvestorButton({
   variant: 'primary' | 'ghost'
   size?: 'sm' | 'lg'
 }) {
-  const sizeClass = size === 'sm' ? 'h-9 px-3.5 text-[13px]' : 'h-11 px-5 text-[15px]'
+  // `sm` paints 36px and `lg` paints 44px. MEASURED at 393px (Pixel 5) with
+  // `elementFromPoint`, before this: the sticky header's `sm` CTA had a hit
+  // rectangle of exactly 150x36 — the border box and nothing more — while the
+  // hero's `lg` read 44. So the shortfall was 8px of real, tappable height on a
+  // control `sticky top-0` keeps on screen for all 6,140px of this page (#1955).
+  //
+  // The remedy is `ui/Button`'s: a transparent `::after` extends the HIT AREA to
+  // 44px while the painted box stays 36px. Raising the paint is deliberately not
+  // done — the header band's density depends on it, and #1726 rejected that same
+  // remedy in the product app for the same reason.
+  //
+  // Borrowed rather than shared, because this is not a `Button` and #1766
+  // records that the rule outlives the primitive. `relative` comes WITH it here:
+  // this `<a>` is statically positioned, so the overlay has no containing block
+  // otherwise. (The nav toggle #1766 fixed is `fixed`, already its own
+  // containing block, and taking `relative` there would have unpositioned it —
+  // that is the case the "must not take `relative`" note is about, not this one.)
+  //
+  // Vertical only, for #1726's reason: growing the target sideways would let it
+  // swallow taps meant for a neighbour. `lg` is already 44px and gets nothing.
+  const sizeClass =
+    size === 'sm'
+      ? "h-9 px-3.5 text-[13px] relative after:absolute after:inset-x-0 after:top-1/2 after:h-11 after:-translate-y-1/2 after:content-['']"
+      : 'h-11 px-5 text-[15px]'
   const variantClass =
     variant === 'primary'
       ? 'bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)] shadow-button'
@@ -548,34 +572,11 @@ function InvestorButton({
       className={`inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] ${sizeClass} ${variantClass}`}
     >
       {children}
-      <ArrowIcon />
+      <TrailingArrow />
     </a>
   )
 }
 
-/**
- * The same decorative trailing arrow as `BrandBandButton`'s, on this page's own
- * light-background button. `aria-hidden` for the same reason and by the same
- * `Icon`-style convention (#1940): every `InvestorButton` carries its own text,
- * and the two "Contact the team" buttons on this page — plus the band CTA at
- * the foot of it — all render an IDENTICAL arrow, so the glyph distinguishes
- * nothing and only adds noise to the announcement.
- */
-function ArrowIcon() {
-  return (
-    <svg
-      className="w-3.5 h-3.5"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      aria-hidden="true"
-      focusable={false}
-    >
-      <path d="M3.5 8h9M9 4.5L12.5 8 9 11.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
 
 function ControlSurfaceMock() {
   return (

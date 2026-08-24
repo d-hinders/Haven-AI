@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
+import { TrailingArrow } from '@/components/marketing/TrailingArrow'
 
 /**
  * The call-to-action pair inside a dark brand band (#1867).
@@ -109,21 +110,6 @@ const VARIANT_CLASS: Record<Variant, string> = {
  * applies to every decorative glyph in the product app; this is the same
  * decision spelled by hand because the marketing arrow is not a lucide glyph.
  */
-function TrailingArrow() {
-  return (
-    <svg
-      className="w-3.5 h-3.5"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      aria-hidden="true"
-      focusable={false}
-    >
-      <path d="M3.5 8h9M9 4.5L12.5 8 9 11.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
 
 type BrandBandButtonProps = {
   children: ReactNode

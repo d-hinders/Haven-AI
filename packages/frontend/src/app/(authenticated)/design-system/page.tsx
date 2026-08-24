@@ -1414,7 +1414,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Transaction history"
-        description="Tables render through the Table primitive: Table.Head (collapses below md, optional sticky), Table.HeaderCell (srLabel for icon columns, hideBelowMd for the responsive-collapse pattern), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
+        description="Tables render through the Table primitive: Table.Head (collapses below md, optional sticky), Table.HeaderCell (srLabel for icon columns, hideBelowMd for the responsive-collapse pattern), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews. Columns are revealed in TWO stages, not one: From / To at md, Initiator and Date at xl. The app shell's sidebar arrives at lg and takes 256px back, so content width is a sawtooth in viewport width — 768px and 1024px both leave this table 718px. Revealing every column at md starved the Activity measure at both."
       >
         <Card hover={false} className="overflow-hidden">
           <Table>
@@ -1422,9 +1422,33 @@ export default function DesignSystemPage() {
               <tr>
                 <Table.HeaderCell srLabel="Direction" className="w-10" />
                 <Table.HeaderCell align="left">Activity</Table.HeaderCell>
-                <Table.HeaderCell align="left" hideBelowMd>Initiator</Table.HeaderCell>
+                {/* Initiator and Date reveal at `xl`, not `md` (#1827).
+                    MEASURED, Failed row title measure / lines / row height on
+                    the seven-columns-at-md layout: 71.1px / 5 / 156 at 768px,
+                    82.5px / 4 / 132 at 800px, 118px / 3 / 92 at 900px, then
+                    71.1px / 5 / 156 AGAIN at 1024px. The repeat is the whole
+                    point: the shell's sidebar lands at `lg` and hands back
+                    256px, so content width is a SAWTOOTH — 717.9px at both
+                    768px and 1024px, 973px at both 1023px and 1279px. A fix
+                    keyed to "the md breakpoint" would have left 1024px broken.
+                    `xl` is the first viewport where content clears 974px on
+                    BOTH teeth, which is why the ladder steps there and not at
+                    `lg`.
+                    Pinning the md+ columns the way `TransactionsTable` does
+                    was tried during #1774 and is NOT the answer — it grew
+                    desktop rows 85px -> 133px, because a 140px `From / To`
+                    wraps this showcase's longer names. Nothing is dropped
+                    here: the date rides under the Amount until `xl` (the same
+                    place the below-md layout puts it), and the initiator is
+                    already named inside the title at these widths.
+                    After: 141.7px / 2 / 100 at 768px and 1024px; 1280px is
+                    unchanged to the pixel, so no visual baseline moves.
+                    Gated by geometry in `e2e/transaction-title-measure.spec.ts`
+                    — the pixel gate renders 1280 and 390 only, so it cannot
+                    see any width this is about. */}
+                <Table.HeaderCell align="left" className="hidden xl:table-cell">Initiator</Table.HeaderCell>
                 <Table.HeaderCell align="left" hideBelowMd>From / To</Table.HeaderCell>
-                <Table.SortableHeaderCell label="Date" direction="desc" onSort={() => toast.info('Sorts the loaded set')} hideBelowMd />
+                <Table.SortableHeaderCell label="Date" direction="desc" onSort={() => toast.info('Sorts the loaded set')} className="hidden xl:table-cell" />
                 <Table.SortableHeaderCell label="Amount" direction={null} onSort={() => toast.info('Sorts the loaded set')} align="right" />
                 <Table.HeaderCell srLabel="External details" className="w-8" />
               </tr>
@@ -1530,20 +1554,20 @@ export default function DesignSystemPage() {
                       <TransactionMovement from={row.from} to={row.to} />
                     </div>
                   </td>
-                  <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-2)] md:table-cell">
+                  <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-2)] xl:table-cell">
                     {row.initiator}
                   </td>
                   <td className="hidden px-4 py-4 align-middle md:table-cell">
                     <TransactionMovement from={row.from} to={row.to} />
                   </td>
-                  <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] md:table-cell">
+                  <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] xl:table-cell">
                     {row.date}
                   </td>
                   <td className="w-[110px] px-2 py-4 align-middle text-right md:w-auto md:px-4">
                     <p>
                       <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
                     </p>
-                    <p className="mt-1 text-xs text-[var(--v2-ink-3)] md:hidden">{row.date}</p>
+                    <p className="mt-1 text-xs text-[var(--v2-ink-3)] xl:hidden">{row.date}</p>
                   </td>
                   <td className="w-8 px-2 py-4 align-middle text-right md:w-auto md:px-4">
                     <ExternalDetailsLink href="#" />

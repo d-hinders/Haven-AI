@@ -16,12 +16,22 @@
  *
  * **What it can and cannot see.** It reads the seed's call sites statically and
  * checks them against the app's own registration table, so it catches the two
- * ways a route has actually been retired here — a `retired*()` route option
- * (#1984's `retiredSafeInflow`, #1986's `retiredApprovalTransition`) and
- * outright deletion of the registration. It does NOT see a handler that starts
- * returning 410 from its own body with no marker, and it says nothing about
- * whether a live route still behaves the way the seed needs. It is a
- * liveness check on the seed's route surface, not a contract test.
+ * ways a route has actually been retired here: a `retired*()` symbol named
+ * immediately after the path in the registration, and outright deletion of the
+ * registration.
+ *
+ * The first rule is deliberately shaped around the POSITION rather than the
+ * role, because the role has already moved once. #1984 passed
+ * `retiredSafeInflow(kind)` as a route OPTION with the original handler still
+ * behind it; #1988 deleted those handlers and passed
+ * `retiredSafeInflowHandler(kind)` as the handler ITSELF. Both spellings put
+ * the symbol in the same argument slot, so both match — but that was
+ * re-checked by mutation after the #1988 merge, not assumed.
+ *
+ * It does NOT see a handler that returns 410 from its own body with no such
+ * marker, and it says nothing about whether a live route still behaves the way
+ * the seed needs. It is a liveness check on the seed's route surface, not a
+ * contract test.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -61,7 +71,7 @@ function extractSeedCalls(source: string): string[] {
   return [...calls].sort()
 }
 
-/** Routes registered with a `retired*()` route option — permanently gone. */
+/** Routes whose registration names a `retired*()` symbol after the path — permanently gone. */
 function extractRetiredRoutes(source: string): { method: string; path: string }[] {
   const re =
     /\.(get|post|put|patch|delete)[^'"`(]*\(\s*(['"`])([^'"`]+)\2\s*,\s*retired[A-Za-z]*\(/g

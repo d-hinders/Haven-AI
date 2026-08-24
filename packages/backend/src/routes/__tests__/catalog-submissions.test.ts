@@ -402,3 +402,111 @@ describe('catalog /submit rate-limit tier (epic #1717 #1711)', () => {
     expect(last).toBe(429)
   })
 })
+
+describe('catalog /submit/:id status (epic #1717 #1715)', () => {
+  let app: FastifyInstance
+  let secretApp: FastifyInstance
+
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
+    await app.ready()
+    secretApp = Fastify({ logger: false })
+    await secretApp.register(catalogSubmissionRoutes, {
+      prefix: '/catalog',
+      ownershipSecret: 'test-ownership-secret-not-a-real-key',
+    })
+    await secretApp.ready()
+  })
+
+  afterAll(async () => {
+    await app.close()
+    await secretApp.close()
+  })
+
+  beforeEach(() => {
+    mockQuery.mockReset()
+  })
+
+  const SUBMISSION = '00000000-0000-4000-8000-000000000001'
+
+  function row(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      ...pendingRow(),
+      last_verified_at: null,
+      name: null,
+      description: null,
+      entrypoint: null,
+      ...overrides,
+    }
+  }
+
+  it('404s for an unknown submission id', async () => {
+    mockQuery.mockResolvedValue({ rows: [] } as never)
+    const res = await app.inject({ method: 'GET', url: `/catalog/submit/${SUBMISSION}` })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('returns coarse status and NEVER the verify_token or submitter ip', async () => {
+    mockQuery.mockResolvedValue({
+      rows: [
+        row({
+          status: 'verified_payable',
+          verify_token: 'a'.repeat(48),
+          submitter_ip: '203.0.113.9',
+          last_verified_at: '2026-08-23T10:00:00.000Z',
+          name: 'Summarizer',
+          description: 'Summarizes docs',
+          entrypoint: 'summarize',
+        }),
+      ],
+    } as never)
+    const res = await app.inject({ method: 'GET', url: `/catalog/submit/${SUBMISSION}` })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({
+      id: SUBMISSION,
+      status: 'verified_payable',
+      last_verified_at: '2026-08-23T10:00:00.000Z',
+      name: 'Summarizer',
+    })
+    expect(res.json().verify_token).toBeUndefined()
+    expect(res.json().submitter_ip).toBeUndefined()
+  })
+
+  it('includes the well-known / DNS-TXT proof instructions while the row can still prove ownership', async () => {
+    mockQuery.mockResolvedValue({ rows: [row({ status: 'submitted' })] } as never)
+    const res = await secretApp.inject({ method: 'GET', url: `/catalog/submit/${SUBMISSION}` })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.instructions).toBeDefined()
+    expect(body.instructions.expires_at).toBeDefined()
+    expect(body.instructions.well_known.url).toContain(`/.well-known/haven-verify-`)
+    expect(body.instructions.well_known.content).toMatch(/^haven-domain-verification=v1\./)
+    expect(body.instructions.dns_txt.name).toContain(`_haven-verify.${HOST}`)
+    // The token itself still never crosses the wire.
+    expect(body.verify_token).toBeUndefined()
+  })
+
+  it('omits instructions for verified_payable, failed and delisted rows', async () => {
+    for (const status of ['verified_payable', 'failed', 'delisted']) {
+      mockQuery.mockReset()
+      mockQuery.mockResolvedValue({ rows: [row({ status })] } as never)
+      const res = await secretApp.inject({ method: 'GET', url: `/catalog/submit/${SUBMISSION}` })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().status).toBe(status)
+      expect(res.json().instructions).toBeUndefined()
+    }
+  })
+
+  it('never returns internal failure detail — only the coarse status', async () => {
+    mockQuery.mockResolvedValue({ rows: [row({ status: 'failed' })] } as never)
+    const res = await app.inject({ method: 'GET', url: `/catalog/submit/${SUBMISSION}` })
+    const body = res.json()
+    expect(body.status).toBe('failed')
+    expect(body.detail).toBeUndefined()
+    expect(body.attempts).toBeUndefined()
+    expect(Object.keys(body).sort()).toEqual(
+      ['created_at', 'description', 'entrypoint', 'id', 'last_verified_at', 'name', 'status', 'updated_at'].sort(),
+    )
+  })
+})

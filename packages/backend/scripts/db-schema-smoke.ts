@@ -289,6 +289,8 @@ import {
   MARK_CATALOG_SUBMISSION_FAILED_SQL,
   COUNT_STUCK_CATALOG_SUBMISSIONS_SQL,
   DELETE_TERMINAL_CATALOG_SUBMISSIONS_BEFORE_SQL,
+  GET_CATALOG_SUBMISSION_SQL,
+  LIST_VERIFIED_CATALOG_SUBMISSIONS_SQL,
 } from '../src/infra/repositories/catalog-submissions.js'
 import {
   FIND_CURRENCY_PREFERENCE_SQL,
@@ -801,6 +803,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'catalog-lifecycle: -> failed', sql: MARK_CATALOG_SUBMISSION_FAILED_SQL },
   { name: 'catalog-lifecycle: stuck submitted count', sql: COUNT_STUCK_CATALOG_SUBMISSIONS_SQL },
   { name: 'catalog-lifecycle: purge terminal rows past TTL', sql: DELETE_TERMINAL_CATALOG_SUBMISSIONS_BEFORE_SQL },
+  { name: 'catalog-status: submission by id', sql: GET_CATALOG_SUBMISSION_SQL },
+  { name: 'catalog-listing: verified ingestion rows', sql: LIST_VERIFIED_CATALOG_SUBMISSIONS_SQL },
 ]
 
 async function main(): Promise<void> {

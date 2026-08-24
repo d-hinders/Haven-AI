@@ -334,3 +334,58 @@ export async function deleteTerminalCatalogSubmissionsBefore(
   ])
   return result.rowCount ?? 0
 }
+
+// ---------------------------------------------------------------------------
+// Read-back for the status surface (#1715): one row by id, full lifecycle
+// columns, so the public status endpoint can render current state without the
+// caller ever seeing `verify_token` (the route decides what crosses the wire).
+// ---------------------------------------------------------------------------
+
+export interface CatalogSubmissionDetail extends CatalogLifecycleRow {
+  resource_url: string
+  updated_at: string
+  last_verified_at: string | null
+  failed_at: string | null
+  name: string | null
+  description: string | null
+  entrypoint: string | null
+}
+
+export const GET_CATALOG_SUBMISSION_SQL = `
+  SELECT id, hostname, resource_url, status, submitter_ip, verify_token,
+         created_at, updated_at, last_verified_at, consecutive_failures,
+         failed_at, name, description, entrypoint
+  FROM catalog_submissions
+  WHERE id = $1
+  LIMIT 1`
+
+export async function getCatalogSubmission(
+  id: string,
+  db: Executor = pool,
+): Promise<CatalogSubmissionDetail | null> {
+  const result = await db.query<CatalogSubmissionDetail>(GET_CATALOG_SUBMISSION_SQL, [id])
+  return result.rows[0] ?? null
+}
+
+/** Verified, listable rows — the ingestion half of the public catalogue. */
+export const LIST_VERIFIED_CATALOG_SUBMISSIONS_SQL = `
+  SELECT id, resource_url, name, description, entrypoint, last_verified_at
+  FROM catalog_submissions
+  WHERE status = 'verified_payable'
+  ORDER BY name ASC NULLS LAST, id ASC`
+
+export interface VerifiedCatalogListingRow {
+  id: string
+  resource_url: string
+  name: string | null
+  description: string | null
+  entrypoint: string | null
+  last_verified_at: string | null
+}
+
+export async function listVerifiedCatalogSubmissions(
+  db: Executor = pool,
+): Promise<VerifiedCatalogListingRow[]> {
+  const result = await db.query<VerifiedCatalogListingRow>(LIST_VERIFIED_CATALOG_SUBMISSIONS_SQL)
+  return result.rows
+}

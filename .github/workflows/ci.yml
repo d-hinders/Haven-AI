@@ -501,6 +501,30 @@ jobs:
           name: frontend-next-build
           path: packages/frontend/.next
 
+      # This job DOWNLOADS the frontend build instead of running it, so nothing
+      # here ever builds the workspace's own packages — and `@haven_ai/core` is
+      # published from `dist/`, which `npm ci` does not create. That was
+      # invisible for as long as the visual specs imported only app code: the
+      # prebuilt `.next` already has core bundled INTO it, so the web server
+      # starts fine and only the Playwright process is missing the module.
+      #
+      # #1930 made a visual spec import the shared chain registry (the
+      # AllowanceModule and token addresses its on-chain fixture answers with,
+      # read from `@haven_ai/core` rather than hard-coded — a fixture that
+      # restates a contract address silently stops matching the product the day
+      # the registry moves). The run then died at COLLECTION with
+      # `Cannot find module '@haven_ai/core/dist/index.cjs'`: zero tests ran,
+      # zero pixels were compared, and no diff artifact was produced. That
+      # failure mode is worth naming, because it presents as a red pixel gate
+      # and reads like a baseline problem — it is not one.
+      #
+      # `Update visual baselines` never hit this: it runs
+      # `npm run build -w packages/frontend`, which builds core as a workspace
+      # dependency. So the two halves of the same gate disagreed about what was
+      # on disk — regeneration succeeded and comparison could not start.
+      - name: Build core (the visual specs' chain fixture imports it)
+        run: npm run build -w packages/core
+
       - name: Restore Playwright browser cache
         id: playwright-cache
         uses: actions/cache@v4

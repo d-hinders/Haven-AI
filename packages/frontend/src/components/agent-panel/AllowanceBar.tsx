@@ -26,7 +26,21 @@ export function AllowanceBar({
   // non-null whenever real allowances render. The fallback only covers the
   // brief pre-load frame (where `loading` is already shown); the reset decision
   // must otherwise use chain time, never the device clock.
+  //
+  // ONE clock for the whole row (#1995). `nowSec` decides *whether* the
+  // allowance has reset; `nowMs` formats *how long until* it does. They are the
+  // same instant by construction, so the two halves of that sentence can no
+  // longer disagree. Before this, the countdown read `Date.now()` inside
+  // `timeUntil` — one line below the comment above saying the device clock must
+  // never be used — and any skew that pushed a near-boundary reset past zero
+  // rendered "Resets in now" for an allowance the component had just decided
+  // has NOT reset. Do not read a second clock here, even one that would
+  // usually agree — including in the fallback branch above, which is exactly
+  // why `nowMs` is derived FROM `nowSec` rather than read alongside it. Note
+  // what that does and does not buy: `timeUntil`'s parameter makes the clock
+  // visible at the call site, it does not make a wrong one impossible.
   const nowSec = chainTimeSec ?? Math.floor(Date.now() / 1000)
+  const nowMs = nowSec * 1000
   const effective = computeEffectiveAllowance(info, nowSec)
   const total = info.amount
   const spent = effective.effectiveSpent
@@ -98,12 +112,12 @@ export function AllowanceBar({
       )}
       {!effective.isResetPending && effective.nextResetTime && (
         <p className="text-xs text-[var(--v2-ink-3)]">
-          Resets in {timeUntil(effective.nextResetTime)}
+          Resets in {timeUntil(effective.nextResetTime, nowMs)}
         </p>
       )}
       {remaining === 0n && total > 0n && !effective.isResetPending && (
         <p className="text-xs text-[var(--v2-danger)]">
-          Fully spent{info.resetTimeMin > 0 ? ' — resets ' + (effective.nextResetTime ? 'in ' + timeUntil(effective.nextResetTime) : 'next period') : ''}
+          Fully spent{info.resetTimeMin > 0 ? ' — resets ' + (effective.nextResetTime ? 'in ' + timeUntil(effective.nextResetTime, nowMs) : 'next period') : ''}
         </p>
       )}
     </div>

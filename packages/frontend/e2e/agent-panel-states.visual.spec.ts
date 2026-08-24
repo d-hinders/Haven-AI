@@ -286,14 +286,24 @@ const UNMANAGED_RESET_MIN = 1440
  * fill — and is still deterministic, because it is derived from the fixture's
  * own fixed block timestamp rather than from the wall clock.
  *
- * ONE line of the resulting capture is not chain-derived, and it is called out
- * rather than left to be rediscovered as a mystery diff. `AllowanceBar` decides
- * the reset from `chainTimeSec` but formats the countdown beneath it with
- * `timeUntil`, which is `Date.now()`-based (`AllowanceBar.tsx:99-101`,
- * `lib/format.ts:58-71`) — filed as #1995. Because `FIXTURE_BLOCK_TIMESTAMP` is
- * permanently in the past, that string is pinned at its terminal value and the
- * baseline is stable; it would only move if someone advanced the fixture block
- * to within a period of the present, which is worth knowing before doing it.
+ * EVERY line of the resulting capture is now chain-derived, and the one that
+ * was not is worth recording because the baseline moved when it was fixed.
+ * `AllowanceBar` decided the reset from `chainTimeSec` but formatted the
+ * countdown beneath it from `Date.now()` — filed as #1995, fixed by threading
+ * the same `nowSec` into the formatter. Two corrections to what this comment
+ * said before: the call site binds `agent-panel/agent-display.tsx`'s
+ * `timeUntil`, NOT `lib/format.ts`'s (two same-named helpers; a grep for
+ * `timeUntil` cannot say which one a call site resolves to), and its cliff
+ * string is therefore `now`, not `expired`.
+ *
+ * The concrete consequence for this baseline: the row used to render
+ * "Resets in now" — the terminal value, because `FIXTURE_BLOCK_TIMESTAMP` is
+ * permanently in the past — beside a bar drawn from a decision that the reset
+ * had NOT happened. It now renders "Resets in 18h 0m", which is what six hours
+ * into a daily period actually leaves. The string is still pinned, and now for
+ * a better reason: it is a function of the fixture block and the row alone, so
+ * advancing the fixture block no longer moves it in a way the wall clock
+ * decides.
  */
 const UNMANAGED_LAST_RESET_MIN = Math.floor(FIXTURE_BLOCK_TIMESTAMP / 60) - 360
 

@@ -20,7 +20,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-08-21" # #1882: front-matter only — the `last-verified` chain had DROPPED `#1515`. Same shape as `07-edge-signer.md`: the note at `b3627c15` (PR #1517, 2026-08-17) chained but compressed #1516's entry to "added the merchant-reason surfacing", and `#1515` was cited inside the prose it dropped. #1516's original entry is restored verbatim from `b3627c15^` at the chain tail. Nothing in the body was re-verified in this pass. #1674: the x402-erc7710-fresh-agent leg is added — the cold-start counterfactual case #1667 fixed, previously invisible because every QA identity was long-lived and already deployed; the scenario table gains its row, and the throwaway-identity provisioning is absorbed into lib/throwaway-identity.ts (delegation-lifecycle now consumes it too, behaviour unchanged and its suite green). Prior: #1578: unknown MCP session ids now fail closed (404/-32001) before the payment gate; the stale-session troubleshooting entry documents the re-initialize remedy and separates it from payment refusals. Prior: #1547: x402-catalog-guided-purchase is scheme-aware — the guided prepare now runs the #1450 settlement-scheme preference, so the leg's erc7710 shape (haven_sign, settle by payment_id+signature only, inverted money proof: funding_tx_hash is a FAILURE, delegate untouched, treasury→merchant direct) is expected on dev and the 3009 two-leg proof stays as the fallback shape; the scenario table row and the guided-leg prose section are updated to match. No env, secret, or gating change. Prior: #1531: adds "What this session cannot see, and what to ask for" — the out-of-reach table and the ordered ask-for list, linked from Troubleshooting. Documentation only, deliberately not a gate: the fixable gap was that the request list did not exist. Prior: #1533/#1534: the legacy-rail `x402-settle` and `x402-sweep-recovery` legs removed — x402 coverage is delegation-rail only; the scenario table is now eleven legs (matching the count the prose already claimed). Reviewer correction: this is an ACCEPTED COVERAGE LOSS, not a deduplication — the legacy x402 execute branch now has no live leg; the "sixth scenario" ordinal is replaced by the scenario name so it cannot drift again. Prior: #1530: the preflight now reports every consumable resource before the first leg and refuses to run when one is below floor; the demo-merchant settlement wallet is added to the funding table it was missing from, and its balance is read from the merchant's own /healthz because the address derives from SETTLEMENT_PRIVATE_KEY in the merchant env. No harness credential, target, or scenario semantics change. Prior: #1519: merchant checks authorizationState/balanceOf before submitting, so an already-settled purchase serves the goods instead of 402ing a paid buyer; Troubleshooting gains "a merchant 402 that the chain says was paid". Prior: #1517: merchant faults are reported (and logged) as faults rather than collapsing to "Payment failed"; Troubleshooting now covers three 402 shapes — rejection, fault, bare challenge. Prior: #1516 added the merchant-reason surfacing; #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added) Prior: #1516: x402 legs now append the merchant's own 402 reason instead of a fixed string, and Troubleshooting explains the two 402 shapes (rejection vs lost session, #1515).
+last-verified: "2026-08-25" # #2007: the seed is re-based on the DELEGATION RAIL — it no longer deploys a Safe or calls `POST /user/safes` (410 since #1984; an `allowance_module` account also cannot pay since #1986), and instead provisions a Hybrid DeleGator via `POST /accounts/hybrid` plus an owner-signed budget delegation. Re-verified and corrected in this pass: the seed env block (`SEED_RPC_URL` removed — the seed opens no RPC connection), the funding table (owner EOA needs no ETH; "Safe" row becomes the Hybrid account), the "Run the seed locally" step list, and the `could not decode result data` troubleshooting entry (replaced by a `410` entry). Also recorded: the seed no longer produces `QA_AGENT_API_KEY`/`QA_DELEGATE_PRIVATE_KEY`, which `loadQaConfig` still requires and three legacy legs still consume — tracked separately, NOT fixed here. The scenario table, the harness sections and the merchant/hosted-leg prose were NOT re-verified in this pass. Prior: #1882: front-matter only — the `last-verified` chain had DROPPED `#1515`. Same shape as `07-edge-signer.md`: the note at `b3627c15` (PR #1517, 2026-08-17) chained but compressed #1516's entry to "added the merchant-reason surfacing", and `#1515` was cited inside the prose it dropped. #1516's original entry is restored verbatim from `b3627c15^` at the chain tail. Nothing in the body was re-verified in this pass. #1674: the x402-erc7710-fresh-agent leg is added — the cold-start counterfactual case #1667 fixed, previously invisible because every QA identity was long-lived and already deployed; the scenario table gains its row, and the throwaway-identity provisioning is absorbed into lib/throwaway-identity.ts (delegation-lifecycle now consumes it too, behaviour unchanged and its suite green). Prior: #1578: unknown MCP session ids now fail closed (404/-32001) before the payment gate; the stale-session troubleshooting entry documents the re-initialize remedy and separates it from payment refusals. Prior: #1547: x402-catalog-guided-purchase is scheme-aware — the guided prepare now runs the #1450 settlement-scheme preference, so the leg's erc7710 shape (haven_sign, settle by payment_id+signature only, inverted money proof: funding_tx_hash is a FAILURE, delegate untouched, treasury→merchant direct) is expected on dev and the 3009 two-leg proof stays as the fallback shape; the scenario table row and the guided-leg prose section are updated to match. No env, secret, or gating change. Prior: #1531: adds "What this session cannot see, and what to ask for" — the out-of-reach table and the ordered ask-for list, linked from Troubleshooting. Documentation only, deliberately not a gate: the fixable gap was that the request list did not exist. Prior: #1533/#1534: the legacy-rail `x402-settle` and `x402-sweep-recovery` legs removed — x402 coverage is delegation-rail only; the scenario table is now eleven legs (matching the count the prose already claimed). Reviewer correction: this is an ACCEPTED COVERAGE LOSS, not a deduplication — the legacy x402 execute branch now has no live leg; the "sixth scenario" ordinal is replaced by the scenario name so it cannot drift again. Prior: #1530: the preflight now reports every consumable resource before the first leg and refuses to run when one is below floor; the demo-merchant settlement wallet is added to the funding table it was missing from, and its balance is read from the merchant's own /healthz because the address derives from SETTLEMENT_PRIVATE_KEY in the merchant env. No harness credential, target, or scenario semantics change. Prior: #1519: merchant checks authorizationState/balanceOf before submitting, so an already-settled purchase serves the goods instead of 402ing a paid buyer; Troubleshooting gains "a merchant 402 that the chain says was paid". Prior: #1517: merchant faults are reported (and logged) as faults rather than collapsing to "Payment failed"; Troubleshooting now covers three 402 shapes — rejection, fault, bare challenge. Prior: #1516 added the merchant-reason surfacing; #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added) Prior: #1516: x402 legs now append the merchant's own 402 reason instead of a fixed string, and Troubleshooting explains the two 402 shapes (rejection vs lost session, #1515).
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -102,7 +102,6 @@ Keep credential files outside the repository. Example
 
 ```bash
 SEED_HAVEN_API_URL=https://havenbackend-dev-8b95.up.railway.app
-SEED_RPC_URL=https://sepolia.base.org
 SEED_OWNER_PRIVATE_KEY=<throwaway Base Sepolia owner key>
 SEED_DELEGATE_ADDRESS=<address derived from the QA delegate key>
 SEED_PAYMENT_TO=<Base Sepolia recipient address>
@@ -115,13 +114,18 @@ SEED_RESET_MIN=1440
 The seed accepts the delegate **address**, not its private key. Haven must never
 receive or store the owner or delegate private key.
 
+`SEED_ALLOWANCE_USDC` and `SEED_RESET_MIN` keep their AllowanceModule-era names
+so an existing operator env keeps working; since #2007 they set the **budget
+delegation's** period budget and period length. `SEED_RPC_URL` is no longer read
+— the seed sends nothing on-chain and opens no RPC connection.
+
 ### 3. Fund the required testnet accounts
 
 | Account | Funding | Why |
 |---|---|---|
-| Owner EOA | Base Sepolia ETH | Submits the Safe deployment and owner-approved allowance setup |
-| Safe | Base Sepolia test USDC | Source of the QA agent allowance and payments |
-| Dev relayer | Base Sepolia ETH | Submits Allowance Module transfers and gasless sweep recovery |
+| Owner EOA | **No on-chain funding required** | Signs the budget delegation off-chain. Hybrid provisioning is counterfactual — zero transactions (#2007) |
+| Hybrid account | Base Sepolia test USDC | The treasury every QA payment spends from |
+| Dev relayer | Base Sepolia ETH | Sponsors the UserOps, including the counterfactual account's first deployment, and gasless sweep recovery |
 | Delegate EOA | No on-chain funding required | Signs payment and EIP-3009 sweep authorizations off-chain |
 | **Demo-merchant settlement wallet** | **Base Sepolia ETH** | **Submits `transferWithAuthorization` / `redeemDelegations`. Derived from the merchant's `SETTLEMENT_PRIVATE_KEY`; NOT the receiving wallet** |
 
@@ -193,12 +197,29 @@ npm run seed -w packages/qa-agent
 The seed is idempotent:
 
 1. Create or log in to the QA user.
-2. Deploy or reuse the Base Sepolia Safe.
-3. Enable the Allowance Module and configure the delegate allowance.
-4. Create or reuse the QA agent.
+2. Provision or reuse the Base Sepolia **Hybrid DeleGator** account
+   (`POST /accounts/hybrid`).
+3. Create or reuse the QA agent.
+4. Build, owner-sign and activate the USDC **budget delegation**.
 
-It prints the Safe address and the `QA_*` block for the harness. Fund the Safe
-with Base Sepolia test USDC after its first deployment.
+It prints the account address and the `QA_*` block for the harness. Fund the
+account with Base Sepolia test USDC after the first run.
+
+**It no longer seeds a Safe (#2007, epic #1440).** `POST /user/safes` has
+answered HTTP 410 since #1984, and an `allowance_module` account cannot pay at
+all since #1986, so the seed provisions the rail the product actually runs on.
+The old call was invisible because it sat behind a reuse branch that only a
+**fresh** QA account reaches — the exact case a database reset produces, and
+`qa-dev` feeds the `qa-freshness` gate on `dev → main`.
+`packages/backend/src/openapi/qa-seed-routes.test.ts` now fails if the seed
+calls a route the API has retired or no longer registers.
+
+⚠️ The seed therefore no longer produces `QA_AGENT_API_KEY` or
+`QA_DELEGATE_PRIVATE_KEY` — they named a legacy AllowanceModule identity that
+can no longer be created. `loadQaConfig` still requires them, and three legacy
+legs (`within-budget-settle`, `over-budget-queue`,
+`x402-over-budget-rejected`) still run against them; retiring both is tracked
+separately.
 
 An API key is shown only when a new agent is created. If the agent already
 exists and its key was lost or exposed, rotate it instead of creating duplicate
@@ -849,11 +870,14 @@ done
 The last four are optional to the config loader but required for the delegation
 and hosted legs; a run with `QA_REQUIRE_ALL_LEGS=1` goes red if any is missing.
 
-### Seed returns `could not decode result data`
+### Seed returns `410`
 
-The public Base Sepolia RPC can briefly return stale state immediately after a
-Safe deployment. The seed is idempotent; retry it. If this repeats, set
-`SEED_RPC_URL` to a dedicated Base Sepolia provider.
+A route the seed calls has been retired. This should be impossible to reach
+undiagnosed: `packages/backend/src/openapi/qa-seed-routes.test.ts` fails in CI
+when the seed calls a retired or unregistered route. If you see a 410 anyway,
+the handler is refusing from its own body without a `retired*()` route marker —
+which that guard deliberately cannot see. Read the refusal body; it names the
+replacement route.
 
 ### `On-chain execution failed` or `insufficient funds`
 

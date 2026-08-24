@@ -88,9 +88,16 @@ The GitHub workflow performs the SDK build automatically.
 ## Seed — provision the QA identity (#574)
 
 `npm run seed -w packages/qa-agent` idempotently creates, on **Base Sepolia**: a
-QA user → an EOA-owned Safe → the on-chain spend gate (enable AllowanceModule +
-addDelegate + setAllowance, submitted by the owner EOA) → a `QA Agent`. It then
-prints the `QA_*` block to set as secrets.
+QA user → a **Hybrid DeleGator** account (`POST /accounts/hybrid`, counterfactual
+and zero transactions) → a `QA Agent` → an owner-signed **budget delegation**. It
+then prints the `QA_*` block to set as secrets.
+
+**It seeds no Safe (#2007, epic #1440).** `POST /user/safes` has answered HTTP
+410 since #1984 and an `allowance_module` account cannot pay since #1986, so the
+seed provisions the delegation rail — the one every new account onboards on. The
+dead call had gone unnoticed because it sat behind a reuse branch only a
+**fresh** QA account reaches. `packages/backend/src/openapi/qa-seed-routes.test.ts`
+now fails if the seed calls a route the API has retired or no longer registers.
 
 Env (all **testnet/dev-only**; the seed never holds the delegate key — pass only
 its **address**):
@@ -98,31 +105,43 @@ its **address**):
 | Env | Meaning |
 |---|---|
 | `SEED_HAVEN_API_URL` | Dev backend (e.g. `https://havenbackend-dev-8b95.up.railway.app`) |
-| `SEED_OWNER_PRIVATE_KEY` | QA Safe owner EOA — signs and submits the Safe deploy + allowance setup; needs Base Sepolia ETH |
+| `SEED_OWNER_PRIVATE_KEY` | Hybrid account owner EOA — signs the budget delegation off-chain; **needs no ETH** |
 | `SEED_DELEGATE_ADDRESS` | The delegate's **address** (not its key) |
 | `SEED_PAYMENT_TO` | Recipient for QA payments (→ `QA_PAYMENT_TO`) |
 | `SEED_QA_EMAIL` / `SEED_QA_PASSWORD` | QA user credentials |
-| `SEED_ALLOWANCE_USDC` | USDC allowance (default `5`) |
-| `SEED_RESET_MIN` | Allowance reset window in minutes (default `1440`) |
-| `SEED_RPC_URL` | Base Sepolia RPC (default `https://sepolia.base.org`) |
+| `SEED_ALLOWANCE_USDC` | Budget-delegation period budget in USDC (default `5`) |
+| `SEED_RESET_MIN` | Budget period length in minutes (default `1440`) |
 
-After it runs, fund the printed **Safe** address with Base Sepolia test USDC
+Both budget names are AllowanceModule-era spellings kept so an existing operator
+env keeps working. `SEED_RPC_URL` is no longer read: the seed sends nothing
+on-chain and opens no RPC connection.
+
+After it runs, fund the printed **account** address with Base Sepolia test USDC
 ([Circle faucet](https://faucet.circle.com)).
 
 ## Config contract
 
-Both the seed step and the harness load their config from `loadQaConfig()`, the
-single source of truth for the `QA_*` env (all **testnet/dev-only**):
+The harness loads its config from `loadQaConfig()`, the single source of truth
+for the `QA_*` env (all **testnet/dev-only**). The seed reads the separate
+`SEED_*` env above:
 
 | Env | Meaning |
 |---|---|
 | `QA_HAVEN_API_URL` | Shared dev backend, hit **directly** (Node→API, no CORS) |
-| `QA_AGENT_API_KEY` | QA agent identity (`sk_agent_*`) |
-| `QA_DELEGATE_PRIVATE_KEY` | QA delegate EOA key — signs locally, testnet-only |
+| `QA_AGENT_API_KEY` | Legacy AllowanceModule agent identity (`sk_agent_*`) — **the seed no longer produces one**, see below |
+| `QA_DELEGATE_PRIVATE_KEY` | That agent's delegate EOA key — signs locally, testnet-only |
 | `QA_PAYMENT_TO` | Recipient for direct-send scenarios |
 | `QA_DEMO_MERCHANT_URL` | Dev demo-merchant base URL; required for every merchant round-trip leg |
 
 `loadQaConfig()` fails fast with a clear error listing every missing var.
+
+⚠️ **`QA_AGENT_API_KEY` / `QA_DELEGATE_PRIVATE_KEY` can no longer be obtained.**
+They name a legacy AllowanceModule identity, and that rail is retired: no new
+Safe can be created (#1984) and an existing one cannot pay (#1986). They are
+still *required* by `loadQaConfig()`, and three legs — `within-budget-settle`,
+`over-budget-queue`, `x402-over-budget-rejected` — still run against them.
+Retiring the two vars and those three legs is tracked separately; every other
+leg runs on `QA_DELEGATION_*`, which the seed does produce.
 
 Keep these values in an external dotenv file, source it before a local run, and
 store the same five names as encrypted repository secrets for

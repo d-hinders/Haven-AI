@@ -101,6 +101,18 @@
  * Deterministic: animations disabled, network idle awaited, fixed viewports.
  */
 import { chromium } from '@playwright/test'
+// Used ONLY by the on-chain read seam (#1935): the fixture answers viem's own
+// JSON-RPC calls, so it has to speak viem's encoding. Deliberately the same
+// library the app encodes WITH, so the two cannot drift over an ABI detail.
+import { decodeAbiParameters, encodeAbiParameters, parseAbiParameters, toFunctionSelector } from 'viem'
+// viem's OWN chain registry — the same object the app's client resolves
+// Multicall3 from, so the fixture cannot disagree with it about the address.
+import { base as viemBase } from 'viem/chains'
+// The chain FACTS (AllowanceModule address, token addresses) come from the
+// shared registry the app itself reads, never restated here — a fixture that
+// hard-codes a contract address is a fixture that silently stops matching the
+// product the day the registry moves.
+import { getChainData, resolveToken } from '@haven_ai/core'
 import { spawn } from 'node:child_process'
 import { rm, stat, writeFile } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -591,6 +603,121 @@ export class ScenarioHttpError {
 export const httpError = (status, body) => new ScenarioHttpError(status, body)
 
 /**
+ * ── The on-chain read seam (#1935) ──────────────────────────────────────────
+ *
+ * `scenario.api()` above answers the HAVEN BACKEND. A second class of state is
+ * populated from the CHAIN instead, and until this existed the harness could
+ * not reach any of it: `EditAgentModal`'s "Current agent budgets" list — the
+ * rows carrying the per-row remove control #1923 resized — is
+ * `existingOnChainAllowances`, which is `useOnChainAllowances` reading the
+ * Safe AllowanceModule through viem. No `/api/*` body of any shape puts a row
+ * in that list, exactly as no 200 body could reach `loadError` in #1725.
+ *
+ * The seam is the same one #1725 found: state the harness cannot express, added
+ * to the harness rather than approximated by a cleverer payload. And it is a
+ * NETWORK seam, not a component stub — which is what makes the capture
+ * evidence. viem's transport for the app's chain is `fallback()` over a handful
+ * of plain `http(url)` endpoints (`lib/wagmi.ts`), so the reads leave the
+ * browser as ordinary JSON-RPC POSTs that Playwright routes like anything else
+ * — and the route matches on pathname across every origin, so which endpoint
+ * the fallback happens to pick does not matter. Answering them runs
+ * the app's REAL read path end to end: viem encodes the call, the fixture
+ * returns ABI-encoded return data, viem decodes it, `useOnChainAllowances` maps
+ * it, and `EditAgentModal` renders the rows. Every line between the wire and
+ * the pixel is production code. Nothing is passed to a component by hand.
+ *
+ * `scenario.chain(method, params)` returns the JSON-RPC `result` for one call,
+ * or `undefined` to say it has no answer. A scenario that declares `chain`
+ * takes over ALL of its own chain traffic: an unanswered method is served a
+ * JSON-RPC error rather than being let out to a public node, because a capture
+ * whose data came from the live internet is not deterministic evidence. The gap
+ * is recorded and FAILS THE RUN — see `CHAIN_READ_GAPS`.
+ *
+ * Scenarios that do not declare `chain` are untouched: the predicate below
+ * returns false immediately, and their non-API traffic still `route.continue()`s
+ * exactly as before.
+ */
+
+/**
+ * Chain reads a scenario left unanswered, recorded per call and fatal at the
+ * end of the run.
+ *
+ * Fatal rather than advisory, and that is the point rather than strictness for
+ * its own sake. An unanswered read does not blank the screen — viem throws,
+ * `useOnChainAllowances` swallows it into an empty map (its `catch` logs and
+ * moves on), and the modal renders WITHOUT the budget list. That is a
+ * plausible, well-formed, completely wrong PNG: the empty state of the very
+ * surface the capture exists to show. This is the `deleted_captures` rule one
+ * layer down — evidence that cannot show the defect is worse than no evidence.
+ */
+const CHAIN_READ_GAPS = []
+
+/**
+ * Answer one JSON-RPC request from `scenario.chain`, or decline it.
+ *
+ * Returns `true` when the request was fulfilled here, `false` when the caller
+ * should fall through to its normal handling. Deliberately conservative about
+ * what it claims: a POST is only treated as chain traffic when its body parses
+ * as a JSON-RPC 2.0 envelope (or a batch of them), so a scenario declaring
+ * `chain` cannot accidentally capture an unrelated POST to some other host.
+ */
+async function answerChainRead(route, req, scenario) {
+  if (typeof scenario?.chain !== 'function') return false
+  if (req.method() !== 'POST') return false
+  let payload
+  try {
+    payload = req.postDataJSON()
+  } catch {
+    return false
+  }
+  const batched = Array.isArray(payload)
+  const calls = batched ? payload : [payload]
+  if (calls.length === 0) return false
+  const isRpc = (c) => c && c.jsonrpc === '2.0' && typeof c.method === 'string'
+  if (!calls.every(isRpc)) return false
+
+  const answers = calls.map((call) => {
+    let result
+    try {
+      result = scenario.chain(call.method, call.params ?? [])
+    } catch (err) {
+      // A throw from a scenario's own answer is a fixture bug, and it must not
+      // read like a chain that declined — record it in the same place.
+      CHAIN_READ_GAPS.push({
+        scenario: scenario.name ?? 'scenario',
+        method: call.method,
+        reason: `threw: ${String(err?.message ?? err).slice(0, 200)}`,
+      })
+      return {
+        jsonrpc: '2.0',
+        id: call.id ?? null,
+        error: { code: -32000, message: `screenshot fixture: ${String(err?.message ?? err)}` },
+      }
+    }
+    if (result === undefined) {
+      CHAIN_READ_GAPS.push({
+        scenario: scenario.name ?? 'scenario',
+        method: call.method,
+        reason: 'the scenario returned undefined — no answer was declared for this read',
+      })
+      return {
+        jsonrpc: '2.0',
+        id: call.id ?? null,
+        error: { code: -32601, message: `screenshot fixture: no answer for ${call.method}` },
+      }
+    }
+    return { jsonrpc: '2.0', id: call.id ?? null, result }
+  })
+
+  await route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify(batched ? answers : answers[0]),
+  })
+  return true
+}
+
+/**
  * One browser context wired to the shared auth + data fixture.
  *
  * `scenario.api(apiPath, method)` may return a body to answer a request the
@@ -652,7 +779,13 @@ async function newFixtureContext(browser, vp, scenario) {
     // (api.ts BASE_URL = '/api'). Intercept those; everything else on the
     // frontend origin (pages, `/_next` assets) loads normally.
     const api = pathname.startsWith('/api/') ? pathname.slice(4) : null
-    if (api === null) return route.continue()
+    if (api === null) {
+      // Chain reads leave the browser as JSON-RPC POSTs to a public node, not
+      // through `/api/*` — so they land here, in the `route.continue()` branch
+      // that used to let them onto the real internet (#1935).
+      if (await answerChainRead(route, req, scenario)) return
+      return route.continue()
+    }
 
     const json = (body) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
@@ -711,6 +844,90 @@ async function dismissMobileSidebar(page, vp) {
  * the rendered result, not the seed — expressed for the capture harness, which
  * has no `expect`.
  */
+/**
+ * Assert `EditAgentModal`'s budget list is the SEEDED list, before it is shot
+ * (#1935).
+ *
+ * #1873's rule, which this file already applies to API-seeded state and which
+ * chain-seeded state needs more, not less: seeding a state is not rendering the
+ * branch. The failure this exists to make impossible is specific and quiet — if
+ * `getTokenAllowance` came back wrong, or came back once and was reused for both
+ * rows, the list still renders, still has two rows, still has two remove
+ * controls, and the PNG still looks like a budget list. So:
+ *
+ *  1. the row SYMBOLS are an exact ordered array over the seeded pair, which
+ *     also proves the ERC-20 and native-token branches of `tokenSymbolFromAddr`
+ *     both resolved rather than falling through to a truncated address;
+ *  2. the row PERIODS must DIFFER between the two rows. `resetTimeMin` is the
+ *     third word of the `uint256[5]` each row decodes independently, so two
+ *     matching periods is the exact signature of one answer being served twice
+ *     — the silent duplicate a positional fixture would produce;
+ *  3. every row carries exactly one remove control, addressed by its ARIA name.
+ *
+ * The icon fit is deliberately measured rather than left to the pixels, on
+ * #1924's reasoning: an overflowing glyph photographs perfectly happily, so a
+ * capture is exactly as consistent with the bug as with the fix. Measured as a
+ * DIFFERENCE between two boxes on the same render (#1875/#1909), never as an
+ * absolute local pixel claim.
+ */
+async function assertBudgetRows(list, expected = { symbols: ['USDC', 'ETH'] }) {
+  const rows = await list.evaluate((el) =>
+    Array.from(el.querySelectorAll('button[aria-label^="Remove "]')).map((button) => {
+      const row = button.closest('div.flex.items-center.justify-between')
+      const svg = button.querySelector('svg')
+      const b = button.getBoundingClientRect()
+      const s = svg?.getBoundingClientRect()
+      return {
+        label: button.getAttribute('aria-label') ?? '',
+        symbol: row?.firstElementChild?.textContent?.trim() ?? '',
+        text: row?.textContent?.trim() ?? '',
+        hasIcon: Boolean(svg),
+        overflowX: s ? Math.round((s.width - b.width) * 100) / 100 : null,
+        overflowY: s ? Math.round((s.height - b.height) * 100) / 100 : null,
+      }
+    }),
+  )
+
+  const symbols = rows.map((r) => r.symbol)
+  if (symbols.length !== expected.symbols.length || symbols.some((sym, i) => sym !== expected.symbols[i])) {
+    throw new Error(
+      `budget list: rendered rows [${symbols.join(', ')}] but the chain fixture seeded ` +
+        `[${expected.symbols.join(', ')}] — the capture would be filed as the budget list ` +
+        'while showing something else',
+    )
+  }
+  for (const row of rows) {
+    if (row.label !== `Remove ${row.symbol} budget`) {
+      throw new Error(
+        `budget list: the ${row.symbol} row's remove control is labelled "${row.label}" — ` +
+          'a row and its control disagree about which budget it removes',
+      )
+    }
+    if (!row.hasIcon) {
+      throw new Error(`budget list: the ${row.symbol} row's remove control rendered no glyph`)
+    }
+    if (row.overflowX > 0 || row.overflowY > 0) {
+      throw new Error(
+        `budget list: the ${row.symbol} remove glyph OVERFLOWS its button by ` +
+          `+${row.overflowX}x+${row.overflowY}px. The button does not clip, so every capture ` +
+          'photographs the overflow happily — size the glyph to the control (#1858/#1923).',
+      )
+    }
+  }
+
+  // Period, read off the row's own text. Two rows seeded with different reset
+  // periods MUST render differently; identical text means one on-chain answer
+  // was served for both tokens and the second row is a lie.
+  const periods = rows.map((r) => r.text.split('/').pop()?.trim() ?? '')
+  if (new Set(periods).size !== periods.length) {
+    throw new Error(
+      `budget list: both rows report the same period (${periods.join(' / ')}), but the fixture ` +
+        'seeds a different resetTimeMin per token — one getTokenAllowance answer was reused ' +
+        'for both rows, so the list is not per-token data',
+    )
+  }
+}
+
 async function refuseIfPresent(locator, what) {
   const found = await locator.count()
   if (found > 0) {
@@ -776,6 +993,233 @@ function setBackupRecoveryStage(next) {
     )
   }
   backupRecoveryStage = next
+}
+
+// ── EditAgentModal's on-chain budget list (#1935) ────────────────────────────
+//
+// WHY THIS FIXTURE IS ON BASE MAINNET, and why that is the load-bearing half.
+//
+// The shared fixture's safe carries `chain_id: 84532` (Base Sepolia). The app's
+// wagmi config registers exactly ONE chain — `base` (8453) — in both `chains`
+// and `transports` (`lib/wagmi.ts`, "TEMPORARY: Base-only"). wagmi's
+// `getClient` catches `ChainNotConfiguredError` and returns `undefined`
+// (@wagmi/core `actions/getClient.js`), so `usePublicClient({ chainId: 84532 })`
+// is `undefined`, and `useOnChainAllowances` bails at its first line:
+//
+//     if (!publicClient || !safeAddress) { setLoading(false); return }
+//
+// Zero JSON-RPC requests ever leave the browser. That — not a missing route, not
+// an unwritten scenario — is the concrete reason no capture in this repo has
+// ever contained a budget row: on the shared fixture the read cannot start.
+// Putting this scenario's account on 8453 is what turns the read on, and 8453
+// is the app's primary/default network, so this is the ordinary product state
+// rather than a contrivance. (The wider consequence — that EVERY chain-fed
+// surface in the harness renders its empty branch — is filed separately; it is
+// bigger than one modal and not this issue's to change under everyone else.)
+const BUDGET_CHAIN_ID = 8453
+const BUDGET_CHAIN = getChainData(BUDGET_CHAIN_ID)
+const BUDGET_ALLOWANCE_MODULE = BUDGET_CHAIN.contracts.allowanceModule
+const BUDGET_USDC = resolveToken(BUDGET_CHAIN_ID, 'USDC').address
+const BUDGET_NATIVE = '0x0000000000000000000000000000000000000000'
+
+const BUDGET_FIXTURE_SAFE = { ...FIXTURE_SAFE, chain_id: BUDGET_CHAIN_ID }
+
+// The shared fixture's LEGACY-rail agent, moved onto the same chain as its
+// account. Chosen rather than invented: `agent-ops` is the one fixture agent
+// with `account_type: null` and a `delegate_address`, and both are required —
+// `EditAgentModal` hides the whole budget half on `delegator_hybrid` (#1079,
+// `showBudgetFields`), and `useOnChainAllowances` keys its map by delegate.
+const BUDGET_FIXTURE_AGENT = {
+  ...FIXTURE_AGENTS.find((a) => a.id === 'agent-ops'),
+  safe_chain_id: BUDGET_CHAIN_ID,
+}
+
+/**
+ * The two budget rows this scenario puts on-chain.
+ *
+ * Two rather than one, on purpose: one row cannot tell "the list rendered" apart
+ * from "the list rendered ONE row and dropped the rest", and the remove control
+ * is per row. An ERC-20 and the native token, because they take different
+ * branches through `tokenSymbolFromAddr` / `tokenDecimalsFromAddr`
+ * (`EditAgentModal.tsx:843-863`) — the zero address is special-cased — so the
+ * pair exercises both and the capture shows both symbols resolved.
+ */
+const BUDGET_ROWS = [
+  // amount / spent are atomic; resetTimeMin matches RESET_PERIODS so the row
+  // reads "Daily" rather than a raw "1440m" fallthrough.
+  { token: BUDGET_USDC, amount: 500_000000n, spent: 137_500000n, resetTimeMin: 1440 },
+  { token: BUDGET_NATIVE, amount: 250000000000000000n, spent: 0n, resetTimeMin: 10080 },
+]
+
+/** The reads `useOnChainAllowances` makes, by signature rather than by hand-cut hex. */
+const BUDGET_READS = {
+  isModuleEnabled: {
+    signature: 'function isModuleEnabled(address) view returns (bool)',
+    // `isModuleEnabled` is called ON THE SAFE; the rest on the module.
+    to: BUDGET_FIXTURE_SAFE.safe_address,
+    returns: () => encodeAbiParameters(parseAbiParameters('bool'), [true]),
+  },
+  getDelegates: {
+    signature: 'function getDelegates(address,uint48,uint8) view returns (address[],uint48)',
+    to: BUDGET_ALLOWANCE_MODULE,
+    returns: () =>
+      encodeAbiParameters(parseAbiParameters('address[], uint48'), [
+        [BUDGET_FIXTURE_AGENT.delegate_address],
+        0,
+      ]),
+  },
+  getTokens: {
+    signature: 'function getTokens(address,address) view returns (address[])',
+    to: BUDGET_ALLOWANCE_MODULE,
+    returns: () =>
+      encodeAbiParameters(parseAbiParameters('address[]'), [BUDGET_ROWS.map((r) => r.token)]),
+  },
+  getTokenAllowance: {
+    signature: 'function getTokenAllowance(address,address,address) view returns (uint256[5])',
+    to: BUDGET_ALLOWANCE_MODULE,
+    // The token is the THIRD argument, and it is read out of the calldata
+    // rather than assumed, so the two rows cannot come back identical — which
+    // is exactly the silent duplicate a positional fixture would produce.
+    returns: (data) => {
+      const token = `0x${data.slice(10).slice(64 * 2 + 24, 64 * 3)}`
+      const row = BUDGET_ROWS.find((r) => r.token.toLowerCase() === token.toLowerCase())
+      if (!row) throw new Error(`getTokenAllowance for an unseeded token ${token}`)
+      return encodeAbiParameters(parseAbiParameters('uint256[5]'), [
+        [row.amount, row.spent, BigInt(row.resetTimeMin), 0n, 1n],
+      ])
+    },
+  },
+}
+
+const MULTICALL3_ADDRESS = viemBase.contracts.multicall3.address
+const MULTICALL3_AGGREGATE3 = toFunctionSelector(
+  'function aggregate3((address target, bool allowFailure, bytes callData)[]) returns ((bool success, bytes returnData)[])',
+)
+
+const BUDGET_SELECTORS = new Map(
+  Object.entries(BUDGET_READS).map(([name, read]) => [
+    toFunctionSelector(read.signature),
+    { name, ...read },
+  ]),
+)
+
+/**
+ * A deterministic Base block. `useOnChainAllowances` reads `block.timestamp`
+ * alongside the allowances so the reset math keys off chain time rather than
+ * the device clock, so this has to be a real-shaped block or viem's formatter
+ * throws before the allowances are ever mapped.
+ */
+const BUDGET_BLOCK_TIMESTAMP = Math.floor(Date.parse('2026-07-10T09:00:00.000Z') / 1000)
+const BUDGET_BLOCK = {
+  number: '0x1122334',
+  hash: `0x${'11'.repeat(32)}`,
+  parentHash: `0x${'22'.repeat(32)}`,
+  nonce: '0x0000000000000000',
+  sha3Uncles: `0x${'33'.repeat(32)}`,
+  logsBloom: `0x${'00'.repeat(256)}`,
+  transactionsRoot: `0x${'44'.repeat(32)}`,
+  stateRoot: `0x${'55'.repeat(32)}`,
+  receiptsRoot: `0x${'66'.repeat(32)}`,
+  miner: '0x4200000000000000000000000000000000000011',
+  difficulty: '0x0',
+  totalDifficulty: '0x0',
+  extraData: '0x',
+  size: '0x220',
+  gasLimit: '0x3938700',
+  gasUsed: '0x0',
+  timestamp: `0x${BUDGET_BLOCK_TIMESTAMP.toString(16)}`,
+  baseFeePerGas: '0x1',
+  transactions: [],
+  uncles: [],
+}
+
+/**
+ * Answer the app's own on-chain reads for the budget-list scenario.
+ *
+ * Dispatches on the 4-byte selector AND checks the call's `to` — a selector
+ * collision or a read aimed at some other contract must fail loudly rather than
+ * be handed a plausible answer for the wrong address. Anything not listed
+ * returns `undefined`, which the seam records as a gap and fails the run on
+ * (see `CHAIN_READ_GAPS`): a fixture that quietly declines a read produces a
+ * modal with no budget list, which is a perfectly photogenic wrong answer.
+ */
+function answerBudgetChainRead(method, params) {
+  if (method === 'eth_chainId') return `0x${BUDGET_CHAIN_ID.toString(16)}`
+  if (method === 'eth_blockNumber') return BUDGET_BLOCK.number
+  if (method === 'eth_getBlockByNumber') return BUDGET_BLOCK
+  if (method !== 'eth_call') return undefined
+
+  const call = params?.[0] ?? {}
+  const data = call.data ?? call.input ?? '0x'
+
+  // MULTICALL, because that is what the app actually sends (#1935).
+  //
+  // Found by running this, not by reading it: wagmi enables viem's multicall
+  // batching by default, so `useOnChainAllowances`' reads never reach the wire
+  // as bare `eth_call`s to the AllowanceModule — every one of them is wrapped in
+  // Multicall3's `aggregate3`, with the real call as `bytes` inside it. A
+  // fixture that answered only the un-batched shape is served nothing, and
+  // because the hook swallows the failure into an empty map it would have
+  // produced a modal with no budget list and no error on screen. That is exactly
+  // the plausible-wrong-PNG the seam's fatal gap report exists to refuse, and it
+  // is what it refused on the first run of this scenario.
+  //
+  // MEASURED, because the obvious summary of that is wrong (review of #1935).
+  // "The four reads arrive as one `eth_call`" is what batching sounds like; it
+  // is not what this hook can produce. `useOnChainAllowances` is sequential —
+  // it awaits `isModuleEnabled` before `getDelegates` is queued, and awaits
+  // `getTokens` before the `getTokenAllowance`s are — and viem's batcher can
+  // only merge calls queued inside the same wait window. Logged live, one fetch
+  // cycle is FOUR aggregate3 POSTs plus one bare block read:
+  //
+  //   aggregate3[1] 0x2d9ad53d  isModuleEnabled
+  //   eth_getBlockByNumber      (not wrapped — not a contract read)
+  //   aggregate3[1] 0xeb37abe0  getDelegates
+  //   aggregate3[1] 0x8d0e8e1d  getTokens
+  //   aggregate3[2] 0x94b31fbd  getTokenAllowance x2  <- the only real batch
+  //
+  // So the thing a fixture must handle is not "one big batch": it is that a
+  // LONE read is wrapped too. The direct branch below is kept as a fallback
+  // rather than deleted, because it costs one line and the day someone disables
+  // multicall this is the difference between a fixture that still works and a
+  // silent empty list.
+  if (
+    data.slice(0, 10) === MULTICALL3_AGGREGATE3 &&
+    (call.to ?? '').toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()
+  ) {
+    const [inner] = decodeAbiParameters(
+      parseAbiParameters('(address target, bool allowFailure, bytes callData)[]'),
+      `0x${data.slice(10)}`,
+    )
+    const results = inner.map((c) => {
+      const answer = answerBudgetEthCall(c.target, c.callData)
+      if (answer === undefined) {
+        throw new Error(
+          `aggregate3 carried an unseeded call to ${c.target} (${c.callData.slice(0, 10)})`,
+        )
+      }
+      return { success: true, returnData: answer }
+    })
+    return encodeAbiParameters(
+      parseAbiParameters('(bool success, bytes returnData)[]'),
+      [results],
+    )
+  }
+
+  return answerBudgetEthCall(call.to, data)
+}
+
+/** One un-batched contract read — also the body of each `aggregate3` member. */
+function answerBudgetEthCall(to, data) {
+  const read = BUDGET_SELECTORS.get(data.slice(0, 10))
+  if (!read) return undefined
+  if ((to ?? '').toLowerCase() !== read.to.toLowerCase()) {
+    throw new Error(
+      `${read.name} was called on ${to} but this fixture seeds it on ${read.to} — ` +
+        'the app is reading a different contract than the fixture describes',
+    )
+  }
+  return read.returns(data)
 }
 
 export const SCENARIOS = {
@@ -1641,6 +2085,72 @@ export const SCENARIOS = {
       await shoot(dialog, 'approved')
     },
   },
+  'edit-agent-budget': {
+    description:
+      "EditAgentModal's on-chain budget list and its per-row remove control (#1935)",
+    // ── What this closes ─────────────────────────────────────────────────────
+    //
+    // #1923 resized this modal's remove glyph from 12px to 14px, and said so
+    // honestly: the control "has never been captured at any commit", because
+    // the rows come from an on-chain read no HTTP fixture reaches. #1935 is that
+    // gap. The seam it needed is `scenario.chain` (see `answerChainRead`) — the
+    // same shape #1725 arrived at for `loadError`: when a state is out of reach
+    // because the harness cannot express its INPUT, the harness grows, it does
+    // not get a cleverer payload.
+    //
+    // Nothing here is stubbed above the wire. The fixture answers JSON-RPC; the
+    // app's own viem client, `useOnChainAllowances`, `AgentDetailClient` and
+    // `EditAgentModal` do everything from there. The list in the PNG is the
+    // product's, rendered from the product's own decode of ABI-encoded bytes.
+    api(apiPath) {
+      // All three, though the detail page reads agents from `/agents` and the
+      // safe from `/auth/me`: two safe-serving endpoints that disagree about
+      // which CHAIN an account is on would be a trap for the next scenario that
+      // reaches for the other one, and the disagreement would be invisible
+      // (the reasoning `add-funds-unresolved-chain` records).
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [BUDGET_FIXTURE_SAFE] }
+      if (apiPath === '/user/safes') return { safes: [BUDGET_FIXTURE_SAFE] }
+      if (apiPath === '/agents') return { agents: [BUDGET_FIXTURE_AGENT] }
+      return undefined
+    },
+    chain: answerBudgetChainRead,
+    async run({ page, vp, shoot }) {
+      // `domcontentloaded`, not `networkidle`: this is the first scenario whose
+      // page holds a LIVE on-chain poll (`useOnChainAllowances` re-reads every
+      // 30s), so the quiet window the other scenarios rely on is not guaranteed
+      // to arrive here. Every state below is waited for by its own subject
+      // instead, which is the condition that actually matters.
+      await page.goto(`${BASE_URL}/agents/${BUDGET_FIXTURE_AGENT.id}`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60_000,
+      })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Agent options' }).click({ timeout: 30_000 })
+      await page.getByRole('menuitem', { name: 'Update budget' }).click({ timeout: 15_000 })
+
+      const dialog = page.getByRole('dialog', { name: 'Edit agent' })
+      // The heading pins the MODE. `openUpdateBudget` sets `mode: 'budget'`, and
+      // 'all' mode renders the same list under a different heading — so waiting
+      // on the list alone would happily photograph the wrong entry point's
+      // modal under this scenario's name.
+      await dialog.getByRole('heading', { name: 'Update budget' }).waitFor({ timeout: 30_000 })
+
+      const list = dialog.getByText('Current agent budgets').locator('xpath=..')
+      await list.waitFor({ timeout: 30_000 })
+      await assertBudgetRows(list)
+      await shoot(list, 'budget-list')
+
+      // The confirm step the remove control opens. Captured because it is the
+      // other half of the same control and is equally unreachable without the
+      // chain read — the dialog names the specific token, which only exists
+      // because a real row was clicked.
+      await list.getByRole('button', { name: 'Remove USDC budget' }).click()
+      const confirm = page.getByRole('dialog', { name: 'Remove USDC budget?' })
+      await confirm.waitFor({ timeout: 15_000 })
+      await shoot(confirm, 'remove-confirm')
+    },
+  },
   'modal-migrations': {
     description: 'InfoModal and ComingSoonModal rendered from the design-system reference',
     api() {
@@ -2302,6 +2812,10 @@ async function main() {
         // and the manifest is the only place a later reader can tell them apart
         // (#1936/#1939/#1943).
         deleted_captures: deletedCaptures,
+        // Chain reads a scenario declared `chain` for and then had no answer
+        // for (#1935). Non-empty means at least one capture in this run shows a
+        // surface whose on-chain data silently failed to load.
+        unanswered_chain_reads: CHAIN_READ_GAPS,
         captured_without_unclip: shellless,
         shell_waits: raced,
         // Retention, recorded so the live manifest can be read as "this is the
@@ -2426,6 +2940,20 @@ async function main() {
         '   which one wherever you attach these, and do NOT attach them as a whole screen.)',
     )
   }
+  if (CHAIN_READ_GAPS.length > 0) {
+    console.error(
+      `\n✗ ${CHAIN_READ_GAPS.length} on-chain read(s) went UNANSWERED — any capture of a chain-fed ` +
+        'surface in this run is showing an empty state, not the state it is filed under (#1935):',
+    )
+    for (const g of CHAIN_READ_GAPS) {
+      console.error(`  [scenario:${g.scenario}] ${g.method} — ${g.reason}`)
+    }
+    console.error(
+      '  (a scenario that declares `chain` owns ALL of its chain traffic — nothing is allowed out\n' +
+        '   to a public node, so an undeclared read resolves to a JSON-RPC error and the hook\n' +
+        '   swallows it into an empty result. Declare the method, or stop declaring `chain`.)',
+    )
+  }
   if (consoleErrors.length > 0) {
     console.log(`\n⚠ ${consoleErrors.length} console error(s) during capture — the PNGs may show broken screens:`)
     for (const e of consoleErrors) console.log(`  [${e.route} · ${e.viewport}] ${e.text}`)
@@ -2440,7 +2968,9 @@ async function main() {
   // Broken evidence must not exit 0 — a failed navigation means missing PNGs,
   // and a blank capture means the run produced something that LOOKS like
   // evidence (#1738).
-  if (gotoFailures.length > 0 || deletedCaptures.length > 0) process.exit(1)
+  if (gotoFailures.length > 0 || deletedCaptures.length > 0 || CHAIN_READ_GAPS.length > 0) {
+    process.exit(1)
+  }
 }
 
 // Run only as a CLI (fixtureFor is imported by tests).

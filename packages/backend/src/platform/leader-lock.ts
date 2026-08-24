@@ -68,6 +68,11 @@ export const LEADER_LOCK_KEYS = {
 export const KEYED_LOCK_NAMESPACES = {
   /** One counterfactual account deploy at a time, per (chain, address) (#1673). */
   accountDeploy: 811100,
+  /**
+   * Serialises the catalogue-submission queue cap, so the ceiling is enforced
+   * by mutual exclusion rather than a check-then-act (#1711, epic #1717).
+   */
+  catalogSubmissionQueue: 811101,
 } as const
 
 export interface QueryableClientLike {

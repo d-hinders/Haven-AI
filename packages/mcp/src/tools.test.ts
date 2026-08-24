@@ -1659,6 +1659,98 @@ describe('haven_discover_tools (#349)', () => {
   })
 })
 
+describe('haven_discover_tools badge fields + verified filter (#1716)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function handlers() {
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
+    return createToolHandlers(haven)
+  }
+
+  const badgeFixture = [
+    {
+      id: 'cat-directory', name: 'Directory Summarizer', description: 'Self-submitted service', category: 'api',
+      resource_url: 'https://directory.example.com/mcp', rail: 'x402', protocol: 'mcp',
+      tool_name: 'summarize', tool_arguments: null,
+      price_display: null, price_atomic: null,
+      asset: null, network: null, status: 'active', verified_at: '2026-08-23T10:00:00.000Z',
+      source: 'ingestion', domain_verified: true, verified_payable: true,
+    },
+  ]
+
+  it('surfaces the verified-directory badge fields and forwards the verified filter (#1716)', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(() => Promise.resolve(jsonResponse({ entries: badgeFixture })))
+
+    await handlers().haven_discover_tools({ verified: 'verified' })
+    const url = String(fetchMock.mock.calls[0]?.[0])
+    expect(url).toContain('/catalog')
+    // The filter is applied client-side by the SDK, not as a query param.
+    expect(url).not.toContain('verified')
+
+    const result = await handlers().haven_discover_tools({})
+    const data = (result as { data: Array<Record<string, unknown>> }).data
+    expect(data[0]).toMatchObject({
+      source: 'ingestion',
+      domain_verified: true,
+      verified_payable: true,
+    })
+  })
+
+  it('forwards the verified operator filter to the SDK discoverTools call', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ entries: [] }))
+    const discoverSpy = vi
+      .spyOn(HavenClient.prototype, 'discoverTools')
+      .mockResolvedValue([])
+
+    await handlers().haven_discover_tools({ verified: 'operator' })
+    expect(discoverSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ verified: 'operator' }),
+    )
+
+    await handlers().haven_discover_tools({ verified: 'any' })
+    expect(discoverSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ verified: undefined }),
+    )
+  })
+})
+
+describe('haven_submit_catalog_entry (#1716)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function handlers() {
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
+    return createToolHandlers(haven)
+  }
+
+  it('submits a resource URL through the SDK and returns id + verify_token + status', async () => {
+    const submitSpy = vi
+      .spyOn(HavenClient.prototype, 'submitCatalogEntry')
+      .mockResolvedValue({
+        id: '00000000-0000-4000-8000-000000000001',
+        verifyToken: 'ab'.repeat(24),
+        status: 'submitted',
+      })
+
+    const result = await handlers().haven_submit_catalog_entry({
+      resource_url: 'https://merchant.example/mcp',
+    })
+    expect(result.success).toBe(true)
+    expect(submitSpy).toHaveBeenCalledWith('https://merchant.example/mcp', undefined)
+    expect((result as { data: Record<string, unknown> }).data).toMatchObject({
+      id: '00000000-0000-4000-8000-000000000001',
+      verify_token: 'ab'.repeat(24),
+      status: 'submitted',
+    })
+  })
+})
+
+
 // ── haven_get_payment_status: post-purchase allowance summary (#1310) ─────────
 // Parity with the hosted MCP's identical addition in packages/mcp-server —
 // same condition (rail: x402, phase: payment_confirmed), same SDK call.

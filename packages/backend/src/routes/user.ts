@@ -2,12 +2,10 @@ import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { retiredSafeInflowHandler } from '../middleware/safe-inflow-retired.js'
 import { getSafeDetails } from '../modules/accounts/index.js'
-import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import {
   findCurrencyPreference,
   updateCurrencyPreference,
   updateUserName,
-  updateUserSafeAddress,
   updateUserWalletAddress,
 } from '../infra/repositories/users.js'
 import {
@@ -19,7 +17,7 @@ import {
   listOwnerAliases,
   upsertOwnerAlias,
 } from '../infra/repositories/owner-aliases.js'
-import { ETH_ADDRESS_RE, DEFAULT_CHAIN_ID } from '@haven_ai/core'
+import { ETH_ADDRESS_RE } from '@haven_ai/core'
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
 const OWNER_FETCH_CONCURRENCY = 4
@@ -41,11 +39,6 @@ function userRowVanished(): never {
 
 interface WalletBody {
   wallet_address: string
-}
-
-interface SafeBody {
-  safe_address: string
-  chain_id?: number
 }
 
 interface PreferencesBody {

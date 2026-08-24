@@ -262,18 +262,27 @@ describe('scan: no submitter outside the outbound pipeline (#1559)', () => {
     // caught `modules/accounts/safe-deployer.ts` — but `routes/safe-deploy.ts`
     // became a 410 tombstone with no relayer call in it at all and would have
     // sat here indefinitely, existing and broadcasting nothing: an allowlist
-    // entry excusing a file from a rule it no longer comes near. So the
-    // "still broadcast" clause is now asserted rather than only asserted-in-
-    // prose. `infra/relayer.ts` and `infra/outbound-queue.ts` are exempt from
-    // the clause for the reason their own comments give: one is the lock's
-    // home and the other IS the pipeline.
+    // entry excusing a file from a rule it no longer comes near.
+    //
+    // ⚠️ The first version of this assertion was `toContain('getRelayer')`,
+    // and `haven-reviewer` showed it was satisfied by a SUBSTRING: this file's
+    // own `getRelayerProviderCode`. Deleting the actual broadcast from
+    // `safe-proxy-deployer.ts` left it green. A guard matched on a name
+    // fragment is not a guard on the behaviour that name belongs to. What
+    // earns an entry its place here is holding the SEND LOCK while
+    // broadcasting, so that is what is asserted, and it is mutation-proven:
+    // removing the `withRelayerSendLock(` call turns this red.
+    //
+    // `infra/relayer.ts` and `infra/outbound-queue.ts` are exempt for the
+    // reason their own comments give — one is the lock's home, the other IS
+    // the pipeline — so the clause would be circular for them.
     const NO_BROADCAST_OF_ITS_OWN = new Set(['infra/relayer.ts', 'infra/outbound-queue.ts'])
     for (const rel of LEGACY_LOCK_ONLY) {
       const source = readFileSync(join(BACKEND_SRC, rel), 'utf8')
       expect(source.length).toBeGreaterThan(0)
       if (NO_BROADCAST_OF_ITS_OWN.has(rel)) continue
-      expect(source, `${rel} is pinned as a legacy relayer site but no longer uses the relayer`)
-        .toContain('getRelayer')
+      expect(source, `${rel} is pinned as a legacy relayer site but no longer broadcasts under the lock`)
+        .toContain('withRelayerSendLock(')
     }
   })
 

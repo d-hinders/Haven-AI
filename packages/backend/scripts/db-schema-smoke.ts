@@ -237,18 +237,10 @@ import {
 import {
   CLEAR_DEFAULT_SAFES_FOR_USER_SQL,
   CLEAR_LEGACY_USER_SAFE_ADDRESS_SQL,
-  COUNT_SAFES_FOR_USER_SQL,
-  DELETE_APPROVER_METADATA_SQL,
   DELETE_USER_SAFE_SQL,
   FIND_OLDEST_SAFE_FOR_USER_SQL,
   FIND_OWNED_SAFE_ADDRESS_SQL,
   FIND_OWNED_SAFE_DEFAULT_FLAG_SQL,
-  FIND_OWNED_SAFE_SQL,
-  FIND_SAFE_ID_BY_ADDRESS_AND_CHAIN_SQL,
-  INSERT_USER_SAFE_SQL,
-  LINK_DEFAULT_USER_SAFE_SQL,
-  LIST_APPROVER_METADATA_FOR_SAFE_SQL,
-  LIST_KNOWN_APPROVERS_FOR_USER_SQL,
   LIST_SAFES_FOR_USER_SQL,
   LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL,
   ORPHAN_AGENTS_FOR_SAFE_SQL,
@@ -257,7 +249,6 @@ import {
   RENAME_SAFE_FOR_USER_SQL,
   SET_LEGACY_USER_SAFE_ADDRESS_SQL,
   SET_SAFE_DEFAULT_SQL,
-  UPSERT_APPROVER_METADATA_SQL,
   FIND_HYBRID_OWNER_SAFE_ROW_SQL,
   FIND_OWNED_SAFE_WITH_TYPE_ANY_CHAIN_SQL,
   FIND_OWNED_SAFE_WITH_TYPE_FOR_CHAIN_SQL,
@@ -289,7 +280,6 @@ import {
   INSERT_USER_SQL,
   UPDATE_CURRENCY_PREFERENCE_SQL,
   UPDATE_USER_NAME_SQL,
-  UPDATE_USER_SAFE_ADDRESS_SQL,
   UPDATE_USER_WALLET_ADDRESS_SQL,
 } from '../src/infra/repositories/users.js'
 import {
@@ -387,14 +377,13 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: allowance upsert (mirror row)', sql: UPSERT_AGENT_ALLOWANCE_SQL },
   { name: 'agents: allowance delete', sql: DELETE_AGENT_ALLOWANCE_SQL },
   // User-safes aggregate (#988). IMPORTED from the repository — verbatim from
-  // routes/user-safes.ts.
+  // routes/user-safes.ts. Nine statements left with #1988 (epic #1440): the
+  // four approver-metadata ones, the three import-path writes/reads, and the
+  // two lookups only the deleted handlers used. What remains is the surviving
+  // CRUD surface — list, rename, re-default, unlink — plus the owner directory.
   { name: 'user-safes: list for user', sql: LIST_SAFES_FOR_USER_SQL },
-  { name: 'user-safes: duplicate check by address+chain', sql: FIND_SAFE_ID_BY_ADDRESS_AND_CHAIN_SQL },
-  { name: 'user-safes: count for first-safe default rule', sql: COUNT_SAFES_FOR_USER_SQL },
   { name: 'user-safes: ownership check (id+address)', sql: FIND_OWNED_SAFE_ADDRESS_SQL },
   { name: 'user-safes: ownership check (id+is_default)', sql: FIND_OWNED_SAFE_DEFAULT_FLAG_SQL },
-  { name: 'user-safes: ownership check (id+address+chain)', sql: FIND_OWNED_SAFE_SQL },
-  { name: 'user-safes: import insert', sql: INSERT_USER_SAFE_SQL },
   { name: 'user-safes: legacy users.safe_address mirror', sql: SET_LEGACY_USER_SAFE_ADDRESS_SQL },
   { name: 'user-safes: legacy users.safe_address clear', sql: CLEAR_LEGACY_USER_SAFE_ADDRESS_SQL },
   { name: 'user-safes: rename (tenant-scoped)', sql: RENAME_SAFE_FOR_USER_SQL },
@@ -405,17 +394,11 @@ const QUERIES: SmokeQuery[] = [
   { name: 'user-safes: delete row', sql: DELETE_USER_SAFE_SQL },
   { name: 'user-safes: oldest remaining safe for promotion', sql: FIND_OLDEST_SAFE_FOR_USER_SQL },
   { name: 'user-safes: promote safe to default in delete tx', sql: PROMOTE_SAFE_TO_DEFAULT_SQL },
-  { name: 'user-safes: known approvers across safes', sql: LIST_KNOWN_APPROVERS_FOR_USER_SQL },
-  { name: 'user-safes: approver metadata for safe', sql: LIST_APPROVER_METADATA_FOR_SAFE_SQL },
-  { name: 'user-safes: approver metadata upsert (expression conflict target)', sql: UPSERT_APPROVER_METADATA_SQL },
-  { name: 'user-safes: approver metadata delete', sql: DELETE_APPROVER_METADATA_SQL },
   { name: 'user-safes: owner-directory list (account_type)', sql: LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL },
-  { name: 'user-safes: idempotent link from PUT /user/safe', sql: LINK_DEFAULT_USER_SAFE_SQL },
   // Users aggregate (#1167). IMPORTED from the repository — verbatim from
   // routes/user.ts.
   { name: 'users: update display name', sql: UPDATE_USER_NAME_SQL },
   { name: 'users: update connected wallet address', sql: UPDATE_USER_WALLET_ADDRESS_SQL },
-  { name: 'users: update legacy safe_address mirror', sql: UPDATE_USER_SAFE_ADDRESS_SQL },
   { name: 'users: read currency preference', sql: FIND_CURRENCY_PREFERENCE_SQL },
   { name: 'users: update currency preference', sql: UPDATE_CURRENCY_PREFERENCE_SQL },
   // Signup/login (#1180). IMPORTED — verbatim from routes/auth.ts. These are

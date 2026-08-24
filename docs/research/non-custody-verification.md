@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/rails/execution-rail.ts
   - packages/backend/src/__tests__/non-custody.invariants.test.ts
   - packages/frontend/src/lib/revoke-agent.ts
-last-verified: "2026-08-24" # #1988: the "control surface already exposed" bullet cited `/user/safes/:id/approvers` in the present tense; that route is deleted with the Safe rail, so the example is repointed at the two reads that still serve an owner list. The design premise survives — the surface exists, it is just a different route. Scope: that bullet. Prior: #1986: the invariants table rows 4 and 5 re-read against the AllowanceModule retirement — row 5's mechanism ("queued for approval") is legacy-rail-only and gone, and Red Line #4 is now only PARTIALLY proven on the live rail; addendum added naming the gap (#2004, Depends-on into #1991). Rows 1-3 and 6+ unaffected. Part 2/Phasing left alone — its "design proposal" framing is pre-existing drift, not this diff's. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-24" # #1988: the "control surface already exposed" bullet cited `/user/safes/:id/approvers` in the present tense; that route is deleted with the Safe rail, so the example is repointed. ⚠️ My first repoint invented `GET /user/safes/:safeId`, which does not exist — `routes/user-safes.ts` registers `GET /` and nothing per-id — and `haven-reviewer` caught it: a doc pass fixing a false claim introduced a different one, which is the failure mode the pass exists to prevent. Corrected to the routes that actually serve, and the owner list is now attributed to `/safe/:addr/details`, which is where the approver route read it from anyway. Scope: that bullet. Prior: #1986: the invariants table rows 4 and 5 re-read against the AllowanceModule retirement — row 5's mechanism ("queued for approval") is legacy-rail-only and gone, and Red Line #4 is now only PARTIALLY proven on the live rail; addendum added naming the gap (#2004, Depends-on into #1991). Rows 1-3 and 6+ unaffected. Part 2/Phasing left alone — its "design proposal" framing is pre-existing drift, not this diff's. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Design — make non-custody provable (CI invariants + "verify your control")
@@ -56,11 +56,12 @@ What the codebase shows today:
   (nullable). Per policy, "API auth is identity, signature is authority" — but
   the plaintext column should be fully retired.
 - **Control surface already exposed.** `/safe/:addr/details` (owners,
-  threshold), `GET /user/safes/:safeId`, on-chain allowances, and the agents
-  API already return everything a "verify your control" view needs.
-  (`/user/safes/:id/approvers` was on this list until #1988 deleted it with the
-  Safe rail; the owner list it served is still reachable from the two reads
-  named above.)
+  threshold), `GET /user/safes` (the caller's linked accounts), on-chain
+  allowances, and the agents API already return everything a "verify your
+  control" view needs. (`/user/safes/:id/approvers` was on this list until
+  #1988 deleted it with the Safe rail. The owner list it served is still
+  readable — from `/safe/:addr/details`, which is where it always came from:
+  the approver route read `getOwners()` too and merely decorated the result.)
 
 These facts are true *now* — the point of Part 1 is to keep them true.
 

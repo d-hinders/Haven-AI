@@ -206,7 +206,17 @@ interface PopoverProps {
    * elements".
    *
    * Product call sites never pass it, so the real popover keeps full dialog
-   * semantics.
+   * semantics — and that is ENFORCED, not merely requested (#1975).
+   * `__tests__/wallet-popover-presentational-guard.test.ts` fails if any call
+   * site outside `app/(authenticated)/design-system/` passes this prop, if one
+   * of `WalletButton`'s own popovers passes it, or if the default below is
+   * flipped to `true`. Do not silence an accessibility complaint on a real
+   * surface by reaching for it: the guard will refuse, which is the point.
+   *
+   * It refuses the CARELESS route, not every route — a `{...spread}` or a
+   * renamed import is invisible to a text scan. That limit is enumerated in
+   * the guard file's own "What this guard cannot see" section; read it there
+   * before concluding the confinement is airtight.
    */
   presentational?: boolean
   open: boolean

@@ -1,6 +1,6 @@
 'use client'
 
-import { Check, Clipboard, EllipsisVertical, X } from 'lucide-react'
+import { ArrowRight, Check, Clipboard, EllipsisVertical, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -57,7 +57,7 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={copy}
-      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
       title="Copy"
       aria-label="Copy address"
     >
@@ -286,7 +286,7 @@ export default function AccountDetailClient() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="Account options"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
               >
                 <Icon icon={EllipsisVertical} className="h-4 w-4" />
               </DropdownMenuTrigger>
@@ -408,9 +408,10 @@ export default function AccountDetailClient() {
             <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent access</h2>
             <Link
               href="/agents"
-              className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+              className="inline-flex items-center gap-1 text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
             >
-              View all agents &rarr;
+              View all agents
+              <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
             </Link>
           </div>
           <p className="mt-1 max-w-2xl pb-5 text-sm leading-relaxed text-[var(--v2-ink-2)]">
@@ -588,9 +589,10 @@ export default function AccountDetailClient() {
               {!txLoading && total > 0 ? (
                 <Link
                   href={`/transactions?safeId=${encodeURIComponent(safeId)}`}
-                  className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
                 >
-                  View all &rarr;
+                  View all
+                  <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
                 </Link>
               ) : null}
             </div>
@@ -721,7 +723,7 @@ function RenameModal({
   return (
     <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={loading ? undefined : onClose} />
-      <div className="relative mx-4 w-full max-w-sm rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
+      <div className="relative mx-4 w-full max-w-sm rounded-xl border border-[var(--v2-border)] bg-white shadow-modal">
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-5 py-4">
           <div>
             <h2 className="text-base font-semibold text-[var(--v2-ink)]">Rename account</h2>
@@ -747,11 +749,11 @@ function RenameModal({
                 setError('')
               }}
               autoFocus
-              className="w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2.5 text-sm text-[var(--v2-ink)] transition-colors focus:border-[var(--v2-brand)] focus:outline-none focus:ring-1 focus:ring-brand/20"
+              className="w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2.5 text-sm text-[var(--v2-ink)] transition-colors focus-visible:border-[var(--v2-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
             />
           </div>
           {error && (
-            <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-sm text-[var(--v2-danger)]">
+            <div className="rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-sm text-[var(--v2-danger)]">
               {error}
             </div>
           )}

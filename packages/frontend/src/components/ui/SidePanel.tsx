@@ -41,7 +41,7 @@ export function SidePanel({
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === 'string' ? title : 'Details'}
-        className="v2-animate-panel-in relative flex h-full w-full max-w-md flex-col border-l border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]"
+        className="v2-animate-panel-in relative flex h-full w-full max-w-md flex-col border-l border-[var(--v2-border)] bg-white shadow-modal"
       >
         <div className="flex items-start justify-between gap-3 border-b border-[var(--v2-border)] px-5 py-4">
           <div className="min-w-0">
@@ -54,7 +54,7 @@ export function SidePanel({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+            className="-mr-1 rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
           >
             <Icon icon={X} className="h-4 w-4" />
           </button>

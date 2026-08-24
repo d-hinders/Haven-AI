@@ -1,5 +1,7 @@
 'use client'
 
+import { ExternalLink } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { Table } from '@/components/ui/Table'
 import { type ReactNode } from 'react'
 import Link from 'next/link'
@@ -91,9 +93,10 @@ function SafeControlCard({ safe, agents }: { safe: UserSafe; agents: Agent[] }) 
           href={safeWalletUrl(safe)}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-sm font-medium text-[var(--v2-brand)] hover:underline"
+          className="inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:underline"
         >
-          Open in Safe&#123;Wallet&#125; ↗
+          Open in Safe&#123;Wallet&#125;
+          <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
         </a>
       </div>
 

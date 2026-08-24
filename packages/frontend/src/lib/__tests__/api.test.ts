@@ -154,6 +154,39 @@ describe('ApiClient', () => {
       }
     })
 
+    /**
+     * #1701: some routes refuse with STRUCTURED fields rather than only a
+     * sentence — the agent re-key 409s carry `rekey_id`, `stage` and
+     * `residual_atomic`, and a caller that only sees `message` cannot offer
+     * the action that resolves them. The whole parsed body is carried on the
+     * error so callers that know their route's contract can branch.
+     */
+    it('carries the parsed error body alongside message and status', async () => {
+      mockFetchError(409, {
+        error: 'residual_funds_on_old_delegate',
+        residual_atomic: '2000',
+      } as { error: string })
+
+      try {
+        await api.post('/agents/a/rekey')
+        expect.unreachable('should have thrown')
+      } catch (err) {
+        const e = err as ApiRequestError
+        // The pre-existing contract is unchanged.
+        expect(e.message).toBe('residual_funds_on_old_delegate')
+        expect(e.status).toBe(409)
+        // …and the structured half is now reachable.
+        expect(e.body).toMatchObject({ residual_atomic: '2000' })
+      }
+    })
+
+    it('leaves body undefined when constructed without one', () => {
+      const e = new ApiRequestError('boom', 500)
+      expect(e.body).toBeUndefined()
+      expect(e.message).toBe('boom')
+      expect(e.status).toBe(500)
+    })
+
     it('clears the persisted override when apiBaseUrl=default is provided', async () => {
       mockFetchError(403, { error: 'Forbidden' })
       localStorage.setItem('haven_api_base_url', 'https://branch-backend.example')

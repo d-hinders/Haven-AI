@@ -14,11 +14,14 @@
  * What is tested here vs. in unit tests
  * ─────────────────────────────────────
  * Unit tests (Vitest) cover:
- *   · HostedConnectCard — all states including the "Connected" banner, deep
- *     links, signing-key split, and "Show setup" toggle.
- *   · useAgentLastSeen — polling intervals (3 s waiting / 10 s connected),
- *     error recovery, and agentId-change reset.
  *   · Backend GET /agents/:id — mcp_last_seen_at correlated subquery.
+ *
+ * This list used to name HostedConnectCard and the useAgentLastSeen polling
+ * hook. Both were deleted in #1813: the card lost its only call site when #345
+ * retired CreateAgentModal, and the hook existed solely to drive that card's
+ * live "Connected" banner. The last-seen VALUE is still rendered, by
+ * components/agent-panel/AgentCard.tsx straight off the agent payload — what
+ * went away is a second, polling implementation nothing reached.
  *
  * E2E tests (Playwright) verify the integrated page-level behaviour that
  * only manifests when the full Next.js app, routing, and mocked Haven API
@@ -194,15 +197,10 @@ test.describe('Hosted MCP — over-budget path', () => {
 
 test.describe('Hosted MCP — connected state', () => {
   /**
-   * The full HostedConnectCard connected-state rendering (Connected badge,
-   * "last seen Xs ago" banner, collapsed setup steps, "Try it" prompt) is
-   * covered exhaustively by the unit tests in:
-   *
-   *   packages/frontend/src/components/haven/__tests__/HostedConnectCard.test.tsx
-   *
-   * The polling hook (useAgentLastSeen) that drives live updates is covered by:
-   *
-   *   packages/frontend/src/hooks/__tests__/useAgentLastSeen.test.ts
+   * The component-level connected-state rendering this once pointed at
+   * (HostedConnectCard) no longer exists — see #1813 and the note in this
+   * file's header. These tests never exercised it: they assert the
+   * page-level API contract, which is unaffected.
    *
    * Here we verify that the page-level API contract is correct:
    *   · GET /agents returns mcp_last_seen_at (null until the agent calls)

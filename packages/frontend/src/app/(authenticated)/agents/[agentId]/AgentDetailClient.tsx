@@ -38,6 +38,8 @@ import AgentPassportCard from '@/components/AgentPassportCard'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { RemoveAgentDialog } from '@/components/agent-panel/RemoveAgentDialog'
+import { ReplaceSigningKeyModal } from '@/components/agent-panel/ReplaceSigningKeyModal'
+import { useAgentPassport } from '@/hooks/useAgentPassport'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -351,6 +353,11 @@ export default function AgentDetailClient({ agentId }: Props) {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [replaceKeyOpen, setReplaceKeyOpen] = useState(false)
+
+  // #1701/#1699: only an anchored attestation is retired and reissued. Pending
+  // or failed issuance will read the new delegate if it anchors after re-key.
+  const { passport } = useAgentPassport(agentId)
 
   const isActive = agent?.status === 'active'
   const isPaused = agent?.status === 'paused'
@@ -376,7 +383,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   if (!agent) {
     return (
       <div className="max-w-3xl">
-        <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-8 text-center shadow-[var(--v2-shadow-card)]">
+        <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-8 text-center shadow-card">
           <h1 className="text-xl font-semibold text-[var(--v2-ink)]">Agent not found</h1>
           <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
             This agent may have been removed or you may no longer have access to it.
@@ -517,7 +524,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                 <DropdownMenuTrigger
                   aria-label="Agent options"
                   disabled={pendingAction !== null}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Icon icon={EllipsisVertical} className="h-4 w-4" />
                 </DropdownMenuTrigger>
@@ -527,6 +534,18 @@ export default function AgentDetailClient({ agentId }: Props) {
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => setCredentialsOpen(true)}>
                     Payment credentials
+                  </DropdownMenuItem>
+                  {/* #1701. Delegation rail only — re-key replaces a signed
+                      delegation, which an older account simply does not have.
+                      The entry stays reachable on BOTH rails and the modal
+                      carries the refusal, rather than being disabled here: an
+                      owner whose key is lost needs to learn that re-onboarding
+                      is the path, and neither a hidden item nor a greyed one
+                      can tell them. A disabled button would also put the
+                      reason in a hover tooltip, which a keyboard or touch user
+                      never sees. */}
+                  <DropdownMenuItem onSelect={() => setReplaceKeyOpen(true)}>
+                    Replace signing key
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -630,7 +649,7 @@ export default function AgentDetailClient({ agentId }: Props) {
       ) : null}
 
       {errorMessage ? (
-        <div className="mt-4 rounded-xl border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3">
+        <div className="mt-4 rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3">
           <p className="text-sm font-medium text-[var(--v2-danger)]">Action failed</p>
           <p className="mt-1 text-sm text-[var(--v2-danger)]">{errorMessage}</p>
         </div>
@@ -871,6 +890,21 @@ export default function AgentDetailClient({ agentId }: Props) {
           }}
         />
       ) : null}
+
+      <ReplaceSigningKeyModal
+        open={replaceKeyOpen}
+        onClose={() => setReplaceKeyOpen(false)}
+        agentId={agentId}
+        agentName={currentAgent.name}
+        chainId={chainId}
+        isDelegationAgent={isDelegationAgent}
+        currentDelegateAddress={currentAgent.delegate_address}
+        recentPayments={activity.filter(isPaymentActivityItem)}
+        hasAnchoredPassport={passport?.status === 'anchored' && passport.attestation_uid !== null}
+        onCompleted={() => {
+          refetch()
+        }}
+      />
 
       <PaymentCredentialsModal
         open={credentialsOpen}

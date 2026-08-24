@@ -94,7 +94,7 @@ export function Tooltip({
               'pointer-events-none z-[var(--v2-z-tooltip)]',
               'bg-[var(--v2-ink)] text-white px-2.5 py-1.5 rounded-md',
               'text-[12px] leading-tight whitespace-nowrap',
-              'shadow-[var(--v2-shadow-popover)]',
+              'shadow-popover',
               mono ? 'font-mono' : '',
             ]
               .filter(Boolean)

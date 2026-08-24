@@ -121,7 +121,7 @@ function ConnectedAgentsSection({
   onConnectAgent: () => void
 }) {
   return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
+    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card overflow-hidden">
       <Card.Header
         as="h2"
         title="Connected agents"
@@ -260,7 +260,7 @@ function DashboardHero({
 
   return (
     <section
-      className="relative overflow-hidden rounded-[24px] border border-[var(--v2-border-anchor)] bg-[var(--v2-surface-anchor)] shadow-[var(--v2-shadow-card-raised)]"
+      className="relative overflow-hidden rounded-[24px] border border-[var(--v2-border-anchor)] bg-[var(--v2-surface-anchor)] shadow-card-raised"
     >
       {/*
         Subtle ambient drift on the hero's gradient backdrop — the v2-mesh-drift
@@ -415,9 +415,9 @@ function MetricCard({
   // translate) makes the affordance obvious and matches the Stripe-style
   // hover treatment used on the dashboard hero.
   const baseClass =
-    'group block rounded-[10px] border border-[var(--v2-border)] bg-white p-5 shadow-[var(--v2-shadow-card)] transition-all duration-200 ease-out motion-reduce:transition-none motion-reduce:hover:translate-y-0'
+    'group block rounded-[10px] border border-[var(--v2-border)] bg-white p-5 shadow-card transition-all duration-200 ease-out motion-reduce:transition-none motion-reduce:hover:translate-y-0'
   const hoverClass =
-    'hover:-translate-y-px hover:shadow-[var(--v2-shadow-card-raised)] hover:border-[var(--v2-border-strong)]'
+    'hover:-translate-y-px hover:shadow-card-raised hover:border-[var(--v2-border-strong)]'
 
   if (href) {
     return (
@@ -536,7 +536,7 @@ function TransactionsSection({
   resolveAddress: (address: string) => string | null
 }) {
   return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
+    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card overflow-hidden">
       <Card.Header
         as="h2"
         title="Recent transactions"
@@ -550,7 +550,14 @@ function TransactionsSection({
       {loading ? (
         <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading recent transactions">
           {[0, 1, 2].map((item) => (
-            <div key={item} className="grid gap-3 px-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 h-[72px]">
+            // Same breakpoint-scoped height as the loaded row it stands in for
+            // (#1833). It does not currently overflow — the stacked skeleton is
+            // ~64px against the 72px clamp — but it is the identical shape:
+            // an `sm:`-gated two-column grid pinned unconditionally. Left
+            // clamped it would ALSO make the list jump on load, since the
+            // loaded row now grows to 116-164px below `sm` while this stayed
+            // at 72px.
+            <div key={item} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 sm:py-0 sm:h-[72px]">
               <div className="flex items-center gap-3">
                 <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
                 <div>

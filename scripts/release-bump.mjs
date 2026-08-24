@@ -27,6 +27,11 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { bumpLockfileText, lockfileDiffViolations } from './release-lockfile.mjs'
+import {
+  MANIFEST_ROWS,
+  manifestTableViolations,
+  rewriteManifestTable,
+} from './release-manifest-doc.mjs'
 
 const execAsync = promisify(execFile)
 
@@ -77,6 +82,11 @@ function isWildcardRange(range) {
 // Source files that contain inlined version literals.
 const MCP_SERVER_TS    = join(ROOT, 'packages', 'mcp', 'src', 'server.ts')
 const RUNTIME_MANIFEST = join(ROOT, 'packages', 'connect', 'src', 'runtime-manifest.ts')
+
+// The contract doc whose Supported Runtime Manifest table mirrors the constants
+// above (#1790). The bump writes the table; scripts/release-manifest-doc.mjs
+// owns both the write and the independent check.
+const MANIFEST_DOC = join(ROOT, 'docs', 'operations', 'mcp-runtime-compatibility.md')
 
 // Source-level version constants that must stay in lockstep with the release.
 // Each is an `export const NAME = '...'` literal. They are self-reported
@@ -221,6 +231,63 @@ async function updateRuntimeManifest(newVersion) {
 
   await writeFile(RUNTIME_MANIFEST, source, 'utf8')
   log(`  sdkVersion + signerVersion → '${newVersion}' in packages/connect/src/runtime-manifest.ts`)
+}
+
+/**
+ * Re-pin the Supported Runtime Manifest table in the contract doc (#1790).
+ *
+ * The table's stated job is to mirror the constants this script just wrote, and
+ * it was re-pinned by hand on every release — four numbers copied out of a file
+ * the script had already written and already verified.
+ *
+ * What this does NOT do, deliberately: satisfy the contract-doc gate on its own.
+ * The gate requires BOTH contract docs, and the CASP shard remains entirely
+ * hand-written — as does this doc's own `last-verified` note, which says what
+ * the release carries and why the perimeter is unaffected. Those are the parts
+ * that need judgement; a table of four identical version strings is not.
+ */
+async function updateManifestDoc(newVersion) {
+  const source = await readFile(MANIFEST_DOC, 'utf8')
+  const updated = rewriteManifestTable(source, newVersion)
+  await writeFile(MANIFEST_DOC, updated, 'utf8')
+  log(`  Supported Runtime Manifest table → '${newVersion}' in docs/operations/mcp-runtime-compatibility.md`)
+  log('    (the last-verified note on that doc is still yours to write, and so is the CASP shard)')
+}
+
+/**
+ * Verify the manifest table against the SOURCE CONSTANTS — never against the
+ * version this run computed.
+ *
+ * This distinction is the whole point. A script that writes a value and then
+ * checks it wrote that value has built a guard that cannot fail, which is the
+ * defect this repo keeps producing. So the check re-reads both the doc and each
+ * row's own source file FROM DISK and compares them to each other: remove
+ * `updateManifestDoc` above and this still runs, sees the stale table, and
+ * fails. Pass it a version no source carries and every row is reported.
+ *
+ * Each row is checked against its OWN constant rather than one shared string,
+ * so a table that agrees with itself and with nothing else cannot pass. The
+ * same function runs in CI on every pull request
+ * (`scripts/release-bump.test.mjs`), which is what makes it a drift guard
+ * rather than a release-time formality — a hand-edited table fails there with
+ * no release in sight.
+ */
+async function verifyManifestDoc() {
+  const doc = await readFile(MANIFEST_DOC, 'utf8')
+  const sources = {}
+  for (const spec of MANIFEST_ROWS) {
+    sources[spec.file] = await readFile(join(ROOT, spec.file), 'utf8')
+  }
+  const violations = manifestTableViolations(doc, sources)
+  if (violations.length > 0) {
+    die(
+      'Supported Runtime Manifest table does not match the version constants it mirrors (#1790):\n  ' +
+      violations.join('\n  ') + '\n\n' +
+      'docs/operations/mcp-runtime-compatibility.md is a CONTRACT doc — it is what a\n' +
+      'consumer reads to know which versions work together.',
+    )
+  }
+  log('  ✓ Supported Runtime Manifest table matches every version constant it mirrors')
 }
 
 // ── Build helpers ─────────────────────────────────────────────────────────────
@@ -421,12 +488,14 @@ async function main() {
   log(`  MCP_VERSION = '${newVersion}'  (packages/mcp/src/server.ts)`)
   log(`  sdkVersion + signerVersion = '${newVersion}'  (packages/connect/src/runtime-manifest.ts)`)
   log(`  ${SOURCE_VERSION_CONSTANTS.map((c) => c.name).join(', ')} = '${newVersion}'`)
+  log(`  Supported Runtime Manifest table = '${newVersion}'  (docs/operations/mcp-runtime-compatibility.md)`)
   // These two are CHECKS THIS RUN WILL PERFORM, not results — the guards run
   // after the pins are rewritten, further down. Saying "(verified)" here
   // printed a reassuring line immediately before the run died on that very
   // check (#1526).
   log(`  will verify: no wildcard internal @haven_ai/* deps in published packages`)
   log(`  will verify: no exact internal @haven_ai/* pins in private consumers`)
+  log(`  will verify: the manifest table matches the source constants, not this run's value`)
   log(`  dist directories wiped, packages rebuilt in order: sdk → signer → mcp → connect`)
 
   if (!process.argv.includes('--yes') && process.stdout.isTTY) {
@@ -494,6 +563,13 @@ async function main() {
     await updateSourceVersionConstant(entry, newVersion)
   }
 
+  // The contract doc's table mirrors the constants written immediately above,
+  // so it is re-pinned here rather than by hand afterwards (#1790). It is
+  // written LAST in this step on purpose: verifyManifestDoc() further down
+  // compares it against those constants on disk, so writing them first means
+  // the check has something real to disagree with.
+  await updateManifestDoc(newVersion)
+
   // ── 6. Wipe all dists ────────────────────────────────────────────────────
   header('Wiping dist directories')
   await wipeAllDists()
@@ -550,6 +626,10 @@ async function main() {
   header('Verifying connect bundle')
   await verifyConnectBundle(newVersion)
   await verifySourceVersionConstants(newVersion)
+  // Takes no version argument, and that is deliberate (#1790): it compares the
+  // contract doc's table against the source constants on disk, so it cannot be
+  // satisfied by the write this run performed.
+  await verifyManifestDoc()
 
   // Strong build-order check: the dedicated verifier require()s the built
   // bundle and compares its runtime-resolved mcpVersion against the
@@ -564,13 +644,40 @@ async function main() {
   header('Done')
   log(`\n  Released: ${newVersion}`)
   log('')
-  log('  Next steps:')
-  log('    git diff --stat                          # review all changes')
-  log('    git add -p && git commit -m "chore: bump to ' + newVersion + '"')
-  log('    npm publish -w packages/sdk --tag alpha')
-  log('    npm publish -w packages/signer --tag alpha')
-  log('    npm publish -w packages/mcp --tag alpha')
-  log('    npm publish -w packages/connect --tag alpha')
+  // #1788: this block used to end with `npm publish` invocations — the one
+  // action CLAUDE.md and the release skill forbid in three separate places,
+  // arriving at the moment of maximum trust, right after the tool has done
+  // everything else correctly. It also named four of the five published
+  // packages, so following it stranded @haven_ai/cli at the previous version.
+  //
+  // Nothing here enumerates packages. The published set is derived at publish
+  // time by publish.yml; a second hand-maintained list is what drifted.
+  log('  Next steps — publishing is NOT one of them:')
+  log('')
+  log('    1. git diff --stat            review the bump')
+  log('    2. Write the two contract docs, or the blocking coupling gate fails.')
+  log('       The mechanical half is already done; what is left needs judgement:')
+  log('         docs/operations/mcp-runtime-compatibility.md')
+  log('           the manifest table is ALREADY re-pinned and verified against the')
+  log('           source constants. Still yours: prepend a last-verified note saying')
+  log('           what this release carries and what did NOT move.')
+  // #1789: named for the VERSION, never the PR number. The shard must exist
+  // before the PR is opened — the coupling gate blocks the PR without it — so a
+  // PR-numbered name cannot be written at the moment it is needed. This line is
+  // where a release-cutter actually reads the convention, which is why it is
+  // guarded: the docs were corrected once while this string kept teaching the
+  // retired rule to the next person who ran the bump.
+  log(`         docs/regulatory/casp-changelog/<date>-${newVersion}-release.md`)
+  log('           a new shard, ending in a perimeter verdict')
+  log('    3. npm run docs:coupling      must exit 0')
+  log('    4. Commit on a release branch and open a PR into `dev`.')
+  log('')
+  log('  Publishing happens on the dev -> main promotion, and is version-gated:')
+  log('  publish.yml skips any version already on npm.')
+  log('')
+  log('  Never run `npm publish` by hand. It bypasses the per-package summary,')
+  log('  the prod release record, and every promotion gate.')
+  log('  See .agents/skills/release/SKILL.md.')
   log('')
 }
 

@@ -191,31 +191,96 @@ Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../
 ## Merge Gate
 
 Classify a change as money-path when **either** the issue carries the `money-path`
-label **or** the diff touches any of:
+label **or** the diff touches a file on the perimeter.
 
-- `routes/payments.ts` or `routes/x402-resources.ts` (`routes/x402.ts` and
-  `routes/machine-payments.ts` dissolved into the modules below, #996/#997);
-- `modules/x402/`, `modules/mpp/`, `domain/payment-token.ts`, `domain/payment-coverage.ts`, or `rails/allowance-module.ts`;
-- `rails/execution-rail.ts` (the rail seam);
-- `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`, `rails/hybrid-account-config.ts`, or `routes/agent-delegations.ts`
-  (the delegation rail);
-- `rails/sweep.ts`, `infra/relayer*.ts`, `infra/outbound-*.ts`, or
-  `modules/accounts/mainnet-gate.ts` (funds recovery, gas payment, the durable
-  outbound-tx queue and its bump worker, the relayer spend guard/monitor, and the
-  mainnet authority floor — the relayer/mainnet trio added by #1045 after review
-  found them missing while they literally move or gate money; the outbound globs
-  added after epic #1554 shipped files that broadcast and replace real
-  transactions without appearing here);
+**The perimeter's single source of truth is
+[`.github/money-path-globs.json`](../../../.github/money-path-globs.json)** (#1030) —
+the same file that drives the `money-path` labeler and the `qa-freshness` promotion
+gate. The annotated list below exists for the *why* behind each group, and
+`scripts/ci/money-path.test.mjs` now pins it to that JSON **in both directions**: a
+path here that the JSON lacks fails CI, and a path in the JSON that is missing here
+fails CI too. Read the JSON when you need the authoritative answer; read this when
+you need the reasoning. Never edit one without the other — CI will not let you.
+
+- `routes/payments.ts`, `routes/x402-resources.ts`, `routes/x402.ts`, and
+  `routes/machine-payments.ts` — all four are live route files. (#996/#997 moved
+  their *logic* into the modules below and left thin validation/auth shells, which
+  this line described for a year as the files having "dissolved". They had not;
+  both are registered in `index.ts` today. A parenthetical that reads as an
+  exclusion is worse than an omission, because nobody re-checks it — #1892.);
+- `modules/x402/`, `modules/mpp/`, `domain/payment-token.ts`,
+  `domain/payment-coverage.ts`, `domain/machine-payment-lifecycle.ts`, or
+  `rails/allowance-module.ts`;
+- `rails/execution-rail.ts` (the rail seam) and `rails/allowance-nonce-coordinator.ts`;
+- `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`,
+  `rails/hybrid-account-config.ts`, `rails/hybrid-signer-actions.ts`,
+  `rails/hybrid-transfers.ts`, `routes/agent-delegations.ts`, or
+  `routes/agent-rekey.ts` and `modules/agents/rekey-*.ts`
+  (the delegation rail — including re-key, which revokes and re-issues an agent's
+  on-chain spend authority. It was missing here, in the JSON and in the labeler
+  from #1698 until #1892, while `infra/repositories/` already covered its storage
+  layer: a PR touching the re-key repository was labelled and one touching only the
+  route was not, so the list read as though it knew about re-key);
+- `rails/sweep.ts`, `infra/relayer*.ts`, `infra/delegate-*.ts`, `infra/outbound-*.ts`,
+  `infra/chain/`, `infra/repositories/`, or `modules/accounts/mainnet-gate.ts` (funds
+  recovery, gas payment, the durable outbound-tx queue and its bump worker, the relayer
+  spend guard/monitor, the delegate exposure monitor, the contract-call and persistence
+  layers, and the mainnet authority floor — the relayer/mainnet trio added by #1045
+  after review found them missing while they literally move or gate money; the outbound
+  globs added after epic #1554 shipped files that broadcast and replace real
+  transactions without appearing here; `infra/delegate-*.ts` added by #1892's own
+  review, which found the delegate balance monitor unlisted while its equally
+  read-only sibling `infra/relayer-balance-monitor.ts` was matched by prefix accident —
+  the two even share an alert channel);
 - `routes/safe-exec.ts`, `routes/approvals.ts`, or `routes/hybrid-accounts.ts`
   (user-signed execution, the approval queue, account provisioning);
 - `packages/sdk/src/signer.ts` (signing schemes are spend authority);
 - `middleware/agentAuth.ts`;
 - `db/migrations/`;
-- `scripts/release-bump.mjs` or `.github/workflows/publish.yml`.
+- the safeguard's own control surface — `scripts/release-bump.mjs`,
+  `scripts/ci/qa-freshness.mjs`, `scripts/ci/money-path.test.mjs`,
+  `scripts/ci/money-path-restatement-scan.mjs`, `.github/CODEOWNERS`,
+  `.github/money-path-globs.json`, `.github/workflows/publish.yml`,
+  `.github/workflows/dev-gate.yml`, `.github/workflows/qa-dev.yml`. These are
+  `controlGlobs` in the JSON: labelled money-path so a PR weakening the gate gets
+  this playbook and a human, but excluded from the freshness re-run, because
+  re-running the money-flow harness proves nothing about a CI config change.
 
 The label matters because money-sensitive changes do not always touch listed files
 (a new signing scheme, a new rail); the file list matters because a diff can be
 money-sensitive without the issue being labeled. Union, never intersection.
+
+**The file half fails silently, so it needs the guard the label half does not.** When
+a route is missing from the list, a labeled issue still classifies correctly and
+nothing looks wrong — the right answer comes out for the wrong reason, and only
+someone asking *why* it was right finds the hole (which is how #1892 was found, off
+the back of #1870 shipping correctly). That is why the drift check above is
+bidirectional and why adding a path is cheap while leaving one out is the failure
+mode. It is **not** derived from the code, and that was measured rather than assumed
+(#1892, against `packages/backend/src` on 2026-08-23, 266 non-test `.ts` files). A
+narrow money-verb scan matches **29 of 266** — good discrimination — but misses **30
+of the 48** files this list covered before #1892, counting the pre-#1892 Merge Gate
+entries expanded to real non-test files under `packages/backend/src` only, so
+excluding `db/migrations/**`, `packages/sdk/` and the control globs. State that
+denominator whenever you requote the figure; a different one gives a different
+number. A vocabulary wide enough to catch those misses matches **149 — 56% of the
+backend**, at which point the classification stops discriminating. So the list stays
+hand-written, in one place, with the copies pinned to it.
+
+**Two things the pinning now also checks (#1897/#1899).** Every glob must match
+real tracked code, so the list cannot claim a module layout the repository does
+not have — a `modules/machine-payments/` entry, added pre-emptively by #1158 for
+a split that landed as `modules/mpp/`, sat matching nothing until #1897 removed
+it. Removing a glob normally *shrinks* the perimeter and needs its own answer to
+"is it dead, or did it just move?"; that one had never matched anything in the
+repository's history, and every machine-payment file today is covered by another
+entry. If a glob's code genuinely moved, **repoint it — never just delete it**;
+if it is genuinely still coming, `PRE_EMPTIVE_GLOBS` in the drift test is where
+to say so. And `docs/regulatory/casp-risk-guardrails.md`'s `covers:` front matter
+— a fourth copy of this perimeter, which declares itself maintained against this
+list — is now pinned to it too, with its two remaining gaps exempted explicitly
+rather than silently.
+
 A comment-only diff in a listed file may be treated as non-money-path when the
 review confirms zero behavioral change — say so explicitly in the PR.
 
@@ -240,7 +305,7 @@ diagnosis rule and why it is silent live in
 § *Before Merging* (#1366); read it there rather than re-deriving it from a stalled
 check list.
 
-> **Why money-path does not pause here (#1024).** The in-session approval applied only to pull requests opened through this skill — a hand-written money-path pull request merged on green CI alone. That made the canonical workflow more expensive than bypassing it while protecting nothing on the bypass path, and the approver was usually the author. What protects the money path is automatic and tool-independent: `CODEOWNERS` for irreversible schema changes, and the `qa-freshness` gate that refuses a `dev → main` promotion without a recent green money-flow QA run on `dev` (partial — time-based, not SHA-bound, and blind to `hotfix/*`). See [`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md) → "Money-path safety model".
+> **Why money-path does not pause here (#1024).** The in-session approval applied only to pull requests opened through this skill — a hand-written money-path pull request merged on green CI alone. That made the canonical workflow more expensive than bypassing it while protecting nothing on the bypass path, and the approver was usually the author. What protects the money path is automatic and tool-independent: `CODEOWNERS` for irreversible schema changes, and the `qa-freshness` gate, which since [#1030](https://github.com/d-hinders/Haven-AI/issues/1030) refuses a `dev → main` promotion unless a green money-flow QA run actually **covered** the money-path code being promoted — recency alone does not satisfy it, and a money-path `hotfix/*` blocks outright. Its real limits are the deliberate ones: a logged `qa-override`, and the fact that it only bites while listed in `main`'s required checks. See [`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md) → "Money-path safety model" and "Be precise about what gate 2 proves", which is where the limits are enumerated — this line names them only to say they are not the ones people assume.
 
 Never bypass required checks. Diagnose CI failures, fix them, push, and re-arm auto-merge only when appropriate.
 

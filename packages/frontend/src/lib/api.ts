@@ -179,7 +179,7 @@ class ApiClient {
       const body: ApiError = await response.json().catch(() => ({
         error: 'An unexpected error occurred',
       }))
-      throw new ApiRequestError(body.error, response.status)
+      throw new ApiRequestError(body.error, response.status, body)
     }
 
     return response.json() as Promise<T>
@@ -200,7 +200,7 @@ class ApiClient {
       const body: ApiError = await response.json().catch(() => ({
         error: 'An unexpected error occurred',
       }))
-      throw new ApiRequestError(body.error, response.status)
+      throw new ApiRequestError(body.error, response.status, body)
     }
     return response.text()
   }
@@ -246,10 +246,29 @@ class ApiClient {
 
 export class ApiRequestError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  /**
+   * The parsed error body, when there was one (#1701).
+   *
+   * `message` is `body.error` — a human string — and for most routes that is
+   * the whole of it. Some routes answer a refusal with STRUCTURED fields the
+   * caller has to branch on rather than read: the agent re-key flow's 409s
+   * carry `rekey_id` + `stage` (which re-key is already in flight, and where
+   * it stopped) and `residual_atomic` (how much is stranded on the delegate
+   * about to be retired). Flattening those to a sentence made the refusal
+   * unactionable — the client could tell the user something went wrong, but
+   * not offer the one thing that resolves it.
+   *
+   * Deliberately `unknown`: this is an escape hatch for callers that know
+   * their route's contract, not a typed second API surface. Narrow it at the
+   * call site. Additive — every existing caller reads `message`/`status` and
+   * is unaffected.
+   */
+  body?: unknown
+  constructor(message: string, status: number, body?: unknown) {
     super(message)
     this.name = 'ApiRequestError'
     this.status = status
+    this.body = body
   }
 }
 

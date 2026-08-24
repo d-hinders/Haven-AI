@@ -49,7 +49,17 @@ export {
 
 // The real on-chain anchor. Imported here (not inside issuance.ts) so the
 // issuance state machine stays testable without ethers or a relayer.
-export { anchorOnChain, revokeOnChain, recoverAnchorFromReceipt, classifyAnchorTxLiveness, buildAttestCall, buildRevokeCall, encodeClaim } from './attestation.js'
+export {
+  anchorOnChain,
+  revokeOnChain,
+  recoverAnchorFromReceipt,
+  classifyAnchorTxLiveness,
+  readRevocationAnchor,
+  buildAttestCall,
+  buildRevokeCall,
+  encodeClaim,
+  PASSPORT_REVOKE_SUBMITTER,
+} from './attestation.js'
 
 // The merchant-facing verifier (#974). Haven's DB is the authority here; the
 // attestation UID rides along as an evidence pointer, never as the decision.
@@ -97,12 +107,28 @@ export {
   reconcilePendingRevocations,
   listStuckRevocations,
   revocationBackoffSeconds,
+  isStaleAnchor,
   setRevoker,
+  setRevocationProbe,
   type Standing,
   type AnchorState,
   type PassportStanding,
   type Revoker,
+  type RevocationAnchorProbe,
+  type RevocationAnchorReading,
+  type RevocationAnchorState,
 } from './revocation.js'
+
+// Re-anchoring after a re-key (#1699, epic #1694). EAS attestations are
+// immutable and the schema's first field is the delegate EOA, so a rotated key
+// means retire-and-reissue — with the DB's `standing` running unbroken across
+// it, because standing was never a column of this table.
+export {
+  reconcileReanchor,
+  reanchorPassportBestEffort,
+  reconcilePendingReanchors,
+  listStuckReanchors,
+} from './reanchor.js'
 
 // x402 passport-reference delivery (#976, `X-Agent-Passport` header) — #998
 // added this re-export so `modules/x402/settle.ts` (the only external

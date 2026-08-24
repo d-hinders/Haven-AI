@@ -268,6 +268,126 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/agents/{id}/rekey": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-key step 0: preflight — residual check, and open the re-key (#1698).
+         * @description Opens an owner-authorised re-key: same agent identity, new delegate key, new API key, old authority revoked. Delegation rail only — a legacy AllowanceModule account is refused 409 with re-onboarding named as the path. An agent API key is refused 403: an agent can never re-key itself. new_delegate_address is the PUBLIC address of a keypair generated on the target machine; Haven never receives the private half. Preflight reads the residual balance on the OLD delegate EOA and refuses 409 on a non-zero one until residual_disposition says what happened to it, because sweeping needs the old key's signature and after the rotation that balance is unrecoverable. A failed balance read is 503 rather than a shrug.
+         */
+        post: operations["startAgentRekey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/rekey/{rekeyId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-key step 1a: prepare the batched revoke of every live delegation (#1698).
+         * @description Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage with an empty carry.
+         */
+        post: operations["prepareRekeyRevocation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/rekey/{rekeyId}/revoke/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-key steps 1b + 2: land the revoke, THEN read the now-frozen meter (#1698).
+         * @description Submits the owner-signed disableDelegation UserOp and, only once it has landed, reads each revoked delegation's remaining period budget and boundary into a frozen carry snapshot. The ordering is the point: reading before the revoke leaves a window in which a payment lands and the carried remainder over-counts it by that amount; after the revoke the on-chain state cannot move. It is safe because the revoke writes to the DelegationManager while the meter is read from the ERC20PeriodTransferEnforcer — two different contracts, and the read consults nothing the revoke writes. On a failed submit nothing is written and the old key is still live, so a retry is safe.
+         */
+        post: operations["submitRekeyRevocation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/rekey/{rekeyId}/issue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-key step 3: build the carried delegations for the new delegate (#1698).
+         * @description Refuses unless the re-key is at stage "metered" — which is only reachable through the revoke, so issue-before-revoke is forbidden structurally rather than by convention. Each replaced budget yields up to two grants: a "carry" capped at the frozen remainder and EXPIRING at the old period boundary, and a paired "steady" carrying the original budget and cadence starting at that same instant. The two never overlap, so no re-key can shorten a period or grant more than the original budget within one. Returns EIP-712 payloads for the owner to sign.
+         */
+        post: operations["issueRekeyDelegations"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/rekey/{rekeyId}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-key steps 4 + 5: activate, rotate BOTH credentials, invalidate old-payer intents (#1698).
+         * @description Activates every signed replacement delegation and, in the same transaction, swaps the agent's delegate address AND mints a new API key — one operation retires the whole old credential set, because a stale API key is its own hazard (#1681 finding A). Every unexecuted intent stamped with the old payer is expired in that same transaction; #1690's signer-side payer guard is a backstop, not the primary defence. The new API key is returned ONCE, to the authenticated owner.
+         */
+        post: operations["completeAgentRekey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/rekey/{rekeyId}/abandon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a stopped re-key, and say plainly if it left the agent without authority (#1698).
+         * @description Recorded, not deleted: an abandoned re-key that got past the revoke left the agent with no authority, and the dashboard has to be able to say so rather than letting it read as a mysterious 403.
+         */
+        post: operations["abandonAgentRekey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents/{id}/delegations/revoke-all": {
         parameters: {
             query?: never;
@@ -2792,6 +2912,7 @@ export type components = {
             archived_at?: string | null;
             allowances: components["schemas"]["AgentAllowance"][];
             mcp_last_seen_at?: string | null;
+            mcp_server_name?: string | null;
             has_stranded_funds?: boolean;
         } & {
             [key: string]: unknown;
@@ -3608,6 +3729,114 @@ export type components = {
             agents: components["schemas"]["DashboardAgentPreview"][];
             /** @description At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection. */
             transactions: components["schemas"]["Transaction"][];
+        };
+        /** @description Reported whether or not it is recoverable — nothing about a stranded residual fails quietly. */
+        AgentRekeyResidual: {
+            atomic: string;
+            token_address?: string | null;
+            disposition?: string | null;
+            recoverable_after_rekey: boolean;
+            note?: string;
+        };
+        AgentRekeyRevokePrepare: {
+            /** @enum {string} */
+            signature_scheme: "eip712_userop";
+            signing_payload: {
+                [key: string]: unknown;
+            };
+            user_operation: {
+                [key: string]: unknown;
+            };
+            /** @example 0x1111111111111111111111111111111111111111 */
+            treasury_address: string;
+            delegation_hashes: string[];
+            instructions: string;
+        } | {
+            /** @enum {string} */
+            signature_scheme: "webauthn_userop";
+            user_op_hash: string;
+            user_operation: {
+                [key: string]: unknown;
+            };
+            /** @example 0x1111111111111111111111111111111111111111 */
+            treasury_address: string;
+            delegation_hashes: string[];
+            instructions: string;
+        } | {
+            /** @enum {boolean} */
+            revoked: true;
+            tx_hash?: string | null;
+            delegation_hashes?: string[];
+            stage: string;
+            carry?: {
+                [key: string]: unknown;
+            }[];
+            agent_has_no_authority: boolean;
+            next_step: string;
+        };
+        AgentRekeyPreflight: {
+            /** Format: uuid */
+            rekey_id: string;
+            /** @enum {string} */
+            stage: "preflight";
+            /** @example 0x1111111111111111111111111111111111111111 */
+            old_delegate_address: string;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            new_delegate_address: string;
+            residual: components["schemas"]["AgentRekeyResidual"];
+            delegations_to_revoke: string[];
+            next_step: string;
+            ordering_note?: string;
+        };
+        AgentRekeyIssuedDelegation: {
+            /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+            delegation_hash: string;
+            /** @enum {string} */
+            carry_role: "carry" | "steady" | "reanchor";
+            /** @example 0x1111111111111111111111111111111111111111 */
+            token_address: string;
+            recipient_address?: string | null;
+            budget_atomic: string;
+            period_seconds?: number;
+            start_date?: number;
+            expires_at?: number;
+            signing_payload: {
+                [key: string]: unknown;
+            };
+        };
+        AgentRekeyIssueResponse: {
+            /** @enum {string} */
+            stage: "issued";
+            /** @example 0x1111111111111111111111111111111111111111 */
+            delegate_account_address: string;
+            delegations: components["schemas"]["AgentRekeyIssuedDelegation"][];
+            skipped?: {
+                /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+                delegation_hash?: string;
+                reason?: string;
+            }[];
+            carry_note?: string;
+            next_step?: string;
+        };
+        AgentRekeyCompleteResponse: {
+            completed: boolean;
+            /** @enum {string} */
+            stage: "completed";
+            /** Format: uuid */
+            agent_id: string;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            new_delegate_address: string;
+            /** @description Shown ONCE. Never stored in plaintext and never logged. */
+            api_key: string;
+            api_key_prefix: string;
+            old_api_key_revoked: boolean;
+            invalidated_intents?: number;
+            superseded_delegations?: number;
+            residual_on_old_delegate?: {
+                atomic?: string;
+                recoverable?: boolean;
+                note?: string;
+            };
         };
         TransactionsResponse: {
             transactions: components["schemas"]["Transaction"][];
@@ -4841,6 +5070,731 @@ export interface operations {
             };
         };
     };
+    startAgentRekey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description PUBLIC address of the new delegate keypair, generated locally. Must differ from the current delegate and must not collide with another live agent.
+                     * @example 0x1111111111111111111111111111111111111111
+                     */
+                    new_delegate_address: string;
+                    /**
+                     * @description Required only when the old delegate EOA holds a non-zero balance. "swept" after sweeping it with the old key; "acknowledged_unrecoverable" to proceed knowing the key is lost and the balance is written off.
+                     * @enum {string}
+                     */
+                    residual_disposition?: "swept" | "acknowledged_unrecoverable";
+                };
+            };
+        };
+        responses: {
+            /** @description Re-key opened at stage preflight. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRekeyPreflight"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description An agent credential was presented — an agent can never re-key itself. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Not on the delegation rail, a re-key already in flight, a colliding delegate address, or an undispositioned residual balance. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The residual balance read failed; proceeding would retire the only key that could sweep it. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    prepareRekeyRevocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+                /** @description Re-key id from the preflight response. */
+                rekeyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Multi-signer accounts choose per request; omitted, an EOA owner defaults to eip712_userop.
+                     * @enum {string}
+                     */
+                    signature_scheme?: "eip712_userop" | "webauthn_userop";
+                };
+            };
+        };
+        responses: {
+            /** @description Prepared revocation, shaped by the signature scheme — or the no-authority short-circuit. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRekeyRevokePrepare"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Wrong stage — this re-key is past the revoke; the account signer configuration is unknown; or the requested signature_scheme is one this account cannot sign. Every one of these lands BEFORE the revoke, so the re-key stays retryable (#1868). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    submitRekeyRevocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+                /** @description Re-key id from the preflight response. */
+                rekeyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    signature: string;
+                    user_operation: {
+                        [key: string]: unknown;
+                    };
+                    delegation_hashes: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Revoked on-chain and metered. The agent now has NO authority until the issue step completes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        revoked: boolean;
+                        tx_hash?: string | null;
+                        delegation_hashes?: string[];
+                        /** @enum {string} */
+                        stage: "metered";
+                        /** @description The frozen measurement, one entry per revoked delegation. */
+                        carry?: {
+                            /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+                            delegation_hash?: string;
+                            remaining_atomic?: string;
+                            /** @description False means the read fell back to the full budget. The carry REFUSES these rather than granting a fresh full period. */
+                            from_chain?: boolean;
+                        }[];
+                        agent_has_no_authority: boolean;
+                        next_step?: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    issueRekeyDelegations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+                /** @description Re-key id from the preflight response. */
+                rekeyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Replacement delegations built, pending the owner signature. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRekeyIssueResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Wrong stage (issue may never precede the revoke), or the carry was refused because the meter read did not come from the chain. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    completeAgentRekey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+                /** @description Re-key id from the preflight response. */
+                rekeyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description One entry per delegation from the issue step. Every one must be signed — a partial completion would rotate credentials while some replacement authority stayed unsigned. */
+                    signatures: {
+                        /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+                        delegation_hash: string;
+                        signature: string;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Re-key complete. The old API key stops authenticating immediately. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRekeyCompleteResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    abandonAgentRekey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+                /** @description Re-key id from the preflight response. */
+                rekeyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Re-key abandoned. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        abandoned: boolean;
+                        /** @enum {string} */
+                        stage: "abandoned";
+                        agent_has_no_authority: boolean;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     prepareRevokeAllDelegations: {
         parameters: {
             query?: never;
@@ -6024,10 +6978,10 @@ export interface operations {
                              */
                             standing: "active" | "suspended" | "revoked" | "unknown";
                             /**
-                             * @description Describes the chain, for transparency — not for deciding.
+                             * @description Describes the chain, for transparency — not for deciding. `re_anchoring` means a re-key rotated the delegate key and the attestation naming the old one is being retired and reissued (#1699); standing is unaffected.
                              * @enum {string}
                              */
-                            anchor: "not_anchored" | "anchored" | "revocation_pending" | "revoked_onchain";
+                            anchor: "not_anchored" | "anchored" | "re_anchoring" | "revocation_pending" | "revoked_onchain";
                             attestationUid: string | null;
                             /** @description True when the database says revoked but the chain has not caught up — a merchant reading only the chain in this window would be WRONG. */
                             chainLagging: boolean;
@@ -6333,10 +7287,10 @@ export interface operations {
                              */
                             standing: "active" | "suspended" | "revoked" | "unknown";
                             /**
-                             * @description The on-chain anchor's progress, for transparency. Never the authority.
+                             * @description The on-chain anchor's progress, for transparency. Never the authority. `re_anchoring` is the re-key window (#1699): the attestation on-chain is live but names the agent's RETIRED delegate key, because EAS attestations are immutable — the agent's standing is unaffected.
                              * @enum {string}
                              */
-                            anchor: "not_anchored" | "anchored" | "revocation_pending" | "revoked_onchain";
+                            anchor: "not_anchored" | "anchored" | "re_anchoring" | "revocation_pending" | "revoked_onchain";
                             evidenceUid: string | null;
                             chainId: number | null;
                             controls: {

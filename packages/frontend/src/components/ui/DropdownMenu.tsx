@@ -52,7 +52,21 @@ function useDropdownMenu() {
  *     </DropdownMenuContent>
  *   </DropdownMenu>
  */
-export function DropdownMenu({ children }: { children: ReactNode }) {
+export function DropdownMenu({
+  children,
+  className = '',
+}: {
+  children: ReactNode
+  /**
+   * Extra classes for the root wrapper (#1767). The wrapper — not the trigger —
+   * is what a surrounding flex row sees, so a trigger that needs to compress in
+   * a tight row (`min-w-0`) has to say so HERE: `min-w-0` on the trigger alone
+   * is inert, because the wrapper's own `min-width: auto` is what refuses to
+   * shrink. Found by measuring a chip that stayed 176.88px wide in a 141px
+   * slot and painted over its neighbour.
+   */
+  className?: string
+}) {
   const [open, setOpen] = useState(false)
   const baseId = useId()
   const triggerRef = useRef<HTMLButtonElement | null>(null)
@@ -67,7 +81,7 @@ export function DropdownMenu({ children }: { children: ReactNode }) {
         triggerRef,
       }}
     >
-      <div className="relative inline-flex">{children}</div>
+      <div className={`relative inline-flex ${className}`.trim()}>{children}</div>
     </DropdownMenuContext.Provider>
   )
 }
@@ -181,7 +195,7 @@ export function DropdownMenuContent({
       role="menu"
       aria-labelledby={triggerId}
       onKeyDown={handleKeyDown}
-      className={`absolute top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white py-1 shadow-[var(--v2-shadow-modal)] ${
+      className={`absolute top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white py-1 shadow-modal ${
         align === 'right' ? 'right-0' : 'left-0'
       }`}
     >

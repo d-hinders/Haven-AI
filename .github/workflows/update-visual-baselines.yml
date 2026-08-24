@@ -2,10 +2,17 @@
 #
 # Baselines MUST be Linux-rendered (CI is the judge; macOS fonts differ), so
 # intended visual changes are accepted by dispatching this workflow on the PR
-# branch: it rebuilds, reruns the visual spec with --update-snapshots, and
+# branch: it rebuilds, reruns the visual spec with --update-snapshots=ALL, and
 # commits the new baselines back to the branch — where they show up as a
 # reviewable image diff in the PR. This is also how the very first baseline
 # set was bootstrapped.
+#
+# `=all` is load-bearing and not a stylistic choice — see the note on the
+# Regenerate step below (#1760). Because `all` blesses whatever renders without
+# comparing anything, DIAGNOSE A FAILING DIFF BEFORE DISPATCHING THIS: scan the
+# diff PNG by row (a clean horizontal cut or a size-mismatch line is a height
+# change; a continuous colour difference at unchanged dimensions is drift).
+# Regenerating first is how a broken render becomes the expected state.
 name: Update visual baselines
 
 on:
@@ -13,6 +20,9 @@ on:
 
 permissions:
   contents: write
+  # #1777: the follow-up step posts the deadlock notice ON THE PULL REQUEST.
+  # That is the whole fix — see scripts/ci/baseline-push-followup.mjs.
+  pull-requests: write
 
 jobs:
   update:
@@ -21,12 +31,26 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      # GITHUB_TOKEN pushes do NOT trigger pull_request workflows — on an
-      # already-open PR the regenerated-baseline commit would become a head
-      # SHA with ZERO check runs, deadlocking every required check
-      # ("Expected — waiting for status"). A PAT/app token in
-      # BASELINE_PUSH_TOKEN makes the push trigger CI like a human push;
-      # without it we fall back to GITHUB_TOKEN and warn (see the commit step).
+      # A GITHUB_TOKEN push is attributed to github-actions[bot], and a bot
+      # push onto a branch with an OPEN PR strands it (#1777/#1850).
+      #
+      # The precise mechanism, because the imprecise version sends you looking
+      # for the wrong repair. This used to say the push "does NOT trigger
+      # pull_request workflows". It does trigger them — GitHub then PARKS the
+      # runs at `conclusion: action_required`, pending approval, because a bot
+      # pushed. No job executes, so no check run ever attaches to the SHA, and
+      # the PR sits at "Expected — waiting for status" with nothing to wait
+      # for. Verified on bot commit 31003514: check-runs total_count 0, while
+      # actions/runs?head_sha=... showed 5 parked pull_request runs. "The event
+      # never fired" would invite adding a `push` trigger, which does nothing.
+      #
+      # A PAT/app token in BASELINE_PUSH_TOKEN attributes the push to a real
+      # actor, so no approval gate applies. Without it we fall back to
+      # GITHUB_TOKEN and the follow-up step below says so ON THE PR.
+      #
+      # Note the fallback cannot be "fixed" by having this workflow push a
+      # second, empty commit: the gate keys on WHO pushed, not on what was
+      # pushed, so the second push parks exactly like the first.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
@@ -63,29 +87,74 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: packages/frontend
 
+      # `=all`, NOT the bare flag (#1760). Playwright reads a bare
+      # `--update-snapshots` as `changed`, and `changed` still runs the
+      # comparison WITH the spec's tolerance applied: a capture that differs
+      # from its baseline but stays under budget takes the "matching" path and
+      # is NOT rewritten (playwright/lib/matchers/expect.js — `if (!errorMessage)
+      # … return helper.handleMatching()`).
+      #
+      # That made sub-tolerance drift permanently un-refreshable, which is the
+      # mechanical reason #1760's stale baselines survived every regeneration
+      # anyone dispatched. Measured on 2026-08-22: the committed mobile baseline
+      # differed from the live render by 2,084 pixels — all of them inside the
+      # 56px TopBar band — and a bare `--update-snapshots` run left the file
+      # untouched and reported "Baselines unchanged — nothing to commit."
+      #
+      # `all` skips the comparison entirely (it passes `expected: undefined`) and
+      # rewrites whenever the bytes differ, which is what "regenerate" has always
+      # meant here. The gate's tolerance decides what FAILS; it must not also
+      # decide what can be refreshed.
       - name: Regenerate baselines
-        run: npm run test:visual -w packages/frontend -- --update-snapshots
+        run: npm run test:visual -w packages/frontend -- --update-snapshots=all
         env:
           CI: 1
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
           NEXT_TELEMETRY_DISABLED: 1
 
       - name: Commit baselines to the branch
+        id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add packages/frontend/e2e/__screenshots__
           if git diff --cached --quiet; then
             echo "Baselines unchanged — nothing to commit."
+            echo "committed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "chore: regenerate /design-system visual baselines (Linux-rendered)"
             git push
-            if [ -z "${BASELINE_PUSH_TOKEN}" ]; then
-              echo "::warning::Pushed with GITHUB_TOKEN — this commit will NOT trigger PR workflows." \
-                "If a PR is already open on this branch, its required checks will wait forever;" \
-                "push an empty commit (git commit --allow-empty && git push) or set the" \
-                "BASELINE_PUSH_TOKEN secret (a PAT with contents:write) to fix this permanently."
-            fi
+            echo "committed=true" >> "$GITHUB_OUTPUT"
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           fi
+
+      # #1777. The step above used to end with a `::warning::` naming both
+      # remedies. It was accurate enough and it still cost four sessions a step
+      # each, plus twice more during #1857 — because a `::warning::` in a log
+      # nobody reads, while a PR sits at "waiting for status", is not a control.
+      #
+      # So the condition is reported where the person is actually looking (a
+      # sticky comment on the PR) and the run goes RED. A green run that leaves
+      # the PR unmergeable is the least useful of the three possible outcomes.
+      # The red does NOT mean the baselines are bad: they are committed and
+      # pushed by the step above, before this one runs.
+      #
+      # The decision itself is a tested pure function rather than inline bash —
+      # inline YAML only proves itself in production, which is precisely how the
+      # old warning survived being useless. `node --test scripts/ci/*.test.mjs`
+      # in ci.yml already covers it.
+      #
+      # Only the BOOLEAN `secrets.BASELINE_PUSH_TOKEN != ''` crosses into the
+      # script. The secret's value is never passed, printed, or committed.
+      - name: Report the push-attribution deadlock on the PR
+        # Deliberately NOT `always()`: the only thing that can precede this and
+        # still leave a push behind is the commit step itself, and `committed`
+        # is unset unless that step reached the push. Running after an unrelated
+        # earlier failure would add a second, misleading red.
+        if: steps.commit.outputs.committed == 'true'
         env:
-          BASELINE_PUSH_TOKEN: ${{ secrets.BASELINE_PUSH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          HAS_PUSH_TOKEN: ${{ secrets.BASELINE_PUSH_TOKEN != '' }}
+          BASELINES_COMMITTED: ${{ steps.commit.outputs.committed }}
+          PUSHED_SHA: ${{ steps.commit.outputs.sha }}
+        run: node scripts/ci/baseline-push-followup.mjs

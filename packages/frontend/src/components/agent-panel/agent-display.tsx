@@ -1,7 +1,7 @@
 'use client'
 
 import { Bot } from 'lucide-react'
-import { Icon } from '@/components/ui/Icon'
+import { Icon, type IconSize } from '@/components/ui/Icon'
 import { type AgentAllowance } from '@/hooks/useAgents'
 import { formatAllowanceAmount, getTokenDecimals } from '@/lib/allowance-format'
 import { truncate } from '@/lib/format'
@@ -61,7 +61,7 @@ export function timeUntil(date: Date): string {
   return `${days}d ${hours % 24}h`
 }
 
-export function BotIcon({ size = 15 }: { size?: number }) {
+export function BotIcon({ size = 16 }: { size?: IconSize }) {
   return (
     <Icon icon={Bot} size={size} className="flex-shrink-0" />
   )

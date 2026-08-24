@@ -20,7 +20,7 @@ If it fails, the error message points at the fix: `npm run release:bump -- <type
 
 ### Problem it solves
 
-A version bump for the four published packages (`@haven_ai/sdk`, `@haven_ai/signer`, `@haven_ai/mcp`, `@haven_ai/connect`) previously required 8+ surgical edits across 5 files:
+A version bump for the five published packages (`@haven_ai/sdk`, `@haven_ai/signer`, `@haven_ai/mcp`, `@haven_ai/connect`, `@haven_ai/cli`) previously required 8+ surgical edits across 5 files:
 
 | File | What to change |
 |---|---|
@@ -34,6 +34,17 @@ A version bump for the four published packages (`@haven_ai/sdk`, `@haven_ai/sign
 Missing any edit caused bugs in production — e.g. connect shipping a stale runtime manifest or mcp loading the wrong SDK version via npm's nested-resolution rules.
 
 `release-bump.mjs` atomically applies all of these in one command.
+
+That table is the **original inventory** (`3f6e9959c`), kept because it is what
+motivated the script — not a description of today's surface, which has grown
+since: `@haven_ai/cli` became a published package, `mcp-server`'s version joined
+the lockstep set, more source constants appeared
+(`SIGNER_VERSION`, `HOSTED_SERVER_VERSION`, `CONNECTOR_VERSION`, `CLI_VERSION`),
+and the lockfile is rewritten too. *What the script does (in order)* below is the
+current list. The authoritative published set is not written down in prose at
+all: it is **derived from each workspace's `private` flag** — the same test
+`release-bump.mjs` and `scripts/workspace-pin-lint.mjs` apply — and
+`npm run release:bump:test` fails if an enumeration in this file drifts from it.
 
 **Private workspace consumers are intentionally NOT in this table.** `backend`,
 `qa-agent`, `frontend` and `mcp-server` depend on `@haven_ai/*` with `"*"` so
@@ -102,15 +113,16 @@ npm run release:bump -- prerelease --yes
 1. **Read** current version from `packages/sdk/package.json`.
 2. **Compute** the new version from the bump type.
 3. **Show** a preview of all changes; prompt for confirmation (unless `--yes`).
-4. **Update** all four `package.json` `version` fields.
+4. **Update** the `version` field of every lockstep package — the five published ones (`sdk`, `signer`, `mcp`, `connect`, `cli`) **plus `mcp-server`**, which is `private: true` and never published but version-locksteps for coherence with its `HOSTED_SERVER_VERSION` constant. Six in total (`VERSIONED_PACKAGES` = `PUBLISHED_PACKAGES` + `mcp-server`); only the five published ones are pin-managed.
 5. **Update** cross-package dep pins: `mcp → @haven_ai/sdk`, `connect → @haven_ai/sdk / @haven_ai/mcp / @haven_ai/signer`.
 6. **Update** `packages/mcp/src/server.ts` — the `MCP_VERSION` constant.
-7. **Update** `packages/connect/src/runtime-manifest.ts` — `sdkVersion` and `signerVersion` string literals.
+7. **Update** `packages/connect/src/runtime-manifest.ts` — `sdkVersion` and `signerVersion` string literals, then re-pin the *Supported Runtime Manifest* table in `docs/operations/mcp-runtime-compatibility.md` to match ([#1790](https://github.com/d-hinders/Haven-AI/issues/1790)). The table is verified in step 11 against the constants themselves, never against the value this run wrote — see *The manifest table writes itself*.
 8. **Wipe** all `packages/*/dist` directories — required to prevent tsup from bundling a stale constant from the previous build's output.
 9. **`npm install` + deterministic lockfile rewrite** ([#1663](https://github.com/d-hinders/Haven-AI/issues/1663)) — the install keeps `node_modules` consistent for the builds below, but its lockfile output is **not taken**: on three consecutive cuts (0.1.26 → 0.1.28) the local npm also inserted `"dev"`/`"peer"` metadata on unrelated entries, and each release hand-repaired the diff back to its 11 version lines. Instead the version substitution is replayed **structurally** onto the pre-install lockfile (`scripts/release-lockfile.mjs` — structural rather than textual so a third-party dep coincidentally at the old version is never touched), and the bump then **fails loudly** if the final `package-lock.json` diff contains any line that is not a workspace `version` field or an `@haven_ai/*` pin. The guard reads the file on disk, so removing the rewrite makes the guard see npm's polluted output and fail. Self-tested: `npm run release:bump:test`.
 10. **Build** in dependency order: `sdk → signer → mcp → connect`.
     - Connect is built directly with tsup (skipping its internal pre-build of mcp/signer) so the already-built dist from the previous step is used — the exact scenario that surfaces the build-order bug.
-11. **Verify** the built `packages/connect/dist/cli.cjs` contains the new version literal, and that `server.ts` has the correct `MCP_VERSION`.
+    - **`cli` is deliberately absent here, and this is not the count drift fixed above — do not "correct" it.** These builds exist to *verify the connect bundle*, which is the one artifact that inlines version literals at build time; `cli` inlines nothing connect depends on and nothing this step checks. Publishing does not rely on it either: `publish.yml` rebuilds every published package from a clean checkout at publish time, so a `cli` dist produced here would be discarded. Whether the bump should build `cli` anyway — as a cheap "does it still compile at the new version" signal — is a real question, but it is a **behaviour change** and belongs in its own issue rather than in a doc edit.
+11. **Verify** the built `packages/connect/dist/cli.cjs` contains the new version literal, that `server.ts` has the correct `MCP_VERSION`, and that the *Supported Runtime Manifest* table matches every constant it mirrors.
 
 ### Why the dist-wipe is mandatory
 
@@ -121,7 +133,7 @@ The dist-wipe ensures tsup starts from a clean slate and picks up the freshly-bu
 ### What the script does NOT do
 
 - **Publish** — publishing is decoupled from the bump. Bumping only produces a reviewable version diff; the actual `npm publish` happens automatically when that diff lands on `main` (see *After the bump*, below).
-- Bump `mcp-server`, `backend`, or `frontend` — those are not published to npm.
+- Bump `backend` or `frontend` — those are not published to npm and are not in the lockstep set. (`mcp-server` **is** bumped, per step 4: not published, but version-locked to its `HOSTED_SERVER_VERSION` constant. This line used to say otherwise, contradicting both the script and the paragraph above about `mcp-server`'s version moving in lockstep.)
 - Update the dashboard's `npx` install command — that's handled by the `@alpha` dist-tag (#311).
 
 ### After the bump
@@ -188,17 +200,82 @@ Two **contract docs** are coupled to the published packages, and the blocking
 touches them. A version bump touches all five, so **every release PR needs
 both** — this is not optional and not conditional:
 
-1. **`docs/operations/mcp-runtime-compatibility.md`** — re-pin the *Supported
-   Runtime Manifest* table to the new version (it must match
-   `packages/connect/src/runtime-manifest.ts`), and prepend a note to
+1. **`docs/operations/mcp-runtime-compatibility.md`** — the *Supported Runtime
+   Manifest* table is **re-pinned by the bump** ([#1790](https://github.com/d-hinders/Haven-AI/issues/1790)),
+   so do not copy those four numbers by hand. Still yours: prepend a note to
    `last-verified` saying what the release carries and that no tool, capability,
-   or version-skew surface moved.
-2. **`docs/regulatory/casp-changelog/YYYY-MM-DD-<pr>-release.md`** — a new
-   shard. `casp-risk-guardrails.md` declares
+   or version-skew surface moved. See *The manifest table writes itself* below.
+2. **`docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md`** — a new
+   shard, named for the **version** and not the PR number (#1789): the gate
+   blocks the PR until the shard exists, so the shard has to be written *before*
+   there is a PR number to name it after. The version is known from the moment
+   you choose it. Convention and an example:
+   [`casp-changelog/README.md`](../docs/regulatory/casp-changelog/README.md).
+   `casp-risk-guardrails.md` declares
    `satisfied-by: docs/regulatory/casp-changelog/**`, so a shard satisfies the
    gate without touching the shared parent (which is what stops concurrent PRs
    conflicting — #1366). State what changed, the authority/custody argument for
    why the CASP perimeter is unaffected, and end with `Perimeter unchanged.`
+
+#### The manifest table writes itself, and the check does not trust the write
+
+The *Supported Runtime Manifest* table's stated job is to mirror the version
+constants the bump has already written. It was copied by hand on every release
+anyway — four numbers, out of a file the script had just written and already
+verified. Since #1790 the bump writes it (`scripts/release-manifest-doc.mjs`).
+
+**What that deliberately does NOT do is satisfy the coupling gate for you.** A
+bump alone cannot produce a green release PR, because the gate needs *both*
+contract docs and the CASP shard is wholly hand-written. The `last-verified`
+note is a required hand edit too. Those are the parts that carry an argument —
+what the release contains, and why the perimeter is unaffected. A table of four
+identical version strings carries none, which is the whole reason it could be
+generated.
+
+**Be precise about what enforces that, because it is not what you would
+assume** (review finding on #1790). The gate's per-doc satisfaction test is
+**file presence** — a doc that merely appears in the changed set is excused,
+with no check on whether `last-verified` moved or who wrote the diff. Before
+#1790, the only way `mcp-runtime-compatibility.md` could appear in a release
+diff was a human editing it, so *touched* and *read* were the same event. They
+are not any more: the bump's own write now excuses that doc by itself.
+
+What still forces human content into a release PR is
+`casp-risk-guardrails.md` — its `covers:` spans the published packages every
+release touches, and only a hand-written shard satisfies it. That is a real
+guarantee, but it rests on **another doc's `covers:` breadth**, so narrowing
+that list would silently remove the human-read requirement here. It is
+therefore pinned by a test (`scripts/docs/coupling-gate.test.mjs`): a bump-only
+diff with no shard must still fail the strict gate. Deleting CASP's
+published-package coverage fails that test rather than quietly going green.
+
+Since [#1739](https://github.com/d-hinders/Haven-AI/issues/1739) that dependency
+is also **deliberate rather than incidental**: `casp-risk-guardrails.md` now
+covers `scripts/release-bump.mjs` and `.github/workflows/publish.yml` outright,
+so the release path is named in the list that guarantees it. Note what that does
+and does not cost — `covers:` gates *edits to* the release plumbing, not release
+cuts, so **a release PR is unaffected by it**; a PR that changes the bump script
+or the publish workflow now owes a shard saying which of {version fields,
+cross-package pins, connect's pinned `sdkVersion`/`signerVersion`, dist-tag
+selection, publish trigger and ref, build order, credential path} moved. And the
+shard stays hand-written **always**: the gate excuses a doc on file presence, so
+a generated shard would excuse it with content nobody read.
+
+**The verification is independent of the write, and this is load-bearing.** A
+script that writes a value and then checks it wrote that value has built a guard
+that cannot fail. So the check is never told the version the run computed: it
+re-reads the doc and each row's own constant from disk and compares them to each
+other — `@haven_ai/sdk` and `@haven_ai/signer` against
+`connect/src/runtime-manifest.ts`, `@haven_ai/mcp` against `MCP_VERSION`,
+`@haven_ai/connect` against `CONNECTOR_VERSION`. Row by row, never against one
+shared string, so a table that agrees with itself and with nothing else fails.
+
+That makes it meaningful in the two situations the writer is absent from — a
+hand-edited doc, and a doc that drifted because a constant moved without a
+re-pin — which is why **the same check also runs on every pull request** (in
+`scripts/release-bump.test.mjs`, from `ci.yml`'s unconditional job). Drift fails
+there, with no release in sight. Remove the writer and the check does not go
+quiet; it reads the stale table and fails.
 
 Check locally before pushing: `npm run docs:coupling` must exit 0. It will still
 list ~14 **advisory** docs; those are architecture prose a version bump does not
@@ -269,20 +346,47 @@ Only if the workflow is unavailable mid-incident and a release is urgent,
 publish by hand from a clean checkout of the merged commit — the same versions
 the workflow would have published. This path uses your own npm credentials
 (`npm login`) and **does not produce provenance** (provenance requires the CI
-OIDC flow), so prefer re-running the workflow whenever possible:
+OIDC flow), so prefer re-running the workflow whenever possible.
+
+It mirrors `publish.yml`'s build-and-publish step deliberately: the same five
+packages, the same dist-wipe, and the same build **order** — connect's tsup
+inlines `MCP_VERSION`, so building it before a fresh `mcp` bundles a stale one.
+
+Two things the workflow does that this path cannot, and one you must decide:
+you get no per-package summary table, no provenance, and **the tag is
+hardcoded below**. `publish.yml` derives it from the version (prerelease →
+`alpha`, stable → `latest`). Every release to date has been a prerelease, so
+`--tag alpha` is right today — but if you are hand-publishing the first
+**stable** release, change it to `--tag latest`, or `npm install` keeps
+resolving the old version with nothing reporting an error.
 
 ```sh
 npm ci
-rm -rf packages/{sdk,signer,mcp,connect}/dist
+rm -rf packages/{sdk,signer,mcp,connect,cli}/dist
 npm run build -w packages/sdk
 npm run build -w packages/signer
 npm run build -w packages/mcp
 npm run build -w packages/connect   # runs verify-connect-bundle.mjs
-npm publish -w packages/sdk     --tag alpha
-npm publish -w packages/signer  --tag alpha
-npm publish -w packages/mcp     --tag alpha
-npm publish -w packages/connect --tag alpha
+npm run build -w packages/cli
+for pkg in sdk signer mcp connect cli; do
+  npm publish -w "packages/$pkg" --tag alpha --access public
+done
 ```
+
+**Then verify on the registry, package by package.** This path prints no
+summary and does not stop on a partial failure, so a package that did not go
+out is silent:
+
+```sh
+for pkg in sdk signer mcp connect cli; do
+  npm view "@haven_ai/$pkg" dist-tags --json
+done
+```
+
+All five must show the new version on `alpha`, and `latest` must be unchanged
+for a prerelease. Anything missing is a partial publish — the state
+[#1159](https://github.com/d-hinders/Haven-AI/issues/1159) exists to surface,
+which this path cannot do for you.
 
 ### If verification fails
 

@@ -70,6 +70,13 @@ interface RegisterSetupBody extends ResolveSetupBody {
   proof_signature: string
   api_key_hash: string
   api_key_prefix: string
+  /**
+   * #1878: the resolved hosted MCP server name the connector wired this agent
+   * as — `haven` for the bare pair, `haven-<slug>` for a named one. Optional:
+   * connectors older than #1878 send nothing, and those agents stay NULL
+   * rather than being guessed at.
+   */
+  mcp_server_name?: string
   connector_context?: unknown
   install_capabilities?: {
     can_write_runtime_config?: boolean
@@ -115,6 +122,33 @@ interface WalletApprovalBody {
  * (or NEXT_PUBLIC_HAVEN_MCP_URL) explicitly or the setup fails LOUDLY with
  * the variable named.
  */
+/**
+ * #1878: the connector's self-reported MCP server name, reduced to something
+ * safe to store and show.
+ *
+ * This is a DISPLAY-SAFETY check, not the naming contract. That contract lives
+ * in `packages/connect/src/server-names.ts` and cannot be imported here —
+ * connect is published to npm and this package is not, so the two cannot share
+ * a module. Re-implementing the full rule (reserved words, collision families)
+ * would therefore be a second copy that silently drifts, and it would buy
+ * nothing: Haven keys nothing off this value, so a name that is wrong is a
+ * wrong label, not a wrong authorization.
+ *
+ * What is worth refusing is anything that is not plausibly one of our server
+ * names — an oversized blob, a different product's name, control characters —
+ * because that is what would land in the dashboard. Anything unrecognized
+ * becomes NULL, which the UI already renders honestly as "not recorded". A
+ * refusal would be worse: it would fail a whole registration over a label.
+ */
+const MCP_SERVER_NAME_RE = /^haven(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/
+
+export function normalizeMcpServerName(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (trimmed.length === 0 || trimmed.length > 64) return null
+  return MCP_SERVER_NAME_RE.test(trimmed) ? trimmed : null
+}
+
 const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
 const PRODUCTION_API_HOST = 'havenbackend-production-8a00.up.railway.app'
 export const CONNECTOR_PACKAGE = '@haven_ai/connect@alpha'
@@ -205,14 +239,14 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       )
 
       const apiUrl = apiBaseUrl(request)
-      const command = buildConnectorCommand(setupToken, apiUrl, parsed.runtime, parsed.localMcp)
+      const command = buildConnectorCommand(setupToken, apiUrl, parsed.localMcp)
       return reply.code(201).send({
         setup_id: setupId,
         status: 'awaiting_connection',
         setup_token: setupToken,
         expires_at: expiresAt,
         connector_command: command,
-        setup_prompt: buildSetupPrompt(command, parsed.runtime, apiUrl),
+        setup_prompt: buildSetupPrompt(command, apiUrl),
       })
     },
   )
@@ -314,6 +348,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         }
 
         apiKeyPrefix = request.body.api_key_prefix
+        const mcpServerName = normalizeMcpServerName(request.body.mcp_server_name)
         const connectorContext = sanitizeConnectorContext(request.body.connector_context)
         const initialInstallStatus = {
           hosted_mcp_configured: false,
@@ -336,6 +371,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
             apiKeyHash: request.body.api_key_hash,
             apiKeyPrefix,
             safeId: setup.safe_id,
+            mcpServerName,
           },
           tx,
         )
@@ -733,7 +769,16 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
   const runtime = typeof body.runtime === 'string' && body.runtime.trim()
     ? body.runtime.trim().slice(0, 80)
     : null
-  if (body.local_mcp === true && (!runtime || !LOCAL_MCP_RUNTIMES.has(runtime))) {
+  // #1720: a request with NO runtime is now the normal case — the dashboard
+  // stopped picking one — so absence can no longer mean refusal. The runtime
+  // check moves to the connector, which is the only party that knows the
+  // answer and already refuses `--local` on an unsupported runtime by name.
+  //
+  // An EXPLICIT unsupported runtime is still refused here. Older clients that
+  // still send the field keep the behaviour they were built against, and
+  // refusing at setup time beats refusing at connector run time whenever we
+  // genuinely know enough to do it.
+  if (body.local_mcp === true && runtime && !LOCAL_MCP_RUNTIMES.has(runtime)) {
     reply.code(400).send({ error: 'Local MCP is only available for the Claude Code, Codex, and Cowork runtimes' })
     return null
   }
@@ -1180,40 +1225,36 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
   }
 }
 
-// #1672: command-path runtimes get NO --runtime flag — the connector detects
-// the environment it executes inside (CLAUDECODE/CODEX_*/… markers), and an
-// embedded wrong hint used to silently configure the wrong client. #1682's
-// named rows (claude-code / codex / cowork) are that same path; 'agent' and
-// the legacy per-client ids keep older clients and older setup rows flag-free
-// too. Snippet-only runtimes (claude-desktop, cursor, …) keep the flag: their
-// command is run from a plain terminal where nothing is detectable.
-const DETECTED_RUNTIMES = new Set([
-  'claude-code',
-  'codex',
-  'cowork',
-  'agent',
-  'codex-cli',
-  'codex-desktop',
-])
-
-function buildConnectorCommand(setupToken: string, apiUrl: string, runtime: string | null, localMcp = false): string {
+// #1720: NO command carries --runtime any more. The dashboard stopped asking
+// which runtime a user is in, because it never had a way to know: it sees no
+// env markers, no installed clients, and no live agent. The connector sees all
+// three (#1672 detection, #1719 self-report + installed-client prompt), so the
+// resolution moved to the component that can answer.
+//
+// DETECTED_RUNTIMES went with it. That set existed to answer one question —
+// "does this picked id need the flag spelled out?" — and with no picked id and
+// no flag, nothing asked it. LOCAL_MCP_RUNTIMES stays because it still has a
+// live caller in validateCreateBody.
+function buildConnectorCommand(setupToken: string, apiUrl: string, localMcp = false): string {
   const args = [
     `npx -y ${CONNECTOR_PACKAGE}`,
     `--setup ${shellQuote(setupToken)}`,
     `--api ${shellQuote(apiUrl)}`,
     '--ack-local-tools',
   ]
-  if (runtime && !DETECTED_RUNTIMES.has(runtime)) args.push(`--runtime ${shellQuote(runtime)}`)
+  // `--local` is the ONE remaining suffix, and it is not environment-derived:
+  // it is an advanced choice the user makes explicitly. Nothing here varies by
+  // who is asking (#1720).
   if (localMcp) args.push('--local')
   return args.join(' ')
 }
 
-function buildSetupPrompt(command: string, runtime: string | null, apiUrl: string): string {
+function buildSetupPrompt(command: string, apiUrl: string): string {
   const approvedActions = [
     `download and execute the published npm package ${CONNECTOR_PACKAGE}`,
     `connect to Haven at ${apiUrl}`,
     'write local Haven credential files under ~/.haven',
-    runtimeConfigAction(runtime),
+    'update the local agent MCP config when supported',
   ]
 
   return [
@@ -1229,7 +1270,6 @@ function buildSetupPrompt(command: string, runtime: string | null, apiUrl: strin
     '',
     'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
     '',
-    ...runtimeSetupGuidance(runtime),
     // #1545: one sentence of discoverability for agent operators — the flag is
     // opt-in and the pasted command stays the prose-mode default, so the
     // relay-to-human narration keeps working when the operator ignores this.
@@ -1246,27 +1286,6 @@ function buildSetupPrompt(command: string, runtime: string | null, apiUrl: strin
     // the same word the connector's own wait loop and celebration use (#1542).
     'When the connector finishes, tell me to return to Haven to approve the budget.',
   ].join('\n')
-}
-
-function runtimeConfigAction(runtime: string | null): string {
-  if (runtime === 'codex-cli' || runtime === 'codex-desktop') {
-    return 'update Codex MCP config under ~/.codex/config.toml'
-  }
-  if (runtime === 'hermes') {
-    return 'update Hermes Agent MCP config and its matching owner-only .env file, using MCP_HAVEN_API_KEY only as a config reference'
-  }
-  return 'update the local agent MCP config when supported'
-}
-
-function runtimeSetupGuidance(runtime: string | null): string[] {
-  if (runtime !== 'hermes') return []
-  return [
-    'For Hermes, the connector performs this configuration non-interactively. Do not run `hermes mcp add` or a Hermes-internal Python script.',
-    '',
-    'After it exits successfully, start a new Hermes session (Gateway users: `/restart`), then run `hermes mcp list`, `hermes mcp test haven`, and `hermes mcp test haven-signer`.',
-    'If Haven tools do not appear after restart, install the MCP SDK in the Hermes environment with `pip install mcp`, then restart Hermes.',
-    '',
-  ]
 }
 
 function joinApprovedActions(actions: string[]): string {

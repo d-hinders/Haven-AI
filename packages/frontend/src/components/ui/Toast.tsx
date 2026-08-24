@@ -137,21 +137,28 @@ export function useToast(): Pick<ToastContextValue, 'toast'> {
 // ── Toast item ─────────────────────────────────────────────────────────────
 
 const TONE_STYLES: Record<Tone, { container: string; close: string; icon: React.ReactNode }> = {
+  // The `close` ring colour is named per tone rather than inherited. It used to
+  // be `ring-current/30`, which — exactly like the bare-`var()` shape #1708
+  // removed — Tailwind drops from the compiled output entirely: an opacity
+  // modifier has no channels to re-compose on `currentColor`, so no
+  // `--tw-ring-color` was ever emitted and this ring rendered preflight's
+  // blue-500/50 on all three tones. #1708's guard only matched
+  // `ring-[var(--v2-*)]/N`, so it did not catch this second dead shape (#1741).
   info: {
     container: 'bg-[var(--v2-ink)] text-white',
-    close: 'text-white/50 hover:text-white',
+    close: 'text-white/50 hover:text-white focus-visible:ring-white/80',
     icon: <Icon icon={Info} className="h-4 w-4 flex-shrink-0" />,
   },
   success: {
     container:
-      'bg-[var(--v2-success-soft)] border border-[var(--v2-success)]/20 text-[var(--v2-success)]',
-    close: 'text-[var(--v2-success)]/50 hover:text-[var(--v2-success)]',
+      'bg-[var(--v2-success-soft)] border border-success/20 text-[var(--v2-success)]',
+    close: 'text-success/50 hover:text-[var(--v2-success)] focus-visible:ring-success/80',
     icon: <Icon icon={Check} className="h-4 w-4 flex-shrink-0" />,
   },
   error: {
     container:
-      'bg-[var(--v2-danger-soft)] border border-[var(--v2-danger)]/20 text-[var(--v2-danger)]',
-    close: 'text-[var(--v2-danger)]/50 hover:text-[var(--v2-danger)]',
+      'bg-[var(--v2-danger-soft)] border border-danger/20 text-[var(--v2-danger)]',
+    close: 'text-danger/50 hover:text-[var(--v2-danger)] focus-visible:ring-danger/80',
     icon: <Icon icon={TriangleAlert} className="h-4 w-4 flex-shrink-0" />,
   },
 }
@@ -175,7 +182,7 @@ function ToastItemView({ item, onDismiss }: ToastItemProps) {
     <div
       role="presentation"
       className={[
-        'flex items-start gap-3 rounded-md px-4 py-3 shadow-[var(--v2-shadow-popover)] min-w-[240px] max-w-sm',
+        'flex items-start gap-3 rounded-md px-4 py-3 shadow-popover min-w-[240px] max-w-sm',
         'transition-all duration-200',
         visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1',
         styles.container,
@@ -188,7 +195,7 @@ function ToastItemView({ item, onDismiss }: ToastItemProps) {
         aria-label="Dismiss notification"
         onClick={() => onDismiss(item.id)}
         className={[
-          'flex-shrink-0 rounded p-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/30',
+          'flex-shrink-0 rounded p-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2',
           styles.close,
         ].join(' ')}
       >

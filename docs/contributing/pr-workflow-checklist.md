@@ -7,7 +7,7 @@ covers:
   - package.json
   - .agents/skills/haven-agent-workflow/references/reviewer.md
   - .agents/skills/haven-agent-workflow/references/design-reviewer.md
-last-verified: "2026-08-22" # #1768: the Browser UX row now points at `test:e2e:gate` (desktop + mobile), not desktop-only. Prior: the haven-reviewer rule is unconditional (owner decision 2026-08-21); the risk list this file carried was the licence for skipping it. AGENTS.md is canonical. Prior: #1227: lint:db-mocks added to the Backend/API verification row
+last-verified: "2026-08-23" # #1777: the visual-baselines bullet gains the expected-RED sub-bullet — the *Update visual baselines* dispatch now fails by design while `BASELINE_PUSH_TOKEN` is unset, and a reader who does not know that re-dispatches; points at approving the parked runs rather than pushing. Only that bullet re-read this pass. Prior: #1843: the Docs row's enumeration of what `docs:check` validates now names the `last-verified` chain check; only that row re-read this pass. Prior: #1768: the Browser UX row now points at `test:e2e:gate` (desktop + mobile), not desktop-only. Prior: the haven-reviewer rule is unconditional (owner decision 2026-08-21); the risk list this file carried was the licence for skipping it. AGENTS.md is canonical. Prior: #1227: lint:db-mocks added to the Backend/API verification row
 ---
 
 # PR Workflow Checklist
@@ -104,6 +104,7 @@ Good split examples:
 - Verify that merging this PR will trigger the expected deployment branch.
 - For money movement, agent authority, SDK payment APIs, generated credential artifacts, x402/MPP, or shared contract changes, confirm a risk-specific review happened even if CI is green. The `money-path` label selects the `ship-playbooks/money.md` bar (characterization tests first, CASP guardrails) but does not pause the merge (#1024); DB migrations are hard-gated by an independent code-owner review, and `dev → main` promotion is gated on a green money-flow QA run that covers the promoted money-path code (#1030).
 - If the PR intentionally changes what `/design-system` renders, regenerate the visual-regression baselines via the *Update visual baselines* workflow_dispatch on the PR branch (never commit macOS-rendered baselines), and confirm the *Design visual regression* check is green on the head SHA before calling the PR shipped.
+  - **That dispatch run currently ends RED by design, and that is not your PR failing (#1777).** While `BASELINE_PUSH_TOKEN` is unset the bot's push leaves this PR's workflow runs **created but parked** at `conclusion: action_required` rather than executed, so the workflow now fails and comments the recovery on your PR instead of going green into a deadlock. Read the comment and **approve the parked runs it links** — that clears the required checks with no push. Do not re-dispatch; the baselines were pushed before the failing step. Mechanism and recovery: [`ship-playbooks/frontend.md`](ship-playbooks/frontend.md) §4.
 
 ## Merge Readiness Report
 
@@ -128,7 +129,7 @@ Use the smallest reliable set that matches the change.
 
 | Change type | Commands |
 | --- | --- |
-| Docs, prompts, or PR template only | `git diff --check` and `npm run docs:check` (front-matter + `covers` globs + agent-skill alignment) |
+| Docs, prompts, or PR template only | `git diff --check` and `npm run docs:check` (front-matter + `covers` globs + agent-skill alignment + `last-verified` chain integrity, #1843) |
 | Any source file | `npm run docs:coupling` — the strict contract-doc gate, keyed on **code**, so the docs row above never covers the pure-code PR that needs it |
 | Payment, Safe, relayer, SDK payment APIs, or agent authority | Relevant package checks plus the checklist in `docs/regulatory/casp-risk-guardrails.md` |
 | Backend/API | `npm run typecheck -w packages/backend`, `npm run test -w packages/backend`, `npm run lint:deps` (dependency boundaries, #982), and `npm run lint:db-mocks` (positional DB-mock ratchet, #1227) |

@@ -449,7 +449,7 @@ export default function EditAgentModal({
         className="absolute inset-0"
         onClick={step !== 'executing' ? handleClose : undefined}
       />
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Edit agent" className="relative bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-[var(--v2-shadow-modal)] max-h-[90vh] overflow-y-auto">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Edit agent" className="relative bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-modal max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--v2-border)]">
           <div>
@@ -483,7 +483,7 @@ export default function EditAgentModal({
           {step === 'form' && (
             <div className="space-y-5">
               {showAgentFields && (
-                <div className="space-y-4 rounded-[10px] border border-[var(--v2-border)] bg-white p-4 shadow-[var(--v2-shadow-card)]">
+                <div className="space-y-4 rounded-[10px] border border-[var(--v2-border)] bg-white p-4 shadow-card">
                   <div>
                     <label className="mb-1.5 block text-xs font-medium text-[var(--v2-ink-3)]">
                       Agent name
@@ -535,9 +535,13 @@ export default function EditAgentModal({
                               }
                               disabled={isRemoving}
                               aria-label={`Remove ${sym} budget`}
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/30 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              <Icon icon={X} className="h-3 w-3" />
+                              {/* 14, not 12 (#1923): a remove control on a data row takes
+                                  14 whatever its box is, matching haven/AgentBudgetCard.
+                                  The row's text-xs run does not pull it to 12 — see
+                                  docs/product/design-system.md § 5 -> Size. */}
+                              <Icon icon={X} className="h-3.5 w-3.5" />
                             </button>
                           </div>
                         </div>
@@ -681,7 +685,7 @@ export default function EditAgentModal({
               )}
 
               {budgetChanged && (safeDetails?.threshold ?? 1) > 1 && (
-                <div className="text-xs text-[var(--v2-warning)] bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20 rounded-lg px-3 py-2">
+                <div className="text-xs text-[var(--v2-warning)] bg-[var(--v2-warning-soft)] border border-warning/20 rounded-lg px-3 py-2">
                   This account requires {safeDetails?.threshold} of {safeDetails?.owners?.length} approvals. Haven will submit it for approval.
                 </div>
               )}

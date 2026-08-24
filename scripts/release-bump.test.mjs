@@ -8,6 +8,12 @@ import {
   bumpLockfileText,
   lockfileDiffViolations,
 } from './release-lockfile.mjs'
+import {
+  MANIFEST_ROWS,
+  documentedVersions,
+  manifestTableViolations,
+  rewriteManifestTable,
+} from './release-manifest-doc.mjs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -155,4 +161,447 @@ test('MUTATION PROOF: a corrupted unrelated version cannot wear a version line a
     .replace(`"version": "${CUR}",\n      "resolved"`, '"version": "9.9.9",\n      "resolved"')
   const violations = lockfileDiffViolations(before, corrupted, { currentVersion: CUR, newVersion: NEXT })
   assert.ok(violations.some((v) => v.includes('9.9.9')), `garbage version passed the guard: ${violations}`)
+})
+
+/**
+ * #1788: the script used to sign off by printing `npm publish` invocations —
+ * the one action CLAUDE.md and the release skill forbid in three separate
+ * places. The rule was prose in three files and the tool contradicted it at
+ * the moment of maximum trust, right after the bump had succeeded.
+ *
+ * Prose cannot guard a script. These tests do, scoped to the sign-off block so
+ * the prohibition sentence itself (which necessarily contains the words
+ * "npm publish") is not mistaken for an instruction to run it.
+ */
+async function doneBlock() {
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+  const start = source.indexOf("header('Done')")
+  assert.notEqual(start, -1, "release-bump.mjs no longer has a header('Done') sign-off block")
+  const end = source.indexOf('\nmain().catch', start)
+  assert.notEqual(end, -1, 'could not find the end of main() after the Done block')
+  return source.slice(start, end)
+}
+
+/**
+ * What the script PRINTS, not what its source says. The block carries a
+ * comment explaining the #1788 defect — which necessarily names @haven_ai/cli
+ * and the words "npm publish" — and a guard that read the raw source would
+ * trip on the very explanation of why it exists.
+ */
+function emitted(block) {
+  return block
+    .split('\n')
+    .filter((line) => line.trim().startsWith('log('))
+    .join('\n')
+}
+
+test('MUTATION PROOF: the sign-off never emits an npm publish instruction (#1788)', async () => {
+  const printed = emitted(await doneBlock())
+  // Every legitimate mention is the backtick-quoted one inside the
+  // prohibition sentence. Strip those, and NOTHING may remain — this catches
+  // a bare `npm publish` with no flags, which an earlier flag-shaped regex
+  // let through (review finding on #1788).
+  const leftover = printed.replace(/`npm publish`/g, '').match(/npm publish/g)
+  assert.equal(
+    leftover,
+    null,
+    `release-bump.mjs must not instruct a manual publish; found ${leftover?.length} unquoted mention(s)`,
+  )
+})
+
+test('the sign-off enumerates no packages, in flags or in prose (#1788)', async () => {
+  const printed = emitted(await doneBlock())
+  // Doc paths legitimately contain package-ish substrings
+  // (mcp-runtime-compatibility.md), and they are not enumerations.
+  const prose = printed.replace(/\S*\/\S*/g, '').replace(/publish\.yml/g, '')
+  // The original defect listed four of the five published packages. Catch that
+  // shape however it is written — `-w packages/sdk` or "sdk, signer, mcp,
+  // connect and cli" — because the second form slipped past a flag-only regex.
+  const named = prose.match(/\b(sdk|signer|mcp|connect|cli)\b/gi)
+  assert.equal(
+    named,
+    null,
+    `the sign-off must not name packages — the published set is derived, not restated; found: ${JSON.stringify(named)}`,
+  )
+})
+
+test('the sign-off still tells the operator publishing is not theirs to do (#1788)', async () => {
+  const block = await doneBlock()
+  // Removing the defect must not also remove the guidance: silence would let
+  // the next reader assume publishing is a manual step nobody wrote down.
+  assert.match(block, /Never run `npm publish` by hand/)
+  assert.match(block, /promotion/)
+})
+
+/**
+ * #1791: the documented manual fallback in scripts/README.md claims to publish
+ * "the same versions the workflow would have published" and published four of
+ * five — @haven_ai/cli was missing from the dist-wipe, the builds and the
+ * publish. It is the break-glass path, taken mid-incident under time pressure,
+ * with no per-package summary to reveal the gap.
+ *
+ * The irony this guard exists to prevent recurring: the paragraph immediately
+ * above that block narrates @haven_ai/cli being missed in the 2026-08-07
+ * release (#1159) and staying invisible for six weeks.
+ *
+ * The set is DERIVED from each workspace's `private` flag — the same test
+ * release-bump.mjs and workspace-pin-lint.mjs already apply — because a fifth
+ * hand-maintained copy is the defect, not the fix.
+ *
+ * Note LOCKSTEP_LOCKFILE_PATHS is deliberately NOT reused here: it carries six
+ * entries including mcp-server, whose version moves in lockstep but which is
+ * private and must never be published.
+ */
+async function publishedPackageDirs() {
+  const { readdir } = await import('node:fs/promises')
+  const entries = await readdir(join(ROOT, 'packages'))
+  const published = []
+  for (const dir of entries) {
+    let manifest
+    try {
+      manifest = JSON.parse(await readFile(join(ROOT, 'packages', dir, 'package.json'), 'utf8'))
+    } catch {
+      continue
+    }
+    if (manifest.private !== true) published.push(dir)
+  }
+  return published.sort()
+}
+
+async function manualFallbackBlock() {
+  const readme = await readFile(join(ROOT, 'scripts', 'README.md'), 'utf8')
+  const start = readme.indexOf('#### Manual fallback')
+  assert.notEqual(start, -1, 'scripts/README.md no longer has a "Manual fallback" section')
+  const end = readme.indexOf('\n### ', start)
+  assert.notEqual(end, -1, 'could not find the end of the Manual fallback section')
+  return readme.slice(start, end)
+}
+
+test('the manual fallback publishes every published package, and only those (#1791)', async () => {
+  const block = await manualFallbackBlock()
+  const expected = await publishedPackageDirs()
+  // The publish loop is the authoritative list in that block.
+  const loop = block.match(/for pkg in ([^;]+); do\s*\n\s*npm publish/)
+  assert.ok(loop, 'the manual fallback no longer publishes via a "for pkg in ..." loop')
+  const listed = loop[1].trim().split(/\s+/).sort()
+  assert.deepEqual(
+    listed,
+    expected,
+    'the manual fallback publish list has drifted from the packages whose package.json is not private',
+  )
+})
+
+test('the manual fallback builds and wipes every package it publishes (#1791)', async () => {
+  const block = await manualFallbackBlock()
+  const expected = await publishedPackageDirs()
+  const wipe = block.match(/rm -rf packages\/\{([^}]+)\}\/dist/)
+  assert.ok(wipe, 'the manual fallback no longer wipes dist with a brace-expanded list')
+  assert.deepEqual(
+    wipe[1].split(',').map((s) => s.trim()).sort(),
+    expected,
+    'the dist-wipe list has drifted from the published set — a stale dist ships in the tarball',
+  )
+  for (const pkg of expected) {
+    assert.match(
+      block,
+      new RegExp(`npm run build -w packages/${pkg}\\b`),
+      `the manual fallback publishes ${pkg} but never builds it`,
+    )
+  }
+})
+
+test('the manual fallback builds in the order publish.yml builds in (#1791)', async () => {
+  // Membership is not enough, and the block's own prose says why: connect's
+  // tsup INLINES MCP_VERSION, so building connect before a fresh mcp bundles a
+  // stale one. Review on #1791 proved the point — swapping the mcp and connect
+  // build lines left every other guard here passing.
+  const block = await manualFallbackBlock()
+  const workflow = await readFile(join(ROOT, '.github', 'workflows', 'publish.yml'), 'utf8')
+  const order = (text) =>
+    [...text.matchAll(/npm run build -w packages\/(\S+)/g)].map((m) => m[1])
+
+  const documented = order(block)
+  const actual = order(workflow)
+  assert.ok(actual.length > 0, 'publish.yml no longer builds packages with `npm run build -w`')
+  assert.deepEqual(
+    documented,
+    actual,
+    'the manual fallback build ORDER has drifted from publish.yml — a stale dist gets bundled',
+  )
+})
+
+test('the manual fallback tells the operator to verify on the registry (#1791)', async () => {
+  const block = await manualFallbackBlock()
+  // This path has no per-package summary and does not stop on a partial
+  // failure, so "it printed no error" is not evidence anything published.
+  assert.match(block, /npm view/)
+  assert.match(block, /dist-tags/)
+})
+
+/**
+ * #1795: scripts/README.md stated the published-package count twice, in the
+ * same file, differently — "the four published packages" at the top and "all
+ * five" further down. Both stale lines predated @haven_ai/cli becoming
+ * published (`3f6e9959c`), and neither was wrong in a way any check could see.
+ *
+ * Third instance of one root cause in three days (#1159, #1526, #1791): the
+ * published set is hand-written in several places and each copy drifts on its
+ * own. So this guard, like #1791's above, DERIVES the set from each workspace's
+ * `private` flag rather than adding a fifth hand-maintained copy.
+ *
+ * Scoped deliberately to the two enumerations that claim to BE the set. Prose
+ * elsewhere in the file names packages for other reasons — the build order
+ * (`sdk → signer → mcp → connect`, correct WITHOUT cli), the `private`-rule
+ * table, the #1159 story about cli — and a file-wide "every package name must
+ * appear" rule would fail on all of them and push the next author to weaken it.
+ */
+function namedPackages(text) {
+  return [...text.matchAll(/`@haven_ai\/([a-z-]+)`/g)].map((m) => m[1]).sort()
+}
+
+async function readmeText() {
+  return readFile(join(ROOT, 'scripts', 'README.md'), 'utf8')
+}
+
+test('the README\'s "problem it solves" names exactly the published set (#1795)', async () => {
+  const readme = await readmeText()
+  const sentence = readme.match(/^A version bump for the .*$/m)
+  assert.ok(sentence, 'scripts/README.md no longer opens release-bump.mjs with "A version bump for the ..."')
+  assert.deepEqual(
+    namedPackages(sentence[0]),
+    await publishedPackageDirs(),
+    'the opening sentence enumerates a published set that has drifted from the non-private workspaces',
+  )
+})
+
+test('the README\'s version-bump step names exactly the LOCKSTEP set (#1795)', async () => {
+  // Not the same set as above, and the difference is the whole point: the
+  // script bumps mcp-server's version too (VERSIONED_PACKAGES), for coherence
+  // with HOSTED_SERVER_VERSION, while mcp-server stays private and unpublished.
+  // Conflating the two is how ":105" came to say "four".
+  const readme = await readmeText()
+  const step = readme.match(/^4\. \*\*Update\*\* the `version` field.*$/m)
+  assert.ok(step, 'scripts/README.md step 4 is no longer the version-field update step')
+  const expected = [...(await publishedPackageDirs()), 'mcp-server'].sort()
+  const named = [...step[0].matchAll(/`([a-z-]+)`/g)]
+    .map((m) => m[1])
+    .filter((n) => expected.includes(n))
+    .sort()
+  assert.deepEqual(
+    [...new Set(named)],
+    expected,
+    'step 4 enumerates a lockstep set that has drifted from (non-private workspaces + mcp-server)',
+  )
+})
+
+test('the sign-off names release shards by version, never by PR number (#1789)', async () => {
+  // The reviewer pass on this change found this line still teaching the retired
+  // convention after all three DOCS had been corrected — and it is the copy a
+  // release-cutter actually reads, at the moment they are about to write the
+  // shard. A PR-numbered name is unsatisfiable by construction: the coupling
+  // gate blocks the PR until the shard exists, so the number does not exist
+  // yet. Nothing validates a shard filename, so a wrong name never fails
+  // anything; it just persists as a mislabelled compliance record.
+  const printed = emitted(await doneBlock())
+  const shardLine = printed.match(/^.*casp-changelog.*$/m)
+  assert.ok(shardLine, 'the sign-off no longer tells the operator to write a CASP shard')
+  assert.doesNotMatch(
+    shardLine[0],
+    /<pr>|<PR>/,
+    'the sign-off names the shard after the PR number, which cannot be known when the shard must be written (#1789)',
+  )
+  // It interpolates the real version rather than a placeholder, so the operator
+  // has nothing left to guess.
+  assert.match(
+    shardLine[0],
+    /newVersion\}-release\.md/,
+    'the sign-off should print the actual release version in the shard filename',
+  )
+})
+
+test('no surviving prose calls the published set "four" (#1795)', async () => {
+  const readme = await readmeText()
+  // Whitespace-collapsed so a hand-rewrap that puts "four" and "packages" on
+  // adjacent LINES cannot slip past (review nit). Still sentence-bounded: the
+  // file legitimately says things like "four more source constants appeared".
+  const stale = readme
+    .replace(/\s+/g, ' ')
+    .match(/\bfour\b[^.]*\bpackages?\b|\bpackages?\b[^.]*\bfour\b/gi)
+  assert.equal(
+    stale,
+    null,
+    `scripts/README.md still describes a package set as "four": ${JSON.stringify(stale)}`,
+  )
+})
+
+/**
+ * #1790: the Supported Runtime Manifest table in
+ * docs/operations/mcp-runtime-compatibility.md re-pins four rows to the new
+ * version on every release. It was written by hand, next to a script that
+ * already knew the number, already wrote it into the source, and already
+ * verified the built bundle against it.
+ *
+ * The bump now writes it. The hazard that creates is the one this repo has
+ * produced a dozen times in two days: a script that writes a value and then
+ * verifies its own write is a guard that cannot fail. So the verification never
+ * receives the version the bump computed — `manifestTableViolations` reads each
+ * row's OWN source constant and compares the doc against that.
+ *
+ * These tests therefore prove two different things:
+ *   - the rewrite does what it claims (and refuses when the table shape moves);
+ *   - the CHECK fails on a table the script did not just write — a hand-edited
+ *     doc, or one that drifted because a constant moved without a re-pin. That
+ *     is the property that makes it a guard rather than a receipt, and the last
+ *     test runs it against the REAL repo files on every CI run.
+ */
+
+const MANIFEST_DOC = join(ROOT, 'docs', 'operations', 'mcp-runtime-compatibility.md')
+
+/** A minimal table in the real doc's shape. */
+function docFixture(versions = {}) {
+  const v = {
+    connect: CUR, mcp: CUR, sdk: CUR, signer: CUR, ...versions,
+  }
+  return [
+    '## Supported Runtime Manifest',
+    '',
+    'Keep this table in sync with that file.',
+    '',
+    '| Component | Supported version |',
+    '| --- | --- |',
+    '| Node.js | >= 22.0.0 (`engines` floor) |',
+    '| `@haven_ai/connect` | `' + v.connect + '` |',
+    '| `@haven_ai/mcp` | `' + v.mcp + '` |',
+    '| `@haven_ai/sdk` | `' + v.sdk + '` |',
+    '| `@haven_ai/signer` | `' + v.signer + '` |',
+    '| Claude Code | local stdio MCP |',
+    '',
+  ].join('\n')
+}
+
+function sourceFixture(versions = {}) {
+  const v = { connect: CUR, mcp: CUR, sdk: CUR, signer: CUR, ...versions }
+  return {
+    'packages/connect/src/runtime.ts': `export const CONNECTOR_VERSION = '${v.connect}'\n`,
+    'packages/mcp/src/server.ts': `export const MCP_VERSION = '${v.mcp}'\n`,
+    'packages/connect/src/runtime-manifest.ts':
+      `export const M = {\n  sdkVersion: '${v.sdk}',\n  signerVersion: '${v.signer}',\n}\n`,
+  }
+}
+
+test('the rewrite re-pins every owned row and touches nothing else (#1790)', () => {
+  const before = docFixture()
+  const after = rewriteManifestTable(before, NEXT)
+  assert.deepEqual(documentedVersions(after), {
+    '@haven_ai/connect': NEXT,
+    '@haven_ai/mcp': NEXT,
+    '@haven_ai/sdk': NEXT,
+    '@haven_ai/signer': NEXT,
+  })
+  // The Node.js and client rows are not version-pinned and must survive intact.
+  assert.match(after, /\| Node\.js \| >= 22\.0\.0/)
+  assert.match(after, /\| Claude Code \| local stdio MCP \|/)
+  assert.equal(after.split('\n').length, before.split('\n').length)
+})
+
+test('the rewrite REFUSES a table whose shape moved, rather than no-oping (#1790)', () => {
+  // A silent skip here is how a release ships a stale contract doc while every
+  // check stays green — the table is the one thing the gate does not read.
+  const withoutSigner = docFixture().replace(/^\| `@haven_ai\/signer`.*$\n/m, '')
+  assert.throws(
+    () => rewriteManifestTable(withoutSigner, NEXT),
+    /no row for: @haven_ai\/signer/,
+  )
+})
+
+test('a table matching its sources has no violations (#1790)', () => {
+  assert.deepEqual(manifestTableViolations(docFixture(), sourceFixture()), [])
+})
+
+test('MUTATION PROOF: the check catches a HAND-EDITED table (#1790)', () => {
+  // The defect class this guard exists for: the script did not write this
+  // table, a human did, and got one row wrong. Nothing else in the repo reads
+  // the table, so without this the doc simply lies from then on.
+  const tampered = docFixture({ sdk: '0.1.27-alpha.0' })
+  const violations = manifestTableViolations(tampered, sourceFixture())
+  assert.equal(violations.length, 1)
+  assert.match(violations[0], /@haven_ai\/sdk: table says '0\.1\.27-alpha\.0'/)
+  assert.match(violations[0], /sdkVersion in packages\/connect\/src\/runtime-manifest\.ts is '0\.1\.28-alpha\.0'/)
+})
+
+test('MUTATION PROOF: the check catches a DRIFTED source, doc untouched (#1790)', () => {
+  // The other direction, and the one a release-time-only check would miss: the
+  // doc is exactly what the last release wrote, but a constant moved since.
+  const violations = manifestTableViolations(docFixture(), sourceFixture({ mcp: NEXT }))
+  assert.equal(violations.length, 1)
+  assert.match(violations[0], /@haven_ai\/mcp: table says/)
+})
+
+test('MUTATION PROOF: the check does not accept its own writer as evidence (#1790)', () => {
+  // The heart of #1790. Rewriting the doc to a version NO SOURCE carries must
+  // still fail — if the check took the bump's word for the version, this would
+  // pass and the guard would be a receipt for its own write.
+  const written = rewriteManifestTable(docFixture(), '9.9.9-invented.0')
+  const violations = manifestTableViolations(written, sourceFixture())
+  assert.equal(violations.length, 4, 'every row must be reported, not just the first')
+  for (const v of violations) assert.match(v, /9\.9\.9-invented\.0/)
+})
+
+test('a renamed source constant FAILS rather than passing quietly (#1790)', () => {
+  const renamed = sourceFixture()
+  renamed['packages/mcp/src/server.ts'] = "export const MCP_SERVER_VERSION = '0.1.28-alpha.0'\n"
+  const violations = manifestTableViolations(docFixture(), renamed)
+  assert.equal(violations.length, 1)
+  assert.match(violations[0], /MCP_VERSION not found/)
+})
+
+test('a missing table row FAILS rather than passing quietly (#1790)', () => {
+  const withoutConnect = docFixture().replace(/^\| `@haven_ai\/connect`.*$\n/m, '')
+  const violations = manifestTableViolations(withoutConnect, sourceFixture())
+  assert.equal(violations.length, 1)
+  assert.match(violations[0], /has no `@haven_ai\/connect` row/)
+})
+
+test('the bump verifies the table WITHOUT being told what it just wrote (#1790)', async () => {
+  // The property everything else here rests on, pinned structurally so a later
+  // "tidy-up" cannot quietly undo it. The moment `verifyManifestDoc` is handed
+  // the version this run computed, it stops being able to disagree with the
+  // write that preceded it — a guard that confirms its own output, which is the
+  // defect class this repo has produced repeatedly.
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+
+  const declaration = source.match(/async function verifyManifestDoc\(([^)]*)\)/)
+  assert.ok(declaration, 'release-bump.mjs no longer declares verifyManifestDoc')
+  assert.equal(
+    declaration[1].trim(),
+    '',
+    'verifyManifestDoc must take NO arguments — it compares the doc against the source constants on disk, never against the version this run computed',
+  )
+
+  const calls = [...source.matchAll(/await verifyManifestDoc\(([^)]*)\)/g)]
+  assert.equal(calls.length, 1, 'expected exactly one verifyManifestDoc() call in the release path')
+  assert.equal(calls[0][1].trim(), '', 'verifyManifestDoc must be called with no arguments')
+
+  // And it must actually run after the write, not instead of it.
+  assert.ok(
+    source.indexOf('await updateManifestDoc(') < source.indexOf('await verifyManifestDoc()'),
+    'the manifest doc must be written before it is verified',
+  )
+})
+
+test('the REAL manifest table agrees with the REAL source constants (#1790)', async () => {
+  // This is the one that runs on every pull request (ci.yml → "Release-bump
+  // lockfile self-test", an unconditional job). It is what makes the check a
+  // drift guard rather than a release-time formality: a hand-edited or drifted
+  // table fails here, with no release in sight.
+  const doc = await readFile(MANIFEST_DOC, 'utf8')
+  const sources = {}
+  for (const spec of MANIFEST_ROWS) {
+    sources[spec.file] = await readFile(join(ROOT, spec.file), 'utf8')
+  }
+  assert.deepEqual(
+    manifestTableViolations(doc, sources),
+    [],
+    'the Supported Runtime Manifest table has drifted from the version constants it mirrors',
+  )
 })

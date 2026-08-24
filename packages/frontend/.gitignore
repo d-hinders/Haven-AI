@@ -1,3 +1,12 @@
 
 # Rendered-screen evidence (#896) — attach to PRs, never commit
 .screenshots/
+
+# Capture-server identity marker (#1800) — written per run into public/ so the
+# app itself can prove which worktree it is, removed when the run ends
+public/capture-identity.json
+
+# e2e-run identity marker (#1816) — the same mechanism for `npm run test:e2e`,
+# under its OWN filename so a concurrent capture run in this worktree cannot
+# overwrite it (and be refused for it)
+public/e2e-identity.json

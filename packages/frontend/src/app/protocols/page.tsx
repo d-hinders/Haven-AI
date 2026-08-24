@@ -36,7 +36,7 @@ export default function ProtocolsPage() {
         <HeroBackdrop variant="soft" />
         <div className="relative max-w-6xl mx-auto px-6 pt-20 md:pt-28 pb-16 md:pb-20">
           <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 mb-6 px-2.5 py-1 rounded-full border border-[var(--v2-border)] bg-white/80 backdrop-blur text-[12px] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+            <div className="inline-flex items-center gap-2 mb-6 px-2.5 py-1 rounded-full border border-[var(--v2-border)] bg-white/80 backdrop-blur text-[12px] text-[var(--v2-ink-2)] shadow-card">
               <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
               Protocol native
             </div>
@@ -65,7 +65,7 @@ export default function ProtocolsPage() {
             <Card
               key={protocol.name}
               hover={false}
-              className="p-7 hover:border-[var(--v2-brand)]/40 hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)] transition-all group"
+              className="p-7 hover:border-brand/40 hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)] transition-all group"
             >
               <Link href={protocol.href} className="block">
                 <div className="text-[12px] font-medium tracking-tight text-[var(--v2-brand)] mb-4">

@@ -13,7 +13,7 @@ covers:
   - packages/frontend/src/lib/passkey-approver.ts
   - packages/backend/src/routes/passkeys.ts
   - packages/backend/src/routes/safe-exec.ts
-last-verified: "2026-08-14" # #1199: both signer-removal paths permit an informed two-to-one transition
+last-verified: "2026-08-23" # #1702: new section "Not the same thing: replacing an agent's key" — the account-signer / agent-delegate distinction stated from THIS side, paired with the same distinction stated from `agent-key-rotation.md` (the epic asked for both directions, because a reader arrives at whichever page their search terms hit and only one of them is right for a lost account signer). No existing claim changed: the two-signer rule, the single-signer limit, the removal floor and the legacy-Safe section were all re-read against `hybrid-signer-actions.ts` and `delegation-rail-security-model.md` §7 and stand. Scope: the new section only; no recovery flow was re-executed. Prior: #1199: both signer-removal paths permit an informed two-to-one transition
 ---
 
 # Account recovery (delegation-rail accounts)
@@ -33,6 +33,25 @@ ID) and/or a connected wallet. Any enrolled signer can add or remove other
 signers. So a **backup** signer is the whole recovery story: if you lose the
 device holding your primary passkey, the backup can remove the lost one and
 enroll a replacement.
+
+## Not the same thing: replacing an agent's key
+
+This page is about the signers that control your **account**. It is routinely
+confused with replacing an **agent's** signing key, and the two have opposite
+answers, so it is worth thirty seconds:
+
+|  | Account signer | Agent delegate key |
+|---|---|---|
+| What it can do | Approve anything the account can do | Only *request* payments, inside a budget you granted |
+| Lost, with no backup | **Unrecoverable.** Nothing brings it back | **Recoverable.** You replace it |
+| Who fixes it | Your other signer, if you have one | You, from the dashboard |
+
+The asymmetry is not a policy choice, it is the structure. An agent's delegate
+never held authority over the account, so you are still there to revoke it and
+issue a new one — that is [replacing an agent's signing key](agent-key-rotation.md).
+Your account's last signer *is* the authority, so there is nobody above it to
+appeal to. **Replacing an agent's key does nothing for a lost account signer**,
+and it is the wrong page to be reading if that is what happened.
 
 ## The one thing you must do: keep at least two
 

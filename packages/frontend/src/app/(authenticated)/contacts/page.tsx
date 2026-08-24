@@ -2,7 +2,7 @@
 
 import { Check, Copy, Info, Pencil, Search, Trash2, Users } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useState, type FormEvent, type MouseEvent } from 'react'
+import { useId, useState, type FormEvent, type MouseEvent } from 'react'
 import { useContacts, type Contact } from '@/hooks/useContacts'
 import { useContactChains } from '@/hooks/useContactChains'
 import { useChainScope } from '@/hooks/useActiveChain'
@@ -52,7 +52,7 @@ function Initials({ name }: { name: string }) {
       : (parts[0] ?? '?').slice(0, 2)
 
   return (
-    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-[var(--v2-brand)]/20 bg-[var(--v2-brand-soft)]">
+    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-brand/20 bg-[var(--v2-brand-soft)]">
       <span className="text-xs font-semibold text-[var(--v2-brand)]">{initials.toUpperCase()}</span>
     </div>
   )
@@ -71,6 +71,10 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
   const [address, setAddress] = useState(initial?.address ?? '')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  // Binds the footer's submit button to the form in the body (#1946). Two of
+  // these dialogs never coexist, but a generated id costs nothing and cannot
+  // collide with anything else on the page.
+  const formId = useId()
 
   const trimmedAddress = address.trim()
   const duplicateContact =
@@ -111,8 +115,32 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
       onClose={saving ? () => {} : onClose}
       closeOnBackdrop={!saving}
       title={mode === 'add' ? 'Add contact' : 'Edit contact'}
+      /*
+        #1946: the actions live in the footer, which `ui/Modal` renders OUTSIDE
+        the scrolling body. Measured before moving them, because an unmeasured
+        fix is a change with no defect behind it: with the duplicate-address
+        hint showing, this dialog's body overflows and the Save button sat 37px
+        below the fold on a landscape phone (844x390) and 27px below at 200%
+        browser zoom (640x400, which WCAG 1.4.4 requires to work). With the
+        save-error box showing instead, both numbers go to ~98px and ~89px.
+        Neither of #1946's other two candidates could be made to overflow at any
+        supported viewport, so neither was touched.
+
+        The submit button reaches the form below by `form={formId}` rather than
+        by nesting, which is what keeps Enter-in-a-text-field submitting.
+      */
+      footer={
+        <>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" form={formId} disabled={saving || !!duplicateContact}>
+            {saving ? 'Saving...' : mode === 'add' ? 'Add contact' : 'Save changes'}
+          </Button>
+        </>
+      }
     >
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form id={formId} onSubmit={handleSubmit} className="space-y-4">
         <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
           Save a name for a recipient address so payment reviews can show who you are paying.
           The payment network is chosen when you send from a Haven wallet.
@@ -174,19 +202,11 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
         )}
 
         {error && (
-          <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2.5 text-sm text-[var(--v2-danger)]">
+          <div className="rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2.5 text-sm text-[var(--v2-danger)]">
             {error}
           </div>
         )}
 
-        <div className="flex gap-3 pt-1">
-          <Button type="button" variant="ghost" onClick={onClose} disabled={saving} className="flex-1">
-            Cancel
-          </Button>
-          <Button type="submit" disabled={saving || !!duplicateContact} className="flex-1">
-            {saving ? 'Saving...' : mode === 'add' ? 'Add contact' : 'Save changes'}
-          </Button>
-        </div>
       </form>
     </Modal>
   )
@@ -241,7 +261,7 @@ function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
           onClick={copyAddress}
           aria-label={copied ? 'Address copied' : 'Copy address'}
           title={copied ? 'Address copied' : 'Copy address'}
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 sm:h-9 sm:w-9"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:h-9 sm:w-9"
         >
           {copied ? (
             <Icon icon={Check} className="h-4 w-4 text-[var(--v2-success)]" />
@@ -255,7 +275,7 @@ function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
           onClick={() => onEdit(contact)}
           aria-label={`Edit ${contact.name}`}
           title="Edit contact"
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 sm:h-9 sm:w-9"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:h-9 sm:w-9"
         >
           <Icon icon={Pencil} className="h-4 w-4" />
         </button>
@@ -265,7 +285,7 @@ function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
           onClick={() => onDelete(contact)}
           aria-label={`Delete ${contact.name}`}
           title="Delete contact"
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 sm:h-9 sm:w-9"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 sm:h-9 sm:w-9"
         >
           <Icon icon={Trash2} className="h-4 w-4" />
         </button>
@@ -316,7 +336,7 @@ function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
           </p>
         </div>
         {error && (
-          <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2.5 text-sm text-[var(--v2-danger)]">
+          <div className="rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2.5 text-sm text-[var(--v2-danger)]">
             {error}
           </div>
         )}
@@ -411,7 +431,7 @@ export default function ContactsPage() {
           aria-busy="true"
           aria-live="polite"
           aria-label="Loading contacts"
-          className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]"
+          className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card"
         >
           {[0, 1, 2].map((item) => (
             <div key={item} className="flex items-center gap-3 border-b border-[var(--v2-border)] px-4 py-3 last:border-b-0">
@@ -435,7 +455,7 @@ export default function ContactsPage() {
       )}
 
       {!loading && !error && filtered.length > 0 && (
-        <div className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]">
+        <div className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card">
           <div className="divide-y divide-[var(--v2-border)]">
             {filtered.map((contact) => (
               <ContactRow

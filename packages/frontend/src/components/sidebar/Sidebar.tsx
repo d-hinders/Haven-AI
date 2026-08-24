@@ -234,19 +234,46 @@ export default function Sidebar() {
         2. **No `relative`.** `Button` adds it to create a positioning context;
            `fixed` already is one, and adding `relative` here would un-fix the
            button and drop it back under `TopBar` — the #1749 defect, restored.
+        3. **`top-3 left-4`, and the `left` is deliberate (#1767).** `top-3`
+           centres the 32px box in the 56px bar (y 12-44, centre 28 — it was
+           `top-4` and 4px low). The obvious matching change, `left-6`, would
+           make the box concentric with `TopBar`'s `w-8` spacer (x 24-56), and
+           it was measured and REJECTED: it costs 8px of the 44px target's
+           right-hand clearance (14px -> 6px, under the 8px § Buttons asks
+           between adjacent targets) AND it pushes the target's right edge from
+           x=54 to x=62, past the centre of the open drawer's own Haven logo
+           link at x=56 — turning the last assertion in the mobile spec red.
+           The spacer's job is to keep the bar's content CLEAR of this control,
+           not to be concentric with it; `left-4` is what clears it best.
       */}
       <button
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        className="lg:hidden fixed top-4 left-4 z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
+        className="lg:hidden fixed top-3 left-4 z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
       >
         <Icon icon={Menu} className="w-4 h-4" />
       </button>
 
-      {/* Overlay for mobile */}
+      {/*
+        Overlay for mobile — the same `v2-modal-backdrop` Modal and SidePanel use.
+
+        It was `bg-[var(--v2-ink)]/40 backdrop-blur-sm`, an opacity modifier on a
+        bare var(), which Tailwind v3.4 drops silently (#1818): the scrim had no
+        background at all, so the drawer opened over an undimmed page.
+
+        Fixing it onto `bg-ink/40` would have worked, but it would have shipped a
+        SECOND overlay convention — and worse, it would have made the blur real.
+        `backdrop-blur-sm` was never free by intent, only by accident: with no
+        background painted there was nothing to composite. Painting one activates
+        a full-viewport `backdrop-filter` on a `fixed inset-0` element, which is
+        exactly what globals.css's `.v2-modal-backdrop` documents avoiding — the
+        compositor keeps a GPU snapshot of the whole page and re-blurs it every
+        paint. So this reuses the existing dim token instead, blur included in
+        what it deliberately omits.
+      */}
       {!collapsed && (
         <div
-          className="lg:hidden fixed inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm z-[var(--v2-z-nav-scrim)]"
+          className="lg:hidden fixed inset-0 v2-modal-backdrop z-[var(--v2-z-nav-scrim)]"
           onClick={() => setCollapsed(true)}
         />
       )}
@@ -320,7 +347,7 @@ export default function Sidebar() {
                 onClick={() => setCollapsed(true)}
                 aria-label={`Open profile for ${name}`}
                 aria-current={profileActive ? 'page' : undefined}
-                className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 focus-visible:ring-offset-1"
+                className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2"
               >
                 {/* Avatar */}
                 <div className="w-8 h-8 rounded-full bg-[var(--v2-brand)] flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
@@ -350,7 +377,7 @@ export default function Sidebar() {
                     aria-haspopup="menu"
                     aria-expanded={menuOpen}
                     aria-label="User menu"
-                    className="w-7 h-7 flex items-center justify-center rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] focus-visible:ring-2 focus-visible:ring-brand/30 focus-visible:outline-none transition-colors"
+                    className="w-7 h-7 flex items-center justify-center rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:outline-none transition-colors"
                   >
                     <span className="inline-flex w-4 h-4 items-center justify-center">
                       {icons.dotsVertical}
@@ -364,7 +391,7 @@ export default function Sidebar() {
                     ref={popoverRef}
                     role="menu"
                     aria-label="User menu"
-                    className="absolute bottom-full right-0 mb-2 w-44 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-lg shadow-[var(--v2-shadow-popover)] py-1 z-[var(--v2-z-chrome-popover)]"
+                    className="absolute bottom-full right-0 mb-2 w-44 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-lg shadow-popover py-1 z-[var(--v2-z-chrome-popover)]"
                   >
                     <Link
                       href="/profile"
@@ -373,7 +400,7 @@ export default function Sidebar() {
                         setMenuOpen(false)
                         setCollapsed(true)
                       }}
-                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
                     >
                       <span className="inline-flex w-3.5 h-3.5 items-center justify-center flex-shrink-0">
                         {icons.profile}
@@ -387,7 +414,7 @@ export default function Sidebar() {
                         setMenuOpen(false)
                         setCollapsed(true)
                       }}
-                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
                     >
                       <span className="inline-flex w-3.5 h-3.5 items-center justify-center flex-shrink-0">
                         {icons.settings}
@@ -402,7 +429,7 @@ export default function Sidebar() {
                         logout()
                         router.push('/')
                       }}
-                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-danger)] hover:bg-[var(--v2-danger-soft)] w-full text-left transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-danger)] hover:bg-[var(--v2-danger-soft)] w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-danger/80"
                     >
                       <span className="inline-flex w-3.5 h-3.5 items-center justify-center flex-shrink-0">
                         {icons.logout}

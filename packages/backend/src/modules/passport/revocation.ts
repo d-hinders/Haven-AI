@@ -22,6 +22,23 @@
  * 2026-07-24). There is deliberately no terminal `failed` revocation state —
  * a struggling revoke stays `pending` and due, and one that stays unreconciled
  * past a threshold is surfaced as an operational incident, never dropped.
+ *
+ * ## What CLOSES a revocation (#1758)
+ *
+ * "Retries until they agree" needs something that can observe agreement.
+ * Until #1758 only one thing could: a fresh `revokeOnChain` returning a
+ * status-1 receipt. That is unreachable in the case that matters — once the
+ * attestation is revoked on-chain, EAS reverts every later revoke of the same
+ * UID — so a revoke that mined after #1742's bounded wait expired left the row
+ * `pending` FOREVER, alarming about a credential that was already dead and
+ * burning gas hourly on a doomed transaction.
+ *
+ * `reconcileRevocation` now asks the chain directly, before it spends
+ * anything: **is this attestation already revoked, as of a settled block?**
+ * That fact closes the row regardless of which transaction set it or whether
+ * Haven ever saw a receipt. Every other answer — live, unreadable, no probe
+ * wired — behaves exactly as this module did before, so the probe can only
+ * ever remove a stuck state, never create one.
  */
 
 import * as repo from '../../infra/repositories/agent-passports.js'
@@ -43,8 +60,23 @@ import { getEasDeployment, isPassportConfigured } from './schema.js'
  */
 export type Standing = 'active' | 'suspended' | 'revoked' | 'unknown'
 
-/** Progress of the on-chain anchor. Never the authority. */
-export type AnchorState = 'not_anchored' | 'anchored' | 'revocation_pending' | 'revoked_onchain'
+/**
+ * Progress of the on-chain anchor. Never the authority.
+ *
+ * `re_anchoring` (#1699) is the re-key window: the attestation on-chain is
+ * live but names the RETIRED delegate key, because EAS attestations are
+ * immutable and `PASSPORT_SCHEMA`'s first field is `address agentEoa`. It is
+ * its own state rather than folded into `anchored` — the credential is real,
+ * so calling it `not_anchored` would be false — and rather than folded into
+ * `revocation_pending`, which says the agent LOST its standing. Here the agent
+ * is live and fully authorised; only the anchor is behind.
+ */
+export type AnchorState =
+  | 'not_anchored'
+  | 'anchored'
+  | 're_anchoring'
+  | 'revocation_pending'
+  | 'revoked_onchain'
 
 /**
  * Agent status → standing. THE allow-list, and the only one.
@@ -75,11 +107,46 @@ export function standingForStatus(agentStatus: string): Standing {
 export function anchorForPassport(
   passportStatus: string | null,
   revocationStatus: string | null,
+  staleAnchor = false,
 ): AnchorState {
   if (passportStatus !== 'anchored') return 'not_anchored'
+  // Ordered ABOVE BOTH revocation checks, and that is the whole subtlety of
+  // this function. A re-anchor drives the row through the SAME
+  // `revocation_status` column an ordinary revoke uses — `pending` while it
+  // holds the lease, then `confirmed` for the moment between the retire
+  // landing and `resetForReanchor` clearing the row. Read without this branch,
+  // a routine re-key would report `revocation_pending` and then
+  // `revoked_onchain` for an agent that is live and fully authorised, and the
+  // dashboard would render "Revoked on-chain" in the danger tone at the exact
+  // moment nothing is wrong.
+  //
+  // Safe because the two situations cannot overlap: `staleAnchor` is only ever
+  // true for a LIVE agent (every caller gates it on `agents.status <>
+  // 'revoked'`, and so does the SQL predicate that feeds the queue), while an
+  // ordinary revocation only reaches `pending`/`confirmed` for a REVOKED one
+  // (`claimRevocation` requires it). So a genuinely revoked agent can never
+  // take this branch, and a live one has no other honest answer.
+  if (staleAnchor) return 're_anchoring'
   if (revocationStatus === 'confirmed') return 'revoked_onchain'
   if (revocationStatus === 'pending') return 'revocation_pending'
   return 'anchored'
+}
+
+/**
+ * Does the live attestation name a key the agent no longer holds? (#1699)
+ *
+ * Case-insensitive because neither column is normalised on write across every
+ * path that has ever written them, and an address that differs only in EIP-55
+ * checksum casing is the SAME address — treating it as stale would put a
+ * healthy agent into a permanent re-anchor loop, revoking and re-minting a
+ * credential once per sweep.
+ */
+export function isStaleAnchor(
+  attestedEoa: string | null,
+  currentDelegate: string | null,
+): boolean {
+  if (!attestedEoa || !currentDelegate) return false
+  return attestedEoa.toLowerCase() !== currentDelegate.toLowerCase()
 }
 
 export interface PassportStanding {
@@ -119,7 +186,11 @@ export async function passportStanding(agentId: string): Promise<PassportStandin
   // The DB decides. Note this reads `agents.status`, NOT any passport column:
   // an agent revoked before its passport ever anchored is still revoked.
   const standing = standingForStatus(row.agent_status)
-  const anchor = anchorForPassport(row.passport_status, row.revocation_status)
+  const anchor = anchorForPassport(
+    row.passport_status,
+    row.revocation_status,
+    standing !== 'revoked' && isStaleAnchor(row.agent_eoa, row.delegate_address),
+  )
 
   return {
     agentId,
@@ -137,6 +208,37 @@ export type Revoker = (chainId: number, attestationUid: string) => Promise<{ txH
 let revokerImpl: Revoker | null = null
 export function setRevoker(revoker: Revoker | null): void {
   revokerImpl = revoker
+}
+
+/**
+ * What the chain says about an attestation's revoked bit (#1758).
+ *
+ * `revoked` is POSITIVE EVIDENCE, read as of a settled block: the attestation
+ * is revoked and will stay revoked. `live` is the attestation existing with
+ * `revocationTime = 0`. `unknown` is the absence of an answer — no provider,
+ * no settled vantage point, an unreadable UID — and is deliberately NOT a
+ * third behaviour at the call site: it takes the same branch as `live`, which
+ * is the branch this code took before the probe existed. Only `revoked`
+ * concludes anything.
+ *
+ * `txHash` is the evidence pointer migration 049 requires before a row may
+ * read `confirmed`; it is null when the chain agrees but Haven has no record
+ * of the transaction that did it. Injected like {@link Revoker} so this module
+ * stays free of ethers and the relayer.
+ */
+export type RevocationAnchorState = 'revoked' | 'live' | 'unknown'
+export interface RevocationAnchorReading {
+  state: RevocationAnchorState
+  txHash: string | null
+}
+export type RevocationAnchorProbe = (
+  chainId: number,
+  attestationUid: string,
+) => Promise<RevocationAnchorReading>
+
+let revocationProbeImpl: RevocationAnchorProbe | null = null
+export function setRevocationProbe(probe: RevocationAnchorProbe | null): void {
+  revocationProbeImpl = probe
 }
 
 /**
@@ -181,25 +283,115 @@ export async function reconcileRevocation(agentId: string): Promise<AnchorState>
     return row.revocation_status === 'pending' ? 'revocation_pending' : 'anchored'
   }
 
-  if (!isPassportConfigured(row.chain_id) || !revokerImpl) {
+  return retireAttestationOnChain(
+    agentId,
+    row.chain_id,
+    row.attestation_uid,
+    row.revocation_attempts,
+  )
+}
+
+/**
+ * Retire ONE attestation on-chain and record the outcome. Shared by both
+ * paths that retire a credential (#1699).
+ *
+ * Extracted verbatim from `reconcileRevocation` when re-anchoring needed the
+ * same step, rather than reimplemented beside it. The #1758 probe-before-spend
+ * reasoning and the #1745-shaped fail-safes below are subtle enough that a
+ * second copy would be a second thing to keep correct — and the failure mode
+ * of a drifted copy is a live credential nobody revokes.
+ *
+ * The CALLER owns the invariant check and the lease: this function assumes the
+ * right to submit has already been claimed atomically
+ * (`claimRevocation` for a revoked agent, `claimReanchorRevocation` for a
+ * stale anchor). It never checks agent status itself, which is exactly why it
+ * must not be exported beyond this module's own callers.
+ */
+export async function retireAttestationOnChain(
+  agentId: string,
+  chainId: number,
+  attestationUid: string,
+  revocationAttempts: number,
+): Promise<'revoked_onchain' | 'revocation_pending'> {
+  if (!isPassportConfigured(chainId)) {
     await repo.scheduleRevocationRetry(
       agentId,
       'revocation anchor unavailable (schema unregistered or no revoker configured)',
-      revocationBackoffSeconds(row.revocation_attempts),
+      revocationBackoffSeconds(revocationAttempts),
+    )
+    return 'revocation_pending'
+  }
+
+  // ── Converge before spending gas (#1758) ────────────────────────────────
+  //
+  // Ask the chain whether this attestation is ALREADY revoked, before
+  // submitting a revoke that would be doomed if it is. This is the only path
+  // that can close a revoke which mined after #1742's 120 s wait expired: the
+  // bump worker closes the `outbound_txs` row and stops there, and a fresh
+  // `revokeOnChain` can never succeed again once the UID is revoked, because
+  // EAS reverts it `AlreadyRevoked`. Without this the row stayed `pending`
+  // permanently — false stuck-revoke alarm, hourly gas burn, no self-heal.
+  //
+  // A PULL, not a push. Nothing teaches the passport row from the outbound
+  // side: `outbound_txs` is the relayer's ledger and holds no agent id, so a
+  // push would mean inventing a join and coupling the generic queue to this
+  // module. The pull also covers what a push never could — an attestation
+  // revoked by an operator by hand, by another deployment, or by a
+  // transaction whose receipt Haven never saw.
+  //
+  // FAIL-SAFE, like #1745's liveness probe: unwired, throwing, or answering
+  // `unknown` all fall through to the submit below, which is exactly what this
+  // function did before the probe existed. Nothing here can conclude
+  // `confirmed` from a read that did not happen.
+  if (revocationProbeImpl) {
+    let reading: RevocationAnchorReading = { state: 'unknown', txHash: null }
+    try {
+      reading = await revocationProbeImpl(chainId, attestationUid)
+    } catch {
+      // An unreadable chain is not an answer. Fall through and submit.
+    }
+    if (reading.state === 'revoked') {
+      // Migration 049: `confirmed` is unrepresentable without a tx hash. The
+      // row's own `revocation_tx_hash` is no help — it is written only BY the
+      // confirmation, in the same statement, so on a pending row it is always
+      // null — which leaves the probe's pointer as the only source. With none,
+      // we do NOT invent one, and we do NOT broadcast a revoke the chain has
+      // already made pointless: the row stays pending and keeps alarming,
+      // which is the honest state for "the chain agrees, but Haven cannot say
+      // what made it agree".
+      if (!reading.txHash) {
+        await repo.scheduleRevocationRetry(
+          agentId,
+          'attestation already revoked on-chain, but no revoke transaction is recorded for it — ' +
+            'cannot record a confirmation without its evidence pointer (#1758)',
+          revocationBackoffSeconds(revocationAttempts),
+        )
+        return 'revocation_pending'
+      }
+      await repo.markRevocationConfirmed(agentId, reading.txHash)
+      return 'revoked_onchain'
+    }
+  }
+
+  if (!revokerImpl) {
+    await repo.scheduleRevocationRetry(
+      agentId,
+      'revocation anchor unavailable (schema unregistered or no revoker configured)',
+      revocationBackoffSeconds(revocationAttempts),
     )
     return 'revocation_pending'
   }
 
   try {
-    getEasDeployment(row.chain_id)
-    const { txHash } = await revokerImpl(row.chain_id, row.attestation_uid)
+    getEasDeployment(chainId)
+    const { txHash } = await revokerImpl(chainId, attestationUid)
     await repo.markRevocationConfirmed(agentId, txHash)
     return 'revoked_onchain'
   } catch (err) {
     await repo.scheduleRevocationRetry(
       agentId,
       redactVendorSecrets(err instanceof Error ? err.message : String(err)),
-      revocationBackoffSeconds(row.revocation_attempts),
+      revocationBackoffSeconds(revocationAttempts),
     )
     return 'revocation_pending'
   }

@@ -10,6 +10,13 @@ export interface ParsedCli {
   repair: boolean
   /** #1681: retire an agent credential directory in place — no token required. */
   tombstone?: { directory: string; reason?: string; replacedBy?: string }
+  /**
+   * #1700: replace an agent's signing key on this machine. Two phases, because
+   * the dashboard sits between them — `start` generates the key and prints its
+   * address, `finish` writes the key the owner brings back. No setup token: the
+   * re-key API is owner-authenticated and this connector never calls it.
+   */
+  rekey?: { phase: 'start' | 'finish'; newApiKey?: string }
 }
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): ParsedCli {
@@ -21,6 +28,8 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   let json = false
   let doctor = false
   let repair = false
+  let rekeyPhase: 'start' | 'finish' | undefined
+  let newApiKey: string | undefined
   let tombstoneDir: string | undefined
   let tombstoneReason: string | undefined
   let tombstoneReplacedBy: string | undefined
@@ -35,6 +44,12 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       doctor = true
     } else if (arg === '--repair') {
       repair = true
+    } else if (arg === '--rekey') {
+      rekeyPhase = 'start'
+    } else if (arg === '--rekey-finish') {
+      rekeyPhase = 'finish'
+    } else if (arg === '--api-key') {
+      newApiKey = requireValue(argv, ++i, arg)
     } else if (arg === '--tombstone') {
       tombstoneDir = requireValue(argv, ++i, arg)
     } else if (arg === '--reason') {
@@ -77,9 +92,36 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   const tombstone = tombstoneDir
     ? { directory: tombstoneDir, reason: tombstoneReason, replacedBy: tombstoneReplacedBy }
     : undefined
+  const rekey = rekeyPhase ? { phase: rekeyPhase, newApiKey } : undefined
 
   if (help) {
-    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone }
+    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey }
+  }
+
+  if (rekey) {
+    // Re-key reuses STORED credentials, like --doctor: the whole point is that
+    // the agent already exists here, so a setup token is exactly what it does
+    // not need. It refuses the two ways a caller can mean something it cannot
+    // do, rather than silently doing the other one.
+    if (options.setupToken) {
+      throw new Error('--rekey replaces an existing agent\'s key; it does not take --setup. Drop one of them.')
+    }
+    if (rekey.phase === 'start' && newApiKey !== undefined) {
+      throw new Error(
+        '--api-key belongs to --rekey-finish. --rekey generates the new key here and prints the ' +
+          'address to paste into Haven; the API key does not exist yet.',
+      )
+    }
+    if (rekey.phase === 'finish' && !newApiKey) {
+      throw new Error('--rekey-finish needs --api-key <key> — the one the Haven agent page showed once.')
+    }
+    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey }
+  }
+
+  if (newApiKey !== undefined) {
+    // Refuse rather than silently discard — the caller believed it did
+    // something (the #1681 finding-2 rule, applied to the new flag).
+    throw new Error('--api-key requires --rekey-finish.')
   }
 
   if (!tombstoneDir && (tombstoneReason !== undefined || tombstoneReplacedBy !== undefined)) {
@@ -90,7 +132,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
 
   if (tombstone) {
     // Retirement reuses STORED state, like --doctor — no token, no runtime.
-    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone }
+    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey }
   }
 
   if (doctor || repair) {
@@ -99,7 +141,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     if (!options.runtime) {
       throw new Error('--doctor/--repair need --runtime <runtime> (which config to examine).')
     }
-    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone }
+    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey }
   }
 
   if (!options.setupToken) {
@@ -110,7 +152,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   }
 
   options.apiBaseUrl = options.apiBaseUrl.replace(/\/+$/, '')
-  return { options: options as ConnectOptions, help, json, doctor, repair, tombstone }
+  return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey }
 }
 
 export function helpText(): string {
@@ -148,6 +190,14 @@ export function helpText(): string {
     '  --repair                   Repair, then re-diagnose (implies --doctor): reinstall the pinned signer',
     '                             runtime, rewrite the wrapper and runtime config from stored credentials.',
     '                             Hosted topology only (refuses to touch a --local config). No keys, no token.',
+    '  --rekey                    Replace this agent\'s signing key (no token). Generates a fresh keypair HERE and',
+    '                             prints its public address to paste into the Haven agent page. Nothing changes',
+    '                             until you finish; the agent keeps working on its old key throughout.',
+    '                             Add --name <slug> for a named agent. Refuses a legacy-rail or revoked agent.',
+    '  --rekey-finish             Second half of --rekey: writes the new key and the API key the agent page',
+    '                             showed once, in place at the same path, and rewrites only this agent\'s MCP',
+    '                             config pair. Server names do not change, so wired hosts need only a restart.',
+    '  --api-key <key>            The new API key, for --rekey-finish.',
     '  --tombstone <dir>          Retire an agent credential directory in place (no token): replaces its signer',
     '                             wrapper with a diagnostic that names the retirement in MCP stderr logs, and',
     '                             writes TOMBSTONE.json. Touches NO key material and revokes nothing.',

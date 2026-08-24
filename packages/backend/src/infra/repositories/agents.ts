@@ -151,16 +151,6 @@ export const LIST_ALLOWANCES_FOR_AGENT_UNORDERED_SQL = `SELECT id, agent_id, tok
          FROM agent_allowances WHERE agent_id = $1`
 
 /**
- * The money-path policy gate (#995): does this agent carry an AllowanceModule
- * config row for the token? Session/legacy rails treat a missing row as "not
- * configured" (403); the delegation rail never consults it. The projection
- * (`allowance_amount`) is verbatim from the routes even though every caller
- * only checks existence.
- */
-export const FIND_TOKEN_ALLOWANCE_AMOUNT_SQL = `SELECT allowance_amount FROM agent_allowances
-         WHERE agent_id = $1 AND LOWER(token_address) = LOWER($2)`
-
-/**
  * The `/machine-payments/allowances` projection — narrower than
  * `LIST_ALLOWANCES_FOR_AGENT_SQL` (no `agent_id` column). Pre-existing
  * divergence, preserved verbatim rather than widened (#995).
@@ -266,18 +256,17 @@ export async function listAllowancesForAgentUnordered(
   return result.rows
 }
 
-/** True when the agent has an AllowanceModule config row for this token (#995). */
-export async function hasTokenAllowanceConfigured(
-  agentId: string,
-  tokenAddress: string,
-  db: Executor = pool,
-): Promise<boolean> {
-  const result = await db.query<{ allowance_amount: string }>(FIND_TOKEN_ALLOWANCE_AMOUNT_SQL, [
-    agentId,
-    tokenAddress,
-  ])
-  return result.rows.length > 0
-}
+// #1987 (epic #1440): `FIND_TOKEN_ALLOWANCE_AMOUNT_SQL` and
+// `hasTokenAllowanceConfigured` are gone with the AllowanceModule rail. They
+// were the per-token policy gate for the legacy and session rails only — the
+// delegation rail never consulted them — and their four callers
+// (routes/payments.ts, modules/mpp/{authorize,send}.ts,
+// modules/x402/legacy-authorize.ts) all died with the rail. The
+// `agent_allowances` TABLE stays until #1990; only the gate is removed.
+//
+// `LIST_ALLOWANCE_CONFIG_FOR_AGENT_SQL` below is deliberately NOT removed: it
+// backs `GET /machine-payments/allowances`, which #1986 left readable on
+// purpose.
 
 export interface AllowanceConfigRow {
   id: string

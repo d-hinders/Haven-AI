@@ -6,13 +6,12 @@ covers:
   - packages/backend/src/loop-harness/**
   - packages/frontend/src/lib/allowance-math.ts
   - packages/frontend/src/lib/loop-harness/**
-  - packages/backend/src/domain/payment-coverage.ts
   - packages/backend/src/modules/mpp/**
   - packages/backend/src/routes/x402-resources.ts
   - packages/backend/package.json
   - packages/frontend/package.json
   - .github/workflows/ci.yml
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-24" # #1987: re-read against the AllowanceModule deletion. LP-1 STAYS and its target survives, but its stated purpose was wrong post-deletion (it drives the allowances report, not routing) — corrected. `domain/payment-coverage.ts` dropped from `covers:` (deleted), and two of the three candidate loops withdrawn because their surfaces are gone. LP-2 (frontend) untouched — that is #1989. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Loop Harness Index
@@ -31,7 +30,7 @@ Each row is a permanent harness that runs in CI as a regression/drift guard.
 
 ### LP-1 · Backend allowance routing math
 
-- **Target:** `computeEffectiveAllowance` in `packages/backend/src/rails/allowance-module.ts` — drives auto-execute-vs-queue routing.
+- **Target:** `computeEffectiveAllowance` in `packages/backend/src/rails/allowance-module.ts` — **since #1987 this drives the allowances REPORT, not routing.** The auto-execute-vs-queue decision it used to make is gone with the AllowanceModule rail's execution half; the function survives because `GET /machine-payments/allowances` still reads it (#1986 kept that surface readable), so the loop still guards a live function and stays. The clock-source finding below is what makes keeping it worthwhile: a report that predicts a reset wrongly is still wrong.
 - **Oracle:** reference model of the Safe AllowanceModule reset semantics (`packages/backend/src/loop-harness/reference-allowance-module.ts`). Not yet machine-certified against the live contract (clock-source divergences are still confirmed bugs regardless).
 - **Harness:** `packages/backend/src/loop-harness/`
 - **Run:** `npm --prefix packages/backend run test:loop`
@@ -55,9 +54,9 @@ work.
 
 | Candidate | Where | Oracle to define | Notes |
 | --- | --- | --- | --- |
-| x402 coverage branching | `packages/backend/src/domain/payment-coverage.ts` (`decideCoverage`) | invariant set over `delegateBalance + remaining` vs requested amount | bespoke Haven logic, no on-chain backstop on the merchant leg |
-| x402 tx verification decoder | `packages/backend/src/routes/x402-resources.ts` (`_verifyTx`) | AllowanceModule calldata spec (decode `executeAllowanceTransfer`) | parsing/validation surface |
-| Approval-flow state machine | `packages/backend/src/modules/mpp/**` (was `lib/machine-payments.ts`, #997/#980) | invariant: no `executed` record without a tx hash; over-limit never auto-executes | property/invariant shape, not differential |
+| ~~x402 coverage branching~~ | ~~`packages/backend/src/domain/payment-coverage.ts` (`decideCoverage`)~~ | — | **WITHDRAWN (#1987).** The file is deleted: coverage arithmetic was the AllowanceModule rail's, and the delegation rail does none — budget is metered on-chain by the caveat enforcers. There is nothing left to build a differential loop against. |
+| x402 tx verification decoder | `packages/backend/src/infra/chain/allowance-transfer-verifier.ts` (#994 extraction) | AllowanceModule calldata spec (decode `executeAllowanceTransfer`) | parsing/validation surface. #1987: the decoder survives — it verifies HISTORICAL inbound transfers for `POST /x402/resources/:id/verify`, which is Haven-as-merchant, not the retired spend path. Weak candidate now that no new such transfers can be created. |
+| ~~Approval-flow state machine~~ | ~~`packages/backend/src/modules/mpp/**`~~ | — | **WITHDRAWN (#1987).** The approval queue was legacy-rail-only; `modules/mpp/authorize.ts` is deleted and the delegation rail has no approval queue at all. |
 
 ## Maintenance notes
 

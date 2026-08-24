@@ -8,6 +8,7 @@ import { StepList } from '@/components/marketing/StepList'
 import { HeroBackdrop } from '@/components/marketing/HeroBackdrop'
 import { FlowCard } from '@/components/marketing/FlowCard'
 import { BrandBandButton } from '@/components/marketing/BrandBandButton'
+import { TrailingArrow } from '@/components/marketing/TrailingArrow'
 
 const INTEGRATIONS = ['Base', 'x402', 'Stripe MPP', 'USDC']
 
@@ -260,19 +261,7 @@ export default function Home() {
               className="inline-flex items-center gap-1.5 text-[14px] font-medium text-white hover:text-white/90 transition-colors group"
             >
               See the full walkthrough
-              <svg
-                className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.75}
-              >
-                <path
-                  d="M3.5 8h9M9 4.5L12.5 8 9 11.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              <TrailingArrow className="transition-transform group-hover:translate-x-0.5" />
             </Link>
           </div>
         </div>
@@ -299,9 +288,7 @@ export default function Home() {
               </p>
               <span className="text-[13px] font-medium text-[var(--v2-brand)] inline-flex items-center gap-1 group-hover:gap-2 transition-all">
                 See the x402 flow
-                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.75}>
-                  <path d="M3.5 8h9M9 4.5L12.5 8 9 11.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+                <TrailingArrow />
               </span>
             </Link>
           </Card>
@@ -320,9 +307,7 @@ export default function Home() {
               </p>
               <span className="text-[13px] font-medium text-[var(--v2-brand)] inline-flex items-center gap-1 group-hover:gap-2 transition-all">
                 See the MPP flow
-                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.75}>
-                  <path d="M3.5 8h9M9 4.5L12.5 8 9 11.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+                <TrailingArrow />
               </span>
             </Link>
           </Card>

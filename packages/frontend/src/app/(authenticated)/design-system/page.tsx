@@ -34,6 +34,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+import { WalletPopover } from '@/components/WalletButton'
 import {
   AgentBudgetCard,
   Address,
@@ -71,6 +72,11 @@ const modalInfoPages: InfoPage[] = [
     ),
   },
 ]
+
+/** Deterministic demo values for the wallet-menu signing-credential states (#1952). */
+const DS_HYBRID_ACCOUNT = '0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3'
+const DS_PASSKEY_KEY_ID = '0x1111111111111111111111111111111111111111111111111111111111111111'
+const NOOP = () => {}
 
 function Section({
   title,
@@ -1789,6 +1795,58 @@ export default function DesignSystemPage() {
             <ApprovalRequiredBanner title="You stay in control" tone="neutral">
               Anything above 75 USDC waits for your manual approval before it is paid.
             </ApprovalRequiredBanner>
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Signing credential (wallet menu)"
+        description="Which passkey is about to sign, as the wallet menu states it. Two states, because they are two different facts: a credential this device's marker matched, and the passkeys[0] fallback used when no enrolled passkey carries this device's marker. The fallback is deliberate and load-bearing — see delegation-rail-security-model.md §6 — and until #1952 the menu rendered NOTHING in that case, going silent in exactly the case where the credential was chosen by array position."
+      >
+        {/*
+          Rendered with props forced, on purpose, and this is the only honest way
+          to photograph the second state: `useActiveSigner` returns a
+          `delegator_passkey` only when the device marker already matched, so no
+          app-state fixture and no screenshot scenario can drive a browser into
+          the fallback render (that upstream gate is #1969). The primitive
+          gallery's existing job — showing states a user flow does not reach —
+          is exactly what is needed, so the two states go under the blocking
+          pixel gate here rather than being asserted and left unseen.
+        */}
+        <div className="flex flex-wrap gap-6">
+          <div className="relative h-[260px] w-72">
+            <WalletPopover
+              primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
+              signingWith={{
+                label: 'Passkey \u00b7 added March 3, 2026',
+                keyId: DS_PASSKEY_KEY_ID,
+                onThisDevice: true,
+              }}
+              open
+              onClose={NOOP}
+              onSwitchWallet={NOOP}
+              onConnectWallet={NOOP}
+              hasConnectedWallet={false}
+              switching={false}
+              anchorRef={{ current: null }}
+            />
+          </div>
+          <div className="relative h-[260px] w-72">
+            <WalletPopover
+              primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
+              signingWith={{
+                label: 'Passkey \u00b7 added March 3, 2026',
+                keyId: DS_PASSKEY_KEY_ID,
+                onThisDevice: false,
+              }}
+              open
+              onClose={NOOP}
+              onSwitchWallet={NOOP}
+              onConnectWallet={NOOP}
+              hasConnectedWallet={false}
+              switching={false}
+              anchorRef={{ current: null }}
+            />
           </div>
         </div>
       </Section>

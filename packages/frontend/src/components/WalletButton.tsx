@@ -9,7 +9,7 @@ import {
   type RefObject,
 } from 'react'
 import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit'
-import { TriangleAlert, Wallet } from 'lucide-react'
+import { Info, TriangleAlert, Wallet } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useAccount, useDisconnect } from 'wagmi'
 import type { Address } from 'viem'
@@ -149,6 +149,34 @@ interface PopoverProps {
    * same statement to a user about to authorise a spend, so they do not get
    * the same words.
    *
+   * ── Tone: NEUTRAL, decided rather than defaulted (#1952, cf. #1937) ───────
+   *
+   * No semantic token. There is no `--v2-info` family to reach for, and
+   * `--v2-warning` is scoped in `design-system.md` to "402 Payment Required,
+   * pending review" — spending amber here would both misuse it and train users
+   * to ignore it. Nothing has failed and nothing is blocked: the marker is a
+   * LOCAL hint, so a miss costs a ceremony the authenticator resolves from its
+   * own credential lookup (delegation-rail-security-model.md §6). The weight
+   * this state needs is carried structurally — a rule, an icon, a named fact —
+   * which is what makes it legible without making it alarming.
+   *
+   * **#1937 is the same question for a different fact and this does not
+   * prejudge it.** There the fact is UNKNOWN (a failed read leaves the recovery
+   * posture unreadable); here it is fully KNOWN and merely not preferred. An
+   * unknown safety-relevant fact has a strictly better claim on a tone than a
+   * known one does, so: if #1937 resolves to neutral, this must stay neutral
+   * for consistency; if #1937 resolves to toned, this may still stay neutral,
+   * because "we know exactly which key and it was picked by position" is not
+   * the same as "we cannot tell you". The one outcome this rules out is toning
+   * THIS louder than #1937's.
+   *
+   * The #1097 "passkey may be on another device" hints in `AccountSignersCard`
+   * and `DelegationSendModal` are the nearest shipped precedent and are plain
+   * muted text — but they are deliberately NOT leaned on as the argument. Their
+   * fact is mild friction with the RIGHT credential (a device hop); this one is
+   * a credential chosen by array position and never verified as the user's.
+   * Those differ in kind, which is why this state gets a marker they do not.
+   *
    * **`onThisDevice: false` is not reachable in the product today, and that is
    * recorded here rather than left for the next reader to rediscover.**
    * `useActiveSigner` (`lib/signer.ts`) only returns a `delegator_passkey` at
@@ -156,11 +184,11 @@ interface PopoverProps {
    * `signer.test.ts` > "does NOT resolve the hybrid signer when the device
    * marker is missing". So the marker-less user reaches no Hybrid branch here
    * — they get no passkey signer in the dashboard at all, which is a bigger
-   * gap than the one #1952 describes and is filed separately rather than
-   * changed from this component. What this branch buys meanwhile is that the
-   * popover states the fallback honestly the moment that gate is corrected,
-   * instead of going silent again. Do not read it as shipped, user-visible
-   * behaviour.
+   * gap than the one #1952 describes and is filed as #1969 rather than changed
+   * from this component. This rendering becomes user-visible the moment #1969
+   * closes, with NO guaranteed review checkpoint at that time — which is the
+   * reason it is built correct now rather than later. Do not read it as
+   * shipped, user-visible behaviour.
    */
   signingWith?: { label: string; keyId: string; onThisDevice: boolean }
   unavailablePasskey?: boolean
@@ -180,7 +208,17 @@ interface PopoverProps {
   anchorRef: RefObject<HTMLButtonElement | null>
 }
 
-function WalletPopover({
+/**
+ * Exported ONLY so `/design-system` can render its states directly (#1952).
+ *
+ * `WalletButton` remains the sole product call site. The reason for the export
+ * is that the fallback state is unreachable through any app-state fixture —
+ * `useActiveSigner` gates the Hybrid branch on a device-marker match — so the
+ * only way to put the two renderings under the blocking pixel gate is to render
+ * the component with the props forced, the way the primitive gallery already
+ * photographs states no user flow reaches.
+ */
+export function WalletPopover({
   primary,
   secondary,
   signingWith,
@@ -288,22 +326,36 @@ function WalletPopover({
         )}
         {renderAddressSection(primary)}
         {signingWith ? (
-          <div className="py-2">
-            <p className="text-xs text-[var(--v2-ink-muted)]">
-              {signingWith.onThisDevice
-                ? 'Signing with'
-                : 'No passkey registered on this device — signing with'}
-            </p>
+          // #1952: the fallback carries a DESIGNED marker — a left rule and an
+          // icon-led label — not a longer sentence. An earlier revision changed
+          // only the eyebrow string, and the design pass measured that the
+          // distinction then rested on incidental text wrap: at `w-72` minus
+          // `p-4` the content box is 256px, so a 54-character `text-xs` eyebrow
+          // happened to run to two lines while "Signing with" did not. That is
+          // a coincidence of string length, and it also pushed the bold
+          // credential name — the fact that matters most — into the middle of
+          // two muted paragraphs. The rule and the icon are independent of copy
+          // length, and keeping the "Signing with" eyebrow identical in both
+          // states preserves the hierarchy the name sits in.
+          <div
+            className={
+              signingWith.onThisDevice
+                ? 'py-2'
+                : 'my-1 border-l-2 border-[var(--v2-border-strong)] py-2 pl-3'
+            }
+          >
+            {signingWith.onThisDevice ? null : (
+              <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--v2-ink-2)]">
+                <Icon icon={Info} className="h-3.5 w-3.5 flex-shrink-0" />
+                No passkey enrolled on this device
+              </p>
+            )}
+            <p className="text-xs text-[var(--v2-ink-muted)]">Signing with</p>
             <p className="text-sm font-medium text-[var(--v2-ink)]">{signingWith.label}</p>
             <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">
               {truncateAddress(signingWith.keyId)}
             </p>
             {signingWith.onThisDevice ? null : (
-              // Neutral, not amber (#1952). Nothing has failed and nothing is
-              // blocked: the marker is a local hint, so a miss costs a ceremony
-              // the authenticator resolves from its own credential lookup
-              // (delegation-rail-security-model.md §6). Saying what happens next
-              // is the honest thing to add here; alarm is not.
               <p className="mt-1.5 text-xs text-[var(--v2-ink-3)]">
                 Your browser may ask you to choose a different one.
               </p>

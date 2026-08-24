@@ -456,7 +456,7 @@ describe('WalletButton', () => {
     // visibly — a positive-only assertion on 'Signing with' would pass against
     // BOTH renderings, since the fallback eyebrow contains that substring.
     expect(
-      within(dialog).queryByText('No passkey registered on this device — signing with'),
+      within(dialog).queryByText('No passkey enrolled on this device'),
     ).not.toBeInTheDocument()
     expect(
       within(dialog).queryByText('Your browser may ask you to choose a different one.'),
@@ -518,18 +518,24 @@ describe('WalletButton', () => {
 
     // The credential is NAMED rather than hidden, and it is the one signing
     // will actually use — passkeys[0], not the second key.
-    expect(
-      within(dialog).getByText('No passkey registered on this device — signing with'),
-    ).toBeInTheDocument()
+    const marker = within(dialog).getByText('No passkey enrolled on this device')
+    expect(marker).toBeInTheDocument()
+    expect(within(dialog).getByText('Signing with')).toBeInTheDocument()
     expect(within(dialog).getByText('Passkey · added March 3, 2026')).toBeInTheDocument()
     expect(within(dialog).getByText('0x1111…1111')).toBeInTheDocument()
     expect(
       within(dialog).getByText('Your browser may ask you to choose a different one.'),
     ).toBeInTheDocument()
 
-    // And it must NOT be rendered as a marker match. `getByText` matches the
-    // whole normalised string, so this fails if the eyebrow is the plain one.
-    expect(within(dialog).queryByText('Signing with')).not.toBeInTheDocument()
+    // The marker must be a DESIGNED one, not a longer sentence: the design pass
+    // measured that an eyebrow-only distinction rested on incidental text wrap
+    // at 288px. Assert the structural half — the left rule — so a revision that
+    // keeps the words and drops the treatment fails here rather than passing as
+    // "the copy is still there". The icon is asserted as a rendered svg for the
+    // same reason.
+    const block = marker.closest('div')
+    expect(block?.className).toContain('border-l-2')
+    expect(marker.querySelector('svg')).not.toBeNull()
     // The second key is not the one signing: naming it here would be the same
     // defect wearing different copy.
     expect(within(dialog).queryByText('0x2222…2222')).not.toBeInTheDocument()
@@ -560,7 +566,7 @@ describe('WalletButton', () => {
     // "always render something".
     expect(within(dialog).queryByText('Signing with')).not.toBeInTheDocument()
     expect(
-      within(dialog).queryByText('No passkey registered on this device — signing with'),
+      within(dialog).queryByText('No passkey enrolled on this device'),
     ).not.toBeInTheDocument()
     expect(
       within(dialog).queryByText('Your browser may ask you to choose a different one.'),

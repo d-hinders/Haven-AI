@@ -451,6 +451,119 @@ describe('WalletButton', () => {
     expect(within(dialog).getByText('Passkey · added May 10, 2026')).toBeInTheDocument()
     // The block identifies the credential by truncated key id, never an address:
     expect(within(dialog).getByText('0x2222…2222')).toBeInTheDocument()
+    // #1952: the matched rendering must NOT carry the fallback's words, or the
+    // two facts are indistinguishable in the direction that matters least
+    // visibly — a positive-only assertion on 'Signing with' would pass against
+    // BOTH renderings, since the fallback eyebrow contains that substring.
+    expect(
+      within(dialog).queryByText('No passkey registered on this device — signing with'),
+    ).not.toBeInTheDocument()
+    expect(
+      within(dialog).queryByText('Your browser may ask you to choose a different one.'),
+    ).not.toBeInTheDocument()
     window.localStorage.removeItem('haven_passkey_device_' + credentialIdFromKeyId(KEY_B))
+  })
+
+  /**
+   * #1952 — the state the popover used to render as NOTHING.
+   *
+   * The defect was an inversion: `WalletButton` drove the block from
+   * `hybridPasskeyOnDevice`, which returns `null` when no enrolled passkey
+   * carries this device's marker, so `signingWith` went `undefined` and the
+   * whole section vanished. That is precisely when signing falls back to
+   * `passkeys[0]` — an arbitrary credential chosen by POSITION. The UI named
+   * the credential when the choice was unambiguous and went silent when it was
+   * arbitrary, on an authority-bearing action.
+   *
+   * The fix is a routing change, not a copy change: display now asks
+   * `hybridPasskeyToSignWith` — the same selector `delegationPasskeySigner`
+   * signs through (#1933) — so display and signing cannot name different keys.
+   *
+   * ── What these tests do and do not prove ────────────────────────────────
+   *
+   * They prove the COMPONENT's contract, because they hand `WalletButton` a
+   * `delegator_passkey` through the mocked `useActiveSigner` directly. They do
+   * NOT prove a reachable production state, and that distinction is stated
+   * rather than glossed: the real `useActiveSigner` refuses to return a
+   * `delegator_passkey` at all unless `hybridPasskeyOnDevice` already matched
+   * (`lib/signer.ts`, pinned by `signer.test.ts` > "does NOT resolve the hybrid
+   * signer when the device marker is missing"). So there is no fixture — and no
+   * `npm run screenshot` scenario — that can drive a real browser into this
+   * render, and none is faked here to make the acceptance criterion look met.
+   * The upstream gate is filed separately.
+   */
+  it('Hybrid dropdown: names the passkeys[0] fallback and says it IS a fallback (#1952)', () => {
+    const KEY_A = '0x' + '11'.repeat(32)
+    const KEY_B = '0x' + '22'.repeat(32)
+    const ACCOUNT = '0x' + 'aa'.repeat(20)
+    // No device marker for EITHER key — the case the old code rendered blank.
+    mocks.useActiveSigner.mockReturnValue({
+      type: 'delegator_passkey',
+      accountAddress: ACCOUNT,
+      chainId: 84532,
+      signers: {
+        account_address: ACCOUNT,
+        chain_id: 84532,
+        owner_address: null,
+        passkeys: [
+          { key_id: KEY_A, x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+          { key_id: KEY_B, x: '0x3', y: '0x4', created_at: '2026-05-10T09:00:00.000Z' },
+        ],
+      },
+    })
+
+    render(<WalletButton />)
+    fireEvent.click(screen.getByRole('button', { name: 'Passkey' }))
+    const dialog = screen.getByRole('dialog', { name: 'Wallet menu' })
+
+    // The credential is NAMED rather than hidden, and it is the one signing
+    // will actually use — passkeys[0], not the second key.
+    expect(
+      within(dialog).getByText('No passkey registered on this device — signing with'),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByText('Passkey · added March 3, 2026')).toBeInTheDocument()
+    expect(within(dialog).getByText('0x1111…1111')).toBeInTheDocument()
+    expect(
+      within(dialog).getByText('Your browser may ask you to choose a different one.'),
+    ).toBeInTheDocument()
+
+    // And it must NOT be rendered as a marker match. `getByText` matches the
+    // whole normalised string, so this fails if the eyebrow is the plain one.
+    expect(within(dialog).queryByText('Signing with')).not.toBeInTheDocument()
+    // The second key is not the one signing: naming it here would be the same
+    // defect wearing different copy.
+    expect(within(dialog).queryByText('0x2222…2222')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Passkey · added May 10, 2026')).not.toBeInTheDocument()
+  })
+
+  it('Hybrid dropdown: names no credential when the signer set is empty (#1952)', () => {
+    const ACCOUNT = '0x' + 'aa'.repeat(20)
+    mocks.useActiveSigner.mockReturnValue({
+      type: 'delegator_passkey',
+      accountAddress: ACCOUNT,
+      chainId: 84532,
+      signers: {
+        account_address: ACCOUNT,
+        chain_id: 84532,
+        owner_address: null,
+        passkeys: [],
+      },
+    })
+
+    render(<WalletButton />)
+    fireEvent.click(screen.getByRole('button', { name: 'Passkey' }))
+    const dialog = screen.getByRole('dialog', { name: 'Wallet menu' })
+
+    // Nothing can sign, so there is no credential to name — and the fallback
+    // copy must not claim one. This is the ONLY case where silence is correct,
+    // which is why it is pinned: it is what stops the fix from being written as
+    // "always render something".
+    expect(within(dialog).queryByText('Signing with')).not.toBeInTheDocument()
+    expect(
+      within(dialog).queryByText('No passkey registered on this device — signing with'),
+    ).not.toBeInTheDocument()
+    expect(
+      within(dialog).queryByText('Your browser may ask you to choose a different one.'),
+    ).not.toBeInTheDocument()
   })
 })

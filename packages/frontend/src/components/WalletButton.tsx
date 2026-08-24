@@ -16,7 +16,12 @@ import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
-import { useActiveSigner, hybridPasskeyOnDevice } from '@/lib/signer'
+import {
+  useActiveSigner,
+  hybridPasskeyToSignWith,
+  hasPasskeyCredentialOnDevice,
+  credentialIdFromKeyId,
+} from '@/lib/signer'
 import { passkeyRowLabel } from '@/lib/passkeyLabels'
 import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { truncateAddress } from '@/components/haven'
@@ -136,8 +141,28 @@ interface PopoverProps {
    * passkeys are raw P256 coordinates on the account contract and have no
    * on-chain address of their own; showing the treasury address here implied
    * the credential owned it.
+   *
+   * #1952: `onThisDevice` is NOT decoration. It separates two different facts
+   * that used to share one rendering — and, worse, used to share it with
+   * "nothing at all". "Signing with X" (this device's marker picked X) and
+   * "no passkey is registered here, so X is what will be offered" are not the
+   * same statement to a user about to authorise a spend, so they do not get
+   * the same words.
+   *
+   * **`onThisDevice: false` is not reachable in the product today, and that is
+   * recorded here rather than left for the next reader to rediscover.**
+   * `useActiveSigner` (`lib/signer.ts`) only returns a `delegator_passkey` at
+   * all when `hybridPasskeyOnDevice` already matched, pinned by
+   * `signer.test.ts` > "does NOT resolve the hybrid signer when the device
+   * marker is missing". So the marker-less user reaches no Hybrid branch here
+   * — they get no passkey signer in the dashboard at all, which is a bigger
+   * gap than the one #1952 describes and is filed separately rather than
+   * changed from this component. What this branch buys meanwhile is that the
+   * popover states the fallback honestly the moment that gate is corrected,
+   * instead of going silent again. Do not read it as shipped, user-visible
+   * behaviour.
    */
-  signingWith?: { label: string; keyId: string }
+  signingWith?: { label: string; keyId: string; onThisDevice: boolean }
   unavailablePasskey?: boolean
   open: boolean
   onClose: () => void
@@ -264,11 +289,25 @@ function WalletPopover({
         {renderAddressSection(primary)}
         {signingWith ? (
           <div className="py-2">
-            <p className="text-xs text-[var(--v2-ink-muted)]">Signing with</p>
+            <p className="text-xs text-[var(--v2-ink-muted)]">
+              {signingWith.onThisDevice
+                ? 'Signing with'
+                : 'No passkey registered on this device — signing with'}
+            </p>
             <p className="text-sm font-medium text-[var(--v2-ink)]">{signingWith.label}</p>
             <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">
               {truncateAddress(signingWith.keyId)}
             </p>
+            {signingWith.onThisDevice ? null : (
+              // Neutral, not amber (#1952). Nothing has failed and nothing is
+              // blocked: the marker is a local hint, so a miss costs a ceremony
+              // the authenticator resolves from its own credential lookup
+              // (delegation-rail-security-model.md §6). Saying what happens next
+              // is the honest thing to add here; alarm is not.
+              <p className="mt-1.5 text-xs text-[var(--v2-ink-3)]">
+                Your browser may ask you to choose a different one.
+              </p>
+            )}
           </div>
         ) : null}
         {secondary && renderAddressSection(secondary, true)}
@@ -482,18 +521,33 @@ export default function WalletButton() {
 
         if (delegatorSigner) {
           const accountAlias = getOwnerAlias(delegatorSigner.accountAddress)
-          // #1126/#1679: name the enrolled-on-this-device credential the same
-          // way AccountSignersCard does — "Passkey · added {date}", never a
-          // platform brand or a positional label. No address: Hybrid passkeys
-          // have none.
-          const onDeviceKey = hybridPasskeyOnDevice(delegatorSigner.signers)
-          const keyIndex = onDeviceKey
-            ? delegatorSigner.signers.passkeys.findIndex((pk) => pk.key_id === onDeviceKey.key_id)
+          // #1126/#1679: name the credential the same way AccountSignersCard
+          // does — "Passkey · added {date}", never a platform brand or a
+          // positional label. No address: Hybrid passkeys have none.
+          //
+          // #1952: ask `hybridPasskeyToSignWith` — the SAME selector
+          // `delegationPasskeySigner` signs through (#1933) — rather than
+          // `hybridPasskeyOnDevice`. That was the root cause here, not the
+          // rendering: two call sites into one rule, and only the signing one
+          // knew about the `passkeys[0]` fallback. Display therefore went
+          // SILENT in exactly the case where an arbitrary credential was about
+          // to sign. Going through the selector means the two cannot drift.
+          //
+          // Whether the marker matched is then a question about the credential
+          // this popover is naming, not a second copy of the selection rule:
+          // the selector only reaches its fallback when nothing carried a
+          // marker, so a chosen key with no marker IS the fallback case.
+          const signKey = hybridPasskeyToSignWith(delegatorSigner.signers)
+          const keyIndex = signKey
+            ? delegatorSigner.signers.passkeys.findIndex((pk) => pk.key_id === signKey.key_id)
             : -1
-          const signingWith = onDeviceKey
+          // `undefined` only for an empty signer set — there is no credential
+          // to name, and nothing can sign.
+          const signingWith = signKey
             ? {
-                label: passkeyRowLabel(onDeviceKey.created_at, keyIndex),
-                keyId: onDeviceKey.key_id,
+                label: passkeyRowLabel(signKey.created_at, keyIndex),
+                keyId: signKey.key_id,
+                onThisDevice: hasPasskeyCredentialOnDevice(credentialIdFromKeyId(signKey.key_id)),
               }
             : undefined
           const connectedWallet =

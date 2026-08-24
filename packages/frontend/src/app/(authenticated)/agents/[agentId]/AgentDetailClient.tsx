@@ -355,9 +355,8 @@ export default function AgentDetailClient({ agentId }: Props) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [replaceKeyOpen, setReplaceKeyOpen] = useState(false)
 
-  // #1701: drives the passport disclosure in the re-key flow. Only an agent
-  // that HAS a passport has one to leave pointing at the retired key (#1847),
-  // so the warning is shown on evidence rather than unconditionally.
+  // #1701/#1699: only an anchored attestation is retired and reissued. Pending
+  // or failed issuance will read the new delegate if it anchors after re-key.
   const { passport } = useAgentPassport(agentId)
 
   const isActive = agent?.status === 'active'
@@ -901,7 +900,7 @@ export default function AgentDetailClient({ agentId }: Props) {
         isDelegationAgent={isDelegationAgent}
         currentDelegateAddress={currentAgent.delegate_address}
         recentPayments={activity.filter(isPaymentActivityItem)}
-        hasPassport={passport !== null}
+        hasAnchoredPassport={passport?.status === 'anchored' && passport.attestation_uid !== null}
         onCompleted={() => {
           refetch()
         }}

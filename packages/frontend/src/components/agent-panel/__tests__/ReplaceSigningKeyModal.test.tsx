@@ -2,8 +2,8 @@
  * Replace signing key — the guarantees, not the markup (#1701).
  *
  * Every assertion here is about something a user could be MISLED by, because
- * this modal drives a backend whose siblings are unshipped and whose reachable
- * states the product does not yet describe. The interesting failures are all
+ * this modal drives an irreversible authority change whose reachable states
+ * must stay aligned with later backend fixes. The interesting failures are all
  * copy that is confidently wrong, so the tests query by role and name and
  * assert on sentences rather than class names.
  *
@@ -98,7 +98,7 @@ function renderModal(overrides: Partial<React.ComponentProps<typeof ReplaceSigni
     isDelegationAgent: true,
     currentDelegateAddress: CURRENT,
     recentPayments: [],
-    hasPassport: false,
+    hasAnchoredPassport: false,
     onCompleted: vi.fn(),
     ...overrides,
   }
@@ -232,49 +232,82 @@ describe('the point of no return (#1868)', () => {
   })
 })
 
-describe('the long-pause hazard (#1849)', () => {
-  it('warns that pausing across a period boundary can zero the budget', async () => {
+describe('budget-boundary carry (#1849)', () => {
+  it('says closed-period remainder is dropped while recurring budgets keep their schedule', async () => {
     renderModal()
     await advanceToConsequences()
-    expect(screen.getByText(/finish this in one go/i)).toBeInTheDocument()
-    expect(screen.getByText(/nothing to spend until the following period/i)).toBeInTheDocument()
+    expect(screen.getByText(/finish the remaining steps now/i)).toBeInTheDocument()
+    expect(screen.getByText(/remainder from the closed period is dropped/i)).toBeInTheDocument()
+    expect(screen.getByText(/recurring budget.*existing schedule/i)).toBeInTheDocument()
   })
 
-  /**
-   * The backend returns `carry_note` and `skipped[].reason` prose, and the
-   * skipped reason currently asserts authority "resumes at the original
-   * boundary" — which #1849 establishes is a period too early. Rendering it
-   * would ship a false promise, so this asserts the sentence never appears.
-   */
-  it('does not repeat the backend\'s false "original boundary" claim', async () => {
+  it('does not retain the obsolete zero-budget warning', async () => {
     const { container } = renderModal()
     await advanceToConsequences()
-    expect(container.textContent ?? '').not.toMatch(/original boundary/i)
+    const text = container.textContent ?? ''
+    expect(text).not.toMatch(/nothing to spend until the (following|next) period/i)
+    expect(text).not.toMatch(/silently carry zero/i)
   })
 })
 
-describe('passport standing (#1847)', () => {
-  it('says the public record will name the OLD key when the agent has a passport', async () => {
-    renderModal({ hasPassport: true })
+describe('passport re-anchoring (#1699)', () => {
+  it('says the public record catches up asynchronously when the agent has a passport', async () => {
+    renderModal({ hasAnchoredPassport: true })
     await advanceToConsequences()
-    expect(screen.getByText(/still names the signing address you are retiring/i)).toBeInTheDocument()
-    // "out of date", never "catching up" — nothing re-anchors it today.
-    expect(screen.getByText(/out of date rather than catching up/i)).toBeInTheDocument()
+    expect(screen.getByText(/public record updates separately/i)).toBeInTheDocument()
+    expect(screen.getByText(/standing in Haven remains unchanged/i)).toBeInTheDocument()
+    expect(screen.getByText(/retired and replaced with one naming the new signing address/i)).toBeInTheDocument()
+    expect(screen.getByText(/updating on-chain/i)).toBeInTheDocument()
   })
 
   // Paired absence: the sibling above proves the warning is producible.
   it('omits the passport warning when the agent has no passport', async () => {
-    renderModal({ hasPassport: false })
+    renderModal({ hasAnchoredPassport: false })
     await advanceToConsequences()
-    expect(screen.queryByText(/still names the signing address you are retiring/i)).toBeNull()
+    expect(screen.queryByText(/public record updates separately/i)).toBeNull()
   })
 
-  it('never claims passport standing carries over on-chain', async () => {
-    const { container } = renderModal({ hasPassport: true })
+  it('does not retain the obsolete permanently-stale passport warning', async () => {
+    const { container } = renderModal({ hasAnchoredPassport: true })
     await advanceToConsequences()
     const text = container.textContent ?? ''
-    expect(text).not.toMatch(/briefly lags/i)
-    expect(text).not.toMatch(/standing carries/i)
+    expect(text).not.toMatch(/nothing updates it yet/i)
+    expect(text).not.toMatch(/out of date rather than catching up/i)
+  })
+})
+
+describe('completion budget summary (#1849)', () => {
+  it('treats an expired carry as informational when an active replacement was issued', async () => {
+    fullRunOn('eip712_userop', {
+      carryRole: 'steady',
+      skipped: [{ reason: 'The carry window closed before issue.' }],
+    })
+    renderModal()
+    await advanceToConsequences()
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: /switch off the old key/i }))
+
+    await waitFor(() => expect(screen.getByText(/signing key replaced/i)).toBeInTheDocument())
+    expect(screen.getByText(/old budget pieces were not re-issued/i)).toBeInTheDocument()
+    expect(screen.getByText(/active replacement budget rules were issued/i)).toBeInTheDocument()
+    expect(screen.queryByText(/cannot spend until you set a new budget/i)).toBeNull()
+    expect(screen.queryByText(/no budget was carried over/i)).toBeNull()
+  })
+
+  it('also describes a fully spent piece honestly when an active replacement was issued', async () => {
+    fullRunOn('eip712_userop', {
+      carryRole: 'steady',
+      skipped: [{ reason: 'The prior period was fully spent.' }],
+    })
+    renderModal()
+    await advanceToConsequences()
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: /switch off the old key/i }))
+
+    await waitFor(() => expect(screen.getByText(/signing key replaced/i)).toBeInTheDocument())
+    expect(screen.getByText(/nothing remained or their time windows had closed/i)).toBeInTheDocument()
+    expect(screen.getByText(/active replacement budget rules were issued/i)).toBeInTheDocument()
+    expect(screen.queryByText(/cannot spend until you set a new budget/i)).toBeNull()
   })
 })
 
@@ -368,7 +401,13 @@ function multiSignerOnPasskeyDevice() {
  * A full run whose revoke prepare answers on `scheme`, driven to completion.
  * Returns the recorded calls so a test can assert what each step was handed.
  */
-function fullRunOn(scheme: 'eip712_userop' | 'webauthn_userop') {
+function fullRunOn(
+  scheme: 'eip712_userop' | 'webauthn_userop',
+  issueOptions: {
+    carryRole?: 'carry' | 'steady' | 'reanchor'
+    skipped?: Array<{ reason: string }>
+  } = {},
+) {
   mockApiPost.mockImplementation(async (path: string) => {
     if (path.endsWith('/rekey')) {
       return {
@@ -410,7 +449,7 @@ function fullRunOn(scheme: 'eip712_userop' | 'webauthn_userop') {
         delegations: [
           {
             delegation_hash: '0xd1',
-            carry_role: 'carry',
+            carry_role: issueOptions.carryRole ?? 'carry',
             token_address: '0xusdc',
             budget_atomic: '1000',
             period_seconds: 86400,
@@ -419,7 +458,7 @@ function fullRunOn(scheme: 'eip712_userop' | 'webauthn_userop') {
             signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message: { delegate: NEXT } },
           },
         ],
-        skipped: [],
+        skipped: issueOptions.skipped ?? [],
       }
     }
     if (path.endsWith('/complete')) {
@@ -760,6 +799,9 @@ describe('recovering from a failure past the point of no return', () => {
     await revokeThenFail('complete')
     await waitFor(() => expect(screen.getByText(/cannot pay right now/i)).toBeInTheDocument())
     expect(screen.getByText(/nothing was left half-applied/i)).toBeInTheDocument()
+    expect(screen.getByText(/finish now so the replacement can be completed/i)).toBeInTheDocument()
+    expect(screen.getByText(/can pay again/i)).toBeInTheDocument()
+    expect(screen.queryByText(/nothing to spend until the next period/i)).toBeNull()
   })
 })
 

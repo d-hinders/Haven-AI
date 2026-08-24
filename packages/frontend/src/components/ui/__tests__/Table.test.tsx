@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { Table } from '@/components/ui/Table'
+import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
 
 function renderHeader(ui: React.ReactNode) {
   return render(
@@ -56,12 +56,74 @@ describe('Table (#857)', () => {
     expect(label.className).toContain('sr-only')
   })
 
-  it('hideBelowMd applies the responsive-collapse pattern', () => {
-    renderHeader(<Table.HeaderCell hideBelowMd>Initiator</Table.HeaderCell>)
-    expect(screen.getByRole('columnheader').className).toContain('hidden md:table-cell')
+  it('revealAt keys the collapse on the CONTAINER, not the viewport (#1999)', () => {
+    renderHeader(<Table.HeaderCell revealAt="md">Initiator</Table.HeaderCell>)
+    const th = screen.getByRole('columnheader')
+    expect(th.className).toContain('[@container_v2table_(min-width:718px)]:table-cell')
+    // The point of the change: no viewport variant decides a column any more.
+    expect(th.className).not.toContain('md:table-cell')
   })
 
-  it('Head collapses below md by default and stays visible with collapseBelowMd={false}', () => {
+  it('the xl stage is the wider container threshold', () => {
+    renderHeader(<Table.SortableHeaderCell label="Date" direction={null} onSort={() => undefined} revealAt="xl" />)
+    expect(screen.getByRole('columnheader').className).toContain(
+      '[@container_v2table_(min-width:974px)]:table-cell',
+    )
+  })
+
+  it('the <td> helper emits exactly the class the <th> does — header and body cannot drift (#1774/#1999)', () => {
+    renderHeader(<Table.HeaderCell revealAt="md">Initiator</Table.HeaderCell>)
+    const th = screen.getByRole('columnheader')
+    for (const cls of tableColumnClass('md').split(' ')) {
+      expect(th.className.split(/\s+/)).toContain(cls)
+    }
+    // and the relocated-content helper is the same stage, negated
+    expect(tableHideFromClass('md')).toContain('[@container_v2table_(min-width:718px)]:hidden')
+    expect(tableHideFromClass('xl')).toContain('[@container_v2table_(min-width:974px)]:hidden')
+  })
+
+  it('every stage carries its @supports-not viewport fallback, at the matching breakpoint', () => {
+    // Without this pair, a browser that cannot parse `@container` keeps the
+    // base `hidden` and NEVER reveals the column — a silent, total failure
+    // rather than a graceful one. The breakpoint has to MATCH the stage: an
+    // `md:` fallback under the `xl` stage would hand the wide columns back
+    // 512px early on exactly the browsers that get no second chance.
+    expect(tableColumnClass('md')).toContain('md:[@supports_not_(container-type:inline-size)]:table-cell')
+    expect(tableColumnClass('xl')).toContain('xl:[@supports_not_(container-type:inline-size)]:table-cell')
+    expect(tableColumnClass('xl')).not.toContain('md:[@supports')
+    expect(tableHideFromClass('md')).toContain('md:[@supports_not_(container-type:inline-size)]:hidden')
+    expect(tableHideFromClass('xl')).toContain('xl:[@supports_not_(container-type:inline-size)]:hidden')
+  })
+
+  it('Table establishes the named inline-size container, and `scrollable` suppresses it', () => {
+    const { container, rerender } = render(
+      <Table>
+        <Table.Body>
+          <tr>
+            <td>row</td>
+          </tr>
+        </Table.Body>
+      </Table>,
+    )
+    const wrapper = container.querySelector('div')
+    expect(wrapper).not.toBeNull()
+    expect(wrapper!.className).toContain('[container-type:inline-size]')
+    expect(wrapper!.className).toContain('[container-name:v2table]')
+
+    rerender(
+      <Table scrollable>
+        <Table.Body>
+          <tr>
+            <td>row</td>
+          </tr>
+        </Table.Body>
+      </Table>,
+    )
+    expect(container.querySelector('div')).toBeNull()
+    expect(container.querySelector('table')).not.toBeNull()
+  })
+
+  it('Head collapses on the md container stage by default and stays visible with collapseWhenNarrow={false}', () => {
     const { container, rerender } = render(
       <Table>
         <Table.Head>
@@ -71,11 +133,13 @@ describe('Table (#857)', () => {
         </Table.Head>
       </Table>,
     )
-    expect(container.querySelector('thead')!.className).toContain('hidden md:table-header-group')
+    expect(container.querySelector('thead')!.className).toContain(
+      'hidden [@container_v2table_(min-width:718px)]:table-header-group',
+    )
 
     rerender(
       <Table>
-        <Table.Head collapseBelowMd={false}>
+        <Table.Head collapseWhenNarrow={false}>
           <tr>
             <Table.HeaderCell>Token</Table.HeaderCell>
           </tr>

@@ -33,10 +33,16 @@
  * ## What this guard cannot see
  *
  * A `presentational` reaching a call site through a spread (`<WalletPopover
- * {...props} />`) is invisible to a text scan, as is a rename at an intermediate
- * wrapper. Neither is a live shape today — `WalletButton` builds every popover's
- * props inline — and both would be a deliberate act rather than the careless one
- * this guard exists to refuse.
+ * {...props} />`) is invisible to a text scan, as is a rename — at an
+ * intermediate wrapper, or at the import itself (`import { WalletPopover as X }`
+ * then `<X presentational />`, which the literal `<WalletPopover` opener below
+ * cannot see). None is a live shape today — every one of the five call sites in
+ * the repo names the component and passes its props inline — and each would be a
+ * deliberate act rather than the careless one this guard exists to refuse.
+ *
+ * It also matches `presentational` inside comments and string literals. That
+ * errs toward extra red rather than a silent pass, which is the safe direction
+ * for a guard, so it is left alone.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -54,6 +60,14 @@ const WALLET_BUTTON = path.join(FRONTEND_SRC, 'components/WalletButton.tsx')
  * gallery of illustrations; nothing there is a live overlay.
  */
 const SHOWCASE_DIR = 'app/(authenticated)/design-system'
+/**
+ * Compared WITH the separator, not as a bare string prefix (review finding on
+ * #1975). `startsWith(SHOWCASE_DIR)` also accepts a future sibling that merely
+ * shares the name — `design-system-legacy/`, `design-systematic/` — which would
+ * be silently exempt with nothing going red. No such directory exists today;
+ * the point is that the exemption stays exactly as wide as it claims to be.
+ */
+const SHOWCASE_PREFIX = `${SHOWCASE_DIR}/`
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -144,7 +158,7 @@ describe('WalletPopover presentational guard (#1975)', () => {
       for (const tag of walletPopoverOpeningTags(source)) {
         if (!PRESENTATIONAL_ATTR.test(tag.attrs)) continue
         const line = source.slice(0, tag.index).split('\n').length
-        if (rel.startsWith(SHOWCASE_DIR)) showcaseUsages++
+        if (rel.startsWith(SHOWCASE_PREFIX)) showcaseUsages++
         else offenders.push(`${rel}:${line}`)
       }
     }

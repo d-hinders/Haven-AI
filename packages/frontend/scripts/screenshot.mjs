@@ -107,7 +107,7 @@ import { chromium } from '@playwright/test'
 import { decodeAbiParameters, encodeAbiParameters, parseAbiParameters, toFunctionSelector } from 'viem'
 // viem's OWN chain registry — the same object the app's client resolves
 // Multicall3 from, so the fixture cannot disagree with it about the address.
-import { base as viemBase } from 'viem/chains'
+import { base as viemBase, baseSepolia as viemBaseSepolia } from 'viem/chains'
 // The chain FACTS (AllowanceModule address, token addresses) come from the
 // shared registry the app itself reads, never restated here — a fixture that
 // hard-codes a contract address is a fixture that silently stops matching the
@@ -689,7 +689,7 @@ const CHAIN_READ_GAPS = []
  * adds the sixteenth; routes change rarely, and the property being asserted is
  * a property of the screen, not of the story told about it.
  */
-const CHAIN_FED_ROUTES = [
+export const CHAIN_FED_ROUTES = [
   {
     pattern: /^\/agents(\/|$)/,
     reads: 'useOnChainAllowances — via useAgentPanelState (AgentPanel, unmanaged-delegate ' +
@@ -702,23 +702,23 @@ const CHAIN_FED_ROUTES = [
 ]
 
 /** Chain-fed captures where the app issued no chain read at all. Fatal. */
-const CHAIN_SILENT_CAPTURES = []
+export const CHAIN_SILENT_CAPTURES = []
 
 /** Live counters for the context currently being captured. */
 let chainWatch = null
 
-function beginChainWatch(label, viewport) {
+export function beginChainWatch(label, viewport) {
   chainWatch = { label, viewport, observed: 0, methods: new Set(), visited: new Map() }
 }
 
-function noteChainReadObserved(method) {
+export function noteChainReadObserved(method) {
   if (!chainWatch) return
   chainWatch.observed += 1
   chainWatch.methods.add(method)
 }
 
 /** Record a main-frame navigation, so the watch knows which screens were shown. */
-function noteChainWatchNavigation(url) {
+export function noteChainWatchNavigation(url) {
   if (!chainWatch) return
   let pathname
   try {
@@ -731,7 +731,7 @@ function noteChainWatchNavigation(url) {
   }
 }
 
-function endChainWatch() {
+export function endChainWatch() {
   const watch = chainWatch
   chainWatch = null
   if (!watch) return
@@ -1126,9 +1126,20 @@ function setBackupRecoveryStage(next) {
 const MULTICALL3_AGGREGATE3 = toFunctionSelector(
   'function aggregate3((address target, bool allowFailure, bytes callData)[]) returns ((bool success, bytes returnData)[])',
 )
-// Canonical across every chain Haven serves; asserted rather than assumed
-// because a wrong `to` here would be answered as if it were right.
+// Canonical across every chain Haven serves — ASSERTED rather than assumed,
+// because a wrong `to` here would be answered as if it were right, and the
+// factory below serves two chains from this one constant.
 const MULTICALL3_ADDRESS = viemBase.contracts.multicall3.address
+if (
+  viemBaseSepolia.contracts.multicall3.address.toLowerCase() !==
+  MULTICALL3_ADDRESS.toLowerCase()
+) {
+  throw new Error(
+    'screenshot fixture: Multicall3 is not at the same address on Base and Base Sepolia ' +
+      `(${MULTICALL3_ADDRESS} vs ${viemBaseSepolia.contracts.multicall3.address}) — ` +
+      'makeAllowanceChainFixture assumes one address for every chain it serves',
+  )
+}
 
 /**
  * A deterministic block, parameterised by timestamp.
@@ -1172,7 +1183,7 @@ const FIXTURE_BLOCK_TIMESTAMP = Math.floor(Date.parse('2026-07-10T09:00:00.000Z'
  * atomic and `resetTimeMin` must match a RESET_PERIODS entry so the row reads
  * "Daily" rather than a raw "1440m" fallthrough.
  */
-function makeAllowanceChainFixture({ chainId, safeAddress, delegates, rows }) {
+export function makeAllowanceChainFixture({ chainId, safeAddress, delegates, rows }) {
   const allowanceModule = getChainData(chainId).contracts.allowanceModule
 
   /** The reads `useOnChainAllowances` makes, by signature rather than hand-cut hex. */
@@ -1324,7 +1335,7 @@ function makeAllowanceChainFixture({ chainId, safeAddress, delegates, rows }) {
 // disagree would photograph a contradiction the product cannot actually produce.
 // The delegate set is exactly the managed one for the same reason — seeding a
 // stranger here would render an "unmanaged delegate" warning in every capture.
-const SHARED_CHAIN_ROWS = [
+export const SHARED_CHAIN_ROWS = [
   {
     token: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,
     amount: 500_000000n,
@@ -1332,7 +1343,7 @@ const SHARED_CHAIN_ROWS = [
     resetTimeMin: 1440,
   },
 ]
-const answerSharedChainRead = makeAllowanceChainFixture({
+export const answerSharedChainRead = makeAllowanceChainFixture({
   chainId: FIXTURE_SAFE.chain_id,
   safeAddress: FIXTURE_SAFE.safe_address,
   delegates: [ADDR.delegate],

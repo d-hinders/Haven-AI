@@ -83,12 +83,70 @@ async function reachability(page: Page) {
         return !!hit && (hit === submit || submit.contains(hit))
       })(),
       formAttribute: submit.getAttribute('form'),
-      formOwnerMatches: submit.form !== null && submit.form === document.getElementById(
+      formOwnerMatches: submit.form === document.getElementById(
         submit.getAttribute('form') ?? '',
       ),
+      // Whether the button could actually be pressed in this state, which is
+      // NOT the same question as whether it is on screen. See the two states
+      // below.
+      enabled: !submit.disabled,
     }
   })
 }
+
+/**
+ * The two body states that make this dialog overflow, and they are NOT equally
+ * strong evidence — a distinction review drew and it is worth keeping.
+ *
+ * With the duplicate-address hint showing, the submit button is `disabled`
+ * (`disabled={saving || !!duplicateContact}`), so being off-screen cost the
+ * user the ability to SEE the control they had to correct, not the ability to
+ * press it. Real, but the weaker case.
+ *
+ * With the save-error box showing, the button is ENABLED and the user's next
+ * action is to press it again — so being off-screen cost them the action
+ * itself. That is the case this dialog most needed fixing for, and it also
+ * overflows by more (98px / 89px against 37px / 27px).
+ *
+ * Both are asserted below, at both viewports.
+ */
+const OVERFLOW_STATES = [
+  {
+    name: 'duplicate-address hint',
+    expectEnabled: false,
+    async force(page: Page) {
+      await page.getByLabel('Contact name').fill('Duplicate vendor')
+      await page.locator('#contact-address').fill(testRecipientAddress)
+      await expect(
+        page.getByRole('dialog').getByText('This address is already saved as'),
+      ).toBeVisible()
+    },
+  },
+  {
+    name: 'save-error box',
+    expectEnabled: true,
+    async force(page: Page) {
+      await page.route('**/api/contacts', async (route) => {
+        if (route.request().method() === 'POST') {
+          await route.fulfill({
+            status: 500,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              error:
+                'We could not save this contact because the address book service is temporarily unavailable. Try again in a moment.',
+            }),
+          })
+          return
+        }
+        await route.fallback()
+      })
+      await page.getByLabel('Contact name').fill('New vendor')
+      await page.locator('#contact-address').fill('0x5555555555555555555555555555555555555555')
+      await page.getByRole('dialog').getByRole('button', { name: 'Add contact', exact: true }).click()
+      await expect(page.getByRole('dialog').getByText('could not save')).toBeVisible()
+    },
+  },
+]
 
 test.describe('contacts dialog — action row reachability (#1946)', () => {
   test.beforeEach(async ({ page }) => {
@@ -97,19 +155,13 @@ test.describe('contacts dialog — action row reachability (#1946)', () => {
   })
 
   for (const vp of SHORT_VIEWPORTS) {
-    test(`the Add contact button is reachable at ${vp.name}, with the body overflowing`, async ({
+    for (const state of OVERFLOW_STATES) {
+    test(`the Add contact button is reachable at ${vp.name}, ${state.name} showing`, async ({
       page,
     }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height })
       await openAddContact(page)
-
-      // Force the duplicate-address hint — the state that made this dialog
-      // overflow in the first place.
-      await page.getByLabel('Contact name').fill('Duplicate vendor')
-      await page.locator('#contact-address').fill(testRecipientAddress)
-      await expect(
-        page.getByRole('dialog').getByText('This address is already saved as'),
-      ).toBeVisible()
+      await state.force(page)
 
       const m = await reachability(page)
       expect(m.found, 'the dialog must expose a scroll body and a submit button').toBe(true)
@@ -136,7 +188,18 @@ test.describe('contacts dialog — action row reachability (#1946)', () => {
         'no part of the submit button may sit below the viewport',
       ).toBe(0)
       expect(m.hitTestsToSelf, 'the submit button must be hit-testable').toBe(true)
+
+      // Pins WHICH of the two states this case is, so the strong one cannot
+      // silently decay into a second copy of the weak one. In the save-error
+      // state the button is pressable and being off-screen cost the user the
+      // action itself; in the duplicate-hint state it is disabled by policy
+      // and only visibility was at stake.
+      expect(
+        m.enabled,
+        `${state.name}: submit button enabled-ness must match the state under test`,
+      ).toBe(state.expectEnabled)
     })
+    }
   }
 
   test('the footer submit button still owns the form in the body', async ({ page }) => {

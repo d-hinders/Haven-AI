@@ -739,12 +739,20 @@ changing any of them**, because a fix for an overflow that does not occur is a
 change with no defect behind it. Measured in Chromium, action-row pixels below
 the fold at rest:
 
-| dialog | 1280x800 | 390x844 | 844x390 | 640x400 |
-|---|---|---|---|---|
-| contacts, duplicate-address hint showing | 0 | 0 | **37** | **27** |
-| contacts, save-error box showing | 0 | 0 | **98** | **89** |
-| `DelegationSendModal` | 0 | 0 | 0 | 0 |
-| `ComingSoonModal` | 0 | 0 | 0 | 0 |
+| dialog | 1280x800 | 390x844 | 844x390 | 640x400 | button pressable? |
+|---|---|---|---|---|---|
+| contacts, duplicate-address hint showing | 0 | 0 | **37** | **27** | no — `disabled` by policy |
+| contacts, save-error box showing | 0 | 0 | **98** | **89** | **yes** |
+| `DelegationSendModal` | 0 | 0 | 0 | 0 | — |
+| `ComingSoonModal` | 0 | 0 | 0 | 0 | — |
+
+**The two contacts rows are not equally strong evidence, and the difference is
+the point.** With the duplicate-address hint showing, the submit button is
+`disabled`, so being off-screen cost the user sight of the control they had to
+correct — real, but the weaker case. With the save-error box showing the button
+is ENABLED and pressing it again is the user's next action, so being off-screen
+cost them the action itself. That is the case this dialog most needed fixing
+for, and it also overflows by more. Both states are asserted at both viewports.
 
 Only `contacts/page.tsx` was moved. The other two need a viewport under ~340px
 tall before their action row goes below the fold, which this app does not

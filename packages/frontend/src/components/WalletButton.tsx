@@ -183,15 +183,32 @@ interface PopoverProps {
    * all when `hybridPasskeyOnDevice` already matched, pinned by
    * `signer.test.ts` > "does NOT resolve the hybrid signer when the device
    * marker is missing". So the marker-less user reaches no Hybrid branch here
-   * — they get no passkey signer in the dashboard at all, which is a bigger
-   * gap than the one #1952 describes and is filed as #1969 rather than changed
-   * from this component. This rendering becomes user-visible the moment #1969
+   * — the dashboard gives them no passkey-based signing path at all. That is a
+   * bigger gap than the one #1952 describes, and it is filed as #1969 rather
+   * than changed from this component. This rendering becomes user-visible the moment #1969
    * closes, with NO guaranteed review checkpoint at that time — which is the
    * reason it is built correct now rather than later. Do not read it as
    * shipped, user-visible behaviour.
    */
   signingWith?: { label: string; keyId: string; onThisDevice: boolean }
   unavailablePasskey?: boolean
+  /**
+   * Render as a static ILLUSTRATION rather than a live overlay (#1952).
+   *
+   * `/design-system` shows this popover's two signing-credential states side by
+   * side, permanently open. A showcase copy is not a dialog: exposing three
+   * `role="dialog"` nodes at once is wrong for a screen reader, and it also
+   * broke `e2e/modal-scroll-cue.spec.ts`, which reaches for
+   * `document.querySelector('[role="dialog"]')` and would otherwise find a demo
+   * instead of the Modal under test — a raw DOM query no `aria-hidden` or
+   * `inert` wrapper can redirect. Measured, not predicted: without this the
+   * suite reports "strict mode violation: getByRole('dialog') resolved to 3
+   * elements".
+   *
+   * Product call sites never pass it, so the real popover keeps full dialog
+   * semantics.
+   */
+  presentational?: boolean
   open: boolean
   onClose: () => void
   /**
@@ -223,6 +240,7 @@ export function WalletPopover({
   secondary,
   signingWith,
   unavailablePasskey = false,
+  presentational = false,
   open,
   onClose,
   onSwitchWallet,
@@ -314,7 +332,7 @@ export function WalletPopover({
   return (
     <div
       ref={popoverRef}
-      role="dialog"
+      role={presentational ? 'group' : 'dialog'}
       aria-label="Wallet menu"
       className="absolute right-0 top-full mt-2 w-72 z-50 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-xl shadow-modal overflow-hidden"
     >

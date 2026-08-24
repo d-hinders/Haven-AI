@@ -1813,8 +1813,20 @@ export default function DesignSystemPage() {
           is exactly what is needed, so the two states go under the blocking
           pixel gate here rather than being asserted and left unseen.
         */}
-        <div className="flex flex-wrap gap-6">
-          <div className="relative h-[260px] w-72">
+        <div className="grid gap-5 lg:grid-cols-2">
+          {/*
+            `inert` + `aria-hidden`: these are static ILLUSTRATIONS of a
+            popover, not live overlays, and `WalletPopover`'s root carries
+            `role="dialog"`. Without this the page exposes three dialogs at
+            once — which is wrong for a screen reader and also breaks
+            `e2e/modal-scroll-cue.spec.ts`, whose unscoped
+            `getByRole('dialog')` then hits a strict-mode violation
+            ("resolved to 3 elements", measured, not predicted). `inert`
+            also keeps the demo's Copy/Switch buttons out of the tab order,
+            which `aria-hidden` alone would not do. Same deliberate
+            treatment design-system.md § 6 records for the modal demo.
+          */}
+          <div inert aria-hidden="true" className="relative h-[260px] w-72">
             <WalletPopover
               primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
               signingWith={{
@@ -1822,6 +1834,7 @@ export default function DesignSystemPage() {
                 keyId: DS_PASSKEY_KEY_ID,
                 onThisDevice: true,
               }}
+              presentational
               open
               onClose={NOOP}
               onSwitchWallet={NOOP}
@@ -1831,7 +1844,19 @@ export default function DesignSystemPage() {
               anchorRef={{ current: null }}
             />
           </div>
-          <div className="relative h-[260px] w-72">
+          {/*
+            `inert` + `aria-hidden`: these are static ILLUSTRATIONS of a
+            popover, not live overlays, and `WalletPopover`'s root carries
+            `role="dialog"`. Without this the page exposes three dialogs at
+            once — which is wrong for a screen reader and also breaks
+            `e2e/modal-scroll-cue.spec.ts`, whose unscoped
+            `getByRole('dialog')` then hits a strict-mode violation
+            ("resolved to 3 elements", measured, not predicted). `inert`
+            also keeps the demo's Copy/Switch buttons out of the tab order,
+            which `aria-hidden` alone would not do. Same deliberate
+            treatment design-system.md § 6 records for the modal demo.
+          */}
+          <div inert aria-hidden="true" className="relative h-[260px] w-72">
             <WalletPopover
               primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
               signingWith={{
@@ -1839,6 +1864,7 @@ export default function DesignSystemPage() {
                 keyId: DS_PASSKEY_KEY_ID,
                 onThisDevice: false,
               }}
+              presentational
               open
               onClose={NOOP}
               onSwitchWallet={NOOP}

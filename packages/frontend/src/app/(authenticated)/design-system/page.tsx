@@ -1884,15 +1884,17 @@ export default function DesignSystemPage() {
         <div className="grid gap-5 lg:grid-cols-2">
           {/*
             `inert` + `aria-hidden`: these are static ILLUSTRATIONS of a
-            popover, not live overlays, and `WalletPopover`'s root carries
-            `role="dialog"`. Without this the page exposes three dialogs at
-            once — which is wrong for a screen reader and also breaks
-            `e2e/modal-scroll-cue.spec.ts`, whose unscoped
-            `getByRole('dialog')` then hits a strict-mode violation
-            ("resolved to 3 elements", measured, not predicted). `inert`
-            also keeps the demo's Copy/Switch buttons out of the tab order,
-            which `aria-hidden` alone would not do. Same deliberate
-            treatment design-system.md § 6 records for the modal demo.
+            popover, not live overlays. THIS wrapper is what keeps them out
+            of the accessibility tree and out of the tab order. The
+            `presentational` prop below is a SEPARATE mechanism doing a
+            SEPARATE job — keep both; neither is redundant because the other
+            exists.
+
+            Which does what, and the measurements behind that claim, are
+            recorded ONCE — on the `presentational` prop's doc-comment in
+            `components/WalletButton.tsx` (#1982). Read it there. It is not
+            restated here on purpose: four synchronised copies of the same
+            paragraph is the rot surface #1982 existed to remove.
           */}
           <div className="min-h-[290px]">
             <div inert aria-hidden="true" className="relative h-0 w-72">
@@ -1916,15 +1918,17 @@ export default function DesignSystemPage() {
           </div>
           {/*
             `inert` + `aria-hidden`: these are static ILLUSTRATIONS of a
-            popover, not live overlays, and `WalletPopover`'s root carries
-            `role="dialog"`. Without this the page exposes three dialogs at
-            once — which is wrong for a screen reader and also breaks
-            `e2e/modal-scroll-cue.spec.ts`, whose unscoped
-            `getByRole('dialog')` then hits a strict-mode violation
-            ("resolved to 3 elements", measured, not predicted). `inert`
-            also keeps the demo's Copy/Switch buttons out of the tab order,
-            which `aria-hidden` alone would not do. Same deliberate
-            treatment design-system.md § 6 records for the modal demo.
+            popover, not live overlays. THIS wrapper is what keeps them out
+            of the accessibility tree and out of the tab order. The
+            `presentational` prop below is a SEPARATE mechanism doing a
+            SEPARATE job — keep both; neither is redundant because the other
+            exists.
+
+            Which does what, and the measurements behind that claim, are
+            recorded ONCE — on the `presentational` prop's doc-comment in
+            `components/WalletButton.tsx` (#1982). Read it there. It is not
+            restated here on purpose: four synchronised copies of the same
+            paragraph is the rot surface #1982 existed to remove.
           */}
           <div className="min-h-[290px]">
             <div inert aria-hidden="true" className="relative h-0 w-72">

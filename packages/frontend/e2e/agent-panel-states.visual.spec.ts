@@ -113,7 +113,10 @@ import {
 // hand-written encoder for the same four reads would drift SILENTLY, because a
 // wrong encoding is swallowed by `useOnChainAllowances` into an empty map and
 // renders as a plausible empty card.
-import { makeAllowanceChainFixture } from '../scripts/allowance-chain-fixture.mjs'
+import {
+  FIXTURE_BLOCK_TIMESTAMP,
+  makeAllowanceChainFixture,
+} from '../scripts/allowance-chain-fixture.mjs'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, shared with
 // the screenshot script and the other two pixel gates so all of them render at
@@ -262,12 +265,45 @@ if (!UNMANAGED_TOKEN?.address) {
 }
 const UNMANAGED_TOKEN_ADDRESS = UNMANAGED_TOKEN.address
 
+const UNMANAGED_RESET_MIN = 1440
+
+/**
+ * Anchored INSIDE the current period, and that is the whole reason this
+ * constant exists (#1930, design review).
+ *
+ * The fixture's `lastResetMin` defaults to 0, which is unboundedly far in the
+ * past, so `computeEffectiveAllowance` reports `isResetPending` and zeroes
+ * effective spend (`lib/allowance-math.ts:60-71`). The card then renders
+ * "200.00 / 200.00 remaining per day" over an `AllowanceBar` whose fill segment
+ * is ZERO WIDTH — a capture that shows the bar's track and never its fill.
+ *
+ * That is exactly the shape this spec family keeps having to catch: a
+ * plausible, well-formed PNG of the wrong thing. The fill is the one part of
+ * this row whose colour has to hold up against the card's `--v2-warning-soft`
+ * ground, and a bar that never paints it cannot show a regression in it.
+ *
+ * Six hours back on a daily period puts the row at 45/200 spent — a partial
+ * fill — and is still deterministic, because it is derived from the fixture's
+ * own fixed block timestamp rather than from the wall clock.
+ *
+ * ONE line of the resulting capture is not chain-derived, and it is called out
+ * rather than left to be rediscovered as a mystery diff. `AllowanceBar` decides
+ * the reset from `chainTimeSec` but formats the countdown beneath it with
+ * `timeUntil`, which is `Date.now()`-based (`AllowanceBar.tsx:99-101`,
+ * `lib/format.ts:58-71`) — filed as #1995. Because `FIXTURE_BLOCK_TIMESTAMP` is
+ * permanently in the past, that string is pinned at its terminal value and the
+ * baseline is stable; it would only move if someone advanced the fixture block
+ * to within a period of the present, which is worth knowing before doing it.
+ */
+const UNMANAGED_LAST_RESET_MIN = Math.floor(FIXTURE_BLOCK_TIMESTAMP / 60) - 360
+
 const UNMANAGED_ROWS = [
   {
     token: UNMANAGED_TOKEN_ADDRESS,
     amount: 200_000000n,
     spent: 45_000000n,
-    resetTimeMin: 1440,
+    resetTimeMin: UNMANAGED_RESET_MIN,
+    lastResetMin: UNMANAGED_LAST_RESET_MIN,
   },
 ] as const
 
@@ -755,9 +791,24 @@ test.describe('agent panel empty states and card banners', () => {
    *   - `/auth/me` returns every `user_safes` row for the user, unfiltered by
    *     chain or anything else (`LIST_SESSION_SAFES_FOR_USER_SQL`).
    *
-   * So `safes: [] && safe_address != null` is not a shape the product can
-   * serve, and the branch is unreachable for a PRODUCT reason rather than a
-   * harness one. Seeding it would photograph a screen no user can be on.
+   * ONE residual path survives that reading, found by independent review and
+   * recorded here rather than rounded off. `PUT /user/safe`
+   * (`routes/user.ts:152-174`) writes the same two sides with **two
+   * un-transacted `pool.query` calls in sequence** — the legacy mirror first,
+   * the `user_safes` row second. A crash between them commits exactly the
+   * shape the paragraph above says cannot exist. It has no frontend caller
+   * (the dashboard uses `POST /user/safes`), so no user reaches it through the
+   * product, and the window is a torn write rather than a state the backend
+   * intends — but "the backend cannot emit this" is stronger than the evidence
+   * supports, and the honest claim is that it cannot emit it *by design*.
+   *
+   * Filed as #1994 rather than fixed here: wrapping a route's writes in a
+   * transaction is a behaviour change on the account-linking path, which is
+   * not a test PR's to make.
+   *
+   * The conclusion is unchanged either way. A capture of this branch would be
+   * a photograph of a torn write, not of a screen the product puts anyone on,
+   * and #1924's rule is about what the PRODUCT can reach.
    *
    * ── 2. The finalizing / finalize-timeout EmptyStates — behind a signature ──
    *
@@ -964,7 +1015,18 @@ test.describe('agent panel empty states and card banners', () => {
    * and the two captures would be silent near-duplicates.
    */
   async function expectUnmanagedCard(card: Locator, label: string) {
-    await expect(card.getByRole('heading', { name: 'Unmanaged Delegate' })).toHaveCount(1)
+    // The card's heading SET, not "the heading I located it by is present" —
+    // the latter cannot fail, because `card` is built by walking up from that
+    // exact heading and the caller has already asserted it resolves
+    // (independent review, #1930). Asserting the set has real discriminating
+    // power: a second heading appearing inside this card fails here.
+    const headings = await card
+      .getByRole('heading')
+      .evaluateAll((els) => els.map((el) => el.textContent?.trim() ?? ''))
+    expect(
+      headings,
+      `${label}: this is not the heading set the card is supposed to render`,
+    ).toEqual(['Unmanaged Delegate'])
     await expect(
       card.getByText('network only', { exact: true }),
       `${label}: this is the pendingHavenSetup branch, not the unmanaged one`,
@@ -996,6 +1058,32 @@ test.describe('agent panel empty states and card banners', () => {
       `${label}: the budget block rendered but carries no token symbol — the ` +
         `rows did not survive decoding.`,
     ).toContain('USDC')
+
+    // The bar's FILL, not just its track. `AllowanceBar` paints the spent
+    // portion as a nested element inside the track, and a reset-pending row
+    // paints it at zero width — which photographs as a perfectly tidy empty
+    // bar. Asserting a fill wider than 0 and narrower than the track is what
+    // makes this capture evidence about the fill colour rather than about the
+    // container it sits in (#1930, design review).
+    const fill = await budget.evaluate((el) => {
+      const bars = Array.from(el.querySelectorAll('div')).filter((d) => {
+        const parent = d.parentElement
+        if (!parent) return false
+        return (
+          d.getBoundingClientRect().width > 0 &&
+          d.getBoundingClientRect().width < parent.getBoundingClientRect().width &&
+          getComputedStyle(d).backgroundColor !== getComputedStyle(parent).backgroundColor
+        )
+      })
+      return bars.length
+    })
+    expect(
+      fill,
+      `${label}: no partially-filled bar segment inside the budget block. A ` +
+        `reset-pending row renders the track with a ZERO-WIDTH fill, so this ` +
+        `capture would show the bar's container and never the fill colour it ` +
+        `exists to prove. Check UNMANAGED_LAST_RESET_MIN.`,
+    ).toBeGreaterThan(0)
   }
 
   test('agent panel unmanaged delegate — set up outside Haven', async ({ page }) => {

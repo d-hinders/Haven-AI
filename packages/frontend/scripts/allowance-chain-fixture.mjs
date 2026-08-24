@@ -93,14 +93,15 @@ function fixtureBlock(timestampSec) {
   }
 }
 
-const FIXTURE_BLOCK_TIMESTAMP = Math.floor(Date.parse('2026-07-10T09:00:00.000Z') / 1000)
+export const FIXTURE_BLOCK_TIMESTAMP = Math.floor(Date.parse('2026-07-10T09:00:00.000Z') / 1000)
 
 /**
  * Build a `scenario.chain`-shaped answer function for one Safe's AllowanceModule.
  *
  * `rows` are the budgets the module reports for `delegates[0]`; amounts are
  * atomic and `resetTimeMin` must match a RESET_PERIODS entry so the row reads
- * "Daily" rather than a raw "1440m" fallthrough.
+ * "Daily" rather than a raw "1440m" fallthrough. `lastResetMin` is optional and
+ * defaults to 0 — see the note at `getTokenAllowance` for what that decides.
  */
 export function makeAllowanceChainFixture({ chainId, safeAddress, delegates, rows }) {
   const allowanceModule = getChainData(chainId).contracts.allowanceModule
@@ -135,8 +136,19 @@ export function makeAllowanceChainFixture({ chainId, safeAddress, delegates, row
         const token = `0x${data.slice(10).slice(64 * 2 + 24, 64 * 3)}`
         const row = rows.find((r) => r.token.toLowerCase() === token.toLowerCase())
         if (!row) throw new Error(`getTokenAllowance for an unseeded token ${token}`)
+        // Slot 3 is `lastResetMin`, and it decides whether the UI shows a
+        // SPENT allowance or a reset-pending one — `computeEffectiveAllowance`
+        // zeroes effective spend once `currentMin - lastResetMin >=
+        // resetTimeMin` (`lib/allowance-math.ts:60-71`). It defaults to 0,
+        // which is unboundedly far in the past and therefore ALWAYS
+        // reset-pending: every existing consumer renders a full, unfilled bar,
+        // and that is the behaviour they were captured against, so the default
+        // is left alone. A row that wants to photograph a PARTIALLY SPENT bar
+        // — the fill colour against its container, which a full bar cannot
+        // show — sets `lastResetMin` inside the current period instead
+        // (#1930, design review).
         return encodeAbiParameters(parseAbiParameters('uint256[5]'), [
-          [row.amount, row.spent, BigInt(row.resetTimeMin), 0n, 1n],
+          [row.amount, row.spent, BigInt(row.resetTimeMin), BigInt(row.lastResetMin ?? 0), 1n],
         ])
       },
     },

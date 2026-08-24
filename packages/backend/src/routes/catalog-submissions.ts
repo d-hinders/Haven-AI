@@ -89,8 +89,13 @@ import { config } from '../config.js'
 import {
   countPendingCatalogSubmissions,
   findPendingCatalogSubmissionByHost,
+  getCatalogSubmission,
   insertCatalogSubmission,
 } from '../infra/repositories/catalog-submissions.js'
+import {
+  ownershipInstructions,
+  type OwnershipClaim,
+} from '../modules/catalog/ownership.js'
 import { catalogSubmitRateLimit } from '../middleware/rate-limit.js'
 
 /** Pending-queue ceiling — a flood cannot grow the pending set past this. */
@@ -105,6 +110,31 @@ interface SubmitBody {
   resource_url?: unknown
   /** Honeypot. Presence + non-empty → bot, dropped with a fake success. */
   website?: unknown
+}
+
+/**
+ * Ownership-proof instructions for a row, or undefined when the deployment
+ * has no `CATALOG_OWNERSHIP_SECRET` (the proof payload cannot be computed and
+ * verification is impossible either way; the UI then shows status only).
+ *
+ * Safe to return to any caller who holds the submission id: the payload is
+ * bound to the row's domain via HMAC, so publishing it is the intended action
+ * (ownership.ts). The `verify_token` itself is NEVER shipped here.
+ */
+function instructionsFor(
+  row: { id: string; hostname: string; verify_token: string; created_at: string },
+  secret: string,
+):
+  | ReturnType<typeof ownershipInstructions>
+  | undefined {
+  if (secret === '') return undefined
+  const claim: OwnershipClaim = {
+    submissionId: row.id,
+    hostname: row.hostname,
+    verifyToken: row.verify_token,
+    tokenIssuedAt: new Date(row.created_at),
+  }
+  return ownershipInstructions(claim, secret)
 }
 
 /** 127/8 loopback, 0/8 unspecified, 169.254/16 link-local (metadata service). */
@@ -242,12 +272,16 @@ function normalizeSubmitTarget(
 
 export default async function catalogSubmissionRoutes(
   app: FastifyInstance,
-  opts: { trustProxyHops?: number } = {},
+  opts: { trustProxyHops?: number; ownershipSecret?: string } = {},
 ): Promise<void> {
   // #1711 (mirroring authRoutes #1670): the per-IP tier only arms when the
   // deployment trusts its proxy. Injectable so tests can exercise both states;
   // production callers never pass it and get the environment's value.
   const trustProxyHops = opts.trustProxyHops ?? config.trustProxyHops
+  // #1715: the ownership-proof instructions factory needs the HMAC secret.
+  // Injectable so tests can exercise the instructions path without mutating
+  // the process-wide config.
+  const ownershipSecret = opts.ownershipSecret ?? config.catalogOwnershipSecret
 
   app.post<{ Body: SubmitBody | undefined }>(
     '/submit',
@@ -303,7 +337,10 @@ export default async function catalogSubmissionRoutes(
         queueCap: QUEUE_CAP,
       })
       // The ONLY response that carries a verify_token: this caller just minted
-      // it by creating the row.
+      // it by creating the row. Ownership-proof instructions come from
+      // GET /catalog/submit/:id (they are derivable from the row and must be
+      // computable even after a page reload, so they do not belong in the
+      // one-shot create response).
       if (created) {
         return reply.code(201).send(created)
       }
@@ -318,4 +355,33 @@ export default async function catalogSubmissionRoutes(
       return reply.code(429).send({ error: 'The submission queue is full, try again later' })
     },
   )
+
+  // GET /catalog/submit/:id — public submission status (#1715).
+  //
+  // Coarse current state plus, while the proof is still usable, the
+  // ownership instructions. Deliberately minimal:
+  //   - the `verify_token` NEVER crosses this wire (it is a credential minted
+  //     once at creation — see `acknowledgement`);
+  //   - failure reasons are coarse (`status: 'failed'`) with no `detail`,
+  //     so the endpoint cannot become the blind internal-DNS oracle that
+  //     #1711's header warns about — the granular guard verdicts stay in logs.
+  app.get<{ Params: { id: string } }>('/submit/:id', async (request, reply) => {
+    const row = await getCatalogSubmission(request.params.id)
+    if (!row) {
+      return reply.code(404).send({ error: 'Submission not found' })
+    }
+    const canStillProve = row.status === 'submitted' || row.status === 'ownership_verified'
+    const instructions = canStillProve ? instructionsFor(row, ownershipSecret) : undefined
+    return {
+      id: row.id,
+      status: row.status,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      last_verified_at: row.last_verified_at,
+      name: row.name,
+      description: row.description,
+      entrypoint: row.entrypoint,
+      ...(instructions ? { instructions } : {}),
+    }
+  })
 }

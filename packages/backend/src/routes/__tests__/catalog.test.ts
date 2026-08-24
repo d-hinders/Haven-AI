@@ -68,6 +68,22 @@ function mockAgentLookupThen(...catalogResults: Array<{ rows: unknown[] }>) {
   })
 }
 
+/**
+ * The listing routes ALSO read verified ingestion rows (#1715). This helper
+ * answers the merchant_catalog query with `merchantRows` and the
+ * catalog_submissions listing query with `ingestionRows` (empty unless asked),
+ * so a test that only cares about operator entries does not accidentally feed
+ * the ingestion branch.
+ */
+function mockCatalogWithIngestion(merchantRows: unknown[], ingestionRows: unknown[] = []) {
+  mockQuery.mockImplementation(async (sql: string) => {
+    if (sql.includes('api_key_hash')) return { rows: [AGENT_ROW] }
+    if (sql.includes('UPDATE agents')) return { rows: [] }
+    if (sql.includes('FROM catalog_submissions')) return { rows: ingestionRows }
+    return { rows: merchantRows }
+  })
+}
+
 describe('catalog routes', () => {
   let app: FastifyInstance
 
@@ -91,7 +107,7 @@ describe('catalog routes', () => {
   })
 
   it('lists entries for a dashboard JWT', async () => {
-    mockQuery.mockResolvedValue({ rows: [ENTRY] })
+    mockCatalogWithIngestion([ENTRY])
     const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
 
     const res = await app.inject({
@@ -223,7 +239,7 @@ describe('catalog routes', () => {
   })
 
   it('finds a product from a category term search', async () => {
-    mockQuery.mockResolvedValue({ rows: [VPN_ENTRY] })
+    mockCatalogWithIngestion([VPN_ENTRY])
     const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
 
     const res = await app.inject({
@@ -312,8 +328,8 @@ describe('catalog routes', () => {
   })
 
   it('returns one entry by id and 404s on misses', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [ENTRY] })
     const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+    mockCatalogWithIngestion([ENTRY])
 
     const hit = await app.inject({
       method: 'GET',
@@ -362,7 +378,64 @@ describe('catalog routes', () => {
     })
 
     for (const [sql] of mockQuery.mock.calls) {
+      // The ingestion listing query (#1715) selects verified_payable rows only
+      // — it has no 'delisted' clause because it cannot contain delisted rows.
+      if (String(sql).includes('FROM catalog_submissions')) continue
       expect(String(sql)).toContain(`status != 'delisted'`)
     }
+  })
+
+  it('merges verified ingestion entries after operator rows, with badges (#1715)', async () => {
+    mockCatalogWithIngestion([ENTRY], [
+      {
+        id: '00000000-0000-4000-8000-000000000002',
+        resource_url: 'https://directory.example.com/mcp',
+        name: 'Directory Summarizer',
+        description: 'A self-submitted payable service',
+        entrypoint: 'summarize',
+        last_verified_at: '2026-08-23T10:00:00.000Z',
+      },
+    ])
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const res = await app.inject({ method: 'GET', url: '/catalog', headers: { authorization: `Bearer ${token}` } })
+    expect(res.statusCode).toBe(200)
+    const entries = res.json().entries
+    expect(entries).toHaveLength(2)
+    // Operator row first, ingestion row second.
+    expect(entries[0]).toMatchObject({ id: 'cat-1', source: 'operator', domain_verified: false, verified_payable: false })
+    expect(entries[1]).toMatchObject({
+      id: '00000000-0000-4000-8000-000000000002',
+      name: 'Directory Summarizer',
+      source: 'ingestion',
+      domain_verified: true,
+      verified_payable: true,
+      category: 'api',
+      rail: 'x402',
+      protocol: 'mcp',
+      tool_name: 'summarize',
+      verified_at: '2026-08-23T10:00:00.000Z',
+    })
+  })
+
+  it('hides ingestion entries from agents (they filter by chain; ingestion rows have none) and applies the rail filter', async () => {
+    mockCatalogWithIngestion([ENTRY], [
+      {
+        id: '00000000-0000-4000-8000-000000000002',
+        resource_url: 'https://directory.example.com/mcp',
+        name: 'Directory Summarizer',
+        description: 'A self-submitted payable service',
+        entrypoint: 'summarize',
+        last_verified_at: null,
+      },
+    ])
+
+    const agentRes = await app.inject({ method: 'GET', url: '/catalog', headers: { authorization: `Bearer ${AGENT_KEY}` } })
+    expect(agentRes.json().entries).toHaveLength(1)
+
+    // A 'mpp' filter excludes the x402 ingestion row from the dashboard too.
+    const jwt = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+    const dash = await app.inject({ method: 'GET', url: '/catalog?rail=mpp', headers: { authorization: `Bearer ${jwt}` } })
+    expect(dash.json().entries).toHaveLength(1)
   })
 })

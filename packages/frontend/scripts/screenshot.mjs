@@ -1079,7 +1079,7 @@ export const SCENARIOS = {
     // issue unblocks — the primary path now, not a workaround for the harness.
     // The armed capture below is the evidence that was missing.
     api(apiPath) {
-      // agent-research carries the passport, so the #1847 disclosure renders.
+      // agent-research has an anchored passport, so the #1699 disclosure renders.
       // The shared fixture gives it a null delegate; re-key needs one to be
       // replacing, so the scenario supplies it.
       if (apiPath === '/agents') {

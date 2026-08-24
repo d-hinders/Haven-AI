@@ -43,14 +43,11 @@
  * Cancel button that implies there is one.
  *
  * **2. Never render the backend's prose.** The route returns readable
- * `carry_note`, `ordering_note` and `skipped[].reason` strings. One of them
- * is currently FALSE: the skipped-carry reason says authority "resumes at the
- * original boundary", but `planCarry` anchors the replacement to the period
- * `/issue` runs in, not the period the meter was read in, so a boundary
- * crossing lands it a period later (#1849). This hook therefore returns
- * STRUCTURED fields only and the UI writes its own copy. A prose string from
- * an API is an API field like any other — it goes stale and nothing
- * type-checks it.
+ * `carry_note`, `ordering_note` and `skipped[].reason` strings. The old
+ * original-boundary sentence was false before #1849 fixed `planCarry` to use
+ * the metering clock. This hook still returns STRUCTURED fields only and the
+ * UI writes its own copy: API prose can drift across releases even when its
+ * underlying behavior is later corrected, and nothing type-checks it.
  */
 
 import { useCallback, useMemo, useState } from 'react'

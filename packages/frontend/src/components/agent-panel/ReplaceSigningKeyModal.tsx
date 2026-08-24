@@ -36,21 +36,17 @@
  * banner, so its forward action stays in the footer rather than being buried
  * for the sake of symmetry.
  *
- * ## Two things this flow must not claim
+ * ## Later siblings this flow must describe accurately
  *
- * The backend it drives is merged and complete, but two of its siblings are
- * not, and each leaves a state a user can now reach from here. Neither is
- * worked around — a UI cannot fix them — but neither is papered over:
+ * Two fixes landed after the first version of this modal, and both change what
+ * an owner should expect after the revoke:
  *
- * - **#1847** — the passport attestation stays anchored to the RETIRED
- *   delegate. #1701's issue text says "passport standing carries (the on-chain
- *   anchor re-issues and briefly lags)". That is not true today: nothing
- *   re-anchors it, so it is stale rather than lagging, and this file says so.
- * - **#1849** — `planCarry` anchors the replacement to the period `/issue`
- *   runs in, not the period the meter was read in. A re-key left half-finished
- *   across a period boundary can silently carry ZERO. A multi-step flow makes
- *   that reachable by going to lunch, so the flow warns against pausing and
- *   never repeats the backend's "authority resumes at the original boundary".
+ * - **#1699** re-anchors an anchored Agent Passport asynchronously. Standing
+ *   remains unchanged while the public on-chain record briefly catches up.
+ * - **#1849** plans the replacement on the metering clock. If a budget period
+ *   ends before issue, the expired carry is dropped and, while the original
+ *   recurring grant remains active, the full budget for the current period is
+ *   issued instead of silently carrying zero.
  *
  * A third used to sit here and no longer does. #1870/#1890 closed: the backend
  * takes a `signature_scheme` (PR #1891) and this flow now sends one, so a
@@ -133,7 +129,7 @@ export function ReplaceSigningKeyModal({
   isDelegationAgent,
   currentDelegateAddress,
   recentPayments,
-  hasPassport,
+  hasAnchoredPassport,
   onCompleted,
 }: {
   open: boolean
@@ -150,8 +146,8 @@ export function ReplaceSigningKeyModal({
   currentDelegateAddress: string | null
   /** Feeds the compromised path's damage assessment. */
   recentPayments: PaymentActivityItem[]
-  /** Drives the #1847 disclosure — only shown when there is one to go stale. */
-  hasPassport: boolean
+  /** Shows the #1699 disclosure only when there is an anchored record to replace. */
+  hasAnchoredPassport: boolean
   onCompleted: () => void
 }) {
   const rekey = useAgentRekey(agentId, chainId)
@@ -649,22 +645,24 @@ export function ReplaceSigningKeyModal({
             to be the only banner on this screen that looks like an alarm. */}
         <ApprovalRequiredBanner title="Before you approve" tone="warning">
           <ul className="space-y-2.5 text-sm leading-relaxed">
-            {hasPassport ? (
+            {hasAnchoredPassport ? (
               <li>
                 <strong className="font-medium text-[var(--v2-ink)]">
-                  The public record will still name the old key.
+                  The public record updates separately.
                 </strong>{' '}
-                {agentName}’s standing inside Haven is unchanged, but its public on-chain record
-                still names the signing address you are retiring, and nothing updates it yet —
-                treat that record as out of date rather than catching up.
+                {agentName}’s standing in Haven remains unchanged. Its current on-chain record will be
+                retired and replaced with one naming the new signing address, so the dashboard may
+                briefly show “Updating on-chain” after this finishes.
               </li>
             ) : null}
             <li>
-              <strong className="font-medium text-[var(--v2-ink)]">Finish this in one go.</strong>{' '}
-              What is left of the budget is measured the moment you approve, but the replacement
-              is worked out when you finish. If you stop halfway and come back after the budget
-              period has rolled over, the agent can come back with nothing to spend until the
-              following period.
+              <strong className="font-medium text-[var(--v2-ink)]">
+                Finish the remaining steps now.
+              </strong>{' '}
+              After the old key is switched off, {agentName} cannot pay while the replacement is
+              unfinished. If a budget period rolls over before you finish, any remainder from the
+              closed period is dropped. Any recurring budget that is still active continues on its
+              existing schedule.
             </li>
           </ul>
         </ApprovalRequiredBanner>
@@ -761,9 +759,8 @@ export function ReplaceSigningKeyModal({
           </div>
         ) : (
           <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Nothing was left half-applied by the attempt that failed, so trying again is safe. Do
-            it now rather than later — what is left of the budget was measured when you approved,
-            and a long gap can leave the agent with nothing to spend until the next period.
+            Nothing was left half-applied by the attempt that failed, so trying again is safe.
+            Finish now so the replacement can be completed and {agentName} can pay again.
           </p>
         )}
       </div>
@@ -833,14 +830,20 @@ export function ReplaceSigningKeyModal({
           </ul>
         </div>
 
-        {skippedCount > 0 || issuedDelegations.length === 0 ? (
+        {issuedDelegations.length === 0 ? (
           <ApprovalRequiredBanner title="Check the agent’s budget" tone="warning">
             <p className="text-sm leading-relaxed">
-              {issuedDelegations.length === 0
-                ? `No budget was carried over, so ${agentName} cannot spend anything yet.`
-                : 'Part of the old budget was not carried over.'}{' '}
-              Open the agent’s budget and confirm it reads what you expect. If it is empty and you
-              did not expect that, set the budget again — it will not appear on its own.
+              No replacement budget is active, so {agentName} cannot spend until you set a new
+              budget.
+            </p>
+          </ApprovalRequiredBanner>
+        ) : null}
+        {issuedDelegations.length > 0 && skippedCount > 0 ? (
+          <ApprovalRequiredBanner title="Check the agent’s budget" tone="neutral">
+            <p className="text-sm leading-relaxed">
+              Some old budget pieces were not re-issued because nothing remained or their time
+              windows had closed. Active replacement budget rules were issued for the new key.
+              Check the agent’s budget to confirm what is active now.
             </p>
           </ApprovalRequiredBanner>
         ) : null}

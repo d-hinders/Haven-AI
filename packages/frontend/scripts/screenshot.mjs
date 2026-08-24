@@ -627,15 +627,25 @@ export const httpError = (status, body) => new ScenarioHttpError(status, body)
  * the pixel is production code. Nothing is passed to a component by hand.
  *
  * `scenario.chain(method, params)` returns the JSON-RPC `result` for one call,
- * or `undefined` to say it has no answer. A scenario that declares `chain`
- * takes over ALL of its own chain traffic: an unanswered method is served a
- * JSON-RPC error rather than being let out to a public node, because a capture
- * whose data came from the live internet is not deterministic evidence. The gap
- * is recorded and FAILS THE RUN — see `CHAIN_READ_GAPS`.
+ * or `undefined` to say it has no answer. The harness takes over ALL chain
+ * traffic: an unanswered method is served a JSON-RPC error rather than being let
+ * out to a public node, because a capture whose data came from the live internet
+ * is not deterministic evidence. The gap is recorded and FAILS THE RUN — see
+ * `CHAIN_READ_GAPS`.
  *
- * Scenarios that do not declare `chain` are untouched: the predicate below
- * returns false immediately, and their non-API traffic still `route.continue()`s
- * exactly as before.
+ * ── Every capture, not only the ones that opt in (#1971) ─────────────────────
+ *
+ * #1935 applied this only to a scenario that declared `chain`; everything else
+ * fell through to `route.continue()`. That was safe for one reason and it was
+ * not the reason it looked like: the shared fixture sat on chain 84532, which
+ * `lib/wagmi.ts` had no transport for, so no chain request was ever made and
+ * there was nothing to let out. Every chain-fed capture was painting its empty
+ * branch instead. #1971 gave 84532 a transport — the app OFFERS it, and the dev
+ * deployment DEFAULTS to it, so the missing transport was a product defect, not
+ * a fixture one — and the reads are now real. A scenario that declares nothing
+ * therefore inherits `answerSharedChainRead`, the shared fixture's own Safe on
+ * the shared fixture's own chain, so no capture reaches a public node and no
+ * capture is a picture of a read that never happened.
  */
 
 /**
@@ -653,6 +663,91 @@ export const httpError = (status, body) => new ScenarioHttpError(status, body)
 const CHAIN_READ_GAPS = []
 
 /**
+ * ── The silent half: a chain-fed capture whose reads NEVER HAPPENED (#1971) ──
+ *
+ * `CHAIN_READ_GAPS` above catches "the app asked and this fixture had no
+ * answer". It cannot catch the failure that hid #1971 for the entire life of
+ * this harness, because that one produces no request to be unanswered.
+ *
+ * The mechanism: `@wagmi/core`'s `getClient` CATCHES `ChainNotConfiguredError`
+ * and returns `undefined`, so a fixture chain the app has no transport for
+ * makes `usePublicClient({ chainId })` `undefined`, and every consumer guards
+ * on exactly that and returns at its first line —
+ * `if (!publicClient || !safeAddress) { setLoading(false); return }`. Nothing
+ * throws, nothing is logged, no request is issued, and the surface paints its
+ * empty branch. Every PNG of an on-chain surface this harness has ever produced
+ * was that, and none of them looked wrong.
+ *
+ * So the harness measures the thing it could not previously distinguish: for a
+ * capture whose page visited a route that reads the chain at render, it asserts
+ * the app ACTUALLY ASKED. Zero observed reads on a chain-fed route is fatal,
+ * the same stance `deleted_captures` takes one layer down — a photogenic wrong
+ * answer is worse than a failed run.
+ *
+ * Keyed on ROUTE rather than on scenario, deliberately. A scenario list would
+ * need an entry per scenario and would silently under-report the day someone
+ * adds the sixteenth; routes change rarely, and the property being asserted is
+ * a property of the screen, not of the story told about it.
+ */
+const CHAIN_FED_ROUTES = [
+  {
+    pattern: /^\/agents(\/|$)/,
+    reads: 'useOnChainAllowances — via useAgentPanelState (AgentPanel, unmanaged-delegate ' +
+      'discovery) and AgentDetailClient/EditAgentModal (the budget list)',
+  },
+  {
+    pattern: /^\/dashboard(\/|$)/,
+    reads: 'useAgentPanelState + ApprovalQueue (usePublicClient — execution gating)',
+  },
+]
+
+/** Chain-fed captures where the app issued no chain read at all. Fatal. */
+const CHAIN_SILENT_CAPTURES = []
+
+/** Live counters for the context currently being captured. */
+let chainWatch = null
+
+function beginChainWatch(label, viewport) {
+  chainWatch = { label, viewport, observed: 0, methods: new Set(), visited: new Map() }
+}
+
+function noteChainReadObserved(method) {
+  if (!chainWatch) return
+  chainWatch.observed += 1
+  chainWatch.methods.add(method)
+}
+
+/** Record a main-frame navigation, so the watch knows which screens were shown. */
+function noteChainWatchNavigation(url) {
+  if (!chainWatch) return
+  let pathname
+  try {
+    pathname = new URL(url).pathname
+  } catch {
+    return
+  }
+  for (const route of CHAIN_FED_ROUTES) {
+    if (route.pattern.test(pathname)) chainWatch.visited.set(pathname, route.reads)
+  }
+}
+
+function endChainWatch() {
+  const watch = chainWatch
+  chainWatch = null
+  if (!watch) return
+  if (watch.visited.size === 0) return
+  if (watch.observed > 0) return
+  for (const [pathname, reads] of watch.visited) {
+    CHAIN_SILENT_CAPTURES.push({
+      capture: watch.label,
+      viewport: watch.viewport,
+      route: pathname,
+      reads,
+    })
+  }
+}
+
+/**
  * Answer one JSON-RPC request from `scenario.chain`, or decline it.
  *
  * Returns `true` when the request was fulfilled here, `false` when the caller
@@ -662,7 +757,14 @@ const CHAIN_READ_GAPS = []
  * `chain` cannot accidentally capture an unrelated POST to some other host.
  */
 async function answerChainRead(route, req, scenario) {
-  if (typeof scenario?.chain !== 'function') return false
+  // Every capture gets a chain fixture, not only a scenario that opts in
+  // (#1971). Before #1971 this line was `if (typeof scenario?.chain !==
+  // 'function') return false` and the request fell through to
+  // `route.continue()` — which was harmless only because the fixture chain had
+  // no transport and no request was ever made. Now that it does, an
+  // un-intercepted read would reach a public node and the capture would stop
+  // being deterministic evidence.
+  const answer = typeof scenario?.chain === 'function' ? scenario.chain : answerSharedChainRead
   if (req.method() !== 'POST') return false
   let payload
   try {
@@ -676,15 +778,19 @@ async function answerChainRead(route, req, scenario) {
   const isRpc = (c) => c && c.jsonrpc === '2.0' && typeof c.method === 'string'
   if (!calls.every(isRpc)) return false
 
+  // Observed — recorded BEFORE any answer is computed, because the guard this
+  // feeds is about whether the app ASKED, not about whether we could reply.
+  for (const call of calls) noteChainReadObserved(call.method)
+
   const answers = calls.map((call) => {
     let result
     try {
-      result = scenario.chain(call.method, call.params ?? [])
+      result = answer(call.method, call.params ?? [])
     } catch (err) {
       // A throw from a scenario's own answer is a fixture bug, and it must not
       // read like a chain that declined — record it in the same place.
       CHAIN_READ_GAPS.push({
-        scenario: scenario.name ?? 'scenario',
+        scenario: scenario?.name ?? 'shared fixture',
         method: call.method,
         reason: `threw: ${String(err?.message ?? err).slice(0, 200)}`,
       })
@@ -696,7 +802,7 @@ async function answerChainRead(route, req, scenario) {
     }
     if (result === undefined) {
       CHAIN_READ_GAPS.push({
-        scenario: scenario.name ?? 'scenario',
+        scenario: scenario?.name ?? 'shared fixture',
         method: call.method,
         reason: 'the scenario returned undefined — no answer was declared for this read',
       })
@@ -995,55 +1101,267 @@ function setBackupRecoveryStage(next) {
   backupRecoveryStage = next
 }
 
+// ── The AllowanceModule chain fixture (#1935, generalised by #1971) ──────────
+//
+// `useOnChainAllowances` is the harness's only render-time chain read, and it
+// feeds four surfaces (AgentPanel via useAgentPanelState, AgentDetailClient,
+// EditAgentModal, and the unmanaged-delegate discovery inside AgentPanel). This
+// factory answers the exact reads that hook makes, for ONE (chain, safe,
+// delegates, rows) tuple, so the shared fixture and a scenario-local one are the
+// same code with different data rather than two fixtures that can drift.
+//
+// ── Why the shared fixture needed one at all (#1971) ─────────────────────────
+//
+// Until #1971 the shared fixture's chain (84532) had no wagmi transport:
+// `lib/wagmi.ts` registered only `base`, `@wagmi/core`'s `getClient` caught
+// `ChainNotConfiguredError` and returned `undefined`, and the hook returned at
+// its first line. ZERO JSON-RPC requests left the browser in a screenshot run,
+// so every one of those four surfaces was captured in its empty branch — and
+// because nothing threw, the PNGs looked fine. #1971 fixed the transport in
+// `lib/wagmi.ts` (the app OFFERS 84532; it was never the fixture that was
+// wrong), which means those reads now really happen. They must not reach a
+// public node — a capture whose data came off the live internet is not
+// deterministic evidence — so the harness answers them for every scenario,
+// not only for one that opts in.
+const MULTICALL3_AGGREGATE3 = toFunctionSelector(
+  'function aggregate3((address target, bool allowFailure, bytes callData)[]) returns ((bool success, bytes returnData)[])',
+)
+// Canonical across every chain Haven serves; asserted rather than assumed
+// because a wrong `to` here would be answered as if it were right.
+const MULTICALL3_ADDRESS = viemBase.contracts.multicall3.address
+
+/**
+ * A deterministic block, parameterised by timestamp.
+ *
+ * `useOnChainAllowances` reads `block.timestamp` alongside the allowances so the
+ * reset math keys off chain time rather than the device clock, so this has to be
+ * a real-shaped block or viem's formatter throws before the allowances are ever
+ * mapped.
+ */
+function fixtureBlock(timestampSec) {
+  return {
+    number: '0x1122334',
+    hash: `0x${'11'.repeat(32)}`,
+    parentHash: `0x${'22'.repeat(32)}`,
+    nonce: '0x0000000000000000',
+    sha3Uncles: `0x${'33'.repeat(32)}`,
+    logsBloom: `0x${'00'.repeat(256)}`,
+    transactionsRoot: `0x${'44'.repeat(32)}`,
+    stateRoot: `0x${'55'.repeat(32)}`,
+    receiptsRoot: `0x${'66'.repeat(32)}`,
+    miner: '0x4200000000000000000000000000000000000011',
+    difficulty: '0x0',
+    totalDifficulty: '0x0',
+    extraData: '0x',
+    size: '0x220',
+    gasLimit: '0x3938700',
+    gasUsed: '0x0',
+    timestamp: `0x${timestampSec.toString(16)}`,
+    baseFeePerGas: '0x1',
+    transactions: [],
+    uncles: [],
+  }
+}
+
+const FIXTURE_BLOCK_TIMESTAMP = Math.floor(Date.parse('2026-07-10T09:00:00.000Z') / 1000)
+
+/**
+ * Build a `scenario.chain`-shaped answer function for one Safe's AllowanceModule.
+ *
+ * `rows` are the budgets the module reports for `delegates[0]`; amounts are
+ * atomic and `resetTimeMin` must match a RESET_PERIODS entry so the row reads
+ * "Daily" rather than a raw "1440m" fallthrough.
+ */
+function makeAllowanceChainFixture({ chainId, safeAddress, delegates, rows }) {
+  const allowanceModule = getChainData(chainId).contracts.allowanceModule
+
+  /** The reads `useOnChainAllowances` makes, by signature rather than hand-cut hex. */
+  const READS = {
+    isModuleEnabled: {
+      signature: 'function isModuleEnabled(address) view returns (bool)',
+      // `isModuleEnabled` is called ON THE SAFE; the rest on the module.
+      to: safeAddress,
+      returns: () => encodeAbiParameters(parseAbiParameters('bool'), [true]),
+    },
+    getDelegates: {
+      signature: 'function getDelegates(address,uint48,uint8) view returns (address[],uint48)',
+      to: allowanceModule,
+      returns: () =>
+        encodeAbiParameters(parseAbiParameters('address[], uint48'), [delegates, 0]),
+    },
+    getTokens: {
+      signature: 'function getTokens(address,address) view returns (address[])',
+      to: allowanceModule,
+      returns: () =>
+        encodeAbiParameters(parseAbiParameters('address[]'), [rows.map((r) => r.token)]),
+    },
+    getTokenAllowance: {
+      signature: 'function getTokenAllowance(address,address,address) view returns (uint256[5])',
+      to: allowanceModule,
+      // The token is the THIRD argument, and it is read out of the calldata
+      // rather than assumed, so two rows cannot come back identical — which is
+      // exactly the silent duplicate a positional fixture would produce.
+      returns: (data) => {
+        const token = `0x${data.slice(10).slice(64 * 2 + 24, 64 * 3)}`
+        const row = rows.find((r) => r.token.toLowerCase() === token.toLowerCase())
+        if (!row) throw new Error(`getTokenAllowance for an unseeded token ${token}`)
+        return encodeAbiParameters(parseAbiParameters('uint256[5]'), [
+          [row.amount, row.spent, BigInt(row.resetTimeMin), 0n, 1n],
+        ])
+      },
+    },
+  }
+
+  const SELECTORS = new Map(
+    Object.entries(READS).map(([name, read]) => [
+      toFunctionSelector(read.signature),
+      { name, ...read },
+    ]),
+  )
+
+  const block = fixtureBlock(FIXTURE_BLOCK_TIMESTAMP)
+
+  /** One un-batched contract read — also the body of each `aggregate3` member. */
+  function answerEthCall(to, data) {
+    const read = SELECTORS.get(data.slice(0, 10))
+    if (!read) return undefined
+    if ((to ?? '').toLowerCase() !== read.to.toLowerCase()) {
+      throw new Error(
+        `${read.name} was called on ${to} but this fixture seeds it on ${read.to} — ` +
+          'the app is reading a different contract than the fixture describes',
+      )
+    }
+    return read.returns(data)
+  }
+
+  /**
+   * Answer the app's own on-chain reads.
+   *
+   * Dispatches on the 4-byte selector AND checks the call's `to` — a selector
+   * collision or a read aimed at some other contract must fail loudly rather
+   * than be handed a plausible answer for the wrong address. Anything not
+   * listed returns `undefined`, which the seam records as a gap and fails the
+   * run on (see `CHAIN_READ_GAPS`): a fixture that quietly declines a read
+   * produces a surface with no budget rows, which is a photogenic wrong answer.
+   */
+  return function answerChain(method, params) {
+    if (method === 'eth_chainId') return `0x${chainId.toString(16)}`
+    if (method === 'eth_blockNumber') return block.number
+    if (method === 'eth_getBlockByNumber') return block
+    if (method !== 'eth_call') return undefined
+
+    const call = params?.[0] ?? {}
+    const data = call.data ?? call.input ?? '0x'
+
+    // MULTICALL, because that is what the app actually sends (#1935).
+    //
+    // Found by running this, not by reading it: wagmi enables viem's multicall
+    // batching by default, so `useOnChainAllowances`' reads never reach the wire
+    // as bare `eth_call`s to the AllowanceModule — every one of them is wrapped
+    // in Multicall3's `aggregate3`, with the real call as `bytes` inside it. A
+    // fixture that answered only the un-batched shape is served nothing, and
+    // because the hook swallows the failure into an empty map it would produce a
+    // surface with no budget list and no error on screen.
+    //
+    // MEASURED, because the obvious summary of that is wrong (review of #1935).
+    // "The four reads arrive as one `eth_call`" is what batching sounds like; it
+    // is not what this hook can produce. `useOnChainAllowances` is sequential —
+    // it awaits `isModuleEnabled` before `getDelegates` is queued, and awaits
+    // `getTokens` before the `getTokenAllowance`s are — and viem's batcher can
+    // only merge calls queued inside the same wait window. Logged live, one
+    // fetch cycle is FOUR aggregate3 POSTs plus one bare block read:
+    //
+    //   aggregate3[1] 0x2d9ad53d  isModuleEnabled
+    //   eth_getBlockByNumber      (not wrapped — not a contract read)
+    //   aggregate3[1] 0xeb37abe0  getDelegates
+    //   aggregate3[1] 0x8d0e8e1d  getTokens
+    //   aggregate3[2] 0x94b31fbd  getTokenAllowance x2  <- the only real batch
+    //
+    // So the thing a fixture must handle is not "one big batch": it is that a
+    // LONE read is wrapped too. The direct branch below is kept as a fallback
+    // rather than deleted, because it costs one line and the day someone
+    // disables multicall this is the difference between a fixture that still
+    // works and a silent empty list.
+    if (
+      data.slice(0, 10) === MULTICALL3_AGGREGATE3 &&
+      (call.to ?? '').toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()
+    ) {
+      const [inner] = decodeAbiParameters(
+        parseAbiParameters('(address target, bool allowFailure, bytes callData)[]'),
+        `0x${data.slice(10)}`,
+      )
+      const results = inner.map((c) => {
+        const answer = answerEthCall(c.target, c.callData)
+        if (answer === undefined) {
+          throw new Error(
+            `aggregate3 carried an unseeded call to ${c.target} (${c.callData.slice(0, 10)})`,
+          )
+        }
+        return { success: true, returnData: answer }
+      })
+      return encodeAbiParameters(
+        parseAbiParameters('(bool success, bytes returnData)[]'),
+        [results],
+      )
+    }
+
+    return answerEthCall(call.to, data)
+  }
+}
+
+// ── The SHARED fixture's chain answers (#1971) ───────────────────────────────
+//
+// On the shared fixture's own chain (84532), for the shared fixture's own Safe,
+// seeded from the shared fixture's own agent. `agent-ops` is the one fixture
+// agent on the LEGACY rail (`account_type: null`) with a `delegate_address`, and
+// both are required: `EditAgentModal` hides the whole budget half on
+// `delegator_hybrid` (#1079, `showBudgetFields`) and `useOnChainAllowances` keys
+// its map by delegate.
+//
+// The USDC row deliberately MATCHES `agent-ops`'s API allowance (500.000000 /
+// 1440min, `FIXTURE_AGENTS`) rather than inventing a second number. The two
+// sources render side by side on AgentPanel, and a fixture whose chain and API
+// disagree would photograph a contradiction the product cannot actually produce.
+// The delegate set is exactly the managed one for the same reason — seeding a
+// stranger here would render an "unmanaged delegate" warning in every capture.
+const SHARED_CHAIN_ROWS = [
+  {
+    token: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,
+    amount: 500_000000n,
+    spent: 137_500000n,
+    resetTimeMin: 1440,
+  },
+]
+const answerSharedChainRead = makeAllowanceChainFixture({
+  chainId: FIXTURE_SAFE.chain_id,
+  safeAddress: FIXTURE_SAFE.safe_address,
+  delegates: [ADDR.delegate],
+  rows: SHARED_CHAIN_ROWS,
+})
+
 // ── EditAgentModal's on-chain budget list (#1935) ────────────────────────────
 //
-// WHY THIS FIXTURE IS ON BASE MAINNET, and why that is the load-bearing half.
-//
-// The shared fixture's safe carries `chain_id: 84532` (Base Sepolia). The app's
-// wagmi config registers exactly ONE chain — `base` (8453) — in both `chains`
-// and `transports` (`lib/wagmi.ts`, "TEMPORARY: Base-only"). wagmi's
-// `getClient` catches `ChainNotConfiguredError` and returns `undefined`
-// (@wagmi/core `actions/getClient.js`), so `usePublicClient({ chainId: 84532 })`
-// is `undefined`, and `useOnChainAllowances` bails at its first line:
-//
-//     if (!publicClient || !safeAddress) { setLoading(false); return }
-//
-// Zero JSON-RPC requests ever leave the browser. That — not a missing route, not
-// an unwritten scenario — is the concrete reason no capture in this repo has
-// ever contained a budget row: on the shared fixture the read cannot start.
-// Putting this scenario's account on 8453 is what turns the read on, and 8453
-// is the app's primary/default network, so this is the ordinary product state
-// rather than a contrivance. (The wider consequence — that EVERY chain-fed
-// surface in the harness renders its empty branch — is filed separately; it is
-// bigger than one modal and not this issue's to change under everyone else.)
+// Kept on Base MAINNET and scenario-local, unchanged by #1971. Two rows rather
+// than one, on purpose: one row cannot tell "the list rendered" apart from "the
+// list rendered ONE row and dropped the rest", and the remove control is per
+// row. An ERC-20 and the native token, because they take different branches
+// through `tokenSymbolFromAddr` / `tokenDecimalsFromAddr`
+// (`EditAgentModal.tsx:843-863`) — the zero address is special-cased — so the
+// pair exercises both and the capture shows both symbols resolved. Keeping it on
+// 8453 also keeps this scenario's evidence a CONTROL for the shared fixture's:
+// two different chains, two different answer sets, one factory.
 const BUDGET_CHAIN_ID = 8453
-const BUDGET_CHAIN = getChainData(BUDGET_CHAIN_ID)
-const BUDGET_ALLOWANCE_MODULE = BUDGET_CHAIN.contracts.allowanceModule
 const BUDGET_USDC = resolveToken(BUDGET_CHAIN_ID, 'USDC').address
 const BUDGET_NATIVE = '0x0000000000000000000000000000000000000000'
 
 const BUDGET_FIXTURE_SAFE = { ...FIXTURE_SAFE, chain_id: BUDGET_CHAIN_ID }
 
-// The shared fixture's LEGACY-rail agent, moved onto the same chain as its
-// account. Chosen rather than invented: `agent-ops` is the one fixture agent
-// with `account_type: null` and a `delegate_address`, and both are required —
-// `EditAgentModal` hides the whole budget half on `delegator_hybrid` (#1079,
-// `showBudgetFields`), and `useOnChainAllowances` keys its map by delegate.
+/** The shared fixture's LEGACY-rail agent, moved onto the same chain as its account. */
 const BUDGET_FIXTURE_AGENT = {
   ...FIXTURE_AGENTS.find((a) => a.id === 'agent-ops'),
   safe_chain_id: BUDGET_CHAIN_ID,
 }
 
-/**
- * The two budget rows this scenario puts on-chain.
- *
- * Two rather than one, on purpose: one row cannot tell "the list rendered" apart
- * from "the list rendered ONE row and dropped the rest", and the remove control
- * is per row. An ERC-20 and the native token, because they take different
- * branches through `tokenSymbolFromAddr` / `tokenDecimalsFromAddr`
- * (`EditAgentModal.tsx:843-863`) — the zero address is special-cased — so the
- * pair exercises both and the capture shows both symbols resolved.
- */
 const BUDGET_ROWS = [
   // amount / spent are atomic; resetTimeMin matches RESET_PERIODS so the row
   // reads "Daily" rather than a raw "1440m" fallthrough.
@@ -1051,176 +1369,12 @@ const BUDGET_ROWS = [
   { token: BUDGET_NATIVE, amount: 250000000000000000n, spent: 0n, resetTimeMin: 10080 },
 ]
 
-/** The reads `useOnChainAllowances` makes, by signature rather than by hand-cut hex. */
-const BUDGET_READS = {
-  isModuleEnabled: {
-    signature: 'function isModuleEnabled(address) view returns (bool)',
-    // `isModuleEnabled` is called ON THE SAFE; the rest on the module.
-    to: BUDGET_FIXTURE_SAFE.safe_address,
-    returns: () => encodeAbiParameters(parseAbiParameters('bool'), [true]),
-  },
-  getDelegates: {
-    signature: 'function getDelegates(address,uint48,uint8) view returns (address[],uint48)',
-    to: BUDGET_ALLOWANCE_MODULE,
-    returns: () =>
-      encodeAbiParameters(parseAbiParameters('address[], uint48'), [
-        [BUDGET_FIXTURE_AGENT.delegate_address],
-        0,
-      ]),
-  },
-  getTokens: {
-    signature: 'function getTokens(address,address) view returns (address[])',
-    to: BUDGET_ALLOWANCE_MODULE,
-    returns: () =>
-      encodeAbiParameters(parseAbiParameters('address[]'), [BUDGET_ROWS.map((r) => r.token)]),
-  },
-  getTokenAllowance: {
-    signature: 'function getTokenAllowance(address,address,address) view returns (uint256[5])',
-    to: BUDGET_ALLOWANCE_MODULE,
-    // The token is the THIRD argument, and it is read out of the calldata
-    // rather than assumed, so the two rows cannot come back identical — which
-    // is exactly the silent duplicate a positional fixture would produce.
-    returns: (data) => {
-      const token = `0x${data.slice(10).slice(64 * 2 + 24, 64 * 3)}`
-      const row = BUDGET_ROWS.find((r) => r.token.toLowerCase() === token.toLowerCase())
-      if (!row) throw new Error(`getTokenAllowance for an unseeded token ${token}`)
-      return encodeAbiParameters(parseAbiParameters('uint256[5]'), [
-        [row.amount, row.spent, BigInt(row.resetTimeMin), 0n, 1n],
-      ])
-    },
-  },
-}
-
-const MULTICALL3_ADDRESS = viemBase.contracts.multicall3.address
-const MULTICALL3_AGGREGATE3 = toFunctionSelector(
-  'function aggregate3((address target, bool allowFailure, bytes callData)[]) returns ((bool success, bytes returnData)[])',
-)
-
-const BUDGET_SELECTORS = new Map(
-  Object.entries(BUDGET_READS).map(([name, read]) => [
-    toFunctionSelector(read.signature),
-    { name, ...read },
-  ]),
-)
-
-/**
- * A deterministic Base block. `useOnChainAllowances` reads `block.timestamp`
- * alongside the allowances so the reset math keys off chain time rather than
- * the device clock, so this has to be a real-shaped block or viem's formatter
- * throws before the allowances are ever mapped.
- */
-const BUDGET_BLOCK_TIMESTAMP = Math.floor(Date.parse('2026-07-10T09:00:00.000Z') / 1000)
-const BUDGET_BLOCK = {
-  number: '0x1122334',
-  hash: `0x${'11'.repeat(32)}`,
-  parentHash: `0x${'22'.repeat(32)}`,
-  nonce: '0x0000000000000000',
-  sha3Uncles: `0x${'33'.repeat(32)}`,
-  logsBloom: `0x${'00'.repeat(256)}`,
-  transactionsRoot: `0x${'44'.repeat(32)}`,
-  stateRoot: `0x${'55'.repeat(32)}`,
-  receiptsRoot: `0x${'66'.repeat(32)}`,
-  miner: '0x4200000000000000000000000000000000000011',
-  difficulty: '0x0',
-  totalDifficulty: '0x0',
-  extraData: '0x',
-  size: '0x220',
-  gasLimit: '0x3938700',
-  gasUsed: '0x0',
-  timestamp: `0x${BUDGET_BLOCK_TIMESTAMP.toString(16)}`,
-  baseFeePerGas: '0x1',
-  transactions: [],
-  uncles: [],
-}
-
-/**
- * Answer the app's own on-chain reads for the budget-list scenario.
- *
- * Dispatches on the 4-byte selector AND checks the call's `to` — a selector
- * collision or a read aimed at some other contract must fail loudly rather than
- * be handed a plausible answer for the wrong address. Anything not listed
- * returns `undefined`, which the seam records as a gap and fails the run on
- * (see `CHAIN_READ_GAPS`): a fixture that quietly declines a read produces a
- * modal with no budget list, which is a perfectly photogenic wrong answer.
- */
-function answerBudgetChainRead(method, params) {
-  if (method === 'eth_chainId') return `0x${BUDGET_CHAIN_ID.toString(16)}`
-  if (method === 'eth_blockNumber') return BUDGET_BLOCK.number
-  if (method === 'eth_getBlockByNumber') return BUDGET_BLOCK
-  if (method !== 'eth_call') return undefined
-
-  const call = params?.[0] ?? {}
-  const data = call.data ?? call.input ?? '0x'
-
-  // MULTICALL, because that is what the app actually sends (#1935).
-  //
-  // Found by running this, not by reading it: wagmi enables viem's multicall
-  // batching by default, so `useOnChainAllowances`' reads never reach the wire
-  // as bare `eth_call`s to the AllowanceModule — every one of them is wrapped in
-  // Multicall3's `aggregate3`, with the real call as `bytes` inside it. A
-  // fixture that answered only the un-batched shape is served nothing, and
-  // because the hook swallows the failure into an empty map it would have
-  // produced a modal with no budget list and no error on screen. That is exactly
-  // the plausible-wrong-PNG the seam's fatal gap report exists to refuse, and it
-  // is what it refused on the first run of this scenario.
-  //
-  // MEASURED, because the obvious summary of that is wrong (review of #1935).
-  // "The four reads arrive as one `eth_call`" is what batching sounds like; it
-  // is not what this hook can produce. `useOnChainAllowances` is sequential —
-  // it awaits `isModuleEnabled` before `getDelegates` is queued, and awaits
-  // `getTokens` before the `getTokenAllowance`s are — and viem's batcher can
-  // only merge calls queued inside the same wait window. Logged live, one fetch
-  // cycle is FOUR aggregate3 POSTs plus one bare block read:
-  //
-  //   aggregate3[1] 0x2d9ad53d  isModuleEnabled
-  //   eth_getBlockByNumber      (not wrapped — not a contract read)
-  //   aggregate3[1] 0xeb37abe0  getDelegates
-  //   aggregate3[1] 0x8d0e8e1d  getTokens
-  //   aggregate3[2] 0x94b31fbd  getTokenAllowance x2  <- the only real batch
-  //
-  // So the thing a fixture must handle is not "one big batch": it is that a
-  // LONE read is wrapped too. The direct branch below is kept as a fallback
-  // rather than deleted, because it costs one line and the day someone disables
-  // multicall this is the difference between a fixture that still works and a
-  // silent empty list.
-  if (
-    data.slice(0, 10) === MULTICALL3_AGGREGATE3 &&
-    (call.to ?? '').toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()
-  ) {
-    const [inner] = decodeAbiParameters(
-      parseAbiParameters('(address target, bool allowFailure, bytes callData)[]'),
-      `0x${data.slice(10)}`,
-    )
-    const results = inner.map((c) => {
-      const answer = answerBudgetEthCall(c.target, c.callData)
-      if (answer === undefined) {
-        throw new Error(
-          `aggregate3 carried an unseeded call to ${c.target} (${c.callData.slice(0, 10)})`,
-        )
-      }
-      return { success: true, returnData: answer }
-    })
-    return encodeAbiParameters(
-      parseAbiParameters('(bool success, bytes returnData)[]'),
-      [results],
-    )
-  }
-
-  return answerBudgetEthCall(call.to, data)
-}
-
-/** One un-batched contract read — also the body of each `aggregate3` member. */
-function answerBudgetEthCall(to, data) {
-  const read = BUDGET_SELECTORS.get(data.slice(0, 10))
-  if (!read) return undefined
-  if ((to ?? '').toLowerCase() !== read.to.toLowerCase()) {
-    throw new Error(
-      `${read.name} was called on ${to} but this fixture seeds it on ${read.to} — ` +
-        'the app is reading a different contract than the fixture describes',
-    )
-  }
-  return read.returns(data)
-}
+const answerBudgetChainRead = makeAllowanceChainFixture({
+  chainId: BUDGET_CHAIN_ID,
+  safeAddress: BUDGET_FIXTURE_SAFE.safe_address,
+  delegates: [BUDGET_FIXTURE_AGENT.delegate_address],
+  rows: BUDGET_ROWS,
+})
 
 export const SCENARIOS = {
   'design-system-buttons': {
@@ -2639,6 +2793,10 @@ async function main() {
     for (const vp of VIEWPORTS) {
       const context = await newFixtureContext(browser, vp, null)
       const page = await context.newPage()
+      beginChainWatch(`routes · ${vp.name}`, vp.name)
+      page.on('framenavigated', (frame) => {
+        if (frame === page.mainFrame()) noteChainWatchNavigation(frame.url())
+      })
       // A red console on a fixture render is a fixture-shape gap or a real
       // client bug — collect and summarise instead of shipping blank PNGs.
       let currentRoute = ROUTES[0]
@@ -2705,6 +2863,7 @@ async function main() {
           continue
         }
       }
+      endChainWatch()
       await context.close()
 
       // Scenarios get their own context per viewport: a virtual clock and
@@ -2713,6 +2872,10 @@ async function main() {
         const label = `scenario:${scenario.name}`
         const scenarioContext = await newFixtureContext(browser, vp, scenario)
         const scenarioPage = await scenarioContext.newPage()
+        beginChainWatch(label, vp.name)
+        scenarioPage.on('framenavigated', (frame) => {
+          if (frame === scenarioPage.mainFrame()) noteChainWatchNavigation(frame.url())
+        })
         scenarioPage.on('console', (msg) => {
           if (msg.type() === 'error') {
             consoleErrors.push({ route: label, viewport: vp.name, text: msg.text().slice(0, 300) })
@@ -2780,6 +2943,7 @@ async function main() {
             text: `scenario failed: ${String(err?.message ?? err).slice(0, 300)}`,
           })
         }
+        endChainWatch()
         await scenarioContext.close()
       }
     }
@@ -2816,6 +2980,10 @@ async function main() {
         // for (#1935). Non-empty means at least one capture in this run shows a
         // surface whose on-chain data silently failed to load.
         unanswered_chain_reads: CHAIN_READ_GAPS,
+        // Captures of a chain-fed route where the app issued NO chain read at
+        // all (#1971) — the failure `unanswered_chain_reads` structurally
+        // cannot see, because it produces no request to go unanswered.
+        silent_chain_fed_captures: CHAIN_SILENT_CAPTURES,
         captured_without_unclip: shellless,
         shell_waits: raced,
         // Retention, recorded so the live manifest can be read as "this is the
@@ -2954,6 +3122,22 @@ async function main() {
         '   swallows it into an empty result. Declare the method, or stop declaring `chain`.)',
     )
   }
+  if (CHAIN_SILENT_CAPTURES.length > 0) {
+    console.error(
+      `\n✗ ${CHAIN_SILENT_CAPTURES.length} capture(s) of a CHAIN-FED route issued ZERO on-chain ` +
+        'reads — the data did not arrive empty, it was never asked for (#1971):',
+    )
+    for (const c of CHAIN_SILENT_CAPTURES) {
+      console.error(`  [${c.capture} · ${c.viewport}] ${c.route} — expected: ${c.reads}`)
+    }
+    console.error(
+      '  (the usual cause is a fixture chain the app has no wagmi transport for. `getClient`\n' +
+        "   CATCHES ChainNotConfiguredError and returns undefined, so usePublicClient is\n" +
+        '   undefined and every consumer returns at its first line — silently. Check that\n' +
+        `   FIXTURE_SAFE.chain_id (${FIXTURE_SAFE.chain_id}) is registered in lib/wagmi.ts, which\n` +
+        '   derives its chains from SUPPORTED_CHAINS in lib/chains.ts.)',
+    )
+  }
   if (consoleErrors.length > 0) {
     console.log(`\n⚠ ${consoleErrors.length} console error(s) during capture — the PNGs may show broken screens:`)
     for (const e of consoleErrors) console.log(`  [${e.route} · ${e.viewport}] ${e.text}`)
@@ -2968,7 +3152,12 @@ async function main() {
   // Broken evidence must not exit 0 — a failed navigation means missing PNGs,
   // and a blank capture means the run produced something that LOOKS like
   // evidence (#1738).
-  if (gotoFailures.length > 0 || deletedCaptures.length > 0 || CHAIN_READ_GAPS.length > 0) {
+  if (
+    gotoFailures.length > 0 ||
+    deletedCaptures.length > 0 ||
+    CHAIN_READ_GAPS.length > 0 ||
+    CHAIN_SILENT_CAPTURES.length > 0
+  ) {
     process.exit(1)
   }
 }

@@ -207,6 +207,23 @@ test('/design-system: both stages are container-keyed, and the second one is not
  * box between a sticky `thead` and its scrollport silently stops it pinning —
  * the failure looked like nothing at all until the header's `y` was read while
  * scrolling. Same instrument here.
+ *
+ * ⚠️ THE ROW PADDING AND THE SHORT VIEWPORT ARE THE TEST, NOT SETUP.
+ * This took two rounds of the same lesson. The first draft ran at 1280x700
+ * and PASSED against a mutation that put `overflow-x-auto` on the wrapper —
+ * the exact #1772 shape it exists to catch. The mocked `/transactions`
+ * renders ONE row, so `main.scrollHeight` was 644 against a `clientHeight` of
+ * 644: the page could not scroll at all, `scrollTop` stayed 0, and "the
+ * header barely moved" was true of a header nothing had moved. Shortening the
+ * viewport to 300px fixed the scrolling and the test then failed on the
+ * UNMUTATED tree — because with only 188px of travel a header starting at
+ * y=297 never reaches its `-top-8` threshold, so sticky had not engaged yet
+ * and "moved with the content" was the correct behaviour. Both are the same
+ * diagnosis: condition outside the range where it matters.
+ * So the rows are cloned until the table is genuinely long. The two
+ * non-vacuity assertions below refuse to run the pinning check unless the
+ * scroll happened AND it was far enough to push the header past its
+ * threshold. Assert the instrument can say "no" before trusting a "yes".
  */
 test('/transactions: the sticky header still pins through the container wrapper (#1772)', async ({
   page,
@@ -214,29 +231,70 @@ test('/transactions: the sticky header still pins through the container wrapper 
   test.slow()
   await mockHavenApi(page)
   await seedAuthenticatedSession(page)
-  await page.setViewportSize({ width: 1280, height: 700 })
+  // Short on purpose — see the note above. `main` has to be a scrollport.
+  await page.setViewportSize({ width: 1280, height: 300 })
   await page.goto('/transactions')
-  await page.waitForSelector('thead tr', { timeout: 60_000 })
-  await page.waitForTimeout(600)
+  await page.waitForSelector('tbody tr', { timeout: 60_000 })
+  // Make the table genuinely long. The mock serves one transaction; sticky
+  // cannot be observed on a table shorter than its own scrollport.
+  await page.evaluate(() => {
+    const tbody = document.querySelector('tbody')
+    const row = tbody?.querySelector('tr')
+    if (!tbody || !row) throw new Error('no row to clone')
+    for (let i = 0; i < 40; i++) tbody.appendChild(row.cloneNode(true))
+  })
+  await page.waitForTimeout(800)
 
-  const headTop = () =>
+  const state = () =>
     page.evaluate(() => {
-      const thead = document.querySelector('thead')
-      return thead ? +thead.getBoundingClientRect().top.toFixed(1) : NaN
+      const main = document.querySelector('main') as HTMLElement | null
+      const thead = document.querySelector('thead') as HTMLElement | null
+      return {
+        scrollTop: main?.scrollTop ?? -1,
+        scrollable: (main?.scrollHeight ?? 0) - (main?.clientHeight ?? 0),
+        theadTop: thead ? +thead.getBoundingClientRect().top.toFixed(1) : NaN,
+      }
     })
 
-  const before = await headTop()
+  const before = await state()
+  // NON-VACUITY: without this the pinning bound below is satisfiable by a page
+  // that never scrolled, which is exactly how the first draft passed a
+  // mutation. Assert the instrument can say "no" before trusting it saying
+  // "yes".
+  expect(
+    before.scrollable,
+    `main must be a scrollport for this test to mean anything (overflow ${before.scrollable}px)`,
+  ).toBeGreaterThan(900)
+
   await page.evaluate(() => {
     const main = document.querySelector('main')
-    if (main) main.scrollTop = 400
+    if (main) main.scrollTop = 900
   })
   await page.waitForTimeout(400)
-  const after = await headTop()
-
-  // Pinned means it barely moves. Unpinned, it leaves with the content —
-  // #1772 measured y=56 pinned against y=-303 unpinned on this same page.
+  const after = await state()
+  expect(after.scrollTop, 'the scroll actually took effect').toBeGreaterThan(600)
+  // Far enough that a NON-pinning header would have left the viewport
+  // entirely. Without this the bound below is satisfiable by a header that
+  // simply has not reached its threshold yet.
   expect(
-    Math.abs(after - before),
-    `thead moved from y=${before} to y=${after} while main scrolled 400px`,
-  ).toBeLessThan(40)
+    before.theadTop - after.scrollTop,
+    'the scroll must exceed the header\'s sticky threshold, or "it barely moved" proves nothing',
+  ).toBeLessThan(-100)
+
+  // WHAT PINNED LOOKS LIKE, and it is not "barely moved" — a third round of
+  // the same lesson. A sticky header DOES travel, from its resting position
+  // down the page to its pinned offset, and then stops. Measured here: y=297
+  // at rest, y=56 once pinned, which is the same y=56 #1772 recorded on this
+  // page. Unpinned it keeps going with the content — #1772 measured y=-303,
+  // and after a 900px scroll it would be far below that. So the assertion is
+  // about where the header LANDS, inside the scrollport, not about how far it
+  // moved.
+  expect(
+    after.theadTop,
+    `thead landed at y=${after.theadTop} after main scrolled ${after.scrollTop}px (pinned is ~56, unpinned is far negative)`,
+  ).toBeGreaterThan(0)
+  expect(
+    after.theadTop,
+    `thead landed at y=${after.theadTop}, too far down to be pinned against the TopBar`,
+  ).toBeLessThan(120)
 })

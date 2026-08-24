@@ -42,15 +42,41 @@ const TAP_TARGET_CLASS: Record<Size, string> = {
   lg: '',
 }
 
+/**
+ * Fill and focus-ring TONE travel together (#1817).
+ *
+ * The ring's width, offset and offset-colour stay in the base string — those are
+ * uniform across every variant. Its COLOUR lives here, next to the fill it has
+ * to agree with, because a destructive control signals destructive in every
+ * state it has: the `danger` variant is a solid `--v2-danger` fill and wore
+ * `ring-brand/80` for as long as the ring colour lived in the base string,
+ * across four destructive confirmations including the approval queue's reject.
+ *
+ * Co-locating them is what makes the defect *visible* rather than merely fixed.
+ * A per-class-string guard cannot pair a fill in this table with a ring in the
+ * base template — that split is exactly why both existing guards were blind to
+ * this, and #1798 had to write a bespoke `Button` assertion for the offset rule
+ * for the same reason. With the two in one string the general tone rule in
+ * `focus-ring.test.ts` now covers `Button` like any other call-site.
+ *
+ * Do not move the colour back to the base string to "deduplicate" it: three
+ * variants repeating `ring-brand/80` is the cost of the fourth being checkable.
+ *
+ * **A caller-supplied ring colour via `className` is unsupported.** No call-site
+ * does it today. If one did, the override would NOT reliably win: both values
+ * set `--tw-ring-color`, and which one applies is decided by declaration order
+ * in Tailwind's generated stylesheet, not by position in the class attribute —
+ * so "mine is last in the markup" is not a rule. Add a variant instead.
+ */
 const VARIANT_CLASS: Record<Variant, string> = {
   primary:
-    'bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)] shadow-[var(--v2-shadow-button)]',
+    'bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)] shadow-button focus-visible:ring-brand/80',
   ghost:
-    'bg-white text-[var(--v2-ink)] border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)]',
+    'bg-white text-[var(--v2-ink)] border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] focus-visible:ring-brand/80',
   tertiary:
-    'bg-transparent text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]',
+    'bg-transparent text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)] focus-visible:ring-brand/80',
   danger:
-    'bg-[var(--v2-danger)] text-white hover:bg-[var(--v2-danger)]/90 shadow-[var(--v2-shadow-button)]',
+    'bg-[var(--v2-danger)] text-white hover:bg-danger/90 shadow-button focus-visible:ring-danger/80',
 }
 
 type ButtonProps = {
@@ -59,6 +85,20 @@ type ButtonProps = {
   target?: AnchorHTMLAttributes<HTMLAnchorElement>['target']
   rel?: AnchorHTMLAttributes<HTMLAnchorElement>['rel']
   type?: ButtonHTMLAttributes<HTMLButtonElement>['type']
+  /**
+   * Associates a submit button with a `<form>` elsewhere in the document, by
+   * that form's `id` (#1946).
+   *
+   * Needed because `ui/Modal`'s `footer` renders OUTSIDE the scrolling body —
+   * it is a flex sibling, not a descendant — so a dialog whose fields live in
+   * a `<form>` in the body cannot put its submit button in the footer by
+   * nesting. The HTML `form` attribute is the standard answer, and it keeps
+   * implicit submission (Enter in a text field) working, which rewiring the
+   * button to `type="button"` + `onClick` would silently drop.
+   *
+   * Ignored on the `href` branch below: an anchor has no form owner.
+   */
+  form?: string
   disabled?: boolean
   onClick?: ButtonHTMLAttributes<HTMLButtonElement>['onClick']
   variant?: Variant
@@ -73,6 +113,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   target,
   rel,
   type = 'button',
+  form,
   disabled,
   onClick,
   variant = 'primary',
@@ -80,7 +121,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   className = '',
   trailingIcon,
 }, ref) {
-  const classes = `inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] disabled:cursor-not-allowed disabled:opacity-60 ${SIZE_CLASS[size]} ${TAP_TARGET_CLASS[size]} ${VARIANT_CLASS[variant]} ${className}`
+  // Ring geometry is uniform and lives here; ring COLOUR is per-variant and
+  // lives in VARIANT_CLASS, next to the fill it must agree with (#1817).
+  const classes = `inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] disabled:cursor-not-allowed disabled:opacity-60 ${SIZE_CLASS[size]} ${TAP_TARGET_CLASS[size]} ${VARIANT_CLASS[variant]} ${className}`
   const content = (
     <>
       {children}
@@ -92,7 +135,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 
   if (!href) {
     return (
-      <button ref={ref} type={type} disabled={disabled} onClick={onClick} className={classes}>
+      <button ref={ref} type={type} form={form} disabled={disabled} onClick={onClick} className={classes}>
         {content}
       </button>
     )

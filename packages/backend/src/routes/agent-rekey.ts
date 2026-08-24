@@ -2,8 +2,11 @@
  * Agent re-key — owner-authorised credential rotation (#1698, epic #1694).
  *
  * Same agent identity, new delegate key, new API key, old authority revoked.
- * The agent row keeps its id, name, history and passport; only its
- * credentials change. This is what "I lost my key" should do, and it is why
+ * The agent row keeps its id, name, history and passport IDENTITY; only its
+ * credentials change. The passport's on-chain ANCHOR does change — an EAS
+ * attestation names the delegate EOA and is immutable, so completion kicks a
+ * revoke-and-reissue (#1699). Standing is untouched throughout: it derives
+ * from `agents.status`, which a re-key never writes. This is what "I lost my key" should do, and it is why
  * losing a delegate key is recoverable at all: the delegate never held owner
  * authority, so the account owner can replace it.
  *
@@ -65,6 +68,9 @@ import { getChain } from '../domain/chains.js'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
 import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
+// One copy of the multi-signer rule (#1086), shared with agent-delegations.ts:
+// "has an owner" must never mean "must sign as the owner".
+import { resolveSignatureScheme } from '../rails/hybrid-signer-actions.js'
 import {
   buildBudgetDelegation,
   buildRevocation,
@@ -110,6 +116,7 @@ import {
   type DelegationTerms,
   type RekeyStage,
 } from '../modules/agents/index.js'
+import { reanchorPassportBestEffort } from '../modules/passport/index.js'
 
 function safeDetails(err: unknown): string {
   return redactVendorSecrets(err instanceof Error ? err.message : String(err))
@@ -128,6 +135,38 @@ function orderingReply(reply: FastifyReply, err: RekeyOrderingError): FastifyRep
     required_stage: err.required,
     detail: err.message,
   })
+}
+
+/**
+ * The message for a carry that is absent because there was nothing to carry —
+ * as opposed to one the delay outran, which `planCarry` reports itself.
+ *
+ * All three branches exist because two independent things can have happened
+ * since the meter was read, and the owner is owed the truth about both: the
+ * old period may have ended, and the whole grant may have died. Saying
+ * "authority resumes at the original boundary" when the steady grant was
+ * itself dropped contradicts the very next line of the same response — the
+ * shape a reviewer caught on #1849 before it shipped.
+ */
+function fullySpentReason(
+  steady: { startDate: number } | null,
+  dropped: ReadonlyArray<{ role: string }>,
+  nowSec: number,
+): string {
+  const spent = 'The period was fully spent when the meter was read.'
+  if (!steady) {
+    // Either the grant had no period after this one, or the delay outran the
+    // one it had. Promise nothing: the accompanying drop reason, when there
+    // is one, says which.
+    return dropped.some((d) => d.role === 'steady')
+      ? `${spent} The grant's own life then ended before this re-key was finished, so nothing ` +
+          'is issued for it — no spend was lost that was still available to lose.'
+      : `${spent} The grant had no period after that one, so there is nothing to resume.`
+  }
+  return steady.startDate <= nowSec
+    ? `${spent} That period has since ended, so the replacement grant is already live on the ` +
+        'original budget.'
+    : `${spent} No carry grant is issued; authority resumes at the original boundary.`
 }
 
 export default async function agentRekeyRoutes(app: FastifyInstance): Promise<void> {
@@ -322,7 +361,27 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
   })
 
   // ── POST /:id/rekey/:rekeyId/revoke — prepare the owner-signed revoke ──
-  app.post<{ Params: { id: string; rekeyId: string } }>(
+  //
+  // The account is told WHICH signer will sign, and the client is told which
+  // scheme was resolved (#1870). Both mirror `routes/agent-delegations.ts`,
+  // which does the same job for ordinary budget revocation — same helper,
+  // same `signWith` mapping, same two response branches.
+  //
+  // Why it is not cosmetic: `createTreasuryOps` estimates gas against a dummy
+  // signature sized for the signer it was told about, and falls back to
+  // inferring `owner` whenever an EOA owner exists. On a multi-signer account
+  // — an EOA owner AND enrolled passkeys — that inference is a guess, so a
+  // passkey signature (several hundred bytes) was being validated against a
+  // `verificationGasLimit` estimated for 65 bytes.
+  //
+  // Every refusal added here lands in the PREPARE step, which writes nothing
+  // and leaves the re-key at `preflight`. That is deliberate: #1868 makes any
+  // failure AFTER the revoke a permanent wedge, so a scheme the account
+  // cannot sign must be refused before the point of no return, not after it.
+  app.post<{
+    Params: { id: string; rekeyId: string }
+    Body: { signature_scheme?: string }
+  }>(
     '/:id/rekey/:rekeyId/revoke',
     async (request, reply) => {
       const loaded = await loadStep(request, reply)
@@ -372,6 +431,12 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
       if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
 
+      // Resolved BEFORE the treasury is built — a scheme this account cannot
+      // sign is a cheap 409 rather than a 502 from the kit, and nothing about
+      // the re-key has moved.
+      const resolved = resolveSignatureScheme(request.body?.signature_scheme, owner.config)
+      if ('error' in resolved) return reply.code(409).send({ error: resolved.error })
+
       try {
         const treasury = await createTreasuryOps({
           ownerAddress: owner.config.ownerAddress,
@@ -381,19 +446,37 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
           bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
           rpcUrl: getChain(agent.chain_id).rpcUrl,
           sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
+          signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
         })
         const calls = targets.map((t) => buildRevocation(JSON.parse(t.delegation_json), agent.chain_id))
         const prepared = await treasury.prepareCalls(calls)
         const user_operation = JSON.parse(
           JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
         )
+        const delegation_hashes = targets.map((t) => t.delegation_hash)
+        const submitStep = `POST /agents/${request.params.id}/rekey/${rekey.id}/revoke/submit`
+        if (resolved.scheme === 'webauthn_userop') {
+          // The account passkey signs the userOpHash via WebAuthn (#887).
+          // No EIP-712 payload is emitted, so a client cannot accidentally
+          // sign the wrong artefact for the scheme it was handed.
+          return {
+            signature_scheme: 'webauthn_userop',
+            user_op_hash: prepared.userOpHash,
+            user_operation,
+            treasury_address: prepared.treasuryAddress,
+            delegation_hashes,
+            instructions: `Sign user_op_hash with the account passkey (WebAuthn), then ${submitStep}`,
+          }
+        }
         return {
+          // The EOA owner signs THIS typed data (the account validates it),
+          // not the bare hash — the #829 lesson, shared with the sibling.
+          signature_scheme: 'eip712_userop',
           signing_payload: prepared.signingTypedData,
-          user_op_hash: prepared.userOpHash,
           user_operation,
           treasury_address: prepared.treasuryAddress,
-          delegation_hashes: targets.map((t) => t.delegation_hash),
-          instructions: `Sign, then POST /agents/${request.params.id}/rekey/${rekey.id}/revoke/submit`,
+          delegation_hashes,
+          instructions: `Sign signing_payload (EIP-712) with the treasury owner key, then ${submitStep}`,
         }
       } catch (err) {
         return reply
@@ -564,6 +647,23 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       }
 
       const nowSec = Math.floor(Date.now() / 1000)
+      // #1849: the period the remainder was MEASURED in, which is the only
+      // period it means anything in. `metered_at` has been on the row since
+      // migration 065 and was never read — the carry arithmetic ran against
+      // the issue-time clock instead, so an owner who finished after a period
+      // boundary had the remainder spent against the wrong period. That could
+      // not over-grant, but it silently under-granted, at worst to zero for a
+      // period the agent was owed a full budget in.
+      if (!rekey.metered_at) {
+        // Unreachable through the stage machine (`metered` is what sets it),
+        // and refused rather than defaulted anyway: falling back to `nowSec`
+        // here would silently restore the exact bug this closes.
+        return reply.code(409).send({
+          error: 'rekey_out_of_order',
+          detail: 'the re-key has no metering timestamp — re-run the revoke/submit step',
+        })
+      }
+      const meteredAtSec = Math.floor(new Date(rekey.metered_at).getTime() / 1000)
       const built: Array<{
         delegation_hash: string
         carry_role: string
@@ -592,6 +692,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
               remainingAtomic: BigInt(entry.remaining_atomic),
               fromChain: entry.from_chain,
             },
+            meteredAtSec,
             nowSec,
           })
         } catch (err) {
@@ -616,17 +717,25 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
             reason: 'The replaced delegation had already expired — nothing to carry.',
           })
         } else if (plan.kind === 'dormant') {
-          pieces.push({ role: 'reanchor', terms: plan.reissue })
+          if (plan.reissue) pieces.push({ role: 'reanchor', terms: plan.reissue })
         } else {
           if (plan.carry) pieces.push({ role: 'carry', terms: plan.carry })
-          else
+          else if (plan.dropped.every((d) => d.role !== 'carry'))
             skipped.push({
               delegation_hash: entry.delegation_hash,
-              reason:
-                'The period was fully spent — no carry grant is issued; authority resumes at the ' +
-                'original boundary.',
+              reason: fullySpentReason(plan.steady, plan.dropped, nowSec),
             })
           if (plan.steady) pieces.push({ role: 'steady', terms: plan.steady })
+        }
+
+        // #1849: anything the delay outran, reported with the delay named. A
+        // dropped piece is not a silent omission — it is the difference
+        // between the owner understanding why a grant is missing and
+        // concluding the re-key broke their agent.
+        if (plan.kind !== 'expired') {
+          for (const drop of plan.dropped) {
+            skipped.push({ delegation_hash: entry.delegation_hash, reason: drop.reason })
+          }
         }
 
         for (const piece of pieces) {
@@ -781,6 +890,23 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       // the owner can retry the completion with the signatures already held.
       return reply.code(409).send({ error: 'rekey_completion_failed', details: safeDetails(err) })
     }
+
+    // Re-anchor the Agent Passport on the NEW key (#1699).
+    //
+    // Deliberately OUTSIDE the completion transaction and deliberately
+    // fire-and-forget. `PASSPORT_SCHEMA`'s first field is `address agentEoa`
+    // and EAS attestations are immutable, so this is a chain round-trip —
+    // revoke the old attestation, mint a new one — and #1699's acceptance is
+    // explicit that a chain problem must not cost an agent its standing. Doing
+    // it inside the transaction would invert that: an EAS outage would roll
+    // back a re-key that had already succeeded, leaving the owner holding
+    // signatures for delegations that never activated.
+    //
+    // Nothing is lost if this call never runs. The re-anchor queue is defined
+    // by the INVARIANT "the anchored attestation names an address the agent no
+    // longer uses", which is now true of this agent's own row, so the passport
+    // sweep picks it up regardless. This is the fast path, not the mechanism.
+    reanchorPassportBestEffort(request.params.id, sub)
 
     return {
       completed: true,

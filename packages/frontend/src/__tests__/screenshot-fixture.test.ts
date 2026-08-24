@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs script; typed via the cast below
 import {
@@ -6,8 +6,10 @@ import {
   SEED_STORAGE_KEYS,
   FIXTURE_EMPTY_FALLBACK,
   SCENARIOS,
+  ScenarioHttpError,
 } from '../../scripts/screenshot.mjs'
 import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
+import { getStoredPasskeySigner, passkeyStorageKey } from '../lib/signer'
 import {
   isMcpToolCallActivityItem,
   isPaymentActivityItem,
@@ -19,6 +21,18 @@ const fx = fixtureFor as (apiPath: string, mode?: string) => Record<string, unkn
 type ScenarioShape = {
   api: (apiPath: string, method: string) => Record<string, unknown> | undefined
 }
+/** A scenario that also seeds device-local state before app code runs (#1856). */
+type SeedingScenarioShape = ScenarioShape & {
+  seed: () => Record<string, string> | undefined
+}
+/** A scenario that shoots one surface at several states (#1725). */
+type StagedScenarioShape = ScenarioShape & {
+  stage: (next: string) => void
+  stages: Record<string, Record<string, unknown> | null>
+}
+/** Kept in step with FIXTURE_SAFE in screenshot.mjs. */
+const FIXTURE_SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
+const FIXTURE_CHAIN_ID = 84532
 /** Kept in step with the scenario's own constant in screenshot.mjs. */
 const SETUP_ID = 'setup-screenshot'
 /** Likewise FIXTURE_SAFE.id — the legacy scenario must reuse the same account. */
@@ -140,7 +154,19 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     const approve = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent-approve']
     const approveLegacy = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent-approve-legacy']
     const signerRemoval = (SCENARIOS as Record<string, ScenarioShape>)['account-signer-removal']
-    const backupRecovery = (SCENARIOS as Record<string, ScenarioShape>)['account-backup-recovery']
+    // Cast the ENTRY, not the registry: `Record<string, StagedScenarioShape>`
+    // would claim every scenario is staged, and only this one is.
+    const backupRecovery = (SCENARIOS as Record<string, ScenarioShape>)[
+      'account-backup-recovery'
+    ] as StagedScenarioShape
+
+    // The stage is module state in screenshot.mjs (the scenario's `run` resets
+    // it per viewport for the same reason). Leaving it moved would make every
+    // assertion below depend on which test ran last.
+    afterEach(() => backupRecovery.stage('healthy'))
+
+    const signersOf = (scenario: ScenarioShape) =>
+      scenario.api(`/accounts/hybrid/${FIXTURE_SAFE_ADDRESS}/signers`, 'GET')
 
     it('overrides only the account signer set needed to reach the removal confirmation (#1199)', () => {
       const signers = signerRemoval.api('/accounts/hybrid/0x111/signers', 'GET')
@@ -189,6 +215,62 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(backupRecovery.api('/agents', 'GET')).toBeUndefined()
     })
 
+    // ── The two states #1725 added to the same scenario ──────────────────────
+
+    it('opens on the healthy set, whatever the last run left behind (#1725)', () => {
+      // The stage is module state and `run` resets it per viewport. Pinned
+      // here because the reset is the difference between the mobile pass
+      // shooting the healthy card and shooting whatever the desktop pass
+      // finished on — under the healthy capture's filename either way.
+      backupRecovery.stage('load-error')
+      backupRecovery.stage('healthy')
+      expect(signersOf(backupRecovery)).toMatchObject({ owner_address: '0x' + 'ee'.repeat(20) })
+    })
+
+    it('serves exactly ONE way to approve for the warning capture (#1725)', () => {
+      // `AccountSignersCard` renders the amber banner on
+      // `wayCount < 2`, where `wayCount = passkeys.length + (owner_address ? 1 : 0)`.
+      // Asserting that arithmetic rather than the shape it happens to take, so
+      // a fixture that grew a second passkey fails HERE instead of quietly
+      // filing a healthy render under the one-way name.
+      backupRecovery.stage('one-way')
+      const signers = signersOf(backupRecovery) as {
+        owner_address: string | null
+        passkeys: unknown[]
+      }
+      expect(signers.owner_address).toBeNull()
+      expect(signers.passkeys).toHaveLength(1)
+      expect(signers.passkeys.length + (signers.owner_address ? 1 : 0)).toBeLessThan(2)
+    })
+
+    it('reaches loadError the only way the product can — a non-2xx (#1725)', () => {
+      // `useAccountSigners`'s `reload` sets `loadError` in its `catch`, and
+      // `lib/api.ts` throws only on `!response.ok`. So NO 200 body reaches this
+      // branch, however it is shaped — which is what the `ScenarioHttpError`
+      // plumbing exists for, and why this test asserts the failure rather than
+      // a payload. A regression that turned this back into a body would make
+      // the capture a silent duplicate of the healthy one.
+      backupRecovery.stage('load-error')
+      const answer = signersOf(backupRecovery)
+      expect(answer).toBeInstanceOf(ScenarioHttpError)
+      expect((answer as unknown as { status: number }).status).toBeGreaterThanOrEqual(500)
+    })
+
+    it('still answers only the signer route in every stage (#1725)', () => {
+      for (const stage of Object.keys(backupRecovery.stages)) {
+        backupRecovery.stage(stage)
+        expect(backupRecovery.api('/auth/me', 'GET'), stage).toBeUndefined()
+        expect(backupRecovery.api('/agents', 'GET'), stage).toBeUndefined()
+      }
+    })
+
+    it('refuses an unknown stage instead of serving the previous one (#1725)', () => {
+      // A typo'd stage name that silently left the fixture where it was would
+      // shoot the wrong state under the right filename — the exact
+      // confidently-wrong-evidence shape the capture harness fails loudly for.
+      expect(() => backupRecovery.stage('one-way-warning')).toThrow(/unknown stage/)
+    })
+
     it('pins the setup at awaiting_connection for the whole capture', () => {
       // The shared e2e fixture flips to connected_local after the first status
       // read, which would end the waiting screen mid-capture. The scenario
@@ -197,6 +279,75 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       const second = connect.api(`/agent-connection-setups/${SETUP_ID}`, 'GET')
       expect(first).toMatchObject({ status: 'awaiting_connection', agent_id: null })
       expect(second).toMatchObject({ status: 'awaiting_connection' })
+    })
+
+    it('serves a safe WITHOUT chain_id for the unresolved-chain capture (#1844)', () => {
+      // The capture's whole claim is that the modal reached the fallback path
+      // through the wire, not through a hand-edited component. That only holds
+      // if the served safe genuinely lacks `chain_id` — a scenario that quietly
+      // kept the field would shoot the resolved screen under the unresolved
+      // filename, which is exactly the confidently-wrong-evidence shape #1800
+      // exists to prevent.
+      const unresolved = (SCENARIOS as Record<string, ScenarioShape>)['add-funds-unresolved-chain']
+      const me = unresolved.api('/auth/me', 'GET') as { safes: Record<string, unknown>[] }
+      const list = unresolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
+      for (const { safes } of [me, list]) {
+        expect(safes).toHaveLength(1)
+        expect(safes[0]).not.toHaveProperty('chain_id')
+        // Still a real, addressable safe — the hazard is a MISSING chain beside
+        // a PRESENT address, so an empty safe would prove something else.
+        expect(safes[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+        expect(safes[0].id).toBe(FIXTURE_SAFE_ID)
+        expect(safes[0]).not.toHaveProperty('account_type')
+      }
+      expect(unresolved.api('/agents', 'GET')).toBeUndefined()
+    })
+
+    it('keeps the resolved add-funds capture on the shared chain_id (#1844)', () => {
+      // The pair is only evidence about the CHAIN if the chain is the only
+      // thing that differs. The resolved half must therefore still carry
+      // chain_id 84532 — the shared fixture's — while sharing its counterpart's
+      // rail override (dropping `account_type`, which exists purely so the hero
+      // renders its action buttons instead of the passkey-on-another-device
+      // notice).
+      const resolved = (SCENARIOS as Record<string, ScenarioShape>)['add-funds']
+      const me = resolved.api('/auth/me', 'GET') as { safes: Record<string, unknown>[] }
+      expect(me.safes).toHaveLength(1)
+      expect(me.safes[0].chain_id).toBe(84532)
+      expect(me.safes[0]).not.toHaveProperty('account_type')
+      // Both safe endpoints must agree — a fixture where one says 84532 and the
+      // other says nothing is a trap for the next scenario that reads the other.
+      const list = resolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
+      expect(list.safes[0].chain_id).toBe(84532)
+      expect(resolved.api('/agents', 'GET')).toBeUndefined()
+    })
+
+    it('serves the receive-funds pair differing by chain_id and nothing else (#1852)', () => {
+      // Same contract as the #1844 pair above, asserted for the receive
+      // surface. The pair is only evidence about the CHAIN if the chain is the
+      // only thing that differs — and the unresolved capture only proves
+      // suppression if its safe genuinely lacks `chain_id` on BOTH endpoints.
+      const resolved = (SCENARIOS as Record<string, ScenarioShape>)['receive-funds']
+      const unresolved = (SCENARIOS as Record<string, ScenarioShape>)['receive-funds-unresolved-chain']
+
+      for (const endpoint of ['/auth/me', '/user/safes']) {
+        const r = resolved.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
+        const u = unresolved.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
+        expect(r.safes).toHaveLength(1)
+        expect(u.safes).toHaveLength(1)
+        expect(r.safes[0].chain_id).toBe(84532)
+        expect(u.safes[0]).not.toHaveProperty('chain_id')
+        // A MISSING chain beside a PRESENT address is the hazard; an empty safe
+        // would prove something else entirely.
+        expect(u.safes[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+        expect(u.safes[0].id).toBe(FIXTURE_SAFE_ID)
+        // The rail override is the ONLY other difference from the shared
+        // fixture, and both halves carry it, so `chain_id` is the sole variable.
+        expect(r.safes[0]).not.toHaveProperty('account_type')
+        expect(u.safes[0]).not.toHaveProperty('account_type')
+      }
+      expect(resolved.api('/agents', 'GET')).toBeUndefined()
+      expect(unresolved.api('/agents', 'GET')).toBeUndefined()
     })
 
     it('answers the setup CREATE that the shared fixture does not key', () => {
@@ -281,6 +432,104 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           passkeys: unknown[]
         }
         expect(signers.passkeys).toHaveLength(1)
+      })
+    })
+
+    // #1856: the send-review capture — the first `TransactionMovement`
+    // consumer reached by driving a gate rather than by a URL. Its fixture
+    // contract is one field wider than the others', because one of its two
+    // overrides lives in localStorage rather than in an API answer.
+    describe('send-review (#1856)', () => {
+      // Narrowed from the shared shape rather than casting the whole registry:
+      // `seed` is optional across scenarios (only this one needs it), so a
+      // registry-wide cast would claim every entry has one.
+      const sendReview = (SCENARIOS as Record<string, ScenarioShape>)[
+        'send-review'
+      ] as SeedingScenarioShape
+
+      it('seeds a passkey record the REAL parser accepts, under the key the app computes', () => {
+        // The whole capture hangs on this. `SendModal.tsx:821` disables
+        // Continue while `signingUnavailable`, and `useSafeOperationGate` only
+        // leaves that state when `getStoredPasskeySigner` returns a signer —
+        // so the seed is asserted against the parser ITSELF, not against a
+        // hand-copied shape. A schema bump (`PASSKEY_SCHEMA_VERSION`, a new
+        // required field, a tightened regex) fails here, loudly, instead of
+        // silently un-reaching the review step months later.
+        const seeded = sendReview.seed() as Record<string, string>
+        const key = passkeyStorageKey(FIXTURE_SAFE_ADDRESS, FIXTURE_CHAIN_ID)
+        expect(Object.keys(seeded)).toEqual([key])
+
+        window.localStorage.clear()
+        // Paired evidence, in the order that makes it evidence: the parser
+        // must say NO before the seed and YES after it. Asserting only the
+        // second half would pass against a parser that accepts anything.
+        expect(
+          getStoredPasskeySigner({ safeAddress: FIXTURE_SAFE_ADDRESS, chainId: FIXTURE_CHAIN_ID }),
+        ).toBeNull()
+
+        for (const [k, v] of Object.entries(seeded)) window.localStorage.setItem(k, v)
+        const signer = getStoredPasskeySigner({
+          safeAddress: FIXTURE_SAFE_ADDRESS,
+          chainId: FIXTURE_CHAIN_ID,
+        })
+        // `toEqual` against a shape DERIVED from the seed, not `toMatchObject`
+        // against a couple of hand-copied fields: the claim being made is that
+        // the parser round-trips every field the seed writes, and a partial
+        // matcher would let `credentialId` or the public-key pair drift out of
+        // the seed without reddening anything.
+        //
+        // `type: 'passkey'` is the one field with no counterpart in the seed,
+        // and it is not incidental — it is what makes the captured screen say
+        // "Approve with · Device approval" and "fees are paid by Haven", which
+        // is the copy a passkey user actually reads. An `eoa` signer would
+        // render a different screen under the same filename.
+        const record = JSON.parse(seeded[key]) as {
+          address: string
+          credentialId: string
+          publicKey: { x: string; y: string }
+          chainId: number
+        }
+        expect(record.chainId).toBe(FIXTURE_CHAIN_ID)
+        expect(signer).toEqual({
+          type: 'passkey',
+          address: record.address,
+          credentialId: record.credentialId,
+          publicKey: record.publicKey,
+          chainId: record.chainId,
+        })
+        window.localStorage.clear()
+      })
+
+      it('puts the account on the Safe rail — the same override as the funding pair', () => {
+        // Not about signing: the dashboard hero hides Send entirely when no
+        // Safe-rail account exists (`DashboardClient.tsx:907`), so without this
+        // the run never opens the modal at all. Both safe endpoints agree, for
+        // the same reason the #1844/#1852 pairs do.
+        for (const endpoint of ['/auth/me', '/user/safes']) {
+          const res = sendReview.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
+          expect(res.safes).toHaveLength(1)
+          expect(res.safes[0]).not.toHaveProperty('account_type')
+          expect(res.safes[0].chain_id).toBe(FIXTURE_CHAIN_ID)
+        }
+      })
+
+      it('pins threshold 1 rather than inheriting the empty fallback by accident', () => {
+        // The generic empty fallback is TRUTHY, so `!safeDetails` passes and
+        // Continue enables without this key — but `threshold` would then read
+        // `undefined ?? 1`. A threshold of 2 renders an extra "will wait for
+        // approval" banner on the very screen under capture, so the layout
+        // would depend on an accident rather than on a stated fixture.
+        const details = sendReview.api(`/safe/${FIXTURE_SAFE_ADDRESS}/details`, 'GET') as {
+          threshold: number
+          owners: string[]
+        }
+        expect(details.threshold).toBe(1)
+        expect(details.owners).toHaveLength(1)
+      })
+
+      it('leaves every other endpoint to the shared fixture', () => {
+        expect(sendReview.api('/agents', 'GET')).toBeUndefined()
+        expect(sendReview.api('/balances/0x1111', 'GET')).toBeUndefined()
       })
     })
   })

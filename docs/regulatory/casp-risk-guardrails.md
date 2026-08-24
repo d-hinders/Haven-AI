@@ -28,14 +28,17 @@ covers:
   - packages/backend/src/modules/catalog/catalog-discovery.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
   - packages/backend/src/domain/payment-coverage.ts
+  - packages/backend/src/domain/machine-payment-lifecycle.ts
   - packages/backend/src/infra/relayer*.ts
   - packages/backend/src/infra/outbound-*.ts
+  - packages/backend/src/infra/delegate-*.ts
   - packages/backend/src/modules/reporting/**
   - packages/backend/src/modules/accounts/safe-deployer.ts
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/middleware/reportingFeed.ts
   - packages/backend/src/db/migrations/**
+  - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/passkeys.ts
   - packages/backend/src/routes/safe-deploy.ts
@@ -53,14 +56,17 @@ covers:
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/frontend/src/components/UsingYourAgentInfo.tsx
   - packages/sdk/src/**
+  - packages/cli/src/**
   - packages/connect/src/**
   - packages/mcp/src/**
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
+  - scripts/release-bump.mjs
+  - .github/workflows/publish.yml
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-16" # #1496: this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
+last-verified: "2026-08-22" # chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -766,6 +772,26 @@ is money-path enough to route the [`money.md`](../contributing/ship-playbooks/mo
 playbook, it is money-path enough to owe a perimeter shard. **Adding a file to
 that list without adding it here re-opens this hole.**
 
+**That rule is now checked (#1899).** It was maintained by hand for two months
+and had drifted by four globs — `domain/machine-payment-lifecycle.ts` and
+`infra/delegate-*.ts` were simply missing, and `infra/chain/**` and
+`infra/repositories/**` were partly covered by named files. Two of those are
+telling: `infra/relayer*.ts` and `infra/outbound-*.ts` were both here while
+`infra/delegate-*.ts` was not, which is the *same* prefix accident that hid
+`infra/delegate-balance-monitor.ts` — the DETECT mitigation for the x402
+in-flight window — from the money-path list itself until #1892's review. One
+omission in two lists, found twice, because a rule stated in prose is a rule
+nobody re-checks.
+
+`scripts/ci/money-path.test.mjs` now asserts this front matter spans every
+runtime glob in [`.github/money-path-globs.json`](../../.github/money-path-globs.json).
+The two remaining gaps are **exempted explicitly, not silently**: widening a
+`contract: true` doc's `covers:` across `infra/chain/**` (11 files) and
+`infra/repositories/**` (49 files) makes every future PR touching those layers
+owe a CASP shard, which is a friction decision for this doc's owner rather than
+a drift fix. They sit in that test's `EXEMPT` map with their reasons; anything
+else added to the money-path list reddens CI on the day it lands.
+
 Two consequences worth stating outright:
 
 - **Directory globs beat file lists** where a whole layer is the boundary.
@@ -783,14 +809,149 @@ Two consequences worth stating outright:
   enough that over-inclusion costs little and under-inclusion costs the whole
   guarantee.
 
-Deliberately **out of scope**: `scripts/release-bump.mjs` and
-`.github/workflows/publish.yml`. They are money-path in `ship-next`'s sense —
-they ship spend-authority code to users — but they move no funds, hold no keys
-and shift no authority boundary, so a CASP perimeter analysis of a version bump
-would be ceremony. (`publish.yml` is not ungoverned either way: `branch-and-release-flow.md`
-and `mcp-runtime-compatibility.md` both cover it. `release-bump.mjs` is covered by
-nothing, which is the part worth deciding.) Tracked as a decision, not an omission, in
-[#1739](https://github.com/d-hinders/Haven-AI/issues/1739).
+### Release plumbing is in scope (#1739 — reverses the #1736 deferral)
+
+`scripts/release-bump.mjs` and `.github/workflows/publish.yml` are **covered**.
+[#1736](https://github.com/d-hinders/Haven-AI/issues/1736) deferred them on the
+reasoning that they "ship spend-authority code but move no funds and shift no
+authority boundary, so a CASP perimeter analysis of a version bump would be
+ceremony". That reasoning is recorded here because it was overturned, and the
+reason it was overturned is worth more than the conclusion:
+
+**It analysed the wrong event.** `covers:` gates *edits to a file*, never *runs
+of it*. A release PR does not edit `release-bump.mjs` — it executes it. So
+covering the script does not put a shard on a release cut, and the cost #1739
+weighed ("every release PR then writes a shard") does not exist. What covering
+it actually gates is a change **to the release machinery**, which is a different
+event with a different answer.
+
+That event is the one that was ungated. `release-bump.mjs` decides which artifact
+reaches a user's machine: the five published versions, the cross-package dep
+pins, connect's pinned `sdkVersion`/`signerVersion` — which *signer* a newly
+connected agent installs — and the release-time re-check of the wildcard-pin rule,
+held in the script deliberately "because a release must not depend on a lint
+having been run" (`CLAUDE.md`). A change weakening any of those ships the wrong
+signing code under a correct-looking version number. Measured before this
+change: `node scripts/docs/coupling-gate.mjs --strict --changed=scripts/release-bump.mjs`
+exited **0** with three advisory findings and **no contract doc** — nine commits
+in ninety days on a file gated by nothing.
+
+**Two rules from #1736 decide it, applied to #1736's own deferred cases:**
+
+- *Voluntary compliance is evidence of a missing gate*, not of an unneeded one
+  ("contributors wrote the shard anyway … a rule that holds only while people
+  remember it is not a rule"). [#1790](https://github.com/d-hinders/Haven-AI/issues/1790)
+  edited `release-bump.mjs` and wrote `casp-changelog/2026-08-22-1790.md`
+  **voluntarily**, with a real argument enumerating what did not move.
+- *Coverage by some other doc is a different obligation, not a substitute for a
+  perimeter analysis.* `publish.yml`'s two contract docs
+  (`branch-and-release-flow.md`, `mcp-runtime-compatibility.md`) describe the
+  branch model and the runtime pins; neither asks the authority question. It
+  holds the publish trigger, the ref it builds from, the dist-tag choice and the
+  registry credential path, so it is covered on the same footing.
+
+**What the release itself owes is unchanged, and the precedent still stands.**
+[`casp-changelog/2026-08-17-1503.md`](casp-changelog/2026-08-17-1503.md) argues
+that publishing already-reviewed code to npm is a **distribution** event, not a
+second authority change — which is why a release shard may be thin and may
+decline to re-verify the shards of the work it carries. That holds. It answered
+"what does a *release* owe"; it never spoke to "what does changing the *releaser*
+owe". Release PRs already write shards today (`casp-changelog/README.md`'s
+release-shard convention, #1789) — forced not by these two entries but by the
+version constants a bump rewrites in `mcp/`, `signer/`, `connect/` and
+`mcp-server/src/`.
+
+**Naming them here makes a load-bearing dependency deliberate.** Since #1790 the
+bump *writes* one of the two release contract docs, and the coupling gate excuses
+a doc on **file presence alone** — so the only thing still forcing human-written
+content into a release PR is this doc's `covers:` breadth. That is pinned by a
+test (`scripts/docs/coupling-gate.test.mjs`), but the entries it rests on exist
+for unrelated reasons and nothing in the list said so. Now the release path is
+named in the list that guarantees it.
+
+> **A CASP shard is never generated, and must never become generated.** #1790
+> established that a bump may write a contract doc; that precedent stops at the
+> manifest table, which carries four identical version strings and no argument.
+> `satisfied-by: docs/regulatory/casp-changelog/**` is satisfied by *presence*,
+> so a script-written shard would excuse the gate with content no human read —
+> the exact circularity #1790's review caught. Nothing generates a perimeter
+> argument. Keep it that way.
+
+When release plumbing changes, the shard states which of these moved, and that
+the rest did not: version fields, cross-package dep pins, connect's pinned
+`sdkVersion`/`signerVersion`, dist-tag selection, the publish trigger and the ref
+it builds from, build order, and the credential path — plus whether the
+wildcard-pin re-check is intact.
+
+### The agent-authority surface is in scope (#1826)
+
+`packages/cli/src/**` and `packages/backend/src/routes/agents.ts` are **covered**.
+[#1826](https://github.com/d-hinders/Haven-AI/issues/1826) asked whether the
+published `@haven_ai/cli` belongs in the perimeter, on the reasoning that it can
+`agents revoke`, `agents rotate-key` and `agents pause`, and persists a user JWT
+to disk. The conclusion is yes — but **not for that reason**, and the correction
+matters more than the verdict, because the stated reason would justify covering
+`curl`.
+
+**The CLI decides nothing.** It is a thin HTTP client with **zero runtime
+dependencies** — no `viem`, no `ethers`, no crypto, no signing path, no key
+material of any kind. Every authority command is one bare call to a backend
+route that enforces its own checks: `cmdAgentRevoke` is `api.post('/agents/:id/revoke')`,
+`cmdAgentRotateKey` is `api.post('/agents/:id/rotate-key')`. The rotated API key
+is generated **server-side** in the route, and every route re-derives ownership
+from the JWT's `sub` rather than trusting anything the client sends. A CLI edit
+cannot grant authority the backend does not already grant. That is a materially
+different risk from `packages/signer/src/**`, which holds a delegate key, or
+`packages/sdk/src/signer.ts`, where "signing schemes are spend authority".
+
+**What is actually ungated is the decision point, and #1826 walked past it.**
+`routes/agents.ts` is where revoke, rotate-key, pause and resume are decided and
+enforced — and it sat under **no contract doc at all**. Measured, not asserted:
+`node scripts/docs/coupling-gate.mjs --strict --changed=packages/backend/src/routes/agents.ts`
+exited **0** with four advisory findings (`CLAUDE.md` and three architecture
+docs) across **28 commits in ninety days**. The same run for
+`packages/cli/src/commands.ts` exited **0** with two advisory findings across
+19 commits. #1736's rule decides both: *coverage by some other doc is a
+different obligation, not a substitute for a perimeter analysis* — the
+architecture docs describe the API shape, none of them asks the authority
+question. Covering the client while leaving its decision point outside would
+have been worse than covering neither: it would look like the authority surface
+was inside the perimeter.
+
+**The CLI is covered on the narrower argument that survives.** Applying #1739's
+discipline — name the event coverage gates — the gated event is an *edit to the
+CLI's command surface*, never a user running `haven agents revoke`. Two things
+about that edit are perimeter-relevant even for a thin client. It holds a **user
+JWT, the same credential the dashboard holds** (`session.ts` says so), owner-only
+at 0600, and sends it as a Bearer token to whatever `baseUrlFor` resolves —
+which reads a user-supplied `--api-url` flag first. An edit that logged the
+token, loosened those perms, or widened where it is sent is a credential change,
+and Red Line 3 treats a credential as a payment instrument. And it prints a
+freshly rotated agent API key to stdout. That is a real, bounded surface, and it
+is the honest one — not "the CLI can retire an agent's authority".
+
+**The money-path list did not need widening, and #1826's blocker dissolves on
+inspection.** The issue held that this doc "binds its `covers:` maintenance to
+one reference", so a path absent from
+[`ship-next`'s money-path list](../../.agents/skills/ship-next/SKILL.md) could
+not be added without widening that list first. The binding above is a **floor,
+not a ceiling** — it says adding a file *to the money-path list* without adding
+it here re-opens the hole; it never said this list may contain nothing else.
+Empirically it already contains a great deal else: `connect/**`, `mcp/**`,
+`signer/**`, `mcp-server/**`, `demo-merchant-mcp/**`, the whole of `sdk/**`
+(the money-path list names only `sdk/src/signer.ts`), `routes/passkeys.ts`,
+`routes/catalog.ts`, `routes/reporting.ts`, `routes/accounting.ts` and
+`config.ts` — none of them on that list. Absence from it was never a bar, so no
+new judgement about the money-path list is required and none is made here.
+`routes/agents.ts` is a reasonable future candidate for that list, but it is a
+separate question with a separate blast radius (it changes the *testing bar* for
+every agent-lifecycle PR), and this decision does not pre-empt it.
+
+When this surface changes, the shard states whether the authority set moved:
+which lifecycle transitions exist and what may trigger them, whether ownership
+is still re-derived server-side from the authenticated subject, whether API-key
+generation stays server-side, where the user JWT is stored and sent, and whether
+anything in the client began deciding rather than relaying.
 
 ## Verification log
 

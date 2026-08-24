@@ -249,15 +249,31 @@ export default function Sidebar() {
       <button
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        className="lg:hidden fixed top-3 left-4 z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
+        className="lg:hidden fixed top-3 left-4 z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
       >
         <Icon icon={Menu} className="w-4 h-4" />
       </button>
 
-      {/* Overlay for mobile */}
+      {/*
+        Overlay for mobile — the same `v2-modal-backdrop` Modal and SidePanel use.
+
+        It was `bg-[var(--v2-ink)]/40 backdrop-blur-sm`, an opacity modifier on a
+        bare var(), which Tailwind v3.4 drops silently (#1818): the scrim had no
+        background at all, so the drawer opened over an undimmed page.
+
+        Fixing it onto `bg-ink/40` would have worked, but it would have shipped a
+        SECOND overlay convention — and worse, it would have made the blur real.
+        `backdrop-blur-sm` was never free by intent, only by accident: with no
+        background painted there was nothing to composite. Painting one activates
+        a full-viewport `backdrop-filter` on a `fixed inset-0` element, which is
+        exactly what globals.css's `.v2-modal-backdrop` documents avoiding — the
+        compositor keeps a GPU snapshot of the whole page and re-blurs it every
+        paint. So this reuses the existing dim token instead, blur included in
+        what it deliberately omits.
+      */}
       {!collapsed && (
         <div
-          className="lg:hidden fixed inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm z-[var(--v2-z-nav-scrim)]"
+          className="lg:hidden fixed inset-0 v2-modal-backdrop z-[var(--v2-z-nav-scrim)]"
           onClick={() => setCollapsed(true)}
         />
       )}
@@ -375,7 +391,7 @@ export default function Sidebar() {
                     ref={popoverRef}
                     role="menu"
                     aria-label="User menu"
-                    className="absolute bottom-full right-0 mb-2 w-44 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-lg shadow-[var(--v2-shadow-popover)] py-1 z-[var(--v2-z-chrome-popover)]"
+                    className="absolute bottom-full right-0 mb-2 w-44 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-lg shadow-popover py-1 z-[var(--v2-z-chrome-popover)]"
                   >
                     <Link
                       href="/profile"
@@ -384,7 +400,7 @@ export default function Sidebar() {
                         setMenuOpen(false)
                         setCollapsed(true)
                       }}
-                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
                     >
                       <span className="inline-flex w-3.5 h-3.5 items-center justify-center flex-shrink-0">
                         {icons.profile}
@@ -398,7 +414,7 @@ export default function Sidebar() {
                         setMenuOpen(false)
                         setCollapsed(true)
                       }}
-                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
                     >
                       <span className="inline-flex w-3.5 h-3.5 items-center justify-center flex-shrink-0">
                         {icons.settings}
@@ -413,7 +429,7 @@ export default function Sidebar() {
                         logout()
                         router.push('/')
                       }}
-                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-danger)] hover:bg-[var(--v2-danger-soft)] w-full text-left transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-danger)] hover:bg-[var(--v2-danger-soft)] w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-danger/80"
                     >
                       <span className="inline-flex w-3.5 h-3.5 items-center justify-center flex-shrink-0">
                         {icons.logout}

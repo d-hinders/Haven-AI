@@ -68,7 +68,7 @@ approval if it exceeds it), and shows up in your Haven dashboard activity feed.
 - On-chain Safe AllowanceModule state enforces the agent budget.
 - `getAllowances()` / `get_allowances` is the right path for budget, remaining amount, reset period, or "what can I spend?" questions.
 - If an API key is exposed or lost, rotate it from the Haven agent detail page. The new key is shown once and the old key stops working.
-- If a delegate key is exposed or lost, pause or revoke the agent and create a new signing path.
+- If a delegate key is exposed or lost, a delegation-rail agent is **re-keyed** rather than replaced — same agent, new signing key, budget remainder carried. See [Replacing an agent's signing key](../../docs/product/agent-key-rotation.md). Legacy AllowanceModule agents are paused or revoked and re-onboarded instead.
 
 ## Step-by-Step API
 

@@ -24,8 +24,8 @@ export function CredentialHandoffCard({
       hover={false}
       className={`p-4 ${
         saved
-          ? 'border-[var(--v2-success)]/30 bg-[var(--v2-success-soft)]'
-          : 'border-[var(--v2-brand)]/30 bg-[var(--v2-brand-soft)]'
+          ? 'border-success/30 bg-[var(--v2-success-soft)]'
+          : 'border-brand/30 bg-[var(--v2-brand-soft)]'
       }`}
     >
       <div className="flex items-start justify-between gap-3">

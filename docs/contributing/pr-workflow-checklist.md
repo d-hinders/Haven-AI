@@ -7,7 +7,7 @@ covers:
   - package.json
   - .agents/skills/haven-agent-workflow/references/reviewer.md
   - .agents/skills/haven-agent-workflow/references/design-reviewer.md
-last-verified: "2026-08-22" # #1768: the Browser UX row now points at `test:e2e:gate` (desktop + mobile), not desktop-only. Prior: the haven-reviewer rule is unconditional (owner decision 2026-08-21); the risk list this file carried was the licence for skipping it. AGENTS.md is canonical. Prior: #1227: lint:db-mocks added to the Backend/API verification row
+last-verified: "2026-08-24" # #1968: two lines in §"Before Requesting Review" re-read against `AGENTS.md`:109 and the PR template — the frontend-evidence line gains the re-review-re-arms rule and its three escalations, and a new line requires the reviewer verdict to be written into the template's Review Status section as a NAMED line, since the "every pull request" rule (owner decision 2026-08-21) binds whether or not anything reads it and a silent skip left no trace to argue with. §"Before Merging" and the merge-readiness template were read for consistency, not re-verified. Prior: #1777: the visual-baselines bullet gains the expected-RED sub-bullet — the *Update visual baselines* dispatch now fails by design while `BASELINE_PUSH_TOKEN` is unset, and a reader who does not know that re-dispatches; points at approving the parked runs rather than pushing. Only that bullet re-read this pass. Prior: #1843: the Docs row's enumeration of what `docs:check` validates now names the `last-verified` chain check; only that row re-read this pass. Prior: #1768: the Browser UX row now points at `test:e2e:gate` (desktop + mobile), not desktop-only. Prior: the haven-reviewer rule is unconditional (owner decision 2026-08-21); the risk list this file carried was the licence for skipping it. AGENTS.md is canonical. Prior: #1227: lint:db-mocks added to the Backend/API verification row
 ---
 
 # PR Workflow Checklist
@@ -80,10 +80,11 @@ Good split examples:
 - Include a merge-readiness section using the template below for non-trivial PRs.
 - Run the **Captain Self-Check Preflight** in `docs/contributing/ai-agent-workflow.md` for the surfaces the diff touches.
 - If browser verification is skipped for UI, routing, modal, setup-flow, or animation work, add the smallest headless equivalent that covers the skipped risk and name it in the PR.
-- For frontend diffs touching a rendered route or a shared primitive, attach rendered-screen evidence (`npm run screenshot -w packages/frontend -- <routes>`, desktop + mobile PNGs) and get a `haven-design-reviewer` pass over the screenshots in addition to `haven-reviewer` — a finding from either pauses auto-merge (`ship-playbooks/frontend.md`).
+- For frontend diffs touching a rendered route or a shared primitive, attach rendered-screen evidence (`npm run screenshot -w packages/frontend -- <routes>`, desktop + mobile PNGs) and get a `haven-design-reviewer` pass over the screenshots in addition to `haven-reviewer` — a finding from either pauses auto-merge. Clearing it needs no human ack: fix, re-capture, re-run that pass, and a clean re-review re-arms the merge ([#1968](https://github.com/d-hinders/Haven-AI/issues/1968)). Ask the user only if the re-review raises a new finding, the finding is deferred or disputed rather than fixed, or there is no re-review (`ship-playbooks/frontend.md` §6).
 - If the PR adds a `ui/` or `haven/` primitive, document it on `/design-system` in the same PR — the *Design-system coupling (strict)* check blocks on a missing showcase entry — on every PR, however it was opened ([#1023](https://github.com/d-hinders/Haven-AI/issues/1023)) — and a sticky comment explains the finding. Check locally with `npm run design:coupling -w packages/frontend -- --strict`; escape: `// design-system-exempt: <reason>`.
 - If SDK/API behavior, credential semantics, x402/MPP behavior, setup prompts, or product language changes, review generated credential files, `.env` examples, SDK snippets, demo scripts, and skill bundles.
 - Use `haven-reviewer` before requesting review. **Every pull request** — the risk list this line used to carry was conditional, and that conditional is what skipping was drawn from (owner decision 2026-08-21; `AGENTS.md` is canonical).
+- Write the verdict of each pass into the PR's **Review Status** section as a named line (`haven-reviewer: passed | skipped because ___`, and the same for `haven-design-reviewer` on frontend diffs). The rule above binds whether or not anything checks it; this line is what makes a skip *visible*, and `ship-next` will not arm auto-merge on an unfilled one ([#1968](https://github.com/d-hinders/Haven-AI/issues/1968)).
 - If this PR includes a follow-up commit that fixes a bug the original commits introduced, the fix commit must include the smallest regression test (typically a vitest case) that would have caught it. If no such test is practical, document why in the commit body. Every recent "Address reviewer findings" commit that compounded into durable quality landed 2–4 targeted vitest cases alongside the fix.
 
 ## Before Merging
@@ -104,6 +105,7 @@ Good split examples:
 - Verify that merging this PR will trigger the expected deployment branch.
 - For money movement, agent authority, SDK payment APIs, generated credential artifacts, x402/MPP, or shared contract changes, confirm a risk-specific review happened even if CI is green. The `money-path` label selects the `ship-playbooks/money.md` bar (characterization tests first, CASP guardrails) but does not pause the merge (#1024); DB migrations are hard-gated by an independent code-owner review, and `dev → main` promotion is gated on a green money-flow QA run that covers the promoted money-path code (#1030).
 - If the PR intentionally changes what `/design-system` renders, regenerate the visual-regression baselines via the *Update visual baselines* workflow_dispatch on the PR branch (never commit macOS-rendered baselines), and confirm the *Design visual regression* check is green on the head SHA before calling the PR shipped.
+  - **That dispatch run currently ends RED by design, and that is not your PR failing (#1777).** While `BASELINE_PUSH_TOKEN` is unset the bot's push leaves this PR's workflow runs **created but parked** at `conclusion: action_required` rather than executed, so the workflow now fails and comments the recovery on your PR instead of going green into a deadlock. Read the comment and **approve the parked runs it links** — that clears the required checks with no push. Do not re-dispatch; the baselines were pushed before the failing step. Mechanism and recovery: [`ship-playbooks/frontend.md`](ship-playbooks/frontend.md) §4.
 
 ## Merge Readiness Report
 
@@ -128,7 +130,7 @@ Use the smallest reliable set that matches the change.
 
 | Change type | Commands |
 | --- | --- |
-| Docs, prompts, or PR template only | `git diff --check` and `npm run docs:check` (front-matter + `covers` globs + agent-skill alignment) |
+| Docs, prompts, or PR template only | `git diff --check` and `npm run docs:check` (front-matter + `covers` globs + agent-skill alignment + `last-verified` chain integrity, #1843) |
 | Any source file | `npm run docs:coupling` — the strict contract-doc gate, keyed on **code**, so the docs row above never covers the pure-code PR that needs it |
 | Payment, Safe, relayer, SDK payment APIs, or agent authority | Relevant package checks plus the checklist in `docs/regulatory/casp-risk-guardrails.md` |
 | Backend/API | `npm run typecheck -w packages/backend`, `npm run test -w packages/backend`, `npm run lint:deps` (dependency boundaries, #982), and `npm run lint:db-mocks` (positional DB-mock ratchet, #1227) |

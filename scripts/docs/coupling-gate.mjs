@@ -110,6 +110,60 @@ export function ageDays(lastVerified, now = Date.now()) {
  * #1076 was skimmed past in a list of eleven.
  */
 export function isIncidentalPath(file) {
+  // Playwright's snapshot directory — the committed visual-regression
+  // baselines. The name is not a convention someone might rename: it is
+  // `snapshotPathTemplate` in `packages/frontend/playwright.config.ts`, and the
+  // *Update visual baselines* workflow commits exactly this directory. The PNGs
+  // are generated, never hand-edited, and described by no runbook — the
+  // docstring's "generated file mirrors a source the doc already covers" case.
+  //
+  // This is checked BEFORE the test-package carve-out below, and that ordering
+  // is the whole fix (#1854): the baselines live INSIDE
+  // `packages/frontend/e2e/`, so the carve-out was protecting them too, and
+  // `docs/bug-reports/_run-report-template.md` (`covers: packages/frontend/e2e/**`)
+  // was implicated by every baseline regeneration. Nothing about a run-report
+  // template goes stale because a PNG's bytes changed.
+  //
+  // Falling through to the checks below would NOT have been enough: a path like
+  // `…/__screenshots__/design-system.visual.spec.ts/design-system-desktop.png`
+  // matches neither `__tests__/` nor the `$`-anchored `.spec.ts` extension test.
+  // The rule has to say `true` itself.
+  //
+  // Scope, stated mechanically rather than asserted (the #1824 style): this line
+  // can only change an outcome for a changed file under a `__screenshots__/`
+  // directory that is matched by a NON-EXACT `covers` glob. Enumerated across
+  // all docs with the front-matter parser and glob engine above, exactly one
+  // such glob exists — the run-report template's. The two docs that genuinely
+  // describe e2e specs reach only `live/**`, `fixtures/live-session.ts` and
+  // three exact spec paths, so neither can be un-covered by this. Backtested
+  // over 126 first-parent merges into `dev`: 4 advisories stop firing, all four
+  // the run-report template on a baseline regeneration, and 0 change to
+  // blocking findings.
+  //
+  // Be precise about what that backtest proves. "No doc is NEWLY implicated" is
+  // not a measurement — it is true by construction, because this rule only ever
+  // moves a path from not-incidental to incidental, and a narrower "is
+  // incidental" predicate can only remove findings. The informative half is the
+  // other direction: WHICH advisories stopped, and whether any of them was
+  // asked for a good reason. All four were the same doc, via the same glob,
+  // matched only by PNGs.
+  //
+  // That enumeration is a snapshot, NOT a standing invariant, and the rule below
+  // is repo-wide rather than scoped to `packages/frontend/e2e/` (matching the
+  // unscoped style of the `__tests__/` and `.spec.` rules). So if a second
+  // package ever grows its own `__screenshots__/` — a Storybook/Chromatic
+  // snapshot dir, a second Playwright project — it becomes incidental here too,
+  // silently, for any doc covering it by wildcard. That is the intended
+  // reading (generated snapshots are generated snapshots wherever they live),
+  // but it is a decision, not an accident: re-run the enumeration before
+  // assuming the blast radius is still one glob.
+  //
+  // The exact-name escape still works and is the intended way to opt back in: a
+  // doc whose `covers` names a baseline PNG by its full path is implicated by a
+  // change to it, because `implicatedDocs` skips this filter for exact globs.
+  if (/(^|\/)__screenshots__\//.test(file)) {
+    return true
+  }
   // Packages whose CONTENT is tests: the QA scenarios and live e2e specs are
   // what their runbooks document, not a test of some other source. Calling them
   // incidental would silently un-cover the docs that describe them.
@@ -128,28 +182,59 @@ export function isIncidentalPath(file) {
  * return the docs implicated by the change. A doc is implicated when a changed
  * file matches one of its globs AND the doc itself was not changed.
  *
- * Same-day suppression: a doc whose `last-verified` is `today` is skipped — it
- * was already confirmed accurate in this day's work, so re-flagging it on every
- * subsequent edit to a covered file is just noise. This is a heuristic: it
- * trades a small same-day-staleness risk for far less noise. `today` is
- * injectable for testing.
+ * SAME-DAY SUPPRESSION IS GONE (#1824). It used to skip any doc whose
+ * `last-verified` was today. #1077 had already ruled that reasoning out for the
+ * blocking half — "a doc that some OTHER PR verified today says nothing about
+ * whether THIS PR made it stale" — and carved contract docs out of it under
+ * `strict`. #1824 is that same argument finished: it applies just as well to
+ * the advisory half, and the carve-out was the wrong shape.
  *
- * It does NOT apply to a contract doc under `strict`. The advisory comment can
- * afford a wall-clock heuristic; a blocking gate cannot — it would be green at
- * 23:59 and red at 00:01 with no code change, and a doc that some *other* PR
+ * The mechanical reason it could never be right: a doc THIS change verified is
+ * a doc THIS change edited, and `changedSet.has(doc)` skips it four lines down.
+ * So the only situation in which same-day suppression could ever fire was a
+ * stamp written by somebody else's work — precisely the situation #1077 named
+ * as unacceptable. The heuristic was not mostly-right with an edge case; its
+ * entire domain was the edge case.
+ *
+ * `last-verified` notes say so themselves. `docs/product/design-system.md`
+ * carried EIGHT chained notes stamped 2026-08-22, each ending "nothing else
+ * re-verified in this pass" — the document stating, in prose, that one section
+ * was re-read — while the gate read the date and concluded the whole file was
+ * current against every diff that day.
+ *
+ * Measured before removing rather than argued: over 40 merges into `dev`
+ * (window ending 0d299034), the heuristic hid 22 advisories across 15 merges —
+ * about 0.55 per merge — including `design-system.md` on a change to
+ * `TransactionMovement.tsx`, a file it `covers:` by exact path. So removal buys
+ * back 22 real coupling checks for roughly one extra advisory line every other
+ * PR. That is not a noise problem.
+ *
+ * It hid ZERO blocking findings, which is the same claim the code makes
+ * structurally (contract docs already bypassed the suppression under `strict`)
+ * arrived at by measurement instead. Both should agree; that they do is the
+ * point of checking.
+ *
+ * The exact counts move as `dev` moves — they are a description of this
+ * repository's traffic, not a constant. Re-derive rather than cite if the
+ * number ever has to carry an argument again; an earlier run of a buggier
+ * script reported 13/8, low because it skipped ROOT_DOCS entirely and merged
+ * `satisfied-by:` globs into `covers:`.
+ *
+ * The `today` parameter is REMOVED rather than left accepted-and-ignored. It
+ * had no other reader in this function, and an unused knob that used to change
+ * behaviour is how a future caller reintroduces the bug believing it still
+ * works. Staleness AGE reporting is `ageDays`, which owns its own `now`.
+ *
+ * Historical note on the carve-out this replaces: a blocking gate could not
+ * afford a wall-clock heuristic — it would be green at 23:59 and red at 00:01
+ * with no code change, and a doc that some *other* PR
  * verified today says nothing about whether this PR made it stale.
  *
- * Note: the default `today` is the UTC calendar date, while `last-verified` is a
- * human-written local date — so for non-UTC contributors the match can be off by
- * at most ±1 calendar day. Harmless for the advisory half (worst case: one extra
- * comment), and the strict half no longer depends on it at all.
+ * The UTC-vs-local ±1-day skew that note used to carry no longer affects any
+ * suppression decision, because there is none. It still applies to `ageDays`
+ * staleness reporting, where being a day out never changes an outcome.
  */
-export function implicatedDocs(
-  changed,
-  docs,
-  today = new Date().toISOString().slice(0, 10),
-  { strict = false } = {},
-) {
+export function implicatedDocs(changed, docs, { strict = false } = {}) {
   const changedSet = new Set(changed)
   const findings = []
   for (const { doc, covers, lastVerified, contract, satisfiedBy } of docs) {
@@ -170,7 +255,10 @@ export function implicatedDocs(
       continue
     }
     if (!covers || covers.length === 0) continue
-    if (lastVerified && lastVerified === today && !(strict && contract)) continue
+    // (#1824) No same-day suppression. See the header: a doc this change
+    // verified is a doc this change edited, and that was already handled by
+    // `changedSet.has(doc)` above — so every suppression this line could still
+    // perform was on somebody else's stamp.
     // Noise-reduction never weakens the BLOCKING half. Under strict, a contract
     // doc sees every changed file its globs match — the same carve-out the
     // same-day heuristic gets above, for the same reason: a green --strict run
@@ -250,7 +338,7 @@ async function main() {
   }
 
   const docsByPath = new Map(docs.map((d) => [d.doc, d]))
-  const findings = implicatedDocs(changed, docs, undefined, { strict })
+  const findings = implicatedDocs(changed, docs, { strict })
   const hasFindings = findings.length > 0
   const contractFindings = findings.filter((f) => f.contract)
 

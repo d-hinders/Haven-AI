@@ -1,6 +1,8 @@
 'use client'
 
+import { ArrowRight } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
+import { Icon } from '@/components/ui/Icon'
 import { type ReactNode } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
@@ -23,7 +25,7 @@ function Section({
   className?: string
 }) {
   return (
-    <section className={`rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] ${className}`}>
+    <section className={`rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card ${className}`}>
       <Card.Header padding="spacious" className="rounded-t-[10px]">
         <h2 className="text-[13px] font-semibold uppercase tracking-widest text-[var(--v2-ink)]">{title}</h2>
         {description ? (
@@ -120,9 +122,9 @@ function StatusPill({
 }) {
   const classes = {
     neutral: 'bg-[var(--v2-surface)] text-[var(--v2-ink-2)] border-[var(--v2-border)]',
-    success: 'bg-[var(--v2-success-soft)] text-[var(--v2-success)] border-[var(--v2-success)]/20',
-    brand: 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] border-[var(--v2-brand)]/20',
-    warning: 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] border-[var(--v2-warning)]/20',
+    success: 'bg-[var(--v2-success-soft)] text-[var(--v2-success)] border-success/20',
+    brand: 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] border-brand/20',
+    warning: 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] border-warning/20',
   }
 
   return (
@@ -265,9 +267,10 @@ export default function SettingsClient() {
                 href="/exit/"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sm font-medium text-[var(--v2-brand)] hover:underline"
+                className="inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:underline"
               >
-                {t.settings.recovery.exitPathLabel} →
+                {t.settings.recovery.exitPathLabel}
+                <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
               </a>
             }
           />

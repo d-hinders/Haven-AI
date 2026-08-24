@@ -13,8 +13,16 @@ covers:
   - packages/backend/src/rails/hybrid-account-config.ts
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
+  - packages/frontend/src/hooks/useDelegationBudget.ts
+  - packages/frontend/src/hooks/useAgentRekey.ts
+  - packages/frontend/src/hooks/useAccountSigners.ts
+  - packages/frontend/src/hooks/useDelegationSend.ts
+  - packages/frontend/src/lib/hybridAccountOps.ts
+  - packages/frontend/src/lib/delegationPasskeySigner.ts
+  - packages/frontend/src/lib/signer.ts
+  - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-21" # #1698: new §6a — agent delegate-key rotation is a DIFFERENT layer from the account signer set, and its loss has the opposite answer (recoverable, because the delegate never held owner authority); revoke-before-issue, non-custody and no-self-rekey recorded as security properties; covers: widened to the re-key surface. Prior: #1679: signers read gains per-credential created_at (read-only timestamp for UI labels) — read/management boundary and every invariant unchanged; the read-surface paragraph updated to match. Prior: #1605: comment-only tense corrections in hybrid-accounts route + migrations 041/043 (stale "until #829/#834" claims) — no executable code, SQL, or boundary moves; every claim in this doc re-read against the diff stands. Prior: #1436: archiving now requires dead budgets as well as a revoked credential (one statement, refusal-only), so "Removed" cannot hide a spendable agent. #1423: revoke-all prepare reconciles crash-window orphans against disabledDelegations() and caps batches at 25; #1400: batch revoke-all — one owner-signed UserOp disables N delegations atomically (BatchDefault); DB write only after the UserOp lands; invariants unchanged. Prior: #1199 passkey/wallet removal two-to-one rule
+last-verified: "2026-08-24" # Promotion review: re-read §6a against the comment-only useAgentRekey change; the structured-field boundary and #1699/#1849/#1868 security claims stand unchanged. Corrected the property count from six to seven. Prior: #1933: the device-marker SELECTOR moved, so the `covers:` decision recorded below had to be re-taken: `covers:` gains `lib/signer.ts`. #1927 excluded that file on its own test — is a sentence here made true or false by this file — and the answer was no, because `signer.ts` held only the MECHANISM (`hasPasskeyCredentialOnDevice`/`credentialIdFromKeyId`) while the SELECTION lived in `delegationPasskeySigner.ts`. #1933 extracted the duplicated selection into `hybridPasskeyToSignWith` in `lib/signer.ts` and both call sites now use it, so the sentence "the signing ceremony selects the passkey whose credential is actually enrolled on the signing device rather than blindly `passkeys[0]`" — and the `passkeys[0]` fallback sentence after it — are now made true or false BY `signer.ts`. The exclusion reasoning was about WHERE the rule lives, and the rule moved; leaving it in place would have left the doc's central §6 client claim watched by nothing, which is the exact gap #1927 was filed to close. The over-firing objection #1927 raised is real and unresolved rather than refuted — `signer.ts` is a broad utility module (storage keys, the active-signer hook, Safe-capable narrowing) and this gate will now fire on churn this doc does not depend on. That is handled the way `DelegationSendModal.tsx` already is here: coverage is SCOPED, and a change confined to the storage/hook/narrowing half of `signer.ts` is dismissed with one line rather than treated as a doc defect. `delegationPasskeySigner.ts` STAYS covered — it holds the wiring, the empty-signer-set refusal, and the pinned-address property the §6 sentences also assert. The asymmetry the gate had until now was measured, not assumed, and the instrument was proven able to say yes before any zero was believed: on `origin/dev` @ d48622d7, a one-line edit confined to `lib/signer.ts` produced 0 hits for this doc; the positive control, the same edit confined to the already-covered `lib/delegationPasskeySigner.ts`, produced 1 (BLOCKING); and two negative controls (`lib/money-input.ts`, `lib/transaction-csv.ts`) produced 0 each. With `signer.ts` listed, the target run goes 0 -> 1. Prose changed in exactly one place: §6's parenthetical named `lib/delegationPasskeySigner.ts` as "the one place the credential is chosen", which the extraction made false; it now names `hybridPasskeyToSignWith`. Every other §6 device-signing sentence was re-read against the extracted code and stands unchanged, including the fallback paragraph — the fallback is preserved verbatim in behaviour and now carries a named regression test, `lib/__tests__/signer.test.ts` > "keeps passkeys[0] as the fallback when no device marker is present (#1933 — load-bearing, do not delete)", proven by mutation this pass rather than assumed: deleting `?? signers.passkeys[0]` turns that named assertion red (`expected undefined to be '0x0102030405060708'`) along with `delegationPasskeySigner.test.ts` > "falls back to passkeys[0] when no device marker matches", while the two device-marker cases stay green — so the test discriminates the fallback specifically and is not shadowed by the empty-set guard. Scope: §6's device-signing sentences only; no §6a re-key, meter-carry, threshold, §7 two-signer or §8 settlement claim was re-tested beyond re-reading it for contradiction, and none contradicts. Prior: #1927: `covers:` gains `lib/delegationPasskeySigner.ts` — the file that DEFINES the passkey-selection claim, and the correction of a record #1898 got right for the wrong reason. #1898 verified "signing selects the passkey actually enrolled on the signing device, never blindly passkeys[0]" against `pickSigningPath` in `hooks/useDelegationBudget.ts`. The verdict was true; the evidence was for a different claim. `pickSigningPath` chooses the signing PATH — passkey vs EOA vs nothing — and never touches WHICH passkey; the credential is chosen at `lib/delegationPasskeySigner.ts:80-82` (`signers.passkeys.find(...hasPasskeyCredentialOnDevice...) ?? signers.passkeys[0]`), which was uncovered until now. That is the one line a refactor could quietly restore to `passkeys[0]`, breaking recovery from a backup device — the whole point of §6 — with nothing in this doc’s gate able to notice. Re-read §6’s device-signing sentences against the file as merged: the claim holds, and it is now stated more precisely than #1898 left it. Two prose corrections, both from reading the covered file rather than from any behaviour change. (1) The sentence implied `passkeys[0]` is never reached; it IS reached, as the documented fallback when no device marker matches, and the doc now says so and says why that is safe rather than a loophole — the marker is a local `localStorage` hint, so a miss costs a ceremony the authenticator resolves from its own credential lookup, not a wrong signature. Leaving the absolute reading in place would have been the worse trade: the next reader deleting the fallback would have been "complying" with the doc. (2) The *Storage tracks the chain* invariant said the stored signer set is what "the deploy/sign paths rebuild the account config from" — true of the deploy path, and materially incomplete for the client sign path since #891: the account ADDRESS handed to `toMetaMaskSmartAccount` is pinned to the provisioned one and never re-derived from the current set, precisely because the set can have evolved (backup enrolled, key removed) and re-deriving would sign as a different account. The invariant’s security content is unchanged; what changed is that the parenthetical no longer describes a derivation the code deliberately does not do. The selection claim already has a real test guard, and it was proven by mutation this pass, not assumed: replacing lines 80-82 with `const signWith = signers.passkeys[0]` turns `lib/__tests__/delegationPasskeySigner.test.ts` > "signs with the passkey that is enrolled on THIS device, not blindly passkeys[0]" red (expected the backup credential id, received the first-enrolled one), while the other two cases stay green — so the test discriminates the exact behaviour the sentence asserts rather than merely exercising the line. `lib/signer.ts` was considered and deliberately NOT covered, on #1898’s own test — is a sentence here made true or false by this file: it holds `hasPasskeyCredentialOnDevice`/`credentialIdFromKeyId`, mechanism the claim consumes, but the sentence is about the SELECTION, and `signer.ts` is a broad utility module (Safe-capable signer narrowing, the active-signer hook, storage keys) whose ordinary churn carries no claim here; covering it would fire the gate on changes this doc does not depend on, which is how a gate gets waved through. Scope: §6’s device-signing sentences and the *Storage tracks the chain* invariant only; no §6a re-key, meter-carry, threshold, §7 two-signer or §8 settlement claim was re-tested beyond re-reading it for contradiction, and none contradicts. Prior: #1916: `covers:` gains the SIGNER-MANAGEMENT and OWNER-SEND clients — the other half of the gap #1898 opened, and again no prose changed, because nothing here was false; the gate simply could not see the files these claims depend on. Re-read §6's *Management surface (#1081)*, *Owner send (#1083)* and *Recovery invariants* paragraphs against `hooks/useAccountSigners.ts`, `hooks/useDelegationSend.ts` and `lib/hybridAccountOps.ts` as merged. "The frontend now uses the account-scoped surface exclusively (#1089)" is checkable and TRUE of the management surface — `useAccountSigners.ts` is the only frontend caller of `/accounts/hybrid/:address/signers/{prepare,submit}`, and the two surviving `/agents/:id/account-signers` calls (`useDelegationBudget.ts:162`, `useAgentRekey.ts:249`) are READS of the signer set, not signer changes, so they do not contradict it. Invariant 13's client half — every `addKey`/`removeKey`/`transferOwnership` "signed by an existing signer (WebAuthn or EOA)", never Haven — is `signPreparedAccountOp` in `lib/hybridAccountOps.ts`, the single dispatch BOTH surfaces route through: it obeys the server's declared `signature_scheme` verbatim and has a single `if`/else with no third branch, so no client path can sign an op the server did not shape. (The "one implementation … two copies of a spend-authority rule is how they drift apart" sentence above names `rails/hybrid-signer-actions.ts` and is about the BACKEND; this file is the client-side analogue, not the thing that sentence refers to.) §6's owner-send properties hold as written in the client: prepare/submit split, the submit carrying `prep.user_operation` back, and the scheme chosen by the DEVICE (`useDelegationSend.ts:70`). #1085's "a DISMISSED sheet is a neutral cancel, never an error" and #1097's "hint next to the working action, never a false blocker" hold in both hooks — `ready` derives from `pickSigningPath` alone and `passkeyElsewhere` is returned beside it, never folded into the gate. `components/DelegationSendModal.tsx` is covered too, and ONLY for the #1085/#1097 client-rendering claims — worth stating, because the next reader will notice that this file and `AccountSignersCard.tsx` have different §7 status yet share §6 coverage. The reason is that those two sentences say "UI surfaces" in the PLURAL and are rendered in components, not hooks: `DelegationSendModal.tsx:71` is the `toast.info`-not-`toast.error` cancel classification and `:127` the `ready && passkeyElsewhere` hint branch, line for line `AccountSignersCard.tsx:75` / `:206-217`. Before this change the gate caught a mutation flipping cancel from `info` to `error` in one of those files and not the other — for the SAME sentence — which is a gate that half-works on a claim it advertises. Narrowing the plural to one surface was the alternative and is the worse one: the product genuinely does treat a dismissed sheet as a neutral cancel on both, so rewriting the sentence would trade a TRUE claim for a convenient gate. Note what this is NOT: #1898 excluded `ReplaceSigningKeyModal.tsx` because the doc claims NOTHING about it, and covering it would have fired on #1887's pure layout move. The test is not "does the file belong to this feature" but "is a sentence in this doc made true or false by this file" — for `ReplaceSigningKeyModal.tsx` it is not, and for the #1085/#1097 rendering it plainly is. The rest of `DelegationSendModal.tsx` — amount entry, recipient validation, layout — carries no claim here, and a change confined to it should be dismissed with one line rather than treated as a doc defect. NEW gap found doing this, filed not folded (#1927): "signing selects the passkey whose credential is actually enrolled on the signing device rather than blindly `passkeys[0]`" is DEFINED in `lib/delegationPasskeySigner.ts:81-83` and is still uncovered; #1898 verified that sentence against `pickSigningPath`, which chooses the PATH (passkey vs EOA) and never the CREDENTIAL. The sentence is true — the earlier note cited the wrong site for it, and that correction is the point of recording this here. Scope: §6's management/owner-send/recovery-invariant paragraphs and only their client half; no §6a re-key, meter-carry, threshold, §7 two-signer or §8 settlement claim was re-tested beyond re-reading it for contradiction, and none contradicts. Prior: #1849: the meter-carry bullet gains a SIXTH property in §6a — the carry is planned on the clock the remainder was MEASURED on (`agent_rekeys.metered_at`), with the issue-time clock used only to drop a piece the delay outran. Re-read the whole meter-carry bullet against `modules/agents/rekey-carry.ts` and `routes/agent-rekey.ts`: its existing claims were true of the SAME-period case and quietly wrong across a boundary — "anchored inside the old period" named a period the code did not compute, and "either piece may be absent rather than wrong" listed two causes where there are now three. Both are corrected in place, and the direction of the old defect is recorded (under-grant, never over-grant) so the no-refill invariant above it is visibly unaffected. Scope: that bullet only; no signer-set, enrolment, removal, threshold, recovery, revoke-ordering or passport-anchor claim was re-tested beyond re-reading them for contradiction, and none contradicts. Prior: #1898: `covers:` gains the CLIENT half of the device-scheme rule — no prose changed, because nothing here was false; the gate simply could not see the files two claims depend on. Re-read §6 and §6a in full against `hooks/useDelegationBudget.ts` and `hooks/useAgentRekey.ts` as merged by #1902: `pickSigningPath` prefers a passkey marked on THIS device, falls back to a connected owner wallet, then to any passkey — so "selects the passkey actually enrolled on the signing device, never blindly passkeys[0]" and "enrolling a backup wallet never disables the passkey path" both hold as written; `passkeyLikelyElsewhere` is read only into a hint, and the re-key's sole refusal is `no_signer`, so #1097's "never a false blocker" holds too; §6a's fifth property holds in both directions — the hook sends `signature_scheme` on the revoke prepare and branches on the scheme the SERVER resolved. `ReplaceSigningKeyModal.tsx` was considered and deliberately NOT covered: this document claims nothing about its copy or its revoke gate, so listing it would fire the gate on changes no claim here depends on, and a gate that fires on nothing gets waved through. Scope: §6/§6a only, and only their client half — no signer-set, enrolment, removal, threshold, recovery, meter-carry or passport claim was re-tested beyond re-reading for contradiction, and none contradicts. Known remaining gap, filed not folded: `hooks/useAccountSigners.ts`, `hooks/useDelegationSend.ts` and `lib/hybridAccountOps.ts` carry §6's signer-management and owner-send (#1083/#1086) client claims and are still uncovered. Prior: #1699: §6a gains a SIXTH security property — the passport ANCHOR is retired and reissued on a re-key while `standing` never moves. Re-read §6a in full: its opening claim that re-key keeps "the agent's id, name, history and passport" was true of the passport's IDENTITY and false of its on-chain anchor, which until #1699 kept naming the retired delegate EOA (#1847); the word *identity* is now explicit and the gap it papered over is the new bullet. The revoke-before-issue rule is restated one layer up rather than re-derived — same argument, same failure asymmetry. Scope: §6a only; no signer-set, enrolment, removal, threshold, recovery or meter-carry claim was re-tested beyond re-reading them for contradiction, and none contradicts. Prior: #1870: §6a gains a FIFTH security property — the revoke leg is signed by a signer the DEVICE chose, not one the server inferred. Re-read §6 and §6a in full against `routes/agent-rekey.ts` and `rails/hybrid-signer-actions.ts`: §6's "scheme selection is a device decision (`signature_scheme` on the prepare routes)" was TRUE of the delegation routes and FALSE of the re-key revoke, which passed no signer down at all; the claim is now true as written. The new bullet records the refusal ORDERING (409 in prepare, before the revoke) as the security property, not the field. Prior: #1702 (carve-out): §6a gains a FOURTH security property — the budget meter carries amount AND period boundary across a re-key, as the defence against using rotation to refill a budget. Re-read §6 and §6a in full against `modules/agents/rekey-carry.ts` and `routes/agent-rekey.ts` as merged by #1698; every existing claim stands, and the three recorded owner decisions (revoke before issue, meter read AFTER revoke, period carries over) match the code. Scope: §6/§6a only — no signer-set, enrolment, removal, threshold or recovery claim re-tested beyond what #1709 covered the same day. Prior: #1709: pulled in only because the border-token sweep touched `AccountSignersCard.tsx`. That change is a class-string rename (`border-[var(--v2-warning)]/25` -> `border-warning/25`) on one advisory callout — no signer-set, enrolment, removal, threshold, or recovery claim in this document is affected, and the diff for that file contains no logic, prop or copy change. Re-read the signer-management sections against it; they stand unchanged. Scope: that verification only — no other claim re-tested. Prior: #1698: new §6a — agent delegate-key rotation is a DIFFERENT layer from the account signer set, and its loss has the opposite answer (recoverable, because the delegate never held owner authority); revoke-before-issue, non-custody and no-self-rekey recorded as security properties; covers: widened to the re-key surface. Prior: #1679: signers read gains per-credential created_at (read-only timestamp for UI labels) — read/management boundary and every invariant unchanged; the read-surface paragraph updated to match. Prior: #1605: comment-only tense corrections in hybrid-accounts route + migrations 041/043 (stale "until #829/#834" claims) — no executable code, SQL, or boundary moves; every claim in this doc re-read against the diff stands. Prior: #1436: archiving now requires dead budgets as well as a revoked credential (one statement, refusal-only), so "Removed" cannot hide a spendable agent. #1423: revoke-all prepare reconciles crash-window orphans against disabledDelegations() and caps batches at 25; #1400: batch revoke-all — one owner-signed UserOp disables N delegations atomically (BatchDefault); DB write only after the UserOp lands; invariants unchanged. Prior: #1199 passkey/wallet removal two-to-one rule
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -254,7 +262,9 @@ names the consequence and asks for confirmation, and the API does not refuse
   the no-recovery consequence before calling, while the API preserves no
   stricter policy gate.
 - **Storage tracks the chain, not the reverse.** The stored signer set (which the
-  deploy/sign paths rebuild the account config from) is synced only *after* the
+  deploy path rebuilds the account config from, and which the client sign path
+  reads for the *credential* only — the account **address** is pinned, never
+  re-derived from it, #891) is synced only *after* the
   on-chain op confirms, and the submit step **pins the sync to the signed
   calldata** — the DB can never record a signer the owner didn't actually sign.
   (#985 moved `Executor` out of `infra/repositories/hybrid-signers.ts` into the
@@ -291,9 +301,21 @@ rules, the last-signer refusal (§7), the calldata encoding and the signed-op
 matching
 are **one implementation** (`rails/hybrid-signer-actions.ts`), because two copies
 of a spend-authority rule is how they drift apart. Invariant 13 is asserted
-against that shared core and against both routes reaching it. Client-side, signing selects the passkey whose credential is
-actually enrolled on the signing device rather than blindly `passkeys[0]`, so
-recovery with a backup key works from the backup device. UI surfaces treat a
+against that shared core and against both routes reaching it. Client-side, the
+signing ceremony selects the passkey whose credential is actually enrolled on
+the signing device rather than blindly `passkeys[0]`, so recovery with a backup
+key works from the backup device (`hybridPasskeyToSignWith` in `lib/signer.ts` —
+since #1933 the one place the credential is chosen, called by
+`lib/delegationPasskeySigner.ts`, which inlined a second copy of the rule until
+then; `pickSigningPath` in `hooks/useDelegationBudget.ts`
+chooses the *path*, passkey versus EOA, and never the credential). `passkeys[0]`
+survives as the fallback for the case where **no** device marker matches — a
+cleared or never-written marker — and that fallback is safe rather than a
+loophole: the marker is a local hint, so the worst it costs is a ceremony the
+authenticator resolves from its own credential lookup, and no wrong-account
+signature is reachable either way because the account address handed to the kit
+is **pinned** to the one provisioning derived, never re-derived from the current
+signer set (#891). UI surfaces treat a
 DISMISSED signing sheet as a neutral cancel, never an error (#1085) — a user
 changing their mind is not a failure mode. Scheme selection is
 likewise a **device** decision, never an account-shape decision: a mixed
@@ -326,12 +348,16 @@ The delegate never held owner authority. It holds only what a signed
 delegation grants it, and that grant is revocable by the account owner. So a
 lost or exposed delegate key is **recoverable**, where a lost sole account
 signer is not: the owner revokes the old delegation and issues a new one to a
-new delegate, keeping the agent's id, name, history and passport. That is
-`POST /agents/:id/rekey…` (`routes/agent-rekey.ts`), and it is the reason the
-"no recovery" limit above is scoped to the *signer set* rather than to keys in
-general.
+new delegate, keeping the agent's id, name, history and passport IDENTITY.
+That is `POST /agents/:id/rekey…` (`routes/agent-rekey.ts`), and it is the
+reason the "no recovery" limit above is scoped to the *signer set* rather than
+to keys in general.
 
-Three properties of that flow belong in this document because they are
+The word *identity* is load-bearing and was added in #1699, because the
+unqualified "keeps its passport" was read as "the attestation is untouched" and
+that is not what happens — see the re-anchoring property below.
+
+Seven properties of that flow belong in this document because they are
 security properties, not implementation detail:
 
 - **Revoke precedes issue, always.** Both halves are on-chain and
@@ -342,6 +368,47 @@ security properties, not implementation detail:
   live keys* on a funded account, which nothing recovers by retrying. The
   ordering is enforced by a stage machine AND by CHECK constraints on
   `agent_rekeys`, so it holds across the several requests the flow spans.
+- **The budget meter carries across the rotation — amount AND period
+  boundary.** A re-key is not a way to refill a budget. The remainder frozen by
+  the revoke is issued as a **carry** grant, anchored inside the old period and
+  expiring at the old boundary — or at the old grant's own expiry, if that
+  falls first — paired with a **steady** grant starting at that same instant on
+  the original budget and cadence (`modules/agents/rekey-carry.ts`). Either
+  piece may be absent rather than wrong: a fully spent period yields no carry,
+  and a grant that dies at or before the boundary yields no steady. The two
+  never overlap, so total spend before the boundary is capped at the remainder
+  and every later period is the original grant untouched. Carrying only the
+  *amount* is the bypass this
+  defends against: each re-key would restart the clock, so an agent on a daily
+  budget could be handed its remainder hourly — the period is half the grant,
+  and dropping it turns a rate limit into a tally. The defence composes rather
+  than being separately checked, which is why it holds for repeats: re-keying a
+  carry grant reads a grant whose boundary is that same instant, so no number
+  of re-keys inside one period can sum to more than the original budget. Two
+  refusals belong to the same invariant — a remainder larger than the granted
+  budget is refused rather than clamped, and a remaining-budget reading that
+  did not come from the chain is refused rather than carried, because
+  `readRemainingBudget` falls back to the FULL budget on a failed read and
+  carrying that fallback would hand the new key a fresh full period.
+- **The carry is planned on the clock the remainder was MEASURED on, and only
+  dropped on the clock it is issued on.** A re-key spans several requests with
+  an owner signature in the middle, so the meter reading and the issue can fall
+  in different budget periods. The remainder is a fact about the period the
+  revoke froze it in and means nothing in any other, so `planCarry` takes both
+  clocks: `agent_rekeys.metered_at` anchors the boundary and every classification
+  (expired, dormant, live), while the issue-time clock is used for exactly one
+  thing — dropping a piece whose window the delay has already outrun, rather than
+  asking the owner to sign a grant that can never redeem (#1849). Before this the
+  route passed the issue clock for both, which could not over-grant — the
+  remainder is still a ceiling — but silently *under*-granted: an owner who
+  finished after a boundary had a spent period's remainder charged against a
+  fresh one, at worst leaving an agent on zero for a period it was owed a full
+  budget in. A missing `metered_at` is refused (409) rather than defaulted to
+  now, because that default is precisely the defect. This is why "either piece
+  may be absent rather than wrong" has a third cause alongside a fully spent
+  period and a grant that dies at the boundary; every drop is reported to the
+  owner with the window that closed named, so an absent grant is explained
+  rather than merely missing.
 - **Non-custody is unchanged.** The new keypair is generated on the target
   machine and Haven receives only its public address. Nothing in the flow
   accepts, stores or transports private key material, and a design that
@@ -351,6 +418,48 @@ security properties, not implementation detail:
   through the dashboard; an agent presenting its own credential is refused
   explicitly. An agent rotating its own credentials would be an agent editing
   its own authority.
+- **The revoke is signed by a signer the DEVICE chose, not one the server
+  guessed** (#1870). §6's rule — scheme selection is a device decision, never
+  an account-shape decision — reads as though it always held across the prepare
+  routes. It did not hold here: the re-key's revoke prepare passed no signer to
+  the account, so the underlying default inferred the EOA owner whenever one
+  existed. On a mixed account that is a guess, and a costly one, because the
+  UserOp's verification gas is estimated against a dummy signature sized for
+  the inferred signer — a WebAuthn signature is several hundred bytes where an
+  EOA's is 65. The route now resolves `signature_scheme` through the same
+  `rails/hybrid-signer-actions.ts` core §6 describes, passes the choice down,
+  and reports the resolved scheme back so the client branches instead of
+  guessing. **The refusal ordering is the security property**, not the field: a
+  scheme the account cannot sign is refused `409` in the *prepare* step, which
+  writes nothing and leaves the re-key at `preflight`. That is deliberate under
+  the revoke-precedes-issue rule above — a failure after the revoke is the
+  expensive direction, so a new way to fail must land before it.
+
+- **The passport ANCHOR is retired and reissued, and standing never moves**
+  (#1699). An EAS attestation is immutable and `PASSPORT_SCHEMA`'s first field
+  is `address agentEoa`, so there is no mutable-anchor option: the moment the
+  rotation completes, the live attestation names a key the agent no longer
+  holds. Re-key therefore revokes it and issues a new one naming the new key —
+  and the same revoke-before-issue rule applies for the same reason, one layer
+  up. Minting first would leave TWO live credentials for one agent, one of them
+  naming a retired key, and a partial failure would make that permanent;
+  revoking first fails to *this agent has no passport right now*, which is
+  recoverable. The window between them is real, and it is reported as
+  `re_anchoring` rather than hidden — never as `anchored`, which would tell a
+  merchant a credential is current when the address it names cannot spend.
+
+  **What does NOT move is `standing`.** It derives from `agents.status`
+  (`modules/passport/revocation.ts`), which a re-key never writes, so no chain
+  failure in this path can cost an agent its standing — the worst available
+  outcome is a stale anchor that keeps retrying. That is the two-layer split of
+  §epic #970 doing the job it was built for: the DB is authoritative and the
+  anchor is eventually consistent, and re-anchoring is the case that makes the
+  distinction observable rather than theoretical. The queue is the invariant
+  "the attestation names an address the agent no longer uses", so a re-key
+  whose process died before enqueuing anything is still picked up.
+
+  Passport remains governance metadata, never spend authority: nothing in this
+  property grants, withholds or delays what an agent may spend.
 
 One consequence the owner should hear before starting: re-key retires the key
 that could **sweep** any residual balance on the old delegate EOA, so the

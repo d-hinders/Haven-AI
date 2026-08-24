@@ -27,6 +27,7 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 import ComingSoonModal from '@/components/ComingSoonModal'
 import InfoModal, { type InfoPage } from '@/components/InfoModal'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -203,31 +204,31 @@ export default function DesignSystemPage() {
                 name: '--v2-brand',
                 soft: '--v2-brand-soft',
                 use: 'Primary actions, links, brand identity.',
-                swatch: 'border-[var(--v2-brand)]/30 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]',
+                swatch: 'border-brand/30 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]',
               },
               {
                 name: '--v2-success',
                 soft: '--v2-success-soft',
                 use: 'Incoming payments, completed states, positive money movement.',
-                swatch: 'border-[var(--v2-success)]/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]',
+                swatch: 'border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]',
               },
               {
                 name: '--v2-debit',
                 soft: '--v2-debit-soft',
                 use: 'Outgoing payments, sent money. Sibling to success — never use for warnings.',
-                swatch: 'border-[var(--v2-debit)]/30 bg-[var(--v2-debit-soft)] text-[var(--v2-debit)]',
+                swatch: 'border-debit/30 bg-[var(--v2-debit-soft)] text-[var(--v2-debit)]',
               },
               {
                 name: '--v2-warning',
                 soft: '--v2-warning-soft',
                 use: 'Needs attention, paused states, soft caution. Not for irreversible actions.',
-                swatch: 'border-[var(--v2-warning)]/30 bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]',
+                swatch: 'border-warning/30 bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]',
               },
               {
                 name: '--v2-danger',
                 soft: '--v2-danger-soft',
                 use: 'Errors, failures, destructive confirmations (revoke / delete).',
-                swatch: 'border-[var(--v2-danger)]/30 bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]',
+                swatch: 'border-danger/30 bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]',
               },
               {
                 name: '--v2-ink / -2 / -3',
@@ -323,7 +324,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Spacing & radius"
-        description="The implicit scale, made explicit. Radius: cards and inner tiles are 10px (rounded-[10px]); marketing heroes 24px; buttons, inputs and selects rounded-md; badges/pills rounded-full. Card padding: p-5 default, p-6 for page-level section cards (Card.Header uses px-5 py-4 / spacious px-6 py-5). Vertical rhythm: space-y-10 between page sections, gap-4/gap-5 inside grids, mt-2 title→body, mt-4/mt-5 body→action."
+        description="The implicit scale, made explicit. Radius: cards and inner tiles are 10px (rounded-[10px]); marketing heroes 24px; buttons, inputs and selects rounded-md; badges/pills rounded-full. Card padding: p-5 default, p-6 for page-level section cards (Card.Header uses px-5 py-4 / spacious px-6 py-5). Vertical rhythm: space-y-10 between page sections, gap-4/gap-5 inside grids, mt-2 title to body, mt-4/mt-5 body to action."
       >
         <Card hover={false} className="p-5">
           <div className="grid gap-4 sm:grid-cols-3">
@@ -679,11 +680,32 @@ export default function DesignSystemPage() {
             <div className="mt-3 space-y-2 text-sm text-[var(--v2-ink-2)]">
               <p><Address value={sampleAddress} /> <span className="text-xs text-[var(--v2-ink-3)]">— hover for the full address</span></p>
               <p><Address value={sampleAddress} copy /> <span className="text-xs text-[var(--v2-ink-3)]">— with check-pop copy</span></p>
-              <p><Address value={sampleAddress} href="https://basescan.org" /> <span className="text-xs text-[var(--v2-ink-3)]">— explorer link with ↗</span></p>
+              <p><Address value={sampleAddress} href="https://basescan.org" /> <span className="text-xs text-[var(--v2-ink-3)]">— explorer link, opens in a new tab</span></p>
               <p className="break-all text-xs"><Address value={sampleAddress} truncate={false} /> <span className="text-[var(--v2-ink-3)]">— full form for receive surfaces</span></p>
             </div>
           </Card>
         </div>
+      </Section>
+
+      <Section
+        title="CopyButton — the one copy affordance"
+        description="The inline check-pop copy button, extracted from <Address> on its second call site (#1878). Any value a user is expected to paste elsewhere gets this, never a hand-rolled button: it owns the hit area, the focus ring, the 1.5s confirmation, and the silent catch around navigator.clipboard — which rejects on insecure origins, denied permissions, and in most headless captures. Failing quietly is correct for an accelerator; the value stays on screen and selectable. Pass `label` lowercase and name the thing, not the widget — it reads as “Copy address”, then “Address copied”."
+      >
+        <Card hover={false} className="p-5">
+          <div className="flex flex-wrap items-center gap-6 text-sm text-[var(--v2-ink-2)]">
+            <span className="inline-flex items-center gap-1">
+              <span className="v2-tabular rounded bg-[var(--v2-surface-2)] px-1.5 py-0.5 font-mono text-xs">haven-research</span>
+              <CopyButton value="haven-research" label="MCP server name" />
+            </span>
+            <span className="inline-flex items-center gap-1">
+              sk_agent_a1b2c3
+              <CopyButton value="sk_agent_a1b2c3" label="API key prefix" />
+            </span>
+          </div>
+          <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+            Click one — the icon swaps to a success check for 1.5s, then reverts.
+          </p>
+        </Card>
       </Section>
 
       <Section
@@ -1111,7 +1133,7 @@ export default function DesignSystemPage() {
         description="Approval requests lead with the money, show who asked, and make the wallet-to-recipient path readable before the user approves or rejects."
       >
         <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
-          <Card hover={false} className="overflow-hidden border-[var(--v2-warning)]/25">
+          <Card hover={false} className="overflow-hidden border-warning/25">
             <Card.Header>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -1165,6 +1187,53 @@ export default function DesignSystemPage() {
               body="When an agent asks to spend above its budget, the request will appear here before any money moves."
             />
           </div>
+        </div>
+      </Section>
+
+      <Section
+        title="ApprovalRequiredBanner — the tone ladder"
+        description="Three steps, and the step itself is part of the message. Read them together: a ladder can only be judged side by side, which is why all three live here rather than one per screen. Warning is the default, so picking a tone is a deliberate act — reach down to neutral when nothing is at stake, and up to danger only when the next action cannot be undone."
+      >
+        <div className="max-w-2xl space-y-5">
+          <div>
+            <ApprovalRequiredBanner title="You stay in control" tone="neutral">
+              Anything above the remaining budget waits for your approval before it is paid.
+            </ApprovalRequiredBanner>
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              <span className="font-semibold text-[var(--v2-ink-2)]">neutral</span> — states a fact the
+              user should have, and asks nothing of them. Nothing is wrong and nothing is pending.
+            </p>
+          </div>
+
+          <div>
+            <ApprovalRequiredBanner title="This agent has no budget left" tone="warning">
+              Its next request will wait for your approval until you raise the budget or the period
+              resets.
+            </ApprovalRequiredBanner>
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              <span className="font-semibold text-[var(--v2-ink-2)]">warning</span> — the default. Something
+              needs attention and the user can still act on it. This is the tone you get by saying nothing,
+              which is why the other two have to be asked for.
+            </p>
+          </div>
+
+          <div>
+            <ApprovalRequiredBanner title="The next step cannot be undone" tone="danger">
+              Replacing the signing key revokes the old one on-chain. Haven cannot give it back.
+            </ApprovalRequiredBanner>
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              <span className="font-semibold text-[var(--v2-ink-2)]">danger</span> — the action is
+              irreversible, not merely important. Its treatment is a structural break rather than a hue
+              swap — doubled border and a solid left rule — because pale pink and pale yellow at the same
+              border weight read as two shades of “notice” to a skimming reader, and as one shade to a
+              red/green-colour-blind one.
+            </p>
+          </div>
+
+          <ApprovalRequiredBanner title="Do not close this" tone="danger" density="compact">
+            The compact density is the same ladder in a tighter box. Use it inside a dialog or a card that
+            is already dense — never to soften a step you were not entitled to take.
+          </ApprovalRequiredBanner>
         </div>
       </Section>
 
@@ -1233,7 +1302,7 @@ export default function DesignSystemPage() {
             ['Research API', '0x31bc...8d04'],
           ].map(([name, address]) => (
             <div key={name} className="flex items-center gap-3 border-b border-[var(--v2-border)] px-5 py-3 last:border-b-0">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--v2-brand)]/20 bg-[var(--v2-brand-soft)]">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-brand/20 bg-[var(--v2-brand-soft)]">
                 <span className="text-xs font-semibold text-[var(--v2-brand)]">{name.slice(0, 2).toUpperCase()}</span>
               </div>
               <div className="min-w-0 flex-1">
@@ -1393,7 +1462,29 @@ export default function DesignSystemPage() {
                       343px Card at 393px — clipped by the Card's
                       `overflow-hidden`, i.e. the very defect the table below
                       is meant to document the correct shape of. */}
-                  <td className="px-2 py-4 align-middle md:px-4">
+                  {/* The BELOW-md widths live on the `<td>`s, not on the
+                      header cells, and that distinction is the whole defect
+                      (#1774/#1750). `Table.Head` is `hidden md:table-header-group`,
+                      so below md the header row is `display: none` and its
+                      width declarations take no part in column sizing at all —
+                      putting `w-[110px]` on the Amount HEADER measured a
+                      byte-identical mobile layout (Activity still 13px at
+                      390px) while making desktop rows grow 85px -> 133px.
+                      `TransactionsTable` carries these widths on its `<td>`s
+                      (`w-9`/`w-[110px]`/`w-8`, and UNCONDITIONALLY — it stays
+                      fixed-width at desktop too, which is the one place this
+                      showcase deliberately diverges), which is why its
+                      `max-w-0` Activity cell lands on a healthy 106px at 390px
+                      while this showcase's collapsed to
+                      3.7px at 320px / 13px at 390px. `md:w-auto` hands the
+                      columns back to content sizing at md and up, so THESE
+                      widths contribute nothing to the desktop baseline. (The
+                      desktop capture does still move by a few pixels — from
+                      the `TransactionMovement` change, which alters the
+                      From/To column's min-content: the middle row measured
+                      85px -> 73px at 1280px. Attributing that to these classes
+                      would send the next reader to the wrong file.) */}
+                  <td className="w-9 px-2 py-4 align-middle md:w-auto md:px-4">
                     <DirectionMark direction={row.direction} />
                   </td>
                   {/* `max-w-0` BELOW md ONLY. Unconditional, it squashed the
@@ -1442,13 +1533,13 @@ export default function DesignSystemPage() {
                   <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] md:table-cell">
                     {row.date}
                   </td>
-                  <td className="px-2 py-4 align-middle text-right md:px-4">
+                  <td className="w-[110px] px-2 py-4 align-middle text-right md:w-auto md:px-4">
                     <p>
                       <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
                     </p>
                     <p className="mt-1 text-xs text-[var(--v2-ink-3)] md:hidden">{row.date}</p>
                   </td>
-                  <td className="px-2 py-4 align-middle text-right md:px-4">
+                  <td className="w-8 px-2 py-4 align-middle text-right md:w-auto md:px-4">
                     <ExternalDetailsLink href="#" />
                   </td>
                 </tr>
@@ -1719,8 +1810,42 @@ export default function DesignSystemPage() {
           </>
         }
       >
-        Confirm the agent budget before connecting your agent. Requests above the remaining
-        budget will wait for approval.
+        {/*
+          Long enough to overflow the body at ordinary viewport heights, on
+          purpose (#1893). The section above already claims "the panel caps at
+          the viewport and only its body scrolls" — until this demo could
+          actually overflow, that claim had nothing behind it, and the scroll
+          continuation cue had nowhere on `/design-system` to be seen.
+
+          This does NOT move the committed visual baselines: `Modal` returns
+          `null` while closed, and the page is captured with this dialog shut.
+        */}
+        <div className="space-y-3">
+          <p>
+            Confirm the agent budget before connecting your agent. Requests above the remaining
+            budget will wait for approval.
+          </p>
+          <p>
+            The agent can spend up to the budget you set here, from this Haven wallet only. It
+            cannot move funds anywhere else, and it never holds a key of its own.
+          </p>
+          <p>
+            The budget refills at the end of each period. Nothing carries over, so an unspent
+            budget does not stack up into a larger one next period.
+          </p>
+          <p>
+            You can pause or revoke this agent at any time. Revoking takes effect on-chain, so it
+            stops the agent whether or not Haven is reachable.
+          </p>
+          <p>
+            Anything the agent pays for shows up in your transaction history with the merchant, the
+            amount, and the rule that allowed it.
+          </p>
+          <p>
+            Requests above the remaining budget are not refused outright — they wait for you to
+            approve or reject them, and nothing moves until you decide.
+          </p>
+        </div>
       </Modal>
 
       <InfoModal

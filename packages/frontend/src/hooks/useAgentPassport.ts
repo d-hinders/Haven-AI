@@ -16,7 +16,13 @@ export interface AgentPassport {
 }
 
 export type PassportStandingValue = 'active' | 'suspended' | 'revoked' | 'unknown'
-export type PassportAnchorState = 'not_anchored' | 'anchored' | 'revocation_pending' | 'revoked_onchain'
+export type PassportAnchorState =
+  | 'not_anchored'
+  | 'anchored'
+  /** Re-key window (#1699): the live attestation names the RETIRED delegate key. */
+  | 're_anchoring'
+  | 'revocation_pending'
+  | 'revoked_onchain'
 
 export interface AgentPassportStanding {
   agentId: string

@@ -127,7 +127,7 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
         role="dialog"
         aria-modal="true"
         aria-labelledby="payment-credentials-title"
-        className="relative flex w-full max-w-lg flex-col rounded-2xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)] max-h-[90vh]"
+        className="relative flex w-full max-w-lg flex-col rounded-2xl border border-[var(--v2-border)] bg-white shadow-modal max-h-[90vh]"
       >
         {/* Header */}
         <div className="flex items-start justify-between gap-4 border-b border-[var(--v2-border)] px-6 py-5 flex-shrink-0">
@@ -178,7 +178,7 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
                     variant="ghost"
                     onClick={() => void rotateKey()}
                     disabled={rotating}
-                    className="text-[var(--v2-warning)] hover:text-[var(--v2-warning)]/80"
+                    className="text-[var(--v2-warning)] hover:text-warning/80"
                   >
                     {rotating ? (
                       <span className="flex items-center gap-1.5">

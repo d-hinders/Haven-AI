@@ -13,6 +13,8 @@ vi.mock('wagmi', () => ({
 import {
   credentialIdFromKeyId,
   getStoredPasskeySigner,
+  hybridPasskeyOnDevice,
+  hybridPasskeyToSignWith,
   isSafeCapableSigner,
   rememberPasskeyCredentialOnDevice,
   setStoredHybridSigners,
@@ -208,5 +210,52 @@ describe('useActiveSigner', () => {
     )
 
     expect(result.current).toEqual({ type: 'eoa', address: EOA_ADDRESS, walletClient })
+  })
+})
+
+// ── The device-marker selector, in one place (#1933) ────────────────────────
+//
+// `delegationPasskeySigner` used to inline this rule; both call sites now go
+// through `hybridPasskeyToSignWith`. These tests are the rule's home — the
+// signing-path test in `delegationPasskeySigner.test.ts` proves the wiring.
+
+describe('hybridPasskeyToSignWith (#1933)', () => {
+  const FIRST = '0x0102030405060708'
+  const BACKUP = '0x1112131415161718'
+  const SET = {
+    passkeys: [{ key_id: FIRST }, { key_id: BACKUP }],
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  it('selects the passkey whose credential carries THIS device marker, not passkeys[0]', () => {
+    rememberPasskeyCredentialOnDevice(credentialIdFromKeyId(BACKUP))
+
+    expect(hybridPasskeyToSignWith(SET)?.key_id).toBe(BACKUP)
+    expect(hybridPasskeyOnDevice(SET)?.key_id).toBe(BACKUP)
+  })
+
+  it('keeps passkeys[0] as the fallback when no device marker is present (#1933 — load-bearing, do not delete)', () => {
+    // No marker for ANY key in this set. The fallback is what lets the
+    // ceremony proceed at all: the authenticator does its own credential
+    // lookup, so a user on a wiped/fresh profile can still sign. Without it
+    // the selector returns undefined and every such user hits a hard
+    // "no passkey to sign with" failure. Deleting the `?? passkeys[0]` in
+    // `signer.ts` must make THIS assertion red.
+    expect(hybridPasskeyOnDevice(SET)).toBeNull()
+    expect(hybridPasskeyToSignWith(SET)?.key_id).toBe(FIRST)
+  })
+
+  it('does not count a device marker for a credential outside this signer set', () => {
+    rememberPasskeyCredentialOnDevice(credentialIdFromKeyId('0xdeadbeefdeadbeef'))
+
+    expect(hybridPasskeyOnDevice(SET)).toBeNull()
+    expect(hybridPasskeyToSignWith(SET)?.key_id).toBe(FIRST)
+  })
+
+  it('returns undefined for an empty signer set so callers can say what is wrong', () => {
+    expect(hybridPasskeyToSignWith({ passkeys: [] })).toBeUndefined()
   })
 })

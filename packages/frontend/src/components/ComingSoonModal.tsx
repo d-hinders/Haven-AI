@@ -26,7 +26,7 @@ export default function ComingSoonModal({ open, onClose, onReceive }: Props) {
       showCloseButton
       bodyClassName="p-6"
     >
-      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-[10px] border border-[var(--v2-brand)]/20 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-[10px] border border-brand/20 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
         <Icon icon={Plus} className="h-6 w-6" />
       </div>
       <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">

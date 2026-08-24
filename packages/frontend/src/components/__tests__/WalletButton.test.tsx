@@ -312,6 +312,106 @@ describe('WalletButton', () => {
   })
 
 
+  /**
+   * #1803 — the label is not rendered below `sm`, so every state must carry an
+   * EXPLICIT `aria-label`.
+   *
+   * Written as an attribute assertion on purpose. jsdom applies no CSS, so the
+   * `hidden sm:inline` span still has its text here and every `getByRole(…,
+   * { name })` test above would keep passing on that text alone, at the exact
+   * width where the real browser renders none of it. Asserting the attribute is
+   * what makes the accessible name checkable in a DOM with no layout; the
+   * rendered half — that the label really is 0px wide and the name survives it
+   * anyway — is measured in `e2e/mobile-nav-tap-target.mobile.spec.ts`
+   * assertion 10, which is a different question and needs a real engine.
+   *
+   * Every branch of the component is covered, because the collapse applies to
+   * all of them and each builds its label differently.
+   */
+  describe('accessible name survives the label collapse below sm (#1803)', () => {
+    const nameOf = (button: HTMLElement) => button.getAttribute('aria-label')
+
+    it('names the connect call to action', () => {
+      render(<WalletButton />)
+
+      expect(nameOf(screen.getByRole('button', { name: 'Connect wallet' }))).toBe('Connect wallet')
+    })
+
+    it('names the wrong-network state', () => {
+      setConnectedWallet({
+        chain: { id: 999, name: 'Unsupported Chain', unsupported: true },
+      })
+
+      render(<WalletButton />)
+
+      expect(nameOf(screen.getByRole('button', { name: 'Wrong network' }))).toBe('Wrong network')
+    })
+
+    it('names the passkey state, and follows the owner alias when there is one', () => {
+      mocks.useActiveSigner.mockReturnValue({
+        type: 'passkey',
+        address: PASSKEY_ADDRESS,
+        credentialId: 'credential-1',
+        chainId: 100,
+      })
+
+      const plain = render(<WalletButton />)
+      expect(nameOf(screen.getByRole('button', { name: 'Passkey' }))).toBe('Passkey')
+      plain.unmount()
+
+      mocks.useOwnerDirectory.mockReturnValue({
+        getOwnerAlias: vi.fn((address: string) =>
+          address.toLowerCase() === PASSKEY_ADDRESS.toLowerCase() ? 'Daniel passkey' : null,
+        ),
+      })
+
+      render(<WalletButton />)
+      expect(nameOf(screen.getByRole('button', { name: 'Daniel passkey' }))).toBe('Daniel passkey')
+    })
+
+    it('names the Hybrid DeleGator state', () => {
+      mocks.useActiveSigner.mockReturnValue({
+        type: 'delegator_passkey',
+        accountAddress: '0x' + 'aa'.repeat(20),
+        chainId: 84532,
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: null,
+          passkeys: [],
+        },
+      })
+
+      render(<WalletButton />)
+
+      expect(nameOf(screen.getByRole('button', { name: 'Passkey' }))).toBe('Passkey')
+    })
+
+    it('names the connected wallet with exactly what the pill displays', () => {
+      setConnectedWallet()
+      mocks.useActiveSigner.mockReturnValue({
+        type: 'eoa',
+        address: EOA_ADDRESS,
+        walletClient: {},
+      })
+
+      const truncated = render(<WalletButton />)
+      // No alias, no ENS: the truncated address IS the label, so the name must
+      // be the same string rather than a generic "Wallet".
+      expect(nameOf(screen.getByRole('button', { name: '0x5555…5555' }))).toBe('0x5555…5555')
+      truncated.unmount()
+
+      mocks.useOwnerDirectory.mockReturnValue({
+        getOwnerAlias: vi.fn((address: string) =>
+          address.toLowerCase() === EOA_ADDRESS.toLowerCase() ? 'Ledger main' : null,
+        ),
+      })
+
+      render(<WalletButton />)
+      expect(nameOf(screen.getByRole('button', { name: 'Ledger main' }))).toBe('Ledger main')
+    })
+  })
+
   // #1126: the Hybrid DeleGator branch — the PR's core deliverable. The
   // 'Signing with' block names the on-device credential WITHOUT an address
   // (Hybrid passkeys are raw P256 coordinates; none exists).

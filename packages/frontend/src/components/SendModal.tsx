@@ -91,10 +91,10 @@ function SendDetail({
 function ResultIcon({ tone }: { tone: 'success' | 'warning' | 'danger' }) {
   const toneClass =
     tone === 'success'
-      ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
+      ? 'border-success/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
       : tone === 'warning'
-        ? 'border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
-        : 'border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]'
+        ? 'border-warning/20 bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
+        : 'border-danger/20 bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]'
 
   return (
     <div className={`mb-5 flex h-14 w-14 items-center justify-center rounded-full border ${toneClass}`}>
@@ -424,7 +424,7 @@ export default function SendModal({
       />
 
       {/* Modal */}
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Send payment" className="relative w-full max-w-md mx-4 max-h-[calc(100vh-2rem)] overflow-y-auto bg-white border border-[var(--v2-border)] rounded-xl shadow-[var(--v2-shadow-modal)]">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Send payment" className="relative w-full max-w-md mx-4 max-h-[calc(100vh-2rem)] overflow-y-auto bg-white border border-[var(--v2-border)] rounded-xl shadow-modal">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--v2-border)]">
           <h2 className="text-base font-semibold text-[var(--v2-ink)]">
@@ -484,7 +484,7 @@ export default function SendModal({
                           onClick={() => onSelectSafeOption?.(safe.id)}
                           className={`w-full rounded-lg border px-4 py-3 text-left transition-all duration-150 ${
                             isSelected
-                              ? 'border-[var(--v2-brand)]/50 bg-[var(--v2-brand-soft)]'
+                              ? 'border-brand/50 bg-[var(--v2-brand-soft)]'
                               : 'border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-[var(--v2-border-strong)]'
                           }`}
                         >
@@ -521,7 +521,7 @@ export default function SendModal({
             {(contextLoading || contextError) && (
               <div className={`rounded-lg px-4 py-3 text-xs border ${
                 contextError
-                  ? 'text-[var(--v2-danger)] bg-[var(--v2-danger-soft)] border-[var(--v2-danger)]/20'
+                  ? 'text-[var(--v2-danger)] bg-[var(--v2-danger-soft)] border-danger/20'
                   : 'text-[var(--v2-ink-2)] bg-[var(--v2-surface)] border-[var(--v2-border)]'
               }`}>
                 {contextError
@@ -545,7 +545,7 @@ export default function SendModal({
                       onClick={() => { setSelectedToken(t.symbol); setFormError(''); setAmountError('') }}
                       className={`p-3 rounded-lg border text-left transition-all duration-150 ${
                         isActive
-                          ? 'border-[var(--v2-brand)]/50 bg-[var(--v2-brand-soft)]'
+                          ? 'border-brand/50 bg-[var(--v2-brand-soft)]'
                           : 'border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-[var(--v2-border-strong)]'
                       }`}
                     >
@@ -612,7 +612,7 @@ export default function SendModal({
                 {/* Selected contact badge */}
                 {selectedContactName && (
                   <div className="flex items-center gap-2 mb-1.5">
-                    <div className="flex items-center gap-1.5 px-2 py-1 bg-[var(--v2-brand-soft)] border border-[var(--v2-brand)]/20 rounded-md">
+                    <div className="flex items-center gap-1.5 px-2 py-1 bg-[var(--v2-brand-soft)] border border-brand/20 rounded-md">
                       <div className="w-4 h-4 overflow-hidden rounded-full bg-[var(--v2-brand-soft)] flex items-center justify-center">
                         <span className="text-xs font-semibold leading-none text-[var(--v2-brand)]">
                           {selectedContactName.slice(0, 2).toUpperCase()}
@@ -622,7 +622,7 @@ export default function SendModal({
                       <button
                         type="button"
                         onClick={() => { setSelectedContactName(null); setRecipient('') }}
-                        className="text-[var(--v2-brand)]/60 hover:text-[var(--v2-brand-strong)] ml-0.5"
+                        className="text-brand/60 hover:text-[var(--v2-brand-strong)] ml-0.5"
                       >
                         <Icon icon={X} className="w-3 h-3" />
                       </button>
@@ -662,7 +662,7 @@ export default function SendModal({
               )}
 
               {!contactsError && contacts.length === 0 && (
-                <div className="mt-3 rounded-lg border border-[var(--v2-border)] bg-white px-3 py-3 text-xs leading-relaxed text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+                <div className="mt-3 rounded-lg border border-[var(--v2-border)] bg-white px-3 py-3 text-xs leading-relaxed text-[var(--v2-ink-2)] shadow-card">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <span>No saved recipients yet. Add contacts for people or services you pay often.</span>
                     <Button href="/contacts" variant="ghost" size="sm" className="sm:flex-shrink-0">
@@ -701,7 +701,7 @@ export default function SendModal({
                           onClick={() => handleSelectContact(contact)}
                           className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
                             isSelected
-                              ? 'border-[var(--v2-brand)]/40 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
+                              ? 'border-brand/40 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
                               : 'border-[var(--v2-border)] bg-[var(--v2-surface)] text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)]'
                           }`}
                         >
@@ -742,7 +742,7 @@ export default function SendModal({
                       value={contactSearch}
                       onChange={(e) => setContactSearch(e.target.value)}
                       placeholder="Search saved recipients"
-                      className="w-full px-3 py-2 bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-md text-xs text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/40"
+                      className="w-full px-3 py-2 bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-md text-xs text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-brand/40"
                     />
                   </div>
                   <div className="max-h-52 overflow-y-auto">
@@ -797,13 +797,13 @@ export default function SendModal({
             )}
 
             {needsConnectedWallet && (
-              <div className="rounded-lg border border-[var(--v2-border)] bg-white px-4 py-3 text-sm text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+              <div className="rounded-lg border border-[var(--v2-border)] bg-white px-4 py-3 text-sm text-[var(--v2-ink-2)] shadow-card">
                 Connect wallet to send from this account.
               </div>
             )}
 
             {formError && (
-              <div className="text-sm text-[var(--v2-danger)] bg-[var(--v2-danger-soft)] border border-[var(--v2-danger)]/20 rounded-lg px-4 py-3">
+              <div className="text-sm text-[var(--v2-danger)] bg-[var(--v2-danger-soft)] border border-danger/20 rounded-lg px-4 py-3">
                 {formError}
               </div>
             )}
@@ -876,7 +876,7 @@ export default function SendModal({
             )}
 
             {needsConnectedWallet && (
-              <div className="rounded-lg border border-[var(--v2-border)] bg-white px-4 py-3 text-sm text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+              <div className="rounded-lg border border-[var(--v2-border)] bg-white px-4 py-3 text-sm text-[var(--v2-ink-2)] shadow-card">
                 Connect wallet to send from this account.
               </div>
             )}

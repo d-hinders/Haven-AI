@@ -14,6 +14,11 @@ export interface ConnectApiClient {
    * never any secret material.
    */
   getConnectorStatus(setupId: string, apiKey: string): Promise<ConnectorStatusResponse>
+  /**
+   * #1700: the agent behind an API key. Used by the re-key flow on both sides
+   * of the dashboard hand-off — see {@link AgentIdentity}.
+   */
+  getAgentIdentity(apiKey: string): Promise<AgentIdentity>
 }
 
 export interface ConnectorStatusResponse {
@@ -38,6 +43,18 @@ export interface RegisterSetupInput extends ResolveSetupInput {
   proofSignature: string
   apiKeyHash: string
   apiKeyPrefix: string
+  /**
+   * #1878: the RESOLVED hosted MCP server name this agent is being wired as —
+   * `haven` for the bare pair, `haven-<slug>` for a named one. Sent so the
+   * dashboard can tell two agents in one harness apart; it is a display aid
+   * and Haven keys nothing off it.
+   *
+   * Always sent by a connector that supports it, bare pair included. Omitting
+   * it for the bare pair would make "absent" ambiguous between *this is the
+   * unnamed pair* and *an older connector said nothing*, and only the second
+   * of those may render as unknown.
+   */
+  mcpServerName?: string
   connectorContext?: ConnectorContext
   installCapabilities?: {
     canWriteRuntimeConfig?: boolean
@@ -117,6 +134,26 @@ export interface RegisterSetupResponse {
   next_action: string
 }
 
+/**
+ * The agent identity behind an API key (#1700).
+ *
+ * Read from `GET /machine-payments/agent`, the same agent-authenticated
+ * endpoint the SDK's `getAgent()` uses. Re-key needs it twice and for two
+ * different questions: BEFORE, to refuse a legacy-rail account the way the
+ * backend would rather than let the owner discover it five signed steps later;
+ * and AFTER, to prove the API key the owner pasted really belongs to this
+ * agent and really names the key this machine just generated.
+ */
+export interface AgentIdentity {
+  id: string
+  name: string
+  status: string
+  safe_address: string | null
+  delegate_address: string | null
+  chain_id: number | null
+  execution_rail: 'legacy' | 'delegation' | string
+}
+
 export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch = fetch): ConnectApiClient {
   const root = baseUrl.replace(/\/+$/, '')
   return {
@@ -142,12 +179,19 @@ export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch 
           api_key_prefix: input.apiKeyPrefix,
           runtime: input.runtime,
           connector_version: input.connectorVersion,
+          mcp_server_name: input.mcpServerName,
           connector_context: input.connectorContext,
           install_capabilities: input.installCapabilities && {
             can_write_runtime_config: input.installCapabilities.canWriteRuntimeConfig,
             restart_required: input.installCapabilities.restartRequired,
           },
         }),
+      }),
+
+    getAgentIdentity: (apiKey) =>
+      request(fetchImpl, `${root}/machine-payments/agent`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${apiKey}` },
       }),
 
     getConnectorStatus: (setupId, apiKey) =>

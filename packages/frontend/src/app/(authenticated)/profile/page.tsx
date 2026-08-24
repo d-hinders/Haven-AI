@@ -18,7 +18,7 @@ const ProfileClient = dynamic(() => import('./ProfileClient'), {
         <Skeleton variant="text" className="h-8 w-32" />
         <Skeleton variant="text" className="h-5 w-full max-w-md" />
       </div>
-      <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]">
+      <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card">
         <Card.Header padding="spacious" className="space-y-2">
           <Skeleton variant="text" className="h-5 w-40" />
           <Skeleton variant="text" className="h-4 w-full max-w-sm" />

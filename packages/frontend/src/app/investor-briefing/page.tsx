@@ -3,6 +3,8 @@ import type { ReactNode } from 'react'
 import { HeroBackdrop } from '@/components/marketing/HeroBackdrop'
 import { Card } from '@/components/ui/Card'
 import { HavenMark } from '@/components/brand/HavenMark'
+import { BrandBandButton } from '@/components/marketing/BrandBandButton'
+import { TrailingArrow } from '@/components/marketing/TrailingArrow'
 
 const CONTACT_TEAM_HREF =
   'mailto:daniel.hinders@gmail.com?subject=Haven%20investor%20briefing'
@@ -157,7 +159,7 @@ export default function InvestorBriefingPage() {
         <div className="relative max-w-6xl mx-auto px-6 pt-20 md:pt-28 pb-16 md:pb-24">
           <div className="grid grid-cols-1 lg:grid-cols-[0.95fr_1.05fr] gap-12 lg:gap-16 items-center">
             <div>
-              <div className="inline-flex items-center gap-2 mb-6 px-2.5 py-1 rounded-full border border-[var(--v2-border)] bg-white/80 backdrop-blur text-[12px] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+              <div className="inline-flex items-center gap-2 mb-6 px-2.5 py-1 rounded-full border border-[var(--v2-border)] bg-white/80 backdrop-blur text-[12px] text-[var(--v2-ink-2)] shadow-card">
                 <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
                 Unlisted investor briefing
               </div>
@@ -196,7 +198,7 @@ export default function InvestorBriefingPage() {
                 {SIGNAL_CARDS.map((card) => (
                   <div
                     key={card.label}
-                    className="rounded-[10px] border border-[var(--v2-border)] bg-white/80 backdrop-blur px-4 py-3 shadow-[var(--v2-shadow-card)]"
+                    className="rounded-[10px] border border-[var(--v2-border)] bg-white/80 backdrop-blur px-4 py-3 shadow-card"
                   >
                     <div className="text-[11px] text-[var(--v2-ink-3)] mb-1">{card.label}</div>
                     <div className="text-[14px] font-semibold tracking-tight text-[var(--v2-ink)]">
@@ -433,13 +435,9 @@ export default function InvestorBriefingPage() {
             contact the team directly.
           </p>
           <div className="flex justify-center">
-            <a
-              href={CONTACT_TEAM_HREF}
-              className="inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors h-12 px-6 text-[15px] bg-white text-[var(--v2-ink)] hover:bg-white/95 shadow-[0_1px_2px_rgba(16,24,40,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-brand)]"
-            >
+            <BrandBandButton href={CONTACT_TEAM_HREF} trailingArrow>
               Contact the team
-              <ArrowIcon />
-            </a>
+            </BrandBandButton>
           </div>
         </div>
       </section>
@@ -539,10 +537,33 @@ function InvestorButton({
   variant: 'primary' | 'ghost'
   size?: 'sm' | 'lg'
 }) {
-  const sizeClass = size === 'sm' ? 'h-9 px-3.5 text-[13px]' : 'h-11 px-5 text-[15px]'
+  // `sm` paints 36px and `lg` paints 44px. MEASURED at 393px (Pixel 5) with
+  // `elementFromPoint`, before this: the sticky header's `sm` CTA had a hit
+  // rectangle of exactly 150x36 — the border box and nothing more — while the
+  // hero's `lg` read 44. So the shortfall was 8px of real, tappable height on a
+  // control `sticky top-0` keeps on screen for all 6,140px of this page (#1955).
+  //
+  // The remedy is `ui/Button`'s: a transparent `::after` extends the HIT AREA to
+  // 44px while the painted box stays 36px. Raising the paint is deliberately not
+  // done — the header band's density depends on it, and #1726 rejected that same
+  // remedy in the product app for the same reason.
+  //
+  // Borrowed rather than shared, because this is not a `Button` and #1766
+  // records that the rule outlives the primitive. `relative` comes WITH it here:
+  // this `<a>` is statically positioned, so the overlay has no containing block
+  // otherwise. (The nav toggle #1766 fixed is `fixed`, already its own
+  // containing block, and taking `relative` there would have unpositioned it —
+  // that is the case the "must not take `relative`" note is about, not this one.)
+  //
+  // Vertical only, for #1726's reason: growing the target sideways would let it
+  // swallow taps meant for a neighbour. `lg` is already 44px and gets nothing.
+  const sizeClass =
+    size === 'sm'
+      ? "h-9 px-3.5 text-[13px] relative after:absolute after:inset-x-0 after:top-1/2 after:h-11 after:-translate-y-1/2 after:content-['']"
+      : 'h-11 px-5 text-[15px]'
   const variantClass =
     variant === 'primary'
-      ? 'bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)] shadow-[var(--v2-shadow-button)]'
+      ? 'bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)] shadow-button'
       : 'bg-white text-[var(--v2-ink)] border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)]'
 
   return (
@@ -551,18 +572,11 @@ function InvestorButton({
       className={`inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] ${sizeClass} ${variantClass}`}
     >
       {children}
-      <ArrowIcon />
+      <TrailingArrow />
     </a>
   )
 }
 
-function ArrowIcon() {
-  return (
-    <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.75}>
-      <path d="M3.5 8h9M9 4.5L12.5 8 9 11.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
 
 function ControlSurfaceMock() {
   return (
@@ -622,7 +636,16 @@ function ControlSurfaceMock() {
               <span className="text-[12px] font-medium text-white/80">Payment intent</span>
               <span className="text-[11px] font-mono text-white/45">POST /payments</span>
             </div>
-            <div className="space-y-2 font-mono text-[12px] leading-relaxed text-white/78">
+            {/*
+              text-white/75, not text-white/78 (#1818). `/78` is not a step on
+              Tailwind's opacity scale, so v3.4 dropped the utility entirely and
+              this block inherited the parent's full-strength `text-white` — the
+              same silent-drop failure as the bare-var() shape, on a colour that
+              has nothing to do with var(). `/75` is the nearest scale step and
+              sits below the `/80` label above it, which is the hierarchy the
+              off-scale value was reaching for.
+            */}
+            <div className="space-y-2 font-mono text-[12px] leading-relaxed text-white/75">
               <div>{'{ token: "USDC", amount: "23.40",'}</div>
               <div>{'  protocol: "x402", agent: "research" }'}</div>
             </div>

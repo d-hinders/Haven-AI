@@ -31,13 +31,13 @@ export function UnmanagedDelegateCard({
   const accentText = pendingHavenSetup ? 'text-[var(--v2-ink-2)]' : 'text-[var(--v2-warning)]'
   const containerCls = pendingHavenSetup
     ? 'border-[var(--v2-border)] bg-[var(--v2-surface)]'
-    : 'border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)]'
+    : 'border-warning/25 bg-[var(--v2-warning-soft)]'
   return (
     <div className={`rounded-[10px] border border-dashed p-5 ${containerCls}`}>
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className={`w-9 h-9 rounded-xl bg-white flex items-center justify-center ${accentText}`}>
-            <Icon icon={pendingHavenSetup ? Clock : TriangleAlert} className="h-[17px] w-[17px]" />
+            <Icon icon={pendingHavenSetup ? Clock : TriangleAlert} className="h-4 w-4" />
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -69,7 +69,7 @@ export function UnmanagedDelegateCard({
             className={`ml-2 transition-colors hover:text-[var(--v2-ink)] ${accentText}`}
             title="Copy address"
           >
-            <Icon icon={Copy} className="h-[11px] w-[11px]" />
+            <Icon icon={Copy} className="h-3 w-3" />
           </button>
         </p>
       </div>

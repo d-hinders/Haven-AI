@@ -1,6 +1,6 @@
 'use client'
 
-import { RUNTIME_OPTIONS, type AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
+import { type AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
 import { budgetPeriodLabel } from '@/lib/budget-period'
 import { Button } from '../ui/Button'
 import { AgentRulesSummary } from '../haven'
@@ -14,14 +14,12 @@ import { InlineErrorNote, WarningCallout } from './SetupNotices'
  * 20px spacing between the summary card and the notices below it.
  *
  * A confirmation, not a second form: every row restates a CHOICE already
- * made on steps 1-2 (name, runtime, wallet, budget, passport), never
+ * made on steps 1-2 (name, wallet, budget, passport), never
  * explains the protocol. The one policy fact worth restating here — that an
  * over-budget request waits for approval — is a single helper line under the
  * Budget row rather than its own row.
  */
 export function ReviewStep({ flow }: { flow: AgentConnectionSetupFlow }) {
-  const runtimeLabel = RUNTIME_OPTIONS.find((option) => option.id === flow.runtime)?.label ?? flow.runtime
-
   return (
     <>
       <AgentRulesSummary
@@ -30,7 +28,6 @@ export function ReviewStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         density="compact"
         items={[
           { label: 'Agent name', value: flow.name, helper: flow.description.trim() || undefined },
-          { label: 'Runtime', value: runtimeLabel },
           { label: 'Spend from', value: `${flow.walletName} on ${flow.walletNetworkName}` },
           {
             label: 'Budget',

@@ -108,7 +108,7 @@ export default function TransactionsClient() {
     .filter((name): name is string => Boolean(name))
 
   // Plain-English page subtitle that reflects the active filter scope. When
-  // the user lands here from the "View all →" link on an account or agent
+  // the user lands here from the "View all" link on an account or agent
   // detail page, this turns the static "All activity across your accounts."
   // line into "Transactions for {accountName}" so the view feels intentional.
   const subtitle = useMemo(
@@ -195,7 +195,7 @@ export default function TransactionsClient() {
       />
 
       {partialFailure && (
-        <div className="mb-4 rounded-lg border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-warning)]">
+        <div className="mb-4 rounded-lg border border-warning/20 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-warning)]">
           <div className="font-medium mb-1">Some accounts failed to load completely.</div>
           <div className="text-xs text-[var(--v2-warning)]">
             {failedSafeNames.length > 0

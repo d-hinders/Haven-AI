@@ -42,7 +42,7 @@ export function buildTransactionSummary(
  *
  * Goals:
  * - When the user arrived at the page from `/accounts/[safeId]` → /transactions?safeId=…
- *   (the "View all →" link), the subtitle reads "Transactions for {accountName}"
+ *   (the "View all" link), the subtitle reads "Transactions for {accountName}"
  *   so the page feels intentional rather than as if the user landed on the
  *   global feed and the filter happened by accident.
  * - Account + agent scope combine.

@@ -313,8 +313,8 @@ const passportReceipt = {
     },
     anchor: {
       type: 'string',
-      enum: ['not_anchored', 'anchored', 'revocation_pending', 'revoked_onchain'],
-      description: "The on-chain anchor's progress, for transparency. Never the authority.",
+      enum: ['not_anchored', 'anchored', 're_anchoring', 'revocation_pending', 'revoked_onchain'],
+      description: "The on-chain anchor's progress, for transparency. Never the authority. `re_anchoring` is the re-key window (#1699): the attestation on-chain is live but names the agent's RETIRED delegate key, because EAS attestations are immutable — the agent's standing is unaffected.",
     },
     evidenceUid: { type: ['string', 'null'] },
     chainId: { type: ['integer', 'null'] },
@@ -1324,40 +1324,7 @@ export const openapiSpec = {
             description: 'Re-key opened at stage preflight.',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  required: [
-                    'rekey_id',
-                    'stage',
-                    'old_delegate_address',
-                    'new_delegate_address',
-                    'residual',
-                    'delegations_to_revoke',
-                    'next_step',
-                  ],
-                  properties: {
-                    rekey_id: { type: 'string', format: 'uuid' },
-                    stage: { type: 'string', enum: ['preflight'] },
-                    old_delegate_address: address,
-                    new_delegate_address: address,
-                    residual: {
-                      type: 'object',
-                      description:
-                        'Reported whether or not it is recoverable — nothing about a stranded residual fails quietly.',
-                      required: ['atomic', 'recoverable_after_rekey'],
-                      properties: {
-                        atomic: { type: 'string' },
-                        token_address: { type: 'string', nullable: true },
-                        disposition: { type: 'string', nullable: true },
-                        recoverable_after_rekey: { type: 'boolean' },
-                        note: { type: 'string' },
-                      },
-                    },
-                    delegations_to_revoke: { type: 'array', items: delegationHash },
-                    next_step: { type: 'string' },
-                    ordering_note: { type: 'string' },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/AgentRekeyPreflight' },
               },
             },
           },
@@ -1387,15 +1354,19 @@ export const openapiSpec = {
         operationId: 'prepareRekeyRevocation',
         summary: 'Re-key step 1a: prepare the batched revoke of every live delegation (#1698).',
         description:
-          'Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys.',
+          'Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage with an empty carry.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }, rekeyIdParam],
+        requestBody: {
+          required: false,
+          content: { 'application/json': { schema: signatureSchemeBody } },
+        },
         responses: {
           '200': {
-            description: 'Prepared revocation for the owner to sign.',
+            description: 'Prepared revocation, shaped by the signature scheme — or the no-authority short-circuit.',
             content: {
               'application/json': {
-                schema: { type: 'object', additionalProperties: true },
+                schema: { $ref: '#/components/schemas/AgentRekeyRevokePrepare' },
               },
             },
           },
@@ -1403,7 +1374,11 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '404': errorResponse,
-          '409': { ...errorResponse, description: 'Wrong stage — this re-key is past the revoke.' },
+          '409': {
+            ...errorResponse,
+            description:
+              'Wrong stage — this re-key is past the revoke; the account signer configuration is unknown; or the requested signature_scheme is one this account cannot sign. Every one of these lands BEFORE the revoke, so the re-key stays retryable (#1868).',
+          },
           '502': errorResponse,
         },
       },
@@ -1493,43 +1468,7 @@ export const openapiSpec = {
             description: 'Replacement delegations built, pending the owner signature.',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['stage', 'delegate_account_address', 'delegations'],
-                  properties: {
-                    stage: { type: 'string', enum: ['issued'] },
-                    delegate_account_address: address,
-                    delegations: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        properties: {
-                          delegation_hash: delegationHash,
-                          carry_role: { type: 'string', enum: ['carry', 'steady', 'reanchor'] },
-                          token_address: address,
-                          recipient_address: { type: 'string', nullable: true },
-                          budget_atomic: { type: 'string' },
-                          period_seconds: { type: 'integer' },
-                          start_date: { type: 'integer' },
-                          expires_at: { type: 'integer' },
-                          signing_payload: eip712Payload,
-                        },
-                      },
-                    },
-                    skipped: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        properties: {
-                          delegation_hash: delegationHash,
-                          reason: { type: 'string' },
-                        },
-                      },
-                    },
-                    carry_note: { type: 'string' },
-                    next_step: { type: 'string' },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/AgentRekeyIssueResponse' },
               },
             },
           },
@@ -1587,39 +1526,7 @@ export const openapiSpec = {
             description: 'Re-key complete. The old API key stops authenticating immediately.',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  required: [
-                    'completed',
-                    'stage',
-                    'agent_id',
-                    'new_delegate_address',
-                    'api_key',
-                    'api_key_prefix',
-                    'old_api_key_revoked',
-                  ],
-                  properties: {
-                    completed: { type: 'boolean' },
-                    stage: { type: 'string', enum: ['completed'] },
-                    agent_id: { type: 'string', format: 'uuid' },
-                    new_delegate_address: address,
-                    api_key: {
-                      type: 'string',
-                      description: 'Shown ONCE. Never stored in plaintext and never logged.',
-                    },
-                    api_key_prefix: { type: 'string' },
-                    old_api_key_revoked: { type: 'boolean' },
-                    invalidated_intents: { type: 'integer' },
-                    residual_on_old_delegate: {
-                      type: 'object',
-                      properties: {
-                        atomic: { type: 'string' },
-                        recoverable: { type: 'boolean' },
-                        note: { type: 'string' },
-                      },
-                    },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/AgentRekeyCompleteResponse' },
               },
             },
           },
@@ -2203,8 +2110,8 @@ export const openapiSpec = {
                         },
                         anchor: {
                           type: 'string',
-                          enum: ['not_anchored', 'anchored', 'revocation_pending', 'revoked_onchain'],
-                          description: 'Describes the chain, for transparency — not for deciding.',
+                          enum: ['not_anchored', 'anchored', 're_anchoring', 'revocation_pending', 'revoked_onchain'],
+                          description: "Describes the chain, for transparency — not for deciding. `re_anchoring` means a re-key rotated the delegate key and the attestation naming the old one is being retired and reissued (#1699); standing is unaffected.",
                         },
                         attestationUid: { type: ['string', 'null'] },
                         chainLagging: {
@@ -6722,6 +6629,23 @@ export const openapiSpec = {
           /** Timestamp of the most recent MCP tool call from this agent. Null until first call. */
           mcp_last_seen_at: { anyOf: [isoDateTime, { type: 'null' }] },
           /**
+           * #1878: the hosted MCP server name this agent is wired as, exactly
+           * as it appears in the user's MCP config — `haven` for the unnamed
+           * pair, `haven-<slug>` for one connected with `--name`. Its signer
+           * counterpart is `haven-signer` / `haven-signer-<slug>`.
+           *
+           * SELF-REPORTED by the connector at registration and a DISPLAY AID
+           * ONLY: nothing keys off it, it is not unique, and it is not
+           * identity. Use `id` for that.
+           *
+           * Null means never reported — an agent created straight through
+           * `POST /agents`, one that predates #1878, or one connected by an
+           * older connector. Null must NOT be rendered as the bare `haven`
+           * pair: `--name` shipped in #1696, so named agents exist with no
+           * recorded name, and guessing would mislabel exactly them.
+           */
+          mcp_server_name: { type: ['string', 'null'] },
+          /**
            * True when open reconciliation events indicate stranded delegate
            * funds (#1445). Derived by the list and detail reads, so it is NOT
            * required: the creation response is built from the freshly inserted
@@ -7728,6 +7652,175 @@ export const openapiSpec = {
           transactions: { type: 'array', items: { $ref: '#/components/schemas/Transaction' }, description: 'At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection.' },
         },
         additionalProperties: false,
+      },
+      // ── Agent re-key (#1698, epic #1694) ──────────────────────────────
+      //
+      // Named rather than inline because the dashboard renders them (#1701).
+      // The wire-type ratchet (#1447) refuses a hand-written copy of a shape
+      // the spec could provide, and it is right to: a generated type proves
+      // nothing while the code that renders keeps its own restatement, and
+      // this flow revokes and re-issues spend authority.
+      AgentRekeyResidual: {
+        type: 'object',
+        description:
+          'Reported whether or not it is recoverable — nothing about a stranded residual fails quietly.',
+        required: ['atomic', 'recoverable_after_rekey'],
+        properties: {
+          atomic: { type: 'string' },
+          token_address: { type: 'string', nullable: true },
+          disposition: { type: 'string', nullable: true },
+          recoverable_after_rekey: { type: 'boolean' },
+          note: { type: 'string' },
+        },
+      },
+      /**
+       * The revoke-prepare 200, discriminated by `signature_scheme` (#1870).
+       *
+       * Named rather than inline for the reason #1701 established: a response
+       * body a client renders belongs in `components/schemas`, so the
+       * dashboard imports one definition instead of restating it. Only the
+       * nested `user_operation` stays open — it is bundler-shaped and the
+       * client relays it back verbatim.
+       */
+      AgentRekeyRevokePrepare: {
+        oneOf: [
+          {
+            type: 'object',
+            description: 'The treasury EOA owner signs signing_payload (EIP-712).',
+            required: ['signature_scheme', 'signing_payload', 'user_operation', 'treasury_address', 'delegation_hashes', 'instructions'],
+            properties: {
+              signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+              signing_payload: eip712Payload,
+              user_operation: preparedUserOperation,
+              treasury_address: address,
+              delegation_hashes: delegationHashList,
+              instructions: { type: 'string' },
+            },
+          },
+          {
+            type: 'object',
+            description: 'An account passkey signs user_op_hash via WebAuthn.',
+            required: ['signature_scheme', 'user_op_hash', 'user_operation', 'treasury_address', 'delegation_hashes', 'instructions'],
+            properties: {
+              signature_scheme: { type: 'string', enum: ['webauthn_userop'] },
+              user_op_hash: { type: 'string' },
+              user_operation: preparedUserOperation,
+              treasury_address: address,
+              delegation_hashes: delegationHashList,
+              instructions: { type: 'string' },
+            },
+          },
+          {
+            type: 'object',
+            description:
+              'Nothing to revoke on-chain — an agent that never held a budget, or one already revoked. No signature is needed and the re-key is advanced straight to the metered stage with an empty carry.',
+            required: ['revoked', 'stage', 'agent_has_no_authority', 'next_step'],
+            properties: {
+              revoked: { type: 'boolean', enum: [true] },
+              tx_hash: { type: 'string', nullable: true },
+              delegation_hashes: delegationHashList,
+              stage: { type: 'string' },
+              carry: { type: 'array', items: { type: 'object', additionalProperties: true } },
+              agent_has_no_authority: { type: 'boolean' },
+              next_step: { type: 'string' },
+            },
+          },
+        ],
+      },
+      AgentRekeyPreflight: {
+        type: 'object',
+        required: [
+          'rekey_id',
+          'stage',
+          'old_delegate_address',
+          'new_delegate_address',
+          'residual',
+          'delegations_to_revoke',
+          'next_step',
+        ],
+        properties: {
+          rekey_id: { type: 'string', format: 'uuid' },
+          stage: { type: 'string', enum: ['preflight'] },
+          old_delegate_address: address,
+          new_delegate_address: address,
+          residual: { $ref: '#/components/schemas/AgentRekeyResidual' },
+          delegations_to_revoke: { type: 'array', items: delegationHash },
+          next_step: { type: 'string' },
+          ordering_note: { type: 'string' },
+        },
+      },
+      AgentRekeyIssuedDelegation: {
+        type: 'object',
+        required: ['delegation_hash', 'carry_role', 'token_address', 'budget_atomic', 'signing_payload'],
+        properties: {
+          delegation_hash: delegationHash,
+          carry_role: { type: 'string', enum: ['carry', 'steady', 'reanchor'] },
+          token_address: address,
+          recipient_address: { type: 'string', nullable: true },
+          budget_atomic: { type: 'string' },
+          period_seconds: { type: 'integer' },
+          start_date: { type: 'integer' },
+          expires_at: { type: 'integer' },
+          signing_payload: eip712Payload,
+        },
+      },
+      AgentRekeyIssueResponse: {
+        type: 'object',
+        required: ['stage', 'delegate_account_address', 'delegations'],
+        properties: {
+          stage: { type: 'string', enum: ['issued'] },
+          delegate_account_address: address,
+          delegations: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AgentRekeyIssuedDelegation' },
+          },
+          skipped: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                delegation_hash: delegationHash,
+                reason: { type: 'string' },
+              },
+            },
+          },
+          carry_note: { type: 'string' },
+          next_step: { type: 'string' },
+        },
+      },
+      AgentRekeyCompleteResponse: {
+        type: 'object',
+        required: [
+          'completed',
+          'stage',
+          'agent_id',
+          'new_delegate_address',
+          'api_key',
+          'api_key_prefix',
+          'old_api_key_revoked',
+        ],
+        properties: {
+          completed: { type: 'boolean' },
+          stage: { type: 'string', enum: ['completed'] },
+          agent_id: { type: 'string', format: 'uuid' },
+          new_delegate_address: address,
+          api_key: {
+            type: 'string',
+            description: 'Shown ONCE. Never stored in plaintext and never logged.',
+          },
+          api_key_prefix: { type: 'string' },
+          old_api_key_revoked: { type: 'boolean' },
+          invalidated_intents: { type: 'integer' },
+          superseded_delegations: { type: 'integer' },
+          residual_on_old_delegate: {
+            type: 'object',
+            properties: {
+              atomic: { type: 'string' },
+              recoverable: { type: 'boolean' },
+              note: { type: 'string' },
+            },
+          },
+        },
       },
       TransactionsResponse: {
         type: 'object',

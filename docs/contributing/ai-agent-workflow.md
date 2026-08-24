@@ -10,7 +10,7 @@ covers:
   - AGENTS.md
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/ai-review-patterns.md
-last-verified: "2026-08-21" # the independent reviewer pass is now unconditional and route-independent (owner decision 2026-08-21): "owning an equivalent review yourself" no longer reads as licence to self-review. The no-check-for-workflow property is unchanged — the new gate asks whether review happened, never which route ran.
+last-verified: "2026-08-24" # #1968: the PR-report list's "review status" item now names the per-pass verdict line, matching the PR template's Review Status section. The `haven-reviewer`-on-every-PR rule at §"Captain Self-Check Preflight" was read and is unchanged — this adds where the verdict is recorded, not whether the pass is required. Nothing else in this file re-verified. Prior: the independent reviewer pass is now unconditional and route-independent (owner decision 2026-08-21): "owning an equivalent review yourself" no longer reads as licence to self-review. The no-check-for-workflow property is unchanged — the new gate asks whether review happened, never which route ran.
 ---
 
 # Haven AI Agent Workflow
@@ -144,7 +144,11 @@ Every non-trivial PR should end with a concise closeout:
 - generated artifact and credential-handoff impact
 - CASP/MiCA guardrail status when relevant
 - what was intentionally left out
-- review status
+- review status, written as a **named verdict line per pass** — `haven-reviewer: passed |
+  skipped because ___`, and the same for `haven-design-reviewer` on `area:frontend`
+  ([#1968](https://github.com/d-hinders/Haven-AI/issues/1968)). The rule above binds either
+  way; the line is what makes a skip visible, and `ship-next` will not arm auto-merge
+  without it
 - merge-readiness report
 
 Use this merge-readiness format:
@@ -322,6 +326,31 @@ Use separate worktrees only when work can ship independently:
 
 Avoid worktrees for multiple agents editing the same feature surface. That usually delays conflicts instead of removing them.
 
+## Scratchpad Naming ([#1801](https://github.com/d-hinders/Haven-AI/issues/1801))
+
+**Every subagent in a session shares one scratchpad directory.** The scratchpad root is namespaced per *session*, not per agent, so two agents in the same session write to the same folder — and a generic filename is a silent overwrite between agents that never meet.
+
+Measured in one working session: **477 entries**, containing `Sidebar.bak`, `Sidebar2.bak`, `Sidebar.tsx.bak` and `Sidebar.fixed` — four backups of one component, written hours apart by unrelated agents. The second agent to write `Sidebar.bak` hands the first one somebody else's file, and the restored working tree looks entirely healthy.
+
+**Name every scratchpad file for the task, not for the file:**
+
+| purpose | write | not |
+|---|---|---|
+| mutation backup | `Sidebar.tsx.1766.bak` | `Sidebar.bak` |
+| PR body | `pr-1766.md` | `pr.md` |
+| captured output | `1766-typecheck.txt` | `out.txt` |
+
+Two rules that do not follow from the naming:
+
+- **Verify a restore by content, never by exit code.** `cp` from the wrong backup succeeds. Check for a string the file should contain (`rg`), because "the command worked" and "the right bytes are back" are different claims. A backup also goes *stale behind you* — retake it after any change you mean to keep, or the restore silently reverts a reviewer's correction.
+- **Nothing in CI can enforce this.** The scratchpad is outside the repo, so this is a convention held by reading it, not a gate. That is the reason it is written here rather than left implicit: the failure it prevents is invisible, produces a plausible artifact, and is caught only by someone noticing.
+
+Why it matters beyond tidiness: a mis-attributed **PR body is prose**. It fails no check, looks well-formed, and gets merged — a diff carrying a confident description of work it did not do, which is worse than an empty body. The near-miss that produced this rule was a `pr.md` overwritten mid-flight, caught only because the author re-read it before publishing.
+
+**Both logged instances describe the collision as coming from "another session"** — the #1798 near-miss and a second `pr-body.md` collision during #1826. Read literally that is impossible: session scratchpads are separate directories with no shared path. Both were **sibling subagents inside one session**, and the imprecise word is why the hazard looked like somebody else's problem twice. If you are about to write "another session" about a scratchpad collision, check whether you mean another *agent*.
+
+Related, and genuinely cross-session rather than cross-agent: [#1800](https://github.com/d-hinders/Haven-AI/issues/1800), where `npm run screenshot` binds one port in every worktree, so a capture can show another branch's app.
+
 ## Common Captain Instructions
 
 Paste this after any task-specific template below, or tell the agent to use `docs/contributing/ai-agent-workflow.md` when working inside this repo.
@@ -391,7 +420,11 @@ Before calling the PR ready, include:
 - generated artifact and credential handoff impact
 - CASP/MiCA guardrail status when relevant
 - what was intentionally left out
-- review status
+- review status, written as a **named verdict line per pass** — `haven-reviewer: passed |
+  skipped because ___`, and the same for `haven-design-reviewer` on `area:frontend`
+  ([#1968](https://github.com/d-hinders/Haven-AI/issues/1968)). The rule above binds either
+  way; the line is what makes a skip visible, and `ship-next` will not arm auto-merge
+  without it
 - merge-readiness report with risk level, residual risk, and recommended merge order if multiple PRs are open
 ```
 

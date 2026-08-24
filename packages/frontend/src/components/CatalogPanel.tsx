@@ -101,7 +101,7 @@ function CatalogCard({
 
   return (
     <article
-      className="flex flex-col gap-3 rounded-xl border border-[var(--v2-border)] bg-white p-4 transition-colors hover:border-[var(--v2-brand)]/30"
+      className="flex flex-col gap-3 rounded-xl border border-[var(--v2-border)] bg-white p-4 transition-colors hover:border-brand/30"
       data-testid={`catalog-card-${entry.id}`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -214,7 +214,7 @@ export default function CatalogPanel() {
 
   if (error) {
     return (
-      <div className="rounded-xl border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3">
+      <div className="rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3">
         <p className="text-sm font-medium text-[var(--v2-danger)]">Could not load the catalog</p>
         <p className="mt-1 text-sm text-[var(--v2-danger)]">{error}</p>
       </div>

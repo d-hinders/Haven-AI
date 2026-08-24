@@ -12,7 +12,7 @@ covers:
   - packages/connect/src/args.ts
   - packages/connect/src/storage.ts
   - packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx
-last-verified: "2026-08-23" # #1849: "What carries over" gains the boundary-crossing edge — a re-key started in one budget period and finished in the next drops the stale carry and hands you the full budget for the period you are actually in. The old "two edges" paragraph was not wrong so much as silent on the case, and silence there reads as a broken re-key when the client shows one grant where the table promises two. Scope: that paragraph only; the carry table, the revoke-before-issue ordering, the residual caution and the passport-lag section were re-read against `modules/agents/rekey-carry.ts` and `routes/agent-rekey.ts` and stand unchanged. Prior: #1702: written against epic #1694 as merged — #1698 (backend stages), #1699 (passport re-anchor), #1700 (connect --rekey), #1701's shipped half (dashboard). Every claim checked against code rather than the epic's prose; the residual-funds and fresh-process-check cautions are stated because the code says so and nothing user-facing did.
+last-verified: "2026-08-24" # Promotion review: corrected the dashboard walkthrough's stale boundary warning to match #1849 — an expired remainder is dropped and, while the recurring grant remains active, the full current-period budget is issued. Clarified #1699 applies revoke-and-reissue only to an anchored attestation while standing remains unchanged, and #1868 recovery depends on the stage where the flow stopped. Prior: #1849: "What carries over" gains the boundary-crossing edge — a re-key started in one budget period and finished in the next drops the stale carry and hands you the full budget for the period you are actually in. Prior: #1702: written against epic #1694 as merged — #1698 (backend stages), #1699 (passport re-anchor), #1700 (connect --rekey), #1701's shipped half (dashboard).
 ---
 
 # Replacing an agent's signing key
@@ -58,8 +58,9 @@ editing its own authority.
 
 The old authority is revoked **before** the new key gets any. That order is
 deliberate: if something fails partway, you land on *this agent cannot spend right
-now*, which you can retry. The other order would fail to *two live keys on a funded
-account*, which nothing recovers by retrying.
+now*, which is safer than two live keys on a funded account. Recovery depends on the
+stage where the flow stopped: the metered stage can be retried, while closing after
+the revoke can require you to set a new budget.
 
 ### What carries over
 
@@ -74,10 +75,11 @@ Three edges the example skips, all in your favour. A budget whose first period h
 not started yet is simply reissued whole, and a grant that had already expired carries
 nothing because there was nothing live to carry. And if you start a re-key in one
 period but finish it in the next — you left the signing prompt open overnight, say —
-the carried remainder belongs to a period that has ended, so it is dropped and you are
-asked to sign only the full budget for the period you are now in. You will see the
-dropped grant listed with the window that closed; that is the flow working, not a
-grant that went missing.
+the carried remainder belongs to a period that has ended, so it is dropped. If the
+original recurring grant is still active, you are asked to sign the full budget for
+the period you are now in; if the grant itself has expired, no steady piece is
+reissued. You will see the dropped grant listed with the window that closed; that is
+the flow working, not a grant that went missing.
 
 The budget carry is the part people expect to work differently, so it is worth being
 exact. Carrying only the *amount* would mean an agent on a daily budget could be
@@ -97,12 +99,13 @@ into a tally. The period travels with the amount to close that.
 
 ### What briefly lags
 
-If the agent has a passport, its **on-chain attestation** is retired and a new one
-naming the new key is issued. EAS attestations cannot be edited, so this is a
+If the agent has an anchored passport, its **on-chain attestation** is retired and a
+new one naming the new key is issued. EAS attestations cannot be edited, so this is a
 revoke-and-reissue, and there is a short window where the chain is behind. The
-dashboard shows this as **Updating on-chain** while standing stays **Active** — the
-agent is fully authorised the whole time. A chain problem here delays the anchor; it
-cannot cost the agent its standing.
+dashboard shows this as **Updating on-chain** while standing remains unchanged. A
+pending or failed passport issuance has no live attestation to retire; if it later
+anchors, it reads the new delegate. A chain problem here delays the anchor; it cannot
+cost the agent its standing.
 
 ## Lost versus compromised
 
@@ -135,12 +138,13 @@ Open the agent, choose **Replace signing key**, paste the address. You will sign
 times: once to revoke the old authority, then once per replacement budget. At the end
 it shows a **new API key, once**. Copy it.
 
-> **Finish this step in one sitting.** What is left of the budget is measured the
-> moment you approve the revoke, but the replacement is worked out when you finish.
-> If the agent's budget period rolls over while you are part-way through, it can come
-> back with **nothing to spend until the following period**
-> ([#1849](https://github.com/d-hinders/Haven-AI/issues/1849)). The agent also cannot
-> pay at all between the revoke and the finish. Do not start this and go to lunch.
+> **Finish the remaining steps while you are here.** The agent cannot pay while the
+> old key is off and the replacement is unfinished. If a budget period rolls over
+> before you finish, the expired remainder is dropped; any recurring budget that is
+> still active continues from its original boundary. Crossing a boundary no longer
+> leaves a fresh period at zero ([#1849](https://github.com/d-hinders/Haven-AI/issues/1849)),
+> but abandoning after the revoke can still leave the agent without spend authority
+> ([#1868](https://github.com/d-hinders/Haven-AI/issues/1868)).
 
 **3. Back on the machine**
 

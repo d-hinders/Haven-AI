@@ -1414,7 +1414,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Transaction history"
-        description="Tables render through the Table primitive: Table.Head (collapses below md, optional sticky), Table.HeaderCell (srLabel for icon columns, hideBelowMd for the responsive-collapse pattern), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews. Columns are revealed in TWO stages, not one: From / To at md, Initiator and Date at xl. The app shell's sidebar arrives at lg and takes 256px back, so content width is a sawtooth in viewport width — 768px and 1024px both leave this table 718px. Revealing every column at md starved the Activity measure at both."
+        description="Tables render through the Table primitive: Table.Head (collapses below md, optional sticky), Table.HeaderCell (srLabel for icon columns, hideBelowMd for the responsive-collapse pattern), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews. Columns are revealed in TWO stages, not one: From / To at md, Initiator and Date at xl. The app shell's sidebar arrives at lg (240px + 1px border) and main's padding steps p-6 to lg:p-8 at the same breakpoint, so 257px is handed back at once and content width is a sawtooth in viewport width — 768px and 1024px both leave this table 718px. Revealing every column at md starved the Activity measure at both."
       >
         <Card hover={false} className="overflow-hidden">
           <Table>
@@ -1427,8 +1427,17 @@ export default function DesignSystemPage() {
                     the seven-columns-at-md layout: 71.1px / 5 / 156 at 768px,
                     82.5px / 4 / 132 at 800px, 118px / 3 / 92 at 900px, then
                     71.1px / 5 / 156 AGAIN at 1024px. The repeat is the whole
-                    point: the shell's sidebar lands at `lg` and hands back
-                    256px, so content width is a SAWTOOTH — 717.9px at both
+                    point: TWO things step at `lg` and both take width —
+                    `Sidebar.tsx` goes `fixed` -> `lg:static` at `w-[240px]`
+                    plus its 1px `border-r`, AND the authenticated layout's
+                    `main` steps `p-6` -> `lg:p-8`, which is 16px more on the
+                    pair. 241 + 16 = 257px handed back in one breakpoint. Do
+                    not attribute this to the sidebar alone: someone checking
+                    `Sidebar.tsx`, finding 240, and concluding the claim is
+                    sloppy would be right about the number and wrong about the
+                    conclusion. The arithmetic checks out either way —
+                    768 - 48 = 720 and 1024 - 241 - 64 = 719, measured 717.9 at
+                    both. So content width is a SAWTOOTH: 717.9px at both
                     768px and 1024px, 973px at both 1023px and 1279px. A fix
                     keyed to "the md breakpoint" would have left 1024px broken.
                     `xl` is the first viewport where content clears 974px on
@@ -1437,10 +1446,31 @@ export default function DesignSystemPage() {
                     Pinning the md+ columns the way `TransactionsTable` does
                     was tried during #1774 and is NOT the answer — it grew
                     desktop rows 85px -> 133px, because a 140px `From / To`
-                    wraps this showcase's longer names. Nothing is dropped
-                    here: the date rides under the Amount until `xl` (the same
-                    place the below-md layout puts it), and the initiator is
-                    already named inside the title at these widths.
+                    wraps this showcase's longer names.
+                    What the two deferred columns cost is NOT the same, and
+                    the difference is worth naming rather than smoothing over.
+                    The DATE is not dropped at any width — it rides under the
+                    Amount until `xl`, the same place the below-md layout puts
+                    it. The INITIATOR genuinely is dropped between `md` and
+                    `xl`. For two of the three demo rows that costs nothing
+                    visible, because the title already says it ("x402 payment
+                    BY RESEARCH ASSISTANT"); for the first row it is a real
+                    loss — "Received payment" is initiated by "You" and
+                    nothing else on the row says so. That is an acceptable
+                    trade here (the below-md layout drops the initiator
+                    outright, so `md`-`xl` matches the treatment on its narrow
+                    side) but it IS a loss, and a showcase whose job is to
+                    teach the collapse pattern should not claim otherwise.
+                    WHY THE DATE IS NOT HANDED BACK AT `lg`, which looks like
+                    the tidier three-stage ladder and reads as wasted room at
+                    1279px. It was MEASURED, not judged: restoring the Date
+                    column at `lg` puts the Failed row back to 109.9px across
+                    THREE lines in a 108px row at 1024px (against 141.7px / 2 /
+                    100 here), because 1024px is the bottom tooth of the
+                    sawtooth, not the top of a ramp. 768px is identical either
+                    way — the Date is hidden below `lg` in both. The apparent
+                    slack at 1023px/1279px is the price of the one step that
+                    covers both teeth, and it is 16px per row.
                     After: 141.7px / 2 / 100 at 768px and 1024px; 1280px is
                     unchanged to the pixel, so no visual baseline moves.
                     Gated by geometry in `e2e/transaction-title-measure.spec.ts`

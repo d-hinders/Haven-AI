@@ -75,6 +75,16 @@ const DESKTOP_WIDTH = 1280
  * defect state WAS three lines, so a ceiling of 3 would stop this spec seeing
  * it, and the measure floor's margin at that width is only 2px (118 -> 120).
  * The line ceiling is what makes 900px a real check.
+ *
+ * ONE KNOWN HOLE in `starved`, stated rather than papered over. A regression
+ * that keeps the title on exactly one UN-truncated line by shrinking its type
+ * — a smaller font size or line-height — reports `starved = false` and skips
+ * the measure floor entirely; only the line and height ceilings would still
+ * apply, and neither fails a short narrow line. It is not covered because it
+ * is not this bug's failure mode (the two that are, wrap-to-many-lines and
+ * clip-to-ellipsis, are both mutation-proven), and because a new hardcoded
+ * font size would have `design:lint`'s token rules to get past first. Named
+ * here so the next reader has the real perimeter instead of assuming one.
  */
 const MIN_TITLE_MEASURE_PX = 120
 const MAX_TITLE_LINES = 2

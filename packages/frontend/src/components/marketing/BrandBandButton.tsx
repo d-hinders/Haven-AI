@@ -81,34 +81,11 @@ const VARIANT_CLASS: Record<Variant, string> = {
 }
 
 /**
- * The trailing arrow, pixel-identical to the two hand-rolled copies it replaces
- * (`app/page.tsx` inline, `investor-briefing/page.tsx`'s `ArrowIcon`). It is a
- * raw `<svg>` rather than `Icon` + a lucide glyph on purpose: this extraction
- * changes the focus treatment and nothing else about the painted pixels, and
- * swapping the glyph would move every one of them. Marketing surfaces are
- * exempt from the inline-`<svg>` structural lint rule (#874).
- *
- * ── Why it is `aria-hidden` (#1940) ──────────────────────────────────────────
- *
- * Decorative, at every call site: the arrow only ever trails a link whose own
- * text already says where it goes ("Get early access", "Contact the team"). It
- * is never the sole indication of what the control does, and it never
- * distinguishes two otherwise identically-labelled controls — the three
- * "Contact the team" links on `/investor-briefing` all carry the SAME arrow, so
- * it separates nothing. A screen reader announcing a glyph after the label
- * would add noise, not information.
- *
- * This is not a live WCAG failure being fixed. An `<svg>` with no `<title>` and
- * no `role` contributes nothing to the accessible name today, so the name is
- * already correct — the attribute makes that *structural* instead of incidental
- * on the markup staying exactly as it is. `BrandBandButton.test.tsx` proves the
- * difference by adding a `<title>` to the rendered arrow and re-computing the
- * link's accessible name: with `aria-hidden` the name is the label alone,
- * without it the glyph's text lands in the announcement.
- *
- * `aria-hidden` + `focusable={false}` is the pair `components/ui/Icon.tsx`
- * applies to every decorative glyph in the product app; this is the same
- * decision spelled by hand because the marketing arrow is not a lucide glyph.
+ * The trailing arrow now lives in `components/marketing/TrailingArrow.tsx` —
+ * one component for all six marketing instances rather than three agreeing
+ * copies, which is exactly what let #1940 fix two definitions and leave three
+ * raw copies unfixed on the landing page (#1954). Why the glyph is decorative,
+ * and why `aria-hidden` is worth a diff at all, are documented there.
  */
 
 type BrandBandButtonProps = {

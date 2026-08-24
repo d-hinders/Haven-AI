@@ -267,7 +267,7 @@ export default function AccountsOverviewClient() {
           icon={<Icon icon={CreditCard} className="h-5 w-5" />}
           tone="neutral"
           title="No Haven accounts yet"
-          body="Your account is created when you sign in, so you shouldn't normally see this. Reload the page, and get in touch if it stays empty."
+          body="Your Haven account is created when you sign in, so you shouldn't normally see this. Try reloading the page."
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">

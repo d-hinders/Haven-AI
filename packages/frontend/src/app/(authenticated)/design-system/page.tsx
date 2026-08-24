@@ -34,6 +34,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+import { WalletPopover } from '@/components/WalletButton'
 import {
   AgentBudgetCard,
   Address,
@@ -71,6 +72,11 @@ const modalInfoPages: InfoPage[] = [
     ),
   },
 ]
+
+/** Deterministic demo values for the wallet-menu signing-credential states (#1952). */
+const DS_HYBRID_ACCOUNT = '0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3'
+const DS_PASSKEY_KEY_ID = '0x1111111111111111111111111111111111111111111111111111111111111111'
+const NOOP = () => {}
 
 function Section({
   title,
@@ -1789,6 +1795,102 @@ export default function DesignSystemPage() {
             <ApprovalRequiredBanner title="You stay in control" tone="neutral">
               Anything above 75 USDC waits for your manual approval before it is paid.
             </ApprovalRequiredBanner>
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Signing credential (wallet menu)"
+        description="Which passkey is about to sign, as the wallet menu states it. Two states, because they are two different facts: a credential this device's marker matched, and the passkeys[0] fallback used when no enrolled passkey carries this device's marker. The fallback is deliberate and load-bearing — see delegation-rail-security-model.md §6 — and until #1952 the menu rendered NOTHING in that case, going silent in exactly the case where the credential was chosen by array position."
+      >
+        {/*
+          Rendered with props forced, on purpose, and this is the only honest way
+          to photograph the second state: `useActiveSigner` returns a
+          `delegator_passkey` only when the device marker already matched, so no
+          app-state fixture and no screenshot scenario can drive a browser into
+          the fallback render (that upstream gate is #1969). The primitive
+          gallery's existing job — showing states a user flow does not reach —
+          is exactly what is needed, so the two states go under the blocking
+          pixel gate here rather than being asserted and left unseen.
+        */}
+        {/*
+          Each cell is `min-h-[290px]` wrapping a `relative h-0` positioning
+          parent, and that is load-bearing rather than arbitrary: the popover is
+          `absolute right-0 top-full`, so it hangs BELOW its parent — under the
+          trigger button, in the real call site. A parent WITH a height pushes it
+          that far down again, out of this Section and over the next one.
+
+          Stated precisely, because an earlier version of this note overstated
+          it: at `h-[260px]` the popovers still PAINTED, so a full-page capture
+          showed two plausible-looking cards and no gate failed — they were
+          simply 260px from the heading that describes them, sitting in someone
+          else's section. `h-0` puts them back under their own heading; the outer
+          `min-h` reserves the space they no longer take in flow.
+        */}
+        <div className="grid gap-5 lg:grid-cols-2">
+          {/*
+            `inert` + `aria-hidden`: these are static ILLUSTRATIONS of a
+            popover, not live overlays, and `WalletPopover`'s root carries
+            `role="dialog"`. Without this the page exposes three dialogs at
+            once — which is wrong for a screen reader and also breaks
+            `e2e/modal-scroll-cue.spec.ts`, whose unscoped
+            `getByRole('dialog')` then hits a strict-mode violation
+            ("resolved to 3 elements", measured, not predicted). `inert`
+            also keeps the demo's Copy/Switch buttons out of the tab order,
+            which `aria-hidden` alone would not do. Same deliberate
+            treatment design-system.md § 6 records for the modal demo.
+          */}
+          <div className="min-h-[290px]">
+            <div inert aria-hidden="true" className="relative h-0 w-72">
+            <WalletPopover
+              primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
+              signingWith={{
+                label: 'Passkey \u00b7 added March 3, 2026',
+                keyId: DS_PASSKEY_KEY_ID,
+                onThisDevice: true,
+              }}
+              presentational
+              open
+              onClose={NOOP}
+              onSwitchWallet={NOOP}
+              onConnectWallet={NOOP}
+              hasConnectedWallet={false}
+              switching={false}
+              anchorRef={{ current: null }}
+            />
+            </div>
+          </div>
+          {/*
+            `inert` + `aria-hidden`: these are static ILLUSTRATIONS of a
+            popover, not live overlays, and `WalletPopover`'s root carries
+            `role="dialog"`. Without this the page exposes three dialogs at
+            once — which is wrong for a screen reader and also breaks
+            `e2e/modal-scroll-cue.spec.ts`, whose unscoped
+            `getByRole('dialog')` then hits a strict-mode violation
+            ("resolved to 3 elements", measured, not predicted). `inert`
+            also keeps the demo's Copy/Switch buttons out of the tab order,
+            which `aria-hidden` alone would not do. Same deliberate
+            treatment design-system.md § 6 records for the modal demo.
+          */}
+          <div className="min-h-[290px]">
+            <div inert aria-hidden="true" className="relative h-0 w-72">
+            <WalletPopover
+              primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
+              signingWith={{
+                label: 'Passkey \u00b7 added March 3, 2026',
+                keyId: DS_PASSKEY_KEY_ID,
+                onThisDevice: false,
+              }}
+              presentational
+              open
+              onClose={NOOP}
+              onSwitchWallet={NOOP}
+              onConnectWallet={NOOP}
+              hasConnectedWallet={false}
+              switching={false}
+              anchorRef={{ current: null }}
+            />
+            </div>
           </div>
         </div>
       </Section>

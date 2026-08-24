@@ -18,7 +18,7 @@ covers:
   - packages/backend/src/domain/chains.ts
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-08-24" # #1986: the deferral in the prior note is now DISCHARGED — the payment-path 410 landed, so the legacy sequence and the over-allowance approval branch no longer run and the banner says so; diagram kept as history (code deleted by #1987/#1988). The delegation-rail branch re-read against the diff and unchanged, and the read paths it does not describe are unaffected. Prior: #1984: "import-only" corrected. The SEQUENCE itself is untouched and deliberately so — an existing allowance_module account still pays exactly as drawn; the payment-path 410 is slice #1986, not this one. Prior: #1199: signer-removal recovery change re-verified; payment sequence unchanged
+last-verified: "2026-08-24" # #1988: the "what still works" list credited approver management as a surviving read/edit path. It is deleted with the Safe-deploy and owner-change machinery, so the clause is corrected rather than left as a promise the API no longer keeps, and the reason `POST /safe/exec` stays open is restated in terms of fund ACCESS (owner-signed, relayed for gas) rather than approver recovery, which no longer rides on it. Scope: that callout; the payment sequences themselves were not re-verified. Prior: #1986: the deferral in the prior note is now DISCHARGED — the payment-path 410 landed, so the legacy sequence and the over-allowance approval branch no longer run and the banner says so; diagram kept as history (code deleted by #1987/#1988). The delegation-rail branch re-read against the diff and unchanged, and the read paths it does not describe are unaffected. Prior: #1984: "import-only" corrected. The SEQUENCE itself is untouched and deliberately so — an existing allowance_module account still pays exactly as drawn; the payment-path 410 is slice #1986, not this one. Prior: #1199: signer-removal recovery change re-verified; payment sequence unchanged
 ---
 
 # Haven — Payment Execution Sequence
@@ -47,10 +47,14 @@ Source of truth: [packages/backend/src/routes/payments.ts](../../packages/backen
 > read it as history, not as behaviour you can invoke.
 >
 > **What still works for one of these accounts:** every READ. Balances,
-> transaction history, the accounts list, rename, re-default, unlink,
-> approver management, and `GET /machine-payments/allowances`. `POST /safe/exec`
-> also stays open — it is owner-signed, and passkey-Safe approver recovery
-> (#1229) depends on it.
+> transaction history, the accounts list, rename, re-default, unlink, and
+> `GET /machine-payments/allowances`. `POST /safe/exec` also stays open — it is
+> owner-signed and relayed for gas only, so it is how the holder of a
+> passkey-owned Safe still moves funds out of an account they control.
+> **Approver management is gone as of #1988**: Haven no longer constructs
+> owner-change transactions, so the preventive half of #1229's recovery is no
+> longer offered. An EOA owner — which every Safe in the epic's census has —
+> manages owners directly through Safe's own interfaces with their own key.
 >
 > **The live rail is the delegation rail.** New accounts
 > (`account_type='delegator_hybrid'`, `execution_rail='delegation'`) take the

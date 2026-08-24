@@ -31,7 +31,9 @@ vi.mock('../../db.js', () => ({
 }))
 
 // Avoid pulling chain/ethers deploy machinery into this route test.
-vi.mock('../../modules/accounts/index.js', () => ({ relaySafeDeploy: vi.fn() }))
+// #1988 deleted `relaySafeDeploy` and the module import it came from; the
+// route no longer reaches the accounts module at all, so there is nothing
+// left to mock here.
 
 import userSafesRoutes from '../user-safes.js'
 
@@ -227,71 +229,9 @@ describe('user-safes characterization (#988)', () => {
     })
   })
 
-  describe('approver metadata upsert/delete', () => {
-    it('upserts approver metadata for an owned Safe', async () => {
-      mockPoolQuery
-        .mockResolvedValueOnce({ rows: [{ id: SAFE_ID, safe_address: SAFE_ADDRESS, chain_id: 8453 }] })
-        .mockResolvedValueOnce({ rows: [] })
-
-      const res = await app.inject({
-        method: 'POST',
-        url: `/user/safes/${SAFE_ID}/approvers`,
-        headers: auth(),
-        payload: { address: SAFE_ADDRESS, type: 'passkey', label: '  My passkey  ' },
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.json()).toEqual({ success: true })
-      const [sql, params] = mockPoolQuery.mock.calls[1]
-      expect(String(sql)).toContain('INSERT INTO safe_approver_metadata')
-      expect(String(sql)).toContain('ON CONFLICT (safe_id, LOWER(address))')
-      expect(params).toEqual([SAFE_ID, SAFE_ADDRESS, 'passkey', 'My passkey'])
-    })
-
-    it('rejects an invalid approver type', async () => {
-      mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: SAFE_ID, safe_address: SAFE_ADDRESS, chain_id: 8453 }] })
-
-      const res = await app.inject({
-        method: 'POST',
-        url: `/user/safes/${SAFE_ID}/approvers`,
-        headers: auth(),
-        payload: { address: SAFE_ADDRESS, type: 'ledger' },
-      })
-
-      expect(res.statusCode).toBe(400)
-      expect(mockPoolQuery).toHaveBeenCalledTimes(1)
-    })
-
-    it('deletes approver metadata case-insensitively for an owned Safe', async () => {
-      mockPoolQuery
-        .mockResolvedValueOnce({ rows: [{ id: SAFE_ID, safe_address: SAFE_ADDRESS, chain_id: 8453 }] })
-        .mockResolvedValueOnce({ rows: [] })
-
-      const res = await app.inject({
-        method: 'DELETE',
-        url: `/user/safes/${SAFE_ID}/approvers/${SAFE_ADDRESS.toUpperCase().replace('0X', '0x')}`,
-        headers: auth(),
-      })
-
-      expect(res.statusCode).toBe(200)
-      const [sql, params] = mockPoolQuery.mock.calls[1]
-      expect(String(sql)).toContain('DELETE FROM safe_approver_metadata')
-      expect(String(sql)).toContain('LOWER(address) = LOWER($2)')
-      expect(params[0]).toBe(SAFE_ID)
-    })
-
-    it('404s the upsert when the Safe is not the caller’s', async () => {
-      mockPoolQuery.mockResolvedValueOnce({ rows: [] })
-
-      const res = await app.inject({
-        method: 'POST',
-        url: `/user/safes/${SAFE_ID}/approvers`,
-        headers: auth(),
-        payload: { address: SAFE_ADDRESS },
-      })
-
-      expect(res.statusCode).toBe(404)
-      expect(mockPoolQuery).toHaveBeenCalledTimes(1)
-    })
-  })
+  // The approver-metadata cases that used to live here are deleted with the
+  // routes (#1988). Their absence is asserted in
+  // `safe-inflow-retired.test.ts`, which is where the deletion is pinned —
+  // keeping characterization cases for routes that 404 would be a guard over
+  // an empty set.
 })

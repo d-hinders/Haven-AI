@@ -37,12 +37,6 @@ export interface UserSafeRow {
   created_at: string
 }
 
-export interface OwnedSafeRow {
-  id: string
-  safe_address: string
-  chain_id: number
-}
-
 /** The owner-directory projection (#1167). */
 export interface SafeWithAccountTypeRow {
   id: string
@@ -51,19 +45,6 @@ export interface SafeWithAccountTypeRow {
   name: string
   /** 'delegator_hybrid' on the delegation rail; null/legacy = Safe rail (#1069). */
   account_type: string | null
-}
-
-export interface ApproverMetadataRow {
-  address: string
-  type: 'eoa' | 'passkey'
-  label: string | null
-}
-
-export interface KnownApproverRow {
-  address: string
-  type: 'eoa' | 'passkey'
-  label: string | null
-  safe_ids: string[]
 }
 
 // ── Reads ────────────────────────────────────────────────────────────────────
@@ -86,15 +67,9 @@ export const LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL = `SELECT id, safe_addres
      WHERE user_id = $1
      ORDER BY created_at ASC`
 
-export const FIND_SAFE_ID_BY_ADDRESS_AND_CHAIN_SQL = `SELECT id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3`
-
-export const COUNT_SAFES_FOR_USER_SQL = `SELECT COUNT(*) as count FROM user_safes WHERE user_id = $1`
-
 export const FIND_OWNED_SAFE_ADDRESS_SQL = `SELECT id, safe_address FROM user_safes WHERE id = $1 AND user_id = $2`
 
 export const FIND_OWNED_SAFE_DEFAULT_FLAG_SQL = `SELECT id, is_default FROM user_safes WHERE id = $1 AND user_id = $2`
-
-export const FIND_OWNED_SAFE_SQL = `SELECT id, safe_address, chain_id FROM user_safes WHERE id = $1 AND user_id = $2`
 
 /** `userId` is REQUIRED — tenant scope for the Safe list. */
 export async function listSafesForUser(
@@ -117,35 +92,11 @@ export async function listSafesWithAccountTypeForUser(
   return result.rows
 }
 
-/** `userId` is REQUIRED — duplicate detection is per-tenant. */
-export async function findSafeIdByAddressAndChain(
-  userId: string,
-  safeAddress: string,
-  chainId: number,
-  db: Executor = pool,
-): Promise<string | null> {
-  const result = await db.query<{ id: string }>(FIND_SAFE_ID_BY_ADDRESS_AND_CHAIN_SQL, [
-    userId,
-    safeAddress,
-    chainId,
-  ])
-  return result.rows[0]?.id ?? null
-}
-
-export async function countSafesForUser(userId: string, db: Executor = pool): Promise<number> {
-  const result = await db.query<{ count: string }>(COUNT_SAFES_FOR_USER_SQL, [userId])
-  return Number(result.rows[0].count)
-}
-
-/** `userId` is REQUIRED — the ownership check every /:safeId route runs. */
-export async function findOwnedSafe(
-  safeId: string,
-  userId: string,
-  db: Executor = pool,
-): Promise<OwnedSafeRow | null> {
-  const result = await db.query<OwnedSafeRow>(FIND_OWNED_SAFE_SQL, [safeId, userId])
-  return result.rows[0] ?? null
-}
+// `findSafeIdByAddressAndChain` (import duplicate detection), `countSafesForUser`
+// (first-Safe-becomes-default) and `findOwnedSafe` (the approver routes'
+// ownership check) are DELETED with their callers (#1988). `findOwnedSafeAddress`
+// and `findOwnedSafeDefaultFlag` below are the ownership checks the SURVIVING
+// routes run — rename, re-default and unlink.
 
 export async function findOwnedSafeAddress(
   safeId: string,
@@ -173,67 +124,23 @@ export async function findOwnedSafeDefaultFlag(
 
 // ── Writes ───────────────────────────────────────────────────────────────────
 
-export const INSERT_USER_SAFE_SQL = `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, safe_address, chain_id, name, is_default, created_at`
-
+/**
+ * The `users.safe_address` mirror. Still live: re-defaulting and unlinking both
+ * keep the legacy column in step, and both of those routes survive the Safe-rail
+ * retirement. Its INFLOW caller (the import path) is gone with #1988.
+ */
 export const SET_LEGACY_USER_SAFE_ADDRESS_SQL = `UPDATE users SET safe_address = $1, updated_at = NOW() WHERE id = $2`
 
-/**
- * The `PUT /user/safe` companion write (moved from `routes/user.ts`, #1167).
- *
- * Distinct from `INSERT_USER_SAFE_SQL`, which the multi-Safe import path uses:
- * this one hard-codes the name and the default flag and is IDEMPOTENT —
- * `DO NOTHING` means re-linking an already-linked Safe is a no-op rather than
- * an error, and in particular does NOT reset a name the user has since
- * changed. It returns nothing, so a conflict is indistinguishable from an
- * insert by design.
- */
-export const LINK_DEFAULT_USER_SAFE_SQL = `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default)
-       VALUES ($1, $2, $3, 'My account', true)
-       ON CONFLICT (user_id, safe_address, chain_id) DO NOTHING`
-
-/** `userId` is REQUIRED — the Safe is linked into that user's namespace. */
-export async function linkDefaultUserSafe(
-  userId: string,
-  safeAddress: string,
-  chainId: number,
-  db: Executor = pool,
-): Promise<void> {
-  await db.query(LINK_DEFAULT_USER_SAFE_SQL, [userId, safeAddress, chainId])
-}
-
-export async function insertUserSafe(
-  input: {
-    userId: string
-    safeAddress: string
-    chainId: number
-    name: string
-    isDefault: boolean
-  },
-  db: Executor = pool,
-): Promise<UserSafeRow> {
-  const result = await db.query<UserSafeRow>(INSERT_USER_SAFE_SQL, [
-    input.userId,
-    input.safeAddress,
-    input.chainId,
-    input.name,
-    input.isDefault,
-  ])
-  return result.rows[0]
-}
-
-/**
- * Mirror the default Safe's address into the legacy `users.safe_address`
- * column. `userId` is REQUIRED — it is the row scope of the UPDATE.
- */
-export async function setLegacyUserSafeAddress(
-  safeAddress: string,
-  userId: string,
-  db: Executor = pool,
-): Promise<void> {
-  await db.query(SET_LEGACY_USER_SAFE_ADDRESS_SQL, [safeAddress, userId])
-}
+// The three INFLOW writers — `insertUserSafe` (the multi-Safe import),
+// `linkDefaultUserSafe` (`PUT /user/safe`'s idempotent companion) and the
+// `setLegacyUserSafeAddress` wrapper over the SQL above — are DELETED
+// (#1988, epic #1440 slice 5). #1984 made all four inflow routes answer 410;
+// this slice removed the handler bodies, which were their only callers. Nothing
+// writes a NEW `user_safes` row on the Safe rail any more.
+//
+// `user_safes` itself stays, rows and all: the delegation rail inserts Hybrid
+// accounts into the same table through `routes/hybrid-accounts.ts`, which has
+// always carried its own INSERT and never used any of these.
 
 export const RENAME_SAFE_FOR_USER_SQL = `UPDATE user_safes SET name = $1, updated_at = NOW()
          WHERE id = $2 AND user_id = $3
@@ -324,70 +231,12 @@ export async function deleteSafeForUser(
   })
 }
 
-// ── Approver metadata ────────────────────────────────────────────────────────
-
-export const LIST_KNOWN_APPROVERS_FOR_USER_SQL = `SELECT DISTINCT ON (LOWER(m.address))
-              m.address,
-              m.type,
-              m.label,
-              (SELECT array_agg(m2.safe_id::text)
-                 FROM safe_approver_metadata m2
-                 JOIN user_safes s2 ON s2.id = m2.safe_id
-                WHERE s2.user_id = $1 AND LOWER(m2.address) = LOWER(m.address)) AS safe_ids
-         FROM safe_approver_metadata m
-         JOIN user_safes s ON s.id = m.safe_id
-        WHERE s.user_id = $1
-        ORDER BY LOWER(m.address), m.updated_at DESC`
-
-export const LIST_APPROVER_METADATA_FOR_SAFE_SQL = `SELECT address, type, label FROM safe_approver_metadata WHERE safe_id = $1`
-
-export const UPSERT_APPROVER_METADATA_SQL = `INSERT INTO safe_approver_metadata (safe_id, address, type, label)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (safe_id, LOWER(address))
-         DO UPDATE SET type = EXCLUDED.type, label = EXCLUDED.label, updated_at = NOW()`
-
-export const DELETE_APPROVER_METADATA_SQL = `DELETE FROM safe_approver_metadata WHERE safe_id = $1 AND LOWER(address) = LOWER($2)`
-
-/** `userId` is REQUIRED — the registry is per-tenant across all their Safes. */
-export async function listKnownApproversForUser(
-  userId: string,
-  db: Executor = pool,
-): Promise<KnownApproverRow[]> {
-  const result = await db.query<KnownApproverRow>(LIST_KNOWN_APPROVERS_FOR_USER_SQL, [userId])
-  return result.rows
-}
-
-/**
- * Not tenant-scoped in SQL: every caller resolves `safeId` through
- * `findOwnedSafe` first — authorization stays in the route per #988.
- */
-export async function listApproverMetadataForSafe(
-  safeId: string,
-  db: Executor = pool,
-): Promise<ApproverMetadataRow[]> {
-  const result = await db.query<ApproverMetadataRow>(LIST_APPROVER_METADATA_FOR_SAFE_SQL, [safeId])
-  return result.rows
-}
-
-/** Same gating contract as `listApproverMetadataForSafe`. Idempotent. */
-export async function upsertApproverMetadata(
-  safeId: string,
-  address: string,
-  type: 'eoa' | 'passkey',
-  label: string | null,
-  db: Executor = pool,
-): Promise<void> {
-  await db.query(UPSERT_APPROVER_METADATA_SQL, [safeId, address, type, label])
-}
-
-/** Same gating contract as `listApproverMetadataForSafe`. */
-export async function deleteApproverMetadata(
-  safeId: string,
-  address: string,
-  db: Executor = pool,
-): Promise<void> {
-  await db.query(DELETE_APPROVER_METADATA_SQL, [safeId, address])
-}
+// ── Approver metadata — DELETED (#1988, epic #1440 slice 5) ──────────────────
+//
+// `safe_approver_metadata` had exactly one set of callers, the approver routes
+// in `routes/user-safes.ts`, and they are gone. The table itself is dropped in
+// #1990 (CODEOWNERS-reviewed migration); leaving readers and writers behind for
+// a table on its way out is the residue this epic exists to remove.
 
 // ── Hybrid owner-config source row (moved from rails/hybrid-account-config.ts, #999)
 

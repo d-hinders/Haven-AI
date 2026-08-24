@@ -2,10 +2,21 @@
  * `WalletPopover`'s `presentational` prop stays confined to `/design-system` (#1975).
  *
  * The prop is correct and this guard does not argue against it. #1952 (PR #1973)
- * needed a showcase copy of the popover that is NOT announced as a live dialog,
- * and the two alternatives were worse: scoping `e2e/modal-scroll-cue.spec.ts`'s
- * query would weaken a real document-wide invariant, and reordering the demos in
- * the DOM would leave two decorative nodes still claiming `role="dialog"`.
+ * needed a showcase copy of the popover that a DOCUMENT-WIDE dialog query cannot
+ * mistake for a live overlay, and the two alternatives were worse: scoping
+ * `e2e/modal-scroll-cue.spec.ts`'s query would weaken a real document-wide
+ * invariant, and reordering the demos in the DOM would leave two decorative nodes
+ * still claiming `role="dialog"`.
+ *
+ * ## It is a dialog-COUNT fix, not an accessibility fix (#1982)
+ *
+ * Stated because the earlier wording here and on the prop both got it wrong: the
+ * showcase's own `inert` + `aria-hidden` wrapper is what keeps the illustrations
+ * out of the accessibility tree, whatever role the descendants carry. This prop
+ * keeps them out of a DOCUMENT-WIDE dialog count. The measurements behind that
+ * split are recorded ONCE, on the prop's doc-comment in
+ * `components/WalletButton.tsx` — read them there before concluding either
+ * mechanism is redundant, and do not copy them back here.
  *
  * What was missing is enforcement. Until this file, the rule was a doc-comment
  * plus the fact that someone ran a grep at review time — a snapshot, not a guard.
@@ -13,9 +24,9 @@
  * complaint on a real surface, finds a prop that silences it, and passes it, and
  * nothing goes red. The invariant that would break is the one
  * `e2e/modal-scroll-cue.spec.ts` (#1893) asserts DOCUMENT-WIDE — exactly one live
- * `role="dialog"` — and one of its assertions reaches for a raw
- * `document.querySelector('[role="dialog"]')`, which no `aria-hidden` or `inert`
- * wrapper can redirect.
+ * `role="dialog"` — through a raw `document.querySelector('[role="dialog"]')` that
+ * no `aria-hidden` or `inert` wrapper can redirect. Which assertion goes red, and
+ * the mutation that measured it, are named on the prop's doc-comment.
  *
  * ## Why a scan test and not a new lint family
  *

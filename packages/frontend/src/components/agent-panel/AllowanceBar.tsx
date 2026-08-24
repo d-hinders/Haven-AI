@@ -35,7 +35,10 @@ export function AllowanceBar({
   // never be used — and any skew that pushed a near-boundary reset past zero
   // rendered "Resets in now" for an allowance the component had just decided
   // has NOT reset. Do not read a second clock here, even one that would
-  // usually agree.
+  // usually agree — including in the fallback branch above, which is exactly
+  // why `nowMs` is derived FROM `nowSec` rather than read alongside it. Note
+  // what that does and does not buy: `timeUntil`'s parameter makes the clock
+  // visible at the call site, it does not make a wrong one impossible.
   const nowSec = chainTimeSec ?? Math.floor(Date.now() / 1000)
   const nowMs = nowSec * 1000
   const effective = computeEffectiveAllowance(info, nowSec)

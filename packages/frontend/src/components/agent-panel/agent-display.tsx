@@ -61,10 +61,13 @@ export function formatConfiguredAllowance(allowance: AgentAllowance, chainId: nu
  * make the two halves contradict each other outright (a live budget whose
  * countdown reads `now`).
  *
- * Making the reference time a parameter rather than an ambient read is what
- * fixes it structurally: a caller cannot reintroduce the split by forgetting,
- * only by explicitly passing `Date.now()` — which is then visible in the diff.
- * Pass the SAME clock the surrounding decision was made from.
+ * Making the reference time a parameter rather than an ambient read raises the
+ * cost of the mistake without eliminating it, and the difference is worth being
+ * precise about: it stops the split happening by FORGETTING — the caller must
+ * now name a clock — but the type is `number`, so passing one derived from a
+ * different read than the surrounding decision still typechecks. This is a
+ * legibility guarantee, not a soundness one. Pass the SAME instant the
+ * surrounding decision was made from, and read it once.
  */
 export function timeUntil(date: Date, nowMs: number): string {
   const diffMs = date.getTime() - nowMs

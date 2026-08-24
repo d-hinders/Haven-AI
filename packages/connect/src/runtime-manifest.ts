@@ -12,9 +12,9 @@ export const MCP_RUNTIME_MANIFEST = {
   mcpPackage: '@haven_ai/mcp',
   mcpVersion: MCP_VERSION,
   sdkPackage: '@haven_ai/sdk',
-  sdkVersion: '0.1.29-alpha.0',
+  sdkVersion: '0.1.30-alpha.0',
   signerPackage: '@haven_ai/signer',
-  signerVersion: '0.1.29-alpha.0',
+  signerVersion: '0.1.30-alpha.0',
   // Sourced from the SDK, never a literal (#1161). This field read '20.0.0'
   // while every package's `engines` said `>=24` and the docs said `>=24.0.0`,
   // so the guard that was supposed to enforce the floor waved Node v23 through

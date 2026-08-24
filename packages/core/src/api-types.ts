@@ -10502,7 +10502,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The request belongs to a retired rail: readable and rejectable, never approvable. */
+            /** @description ALWAYS, since #1986. Every approval request is an AllowanceModule-rail artifact (the delegation rail has no approval queue), and that rail is retired — so a queued approval is readable and rejectable, never approvable. The refusal runs before the lookup, so a missing request gets this too rather than a 404. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -10590,7 +10590,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Retired rail. */
+            /** @description ALWAYS, since #1986 — same unconditional refusal as /approve. Closing /approve alone would leave a row that was already approved before the retirement able to advance to co-signing. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -13065,6 +13065,21 @@ export interface operations {
                     };
                 };
             };
+            /** @description A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
             /** @description Error response */
             502: {
                 headers: {
@@ -13247,7 +13262,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The intent is pinned to a retired rail — the AllowanceModule rail (#1986) or the session rail (#834) — or it has expired. A retired-rail intent is refused before the expiry flip, so nothing is written. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -13574,7 +13589,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -14032,7 +14047,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The account is on the retired session rail — no state is read (#993 fail-closed contract). */
+            /** @description The account is on the retired SESSION rail — no state is read (#993 fail-closed contract). Deliberately NOT extended to the Safe / AllowanceModule rail by #1986: this endpoint REPORTS spend authority rather than exercising any, and the retirement keeps accounts and history readable. The refusal belongs on the spend paths, and that is where it is. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -14341,7 +14356,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Idempotent replay of a request whose payment has expired. */
+            /** @description Either the account is on a retired rail — the Safe / AllowanceModule rail (#1986) or the session rail (#834), refused before any intent or approval row is written — or this is an idempotent replay of a request whose payment has expired. */
             410: {
                 headers: {
                     [name: string]: unknown;

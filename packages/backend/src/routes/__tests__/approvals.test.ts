@@ -19,6 +19,10 @@ vi.mock('../../infra/fiat-values.js', () => ({
 }))
 
 import approvalRoutes from '../approvals.js'
+import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
+
+/** The one producer of the Safe-rail refusal body (#1986) — never a copy. */
+const APPROVAL_RETIRED = allowanceModuleRailRetired('approval').body.error
 
 describe('approval routes', () => {
   let app: FastifyInstance
@@ -131,15 +135,15 @@ describe('approval routes', () => {
       headers: { authorization: `Bearer ${token}` },
     })
 
-    expect(response.statusCode).toBe(200)
-    const body = response.json()
-    expect(body.payment.source).toBe('x402')
-    expect(body.payment.payment_rail).toBe('x402')
-    expect(body.payment.merchant_address).toBe('0xMerchant')
-    // Resource URL should also prefer payment_resource_url over legacy x402_resource_url
-    expect(body.payment.x402_resource_url).toBe('https://api.example.com/resource')
-    expect(body.payment.payment_resource_url).toBe('https://api.example.com/resource')
-    expectMatchesSpec('POST', '/approvals/{id}/approve', body)
+    // #1986: the derivation still exists in the handler (deleted by #1988) but
+    // is unreachable — the route refuses before the handler runs. Setup kept
+    // verbatim on purpose: a fully valid, fully approvable row is exactly the
+    // case that must now refuse.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(APPROVAL_RETIRED)
+    // Fail-closed: the preHandler replies before any query is issued.
+    expect(mockQuery).not.toHaveBeenCalled()
+    expectMatchesSpec('POST', '/approvals/{id}/approve', response.json(), '410')
   })
 
   it('POST /:id/approve resolves resource URL from legacy x402_resource_url when payment_resource_url is null', async () => {
@@ -180,10 +184,11 @@ describe('approval routes', () => {
       headers: { authorization: `Bearer ${token}` },
     })
 
-    expect(response.statusCode).toBe(200)
-    const body = response.json()
-    expect(body.payment.x402_resource_url).toBe('https://legacy.example.com/resource')
-    expect(body.payment.payment_resource_url).toBe('https://legacy.example.com/resource')
+    // #1986: an older x402 approval refuses identically. Reaching the SAME
+    // refusal from a different row shape is the point of fail-closed.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(APPROVAL_RETIRED)
+    expect(mockQuery).not.toHaveBeenCalled()
   })
 
   it('marks an approved request as proposed', async () => {
@@ -195,13 +200,13 @@ describe('approval routes', () => {
       headers: { authorization: `Bearer ${token}` },
     })
 
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toEqual({ id: 'd4e5f607-1829-4a3b-8c4d-5e6f70819304', status: 'proposed' })
-    expectMatchesSpec('POST', '/approvals/{id}/proposed', response.json())
-    expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining("status = 'approved' AND expires_at > NOW()"),
-      ['d4e5f607-1829-4a3b-8c4d-5e6f70819304', 'user-1'],
-    )
+    // #1986: the multi-signature co-signing hop is part of executing a legacy
+    // approval, so it refuses too. Closing /approve alone would leave a row
+    // that was ALREADY 'approved' before this slice landed able to advance.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(APPROVAL_RETIRED)
+    expectMatchesSpec('POST', '/approvals/{id}/proposed', response.json(), '410')
+    expect(mockQuery).not.toHaveBeenCalled()
   })
 
   it('does not mark pending or expired requests as proposed', async () => {
@@ -213,10 +218,13 @@ describe('approval routes', () => {
       headers: { authorization: `Bearer ${token}` },
     })
 
-    expect(response.statusCode).toBe(404)
-    expect(response.json()).toEqual({
-      error: 'Approval request not found or no longer actionable',
-    })
+    // #1986 CHANGES THIS ANSWER, deliberately: the refusal precedes the
+    // lookup, so /proposed no longer distinguishes "wrong status" from
+    // "retired". 410 for every input is the honest reading of a route that
+    // can never succeed again — and it discloses strictly less.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(APPROVAL_RETIRED)
+    expect(mockQuery).not.toHaveBeenCalled()
   })
 
   it('#1446: records the execution and matches the documented shape', async () => {
@@ -281,7 +289,18 @@ describe('approval routes', () => {
 // ── #1328 (review finding on #1339): historical mpp_demo approvals are
 // readable and rejectable, never approvable/proposable ──────────────────────
 
-describe('mpp_demo retirement gates (#1328)', () => {
+describe('mpp_demo retirement gates (#1328) — now SUBSUMED by #1986', () => {
+  /**
+   * #1986 retires the whole AllowanceModule rail, and every `approval_requests`
+   * row is a legacy-rail artifact, so the #1328 mpp_demo carve-out is no longer
+   * the narrowest rule that refuses: the route-level 410 fires first and
+   * refuses everything. The #1328 WHERE-clause guard stays in the handler,
+   * verbatim and unreachable, for deletion slice #1988.
+   *
+   * These cases are kept rather than deleted because they still prove
+   * something the wider rule must not lose: an mpp_demo approval is STILL
+   * refused, and reject STILL works.
+   */
   /** SQL-pattern-routed mock (the payments.test.ts style — never positional). */
   function primeApprovalDb(opts: { railRow: { payment_rail: string | null; source: string | null } | null }) {
     mockQuery.mockImplementation(async (sql: unknown) => {
@@ -302,9 +321,11 @@ describe('mpp_demo retirement gates (#1328)', () => {
       headers: { authorization: `Bearer ${token}` },
     })
     expect(response.statusCode).toBe(410)
-    expect(response.json().error).toMatch(/mpp_demo flow is retired/)
-    const updateSql = String(mockQuery.mock.calls.find((c) => /UPDATE approval_requests/.test(String(c[0])))![0])
-    expect(updateSql).toContain("COALESCE(payment_rail, source, 'direct') <> 'mpp_demo'")
+    // The refusal is now the wider Safe-rail one, produced by
+    // `allowanceModuleRailRetired`, not #1328's mpp_demo message. Still 410,
+    // still refused, still nothing written — and now without even a query.
+    expect(response.json().error).toBe(APPROVAL_RETIRED)
+    expect(mockQuery).not.toHaveBeenCalled()
   })
 
   it('POST /:id/proposed refuses an mpp_demo approval the same way', async () => {
@@ -315,17 +336,40 @@ describe('mpp_demo retirement gates (#1328)', () => {
       headers: { authorization: `Bearer ${token}` },
     })
     expect(response.statusCode).toBe(410)
-    expect(response.json().error).toMatch(/mpp_demo flow is retired/)
+    expect(response.json().error).toBe(APPROVAL_RETIRED)
+    expect(mockQuery).not.toHaveBeenCalled()
   })
 
-  it('a missing row is still a plain 404, not a retirement message', async () => {
+  it('#1986: a missing row now ALSO gets the retirement 410 — the refusal precedes the lookup', async () => {
+    // Behaviour change, recorded rather than hidden. Pre-#1986 this was a 404
+    // because the retirement was decided from a diagnostic read. The route
+    // now refuses in a preHandler, before any read, so there is nothing left
+    // that could tell a missing row from a present one — and on a permanently
+    // closed route that is the right answer, not a lost distinction.
     primeApprovalDb({ railRow: null })
     const response = await app.inject({
       method: 'POST',
       url: '/approvals/approval-gone/approve',
       headers: { authorization: `Bearer ${token}` },
     })
-    expect(response.statusCode).toBe(404)
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(APPROVAL_RETIRED)
+    expect(mockQuery).not.toHaveBeenCalled()
+  })
+
+  it('#1986: 401 still precedes 410 — an unauthenticated caller learns nothing', async () => {
+    // ORDER, asserted rather than assumed: `authMiddleware` is an onRequest
+    // hook and the refusal is a preHandler, so Fastify runs auth first. A
+    // change that promoted the refusal to onRequest would flip this.
+    primeApprovalDb({ railRow: { payment_rail: 'x402', source: 'x402' } })
+    for (const url of [
+      '/approvals/e5f60718-293a-4b4c-9d5e-6f7081930415/approve',
+      '/approvals/e5f60718-293a-4b4c-9d5e-6f7081930415/proposed',
+    ]) {
+      const response = await app.inject({ method: 'POST', url })
+      expect(response.statusCode).toBe(401)
+      expect(mockQuery).not.toHaveBeenCalled()
+    }
   })
 
   it('POST /:id/reject still works for mpp_demo — cleanup stays possible', async () => {

@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/rails/execution-rail.ts
   - packages/backend/src/__tests__/non-custody.invariants.test.ts
   - packages/frontend/src/lib/revoke-agent.ts
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-24" # #1986: the invariants table rows 4 and 5 re-read against the AllowanceModule retirement — row 5's mechanism ("queued for approval") is legacy-rail-only and gone, and Red Line #4 is now only PARTIALLY proven on the live rail; addendum added naming the gap (#2004, Depends-on into #1991). Rows 1-3 and 6+ unaffected. Part 2/Phasing left alone — its "design proposal" framing is pre-existing drift, not this diff's. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Design — make non-custody provable (CI invariants + "verify your control")
@@ -86,6 +86,42 @@ recorded, not implicit.
 relying on reviewer memory — exactly the "maintain evidence" the doc asks for,
 and the strongest possible answer to a CASP perimeter question. Zero UX, zero
 fund movement.
+
+### Safe / AllowanceModule rail retirement (#1986, epic #1440) — what rows 4 and 5 now mean
+
+> **Read this before rows 4 and 5 above.** Both were written against the legacy
+> AllowanceModule rail, and #1986 fail-closes that rail: every payment entry
+> point answers HTTP 410 for an `allowance_module` account. A rail that cannot
+> spend cannot demonstrate "only a valid signature releases a transfer", so the
+> three contract suites (`non-custody-authz`, `non-custody-onchain-gate`,
+> `non-custody-relay`) were **re-based onto the delegation rail** rather than
+> converted into refusal assertions — a proof that can only say no is not a
+> proof.
+
+**Row 4 (Red Line #3) — still proven, on the live rail.** The delegation-rail
+cases assert that an authenticated request with no signature, a
+shape-invalid signature, or a signature the account rejects on-chain never
+releases a payment, and the positive control in the same run shows a correct
+signature does. **Scope limit, stated:** the suite proves Haven *forwards* the
+account's verdict; it does not prove the delegate smart account's
+`validateUserOp` itself rejects a non-delegate signature, which is on-chain
+code behind the mocked bundler seam.
+
+**Row 5 (Red Line #4) — PARTIALLY proven, and the gap is filed.** The row's
+described mechanism — *"an over-allowance payment is queued for approval"* — is
+**legacy-rail-only and no longer exists**. The delegation rail has no approval
+queue at all: an out-of-policy redemption reverts on-chain during bundler gas
+estimation, enforced by the caveat enforcers. What the re-based suite proves is
+that Haven performs **no off-chain coverage arithmetic** on that rail
+(`computeEffectiveAllowance` / `getTokenAllowance` / `decideCoverage` are never
+called on the delegation branch) and forwards a rejection verbatim with nothing
+written. What it does **not** prove, and structurally cannot from a backend unit
+test, is that the enforcers revert correctly. That gap is tracked as
+[#2004](https://github.com/d-hinders/Haven-AI/issues/2004) and is a hard
+`Depends on` for [#1991](https://github.com/d-hinders/Haven-AI/issues/1991), the
+CASP rewrite — so the guardrails cannot be re-based onto the delegation rail
+while claiming a control is proven on every PR that nothing proves. It needs a
+forked-chain or testnet integration proof, with a positive control.
 
 ### Session-key rail extension (#736, ADR #719 Stage 2)
 

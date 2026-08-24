@@ -18,27 +18,47 @@ covers:
   - packages/backend/src/domain/chains.ts
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-08-24" # #1984: "import-only" corrected. The SEQUENCE itself is untouched and deliberately so — an existing allowance_module account still pays exactly as drawn; the payment-path 410 is slice #1986, not this one. Prior: #1199: signer-removal recovery change re-verified; payment sequence unchanged
+last-verified: "2026-08-24" # #1986: the deferral in the prior note is now DISCHARGED — the payment-path 410 landed, so the legacy sequence and the over-allowance approval branch no longer run and the banner says so; diagram kept as history (code deleted by #1987/#1988). The delegation-rail branch re-read against the diff and unchanged, and the read paths it does not describe are unaffected. Prior: #1984: "import-only" corrected. The SEQUENCE itself is untouched and deliberately so — an existing allowance_module account still pays exactly as drawn; the payment-path 410 is slice #1986, not this one. Prior: #1199: signer-removal recovery change re-verified; payment sequence unchanged
 ---
 
 # Haven — Payment Execution Sequence
 
 How an agent payment actually flows through the system, from intent to
-on-chain settlement. Two branches: **within allowance** (agent signature
-required, no user approval) and **over allowance** (queued for user approval
-and user-authorized Safe execution).
+on-chain settlement. The legacy rail had two branches — **within allowance**
+(agent signature required, no user approval) and **over allowance** (queued
+for user approval and user-authorized Safe execution) — and **neither is
+reachable any more**; see the banner below and jump to the
+[delegation-rail branch](#delegation-rail-new-accounts) for the live flow.
 
 Source of truth: [packages/backend/src/routes/payments.ts](../../packages/backend/src/routes/payments.ts) and
 [packages/backend/src/rails/allowance-module.ts](../../packages/backend/src/rails/allowance-module.ts).
 
-> **This diagram is the legacy AllowanceModule rail** (RETIRING under #1440 —
-> closed to new accounts entirely since #1984; existing accounts only). New accounts (`account_type='delegator_hybrid'`,
-> `execution_rail='delegation'`) take the
+> ⚠️ **THE SEQUENCE BELOW NO LONGER RUNS.** It is the legacy AllowanceModule
+> rail, retired under epic #1440: closed to new accounts by #1984 and
+> **fail-closed for spending by #1986**. `POST /payments` and
+> `POST /payments/:id/sign` now answer **HTTP 410 before the allowance read**
+> for any account whose `execution_rail` is not `delegation` and not
+> `session_key` — nothing written, no chain call, no transfer. Step 1 of the
+> diagram is where it stops. The over-allowance branch is closed at the other
+> end too: `POST /approvals/:id/approve` and `/proposed` refuse
+> unconditionally, because every `approval_requests` row is a legacy-rail
+> artifact. The diagram is kept as the record of what the rail DID, because
+> the code implementing it is still present and is deleted by #1987/#1988 —
+> read it as history, not as behaviour you can invoke.
+>
+> **What still works for one of these accounts:** every READ. Balances,
+> transaction history, the accounts list, rename, re-default, unlink,
+> approver management, and `GET /machine-payments/allowances`. `POST /safe/exec`
+> also stays open — it is owner-signed, and passkey-Safe approver recovery
+> (#1229) depends on it.
+>
+> **The live rail is the delegation rail.** New accounts
+> (`account_type='delegator_hybrid'`, `execution_rail='delegation'`) take the
 > [delegation-rail branch](#delegation-rail-new-accounts) at the bottom of this
-> doc — `POST /payments` resolves the rail from agent auth and either builds an
-> AllowanceModule transfer hash (below) or a redeeming UserOp (delegation rail).
-> The Smart Sessions **session rail is retired** (#834): accounts still marked
-> `execution_rail='session_key'` get HTTP 410 (fail-closed, nothing written).
+> doc; `POST /payments` resolves the rail from agent auth and builds a
+> redeeming UserOp. The Smart Sessions **session rail is retired** too (#834)
+> and answers its own, distinct HTTP 410; both tombstones coexist on the rail
+> seam (`rails/execution-rail.ts`).
 
 ```mermaid
 sequenceDiagram
@@ -170,8 +190,12 @@ Full security model and exit story:
 `POST /x402/authorize` ([packages/backend/src/routes/x402.ts](../../packages/backend/src/routes/x402.ts))
 branches on the agent's execution rail.
 
-**Legacy AllowanceModule rail** shares the payment/approval writers and
-AllowanceModule execution primitive, but its funding semantics differ:
+**Legacy AllowanceModule rail — RETIRED (#1986); the funding leg below no
+longer executes.** `POST /x402/authorize` and `POST /x402` answer HTTP 410
+above `runLegacyAuthorize`, so the Safe→delegate funding transfer never runs
+and the delegate never takes a hot balance for this rail. Kept as the record
+of what it did (deleted by #1987): it shared the payment/approval writers and
+the AllowanceModule execution primitive, but its funding semantics differed:
 
 - Token and chain come from the merchant challenge and must match the agent's
   Haven wallet.

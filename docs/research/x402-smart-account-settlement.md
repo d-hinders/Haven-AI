@@ -84,6 +84,19 @@ type X402Rail =
 
 ## 2. Current baseline (grounded in code)
 
+> **Superseded (2026-08-24, #1986):** this section is written in the present
+> tense and claims to be grounded in code, so it needs the same treatment the
+> blocks above got rather than being left to read as current. The
+> `Safe → delegate EOA → merchant` baseline described below **no longer
+> executes**: epic #1440 retired the legacy AllowanceModule rail, and
+> `POST /x402/authorize` answers HTTP 410 above the funding leg, so step 3's
+> AllowanceModule funding transfer never runs and the delegate never takes a
+> hot balance for this rail. Steps 1–5 are kept as the record of the baseline
+> this investigation reasoned from; the live path is the delegation rail's
+> ERC-7710 direct settlement (no funding leg), with the #946 EIP-3009 bridge
+> as its fallback. Nothing else in this document is restated or corrected —
+> it is a dated 2026-07 investigation record.
+
 Standard merchant x402 on the legacy AllowanceModule rail (now import-only) is
 `Safe → delegate EOA → merchant`:
 

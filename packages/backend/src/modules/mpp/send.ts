@@ -7,7 +7,12 @@
  * lost insert), and the within-allowance / over-allowance coverage split.
  * `routes/machine-payments.ts` keeps only request-shape validation.
  */
-import { mppNotOnDelegationRail, resolveExecutionRail, sessionRailRetired } from '../../rails/execution-rail.js'
+import {
+  allowanceModuleRailRetired,
+  mppNotOnDelegationRail,
+  resolveExecutionRail,
+  sessionRailRetired,
+} from '../../rails/execution-rail.js'
 import {
   findSendIntentByIdempotencyKey,
   insertSendIntent,
@@ -225,6 +230,16 @@ export async function handleSend(
   })
   if (sendRail.rail === 'retired_session') {
     const retired = sessionRailRetired('account')
+    return { statusCode: retired.statusCode, body: retired.body }
+  }
+  // #1986: /send does not itself call `executeAllowanceTransfer` — it mints a
+  // `pending_signature` intent (or an over-allowance approval row) and hands
+  // back sign_data, and `/payments/:id/sign` executes. Both ends refuse, and
+  // this end matters independently: without it the route would still WRITE
+  // rows and hand an agent signing instructions for a payment that can never
+  // execute, which is the opposite of fail-closed-with-nothing-written.
+  if (sendRail.rail === 'retired_allowance') {
+    const retired = allowanceModuleRailRetired('account')
     return { statusCode: retired.statusCode, body: retired.body }
   }
   if (agent.execution_rail === 'delegation') {

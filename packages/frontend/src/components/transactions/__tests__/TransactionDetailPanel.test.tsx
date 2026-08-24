@@ -67,6 +67,44 @@ describe('TransactionDetailPanel', () => {
     expect(screen.getByText('Payment ID')).toBeInTheDocument()
   })
 
+  it('shows the settlement scheme for an eip3009 x402 payment', () => {
+    renderPanel(
+      tx({
+        source: 'x402',
+        settlementScheme: 'eip3009',
+      }),
+    )
+    expect(screen.getByText('Settlement')).toBeInTheDocument()
+    expect(screen.getByText('EIP-3009')).toBeInTheDocument()
+  })
+
+  it('shows the settlement scheme for an erc7710 x402 payment', () => {
+    renderPanel(
+      tx({
+        source: 'x402',
+        settlementScheme: 'erc7710',
+      }),
+    )
+    expect(screen.getByText('Settlement')).toBeInTheDocument()
+    expect(screen.getByText('ERC-7710')).toBeInTheDocument()
+  })
+
+  it('renders no settlement row for x402 rows without a recorded scheme', () => {
+    renderPanel(tx({ source: 'x402' }))
+    expect(screen.queryByText('Settlement')).not.toBeInTheDocument()
+  })
+
+  it('renders no settlement row for non-x402 kinds even when a scheme is present', () => {
+    renderPanel(
+      tx({
+        direction: 'out',
+        source: 'direct',
+        settlementScheme: 'eip3009',
+      }),
+    )
+    expect(screen.queryByText('Settlement')).not.toBeInTheDocument()
+  })
+
   it('shows the send body with recipient and initiator', () => {
     renderPanel(tx({ direction: 'out', source: 'direct', agentName: undefined }))
     expect(screen.getByText('Transfer')).toBeInTheDocument()

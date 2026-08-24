@@ -1,6 +1,7 @@
-import { createConfig, fallback, http } from 'wagmi'
-import { base } from 'wagmi/chains'
+import { createConfig, fallback, http, type Transport } from 'wagmi'
 import { injected, walletConnect, coinbaseWallet } from 'wagmi/connectors'
+import type { Chain } from 'viem'
+import { SUPPORTED_CHAINS } from './chains'
 
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
 
@@ -14,30 +15,73 @@ const connectors = [
 ]
 
 // Read-heavy pages (Safe details, on-chain allowance polling, nonce reads on
-// send/revoke) hammer the RPC. viem's default Base endpoint
-// (https://mainnet.base.org) is aggressively rate-limited and surfaces as
-// "over rate limit" errors — e.g. when revoking an agent.
+// send/revoke) hammer the RPC. viem's default endpoints are aggressively
+// rate-limited and surface as "over rate limit" errors — e.g. when revoking an
+// agent.
 //
-// Use a fallback transport: prefer a dedicated provider via env, then rotate
-// through reliable public nodes. If one endpoint rate-limits or fails, viem
-// automatically falls through to the next. Set NEXT_PUBLIC_BASE_RPC_URL in
+// Use a fallback transport per chain: prefer a dedicated provider via env, then
+// rotate through reliable public nodes. If one endpoint rate-limits or fails,
+// viem automatically falls through to the next. Set the per-chain env var in
 // production to a dedicated provider (Alchemy/Infura/etc.) for best results.
-const baseRpcUrls = [
-  process.env.NEXT_PUBLIC_BASE_RPC_URL?.trim(),
-  'https://base-rpc.publicnode.com',
-  'https://base.llamarpc.com',
-  'https://mainnet.base.org',
-].filter((url): url is string => Boolean(url))
+const RPC_URLS: Record<number, (string | undefined)[]> = {
+  8453: [
+    process.env.NEXT_PUBLIC_BASE_RPC_URL?.trim(),
+    'https://base-rpc.publicnode.com',
+    'https://base.llamarpc.com',
+    'https://mainnet.base.org',
+  ],
+  84532: [
+    process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL?.trim(),
+    'https://base-sepolia-rpc.publicnode.com',
+    'https://sepolia.base.org',
+  ],
+}
 
-// TEMPORARY: Base-only while we ship a single-chain UX. To re-enable
-// multichain, add the chain back to `chains` and `transports` here and to
-// ENABLED_CHAIN_IDS in lib/chains.ts (e.g. `import { gnosis } from
-// 'wagmi/chains'`, `chains: [base, gnosis]`, `[gnosis.id]: fallback(...)`).
+/**
+ * ── Every chain Haven OFFERS must have a transport (#1971) ───────────────────
+ *
+ * This list used to be written out by hand as `chains: [base]`, with a
+ * "TEMPORARY: Base-only while we ship a single-chain UX" note — while
+ * `lib/chains.ts` went on offering **two** chains (`SUPPORTED_CHAIN_IDS` =
+ * 8453 + 84532) in every network picker, and the dev deployment set
+ * `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so Base Sepolia was its DEFAULT.
+ *
+ * The gap between those two lists did not fail loudly. `@wagmi/core`'s
+ * `getClient` CATCHES `ChainNotConfiguredError` and returns `undefined`
+ * (`actions/getClient.js`), so `usePublicClient({ chainId: 84532 })` was
+ * `undefined` and every consumer bailed at its first line — e.g.
+ * `useOnChainAllowances`:
+ *
+ *     if (!publicClient || !safeAddress) { setLoading(false); return }
+ *
+ * No request was issued, no error was raised, and the surface rendered its
+ * empty branch. On the dev deployment that silently disabled agent-budget
+ * reads, unmanaged-delegate discovery, approval execution, on-chain revoke and
+ * `NetworkGate`'s own "Switch wallet to Base Sepolia" button; in the screenshot
+ * harness it meant **zero JSON-RPC requests had ever left the browser**, so
+ * every chain-fed capture was a photograph of an empty state (#1935/#1971).
+ *
+ * So the list is DERIVED rather than restated: whatever `chains.ts` offers, we
+ * build a transport for. Adding a chain to `ENABLED_CHAIN_IDS` can no longer
+ * produce a chain the wallet layer cannot talk to. `wagmi-transport-parity`
+ * asserts the property against `getClient` itself, not against this code.
+ */
+function transportFor(chainId: number): Transport {
+  const urls = (RPC_URLS[chainId] ?? []).filter((url): url is string => Boolean(url))
+  // No pinned endpoints for a newly offered chain: fall back to the chain's own
+  // default RPC rather than registering nothing. A slow default endpoint is a
+  // performance problem; a missing transport is the silent-empty-state defect
+  // this whole comment is about.
+  return urls.length > 0 ? fallback(urls.map((url) => http(url))) : http()
+}
+
+const CHAINS = SUPPORTED_CHAINS.map((c) => c.viemChain) as unknown as readonly [Chain, ...Chain[]]
+
 export const config = createConfig({
-  chains: [base],
+  chains: CHAINS,
   connectors,
-  transports: {
-    [base.id]: fallback(baseRpcUrls.map((url) => http(url))),
-  },
+  transports: Object.fromEntries(
+    CHAINS.map((chain) => [chain.id, transportFor(chain.id)]),
+  ) as Record<number, Transport>,
   ssr: true,
 })

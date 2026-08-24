@@ -699,25 +699,51 @@ export const CHAIN_FED_ROUTES = [
     pattern: /^\/dashboard(\/|$)/,
     reads: 'useAgentPanelState + ApprovalQueue (usePublicClient — execution gating)',
   },
+  {
+    pattern: /^\/custody(\/|$)/,
+    reads: 'useOnChainAllowances — SafeControlCard reads the module and delegates at render',
+  },
 ]
 
 /** Chain-fed captures where the app issued no chain read at all. Fatal. */
 export const CHAIN_SILENT_CAPTURES = []
 
-/** Live counters for the context currently being captured. */
+/**
+ * Live counters for the context currently being captured, keyed PER PAGE.
+ *
+ * Per-page rather than per-context, and that distinction is the whole guard —
+ * caught by independent review before this shipped. One context sweeps several
+ * routes (`npm run screenshot -- /agents /dashboard` is ONE browser context and
+ * two screens), so a single shared counter answers "did this context read the
+ * chain anywhere", which is not the question. If `/agents` regressed to zero
+ * reads while `/dashboard` still read fine, a context-wide counter is non-zero
+ * and the regression is swallowed — the exact failure this guard exists to
+ * catch, missed by the guard. In the other direction it would flag every
+ * chain-fed page in the sweep when only one was broken, and a report that names
+ * four screens for one defect is the kind nobody trusts twice.
+ */
 let chainWatch = null
 
 export function beginChainWatch(label, viewport) {
-  chainWatch = { label, viewport, observed: 0, methods: new Set(), visited: new Map() }
+  chainWatch = { label, viewport, current: null, pages: new Map() }
 }
 
 export function noteChainReadObserved(method) {
   if (!chainWatch) return
-  chainWatch.observed += 1
-  chainWatch.methods.add(method)
+  const page = chainWatch.pages.get(chainWatch.current)
+  if (!page) return
+  page.observed += 1
+  page.methods.add(method)
 }
 
-/** Record a main-frame navigation, so the watch knows which screens were shown. */
+/**
+ * Record a main-frame navigation.
+ *
+ * Sets the page reads are attributed to from here on, and opens a tally the
+ * first time a chain-fed route is seen. A page is registered once: re-navigating
+ * to the same pathname (a scenario that returns to a screen) keeps the reads it
+ * already made rather than resetting them to zero.
+ */
 export function noteChainWatchNavigation(url) {
   if (!chainWatch) return
   let pathname
@@ -726,8 +752,10 @@ export function noteChainWatchNavigation(url) {
   } catch {
     return
   }
-  for (const route of CHAIN_FED_ROUTES) {
-    if (route.pattern.test(pathname)) chainWatch.visited.set(pathname, route.reads)
+  const fed = CHAIN_FED_ROUTES.find((route) => route.pattern.test(pathname))
+  chainWatch.current = fed ? pathname : null
+  if (fed && !chainWatch.pages.has(pathname)) {
+    chainWatch.pages.set(pathname, { reads: fed.reads, observed: 0, methods: new Set() })
   }
 }
 
@@ -735,14 +763,13 @@ export function endChainWatch() {
   const watch = chainWatch
   chainWatch = null
   if (!watch) return
-  if (watch.visited.size === 0) return
-  if (watch.observed > 0) return
-  for (const [pathname, reads] of watch.visited) {
+  for (const [pathname, page] of watch.pages) {
+    if (page.observed > 0) continue
     CHAIN_SILENT_CAPTURES.push({
       capture: watch.label,
       viewport: watch.viewport,
       route: pathname,
-      reads,
+      reads: page.reads,
     })
   }
 }

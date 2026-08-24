@@ -97,7 +97,52 @@ describe('the silent-capture guard', () => {
     ])
   })
 
-  it('scopes reads to the capture that was open — a later read does not excuse an earlier capture', () => {
+  it('attributes reads to the PAGE that made them — a healthy route does not excuse a silent one', () => {
+    // The soundness gap independent review caught before this shipped. One
+    // context sweeps several routes (`npm run screenshot -- /agents /dashboard`
+    // is ONE context, two screens). A context-wide counter would be non-zero
+    // here and would swallow the `/agents` regression entirely — the exact
+    // failure this guard exists to catch, missed by the guard.
+    beginChainWatch('routes · desktop', 'desktop')
+    noteChainWatchNavigation(`${BASE}/agents`)
+    // …no reads on /agents…
+    noteChainWatchNavigation(`${BASE}/dashboard`)
+    noteChainReadObserved('eth_call')
+    endChainWatch()
+
+    expect(CHAIN_SILENT_CAPTURES.map((c) => c.route)).toEqual(['/agents'])
+  })
+
+  it('does not credit a chain-fed page with a read made on a NON-chain-fed page', () => {
+    beginChainWatch('routes · desktop', 'desktop')
+    noteChainWatchNavigation(`${BASE}/agents`)
+    noteChainWatchNavigation(`${BASE}/design-system`)
+    noteChainReadObserved('eth_call')
+    endChainWatch()
+
+    expect(CHAIN_SILENT_CAPTURES.map((c) => c.route)).toEqual(['/agents'])
+  })
+
+  it('keeps a page\'s reads when a scenario navigates back to it', () => {
+    beginChainWatch('scenario:modal-migrations', 'desktop')
+    noteChainWatchNavigation(`${BASE}/agents`)
+    noteChainReadObserved('eth_call')
+    noteChainWatchNavigation(`${BASE}/dashboard`)
+    noteChainReadObserved('eth_call')
+    noteChainWatchNavigation(`${BASE}/agents`)
+    endChainWatch()
+
+    expect(CHAIN_SILENT_CAPTURES).toEqual([])
+  })
+
+  it('covers /custody, which reads the chain at render just as /agents does', () => {
+    beginChainWatch('routes · desktop', 'desktop')
+    noteChainWatchNavigation(`${BASE}/custody`)
+    endChainWatch()
+    expect(CHAIN_SILENT_CAPTURES.map((c) => c.route)).toEqual(['/custody'])
+  })
+
+  it('a read seen after the watch closed does not excuse the capture it left behind', () => {
     // Per-context bookkeeping: `endChainWatch` closes the window. A read seen
     // after it belongs to nothing, and must not retroactively clear a capture
     // already recorded as silent.
@@ -120,10 +165,14 @@ describe('the silent-capture guard', () => {
   it('every chain-fed route names the hook that reads the chain there', () => {
     // The report has to be actionable without this file open. A pattern with no
     // stated reason invites the next editor to delete it as noise.
+    const covered = ['/agents', '/dashboard', '/custody']
     for (const route of CHAIN_FED_ROUTES) {
-      expect(route.pattern.test('/agents') || route.pattern.test('/dashboard')).toBe(true)
+      expect(covered.some((p) => route.pattern.test(p))).toBe(true)
       expect(route.reads.length).toBeGreaterThan(20)
     }
+    // Every route in the list is reachable, and every render-time
+    // `useOnChainAllowances` route in the app is in the list.
+    expect(CHAIN_FED_ROUTES).toHaveLength(covered.length)
   })
 })
 

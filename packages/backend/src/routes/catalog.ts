@@ -186,12 +186,14 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
 
       const entries: CatalogListingEntry[] = result.rows.map(serialize)
 
-      // Ingestion half (#1715): verified_payable self-submitted entries, same
-      // read-only contract. Agents always filter by chain (network is null on
-      // ingestion rows, so nothing they can pay shows here — what an agent can
-      // do with the directory is #1716's question), and the same
-      // category/rail/search filters apply. Appended after operator rows.
-      if (!request.agent) {
+      // Ingestion half (#1715, epic #1717): verified_payable self-submitted
+      // entries, same read-only contract, for BOTH clients. Agents get them
+      // too — an x402 endpoint is self-describing about scheme/chain at pay
+      // time, so the directory entry is discoverable on any chain and the
+      // payment step negotiates. The agent chain filter applies only to the
+      // operator-curated half (which carries an explicit `network`); category,
+      // rail and search filters apply to both halves.
+      {
         const ingestion = (await listVerifiedCatalogSubmissions())
           .filter((row) => {
             if (normalizedCategory && normalizedCategory.toLowerCase() !== 'api') return false

@@ -442,7 +442,7 @@ describe('catalog /submit/:id status (epic #1717 #1715)', () => {
   }
 
   it('404s for an unknown submission id', async () => {
-    mockQuery.mockResolvedValue({ rows: [] })
+    mockQuery.mockResolvedValue({ rows: [] } as never)
     const res = await app.inject({ method: 'GET', url: `/catalog/submit/${SUBMISSION}` })
     expect(res.statusCode).toBe(404)
   })
@@ -460,7 +460,7 @@ describe('catalog /submit/:id status (epic #1717 #1715)', () => {
           entrypoint: 'summarize',
         }),
       ],
-    })
+    } as never)
     const res = await app.inject({ method: 'GET', url: `/catalog/submit/${SUBMISSION}` })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toMatchObject({
@@ -474,7 +474,7 @@ describe('catalog /submit/:id status (epic #1717 #1715)', () => {
   })
 
   it('includes the well-known / DNS-TXT proof instructions while the row can still prove ownership', async () => {
-    mockQuery.mockResolvedValue({ rows: [row({ status: 'submitted' })] })
+    mockQuery.mockResolvedValue({ rows: [row({ status: 'submitted' })] } as never)
     const res = await secretApp.inject({ method: 'GET', url: `/catalog/submit/${SUBMISSION}` })
     expect(res.statusCode).toBe(200)
     const body = res.json()
@@ -490,7 +490,7 @@ describe('catalog /submit/:id status (epic #1717 #1715)', () => {
   it('omits instructions for verified_payable, failed and delisted rows', async () => {
     for (const status of ['verified_payable', 'failed', 'delisted']) {
       mockQuery.mockReset()
-      mockQuery.mockResolvedValue({ rows: [row({ status })] })
+      mockQuery.mockResolvedValue({ rows: [row({ status })] } as never)
       const res = await secretApp.inject({ method: 'GET', url: `/catalog/submit/${SUBMISSION}` })
       expect(res.statusCode).toBe(200)
       expect(res.json().status).toBe(status)
@@ -499,7 +499,7 @@ describe('catalog /submit/:id status (epic #1717 #1715)', () => {
   })
 
   it('never returns internal failure detail — only the coarse status', async () => {
-    mockQuery.mockResolvedValue({ rows: [row({ status: 'failed' })] })
+    mockQuery.mockResolvedValue({ rows: [row({ status: 'failed' })] } as never)
     const res = await app.inject({ method: 'GET', url: `/catalog/submit/${SUBMISSION}` })
     const body = res.json()
     expect(body.status).toBe('failed')

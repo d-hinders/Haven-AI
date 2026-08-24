@@ -418,7 +418,7 @@ describe('catalog routes', () => {
     })
   })
 
-  it('hides ingestion entries from agents (they filter by chain; ingestion rows have none) and applies the rail filter', async () => {
+  it('serves ingestion entries to agents too, and applies the rail filter (#1716)', async () => {
     mockCatalogWithIngestion([ENTRY], [
       {
         id: '00000000-0000-4000-8000-000000000002',
@@ -430,8 +430,12 @@ describe('catalog routes', () => {
       },
     ])
 
+    // Agents discover the verified directory (x402 is self-describing at pay
+    // time, so no chain is needed on the entry itself).
     const agentRes = await app.inject({ method: 'GET', url: '/catalog', headers: { authorization: `Bearer ${AGENT_KEY}` } })
-    expect(agentRes.json().entries).toHaveLength(1)
+    expect(agentRes.json().entries).toHaveLength(2)
+    const agentRows = agentRes.json().entries
+    expect(agentRows.some((e: { source: string }) => e.source === 'ingestion')).toBe(true)
 
     // A 'mpp' filter excludes the x402 ingestion row from the dashboard too.
     const jwt = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })

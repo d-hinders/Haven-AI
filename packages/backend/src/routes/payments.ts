@@ -59,6 +59,8 @@ import {
   serializeUserOp,
   sessionRailRetired,
   isRetiredRailIntent,
+  allowanceModuleRailRetired,
+  isRetiredAllowanceIntent,
 } from '../rails/execution-rail.js'
 import {
   prepareDelegationPayment,
@@ -383,12 +385,21 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // must not resurrect actionable sign_data for an account the rail
     // retirement fail-closes (review finding on #1207 — /:id/sign re-checks
     // independently, but the create surface should never hand it out either).
-    if (railState.safeExecutionRail !== 'delegation') {
-      const earlyDecision = resolveExecutionRail({ ...railState, chainId: agent.chain_id })
-      if (earlyDecision.rail === 'retired_session') {
-        const retired = sessionRailRetired('account')
-        return reply.code(retired.statusCode).send(retired.body)
-      }
+    //
+    // ── Retired-ALLOWANCE gate (#1986, epic #1440 slice 3) — same seam, same
+    // fail-closed contract, same position: BEFORE the replay lookup and
+    // before any chain read, so nothing is written and no allowance is read
+    // for an account that can no longer spend. The legacy execution body
+    // below is left VERBATIM for the deletion slices (#1987/#1988) to
+    // remove; this is a runtime refusal, not a deletion.
+    const earlyDecision = resolveExecutionRail({ ...railState, chainId: agent.chain_id })
+    if (earlyDecision.rail === 'retired_session') {
+      const retired = sessionRailRetired('account')
+      return reply.code(retired.statusCode).send(retired.body)
+    }
+    if (earlyDecision.rail === 'retired_allowance') {
+      const retired = allowanceModuleRailRetired('account')
+      return reply.code(retired.statusCode).send(retired.body)
     }
 
     // 4a. Idempotent replay (#1207): a retried request must return the FIRST
@@ -525,6 +536,14 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     if (railDecision.rail === 'retired_session') {
       // #993: retirement decided in the seam, refusal produced there too.
       const retired = sessionRailRetired('account')
+      return reply.code(retired.statusCode).send(retired.body)
+    }
+    if (railDecision.rail === 'retired_allowance') {
+      // #1986. Unreachable while the early gate above stands — kept for the
+      // same reason the session rail keeps its second gate: this is the last
+      // point before the AllowanceModule read, and a future edit that moves
+      // or narrows the early gate must not silently reopen the rail.
+      const retired = allowanceModuleRailRetired('account')
       return reply.code(retired.statusCode).send(retired.body)
     }
 
@@ -761,6 +780,21 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // and BEFORE the expiry flip for the same #1120 reason.
       if (intent.payment_rail === 'mpp_demo' || intent.source === 'mpp_demo') {
         const retired = mppDemoRetired()
+        return reply.code(retired.statusCode).send(retired.body)
+      }
+
+      // #1986: the same contract for the AllowanceModule rail. This is the
+      // ONE path that actually calls `executeAllowanceTransfer`, so it is the
+      // last line between a legacy intent and a real transfer — a pending
+      // intent authorized before this slice landed must not still execute
+      // after it. Before the expiry flip, for the #1120 reason above.
+      //
+      // Placed AFTER the mpp_demo gate deliberately: an mpp_demo intent is
+      // also `execution_rail = null`, so this predicate would swallow it and
+      // answer with the wider Safe-rail message. Both refuse; the narrower,
+      // more informative rule should be the one that speaks.
+      if (isRetiredAllowanceIntent(intent.execution_rail)) {
+        const retired = allowanceModuleRailRetired('intent')
         return reply.code(retired.statusCode).send(retired.body)
       }
 

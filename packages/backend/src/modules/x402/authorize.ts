@@ -8,7 +8,11 @@
  */
 import type { FastifyBaseLogger } from 'fastify'
 import type { AgentContext } from '../../middleware/agentAuth.js'
-import { resolveExecutionRail, sessionRailRetired } from '../../rails/execution-rail.js'
+import {
+  allowanceModuleRailRetired,
+  resolveExecutionRail,
+  sessionRailRetired,
+} from '../../rails/execution-rail.js'
 import { resolvePaymentToken } from '../../domain/payment-token.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { validateGenericSchemeRail } from './scheme-selection.js'
@@ -71,6 +75,16 @@ export async function authorizeX402(input: AuthorizeX402Input): Promise<X402Hand
   })
   if (railDecision.rail === 'retired_session') {
     const retired = sessionRailRetired('account')
+    return { code: retired.statusCode, body: retired.body }
+  }
+  // #1986 (epic #1440 slice 3): the legacy AllowanceModule x402 flow is
+  // retired. This refusal sits ABOVE the delegation branch and above
+  // `runLegacyAuthorize`, so the Safe → delegate funding leg never runs, no
+  // intent row and no approval row is written, and the delegate never holds
+  // a hot balance for a rail that is gone. `runLegacyAuthorize` is left
+  // verbatim below for deletion slice #1987.
+  if (railDecision.rail === 'retired_allowance') {
+    const retired = allowanceModuleRailRetired('account')
     return { code: retired.statusCode, body: retired.body }
   }
 

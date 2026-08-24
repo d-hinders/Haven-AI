@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import x402Routes from '../x402.js'
+import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
 
 /**
  * Characterization scaffolding for the x402 / machine-payment consolidation
@@ -70,23 +71,21 @@ const AGENT = {
 const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const MERCHANT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a'
 
-// The unified superset contract written by createMachineApproval (PR2), in
-// order. x402 now goes through the same writer, so machine_challenge_id is
-// present in the column list (the value is null for x402 — pinned below).
-const APPROVAL_COLUMNS = [
-  'agent_id', 'user_id', 'safe_address', 'chain_id', 'token_symbol', 'token_address',
-  'to_address', 'amount_raw', 'amount_human', 'reason', 'source', 'x402_resource_url',
-  'payment_rail', 'payment_resource_url', 'merchant_address', 'machine_challenge_id',
-  'machine_idempotency_key', 'machine_metadata', 'status', 'expires_at',
-]
+// #1986: the unified approval-row column contract and its ordered-column
+// helper (`APPROVAL_COLUMNS` / `approvalInsertColumns`) pinned the shared
+// writer's INSERT shape. That writer is never reached on the retired rail
+// (every case below is fail-closed at 410 before any INSERT), so both are
+// dead weight now — removed rather than left unused.
 
-/** Pull the ordered column list out of an `INSERT INTO approval_requests (...)` statement. */
-function approvalInsertColumns(sql: string): string[] {
-  const m = sql.match(/INSERT INTO approval_requests\s*\(([^)]*)\)/i)
-  if (!m) throw new Error('not an approval_requests insert')
-  return m[1].split(',').map((c) => c.trim()).filter(Boolean)
-}
-
+// #1986 (epic #1440 slice 3): `AGENT` here carries no `execution_rail`,
+// which resolves through the LEFT-JOIN `null` fall-through to
+// `retired_allowance` — the legacy Safe/AllowanceModule rail these cases
+// characterized is retired. Both helper flows below (`queueOverAllowance`
+// and `executeWithinAllowance`) now get refused fail-closed with HTTP 410
+// right after auth, before any of the approval/intent writer contract they
+// were built to pin ever runs. Converted in place rather than deleted, per
+// #1986; `modules/x402/legacy-authorize.ts` and these cases are scheduled
+// for deletion in #1987.
 describe('x402↔MPP consolidation — characterization (PT-1)', () => {
   let app: FastifyInstance
 
@@ -140,52 +139,41 @@ describe('x402↔MPP consolidation — characterization (PT-1)', () => {
   }
 
   it('emits the exact ordered shared approval-row column contract', async () => {
+    // #1986: the shared approval-row writer this pinned never runs on the
+    // retired rail — fail-closed refuses the account before the over-budget
+    // approval-queue path is reached, so no approval_requests INSERT is
+    // ever issued to have a column contract at all.
     const response = await queueOverAllowance()
-    expect(response.statusCode).toBe(202)
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
 
     const insertCall = mockQuery.mock.calls.find(
       (c) => typeof c[0] === 'string' && /INSERT INTO approval_requests/i.test(c[0] as string),
     )
-    expect(insertCall, 'an approval_requests INSERT was issued').toBeDefined()
-
-    const columns = approvalInsertColumns(insertCall![0] as string)
-    expect(columns).toEqual(APPROVAL_COLUMNS)
-    expect(insertCall![0]).toContain('ON CONFLICT (agent_id, machine_idempotency_key)')
-    expect(insertCall![0]).toContain('DO NOTHING')
+    expect(insertCall, 'no approval_requests INSERT is issued on the retired rail').toBeUndefined()
   })
 
   it('writes a semantically-x402 row through the shared superset (challenge null)', async () => {
-    // PR2 routed x402 through createMachineApproval, so the column list is now
-    // the superset (machine_challenge_id included). Pin that the x402 row is
-    // semantically unchanged: source/payment_rail are 'x402', x402_resource_url
-    // is set, and the challenge value is null (x402 dedupes on idempotency key).
+    // #1986: the semantic row this pinned (source/payment_rail/x402_resource_url
+    // /machine_challenge_id) is never written on the retired rail — fail-closed
+    // refuses the account before the shared writer runs at all.
     const response = await queueOverAllowance()
-    expect(response.statusCode).toBe(202)
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
     const insertCall = mockQuery.mock.calls.find(
       (c) => typeof c[0] === 'string' && /INSERT INTO approval_requests/i.test(c[0] as string),
-    )!
-    const cols = approvalInsertColumns(insertCall[0] as string)
-    const params = insertCall[1] as unknown[]
-    // status / expires_at are SQL literals (last two columns), so for every
-    // bound column the param index equals the column index.
-    const valueOf = (col: string) => params[cols.indexOf(col)]
-
-    expect(cols).toContain('machine_challenge_id')
-    expect(valueOf('machine_challenge_id')).toBeNull()
-    expect(valueOf('source')).toBe('x402')
-    expect(valueOf('payment_rail')).toBe('x402')
-    expect(valueOf('x402_resource_url')).toBe('https://mcp.soundside.ai/mcp')
+    )
+    expect(insertCall, 'no approval_requests INSERT is issued on the retired rail').toBeUndefined()
   })
 
   it('routes on the delegate balance (balance-aware coverage, unlike the lib core)', async () => {
-    // The x402 path consults the delegate balance and routes on
-    // delegateBalance + remaining; the allowance-only lib core never reads it.
-    // Pinning this ensures the consolidation keeps the balance-aware strategy
-    // for x402 rather than collapsing onto allowance-only routing.
-    await queueOverAllowance()
-    expect(allowanceMocks.getTokenBalance).toHaveBeenCalledWith(
-      AGENT.chain_id, AGENT.delegate_address, USDC,
-    )
+    // #1986: the balance-aware coverage decision this pinned never runs —
+    // fail-closed refuses the account before any coverage decision, so the
+    // delegate balance is never read at all on the retired rail.
+    const response = await queueOverAllowance()
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    expect(allowanceMocks.getTokenBalance).not.toHaveBeenCalled()
   })
 
   // Drive the within-allowance execute path so the payment_intents INSERT runs.
@@ -216,44 +204,18 @@ describe('x402↔MPP consolidation — characterization (PT-1)', () => {
   }
 
   it('persists the x402 intent through the shared writer, keeping the x402_idempotency_key conflict arbiter', async () => {
-    // PR4 routed x402 through createPaymentIntent. The critical preserved
-    // behavior is the DEDUP arbiter: x402 must keep ON CONFLICT on
-    // x402_idempotency_key (not machine_idempotency_key) — switching it would
-    // change which partial-unique index enforces idempotency on the money path.
-    // Also pin the semantic equivalence: source/payment_rail 'x402', both
-    // idempotency keys filled, challenge null.
+    // #1986: the shared-writer dedup arbiter this pinned (ON CONFLICT on
+    // x402_idempotency_key, both idempotency-key columns filled, challenge
+    // null) is never exercised on the retired rail — fail-closed refuses the
+    // account before the execute-within-allowance branch, or any
+    // payment_intents write, is ever reached.
     const response = await executeWithinAllowance()
-    expect(response.statusCode).toBe(201)
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
 
     const insertCall = mockQuery.mock.calls.find(
       (c) => typeof c[0] === 'string' && /INSERT INTO payment_intents/i.test(c[0] as string),
     )
-    expect(insertCall, 'a payment_intents INSERT was issued').toBeDefined()
-    const sql = insertCall![0] as string
-    expect(sql).toContain('ON CONFLICT (agent_id, x402_idempotency_key)')
-    expect(sql).not.toContain('ON CONFLICT (agent_id, machine_idempotency_key)')
-    // The conflict WHERE predicate must match the partial-unique index
-    // (idx_payment_intents_x402_idempotency) or the upsert throws at runtime.
-    expect(sql).toMatch(
-      /ON CONFLICT \(agent_id, x402_idempotency_key\)\s*WHERE x402_idempotency_key IS NOT NULL\s*AND status NOT IN \('failed', 'expired'\)/,
-    )
-
-    // Pin the row's semantic equivalence by column position. `status` (a literal
-    // 'pending_signature') and `expires_at` (a NOW()+interval literal) have no
-    // bind placeholder, so drop them: the param index is the position among the
-    // remaining bound columns.
-    const cols = (sql.match(/INSERT INTO payment_intents\s*\(([^)]*)\)/i)![1])
-      .split(',').map((c) => c.trim()).filter(Boolean)
-    const boundCols = cols.filter((c) => c !== 'status' && c !== 'expires_at')
-    const params = insertCall![1] as unknown[]
-    const valueOf = (col: string) => params[boundCols.indexOf(col)]
-
-    expect(valueOf('source')).toBe('x402')
-    expect(valueOf('payment_rail')).toBe('x402')
-    expect(valueOf('machine_challenge_id')).toBeNull()
-    // x402 fills BOTH idempotency-key columns with the request key; the dedup
-    // arbiter (asserted above) is what distinguishes the rail.
-    expect(valueOf('x402_idempotency_key')).toBe('x402:exec')
-    expect(valueOf('machine_idempotency_key')).toBe('x402:exec')
+    expect(insertCall, 'no payment_intents INSERT is issued on the retired rail').toBeUndefined()
   })
 })

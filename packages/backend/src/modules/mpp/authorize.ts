@@ -59,6 +59,8 @@ import { tryRecordMachinePaymentEvidenceBaseById } from './evidence.js'
 import { decideCoverage } from '../../domain/payment-coverage.js'
 import { isAddress } from '@haven_ai/core'
 import {
+  allowanceModuleRailRetired,
+  isRetiredAllowanceIntent,
   isRetiredRailIntent,
   loadExecutionRailState,
   mppNotOnDelegationRail,
@@ -261,6 +263,13 @@ async function returnExistingIntent(
     if (isRetiredRailIntent(existing.execution_rail)) {
       return sessionRailRetired('intent')
     }
+    // #1986: and so are AllowanceModule-rail intents — a pending legacy
+    // intent must not be refreshed into a fresh, signable hash after the
+    // Safe rail is retired. Before the chain read below: nothing read,
+    // nothing written.
+    if (isRetiredAllowanceIntent(existing.execution_rail)) {
+      return allowanceModuleRailRetired('intent')
+    }
     let existingHash = existing.sign_hash
     let existingNonce = existing.allowance_nonce
     const refreshedAllowance = await getTokenAllowance(
@@ -427,6 +436,16 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
   if (railDecision.rail === 'retired_session') {
     // #993: retirement decided in the seam, refusal produced there too.
     return sessionRailRetired('account')
+  }
+  if (railDecision.rail === 'retired_allowance') {
+    // #1986: the AllowanceModule rail is retired, so this whole orchestration
+    // — allowance coverage, approval queueing, one-shot execution — is
+    // unreachable for the only accounts that ever used it. The HTTP route
+    // (`POST /machine-payments/authorize`) has been a #1328 mppDemoRetired
+    // stub since before this slice, so nothing in production reaches here;
+    // the gate exists so the seam's answer is uniform and a future rewiring
+    // cannot reopen the rail by accident.
+    return allowanceModuleRailRetired('account')
   }
   if (railState.safeExecutionRail === 'delegation') {
     // #1251: MPP has no delegation branch — without this refusal a Hybrid

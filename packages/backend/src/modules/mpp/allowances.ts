@@ -46,6 +46,21 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
     return { statusCode: retired.statusCode, body: retired.body }
   }
 
+  // #1986 (epic #1440 slice 3), stated because its ABSENCE is the decision:
+  // a `retired_allowance` account deliberately does NOT get a 410 here and
+  // falls through to the legacy on-chain read below. This endpoint REPORTS
+  // spend authority; it does not grant or exercise any. The epic's boundary
+  // is "payments stop, accounts and history stay READABLE", and turning a
+  // state read into a refusal would be a read regression for exactly the
+  // population being retired. The refusal belongs on the spend paths, and
+  // that is where it is — `POST /payments`, `/payments/:id/sign`, x402
+  // authorize, `/machine-payments/send`. The session rail differs above
+  // because #834 DELETED its machinery: there is no state left to read.
+  //
+  // Known consequence, accepted: a legacy agent reads a live remaining
+  // allowance and then gets a 410 when it tries to spend it. Misleading, not
+  // unsafe — fail-closed happens at the spend. Making the report say
+  // "retired" is a surface change that belongs with #1989/#1992.
   if (agent.execution_rail === 'delegation') {
     // Delegation rail: the authority IS the active agent_delegations set,
     // derived through the #1090 shared view (agent_allowances is a frozen

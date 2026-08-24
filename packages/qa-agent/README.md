@@ -5,7 +5,8 @@ Internal QA harness for the Haven **dev environment** (epic #573). Not published
 This is the shared home for the automated QA layers that exercise the *deployed*
 dev stack (which the mocked Playwright suite structurally can't):
 
-- **#574** — dev seeding (a QA identity: user + Safe + agent + on-chain allowance).
+- **#574** — dev seeding (a QA identity: user + Hybrid account + agent +
+  budget delegation).
 - **#575** — the deterministic, no-LLM money-flow harness (the deploy-confidence
   core): drives the real SDK/API payment path on **Base Sepolia** against the
   shared dev backend + the dev demo-merchant, asserting the #420 invariants.
@@ -35,8 +36,10 @@ report, and **exits non-zero on any failure**. It reads the `QA_*` env (see
 ([`.github/workflows/qa-dev.yml`](../../.github/workflows/qa-dev.yml)) runs it in
 CI from the `QA_*` Actions secrets.
 
-Scenarios (`src/scenarios/`) — the **legacy-rail** legs, which are the only ones
-that still run the seeded AllowanceModule identity:
+Scenarios (`src/scenarios/`) — the **legacy-rail** legs, the only ones that still
+run the legacy AllowanceModule identity. That identity is **no longer seeded**
+(see the Config contract below); these legs consume a credential that predates
+the Safe rail's retirement:
 
 | Scenario | #420 invariant | Status |
 |---|---|---|

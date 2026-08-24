@@ -223,8 +223,11 @@ const LEGACY_LOCK_ONLY = new Set([
   'infra/outbound-queue.ts', // the pipeline itself broadcasts, by design
   'rails/allowance-module.ts',
   'routes/safe-exec.ts',
-  'routes/safe-deploy.ts',
-  'modules/accounts/safe-deployer.ts',
+  // Shrunk by #1988 (epic #1440): `modules/accounts/safe-deployer.ts` is
+  // DELETED, and `routes/safe-deploy.ts` is a 410 tombstone that no longer
+  // touches the relayer at all. `infra/chain/safe-proxy-deployer.ts` stays —
+  // trimmed to `ensurePasskeySignerDeployed`, which `routes/safe-exec.ts`
+  // still reaches and which still broadcasts under the lock.
   'infra/chain/safe-proxy-deployer.ts',
 ])
 
@@ -253,9 +256,24 @@ describe('scan: no submitter outside the outbound pipeline (#1559)', () => {
     // A pinned allowlist rots when entries linger after their file dies or
     // stops broadcasting; each entry must still earn its place, so removals
     // are forced through this test the same way additions are.
+    //
+    // #1988 strengthened the second half, because it was not being checked.
+    // `readFileSync` alone catches a DELETED entry — that is how this test
+    // caught `modules/accounts/safe-deployer.ts` — but `routes/safe-deploy.ts`
+    // became a 410 tombstone with no relayer call in it at all and would have
+    // sat here indefinitely, existing and broadcasting nothing: an allowlist
+    // entry excusing a file from a rule it no longer comes near. So the
+    // "still broadcast" clause is now asserted rather than only asserted-in-
+    // prose. `infra/relayer.ts` and `infra/outbound-queue.ts` are exempt from
+    // the clause for the reason their own comments give: one is the lock's
+    // home and the other IS the pipeline.
+    const NO_BROADCAST_OF_ITS_OWN = new Set(['infra/relayer.ts', 'infra/outbound-queue.ts'])
     for (const rel of LEGACY_LOCK_ONLY) {
       const source = readFileSync(join(BACKEND_SRC, rel), 'utf8')
       expect(source.length).toBeGreaterThan(0)
+      if (NO_BROADCAST_OF_ITS_OWN.has(rel)) continue
+      expect(source, `${rel} is pinned as a legacy relayer site but no longer uses the relayer`)
+        .toContain('getRelayer')
     }
   })
 

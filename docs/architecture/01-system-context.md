@@ -27,7 +27,7 @@ covers:
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/signer.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-08-24" # #1984: same "import-only" correction — the legacy rail is now closed to new accounts entirely, by deploy AND by import. The context boundaries and actors re-read against the diff and unchanged: no new external system, no new trust edge. Prior: #1199: signer-removal recovery change re-verified; custody boundary unchanged
+last-verified: "2026-08-24" # #1988: the "Owner authority remains on-chain" bullet described approver management as a live read of `getOwners()` plus stored metadata. Those routes are deleted; Haven now neither signs nor constructs an owner change, and the bullet says so — the custody claim gets STRONGER, not weaker, because owner management moves entirely to the user's own key. Scope: that bullet; the mermaid context diagram and the other invariants were not re-verified. Prior: #1984: same "import-only" correction — the legacy rail is now closed to new accounts entirely, by deploy AND by import. The context boundaries and actors re-read against the diff and unchanged: no new external system, no new trust edge. Prior: #1199: signer-removal recovery change re-verified; custody boundary unchanged
 ---
 
 # Haven — System Context
@@ -154,10 +154,12 @@ flowchart LR
   Safe validates the user's complete signature package
   ([allowance execution](../../packages/backend/src/rails/allowance-module.ts),
   [passkey Safe execution](../../packages/backend/src/routes/safe-exec.ts)).
-- **Owner authority remains on-chain.** Linking an existing Haven wallet trusts
-  the user-supplied Safe address at import time. Approver management later reads
-  the authoritative owner list from `getOwners()` and stores only display
-  metadata such as label and owner type
+- **Owner authority remains on-chain, and Haven no longer touches it at all.**
+  Membership truth was always `getOwners()`; Haven stored only display metadata
+  such as label and owner type, and it never signed an owner change. Since
+  #1988 it does not construct one either — the approver routes are deleted, and
+  a legacy Safe's owner set is managed by its owner directly, with their own
+  key, outside Haven
   ([Haven wallet routes](../../packages/backend/src/routes/user-safes.ts)).
 - **User-authorized execution depends on signer type and threshold.** An EOA
   owner submits the Safe transaction through its connected wallet. A passkey

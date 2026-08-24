@@ -65,6 +65,16 @@ const DESKTOP_WIDTH = 1280
  * 120 / 2 / 120 sits clear of the fixed values and clear of the defect on
  * every axis, so ordinary text-metric drift cannot move it and a regression
  * cannot hide under it.
+ *
+ * ONE CAVEAT, stated so the next person does not quietly widen it. The numbers
+ * above are macOS-rendered; CI is Linux, where text metrics differ. The measure
+ * and height bounds carry 15–20% headroom, but `MAX_TITLE_LINES = 2` carries
+ * NONE by construction — the fixed layout wraps to exactly two lines at 768px.
+ * If this goes red on CI and only on CI, the correct response is to find out
+ * why the measure is tighter there, not to bump the ceiling to 3: at 900px the
+ * defect state WAS three lines, so a ceiling of 3 would stop this spec seeing
+ * it, and the measure floor's margin at that width is only 2px (118 -> 120).
+ * The line ceiling is what makes 900px a real check.
  */
 const MIN_TITLE_MEASURE_PX = 120
 const MAX_TITLE_LINES = 2

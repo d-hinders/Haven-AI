@@ -64,11 +64,11 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
   // ── Dashboard-session surfaces (JWT auth, not the agent API key) ──
   {
     file: 'safe-deploy.ts',
-    because: 'Safe deployment — the rail is being retired entirely (#1440). Do not document; expect deletion.',
+    because: 'Safe deployment — retired (#1440). As of #1988 the module is a TOMBSTONE: one route, answering 410, with no implementation behind it. Do not document; it comes off this list by being unregistered, not by being written up.',
   },
   {
     file: 'safe-exec.ts',
-    because: 'Relayed Safe execution — same retirement as safe-deploy.ts (#1440).',
+    because: 'Relayed Safe execution. NOT retired and deliberately still live (#1986 boundary, held by #1988): owner-signed, relayed for gas only, and the way an owner still moves funds out of a legacy Safe. Undocumented because it is a dashboard-session route on a rail nothing new joins, not because it is going away.',
   },
   // ── Integrations ──
 ]

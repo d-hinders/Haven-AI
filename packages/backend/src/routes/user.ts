@@ -1,17 +1,14 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import { retiredSafeInflow } from '../middleware/safe-inflow-retired.js'
+import { retiredSafeInflowHandler } from '../middleware/safe-inflow-retired.js'
 import { getSafeDetails } from '../modules/accounts/index.js'
-import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import {
   findCurrencyPreference,
   updateCurrencyPreference,
   updateUserName,
-  updateUserSafeAddress,
   updateUserWalletAddress,
 } from '../infra/repositories/users.js'
 import {
-  linkDefaultUserSafe,
   listSafesWithAccountTypeForUser,
   type SafeWithAccountTypeRow,
 } from '../infra/repositories/user-safes.js'
@@ -20,7 +17,7 @@ import {
   listOwnerAliases,
   upsertOwnerAlias,
 } from '../infra/repositories/owner-aliases.js'
-import { ETH_ADDRESS_RE, DEFAULT_CHAIN_ID } from '@haven_ai/core'
+import { ETH_ADDRESS_RE } from '@haven_ai/core'
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
 const OWNER_FETCH_CONCURRENCY = 4
@@ -42,11 +39,6 @@ function userRowVanished(): never {
 
 interface WalletBody {
   wallet_address: string
-}
-
-interface SafeBody {
-  safe_address: string
-  chain_id?: number
 }
 
 interface PreferencesBody {
@@ -152,31 +144,12 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
     return (await updateUserWalletAddress(wallet_address, sub)) ?? userRowVanished()
   })
 
-  // PUT /user/safe
-  // INFLOW CLOSED (#1984, epic #1440): the legacy single-Safe link is an
-  // IMPORT — it wrote user_safes and emitted `safe_imported`. 410 before
-  // the handler runs.
-  app.put<{ Body: SafeBody }>('/safe', retiredSafeInflow('import'), async (request, reply) => {
-    const { safe_address, chain_id = DEFAULT_CHAIN_ID } = request.body
-    const { sub } = request.user as { sub: string }
-
-    if (!safe_address || !ETH_ADDRESS_RE.test(safe_address)) {
-      return reply.code(400).send({ error: 'Invalid Ethereum address' })
-    }
-
-    const updated = await updateUserSafeAddress(safe_address, sub)
-
-    // Refuse BEFORE the link: attaching a Safe to an account that no longer
-    // exists is not a partial success worth keeping. (It also never really
-    // worked — the insert's user_id FK would have failed a moment later.)
-    if (!updated) userRowVanished()
-
-    // Also insert into user_safes (multi-Safe support)
-    await linkDefaultUserSafe(sub, safe_address, chain_id)
-
-    emitFunnelEvent(sub, 'safe_imported', { safe_address, chain_id })
-    return updated
-  })
+  // PUT /user/safe — TOMBSTONE (#1984 closed it, #1988 deleted the body).
+  // The legacy single-Safe link was an IMPORT: it wrote `user_safes` through
+  // `linkDefaultUserSafe` and emitted the `safe_imported` funnel event. No
+  // shipped client calls it, which is exactly what would have made it the hole
+  // left open. Kept as a 410 rather than removed, per #834/#1328.
+  app.put('/safe', retiredSafeInflowHandler('import'))
 
   // GET /user/preferences
   app.get('/preferences', async (request) => {

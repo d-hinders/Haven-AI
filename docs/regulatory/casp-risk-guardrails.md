@@ -32,7 +32,6 @@ covers:
   - packages/backend/src/infra/outbound-*.ts
   - packages/backend/src/infra/delegate-*.ts
   - packages/backend/src/modules/reporting/**
-  - packages/backend/src/modules/accounts/safe-deployer.ts
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/middleware/reportingFeed.ts

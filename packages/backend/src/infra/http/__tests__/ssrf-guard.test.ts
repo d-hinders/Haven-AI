@@ -15,6 +15,8 @@ import {
   assertSafeUrl,
   resolvePublicAddresses,
   safeGetText,
+  safePostJson,
+  type PinnedRequest,
   type PinnedResponse,
   type PinnedTransport,
   type ResolvedAddress,
@@ -303,5 +305,120 @@ describe('safeGetText', () => {
       maxBytes: 1024,
     })
     expect(transport.mock.calls[0]![0]!.maxBytes).toBe(1024)
+  })
+})
+
+describe('safePostJson (#1713)', () => {
+  const okJson: PinnedResponse = { status: 200, location: null, body: '{"jsonrpc":"2.0"}' }
+
+  it('sends the JSON body and the JSON-RPC content type on a POST', async () => {
+    const seen: PinnedRequest[] = []
+    const transport: PinnedTransport = async (req) => {
+      seen.push(req)
+      return okJson
+    }
+    await safePostJson('https://merchant.example/mcp', { jsonrpc: '2.0', id: 1 }, {
+      resolver: publicResolver,
+      transport,
+    })
+    expect(seen).toHaveLength(1)
+    expect(seen[0]!.method).toBe('POST')
+    expect(seen[0]!.body).toBe('{"jsonrpc":"2.0","id":1}')
+    expect(seen[0]!.headers['content-type']).toBe('application/json')
+  })
+
+  it('RETURNS a 402 instead of refusing it — the challenge is the wanted result', async () => {
+    // safeGetText refuses every non-200; the probe's whole purpose is to read
+    // one. If this ever starts refusing, #1713 silently verifies nothing.
+    const result = await safePostJson('https://merchant.example/mcp', {}, {
+      resolver: publicResolver,
+      transport: transportReturning({ status: 402, location: null, body: '{"payment_required":{}}' }),
+    })
+    expect(result.ok).toBe(true)
+    expect((result as { status: number }).status).toBe(402)
+  })
+
+  it('REFUSES to follow a redirect on a POST, even to a perfectly public host', async () => {
+    // Address classification cannot see this one: the victim is an ordinary
+    // public host. Following it would make the guard a request forwarder with
+    // an attacker-chosen body and an attacker-chosen target.
+    const transport = vi.fn<PinnedTransport>(async () => ({
+      status: 307,
+      location: 'https://victim.example/ingest',
+      body: '',
+    }))
+    const result = await safePostJson('https://merchant.example/mcp', { a: 1 }, {
+      resolver: publicResolver,
+      transport,
+      // A DELIBERATELY PERMISSIVE budget. The refusal must not depend on a
+      // caller passing `maxRedirects: 0` — callers that pass one are relying
+      // on an option that never gets consulted, because this branch fires
+      // first. Raising the budget here is what proves that.
+      maxRedirects: 5,
+    })
+    expect(result.ok).toBe(false)
+    expect((result as { reason: string }).reason).toBe('redirect_on_post')
+    // And exactly one request left the building — no second hop was attempted
+    // even though five were budgeted.
+    expect(transport).toHaveBeenCalledTimes(1)
+  })
+
+  it('still refuses a POST to private space before any packet leaves', async () => {
+    const transport = vi.fn<PinnedTransport>(async () => okJson)
+    const result = await safePostJson('https://internal.example/mcp', {}, {
+      resolver: async () => [{ address: '169.254.169.254', family: 4 }],
+      transport,
+    })
+    expect(result.ok).toBe(false)
+    expect((result as { reason: string }).reason).toBe('address_not_public')
+    expect(transport).not.toHaveBeenCalled()
+  })
+
+  it('carries an allowlisted caller header and DROPS everything else', async () => {
+    const seen: PinnedRequest[] = []
+    await safePostJson('https://merchant.example/mcp', {}, {
+      resolver: publicResolver,
+      transport: async (req) => {
+        seen.push(req)
+        return okJson
+      },
+      extraHeaders: {
+        'mcp-session-id': 'sess-123',
+        authorization: 'Bearer stolen',
+        host: 'victim.example',
+        'content-type': 'text/plain',
+      },
+    })
+    expect(seen[0]!.headers['mcp-session-id']).toBe('sess-123')
+    expect(seen[0]!.headers.authorization).toBeUndefined()
+    expect(seen[0]!.headers.host).toBeUndefined()
+    // The guard's own content-type is not overridable by a caller.
+    expect(seen[0]!.headers['content-type']).toBe('application/json')
+  })
+
+  it('drops an allowlisted header whose value carries CRLF — header injection', async () => {
+    const seen: PinnedRequest[] = []
+    await safePostJson('https://merchant.example/mcp', {}, {
+      resolver: publicResolver,
+      transport: async (req) => {
+        seen.push(req)
+        return okJson
+      },
+      extraHeaders: { 'mcp-session-id': 'ok\r\nx-injected: yes' },
+    })
+    expect(seen[0]!.headers['mcp-session-id']).toBeUndefined()
+  })
+
+  it('exposes lowercased response headers, so the caller can read mcp-session-id', async () => {
+    const result = await safePostJson('https://merchant.example/mcp', {}, {
+      resolver: publicResolver,
+      transport: transportReturning({
+        status: 200,
+        location: null,
+        body: '{}',
+        headers: { 'mcp-session-id': 'sess-9' },
+      }),
+    })
+    expect((result as { headers: Record<string, string> }).headers['mcp-session-id']).toBe('sess-9')
   })
 })

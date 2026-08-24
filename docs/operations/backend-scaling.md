@@ -5,7 +5,7 @@ covers:
   - packages/backend/src/platform/leader-lock.ts
   - packages/backend/src/rails/hybrid-provisioning.ts
   - packages/backend/src/infra/relayer.ts
-last-verified: "2026-08-22" # #1745: the "single point of stall" entry drops the ordering constraint it carried — no duplicate attest is queued while the stuck one is live — and records that the operator's same-nonce cancel now completes issuance by itself. The blocked-lane trade itself is unchanged. Prior: #1735: the "self-healing on the queue lane" claim gains its exception — a stuck `passport_attest` is deliberately NOT fee-replaced (a replacement orphans the hash #1043 recovery is keyed off), so that lane blocks until an operator acts; cross-ref to the #1745 ordering constraint. Prior: #1722: the deploy lock's connection hold now has a real ceiling — the confirmation wait is `tx.wait(1, 120_000)`, bracketed under the bump worker's 180 s adoption age, and expiry hands the tx to that worker instead of marking the record failed. The rest of the accept (burst threshold, fail-open scoping, the 502 shape) re-read and unchanged. Prior: #1680: rate-limit counters join the list of things multiple replicas now handle — the plugin's in-process store made the real ceiling max × replicas, fixed with a shared Postgres tier (fail-open, 250 ms deadline, leader-gated sweep) on the same pattern as the #718 nonce watermark. Prior: #1559: queue-lane nonce correctness is DB-arbitrated (submitRecorded stamp-before-broadcast); multi-replica correctness now gated only on the Safe-bound legacy sites (#1440); #1558 bump worker noted on the stall point
+last-verified: "2026-08-24" # #1987: the "Allowance-nonce coordination" subsection described machinery this slice DELETED (the coordinator, the watermark repository, `readSharedWatermark`, the structural test, all four call sites, and `generateTransferHash`) entirely in the present tense — rewritten past-tense behind an explicit deleted-banner, and kept rather than removed because the multi-replica lesson outlives the rail. Records that the `allowance_nonce_watermarks` TABLE survives and is now inert until #1990. Other subsections (outbound queue, rate-limit counters, deploy lock) re-read and unaffected. Prior: #1745: the "single point of stall" entry drops the ordering constraint it carried — no duplicate attest is queued while the stuck one is live — and records that the operator's same-nonce cancel now completes issuance by itself. The blocked-lane trade itself is unchanged. Prior: #1735: the "self-healing on the queue lane" claim gains its exception — a stuck `passport_attest` is deliberately NOT fee-replaced (a replacement orphans the hash #1043 recovery is keyed off), so that lane blocks until an operator acts; cross-ref to the #1745 ordering constraint. Prior: #1722: the deploy lock's connection hold now has a real ceiling — the confirmation wait is `tx.wait(1, 120_000)`, bracketed under the bump worker's 180 s adoption age, and expiry hands the tx to that worker instead of marking the record failed. The rest of the accept (burst threshold, fail-open scoping, the 502 shape) re-read and unchanged. Prior: #1680: rate-limit counters join the list of things multiple replicas now handle — the plugin's in-process store made the real ceiling max × replicas, fixed with a shared Postgres tier (fail-open, 250 ms deadline, leader-gated sweep) on the same pattern as the #718 nonce watermark. Prior: #1559: queue-lane nonce correctness is DB-arbitrated (submitRecorded stamp-before-broadcast); multi-replica correctness now gated only on the Safe-bound legacy sites (#1440); #1558 bump worker noted on the stall point
 ---
 
 # Backend Scaling
@@ -34,42 +34,65 @@ may now run more than one, and the relayer is what still caps throughput.**
   lock — the *request* can still fail, because whatever made the lock
   unavailable can hit the guarded work too. What the hold costs, and why it is
   accepted anyway, is worked through in *Accepted cost* below.
-- **Allowance-nonce coordination on every legacy-rail sign-hash builder**
+- **Allowance-nonce coordination on every legacy-rail sign-hash builder —
+  DELETED (#1987), retained here as the record of a solved problem**
   ([#718](https://github.com/d-hinders/Haven-AI/issues/718),
-  [#1196](https://github.com/d-hinders/Haven-AI/issues/1196)). #692 wired the
-  coordinator into one call site; #1196 wired the other three
+  [#1196](https://github.com/d-hinders/Haven-AI/issues/1196)).
+
+  > ⚠️ **None of the machinery described below still exists.** Epic #1440
+  > slice #1987 deleted `rails/allowance-nonce-coordinator.ts`,
+  > `infra/repositories/allowance-nonce-watermarks.ts`, `readSharedWatermark`,
+  > `waitForFreshAllowanceNonce`, the structural test that policed the
+  > builders, and every one of the four call sites — together with
+  > `generateTransferHash` itself. It went with the AllowanceModule rail's
+  > execution half, which #1986 had already fail-closed at HTTP 410. **The
+  > `allowance_nonce_watermarks` TABLE is still there and is now inert**;
+  > dropping tables is #1990's job, and this slice dropped no schema. The
+  > delegation rail has no equivalent problem: it has no allowance nonce, and
+  > its budget is metered on-chain by the caveat enforcers.
+  >
+  > This subsection is kept rather than deleted because the multi-replica
+  > lesson outlives the rail — a process-local `Map` is correct for exactly
+  > one replica, and the two-tier fix below is the shape any future
+  > cross-replica coordination should copy. Read every present tense in it as
+  > past tense.
+
+  #692 wired the coordinator into one call site; #1196 wired the other three
   (`routes/payments.ts`, `modules/mpp/send.ts`, `modules/mpp/authorize.ts`), so
-  the guarantee is uniform rather than depending on which endpoint an agent
-  happens to use. A structural test asserts every `generateTransferHash` caller
-  also calls the coordinator, so a fifth builder cannot be added without one.
+  the guarantee was uniform rather than depending on which endpoint an agent
+  happened to use. A structural test asserted every `generateTransferHash`
+  caller also called the coordinator, so a fifth builder could not be added
+  without one.
 
-  Each site **prefetches** the shared watermark inside the `Promise.all` it
-  already awaits for its chain reads, rather than reading it serially
+  Each site **prefetched** the shared watermark inside the `Promise.all` it
+  already awaited for its chain reads, rather than reading it serially
   afterwards: a single indexed lookup against reads orders of magnitude slower
-  costs nothing concurrently, and the bound and fail-open guards live in
-  `readSharedWatermark` so no call site can prefetch and forget them.
+  cost nothing concurrently, and the bound and fail-open guards lived in
+  `readSharedWatermark` so no call site could prefetch and forget them.
 
-  The AllowanceModule keeps one on-chain nonce per (safe, delegate, token),
-  and after a confirmed transfer the next signature must target the incremented
-  value. RPC reads lag, so [#692](https://github.com/d-hinders/Haven-AI/issues/692)
-  added a coordinator that waits for the increment to become visible.
+  The AllowanceModule kept one on-chain nonce per (safe, delegate, token),
+  and after a confirmed transfer the next signature had to target the
+  incremented value. RPC reads lag, so
+  [#692](https://github.com/d-hinders/Haven-AI/issues/692) added a coordinator
+  that waited for the increment to become visible.
 
   That coordinator used to be a process-local `Map` — correct for exactly one
-  replica. It is now two tiers: the map, plus a shared watermark in
-  `allowance_nonce_watermarks` that any replica can read. The wait target is the
-  **higher** of the two, so replica B waits on a transfer replica A confirmed.
+  replica. It became two tiers: the map, plus a shared watermark in
+  `allowance_nonce_watermarks` that any replica could read. The wait target was
+  the **higher** of the two, so replica B waited on a transfer replica A
+  confirmed.
 
-  Every database interaction on that path is **fail-open**, and bounded as well
-  as guarded. Both layers catch, and the coordinator additionally races the
+  Every database interaction on that path was **fail-open**, and bounded as well
+  as guarded. Both layers caught, and the coordinator additionally raced the
   lookup against a 250 ms deadline — because a rejection is the easy failure and
   a query that is slow but never settles is the one that would actually hang a
-  payment. Nothing else would stop it: the pool sets no `statement_timeout` and
-  Fastify sets no request timeout. A database problem therefore degrades this to
-  the old in-process behaviour — a retry at worst — because trading a rare retry
-  for an outage is the wrong direction on a money path. The
-  [#693](https://github.com/d-hinders/Haven-AI/issues/693) preflight remains the
-  thing that keeps the money safe under every failure mode; nothing here is
-  load-bearing for correctness.
+  payment. Nothing else would have stopped it: the pool sets no
+  `statement_timeout` and Fastify sets no request timeout. A database problem
+  therefore degraded this to the old in-process behaviour — a retry at worst —
+  because trading a rare retry for an outage is the wrong direction on a money
+  path. The [#693](https://github.com/d-hinders/Haven-AI/issues/693) preflight
+  remained the thing that kept the money safe under every failure mode; nothing
+  here was load-bearing for correctness.
 
 - **Rate-limit counters** ([#1680](https://github.com/d-hinders/Haven-AI/issues/1680)).
   `@fastify/rate-limit` ships an in-process LRU store, so every replica counted

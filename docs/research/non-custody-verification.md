@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/rails/execution-rail.ts
   - packages/backend/src/__tests__/non-custody.invariants.test.ts
   - packages/frontend/src/lib/revoke-agent.ts
-last-verified: "2026-08-24" # #1987: re-read after the AllowanceModule EXECUTION half was deleted — the `allowance-module.ts:232` mechanism claim and the References line both named code that no longer exists; both corrected in place with the live delegation-rail equivalent named. The invariants table itself was NOT re-verified in this pass and is left as #1986 wrote it. Prior: #1986: the invariants table rows 4 and 5 re-read against the AllowanceModule retirement — row 5's mechanism ("queued for approval") is legacy-rail-only and gone, and Red Line #4 is now only PARTIALLY proven on the live rail; addendum added naming the gap (#2004, Depends-on into #1991). Rows 1-3 and 6+ unaffected. Part 2/Phasing left alone — its "design proposal" framing is pre-existing drift, not this diff's. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-24" # #1987: the Row 5 addendum named `decideCoverage` as a live symbol the delegation branch merely "never calls" — it is now DELETED, and the spy-based proof it describes went vacuous by construction, so the addendum records the replacement structural assertion and its positive control. Also #1987: re-read after the AllowanceModule EXECUTION half was deleted — the `allowance-module.ts:232` mechanism claim and the References line both named code that no longer exists; both corrected in place with the live delegation-rail equivalent named. The invariants table itself was NOT re-verified in this pass and is left as #1986 wrote it. Prior: #1986: the invariants table rows 4 and 5 re-read against the AllowanceModule retirement — row 5's mechanism ("queued for approval") is legacy-rail-only and gone, and Red Line #4 is now only PARTIALLY proven on the live rail; addendum added naming the gap (#2004, Depends-on into #1991). Rows 1-3 and 6+ unaffected. Part 2/Phasing left alone — its "design proposal" framing is pre-existing drift, not this diff's. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Design — make non-custody provable (CI invariants + "verify your control")
@@ -122,10 +122,25 @@ described mechanism — *"an over-allowance payment is queued for approval"* —
 **legacy-rail-only and no longer exists**. The delegation rail has no approval
 queue at all: an out-of-policy redemption reverts on-chain during bundler gas
 estimation, enforced by the caveat enforcers. What the re-based suite proves is
-that Haven performs **no off-chain coverage arithmetic** on that rail
-(`computeEffectiveAllowance` / `getTokenAllowance` / `decideCoverage` are never
-called on the delegation branch) and forwards a rejection verbatim with nothing
-written. What it does **not** prove, and structurally cannot from a backend unit
+that Haven performs **no off-chain coverage arithmetic** on that rail and
+forwards a rejection verbatim with nothing written.
+
+> ⚠️ **#1987 — how that first half is proven CHANGED, because the original
+> proof went vacuous.** #1986 asserted it with `not.toHaveBeenCalled()` spies
+> on `computeEffectiveAllowance` / `getTokenAllowance` / `decideCoverage`. That
+> was a real behavioural claim while `routes/payments.ts` still imported those
+> functions and chose a branch at runtime. #1987 deleted the legacy branch, and
+> deleted `decideCoverage` (with `domain/payment-coverage.ts`) outright — so
+> the route imports none of them and the spies became **true by construction**:
+> a guard matching the empty set, which would pass just as happily if the
+> payment route were deleted. Measured rather than assumed — re-adding a banned
+> import turned the new check red while every old spy stayed green. The claim
+> is now asserted **structurally**, over the payment route's parsed import
+> bindings, with a positive control proving the extractor can say yes before a
+> "no" is allowed to count. See
+> [`casp-changelog/2026-08-24-1987.md`](../regulatory/casp-changelog/2026-08-24-1987.md).
+
+What it does **not** prove, and structurally cannot from a backend unit
 test, is that the enforcers revert correctly. That gap is tracked as
 [#2004](https://github.com/d-hinders/Haven-AI/issues/2004) and is a hard
 `Depends on` for [#1991](https://github.com/d-hinders/Haven-AI/issues/1991), the

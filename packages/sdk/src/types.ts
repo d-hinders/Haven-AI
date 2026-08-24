@@ -1505,7 +1505,7 @@ export interface RawHavenPaymentReceipt {
 }
 
 /** @internal */
-/** One payable service in Haven's curated merchant catalog. */
+/** One payable service in Haven's merchant catalog (epic #1717). */
 export interface HavenCatalogEntry {
   id: string
   name: string
@@ -1522,6 +1522,16 @@ export interface HavenCatalogEntry {
   network: string | null
   status: 'active' | 'degraded' | 'delisted'
   verifiedAt: string | null
+  /**
+   * Where the entry came from. `operator` = curated in migrations/scripts
+   * (the operator vouches; no verification badges). `ingestion` = submitted
+   * through the Verified Payable Directory and passed domain-ownership proof
+   * plus the read-only quote probe.
+   */
+  source: 'operator' | 'ingestion'
+  /** True only for `ingestion` entries. See the epic's trust claim (never merchant honesty or quality). */
+  domainVerified: boolean
+  verifiedPayable: boolean
 }
 
 /** @internal */
@@ -1541,6 +1551,9 @@ export interface RawCatalogEntry {
   network: string | null
   status: 'active' | 'degraded' | 'delisted'
   verified_at: string | null
+  source: 'operator' | 'ingestion'
+  domain_verified: boolean
+  verified_payable: boolean
 }
 
 export interface RawHavenPaymentReceiptsResponse {
@@ -1548,6 +1561,20 @@ export interface RawHavenPaymentReceiptsResponse {
 }
 
 /** @internal */
+/** Wire shape of POST /catalog/submit (#1717, #1716). */
+export interface CatalogSubmissionAccepted {
+  id: string
+  verify_token: string
+  status: 'submitted' | 'ownership_verified' | 'verified_payable'
+}
+
+/** @internal Client-facing submission handle. */
+export interface HavenCatalogSubmission {
+  id: string
+  verifyToken: string
+  status: 'submitted' | 'ownership_verified' | 'verified_payable'
+}
+
 export interface RawX402StateContext {
   amount_atomic?: string | null
   asset?: string | null

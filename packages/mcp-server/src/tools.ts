@@ -73,6 +73,7 @@ export type HostedToolName =
   | 'haven_verify_receipt'
   | 'haven_sweep_delegate'
   | 'haven_discover_tools'
+  | 'haven_submit_catalog_entry'
 
 /** Legacy aliases kept for one release cycle so existing agents don't break. */
 export type HostedToolNameLegacy = 'haven_x402_authorize' | 'haven_list_transactions'
@@ -102,6 +103,11 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     category: z.string().optional(),
     search: z.string().optional(),
     rail: z.enum(['x402', 'mpp']).optional(),
+    verified: z.enum(['any', 'verified', 'operator']).optional(),
+  },
+  haven_submit_catalog_entry: {
+    resource_url: z.string().min(1),
+    website: z.string().optional(),
   },
   haven_send: {
     asset: z.enum(['ETH', 'USDC']),
@@ -491,6 +497,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
   haven_sweep_delegate: SWEEP_DELEGATE_DESCRIPTION,
   haven_discover_tools: DISCOVER_TOOLS_DESCRIPTION,
+  haven_submit_catalog_entry: composeDescription(sharedDescriptions.submitCatalogEntry),
   haven_send: composeDescription(sharedDescriptions.send),
   haven_pay: PAY_DESCRIPTION,
   haven_submit: SUBMIT_DESCRIPTION,
@@ -622,6 +629,7 @@ export function createToolHandlers(
           category: args.category,
           search: args.search,
           rail: args.rail,
+          verified: args.verified,
         })
         return entries.map((entry) => ({
           id: entry.id,
@@ -644,6 +652,9 @@ export function createToolHandlers(
           network: entry.network,
           status: entry.status,
           verified_at: entry.verifiedAt,
+          source: entry.source,
+          domain_verified: entry.domainVerified,
+          verified_payable: entry.verifiedPayable,
           // Hosted surface is keyless: x402 entries start with the quote half
           // of the split flow; MCP entries take the GUIDED preflight —
           // haven_prepare_catalog_purchase runs the live quote, cap, and
@@ -1699,6 +1710,19 @@ export function createToolHandlers(
       runTool(async () => {
         const args = parse('haven_get_resume_state', input)
         return haven.getResumeState(args.payment_id)
+      }),
+
+    haven_submit_catalog_entry: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_submit_catalog_entry', input)
+        const submission = await haven.submitCatalogEntry(args.resource_url, {
+          ...(args.website ? { website: args.website } : {}),
+        })
+        return {
+          id: submission.id,
+          verify_token: submission.verifyToken,
+          status: submission.status,
+        }
       }),
 
     haven_list_receipts: async (input) =>

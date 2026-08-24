@@ -2,26 +2,35 @@
  * Safe transaction construction and signing.
  *
  * ⚠️ **This file SURVIVED the Safe-rail retirement (#1989, epic #1440) on
- * purpose — do not delete it as "the safe-tx libs".**
+ * purpose — do not delete it as "the safe-tx libs".** Same shape as the
+ * backend's `rails/allowance-module.ts`, which #1987 likewise trimmed to its
+ * shared half rather than deleting: the file's execution half died with the
+ * rail, its shared half has consumers that must live.
  *
- * The retirement deleted the legacy SPEND surfaces that used it (`SendModal`,
- * `useSendTransaction`, `ApprovalQueue`) and, with them, `buildSafeTx`,
- * `SendParams` and the ERC-20 transfer ABI they needed. What remains has
- * consumers OUTSIDE the retired rail, in two groups, and both have to live:
+ * DELETED here with their callers: `buildSafeTx`, the `SendParams` type, the
+ * ERC-20 transfer ABI and the Gnosis `TOKENS` map. Their only consumers were
+ * `SendModal` / `useSendTransaction` / `ApprovalQueue`.
  *
- *  - `getChainTokens` is a generic per-chain token list read by DELEGATION-rail
- *    surfaces (`DelegationSendModal`, `useAgentConnectionSetup`,
- *    `agent-panel/agent-display`) and by `EditAgentModal`.
+ * KEPT, with the consumer that requires each:
+ *
+ *  - `getChainTokens` — a generic per-chain token list, and the one export a
+ *    DELEGATION-rail surface reads: `DelegationSendModal`,
+ *    `useAgentConnectionSetup`, `agent-panel/agent-display` (and
+ *    `EditAgentModal`). Nothing about it is AllowanceModule code.
  *  - `getSafeNonce` / `getSafeTxHash` / `signSafeTx` / `executeSafeTx` /
- *    `proposeSafeTx` / `SafeTxParams` are owner-signed Safe execution. They back
- *    `lib/approver-tx.ts` — the #1229 passkey-Safe RECOVERY path, which is the
- *    only way an existing Safe owner can add a backup owner — plus the agent
- *    connect/revoke/edit flows. Owner authority is not the retired rail's agent
- *    authority; the backend drew the same line by keeping `POST /safe/exec`
- *    open (#1986).
+ *    `proposeSafeTx` / `SafeTxParams` / `SafeTxReceiptTimeoutError` — the
+ *    OWNER-signed Safe execution path, still used by the agent lifecycle
+ *    (`lib/agent-setup.ts`, `lib/revoke-agent.ts`, `EditAgentModal`,
+ *    `lib/allowance-module.ts`, and `signSafeTx` from `lib/signer.ts`). Those
+ *    surfaces are out of this slice's scope; the epic's residue sweep (#1993)
+ *    owns whatever of them the retirement eventually reaches.
  *
- * Mirror of the backend's `rails/allowance-module.ts`, which #1987 likewise
- * trimmed to its shared half rather than deleting.
+ * The #1229 approver-recovery consumer (`lib/approver-tx.ts`) is NOT in that
+ * list any more: #1988 deleted all five `/user/safes/:id/approvers*` routes,
+ * so the builder had no backend left and this slice deleted it. That removed
+ * Haven's only offered way to add a backup owner to a legacy Safe. It is a
+ * deliberate, owner-approved narrowing with a stated residual limit — see
+ * #1988's PR (#2009) boundary section — not something to reverse from here.
  */
 import type { SafeCapableSigner } from './signer'
 import {

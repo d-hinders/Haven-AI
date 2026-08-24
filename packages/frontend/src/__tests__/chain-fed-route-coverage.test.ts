@@ -28,9 +28,10 @@
  *   • every pattern covers at least one route that reaches the hook.
  *
  * Why that hook and not `usePublicClient`: calling `usePublicClient` issues no
- * request. `ManageApprovers` calls it to GATE a control, and a resting capture
- * of that screen legitimately makes no chain request. (`ApprovalQueue` and
- * `useSendTransaction` were the other two examples until #1989 deleted them.) Only a read that runs at render
+ * request. `EditAgentModal` calls it to GATE a control, and a resting capture
+ * of that screen legitimately makes no chain request. (`ApprovalQueue`,
+ * `ManageApprovers` and `useSendTransaction` were the original three examples;
+ * #1989 deleted all three.) Only a read that runs at render
  * can be missing from a PNG, which is the entire subject of the guard.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'

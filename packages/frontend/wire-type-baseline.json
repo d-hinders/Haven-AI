@@ -25,8 +25,5 @@
   "packages/frontend/src/hooks/useReporting.ts": {
     "ReportingSync": 1,
     "ReportingVerification": 1
-  },
-  "packages/frontend/src/hooks/useSafeApprovers.ts": {
-    "KnownApprover": 1
   }
 }

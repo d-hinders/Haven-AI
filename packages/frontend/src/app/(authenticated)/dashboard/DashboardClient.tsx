@@ -30,7 +30,6 @@ import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import { RecoveryNudge } from '@/components/onboarding/RecoveryNudge'
 import { getStoredHybridSigners } from '@/lib/signer'
-import { useSafeApprovers } from '@/hooks/useSafeApprovers'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import ConnectAgentModal from '@/components/ConnectAgentModal'
 import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
@@ -687,43 +686,23 @@ export default function DashboardClient() {
         ? recoverySigners.passkeys.length + (recoverySigners.owner_address ? 1 : 0) < 2
         : false
 
-  // #1229: the legacy passkey-Safe rail carries the identical exposure — the
-  // Safe is deployed with the user's passkey as its SOLE owner, threshold 1 —
-  // and it reaches far more users, since that is what prod onboarding still
-  // builds. It never got this prompt because there was no advice to give:
-  // enrolling a backup passkey 409'd on the one-per-chain constraint. That
-  // constraint is gone, so the recommendation is now actionable here too.
+  // #1229's legacy passkey-Safe arm of this nudge is REMOVED (#1989, epic
+  // #1440). It read the Safe's on-chain owner count through
+  // `GET /user/safes/:id/approvers` and, when it found one owner, pointed the
+  // user at Approvers in settings. #1988 deleted all five approver routes and
+  // `ManageApprovers` goes with them here, so the arm had neither a signal to
+  // read nor a destination to send anyone to — a nudge to do something the
+  // product no longer offers is worse than no nudge.
   //
-  // "Passkey Safe" is read from the passkey rows AuthContext already holds
-  // (a row's `safe_address` is the Safe that passkey owns), which keeps an
-  // imported wallet-owned Safe out of it — its owner already holds their own
-  // key and needs no advice from us.
-  const passkeys = enrolledPasskeys ?? []
-  const passkeySafe = safes.find(
-    (safe) =>
-      safe.account_type !== 'delegator_hybrid' &&
-      passkeys.some(
-        (passkey) =>
-          passkey.safe_address?.toLowerCase() === safe.safe_address.toLowerCase() &&
-          passkey.chain_id === safe.chain_id,
-      ),
-  )
-  // Owner count is the honest signal, and only the chain has it — a backup
-  // may be an EOA, which leaves no passkey row. Silent while loading or on
-  // error: `loading` never clears when there is no passkey Safe to ask about.
-  const {
-    approvers: safeApprovers,
-    loading: safeApproversLoading,
-    error: safeApproversError,
-  } = useSafeApprovers(passkeySafe?.id ?? null)
-  // #1205: gate the safe-rail arm on the SAME server-side chain
-  // classification (absent field = older backend = fail toward showing, which
-  // matches the predicate's own unknown-chains-count-as-value-bearing rule).
-  const safeMissingBackup =
-    !safeApproversLoading &&
-    !safeApproversError &&
-    safeApprovers.length === 1 &&
-    (passkeySafe?.value_bearing_chain ?? true)
+  // The exposure it described is REAL and does not go away: a legacy passkey
+  // Safe is single-owner, threshold 1. What changed is that Haven no longer
+  // offers the fix. #1988's boundary section carries the owner-approved
+  // argument for that (the Base-mainnet census found no passkey-owned Safe;
+  // an EOA owner manages owners with their own key at Safe's own interfaces)
+  // and states its own residual limit.
+  //
+  // The DELEGATION-rail nudge above is untouched — `Backup & recovery` is live
+  // and this is still the rail where new accounts land.
   const hasAgents = dataReady && agents.length > 0
   const overviewInitialLoading = overviewLoading && !overview
   const firstAgentPaymentKnown = Boolean(overview?.onboardingProgress)
@@ -1064,15 +1043,8 @@ export default function DashboardClient() {
         // before, and kept to delegation-rail accounts because "Backup &
         // recovery" is where it sends you and that only exists on those
         // accounts.
-        // #1229 adds the legacy passkey-Safe arm. Delegation first when a user
-        // somehow has both: that rail is where new accounts live, and two
-        // stacked banners saying the same thing is worse than one.
         const recoveryNudge =
-          hasFunds && delegationSafe && missingBackup ? (
-            <RecoveryNudge />
-          ) : hasFunds && passkeySafe && safeMissingBackup ? (
-            <RecoveryNudge rail="safe" />
-          ) : null
+          hasFunds && delegationSafe && missingBackup ? <RecoveryNudge /> : null
 
         if (isFocusedView) {
           return (

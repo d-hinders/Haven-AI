@@ -350,10 +350,16 @@ describe('safePostJson (#1713)', () => {
     const result = await safePostJson('https://merchant.example/mcp', { a: 1 }, {
       resolver: publicResolver,
       transport,
+      // A DELIBERATELY PERMISSIVE budget. The refusal must not depend on a
+      // caller passing `maxRedirects: 0` — callers that pass one are relying
+      // on an option that never gets consulted, because this branch fires
+      // first. Raising the budget here is what proves that.
+      maxRedirects: 5,
     })
     expect(result.ok).toBe(false)
     expect((result as { reason: string }).reason).toBe('redirect_on_post')
-    // And exactly one request left the building.
+    // And exactly one request left the building — no second hop was attempted
+    // even though five were budgeted.
     expect(transport).toHaveBeenCalledTimes(1)
   })
 

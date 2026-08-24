@@ -39,6 +39,13 @@
  * - **Global concurrency cap.** At most `maxConcurrency` probes in flight for
  *   a whole batch, so a flood of eligible rows cannot turn one leader replica
  *   into an outbound request storm.
+ * Redirects are NOT a budget question here. `safePostJson` refuses a redirect
+ * on a POST outright (`redirect_on_post`), before the hop budget is consulted,
+ * so this module passes no `maxRedirects` at all — an explicit `0` here would
+ * read as protective while changing nothing any call makes, which is the shape
+ * this repo keeps having to delete. The control lives in the guard and is
+ * tested there, including under a deliberately permissive budget.
+ *
  * - **Per-hostname cooldown.** One host is probed at most once per
  *   `hostCooldownMs`, across batches. Without it, a submitter who enqueues
  *   many rows pointing at one victim gets Haven to hammer it — the ownership
@@ -263,9 +270,6 @@ export async function probeSubmission(
   const fetchOptions: SafeFetchOptions = {
     timeoutMs: deps.legTimeoutMs ?? DEFAULT_LEG_TIMEOUT_MS,
     maxBytes: deps.maxBytes ?? DEFAULT_MAX_BYTES,
-    // A JSON-RPC endpoint that redirects is refused by the guard on POST; say
-    // so explicitly rather than relying on a default that could change.
-    maxRedirects: 0,
   }
 
   // ---- Leg 1: initialize -------------------------------------------------

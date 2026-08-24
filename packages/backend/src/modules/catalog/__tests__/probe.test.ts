@@ -165,11 +165,17 @@ describe('probeSubmission — the refusals (a probe that never says no verifies 
     expect(result).toMatchObject({ ok: false, reason: 'malformed_challenge', leg: 'tools/call' })
   })
 
-  it('asks the guard for zero redirects on every leg', async () => {
+  it('passes NO redirect budget — the refusal belongs to the guard, not to an option here', async () => {
+    // This deliberately asserts an ABSENCE. A `maxRedirects: 0` on these calls
+    // reads as protective and is inert: `safePostJson` refuses a POST redirect
+    // before the hop budget is ever consulted, so mutating the number changed
+    // only the test that read the number back. The real control is pinned
+    // behaviourally in `infra/http/__tests__/ssrf-guard.test.ts`, under a
+    // permissive budget, where breaking it actually reddens something.
     const post = scripted(INITIALIZE_OK, TOOLS_LIST_OK, PAID_402)
     await probeSubmission(URL_UNDER_TEST, { post })
     for (const call of post.calls) {
-      expect((call[2] as { maxRedirects: number }).maxRedirects).toBe(0)
+      expect(call[2]).not.toHaveProperty('maxRedirects')
     }
   })
 

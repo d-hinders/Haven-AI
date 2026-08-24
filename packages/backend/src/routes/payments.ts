@@ -535,15 +535,16 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     })
     if (railDecision.rail === 'retired_session') {
       // #993: retirement decided in the seam, refusal produced there too.
+      //
+      // ⚠️ #1986 measured this gate and it is UNREACHABLE — the early gate
+      // above already returned for every retired rail, and the delegation
+      // branch returned before here. It is left in place because deleting
+      // the session rail's machinery is not this slice's job (#834's seam,
+      // #1987's block), but it must not be read as load-bearing: a #1986
+      // mutation that removed the equivalent `retired_allowance` line here
+      // turned ZERO assertions red, which is why that line was removed
+      // rather than kept as decorative defence-in-depth.
       const retired = sessionRailRetired('account')
-      return reply.code(retired.statusCode).send(retired.body)
-    }
-    if (railDecision.rail === 'retired_allowance') {
-      // #1986. Unreachable while the early gate above stands — kept for the
-      // same reason the session rail keeps its second gate: this is the last
-      // point before the AllowanceModule read, and a future edit that moves
-      // or narrows the early gate must not silently reopen the rail.
-      const retired = allowanceModuleRailRetired('account')
       return reply.code(retired.statusCode).send(retired.body)
     }
 
@@ -784,10 +785,22 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       }
 
       // #1986: the same contract for the AllowanceModule rail. This is the
-      // ONE path that actually calls `executeAllowanceTransfer`, so it is the
-      // last line between a legacy intent and a real transfer — a pending
-      // intent authorized before this slice landed must not still execute
-      // after it. Before the expiry flip, for the #1120 reason above.
+      // only path that reaches `executeAllowanceTransfer` FROM A LIVE ROUTE,
+      // so it is the last line between a legacy intent and a real transfer —
+      // a pending intent authorized before this slice landed must not still
+      // execute after it. Before the expiry flip, for the #1120 reason above.
+      //
+      // Precision matters here, and an earlier version of this comment got it
+      // wrong (caught by `haven-reviewer`): there are THREE call sites of
+      // `executeAllowanceTransfer`, not one — this line, the one-shot
+      // auto-execute in `modules/mpp/authorize.ts`, and the one-shot
+      // auto-execute in `modules/x402/legacy-authorize.ts`. The other two are
+      // each gated by their own `retired_allowance` refusal upstream
+      // (`modules/mpp/authorize.ts`'s account gate, and `authorizeX402`'s
+      // gate above `runLegacyAuthorize`), and the MPP one is additionally
+      // unreachable in production because `POST /machine-payments/authorize`
+      // has been a #1328 `mppDemoRetired()` stub since before this slice. The
+      // closure is complete; "the only caller" was the overstatement.
       //
       // Placed AFTER the mpp_demo gate deliberately: an mpp_demo intent is
       // also `execution_rail = null`, so this predicate would swallow it and

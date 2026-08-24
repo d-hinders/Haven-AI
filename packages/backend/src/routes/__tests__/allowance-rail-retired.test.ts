@@ -18,13 +18,23 @@ import fastifyJwt from '@fastify/jwt'
  * of them are the ones a scope read would have missed:
  *
  *   POST /payments                — mints the intent (ticket)
- *   POST /payments/:id/sign       — **the only caller of
- *                                   `executeAllowanceTransfer`**, so this is
- *                                   the last line between a legacy intent
- *                                   authorized BEFORE this slice and a real
- *                                   transfer. Closing only the create path
- *                                   would have left every pending intent
- *                                   executable.
+ *   POST /payments/:id/sign       — the only path that reaches
+ *                                   `executeAllowanceTransfer` FROM A LIVE
+ *                                   ROUTE, so this is the last line between a
+ *                                   legacy intent authorized BEFORE this
+ *                                   slice and a real transfer. Closing only
+ *                                   the create path would have left every
+ *                                   pending intent executable.
+ *                                   (`executeAllowanceTransfer` has THREE call
+ *                                   sites, not one — `haven-reviewer` caught
+ *                                   the overstatement. The other two are the
+ *                                   one-shot auto-executes in
+ *                                   `modules/mpp/authorize.ts` and
+ *                                   `modules/x402/legacy-authorize.ts`, each
+ *                                   gated by its own `retired_allowance`
+ *                                   refusal upstream, and the MPP one is
+ *                                   additionally dead in production behind a
+ *                                   #1328 stub. Both gates are pinned below.)
  *   POST /x402/authorize, POST /x402 — the legacy funding leg (ticket)
  *   POST /machine-payments/send   — does not itself execute, but WRITES an
  *                                   intent (or an approval row) and hands

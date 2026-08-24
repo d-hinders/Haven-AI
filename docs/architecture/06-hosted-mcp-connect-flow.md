@@ -19,7 +19,7 @@ covers:
   - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
-last-verified: "2026-08-23" # #1878: two claims corrected, both of the same shape — an exhaustive list of what registration sends. Step 4 said the connector sends "only" the setup token, runtime/version, public address and proof, and API-key hash/prefix, and the review checklist said registration contains "public proof and hashed API-key metadata only". Both are now false: the connector also sends the resolved MCP server name it wired the agent as. It is a non-secret display label and the custody half of each sentence is untouched — no private key, no plaintext API key — but "only" is a strong word and a reader auditing the wire boundary against this page would have found a field the page denies exists. Both now name it AND say what it is not (never authority, not unique, nothing keys off it), because a new field in a custody checklist reads as a custody change unless the doc says otherwise. Scope: those two lines; the rest of the flow, the hosted/local topology split and the remaining checklist items were re-read only for contradiction, and none contradicts. Prior: #1702: re-verified, NOT edited. Implicated only because `packages/connect/**` is in `covers:` and #1702 rewrites that package's README; the body makes no claim about credential-overwrite semantics, `--name`, or re-key, and its review-checklist line "API-key rotation changes identity credentials, not signing authority" is about the separate `POST /agents/:id/rotate-key` route and stays true. Recorded so the coupling-gate loop is closed in the audit trail rather than left as an unaddressed flag. Prior: #1813: dropped the `covers:` entry for `lib/hosted-connect.ts`, deleted as unreachable. No claim in the body named it — the flow described here is served by ConnectAgentModal, not the retired hosted card. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
+last-verified: "2026-08-24" # #1986: the "hosted keyless construct is allowance-rail only" note re-read against the payment 410 — it is now a statement that hosted x402 works for nobody, and says so. Direct-payment flow confirmed rail-agnostic and unaffected. Registration/connect steps re-read and unchanged. Prior: #1878: two claims corrected, both of the same shape — an exhaustive list of what registration sends. Step 4 said the connector sends "only" the setup token, runtime/version, public address and proof, and API-key hash/prefix, and the review checklist said registration contains "public proof and hashed API-key metadata only". Both are now false: the connector also sends the resolved MCP server name it wired the agent as. It is a non-secret display label and the custody half of each sentence is untouched — no private key, no plaintext API key — but "only" is a strong word and a reader auditing the wire boundary against this page would have found a field the page denies exists. Both now name it AND say what it is not (never authority, not unique, nothing keys off it), because a new field in a custody checklist reads as a custody change unless the doc says otherwise. Scope: those two lines; the rest of the flow, the hosted/local topology split and the remaining checklist items were re-read only for contradiction, and none contradicts. Prior: #1702: re-verified, NOT edited. Implicated only because `packages/connect/**` is in `covers:` and #1702 rewrites that package's README; the body makes no claim about credential-overwrite semantics, `--name`, or re-key, and its review-checklist line "API-key rotation changes identity credentials, not signing authority" is about the separate `POST /agents/:id/rotate-key` route and stays true. Recorded so the coupling-gate loop is closed in the audit trail rather than left as an unaddressed flag. Prior: #1813: dropped the `covers:` entry for `lib/hosted-connect.ts`, deleted as unreachable. No claim in the body named it — the flow described here is served by ConnectAgentModal, not the retired hosted card. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -114,13 +114,26 @@ For balance-aware x402 coverage:
 
 Neither a queued nor rejected request returns a funding hash.
 
-The hosted keyless construct is currently allowance-rail only. When a funding
-intent demands a typed-data signing scheme (`sign_data.signature_scheme` set —
-delegation-rail accounts), the SDK's `createX402Intent` fails loudly with a
-`HavenSigningError` at authorize, before any signing context reaches the edge
-signer, directing the user to the local SDK flow (`HavenClient` with
-`delegateKey`). Hosted-signer delegation-rail agents therefore cannot pay x402
-today.
+⚠️ **Since #1986, hosted keyless x402 does not work for ANY account.** The
+construct is allowance-rail only, and the allowance rail no longer executes
+payments: `POST /x402/authorize` answers HTTP 410 for an `allowance_module`
+account, above the funding leg, so no funding intent and no funding hash is
+ever produced for the edge signer to sign. The paragraph below describes the
+delegation-rail *half* of that gap and remains accurate; what changed is that
+the other half is no longer a working path either. Restoring hosted x402 means
+building it on the delegation rail, not on this construct.
+
+When a funding intent demands a typed-data signing scheme
+(`sign_data.signature_scheme` set — delegation-rail accounts), the SDK's
+`createX402Intent` fails loudly with a `HavenSigningError` at authorize, before
+any signing context reaches the edge signer, directing the user to the local
+SDK flow (`HavenClient` with `delegateKey`). Hosted-signer delegation-rail
+agents therefore cannot pay x402 today.
+
+**Hosted DIRECT payments are a separate question and are NOT affected in kind:**
+`POST /payments` serves both rails and its delegation branch is untouched by
+#1986, so a delegation-rail account still creates a signable intent there. It
+is the x402 keyless construct specifically that has no working rail left.
 
 After a successful paid retry — including the hosted completion path
 (`completeX402MerchantCall`) — the SDK captures a merchant-issued receipt from

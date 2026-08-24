@@ -118,7 +118,11 @@ function legacySignedIntent(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function delegationSignedIntent(overrides: Record<string, unknown> = {}) {
+// Return type widened explicitly: the base fixture's inferred literal type
+// does not carry the delegation-only columns this helper adds, so reading
+// `prepared_user_op` back off it (the deep-equal below depends on that) is
+// a type error without this.
+function delegationSignedIntent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return legacySignedIntent({
     execution_rail: 'delegation',
     delegation_hash: DELEGATION_HASH,

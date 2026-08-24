@@ -1813,6 +1813,20 @@ export default function DesignSystemPage() {
           is exactly what is needed, so the two states go under the blocking
           pixel gate here rather than being asserted and left unseen.
         */}
+        {/*
+          Each cell is `min-h-[290px]` wrapping a `relative h-0` positioning
+          parent, and that is load-bearing rather than arbitrary: the popover is
+          `absolute right-0 top-full`, so it hangs BELOW its parent — under the
+          trigger button, in the real call site. A parent WITH a height pushes it
+          that far down again, out of this Section and over the next one.
+
+          Stated precisely, because an earlier version of this note overstated
+          it: at `h-[260px]` the popovers still PAINTED, so a full-page capture
+          showed two plausible-looking cards and no gate failed — they were
+          simply 260px from the heading that describes them, sitting in someone
+          else's section. `h-0` puts them back under their own heading; the outer
+          `min-h` reserves the space they no longer take in flow.
+        */}
         <div className="grid gap-5 lg:grid-cols-2">
           {/*
             `inert` + `aria-hidden`: these are static ILLUSTRATIONS of a
@@ -1827,14 +1841,6 @@ export default function DesignSystemPage() {
             treatment design-system.md § 6 records for the modal demo.
           */}
           <div className="min-h-[290px]">
-            {/*
-              `h-0`, not a tall box: the popover is `absolute right-0
-              top-full`, so it hangs BELOW its positioning parent — under
-              the trigger button, in the real call site. Giving the parent
-              a height pushes the popover that far down and out of the
-              section, which rendered this showcase BLANK. The outer
-              `min-h` is what reserves the space instead.
-            */}
             <div inert aria-hidden="true" className="relative h-0 w-72">
             <WalletPopover
               primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
@@ -1867,14 +1873,6 @@ export default function DesignSystemPage() {
             treatment design-system.md § 6 records for the modal demo.
           */}
           <div className="min-h-[290px]">
-            {/*
-              `h-0`, not a tall box: the popover is `absolute right-0
-              top-full`, so it hangs BELOW its positioning parent — under
-              the trigger button, in the real call site. Giving the parent
-              a height pushes the popover that far down and out of the
-              section, which rendered this showcase BLANK. The outer
-              `min-h` is what reserves the space instead.
-            */}
             <div inert aria-hidden="true" className="relative h-0 w-72">
             <WalletPopover
               primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}

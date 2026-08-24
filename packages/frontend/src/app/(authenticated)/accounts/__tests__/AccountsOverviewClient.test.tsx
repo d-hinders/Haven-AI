@@ -60,7 +60,6 @@ describe('AccountsOverviewClient — active account (#629)', () => {
     mockUseUserSafes.mockReturnValue({
       safes: [BASE, SEPOLIA],
       loading: false,
-      addSafe: vi.fn(),
       setDefault: vi.fn(),
     })
     mockUseAuth.mockReturnValue({ activeSafe: BASE, setActiveSafe: mockSetActiveSafe })

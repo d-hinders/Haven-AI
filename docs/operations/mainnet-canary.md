@@ -5,7 +5,7 @@ covers:
   - packages/backend/scripts/check-mainnet-reconciliation.ts
   - packages/backend/scripts/check-bundler.ts
   - packages/backend/scripts/check-delegation-contracts.ts
-last-verified: "2026-08-15" # #1458: §4.2 added — the erc7710 merchant canary, prepared but NOT run; prod baseline measured (eip3009 only, chain 8453) and the pinned Base DelegationManager verified against the kit. The variable change and the mainnet payment are owner steps. Prior: §4.1 run log added — canary completed on the 0.1.20 train; §§1-3 re-read, probe guidance unchanged
+last-verified: "2026-08-24" # #1984: step 3.1 told the operator to flip NEXT_PUBLIC_DELEGATION_ONBOARDING=1 on the prod Vercel scope as the launch switch. That flag is REMOVED — onboarding provisions Hybrid unconditionally — so the step is rewritten to name the backend DELEGATION_RAIL_CHAIN_IDS as the only remaining authority on where the rail serves. The rest of the runbook re-read; no other step referenced the flag. Prior: #1458: §4.2 added — the erc7710 merchant canary, prepared but NOT run; prod baseline measured (eip3009 only, chain 8453) and the pinned Base DelegationManager verified against the kit. The variable change and the mainnet payment are owner steps. Prior: §4.1 run log added — canary completed on the 0.1.20 train; §§1-3 re-read, probe guidance unchanged
 ---
 
 # Mainnet (8453) canary & reconciliation runbook (#1067)

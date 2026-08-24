@@ -255,10 +255,19 @@ export default function AccountsOverviewClient() {
 
       {/* Safe cards grid */}
       {safes.length === 0 ? (
+        // An empty state with no next step would be a dead end, which the
+        // design system forbids — so this one explains itself instead. There
+        // is no "Add account" button any more (#1984: the Safe rail is
+        // retired and its deploy/import routes answer 410), and there is
+        // nothing to put in its place: an account is created at sign-in.
+        // ProtectedRoute redirects a user with no accounts to /onboarding, so
+        // this should be unreachable in practice; the copy says so rather
+        // than leaving a blank card that reads as broken.
         <EmptyState
           icon={<Icon icon={CreditCard} className="h-5 w-5" />}
           tone="neutral"
           title="No Haven accounts yet"
+          body="Your account is created when you sign in, so you shouldn't normally see this. Reload the page, and get in touch if it stays empty."
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">

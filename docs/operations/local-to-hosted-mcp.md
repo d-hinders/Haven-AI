@@ -5,7 +5,7 @@ covers:
   - packages/mcp/**
   - packages/mcp-server/**
   - packages/signer/**
-last-verified: "2026-08-23" # #1702: the delegate-key-loss answer here was the PRE-#1694 one — "pause or revoke the agent and create a new key path". Epic #1694 made a delegation-rail agent's key REPLACEABLE (re-key: same agent, new key, budget remainder and period boundary carried), so the guidance is now split by rail rather than stated as one blanket answer. Found by the cross-epic doc sweep #1702's acceptance criteria asked for, not by the coupling gate — no `covers:` glob connects this file to `routes/agent-rekey.ts`. This doc names both rails a few lines above, so a single answer was actively wrong here rather than merely incomplete. Scope: the delegate-key paragraph only. Prior: #1813: dropped two `covers:` entries for libs deleted as unreachable (`hosted-connect.ts`, `agent-runtime-snippets.ts`). The body's only related line — NEXT_PUBLIC_HAVEN_MCP_URL rendered in connect-agent snippets — is still accurate; those snippets come from the live ConnectAgentModal path. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
+last-verified: "2026-08-24" # #1984: "the legacy import-only rail" corrected — the rail is closed to new accounts entirely. The hosted-MCP trust claims around it re-read and unchanged: on-chain policy still constrains every automatic payment on both rails. Prior: #1702: the delegate-key-loss answer here was the PRE-#1694 one — "pause or revoke the agent and create a new key path". Epic #1694 made a delegation-rail agent's key REPLACEABLE (re-key: same agent, new key, budget remainder and period boundary carried), so the guidance is now split by rail rather than stated as one blanket answer. Found by the cross-epic doc sweep #1702's acceptance criteria asked for, not by the coupling gate — no `covers:` glob connects this file to `routes/agent-rekey.ts`. This doc names both rails a few lines above, so a single answer was actively wrong here rather than merely incomplete. Scope: the delegate-key paragraph only. Prior: #1813: dropped two `covers:` entries for libs deleted as unreachable (`hosted-connect.ts`, `agent-runtime-snippets.ts`). The body's only related line — NEXT_PUBLIC_HAVEN_MCP_URL rendered in connect-agent snippets — is still accurate; those snippets come from the live ConnectAgentModal path. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Migration - Local MCP To Hosted MCP
@@ -269,7 +269,8 @@ creating duplicate payments.
   injected.
 - API keys identify agents only. They do not authorize payment execution.
 - On-chain policy state constrains every automatic payment — the Safe
-  AllowanceModule on the legacy import-only rail, the delegation's caveat
+  AllowanceModule on the legacy rail (retiring under #1440; closed to new
+  accounts since #1984), the delegation's caveat
   enforcers (budget/recipient/expiry) on the delegation rail.
 - Haven can relay independently valid signed transactions, but it cannot move
   funds with the API key alone.

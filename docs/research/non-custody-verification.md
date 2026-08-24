@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/rails/execution-rail.ts
   - packages/backend/src/__tests__/non-custody.invariants.test.ts
   - packages/frontend/src/lib/revoke-agent.ts
-last-verified: "2026-08-24" # #1986: the invariants table rows 4 and 5 re-read against the AllowanceModule retirement — row 5's mechanism ("queued for approval") is legacy-rail-only and gone, and Red Line #4 is now only PARTIALLY proven on the live rail; addendum added naming the gap (#2004, Depends-on into #1991). Rows 1-3 and 6+ unaffected. Part 2/Phasing left alone — its "design proposal" framing is pre-existing drift, not this diff's. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-24" # #1987: re-read after the AllowanceModule EXECUTION half was deleted — the `allowance-module.ts:232` mechanism claim and the References line both named code that no longer exists; both corrected in place with the live delegation-rail equivalent named. The invariants table itself was NOT re-verified in this pass and is left as #1986 wrote it. Prior: #1986: the invariants table rows 4 and 5 re-read against the AllowanceModule retirement — row 5's mechanism ("queued for approval") is legacy-rail-only and gone, and Red Line #4 is now only PARTIALLY proven on the live rail; addendum added naming the gap (#2004, Depends-on into #1991). Rows 1-3 and 6+ unaffected. Part 2/Phasing left alone — its "design proposal" framing is pre-existing drift, not this diff's. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Design — make non-custody provable (CI invariants + "verify your control")
@@ -22,10 +22,20 @@ last-verified: "2026-08-24" # #1986: the invariants table rows 4 and 5 re-read a
 ## Why this, and why now
 
 Haven's custody-critical controls are **already on-chain**: the Safe
-AllowanceModule enforces per-token amount and reset period keyed by
-`(safe, delegate, token)`, and `executeAllowanceTransfer` is authorised by the
-**delegate's signature** — the relayer only pays gas
-([`allowance-module.ts`](../../packages/backend/src/rails/allowance-module.ts):232).
+AllowanceModule enforced per-token amount and reset period keyed by
+`(safe, delegate, token)`, and `executeAllowanceTransfer` was authorised by the
+**delegate's signature** — the relayer only paid gas.
+
+> ⚠️ **#1987 (epic #1440): that mechanism no longer exists in the codebase.**
+> `executeAllowanceTransfer` — with `generateTransferHash`, `recoverSigner` and
+> the allowance-nonce coordinator — was **deleted** with the AllowanceModule
+> rail's execution half; the line reference this paragraph used to carry
+> (`allowance-module.ts:232`) is gone. The file survives as **reads only**, and
+> the equivalent live claim is the delegation rail's: an agent's authority is a
+> signed delegation whose budget, recipient and expiry are enforced ON-CHAIN by
+> audited caveat enforcers during redemption, and the relayer still only pays
+> gas. The historical statement is kept above because the invariants table below
+> is written against it; read it as the rail's *former* mechanism.
 The model is sound. The gap is **demonstrability**: the guardrails doc asks us to
 "maintain evidence that Haven does not control funds" (§ of the same name) and to
 keep the property "if Haven's backend disappeared, the Safe would still be
@@ -210,5 +220,5 @@ link + honest labels.
 ## References
 
 - [`casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md) — the source of every invariant above.
-- [`allowance-module.ts`](../../packages/backend/src/rails/allowance-module.ts) — on-chain allowance read + relayer-gas-only transfer.
+- [`allowance-module.ts`](../../packages/backend/src/rails/allowance-module.ts) — on-chain allowance READ. (The relayer-gas-only transfer it also held was deleted by #1987; see the addendum above.)
 - [`02-identity-and-custody.md`](../architecture/02-identity-and-custody.md) — the custody model this makes provable.

@@ -4,7 +4,6 @@ status: current
 covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/rails/allowance-module.ts
-  - packages/backend/src/domain/payment-coverage.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/approvals.ts
   - packages/backend/src/routes/agent-delegations.ts

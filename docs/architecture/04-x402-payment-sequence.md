@@ -7,7 +7,6 @@ covers:
   - packages/backend/src/modules/x402/**
   - packages/backend/src/routes/x402-resources.ts
   - packages/backend/src/modules/payments/agent-payment-status.ts
-  - packages/backend/src/domain/payment-coverage.ts
   - packages/backend/src/modules/x402/x402-delegation.ts
   - packages/backend/src/rails/delegation-rail.ts
   - packages/backend/src/routes/catalog.ts

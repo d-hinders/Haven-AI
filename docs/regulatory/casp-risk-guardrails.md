@@ -27,7 +27,6 @@ covers:
   - packages/backend/src/modules/accounting/accounting-entry.ts
   - packages/backend/src/modules/catalog/catalog-discovery.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
-  - packages/backend/src/domain/payment-coverage.ts
   - packages/backend/src/domain/machine-payment-lifecycle.ts
   - packages/backend/src/infra/relayer*.ts
   - packages/backend/src/infra/outbound-*.ts

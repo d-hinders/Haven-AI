@@ -2,8 +2,6 @@
 owner: "@d-hinders"
 status: current
 covers:
-  - packages/backend/src/rails/allowance-nonce-coordinator.ts
-  - packages/backend/src/infra/repositories/allowance-nonce-watermarks.ts
   - packages/backend/src/platform/leader-lock.ts
   - packages/backend/src/rails/hybrid-provisioning.ts
   - packages/backend/src/infra/relayer.ts

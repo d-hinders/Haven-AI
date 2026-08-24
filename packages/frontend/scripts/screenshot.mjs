@@ -684,6 +684,19 @@ const CHAIN_READ_GAPS = []
  * the same stance `deleted_captures` takes one layer down — a photogenic wrong
  * answer is worse than a failed run.
  *
+ * Only routes that read the chain AT RENDER belong here, and `/dashboard` was
+ * wrongly in this list until review checked it against the component tree.
+ * Nothing on `/dashboard` mounts `useOnChainAllowances` -- `AgentPanel` lives on
+ * `/agents` and `ApprovalQueue` on `/approvals`, and `ApprovalQueue`'s
+ * `usePublicClient` only GATES a button: calling the hook issues no request,
+ * only a `readContract` on the returned client does. Five scenarios land on
+ * `/dashboard` before opening their modal, so the mistake would have made
+ * `npm run screenshot -- --scenario=all` red on unchanged `dev` -- precisely the
+ * always-on alarm this file's own `stillClipped` note warns about. A gating
+ * `usePublicClient` is NOT the signal; a render-time read is, and
+ * `chain-fed-route-coverage.test.ts` now derives that fact from the app's own
+ * import graph rather than from a second hand-maintained list.
+ *
  * Keyed on ROUTE rather than on scenario, deliberately. A scenario list would
  * need an entry per scenario and would silently under-report the day someone
  * adds the sixteenth; routes change rarely, and the property being asserted is
@@ -694,10 +707,6 @@ export const CHAIN_FED_ROUTES = [
     pattern: /^\/agents(\/|$)/,
     reads: 'useOnChainAllowances — via useAgentPanelState (AgentPanel, unmanaged-delegate ' +
       'discovery) and AgentDetailClient/EditAgentModal (the budget list)',
-  },
-  {
-    pattern: /^\/dashboard(\/|$)/,
-    reads: 'useAgentPanelState + ApprovalQueue (usePublicClient — execution gating)',
   },
   {
     pattern: /^\/custody(\/|$)/,
@@ -757,6 +766,46 @@ export function noteChainWatchNavigation(url) {
   if (fed && !chainWatch.pages.has(pathname)) {
     chainWatch.pages.set(pathname, { reads: fed.reads, observed: 0, methods: new Set() })
   }
+}
+
+/**
+ * Withdraw a page from the watch — its capture never got far enough to be
+ * judged (#1971 review, and observed live on the authoring run).
+ *
+ * A `goto` that times out still fires `framenavigated`, so the page enters the
+ * watch, renders nothing, issues no chain read, and is reported as a silent
+ * chain-fed capture. On a loaded machine that is a *machine* failure wearing the
+ * diagnosis of a *transport* failure — printed directly beneath the `goto
+ * failed:` line that already says what really happened, and pointing the reader
+ * at `lib/wagmi.ts` for a bug that is not there. The run still exits 1 on the
+ * navigation failure, so nothing is let through by staying quiet here; what is
+ * avoided is a confident wrong cause, which is the same defect this whole
+ * change is about, one level up.
+ */
+export function forgetChainWatchPage(url) {
+  if (!chainWatch) return
+  let pathname
+  try {
+    pathname = new URL(url).pathname
+  } catch {
+    return
+  }
+  chainWatch.pages.delete(pathname)
+  if (chainWatch.current === pathname) chainWatch.current = null
+}
+
+/**
+ * Discard the whole watch — this capture failed for a reason of its own.
+ *
+ * Same reasoning as `forgetChainWatchPage`, for a scenario that threw: its
+ * `scenario failed:` line is already on the record and already exits the run 1.
+ * The cost is real and is accepted deliberately: a scenario that failed BECAUSE
+ * its chain data never arrived (a `waitFor` on a budget row) loses the sharper
+ * diagnosis. The exchange is that a scenario failing for any of a dozen other
+ * reasons no longer accuses the transport.
+ */
+export function abortChainWatch() {
+  chainWatch = null
 }
 
 export function endChainWatch() {
@@ -2855,6 +2904,11 @@ async function main() {
           .then(() => null, (err) => err)
         if (navError) {
           gotoFailures.push({ route: routePath, viewport: vp.name, text: `goto failed: ${String(navError.message ?? navError).slice(0, 200)}` })
+          // The navigation fired `framenavigated` before it timed out, so this
+          // route is in the chain watch and would be reported as a SILENT
+          // chain-fed capture — a machine failure wearing a transport
+          // failure's diagnosis (#1971).
+          forgetChainWatchPage(`${BASE_URL}${routePath}`)
           continue // never write a mislabeled PNG
         }
         await page.waitForTimeout(400) // settle late paints
@@ -2980,6 +3034,10 @@ async function main() {
             viewport: vp.name,
             text: `scenario failed: ${String(err?.message ?? err).slice(0, 300)}`,
           })
+          // Its own failure is already on the record and already exits the run
+          // 1; a silent-chain-read verdict on top would name the wrong cause
+          // (#1971).
+          abortChainWatch()
         }
         endChainWatch()
         await scenarioContext.close()

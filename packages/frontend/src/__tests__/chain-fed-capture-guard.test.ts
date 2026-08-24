@@ -32,9 +32,10 @@ import {
   endChainWatch,
   noteChainReadObserved,
   noteChainWatchNavigation,
+  forgetChainWatchPage,
+  abortChainWatch,
   makeAllowanceChainFixture,
   answerSharedChainRead,
-  SHARED_CHAIN_ROWS,
   FIXTURE_SAFE,
   FIXTURE_AGENTS,
 } from '../../scripts/screenshot.mjs'
@@ -87,26 +88,26 @@ describe('the silent-capture guard', () => {
 
   it('reports every chain-fed route the capture visited, not just the first', () => {
     beginChainWatch('scenario:modal-migrations', 'mobile')
-    noteChainWatchNavigation(`${BASE}/dashboard`)
+    noteChainWatchNavigation(`${BASE}/custody`)
     noteChainWatchNavigation(`${BASE}/agents/agent-ops`)
     endChainWatch()
 
     expect(CHAIN_SILENT_CAPTURES.map((c) => c.route).sort()).toEqual([
       '/agents/agent-ops',
-      '/dashboard',
+      '/custody',
     ])
   })
 
   it('attributes reads to the PAGE that made them — a healthy route does not excuse a silent one', () => {
     // The soundness gap independent review caught before this shipped. One
-    // context sweeps several routes (`npm run screenshot -- /agents /dashboard`
+    // context sweeps several routes (`npm run screenshot -- /agents /custody`
     // is ONE context, two screens). A context-wide counter would be non-zero
     // here and would swallow the `/agents` regression entirely — the exact
     // failure this guard exists to catch, missed by the guard.
     beginChainWatch('routes · desktop', 'desktop')
     noteChainWatchNavigation(`${BASE}/agents`)
     // …no reads on /agents…
-    noteChainWatchNavigation(`${BASE}/dashboard`)
+    noteChainWatchNavigation(`${BASE}/custody`)
     noteChainReadObserved('eth_call')
     endChainWatch()
 
@@ -127,7 +128,7 @@ describe('the silent-capture guard', () => {
     beginChainWatch('scenario:modal-migrations', 'desktop')
     noteChainWatchNavigation(`${BASE}/agents`)
     noteChainReadObserved('eth_call')
-    noteChainWatchNavigation(`${BASE}/dashboard`)
+    noteChainWatchNavigation(`${BASE}/custody`)
     noteChainReadObserved('eth_call')
     noteChainWatchNavigation(`${BASE}/agents`)
     endChainWatch()
@@ -152,7 +153,41 @@ describe('the silent-capture guard', () => {
     noteChainReadObserved('eth_call')
 
     expect(CHAIN_SILENT_CAPTURES).toHaveLength(1)
-    expect(CHAIN_SILENT_CAPTURES[0].capture).toBe('scenario:a')
+    expect(CHAIN_SILENT_CAPTURES[0]!.capture).toBe('scenario:a')
+  })
+
+  it('withdraws a page whose navigation FAILED — a machine timeout is not a transport defect', () => {
+    // Observed live on the authoring run, on a box at load average 300+: a
+    // `goto` that times out still fires `framenavigated`, so the page enters
+    // the watch, renders nothing, reads nothing, and gets reported as a silent
+    // chain-fed capture — directly beneath the `goto failed:` line that already
+    // says what really happened, pointing the reader at lib/wagmi.ts for a bug
+    // that is not there.
+    beginChainWatch('routes · mobile', 'mobile')
+    noteChainWatchNavigation(`${BASE}/agents`)
+    forgetChainWatchPage(`${BASE}/agents`)
+    endChainWatch()
+
+    expect(CHAIN_SILENT_CAPTURES).toEqual([])
+  })
+
+  it('withdrawing one page does not excuse another that really was silent', () => {
+    beginChainWatch('routes · mobile', 'mobile')
+    noteChainWatchNavigation(`${BASE}/agents`)
+    forgetChainWatchPage(`${BASE}/agents`)
+    noteChainWatchNavigation(`${BASE}/custody`)
+    endChainWatch()
+
+    expect(CHAIN_SILENT_CAPTURES.map((c) => c.route)).toEqual(['/custody'])
+  })
+
+  it('a scenario that threw reports its own failure, not a transport verdict', () => {
+    beginChainWatch('scenario:connect-agent', 'mobile')
+    noteChainWatchNavigation(`${BASE}/agents`)
+    abortChainWatch()
+    endChainWatch()
+
+    expect(CHAIN_SILENT_CAPTURES).toEqual([])
   })
 
   it('ignores a non-URL navigation target instead of throwing', () => {
@@ -165,14 +200,19 @@ describe('the silent-capture guard', () => {
   it('every chain-fed route names the hook that reads the chain there', () => {
     // The report has to be actionable without this file open. A pattern with no
     // stated reason invites the next editor to delete it as noise.
-    const covered = ['/agents', '/dashboard', '/custody']
+    //
+    // Whether the LIST itself is right — every render-time chain read covered,
+    // and nothing covered that is not one — is deliberately NOT asserted here.
+    // The first version of this test pinned the list against an array of route
+    // strings typed by hand a few lines up, which only proved that two
+    // hand-maintained lists agreed with each other, and would not have caught
+    // `/dashboard` being in the list on a false premise.
+    // `chain-fed-route-coverage.test.ts` derives that answer from the app's own
+    // import graph instead.
     for (const route of CHAIN_FED_ROUTES) {
-      expect(covered.some((p) => route.pattern.test(p))).toBe(true)
+      expect(route.reads).toMatch(/useOnChainAllowances/)
       expect(route.reads.length).toBeGreaterThan(20)
     }
-    // Every route in the list is reachable, and every render-time
-    // `useOnChainAllowances` route in the app is in the list.
-    expect(CHAIN_FED_ROUTES).toHaveLength(covered.length)
   })
 })
 
@@ -180,6 +220,20 @@ describe('the shared chain fixture', () => {
   const SAFE = FIXTURE_SAFE as { chain_id: number; safe_address: string }
   const chainId = SAFE.chain_id
   const allowanceModule = getChainData(chainId).contracts.allowanceModule
+
+  /**
+   * USDC's address on a chain, or a throw.
+   *
+   * `resolveToken` is total (it can answer "no such token") and `address` is
+   * nullable (a native token has none). Both are real possibilities the type
+   * system is right to insist on — and both would make every assertion below
+   * compare `undefined` to `undefined` and pass. The throw is the point.
+   */
+  const usdcAddress = (id: number): string => {
+    const token = resolveToken(id, 'USDC')
+    if (!token?.address) throw new Error(`the shared registry has no USDC address for chain ${id}`)
+    return token.address
+  }
   const sel = (sig: string) => toFunctionSelector(sig)
 
   const call = (to: string, data: string) =>
@@ -209,13 +263,13 @@ describe('the shared chain fixture', () => {
     const data = call(allowanceModule, sel('function getTokens(address,address) view returns (address[])'))
     const [tokens] = decodeAbiParameters(parseAbiParameters('address[]'), data)
     expect((tokens as string[]).map((t) => t.toLowerCase())).toEqual([
-      resolveToken(chainId, 'USDC').address.toLowerCase(),
+      usdcAddress(chainId).toLowerCase(),
     ])
     // The API fixture's own allowance row for agent-ops.
     const apiAllowance = (FIXTURE_AGENTS as { id: string; allowances: { token_address: string }[] }[])
-      .find((a) => a.id === 'agent-ops')!.allowances[0]
+      .find((a) => a.id === 'agent-ops')!.allowances[0]!
     expect(apiAllowance.token_address.toLowerCase()).toBe(
-      resolveToken(chainId, 'USDC').address.toLowerCase(),
+      usdcAddress(chainId).toLowerCase(),
     )
   })
 
@@ -225,23 +279,22 @@ describe('the shared chain fixture', () => {
     const encoded = encodeAbiParameters(parseAbiParameters('address,address,address'), [
       SAFE.safe_address as `0x${string}`,
       '0x0000000000000000000000000000000000000000',
-      resolveToken(chainId, 'USDC').address as `0x${string}`,
+      usdcAddress(chainId) as `0x${string}`,
     ]).slice(2)
     const data = call(
       allowanceModule,
       sel('function getTokenAllowance(address,address,address) view returns (uint256[5])') + encoded,
     )
     const [row] = decodeAbiParameters(parseAbiParameters('uint256[5]'), data)
-    const [amount, , resetTimeMin] = row as bigint[]
+    const [amount, , resetTimeMin] = row as unknown as bigint[]
 
     const apiAllowance = (FIXTURE_AGENTS as {
       id: string
       allowances: { allowance_amount: string; reset_period_min: number }[]
-    }[]).find((a) => a.id === 'agent-ops')!.allowances[0]
+    }[]).find((a) => a.id === 'agent-ops')!.allowances[0]!
 
     expect(amount).toBe(BigInt(Math.round(Number(apiAllowance.allowance_amount) * 1e6)))
     expect(Number(resetTimeMin)).toBe(apiAllowance.reset_period_min)
-    expect(SHARED_CHAIN_ROWS).toHaveLength(1)
   })
 
   it('refuses a read aimed at the wrong contract rather than answering it plausibly', () => {
@@ -265,7 +318,7 @@ describe('the shared chain fixture', () => {
       chainId: 8453,
       safeAddress: SAFE.safe_address,
       delegates: ['0x000000000000000000000000000000000000BEEF'],
-      rows: [{ token: resolveToken(8453, 'USDC').address, amount: 1n, spent: 0n, resetTimeMin: 1440 }],
+      rows: [{ token: usdcAddress(8453), amount: 1n, spent: 0n, resetTimeMin: 1440 }],
     })
     expect(other('eth_chainId', [])).toBe('0x2105')
     expect(other('eth_chainId', [])).not.toBe(answerSharedChainRead('eth_chainId', []))

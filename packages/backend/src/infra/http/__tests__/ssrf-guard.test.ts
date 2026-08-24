@@ -13,6 +13,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   assertSafeUrl,
+  ipLiteralRange,
   resolvePublicAddresses,
   safeGetText,
   safePostJson,
@@ -99,6 +100,40 @@ describe('isLocallyBoundHostname', () => {
 
   it('allows an ordinary merchant hostname', () => {
     expect(isLocallyBoundHostname('shop.example.com')).toBe(false)
+  })
+})
+
+describe('ipLiteralRange — the predicate BOTH ownership paths consult (#1959)', () => {
+  it.each([
+    ['1.2.3.4', 'public-unicast'],
+    ['93.184.216.34', 'public-unicast'],
+    ['127.0.0.1', 'ipv4-loopback'],
+    ['169.254.169.254', 'ipv4-link-local'],
+    ['10.0.0.7', 'ipv4-private'],
+    ['::1', 'ipv6-loopback'],
+    ['[::1]', 'ipv6-loopback'],
+  ])('classifies %s as the IP literal it is', (host, range) => {
+    expect(ipLiteralRange(host)).toBe(range)
+  })
+
+  it.each(['shop.example.com', 'a.co', 'xn--bcher-kva.example.com', '1.2.3.4.example.com', 'localhost'])(
+    'says %s is a NAME, not a literal',
+    (host) => {
+      // The positive control: a predicate that answers "literal" to everything
+      // would pass every refusal test in this file and reject every merchant.
+      expect(ipLiteralRange(host)).toBeNull()
+    },
+  )
+
+  it('is the ONE source of assertSafeUrl\'s IP-literal refusal, so the two cannot drift', () => {
+    for (const host of ['1.2.3.4', '127.0.0.1', '169.254.169.254']) {
+      const range = ipLiteralRange(host)
+      expect(range).not.toBeNull()
+      const verdict = assertSafeUrl(`https://${host}/x`)
+      expect(verdict).toMatchObject({ ok: false, reason: 'host_not_public' })
+      // The guard's detail is built from this function's range, not a second copy.
+      expect((verdict as { detail: string }).detail).toContain(range as string)
+    }
   })
 })
 

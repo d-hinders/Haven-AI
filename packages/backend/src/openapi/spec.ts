@@ -2292,9 +2292,9 @@ export const openapiSpec = {
       post: {
         tags: ['Dashboard'],
         operationId: 'addUserSafe',
-        summary: 'Link (import) an existing Safe to the caller\'s account.',
+        summary: 'RETIRED — always answers 410. Importing a Safe is closed.',
         description:
-          'Registration only — this moves nothing on-chain and grants Haven no authority over the Safe. The same address on the same chain cannot be linked twice (409). The first Safe a user links becomes their default.',
+          '**RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** The Safe rail is being retired outright, and importing is one of the four ways a Safe could enter Haven; all four are closed. The refusal is a route preHandler, so it precedes every read and write. The route is kept as a compatibility tombstone rather than removed — a 410 tells an old client the flow is permanently gone, where a 404 reads as a transient routing error and invites retries (the #834 session-rail / #1328 mpp_demo pattern); the route itself goes in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Existing linked Safes are unaffected: GET /user/safes, rename, re-default, unlink and every read path behave exactly as before. Historically this was registration only — it moved nothing on-chain and granted Haven no authority over the Safe.',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -2313,13 +2313,8 @@ export const openapiSpec = {
           },
         },
         responses: {
-          '201': {
-            description: 'Safe linked.',
-            content: { 'application/json': { schema: userSafe } },
-          },
-          '400': errorResponse,
           '401': errorResponse,
-          '409': { ...errorResponse, description: 'This Safe is already linked to the account.' },
+          '410': { ...errorResponse, description: 'Always. The Safe rail is retired; the message names POST /accounts/hybrid.' },
         },
       },
     },
@@ -2327,9 +2322,9 @@ export const openapiSpec = {
       post: {
         tags: ['Dashboard'],
         operationId: 'deployUserSafe',
-        summary: 'Deploy a new Safe with the relayer paying gas.',
+        summary: 'RETIRED — always answers 410. Haven no longer deploys Safes.',
         description:
-          'The relayer sponsors the deployment and returns the deployed address plus the transaction hash. Deployment does NOT link the Safe: registration is a separate POST /user/safes call, so onboarding and add-account take the identical path. The deployed Safe is owned by owner_address (single owner, threshold 1) and never by Haven. Note that owner_address is NOT checked against the caller: any authenticated user can have a Safe deployed for any address, so this is a relayer-gas surface bounded only by the global rate limit, not a per-caller ownership check.',
+          '**RETIRED (#1984, epic #1440) — always answers 410 and spends no relayer gas.** The refusal is a route preHandler, so it precedes the relayer entirely. Kept as a compatibility tombstone; removed in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Historically the relayer sponsored the deployment and returned the deployed address plus the transaction hash, and owner_address was NOT checked against the caller — an unbounded-by-ownership relayer-gas surface that this retirement closes as a side effect.',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -2347,21 +2342,8 @@ export const openapiSpec = {
           },
         },
         responses: {
-          '201': {
-            description: 'Safe deployed; link it with POST /user/safes.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['safe_address', 'tx_hash'],
-                  properties: { safe_address: address, tx_hash: { type: 'string' } },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
           '401': errorResponse,
-          '500': { ...errorResponse, description: 'Relay deployment failed.' },
+          '410': { ...errorResponse, description: 'Always. The Safe rail is retired; the message names POST /accounts/hybrid.' },
         },
       },
     },
@@ -2672,9 +2654,9 @@ export const openapiSpec = {
       put: {
         tags: ['Dashboard'],
         operationId: 'updateUserSafe',
-        summary: "Set the caller's legacy safe_address and link it as the default Safe.",
+        summary: 'RETIRED — always answers 410. This link is an import.',
         description:
-          "Writes the legacy users.safe_address column AND links the Safe into user_safes as the default — the multi-Safe table is the real home, this column is history. The order matters and is deliberate: the legacy column write is attempted FIRST and a vanished account refuses before anything is linked, rather than leaving a link whose owner no longer exists. Returns the narrower identity projection.",
+          "**RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** This route wrote the legacy users.safe_address column AND linked the Safe into user_safes as the default, emitting the `safe_imported` funnel event: it is an IMPORT, so it retires with the rail. It is named here explicitly because no shipped client calls it, which is exactly what would have made it the hole left open. Kept as a compatibility tombstone; create a Haven account on the delegation rail instead (POST /accounts/hybrid).",
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -2692,10 +2674,8 @@ export const openapiSpec = {
           },
         },
         responses: {
-          '200': { description: 'The updated identity projection.', content: { 'application/json': { schema: userIdentity } } },
-          '400': errorResponse,
           '401': errorResponse,
-          '404': errorResponse,
+          '410': { ...errorResponse, description: 'Always. The Safe rail is retired; the message names POST /accounts/hybrid.' },
         },
       },
     },

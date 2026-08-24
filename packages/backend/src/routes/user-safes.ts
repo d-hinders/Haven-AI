@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
+import { retiredSafeInflow } from '../middleware/safe-inflow-retired.js'
 import { isSupportedChain } from '../domain/chains.js'
 import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
 import { relaySafeDeploy } from '../modules/accounts/index.js'
@@ -79,7 +80,8 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
   // The relayer pays gas and returns the deployed Safe address + txHash.
   // Registration is done separately via POST /user/safes so the flow is
   // identical for both onboarding and add-account.
-  app.post<{ Body: DeploySafeBody }>('/deploy', async (request, reply) => {
+  // INFLOW CLOSED (#1984, epic #1440): 410 before the handler runs.
+  app.post<{ Body: DeploySafeBody }>('/deploy', retiredSafeInflow('deploy'), async (request, reply) => {
     const { chain_id = DEFAULT_CHAIN_ID, owner_address } = request.body
 
     if (!owner_address || !ETH_ADDRESS_RE.test(owner_address)) {
@@ -100,7 +102,9 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
   })
 
   // POST /user/safes — add (import) an existing Safe
-  app.post<{ Body: AddSafeBody }>('/', async (request, reply) => {
+  // INFLOW CLOSED (#1984, epic #1440): 410 before the handler runs. Importing
+  // is the other half of creating — both are how a Safe enters Haven.
+  app.post<{ Body: AddSafeBody }>('/', retiredSafeInflow('import'), async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { safe_address, chain_id = DEFAULT_CHAIN_ID, name } = request.body
 

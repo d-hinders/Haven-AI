@@ -27,7 +27,7 @@ covers:
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/signer.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-08-14" # #1199: signer-removal recovery change re-verified; custody boundary unchanged
+last-verified: "2026-08-24" # #1984: same "import-only" correction — the legacy rail is now closed to new accounts entirely, by deploy AND by import. The context boundaries and actors re-read against the diff and unchanged: no new external system, no new trust edge. Prior: #1199: signer-removal recovery change re-verified; custody boundary unchanged
 ---
 
 # Haven — System Context
@@ -41,7 +41,8 @@ but does not hold user or agent spending keys. The agent's delegate key stays in
 its local signer or fully local MCP runtime.
 
 > **Two rails.** The diagram and notes below describe the **legacy AllowanceModule
-> rail** (import-only, existing accounts). New accounts run on the **delegation
+> rail** (RETIRING under #1440 — closed to new accounts entirely since #1984;
+> existing accounts only). New accounts run on the **delegation
 > rail** (epic #821, `account_type='delegator_hybrid'`), where the Haven wallet is
 > a MetaMask Hybrid DeleGator smart account and the policy is a signed delegation
 > with caveat enforcers instead of an AllowanceModule allowance. The Smart Sessions

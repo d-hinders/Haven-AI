@@ -65,7 +65,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-14" # #1199: signer-removal recovery change re-verified; delegation authority overview unchanged
+last-verified: "2026-08-24" # #1984: the rail line said the legacy AllowanceModule rail was "import-only" — #1984 closes IMPORT too, so nothing enters it by any route; corrected to closed-to-new-accounts. The rest of the overview re-read against the diff: the delegation rail is still where new accounts are provisioned, and the custody boundary is unchanged. Prior: #1199: signer-removal recovery change re-verified; delegation authority overview unchanged
 ---
 
 # Haven — Architecture Overview
@@ -80,7 +80,7 @@ line holds the security model:
 **API auth = identity, signature = authority, on-chain AllowanceModule state =
 enforcement for automatic Safe funding.**
 
-That line describes the **legacy AllowanceModule rail** (import-only, existing
+That line describes the **legacy AllowanceModule rail** (RETIRING under #1440 — closed to new accounts entirely since #1984; existing
 accounts). Haven runs **two on-chain policy rails** — the Smart Sessions
 **session rail is retired** (#834; accounts still marked
 `execution_rail='session_key'` get HTTP 410 from the payment paths).

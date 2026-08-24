@@ -3,7 +3,15 @@
 /**
  * Passkey → Safe onboarding (the non-delegation path).
  *
- * The heading and intro live on the single onboarding screen that hosts this
+ * **UNREACHABLE since #1984 (epic #1440).** `OnboardingClient` no longer
+ * mounts this component — onboarding provisions a Hybrid delegation-rail
+ * account unconditionally — and the two routes this flow calls,
+ * `POST /safe/deploy` and `POST /user/safes`, both answer 410. The file and
+ * its suite are left in place deliberately: deleting legacy Safe SURFACES is
+ * frontend-deletion slice #1989, and this slice closes the inflow without
+ * reaching into it. Nothing imports it; it renders nowhere.
+ *
+ * The heading and intro live on the single onboarding screen that hosted this
  * flow (#1162); this component owns the action, its progress list, and the
  * retry affordance only.
  */

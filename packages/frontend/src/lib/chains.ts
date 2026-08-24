@@ -124,19 +124,15 @@ const ACTIVE_CHAIN: FrontendChainConfig = CHAINS[CONFIGURED_CHAIN_ID] ?? BASE_CO
 
 const ENABLED_CHAIN_IDS: number[] = [BASE_CONFIG.chainId, BASE_SEPOLIA_CONFIG.chainId]
 
-/**
- * Chains where DELEGATION-RAIL onboarding (Hybrid DeleGator provisioning) is
- * available — the frontend mirror of the backend's `DELEGATION_RAIL_CHAIN_IDS`
- * (rails/delegation-contracts.ts), which serves exactly these two. Base
- * mainnet joined for the #908 launch: contract pins are verified live bytecode
- * on 8453 (ops:check-delegation) and the mainnet relayer is funded. The
- * `NEXT_PUBLIC_DELEGATION_ONBOARDING` flag still gates the FLOW — this set
- * only says where the rail can serve once the flag is on.
- */
-export const DELEGATION_ONBOARDING_CHAIN_IDS: ReadonlySet<number> = new Set([
-  BASE_CONFIG.chainId,
-  BASE_SEPOLIA_CONFIG.chainId,
-])
+// `DELEGATION_ONBOARDING_CHAIN_IDS` lived here — the set of chains on which
+// delegation-rail onboarding could serve, ANDed with
+// `NEXT_PUBLIC_DELEGATION_ONBOARDING` to pick between the Hybrid flow and a
+// Safe deploy. #1984 retires the Safe rail: onboarding is Hybrid on every
+// supported chain, so both the flag and the set are gone. The set was exactly
+// `ENABLED_CHAIN_IDS`, which is what the network picker already offers, so
+// nothing narrowed. The backend's `DELEGATION_RAIL_CHAIN_IDS`
+// (rails/delegation-contracts.ts) remains the authority on where the rail
+// actually serves.
 
 export const SUPPORTED_CHAINS = ENABLED_CHAIN_IDS.map((id) => CHAINS[id])
 export const SUPPORTED_CHAIN_IDS = ENABLED_CHAIN_IDS

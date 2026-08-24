@@ -46,7 +46,10 @@ const CLAIM: OwnershipClaim = {
 
 /** A guarded reader that serves `body` at the well-known URL. */
 function serving(body: string): (url: string) => Promise<SafeFetchResult> {
-  return async (url) => ({ ok: true, status: 200, body, finalUrl: url })
+  // `headers` became part of the guarded response with #1713 (MCP session id
+  // + the `payment-required` challenge header); the ownership proof reads none
+  // of them, so an empty record is the honest fixture.
+  return async (url) => ({ ok: true, status: 200, body, headers: {}, finalUrl: url })
 }
 
 const serving404: (url: string) => Promise<SafeFetchResult> = async () => ({

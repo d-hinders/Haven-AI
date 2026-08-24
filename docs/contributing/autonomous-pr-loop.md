@@ -10,7 +10,7 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-08-19" # #1607: Known CI flake signatures section added (rerun-once policy; ship-next points here). Prior: #1341: re-verified loop stop and issue-readiness conditions after ship-next gained #1289 active-claim coordination
+last-verified: "2026-08-24" # #1968: §"Merge policy A" re-read — the frontend bullet's "pauses for the user" is now "pauses", with clearing delegated to a clean re-review rather than a human ack, and a new bullet makes an unfilled `haven-reviewer:` verdict line a bar to arming auto-merge at all. The section's own safety claim is "CI + haven-reviewer", which a silently skipped pass makes false with nothing to read it off. The ruleset inventory and the money-path safety model were not re-verified in this pass. Prior: #1607: Known CI flake signatures section added (rerun-once policy; ship-next points here). Prior: #1341: re-verified loop stop and issue-readiness conditions after ship-next gained #1289 active-claim coordination
 ---
 
 # Autonomous PR loop
@@ -134,8 +134,17 @@ PR go through before handing it the whole queue.
   blocking/should-fix findings**. For a **frontend (`area:frontend`)** PR there is
   one addition (see [`ship-playbooks/frontend.md`](ship-playbooks/frontend.md)):
   if the design-review / haven-reviewer UI pass flags a UX, copy, or
-  design-system issue (even a nit-level one), the loop **pauses for the user**
-  even if CI is green — UX is a human call.
+  design-system issue (even a nit-level one), the loop **pauses** even if CI is
+  green. Clearing that pause is the reviewer's call, not the user's (#1968) —
+  fix, re-capture the screenshots, re-run the pass that raised it, and a clean
+  re-review re-arms auto-merge unattended. It escalates to the user only when
+  the re-review raises a NEW finding, when the finding is deferred or disputed
+  rather than fixed, or when there is no re-review at all.
+- Auto-merge is not armed at all until the PR body carries a **named verdict
+  line for each review pass** — `haven-reviewer: passed | skipped because ___`
+  (#1968). A filled skip proceeds; a blank one does not. The loop's whole safety
+  claim below is "CI + haven-reviewer", and a silently skipped pass is that
+  claim being false with nothing to read it off.
 - A **money-path** PR (x402 / payments / machine-payments / payment-coverage /
   allowance-module / agentAuth / release tooling) auto-merges on the same terms
   (#1024). The label still selects `money.md` and its characterization-test

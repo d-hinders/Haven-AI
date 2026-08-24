@@ -31,4 +31,6 @@ Return:
 - findings first, each with severity, the screenshot (route + viewport) it's visible in, and a file/line when it maps to code;
 - open questions or assumptions (including any state/viewport you lacked evidence for);
 - a short summary only after the findings;
-- a merge-readiness judgment for the **visual** dimension: is the rendered result on-standard, what residual visual risk remains, and — echoing the frontend merge policy — remember that ANY UX/copy/design finding, even nit-level, means the captain pauses auto-merge and asks the user. Flag clearly when you've produced such a finding.
+- a merge-readiness judgment for the **visual** dimension: is the rendered result on-standard, what residual visual risk remains, and — echoing the frontend merge policy — remember that ANY UX/copy/design finding, even nit-level, pauses auto-merge. Flag clearly when you've produced such a finding.
+
+On a **re-review** of a diff that fixed an earlier finding, say plainly whether the finding is cleared, because your verdict is what re-arms the merge — the captain no longer asks the user to confirm it ([#1968](https://github.com/d-hinders/Haven-AI/issues/1968)). Judge the fix against the screenshots you were handed *this* time; if they are the same PNGs the original finding was raised on, that is itself a finding. A fix that introduces a NEW issue is a new finding, not a cleared one, and it escalates.

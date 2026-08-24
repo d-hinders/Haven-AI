@@ -11,6 +11,7 @@ export function HavenMark({ tone = 'brand', className = 'h-5 w-5' }: HavenMarkPr
   return (
     <svg
       aria-hidden="true"
+      focusable={false}
       viewBox="0 0 24 24"
       className={className}
       fill="none"

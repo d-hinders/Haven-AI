@@ -221,13 +221,22 @@ const WRITE_SHAPED = /\.(sendTransaction|attest|revoke|execTransaction|executeAl
 const LEGACY_LOCK_ONLY = new Set([
   'infra/relayer.ts', // the lock's home; no broadcast of its own
   'infra/outbound-queue.ts', // the pipeline itself broadcasts, by design
-  'rails/allowance-module.ts',
   'routes/safe-exec.ts',
-  // Shrunk by #1988 (epic #1440): `modules/accounts/safe-deployer.ts` is
-  // DELETED, and `routes/safe-deploy.ts` is a 410 tombstone that no longer
-  // touches the relayer at all. `infra/chain/safe-proxy-deployer.ts` stays —
-  // trimmed to `ensurePasskeySignerDeployed`, which `routes/safe-exec.ts`
-  // still reaches and which still broadcasts under the lock.
+  // Shrunk by #1988 (epic #1440), three entries at once:
+  //   - `modules/accounts/safe-deployer.ts` — DELETED by this slice;
+  //   - `routes/safe-deploy.ts` — now a 410 tombstone that never touches the
+  //     relayer;
+  //   - `rails/allowance-module.ts` — trimmed to READS by #1987 (PR #2008).
+  //     It kept `getRelayerWallet` for `rails/sweep.ts` and the #946 bridge,
+  //     so it still mentions the relayer, but it no longer BROADCASTS: the
+  //     write half and its send-lock wiring went with the rail. A read-only
+  //     module does not belong in a set whose whole meaning is "allowed to
+  //     broadcast outside the outbound pipeline".
+  //
+  // The strengthened assertion below is what caught that third one, on the
+  // merge with #1987 rather than months later. It is exempt from the FIRST
+  // test by that test's own `writes.length === 0` skip, so removing it here
+  // loosens nothing: the file has no write-shaped line left to police.
   'infra/chain/safe-proxy-deployer.ts',
 ])
 

@@ -18,7 +18,7 @@ covers:
   - packages/backend/src/domain/chains.ts
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-08-14" # #1199: signer-removal recovery change re-verified; payment sequence unchanged
+last-verified: "2026-08-24" # #1984: "import-only" corrected. The SEQUENCE itself is untouched and deliberately so — an existing allowance_module account still pays exactly as drawn; the payment-path 410 is slice #1986, not this one. Prior: #1199: signer-removal recovery change re-verified; payment sequence unchanged
 ---
 
 # Haven — Payment Execution Sequence
@@ -31,8 +31,8 @@ and user-authorized Safe execution).
 Source of truth: [packages/backend/src/routes/payments.ts](../../packages/backend/src/routes/payments.ts) and
 [packages/backend/src/rails/allowance-module.ts](../../packages/backend/src/rails/allowance-module.ts).
 
-> **This diagram is the legacy AllowanceModule rail** (import-only, existing
-> accounts). New accounts (`account_type='delegator_hybrid'`,
+> **This diagram is the legacy AllowanceModule rail** (RETIRING under #1440 —
+> closed to new accounts entirely since #1984; existing accounts only). New accounts (`account_type='delegator_hybrid'`,
 > `execution_rail='delegation'`) take the
 > [delegation-rail branch](#delegation-rail-new-accounts) at the bottom of this
 > doc — `POST /payments` resolves the rail from agent auth and either builds an

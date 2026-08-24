@@ -39,7 +39,7 @@ Safe AllowanceModule -> On-chain agent budget enforcement
 API auth is identity. Signature is authority. On-chain module state is enforcement.
 
 Haven runs **two on-chain policy rails**, both non-custodial. The line above is
-the **legacy AllowanceModule rail** (import-only, existing accounts; the Smart
+the **legacy AllowanceModule rail** (RETIRING under #1440 — closed to new accounts entirely since #1984; existing accounts only; the Smart
 Sessions session rail is retired, #834). New accounts are
 provisioned on the **delegation rail** (epic #821): the Haven wallet is a MetaMask
 Hybrid DeleGator smart account and the budget is a signed delegation with audited
@@ -361,7 +361,7 @@ Dashboard endpoints use the signed-in user's JWT. The OpenAPI contract is served
 | Surface | Auth | Examples |
 |---|---|---|
 | Dashboard auth | None/JWT | `/auth/signup`, `/auth/login`, `/auth/me` |
-| Haven wallets | JWT | `/user/safes`, `/user/safes/deploy`, balances and account views |
+| Haven wallets | JWT | `/user/safes` (list/rename/re-default/unlink), balances and account views. Creating or importing a Safe is **retired** — `/user/safes` POST, `/user/safes/deploy`, `/safe/deploy` and `PUT /user/safe` all answer 410 (#1984); new accounts come from `/accounts/hybrid` |
 | Approvers (Safe owners) | JWT | `/user/safes/:id/approvers` (list), `/user/safes/:id/approvers/tx` (build add/remove owner-change tx), `/user/safes/known-approvers` (reuse across Safes) |
 | Agents | JWT | `/agents`, `/agents/:id`, `/agents/:id/pause`, `/agents/:id/resume`, `/agents/:id/revoke`, `/agents/:id/rotate-key`, `/agents/:id/allowances` |
 | Agent payments | API key | `/payments`, `/payments/:id/sign`, `/payments/:id`, `/payments` |

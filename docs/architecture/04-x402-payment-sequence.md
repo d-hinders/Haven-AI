@@ -32,7 +32,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-20" # #1640 re-verify: authMiddleware now refuses purpose-claim tokens and catalog.ts routes through it instead of a hand-rolled jwtVerify. Agent API-key auth (agentAuth.ts) is a separate credential type and untouched, so every x402 sequence claim here re-read against the diff stands. # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-24" # #1984: "import-only" corrected. The two-leg funding model and both rails' x402 sequences re-read against the diff and unchanged — this slice closes account provisioning only, not payment. Prior: #1640 re-verify: authMiddleware now refuses purpose-claim tokens and catalog.ts routes through it instead of a hand-rolled jwtVerify. Agent API-key auth (agentAuth.ts) is a separate credential type and untouched, so every x402 sequence claim here re-read against the diff stands. # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -50,8 +50,9 @@ Standard merchant x402 has two legs:
 2. Merchant leg: the agent signs the standard EIP-3009 `X-PAYMENT` header from
    the delegate wallet and retries the merchant/resource request.
 
-> **This doc describes the legacy AllowanceModule rail** (import-only, existing
-> accounts) with its two-leg funding model. New accounts
+> **This doc describes the legacy AllowanceModule rail** (RETIRING under #1440 —
+> closed to new accounts entirely since #1984; existing accounts only) with its
+> two-leg funding model. New accounts
 > (`account_type='delegator_hybrid'`) settle x402 in a **single direct leg** via
 > ERC-7710 — see [Delegation rail x402](#delegation-rail-x402-new-accounts)
 > below. The Smart Sessions **session rail is retired** (#834): the machine-payment

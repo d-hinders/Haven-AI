@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
+import { retiredSafeInflow } from '../middleware/safe-inflow-retired.js'
 import { getSafeDetails } from '../modules/accounts/index.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import {
@@ -152,7 +153,10 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // PUT /user/safe
-  app.put<{ Body: SafeBody }>('/safe', async (request, reply) => {
+  // INFLOW CLOSED (#1984, epic #1440): the legacy single-Safe link is an
+  // IMPORT — it wrote user_safes and emitted `safe_imported`. 410 before
+  // the handler runs.
+  app.put<{ Body: SafeBody }>('/safe', retiredSafeInflow('import'), async (request, reply) => {
     const { safe_address, chain_id = DEFAULT_CHAIN_ID } = request.body
     const { sub } = request.user as { sub: string }
 

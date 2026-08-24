@@ -48,6 +48,27 @@
  *   `isTokenExpired` is checked BEFORE any outbound request, so an expired
  *   claim cannot even be used to make Haven emit traffic.
  *
+ * ## What is a MODULE property and what is only a PATH property (#1959)
+ *
+ * Two proof paths means two chances for a rule to be true of one of them and
+ * silently absent from the other. Both of the rules below are module
+ * properties — enforced on the CLAIM, before a mechanism is chosen — and they
+ * are stated here so a reader never has to diff the two call paths to find out
+ * whether an asymmetry was a decision or an oversight:
+ *
+ * - **The hostname is a domain, never an IP literal.** Enforced by
+ *   `isValidHostname` via `ipLiteralRange`, the same predicate `assertSafeUrl`
+ *   uses, so the well-known and DNS-TXT paths cannot disagree. Before #1959
+ *   this was a property of the well-known path only, because it was inherited
+ *   from the SSRF guard, and the SSRF guard only sees paths that build a URL.
+ * - **The verified string is the string inside the MAC.** Enforced by
+ *   `isValidHostname`'s grammar and URL round-trip.
+ *
+ * What is NOT a module property, and must not be read as one: the CHANNEL
+ * authentication. The well-known path gets host authentication from TLS; DNS
+ * TXT does not, and cannot. That asymmetry is real, deliberate, and analysed
+ * under "What we assume about the resolver" on `TxtResolver`.
+ *
  * ## Single-use vs idempotent — the choice, and why
  *
  * Verification here is **idempotent within the token lifetime**, not
@@ -84,7 +105,12 @@
  * optional.
  */
 import { createHmac, createHash, timingSafeEqual } from 'node:crypto'
-import { safeGetText, type SafeFetchOptions, type SafeFetchResult } from '../../infra/http/ssrf-guard.js'
+import {
+  ipLiteralRange,
+  safeGetText,
+  type SafeFetchOptions,
+  type SafeFetchResult,
+} from '../../infra/http/ssrf-guard.js'
 
 /** Proof format version. Bump only with a migration plan for live claims. */
 export const OWNERSHIP_PROOF_VERSION = 'v1'
@@ -281,6 +307,25 @@ function assertValidVerifyToken(token: string): void {
  * to own it does not, is the shape of a defect nobody finds until that guard
  * moves. With the round-trip in place this function holds it on its own, and
  * `assertSafeUrl` remains an independent second floor.
+ *
+ * ## The IP-literal rule, which the round-trip does NOT imply (#1959)
+ *
+ * The round-trip catches every host the URL parser REWRITES. An already-
+ * canonical dotted-decimal IPv4 literal is not rewritten — `1.2.3.4` survives
+ * it byte-identically — so the round-trip has nothing to say about it, and the
+ * label grammar accepts it as four numeric labels. Only `assertSafeUrl`
+ * refused it, and only on the path that builds a URL. `dnsTxtName` builds no
+ * URL, so the DNS-TXT half of the proof had no equivalent refusal at all: a
+ * bare address reached `resolveTxt` and, with a resolver that answered, could
+ * reach `ok: true`. Verified before it was fixed, not assumed.
+ *
+ * That asymmetry is closed HERE rather than mirrored into the DNS path,
+ * because a mechanism-specific fix would only hold until someone adds a third
+ * mechanism. `ipLiteralRange` is the same predicate `assertSafeUrl` consults,
+ * so the two verdicts cannot drift; the difference is that this one applies to
+ * the CLAIM, before any mechanism is chosen. Refusing costs nothing real: a
+ * bare address cannot make an ownership-of-a-DOMAIN claim in the first place,
+ * which is the reason `assertSafeUrl` gives for its own refusal.
  */
 export function isValidHostname(hostname: string): boolean {
   const host = normalizeHostname(hostname)
@@ -289,6 +334,9 @@ export function isValidHostname(hostname: string): boolean {
   // A merchant domain is never a single label; that is a search-domain lookup.
   if (labels.length < 2) return false
   if (!labels.every((label) => HOSTNAME_LABEL.test(label))) return false
+  // Claim-level, mechanism-independent — see "The IP-literal rule" above.
+  // Placed before the round-trip because a canonical literal PASSES that check.
+  if (ipLiteralRange(host) !== null) return false
   // The general rule — see "The URL round-trip" above.
   try {
     return new URL(`https://${host}/x`).hostname === host
@@ -429,6 +477,28 @@ function documentContainsProof(document: string, expected: string): boolean {
  * well-known file, which gets host authentication from TLS. That is why
  * well-known is attempted FIRST and DNS TXT is documented as the fallback for
  * merchants who cannot serve a file.
+ *
+ * ## What this path does NOT inherit from the SSRF guard (#1959)
+ *
+ * `resolveTxt` does not go through `assertSafeUrl`, and it never will —
+ * there is no URL here to assert on. So every rule the guard enforces is
+ * absent from this path unless the module enforces it itself:
+ *
+ * - **IP-literal refusal: enforced by the module.** `isValidHostname` refuses
+ *   a bare address at claim level, so `dnsTxtName` cannot be handed one. This
+ *   is the fix for #1959, and it is stated here because the previous reader of
+ *   this section had to infer from the absence of a mention that the rule did
+ *   not apply. It did not.
+ * - **Address-range and connection-pinning checks: NOT applicable, by
+ *   construction.** Those exist to stop a socket opening to attacker-chosen
+ *   infrastructure. This path opens no socket to the claimed host: it issues a
+ *   TXT lookup to the resolver the backend is already configured with, and
+ *   reads a string back. That is why the IP-literal question here was a
+ *   consistency and legibility question rather than an exploitable hole — the
+ *   well-known path's refusal prevents an outbound HTTP request, and this
+ *   one's does not prevent anything comparable.
+ * - **Byte caps and deadlines: the resolver's, not ours.** A TXT answer is
+ *   bounded by the DNS transport; `node:dns` timeouts apply.
  */
 export type TxtResolver = (name: string) => Promise<string[][]>
 
@@ -475,12 +545,29 @@ export async function verifyDomainOwnership(
   }
 
   // Backstop, not convenience — see `isValidHostname`. Checked before expiry
-  // so a malformed claim also never reaches an outbound request.
+  // so a malformed claim also never reaches an outbound request OR a DNS
+  // lookup. One decision point, both proof paths (#1959): there is deliberately
+  // no second IP-literal branch further down, because a rule enforced twice is
+  // a rule that can be removed once and still look enforced.
   if (!isValidHostname(claim.hostname)) {
+    // `reason` stays `invalid_hostname` — a new persisted enum member would
+    // oblige #1711's status route to learn a value that means the same thing
+    // to a submitter. The detail is what carries the distinction, and it
+    // echoes no attacker-supplied text.
+    // Same predicate, called a second time ONLY to enrich the message — not to
+    // decide. The decision was made by `isValidHostname` above; this cannot
+    // reach a different verdict, and it is not a second branch point. Spelled
+    // out because the docstring above claims "one decision point, both proof
+    // paths", and a reader skimming for that claim's counter-example would
+    // stop here.
+    const literal = ipLiteralRange(normalizeHostname(claim.hostname))
     return {
       ok: false,
       reason: 'invalid_hostname',
-      detail: 'submission hostname is not a valid DNS name',
+      detail:
+        literal === null
+          ? 'submission hostname is not a valid DNS name'
+          : `submission hostname is an IP literal (${literal}), not a domain; ownership of a domain is the claim`,
       attempts,
     }
   }

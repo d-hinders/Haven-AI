@@ -13,7 +13,7 @@ covers:
   - packages/frontend/src/lib/passkey-approver.ts
   - packages/backend/src/routes/passkeys.ts
   - packages/backend/src/routes/safe-exec.ts
-last-verified: "2026-08-23" # #1702: new section "Not the same thing: replacing an agent's key" — the account-signer / agent-delegate distinction stated from THIS side, paired with the same distinction stated from `agent-key-rotation.md` (the epic asked for both directions, because a reader arrives at whichever page their search terms hit and only one of them is right for a lost account signer). No existing claim changed: the two-signer rule, the single-signer limit, the removal floor and the legacy-Safe section were all re-read against `hybrid-signer-actions.ts` and `delegation-rail-security-model.md` §7 and stand. Scope: the new section only; no recovery flow was re-executed. Prior: #1199: both signer-removal paths permit an informed two-to-one transition
+last-verified: "2026-08-24" # #1988: the "Legacy passkey Safes" section told a user to add a backup owner through Settings → Approvers. That surface is deleted with the Safe rail, so the instruction was a dead end for exactly the population the section exists to help. Rewritten to say what an owner CAN still do — move funds out via the still-open owner-signed relay, manage owners themselves at Safe's own interfaces, and use a backup owner already on the list — and to say plainly that a sole-passkey Safe with no backup should be emptied and closed. The exposure paragraph is unchanged and was already correct. Scope: that section; the delegation-rail half of the doc was not re-verified. Prior: #1702: new section "Not the same thing: replacing an agent's key" — the account-signer / agent-delegate distinction stated from THIS side, paired with the same distinction stated from `agent-key-rotation.md` (the epic asked for both directions, because a reader arrives at whichever page their search terms hit and only one of them is right for a lost account signer). No existing claim changed: the two-signer rule, the single-signer limit, the removal floor and the legacy-Safe section were all re-read against `hybrid-signer-actions.ts` and `delegation-rail-security-model.md` §7 and stand. Scope: the new section only; no recovery flow was re-executed. Prior: #1199: both signer-removal paths permit an informed two-to-one transition
 ---
 
 # Account recovery (delegation-rail accounts)
@@ -130,9 +130,10 @@ recoverable through the public contracts — see the
 
 ## Legacy passkey Safes
 
-Accounts created through the Safe onboarding path (the one production still
-uses today, before the delegation rail takes over) work the same way, with two
-differences worth stating plainly.
+Accounts created through the Safe onboarding path — closed since
+[#1984](https://github.com/d-hinders/Haven-AI/issues/1984); no new account can
+be created on it — differ from the delegation rail in two ways worth stating
+plainly.
 
 **The exposure is identical, and the wording is not softer for being older.**
 That Safe is deployed with your passkey signer as its **sole owner**, threshold
@@ -142,16 +143,28 @@ reset that changes this: Haven can clear the database row so you can onboard a
 *new* account, but the old Safe stays exactly where it is, owned by a key
 nobody holds. Restoring access is not something a support ticket can do.
 
-**Where you add the backup.** These accounts don't have a **Backup & recovery**
-screen. Go to **Approvers** in settings and add either:
+**Haven no longer offers a way to add a backup owner.** Settings → Approvers
+built the owner-change transaction for you to sign; that surface is removed
+with the rest of the Safe rail
+([#1988](https://github.com/d-hinders/Haven-AI/issues/1988)). Haven never
+signed an owner change and now does not construct one either.
 
-- **a second passkey** — a new passkey credential, enrolled and
-  added as an owner in one flow; or
-- **a wallet address** — any browser or hardware wallet you control.
+What you can still do, and it is the whole of it:
 
-Either one is signed by the passkey you already have, and afterwards the Safe
-has two owners. If one is later lost, the other can remove it and add a
-replacement, exactly as on the delegation rail.
+- **Move the funds out.** Haven still relays any Safe transaction *you* sign as
+  an owner, so sending the balance to an account you control — a Haven account
+  on the delegation rail, or any wallet — works exactly as it did.
+- **Manage owners yourself.** A Safe owned by a wallet address is managed at
+  [app.safe.global](https://app.safe.global) with that wallet, independently of
+  Haven. This was always true; it is the point of a non-custodial account, and
+  it is why removing Haven's builder takes away a convenience rather than your
+  control.
+- **A backup owner you already added still works.** If a second passkey is
+  already on the Safe's owner list, it still signs, and Haven still relays for
+  it.
+
+If your Safe's only owner is a passkey and you never added a backup, treat the
+account as move-the-funds-out-and-close rather than as something to keep.
 
 > Until [#1229](https://github.com/d-hinders/Haven-AI/issues/1229) the second
 > passkey could not be added at all — enrolment refused a second credential on

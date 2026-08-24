@@ -359,39 +359,6 @@ const userSafe = {
   },
 } as const
 
-/** An approver (Safe owner) decorated with Haven-stored metadata. */
-const approver = {
-  type: 'object',
-  required: ['address', 'type', 'label'],
-  properties: {
-    address: {
-      ...address,
-      description: 'Checksummed, as the chain returns it — membership comes from getOwners(), not from Haven.',
-    },
-    type: {
-      type: 'string',
-      enum: ['eoa', 'passkey'],
-      description: "Decoration only; defaults to 'eoa' for an owner Haven has no metadata row for.",
-    },
-    label: { type: ['string', 'null'], description: 'Trimmed and capped at 120 characters.' },
-  },
-} as const
-
-/**
- * An unsigned Safe self-call for an owner change. Haven CONSTRUCTS and guards
- * it; the user signs and relays it through /safe/exec. Haven never signs.
- */
-const safeOwnerTx = {
-  type: 'object',
-  required: ['to', 'value', 'data', 'operation'],
-  properties: {
-    to: { ...address, description: 'The Safe itself — owner changes are self-calls.' },
-    value: { type: 'string', enum: ['0'] },
-    data: { type: 'string', pattern: '^0x[0-9a-fA-F]*$' },
-    operation: { type: 'integer', enum: [0], description: 'CALL, never DELEGATECALL.' },
-  },
-} as const
-
 
 // ── Dashboard account building blocks (#1446) ────────────────────────────────
 
@@ -2254,19 +2221,21 @@ export const openapiSpec = {
       },
     },
     // ── Safe (account) management (#1446) ───────────────────────────────────
-    // CUSTODY BOUNDARY: Haven links, labels and CONSTRUCTS owner-change
-    // transactions, but never signs one. Membership truth is on-chain
-    // (getOwners()); the approver rows here only decorate it with a label and
-    // a type. A user who deletes a Safe from Haven still owns it on-chain.
+    // CUSTODY BOUNDARY: Haven labels a linked Safe and nothing more. It never
+    // signed an owner change and, since #1988, no longer constructs one
+    // either. Membership truth was always on-chain (getOwners()). A user who
+    // deletes a Safe from Haven still owns it on-chain, and manages its owners
+    // with their own key wherever they like — which is the property that makes
+    // removing Haven's owner-change builder a narrowing rather than a loss.
     //
-    // RETIRING SURFACE (#1440, owner decision 2026-08-14: the Safe rail goes
-    // away entirely). Of the operations below, only the four plain-CRUD ones
-    // (list, rename, set-default, unlink) are expected to survive — user_safes
-    // is shared with the delegation rail. `deploy`, the import POST and every
-    // approver route are on that epic's removal list, and their entries here
-    // come out with them. Documented anyway, deliberately: the spec describes
-    // the API that exists TODAY, and an undocumented live route is the failure
-    // #1442 was opened on. Do not build new callers against the retiring half.
+    // RETIRED SURFACE (#1440, owner decision 2026-08-14: the Safe rail goes
+    // away entirely). Four plain-CRUD operations survive — list, rename,
+    // set-default, unlink — because `user_safes` is shared with the delegation
+    // rail. `deploy` and the import POST are TOMBSTONES: registered, answering
+    // 410, with no implementation behind them since #1988. Every approver
+    // route is deleted outright. Documented anyway, deliberately: the spec
+    // describes the API that exists TODAY, and a 410 a client can still reach
+    // is part of that API.
     '/user/safes': {
       get: {
         tags: ['Dashboard'],
@@ -2415,181 +2384,12 @@ export const openapiSpec = {
         },
       },
     },
-    '/user/safes/known-approvers': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'listKnownApprovers',
-        summary: "The caller's approver registry across all their Safes.",
-        description:
-          'Distinct by address, carrying the most recent label/type and every safe_id the approver is known on — so a picker can offer reuse on another account while excluding the Safes it already approves (#417). Haven metadata only; it confers nothing on-chain.',
-        security: [{ DashboardJwt: [] }],
-        responses: {
-          '200': {
-            description: 'Known approvers, distinct by address.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['approvers'],
-                  properties: {
-                    approvers: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        required: ['address', 'type', 'label', 'safe_ids'],
-                        properties: {
-                          ...approver.properties,
-                          safe_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          '401': errorResponse,
-        },
-      },
-    },
-    '/user/safes/{safeId}/approvers': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'listSafeApprovers',
-        summary: "Read a Safe's on-chain owners, decorated with stored labels.",
-        description:
-          'The owner list and threshold are read live from the chain (`getOwners()`), not from Haven — an owner added outside Haven appears here with no label rather than being invisible.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
-        responses: {
-          '200': {
-            description: 'On-chain owners plus the Safe threshold.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['threshold', 'approvers'],
-                  properties: {
-                    threshold: { type: 'integer' },
-                    approvers: { type: 'array', items: approver },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-          '502': { ...errorResponse, description: 'Could not read owners from the network.' },
-        },
-      },
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'upsertSafeApproverMetadata',
-        summary: 'Record an approver\'s label and type after the on-chain change lands.',
-        description:
-          'Metadata only, and idempotent: this does not add an owner. Call it after relaying the transaction from /approvers/tx. Enrolling a passkey approver also binds it to the Safe as a signing fast-path — deliberately non-fatal, because /safe/exec re-derives the binding from the on-chain owner list when it is missing.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['address'],
-                properties: {
-                  address: address,
-                  type: { type: 'string', enum: ['eoa', 'passkey'], description: "Defaults to 'eoa'." },
-                  label: { type: 'string', description: 'Trimmed and capped at 120 characters; blank becomes null.' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'Metadata recorded.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-        },
-      },
-    },
-    '/user/safes/{safeId}/approvers/tx': {
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'buildSafeApproverTx',
-        summary: 'Build the UNSIGNED owner-change transaction for the user to sign.',
-        description:
-          "Haven constructs and guards; the user signs and relays through /safe/exec. Haven never signs an owner change. The guards run against the LIVE owner list, before any transaction is produced: removing the final owner is refused (409), as is adding an owner the Safe already has; removing an address that is not an owner is a 404.",
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['action', 'address'],
-                properties: {
-                  action: { type: 'string', enum: ['add', 'remove'] },
-                  address: address,
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'The unsigned Safe self-call.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['chain_id', 'safe_address', 'tx'],
-                  properties: {
-                    chain_id: { type: 'integer' },
-                    safe_address: address,
-                    tx: safeOwnerTx,
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': { ...errorResponse, description: 'Safe not found, or the address to remove is not an owner.' },
-          '409': { ...errorResponse, description: 'Would remove the last owner, or the owner already exists.' },
-          '502': { ...errorResponse, description: 'Could not read owners from the network.' },
-        },
-      },
-    },
-    '/user/safes/{safeId}/approvers/{address}': {
-      delete: {
-        tags: ['Dashboard'],
-        operationId: 'deleteSafeApproverMetadata',
-        summary: "Drop an approver's stored metadata after the on-chain removal.",
-        description:
-          'Cleans up the decoration row only — it removes no owner. The last-owner guard lives on /approvers/tx, where the actual removal is built.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [
-          { name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' },
-          { name: 'address', in: 'path', required: true, schema: address, description: 'Approver address.' },
-        ],
-        responses: {
-          '200': {
-            description: 'Metadata removed.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-        },
-      },
-    },
+    // The approver routes that lived here — GET /user/safes/known-approvers,
+    // GET|POST /user/safes/{safeId}/approvers, POST
+    // /user/safes/{safeId}/approvers/tx and DELETE
+    // /user/safes/{safeId}/approvers/{address} — are DELETED (#1988, epic
+    // #1440 slice 5), exactly as the caveat above said they would be. They are
+    // gone from the router too, so these are not tombstones: the paths 404.
     // ── Dashboard account + owner directory (#1446) ─────────────────────────
     // Profile/preference writes are the user's own record. The owner
     // directory reads Safe owners LIVE from every linked account, so it is

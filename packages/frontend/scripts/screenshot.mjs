@@ -616,9 +616,11 @@ export const httpError = (status, body) => new ScenarioHttpError(status, body)
  * The seam is the same one #1725 found: state the harness cannot express, added
  * to the harness rather than approximated by a cleverer payload. And it is a
  * NETWORK seam, not a component stub — which is what makes the capture
- * evidence. viem's transport for the app's chain is plain
- * `http(url)` (`lib/wagmi.ts`), so the reads leave the browser as ordinary
- * JSON-RPC POSTs that Playwright routes like anything else. Answering them runs
+ * evidence. viem's transport for the app's chain is `fallback()` over a handful
+ * of plain `http(url)` endpoints (`lib/wagmi.ts`), so the reads leave the
+ * browser as ordinary JSON-RPC POSTs that Playwright routes like anything else
+ * — and the route matches on pathname across every origin, so which endpoint
+ * the fallback happens to pick does not matter. Answering them runs
  * the app's REAL read path end to end: viem encodes the call, the fixture
  * returns ABI-encoded return data, viem decodes it, `useOnChainAllowances` maps
  * it, and `EditAgentModal` renders the rows. Every line between the wire and
@@ -1152,15 +1154,35 @@ function answerBudgetChainRead(method, params) {
 
   // MULTICALL, because that is what the app actually sends (#1935).
   //
-  // Found by running this, not by reading it: wagmi's client enables viem's
-  // multicall batching, so `useOnChainAllowances`' four `readContract` calls
-  // never reach the wire as four `eth_call`s to the AllowanceModule. They arrive
-  // as ONE `eth_call` to Multicall3's `aggregate3`, with the real calls as
-  // `bytes` inside it. A fixture that answered only the un-batched shape would
-  // have been served nothing — and, because the hook swallows the failure into
-  // an empty map, would have produced a modal with no budget list and no error
-  // on screen. That is exactly the plausible-wrong-PNG the seam's fatal gap
-  // report exists to refuse, and it is what it refused on the first run.
+  // Found by running this, not by reading it: wagmi enables viem's multicall
+  // batching by default, so `useOnChainAllowances`' reads never reach the wire
+  // as bare `eth_call`s to the AllowanceModule — every one of them is wrapped in
+  // Multicall3's `aggregate3`, with the real call as `bytes` inside it. A
+  // fixture that answered only the un-batched shape is served nothing, and
+  // because the hook swallows the failure into an empty map it would have
+  // produced a modal with no budget list and no error on screen. That is exactly
+  // the plausible-wrong-PNG the seam's fatal gap report exists to refuse, and it
+  // is what it refused on the first run of this scenario.
+  //
+  // MEASURED, because the obvious summary of that is wrong (review of #1935).
+  // "The four reads arrive as one `eth_call`" is what batching sounds like; it
+  // is not what this hook can produce. `useOnChainAllowances` is sequential —
+  // it awaits `isModuleEnabled` before `getDelegates` is queued, and awaits
+  // `getTokens` before the `getTokenAllowance`s are — and viem's batcher can
+  // only merge calls queued inside the same wait window. Logged live, one fetch
+  // cycle is FOUR aggregate3 POSTs plus one bare block read:
+  //
+  //   aggregate3[1] 0x2d9ad53d  isModuleEnabled
+  //   eth_getBlockByNumber      (not wrapped — not a contract read)
+  //   aggregate3[1] 0xeb37abe0  getDelegates
+  //   aggregate3[1] 0x8d0e8e1d  getTokens
+  //   aggregate3[2] 0x94b31fbd  getTokenAllowance x2  <- the only real batch
+  //
+  // So the thing a fixture must handle is not "one big batch": it is that a
+  // LONE read is wrapped too. The direct branch below is kept as a fallback
+  // rather than deleted, because it costs one line and the day someone disables
+  // multicall this is the difference between a fixture that still works and a
+  // silent empty list.
   if (
     data.slice(0, 10) === MULTICALL3_AGGREGATE3 &&
     (call.to ?? '').toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()

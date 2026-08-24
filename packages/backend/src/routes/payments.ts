@@ -510,7 +510,6 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       },
     })
 
-
   })
 
   // ── POST /:id/sign — Sign and execute ───────────────────

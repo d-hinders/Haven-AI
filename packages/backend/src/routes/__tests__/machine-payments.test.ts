@@ -3,7 +3,20 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
 // #1444: validate the real payload against the spec's own schema.
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
-import { authorizeMachinePayment } from '../../modules/mpp/index.js'
+// #1987 (epic #1440 slice #1987): `modules/mpp/authorize.ts` — and its
+// exported `authorizeMachinePayment` / `AuthorizeMachinePaymentInput` — is
+// DELETED. It had no production caller left: `POST /machine-payments/authorize`
+// has been a #1328 `mppDemoRetired()` stub since before this slice, and #1986
+// put an HTTP 410 on the legacy rail underneath it. The block of tests that
+// called `authorizeMachinePayment` directly (intent creation, idempotency
+// replay, stale-sign-data refresh, insert-conflict reload, over-allowance
+// approval queueing, rejected-approval retry, malformed-payTo/merchantPayTo
+// rejection, wrong-delegate signature, one-shot signature recording,
+// one-shot execution-failure handling, and terminal-state races) was removed
+// in this pass — those cases exercised orchestration that no longer exists,
+// not coverage that was silently dropped. The route-level 410/422 refusals
+// on POST /send and POST /machine-payments/authorize below are UNCHANGED and
+// still prove the retirement from the HTTP surface.
 // #1986: the ONE producer of the Safe-rail refusal body — every converted
 // legacy-rail characterization below compares against this, never a
 // copy-pasted string.
@@ -130,11 +143,6 @@ const AUTH: DbRoute = [/api_key_hash = \$1/, () => ({ rows: [AGENT] })]
 /** Auth lookup answered with an overridden agent row (rail refusals, characterization). */
 const authAs = (row: Record<string, unknown>): DbRoute => [/api_key_hash = \$1/, () => ({ rows: [row] })]
 
-/** authorizeMachinePayment: loadExecutionRailState found nothing → legacy rail. */
-const RAIL_LEGACY: DbRoute = [/FROM agents a/, () => ({ rows: [] })]
-/** authorizeMachinePayment: loadExecutionRailState resolves the delegation rail. */
-const RAIL_DELEGATION: DbRoute = [/FROM agents a/, () => ({ rows: [{ execution_rail: 'delegation' }] })]
-
 /** hasTokenAllowanceConfigured (send + authorize policy gate). */
 const allowanceConfigured = (configured: boolean): DbRoute => [
   /LOWER\(token_address\) = LOWER\(\$2\)/,
@@ -150,16 +158,6 @@ const allowanceConfigRows = (rows: unknown[]): DbRoute => [
 /** deriveDelegationBudgets / listDelegationJsonByIds (GET /allowances, delegation rail). */
 const delegationRows = (rows: unknown[]): DbRoute => [/FROM agent_delegations/, () => ({ rows })]
 
-/** findMachineIntentByKeyOrChallenge — the authorize idempotency lookup. */
-const existingIntent = (row: Record<string, unknown> | null): DbRoute => [
-  /COALESCE\(payment_rail, source\) = \$4/,
-  () => ({ rows: row ? [row] : [] }),
-]
-/** findMachineApprovalByKeyOrChallenge — the authorize idempotency lookup. */
-const existingApproval = (row: Record<string, unknown> | null): DbRoute => [
-  /status <> 'expired'/,
-  () => ({ rows: row ? [row] : [] }),
-]
 /** INSERT INTO payment_intents (send's plain insert, or authorize's ON CONFLICT machine insert). */
 const insertIntent = (row: Record<string, unknown> | null): DbRoute => [
   /INSERT INTO payment_intents/,
@@ -170,27 +168,6 @@ const insertApproval = (row: Record<string, unknown> | null): DbRoute => [
   /INSERT INTO approval_requests/,
   () => ({ rows: row ? [row] : [] }),
 ]
-/** refreshMachineIntentNonce — the duplicate-pending stale-nonce guard. */
-const refreshNonce = (row: Record<string, unknown> | null): DbRoute => [
-  /SET allowance_nonce = \$1/,
-  () => ({ rows: row ? [row] : [] }),
-]
-/** recordMachineIntentSignature: pending_signature → signed, no status flip. */
-const recordSignature = (ok: boolean): DbRoute => [
-  /SET signature = \$1, signed_at = NOW\(\)/,
-  () => ({ rows: ok ? [{ id: PAYMENT_ID }] : [] }),
-]
-/** confirmMachineIntent: pending_signature → confirmed, one-shot. */
-const confirm = (ok: boolean): DbRoute => [
-  /SET status = 'confirmed'/,
-  () => ({ rows: ok ? [{ id: PAYMENT_ID }] : [] }),
-]
-/** getIntentStatus, read after a guarded write comes back empty. */
-const intentStatus = (status: string): DbRoute => [
-  /SELECT status FROM payment_intents/,
-  () => ({ rows: [{ status }] }),
-]
-
 /** findSendIntentByIdempotencyKey (POST /send idempotency lookup). */
 const sendIntentLookup = (rows: unknown[]): DbRoute => [
   /send_idempotency_key = \$2[\s\S]*FROM payment_intents|FROM payment_intents[\s\S]*send_idempotency_key = \$2/,
@@ -791,37 +768,6 @@ describe('machine payment routes', () => {
     expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
-  // #1328: the HTTP /authorize route no longer calls authorizeMachinePayment
-  // for any rail — it always refuses (see the "POST /authorize is retired"
-  // describe block below). The underlying rail-gate behavior this test used
-  // to characterize through the route is generic orchestration
-  // (`modules/mpp/authorize.ts`) kept for a future non-demo MPP rail
-  // (#1328's file-ownership scope explicitly excludes it) — proven here by
-  // calling the function directly instead of through the retired HTTP path.
-  it('authorizeMachinePayment REFUSES a delegation-rail account — 422, zero writes, no approval manufactured (#1251)', async () => {
-    primeDb(RAIL_DELEGATION)
-    const result = await authorizeMachinePayment({
-      agent: AGENT,
-      rail: 'mpp_demo',
-      resourceUrl: challenge.resource,
-      payTo: challenge.recipient,
-      merchantPayTo: challenge.recipient,
-      amountAtomic: challenge.amount.atomic,
-      asset: challenge.asset.address,
-      chainId: challenge.network.chainId,
-      description: challenge.description,
-      challengeId: challenge.challengeId,
-      idempotencyKey: 'mpp_demo:delegation-refusal',
-      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
-    })
-    expect(result.statusCode).toBe(422)
-    expect((result.body as { error_code?: string }).error_code).toBe('rail_not_supported')
-    // The bug's signature was a manufactured approval_requests row — assert
-    // the refusal writes NOTHING.
-    expect(sqlCalls().some((c) => /INSERT INTO approval_requests/.test(c.sql))).toBe(false)
-    expect(sqlCalls().some((c) => /INSERT INTO payment_intents/.test(c.sql))).toBe(false)
-  })
-
   it('REFUSES a session-marked account on /send — 410, zero writes', async () => {
     primeDb(authAs({ ...AGENT, execution_rail: 'session_key' }))
     const response = await app.inject({
@@ -835,48 +781,14 @@ describe('machine payment routes', () => {
     expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
-  // #993 characterization (written BEFORE the seam change): a replayed
-  // idempotency key whose EXISTING intent is session-rail gets 410 with ZERO
-  // writes — no refresh, no status flip, no partial state. Direct call per
-  // the #1328 note above (the HTTP /authorize route itself now always 410s).
-  it('authorizeMachinePayment replay of a session-rail intent — 410, zero writes (#834/#993)', async () => {
-    primeDb(existingIntent(pendingIntent({ execution_rail: 'session_key' })))
-
-    const result = await authorizeMachinePayment({
-      agent: AGENT,
-      rail: 'mpp_demo',
-      resourceUrl: challenge.resource,
-      payTo: challenge.recipient,
-      merchantPayTo: challenge.recipient,
-      amountAtomic: challenge.amount.atomic,
-      asset: challenge.asset.address,
-      chainId: challenge.network.chainId,
-      description: challenge.description,
-      challengeId: challenge.challengeId,
-      idempotencyKey: 'mpp_demo:test',
-      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
-    })
-
-    expect(result.statusCode).toBe(410)
-    expect((result.body as { error?: string }).error).toMatch(/session rail is retired/)
-    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
-    // #1986: the session-rail (#834) and Safe-rail (#1986) retirements are
-    // two DISTINCT tombstones on the same seam — this intent's own 410 body
-    // must not collapse into the Safe-rail one.
-    expect((result.body as { error?: string }).error).not.toBe(
-      allowanceModuleRailRetired('intent').body.error,
-    )
-  })
-
   // ── POST /authorize is retired (#1328) ──────────────────────────────────
   // Acceptance: "POST /machine-payments/authorize no longer accepts or
   // creates mpp_demo payments; no new legacy MPP demo challenge can be
   // authorized." The route now refuses UNCONDITIONALLY — fail-closed,
   // mirroring the #834 session-rail 410 pattern — before the body is even
-  // inspected. authorizeMachinePayment's own behavior stays characterized
-  // (above and below, via direct calls) because the generic MPP orchestrator
-  // is kept for a future non-demo MPP rail; only the demo-specific HTTP
-  // wiring is retired.
+  // inspected. (The generic MPP orchestrator this route used to delegate to,
+  // `modules/mpp/authorize.ts`, was deleted outright in #1987 — see the file
+  // header comment.)
   describe('POST /machine-payments/authorize (#1328: mpp_demo retired)', () => {
     it('refuses a well-formed mpp_demo challenge — 410, zero writes', async () => {
       primeDb(AUTH)
@@ -935,184 +847,6 @@ describe('machine payment routes', () => {
       })
 
       expect(response.statusCode).toBe(401)
-    })
-  })
-
-  // #1986 (epic #1440 slice 3): the legacy AllowanceModule rail is retired.
-  // This describe block characterizes an authorize-orchestration path that
-  // ONLY the retired rail could reach — the machinery and these cases are
-  // scheduled for deletion in #1987.
-  describe('Safe rail retired (#1986) — authorize: fresh-intent creation on the legacy rail', () => {
-    it('authorizeMachinePayment creates a payment intent with generic rail metadata', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
-      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
-
-      primeDb(
-        existingIntent(null),
-        existingApproval(null),
-        RAIL_LEGACY,
-        allowanceConfigured(true),
-        insertIntent(pendingIntent()),
-      )
-
-      const result = await authorizeMachinePayment({
-        agent: AGENT,
-        rail: 'mpp_demo',
-        resourceUrl: challenge.resource,
-        payTo: challenge.recipient,
-        merchantPayTo: challenge.recipient,
-        amountAtomic: challenge.amount.atomic,
-        asset: challenge.asset.address,
-        chainId: challenge.network.chainId,
-        description: challenge.description,
-        challengeId: challenge.challengeId,
-        idempotencyKey: 'mpp_demo:test',
-        metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
-      })
-
-      // #1986: a fresh authorize on a legacy-rail account gets 410
-      // fail-closed BEFORE any intent is minted. Was: 201 with a signable
-      // pending_signature intent (asserted below, inverted).
-      expect(result.statusCode).toBe(410)
-      expect(result.body).toEqual(allowanceModuleRailRetired('account').body)
-
-      expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
-      expect(findCall(/INSERT INTO payment_intents/)).toBeUndefined()
-    })
-  })
-
-  it('authorizeMachinePayment returns a confirmed payment for idempotency replay', async () => {
-    primeDb(existingIntent(pendingIntent({ status: 'confirmed', tx_hash: `0x${'ab'.repeat(32)}` })))
-
-    const result = await authorizeMachinePayment({
-      agent: AGENT,
-      rail: 'mpp_demo',
-      resourceUrl: challenge.resource,
-      payTo: challenge.recipient,
-      merchantPayTo: challenge.recipient,
-      amountAtomic: challenge.amount.atomic,
-      asset: challenge.asset.address,
-      chainId: challenge.network.chainId,
-      description: challenge.description,
-      challengeId: challenge.challengeId,
-      idempotencyKey: 'mpp_demo:test',
-      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
-    })
-
-    expect(result.statusCode).toBe(200)
-    expect(result.body).toMatchObject({
-      success: true,
-      payment_id: PAYMENT_ID,
-      status: 'confirmed',
-      tx_hash: `0x${'ab'.repeat(32)}`,
-      rail: 'mpp_demo',
-      challenge_id: challenge.challengeId,
-      amount_atomic: '10000',
-      asset: USDC,
-      network: challenge.network.name,
-      idempotency_key: 'mpp_demo:test',
-      mpp: {
-        challenge_id: challenge.challengeId,
-        resource_url: challenge.resource,
-        merchant_address: RECIPIENT.toLowerCase(),
-      },
-    })
-    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
-
-    const lookup = findCall(/COALESCE\(payment_rail, source\) = \$4/)
-    expect(lookup).toBeDefined()
-    expect(lookup!.params).toEqual([AGENT.id, 'mpp_demo:test', challenge.challengeId, 'mpp_demo'])
-  })
-
-  // #1986 (epic #1440 slice 3): the legacy AllowanceModule rail is retired.
-  // A still-pending legacy-rail intent can no longer be refreshed into a
-  // fresh, signable hash — machinery and this case are scheduled for
-  // deletion in #1987.
-  describe('Safe rail retired (#1986) — authorize: pending-intent nonce-refresh replay on the legacy rail', () => {
-    it('authorizeMachinePayment guards stale sign data refreshes for duplicate pending intents', async () => {
-      const refreshedHash = `0x${'22'.repeat(32)}`
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 4 })
-      allowanceMocks.generateTransferHash.mockResolvedValue(refreshedHash)
-
-      primeDb(
-        existingIntent(pendingIntent({ allowance_nonce: 3, sign_hash: SIGN_HASH })),
-        refreshNonce({ id: PAYMENT_ID }),
-      )
-
-      const result = await authorizeMachinePayment({
-        agent: AGENT,
-        rail: 'mpp_demo',
-        resourceUrl: challenge.resource,
-        payTo: challenge.recipient,
-        merchantPayTo: challenge.recipient,
-        amountAtomic: challenge.amount.atomic,
-        asset: challenge.asset.address,
-        chainId: challenge.network.chainId,
-        description: challenge.description,
-        challengeId: challenge.challengeId,
-        idempotencyKey: 'mpp_demo:test',
-        metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
-      })
-
-      // #1986: 410 'intent', nothing touched — no nonce refresh, no fresh
-      // hash. Was: 200 with a refreshed sign_data (nonce bumped to 4).
-      expect(result.statusCode).toBe(410)
-      expect(result.body).toEqual(allowanceModuleRailRetired('intent').body)
-
-      expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
-      expect(findCall(/SET allowance_nonce = \$1/)).toBeUndefined()
-    })
-  })
-
-  // #1986 (epic #1440 slice 3): the legacy AllowanceModule rail is retired.
-  // The insert-conflict reload this test characterized can no longer run —
-  // the rail refusal fires before the insert is even attempted. Machinery
-  // and this case are scheduled for deletion in #1987.
-  describe('Safe rail retired (#1986) — authorize: insert-conflict reload on the legacy rail', () => {
-    it('authorizeMachinePayment reloads rail-scoped existing intents after insert idempotency conflicts', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
-      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
-
-      // Stateful counter kept from the original characterization (#1226
-      // style) — it now proves the SECOND read never happens, because the
-      // rail refusal fires before the insert-conflict reload this counter
-      // used to observe.
-      let intentReads = 0
-      primeDb(
-        [/COALESCE\(payment_rail, source\) = \$4/, () => {
-          intentReads += 1
-          return { rows: intentReads > 1 ? [pendingIntent()] : [] }
-        }],
-        existingApproval(null),
-        RAIL_LEGACY,
-        allowanceConfigured(true),
-        insertIntent(null),
-      )
-
-      const result = await authorizeMachinePayment({
-        agent: AGENT,
-        rail: 'mpp_demo',
-        resourceUrl: challenge.resource,
-        payTo: challenge.recipient,
-        merchantPayTo: challenge.recipient,
-        amountAtomic: challenge.amount.atomic,
-        asset: challenge.asset.address,
-        chainId: challenge.network.chainId,
-        description: challenge.description,
-        challengeId: challenge.challengeId,
-        idempotencyKey: 'mpp_demo:test',
-        metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
-      })
-
-      // #1986: 410 fail-closed, and the intent lookup runs ONCE, not twice —
-      // the reload this test characterized is unreachable now. Was: 200
-      // after a reload (intentReads === 2).
-      expect(result.statusCode).toBe(410)
-      expect(result.body).toEqual(allowanceModuleRailRetired('account').body)
-      expect(intentReads).toBe(1)
-      expect(findCall(/INSERT INTO payment_intents/)).toBeUndefined()
     })
   })
 
@@ -1247,326 +981,6 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(404)
     expect(response.json()).toEqual({ error: 'Payment or approval request not found' })
-  })
-
-  // #1986 (epic #1440 slice 3): the legacy AllowanceModule rail is retired,
-  // and it was the only rail that ever fed the approval queue — an
-  // over-allowance payment on a retired legacy-rail account gets 410
-  // fail-closed instead of a queued approval. Machinery and this case are
-  // scheduled for deletion in #1987.
-  describe('Safe rail retired (#1986) — authorize: over-allowance approval-queue path on the legacy rail', () => {
-    it('authorizeMachinePayment queues over-allowance payments for approval with rail metadata', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1n })
-
-      primeDb(
-        existingIntent(null),
-        existingApproval(null),
-        RAIL_LEGACY,
-        allowanceConfigured(true),
-        insertApproval({
-          id: 'approval-123',
-          status: 'pending',
-          token_symbol: 'USDC',
-          amount_human: '0.01',
-          expires_at: '2099-01-02T00:00:00.000Z',
-          tx_hash: null,
-          machine_challenge_id: challenge.challengeId,
-          payment_rail: 'mpp_demo',
-        }),
-      )
-
-      const result = await authorizeMachinePayment({
-        agent: AGENT,
-        rail: 'mpp_demo',
-        resourceUrl: challenge.resource,
-        payTo: challenge.recipient,
-        merchantPayTo: challenge.recipient,
-        amountAtomic: challenge.amount.atomic,
-        asset: challenge.asset.address,
-        chainId: challenge.network.chainId,
-        description: challenge.description,
-        challengeId: challenge.challengeId,
-        idempotencyKey: 'mpp_demo:test',
-        metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
-      })
-
-      // #1986: 410 fail-closed, nothing queued. Was: 202 pending_approval
-      // with a manufactured approval_requests row.
-      expect(result.statusCode).toBe(410)
-      expect(result.body).toEqual(allowanceModuleRailRetired('account').body)
-      expect(findCall(/INSERT INTO approval_requests/)).toBeUndefined()
-    })
-  })
-
-  it('authorizeMachinePayment returns a specific response for rejected approval retries', async () => {
-    primeDb(
-      existingIntent(null),
-      existingApproval({
-        id: 'approval-123',
-        status: 'rejected',
-        token_symbol: 'USDC',
-        amount_human: '0.01',
-        expires_at: '2099-01-02T00:00:00.000Z',
-        tx_hash: null,
-        machine_challenge_id: challenge.challengeId,
-        payment_rail: 'mpp_demo',
-      }),
-    )
-
-    const result = await authorizeMachinePayment({
-      agent: AGENT,
-      rail: 'mpp_demo',
-      resourceUrl: challenge.resource,
-      payTo: challenge.recipient,
-      merchantPayTo: challenge.recipient,
-      amountAtomic: challenge.amount.atomic,
-      asset: challenge.asset.address,
-      chainId: challenge.network.chainId,
-      description: challenge.description,
-      challengeId: challenge.challengeId,
-      idempotencyKey: 'mpp_demo:test',
-      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
-    })
-
-    expect(result.statusCode).toBe(409)
-    expect(result.body).toMatchObject({
-      payment_id: 'approval-123',
-      status: 'rejected',
-      error: 'Payment was rejected by the account owner',
-    })
-  })
-
-  it('authorizeMachinePayment rejects malformed MPP payTo before allowance, hash, or execution work', async () => {
-    const result = await authorizeMachinePayment({
-      agent: AGENT,
-      rail: 'mpp_demo',
-      resourceUrl: challenge.resource,
-      payTo: 'not-an-address',
-      merchantPayTo: challenge.recipient,
-      amountAtomic: challenge.amount.atomic,
-      asset: challenge.asset.address,
-      chainId: challenge.network.chainId,
-      description: challenge.description,
-      challengeId: challenge.challengeId,
-      idempotencyKey: 'mpp_demo:test',
-      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
-    })
-
-    expect(result).toEqual({
-      statusCode: 400,
-      body: { error: 'Valid payTo address is required' },
-    })
-    expect(mockQuery).not.toHaveBeenCalled()
-    expectNoAuthorizationWork()
-  })
-
-  it('rejects malformed MPP merchantPayTo before allowance, hash, or execution work', async () => {
-    const result = await authorizeMachinePayment({
-      agent: AGENT,
-      rail: 'mpp_demo',
-      resourceUrl: challenge.resource,
-      payTo: RECIPIENT,
-      merchantPayTo: 'not-an-address',
-      amountAtomic: challenge.amount.atomic,
-      asset: challenge.asset.address,
-      chainId: challenge.network.chainId,
-      description: challenge.description,
-      challengeId: challenge.challengeId,
-      idempotencyKey: 'mpp_demo:test',
-      metadata: {
-        ...challenge.metadata,
-        protocol: 'mpp',
-        network: challenge.network.name,
-        description: challenge.description,
-      },
-    })
-
-    expect(result).toEqual({
-      statusCode: 400,
-      body: { error: 'Valid merchantPayTo address is required' },
-    })
-    expect(mockQuery).not.toHaveBeenCalled()
-    expectNoAuthorizationWork()
-  })
-
-  // #1986 (epic #1440 slice 3): the legacy AllowanceModule rail is retired.
-  // This describe block characterizes the one-shot authorize+execute path
-  // (signature recovery, ordering, execution, terminal-state races) — ALL
-  // of it is legacy-rail-only orchestration that a retired rail can no
-  // longer reach. Machinery and these cases are scheduled for deletion in
-  // #1987.
-  describe('Safe rail retired (#1986) — authorize: one-shot signature/execution path on the legacy rail', () => {
-    it('authorizeMachinePayment rejects signatures from the wrong delegate', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
-      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
-      allowanceMocks.recoverSigner.mockReturnValueOnce('0x0000000000000000000000000000000000000001')
-
-      primeDb(
-        existingIntent(null),
-        existingApproval(null),
-        RAIL_LEGACY,
-        allowanceConfigured(true),
-        insertIntent(pendingIntent()),
-      )
-
-      const result = await authorizeMachinePayment({
-        agent: AGENT,
-        rail: 'mpp_demo',
-        resourceUrl: challenge.resource,
-        payTo: challenge.recipient,
-        merchantPayTo: challenge.recipient,
-        amountAtomic: challenge.amount.atomic,
-        asset: challenge.asset.address,
-        chainId: challenge.network.chainId,
-        description: challenge.description,
-        challengeId: challenge.challengeId,
-        idempotencyKey: 'mpp_demo:test',
-        metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
-        signature: '0xsig',
-      })
-
-      // #1986: the rail refusal fires before signature recovery even runs.
-      // Was: 403 "Signature does not match delegate address".
-      expect(result.statusCode).toBe(410)
-      expect(result.body).toEqual(allowanceModuleRailRetired('account').body)
-      expect(allowanceMocks.recoverSigner).not.toHaveBeenCalled()
-      expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
-    })
-
-    it('authorizeMachinePayment records one-shot signatures without marking the payment submitted before execution', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
-      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
-      allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-      allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
-      fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0.01, eur: 0.01 })
-
-      primeDb(
-        existingIntent(null),
-        existingApproval(null),
-        RAIL_LEGACY,
-        allowanceConfigured(true),
-        insertIntent(pendingIntent()),
-        recordSignature(true),
-        confirm(true),
-      )
-
-      const result = await authorizeMachinePayment({
-        agent: AGENT,
-        rail: 'mpp_demo',
-        resourceUrl: challenge.resource,
-        payTo: challenge.recipient,
-        merchantPayTo: challenge.recipient,
-        amountAtomic: challenge.amount.atomic,
-        asset: challenge.asset.address,
-        chainId: challenge.network.chainId,
-        description: challenge.description,
-        challengeId: challenge.challengeId,
-        idempotencyKey: 'mpp_demo:test',
-        metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
-        signature: '0xsig',
-      })
-
-      // #1986: the one-shot ordering invariant this test characterized (sign
-      // durably recorded before on-chain execution) can no longer run on a
-      // retired-rail account — 410 fail-closed, nothing signed, nothing
-      // executed. Was: 201 with a confirmed, executed payment.
-      expect(result.statusCode).toBe(410)
-      expect(result.body).toEqual(allowanceModuleRailRetired('account').body)
-      expect(findCall(/SET signature = \$1, signed_at = NOW\(\)/)).toBeUndefined()
-      expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
-      expect(findCall(/SET status = 'confirmed'/)).toBeUndefined()
-    })
-
-    it('authorizeMachinePayment does not overwrite one-shot terminal state after execution failures', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
-      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
-      allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-      allowanceMocks.executeAllowanceTransfer.mockRejectedValueOnce(new Error('relayer unavailable'))
-
-      primeDb(
-        existingIntent(null),
-        existingApproval(null),
-        RAIL_LEGACY,
-        allowanceConfigured(true),
-        insertIntent(pendingIntent()),
-        recordSignature(true),
-      )
-
-      const result = await authorizeMachinePayment({
-        agent: AGENT,
-        rail: 'mpp_demo',
-        resourceUrl: challenge.resource,
-        payTo: challenge.recipient,
-        merchantPayTo: challenge.recipient,
-        amountAtomic: challenge.amount.atomic,
-        asset: challenge.asset.address,
-        chainId: challenge.network.chainId,
-        description: challenge.description,
-        challengeId: challenge.challengeId,
-        idempotencyKey: 'mpp_demo:test',
-        metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
-        signature: '0xsig',
-      })
-
-      // #1986: the execution-failure recovery this test characterized never
-      // runs — the rail refusal fires first, before execution is even
-      // attempted. Was: 502 "On-chain execution failed" with the intent
-      // flipped to 'failed'.
-      expect(result.statusCode).toBe(410)
-      expect(result.body).toEqual(allowanceModuleRailRetired('account').body)
-      expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
-      expect(findCall(/SET status = 'failed'/)).toBeUndefined()
-    })
-
-    it('authorizeMachinePayment does not record evidence when a one-shot confirmation loses a terminal-state race', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
-      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
-      allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-      allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
-      fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0.01, eur: 0.01 })
-
-      primeDb(
-        existingIntent(null),
-        existingApproval(null),
-        RAIL_LEGACY,
-        allowanceConfigured(true),
-        insertIntent(pendingIntent()),
-        recordSignature(true),
-        confirm(false), // lost the terminal-state race
-        intentStatus('confirmed'),
-      )
-
-      const result = await authorizeMachinePayment({
-        agent: AGENT,
-        rail: 'mpp_demo',
-        resourceUrl: challenge.resource,
-        payTo: challenge.recipient,
-        merchantPayTo: challenge.recipient,
-        amountAtomic: challenge.amount.atomic,
-        asset: challenge.asset.address,
-        chainId: challenge.network.chainId,
-        description: challenge.description,
-        challengeId: challenge.challengeId,
-        idempotencyKey: 'mpp_demo:test',
-        metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
-        signature: '0xsig',
-      })
-
-      // #1986: the terminal-state race this test characterized never
-      // happens — execution never runs, so there is nothing to race. 410
-      // fail-closed. Was: 409 "Payment intent changed after on-chain
-      // execution" with executeAllowanceTransfer having been called once.
-      expect(result.statusCode).toBe(410)
-      expect(result.body).toEqual(allowanceModuleRailRetired('account').body)
-      expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
-      expect(sqlCalls().some((c) => /SET status = 'confirmed'/.test(c.sql))).toBe(false)
-      expect(sqlCalls().some((c) => /machine_payment_evidence/.test(c.sql))).toBe(false)
-    })
   })
 
   it('records a reconciliation event for confirmed payments rejected by the merchant retry', async () => {

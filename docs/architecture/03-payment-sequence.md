@@ -4,7 +4,6 @@ status: current
 covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/rails/allowance-module.ts
-  - packages/backend/src/domain/payment-coverage.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/approvals.ts
   - packages/backend/src/routes/agent-delegations.ts
@@ -18,7 +17,7 @@ covers:
   - packages/backend/src/domain/chains.ts
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-08-24" # #1986: the deferral in the prior note is now DISCHARGED — the payment-path 410 landed, so the legacy sequence and the over-allowance approval branch no longer run and the banner says so; diagram kept as history (code deleted by #1987/#1988). The delegation-rail branch re-read against the diff and unchanged, and the read paths it does not describe are unaffected. Prior: #1984: "import-only" corrected. The SEQUENCE itself is untouched and deliberately so — an existing allowance_module account still pays exactly as drawn; the payment-path 410 is slice #1986, not this one. Prior: #1199: signer-removal recovery change re-verified; payment sequence unchanged
+last-verified: "2026-08-24" # #1987: the two "the code is still present and is deleted by #1987" banners were future-tense and are now FALSE — the execution half is deleted, so both are rewritten in the past tense and `runLegacyAuthorize` is named as gone rather than as a live landmark. The diagrams themselves are unchanged historical record. Prior: #1986: the deferral in the prior note is now DISCHARGED — the payment-path 410 landed, so the legacy sequence and the over-allowance approval branch no longer run and the banner says so; diagram kept as history (code deleted by #1987/#1988). The delegation-rail branch re-read against the diff and unchanged, and the read paths it does not describe are unaffected. Prior: #1984: "import-only" corrected. The SEQUENCE itself is untouched and deliberately so — an existing allowance_module account still pays exactly as drawn; the payment-path 410 is slice #1986, not this one. Prior: #1199: signer-removal recovery change re-verified; payment sequence unchanged
 ---
 
 # Haven — Payment Execution Sequence
@@ -43,8 +42,12 @@ Source of truth: [packages/backend/src/routes/payments.ts](../../packages/backen
 > end too: `POST /approvals/:id/approve` and `/proposed` refuse
 > unconditionally, because every `approval_requests` row is a legacy-rail
 > artifact. The diagram is kept as the record of what the rail DID, because
-> the code implementing it is still present and is deleted by #1987/#1988 —
-> read it as history, not as behaviour you can invoke.
+> the code implementing it **has now been deleted** — the execution half by
+> #1987 (the AllowanceModule transfer, transfer-hash generation, ECDSA
+> signature recovery and the allowance-nonce coordinator), with the Safe
+> deploy/exec/approver ROUTES still to go in #1988. Read it as history: it is
+> not behaviour you can invoke, and it is no longer behaviour you could find
+> in the tree.
 >
 > **What still works for one of these accounts:** every READ. Balances,
 > transaction history, the accounts list, rename, re-default, unlink,
@@ -192,9 +195,11 @@ branches on the agent's execution rail.
 
 **Legacy AllowanceModule rail — RETIRED (#1986); the funding leg below no
 longer executes.** `POST /x402/authorize` and `POST /x402` answer HTTP 410
-above `runLegacyAuthorize`, so the Safe→delegate funding transfer never runs
-and the delegate never takes a hot balance for this rail. Kept as the record
-of what it did (deleted by #1987): it shared the payment/approval writers and
+before the legacy authorize path could run, so the Safe→delegate funding
+transfer never runs and the delegate never takes a hot balance for this rail.
+The path itself — `runLegacyAuthorize` in `modules/x402/legacy-authorize.ts` —
+was **deleted by #1987**; the 410 above it remains. Kept as the record of what
+it did: it shared the payment/approval writers and
 the AllowanceModule execution primitive, but its funding semantics differed:
 
 - Token and chain come from the merchant challenge and must match the agent's

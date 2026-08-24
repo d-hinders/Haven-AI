@@ -3795,7 +3795,14 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': { ...errorResponse, description: "Not found, not the caller's, already actioned, or expired — deliberately one answer." },
-          '410': { ...errorResponse, description: 'The request belongs to a retired rail: readable and rejectable, never approvable.' },
+          '410': {
+            ...errorResponse,
+            description:
+              'ALWAYS, since #1986. Every approval request is an AllowanceModule-rail artifact ' +
+              '(the delegation rail has no approval queue), and that rail is retired — so a ' +
+              'queued approval is readable and rejectable, never approvable. The refusal runs ' +
+              'before the lookup, so a missing request gets this too rather than a 404.',
+          },
         },
       },
     },
@@ -3827,7 +3834,13 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
-          '410': { ...errorResponse, description: 'Retired rail.' },
+          '410': {
+            ...errorResponse,
+            description:
+              'ALWAYS, since #1986 — same unconditional refusal as /approve. Closing /approve ' +
+              'alone would leave a row that was already approved before the retirement able to ' +
+              'advance to co-signing.',
+          },
         },
       },
     },
@@ -4846,6 +4859,7 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '403': errorResponse,
+          '410': { ...errorResponse, description: 'A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid.' },
           '502': errorResponse,
         },
       },
@@ -4912,7 +4926,13 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '409': errorResponse,
-          '410': errorResponse,
+          '410': {
+            ...errorResponse,
+            description:
+              'The intent is pinned to a retired rail — the AllowanceModule rail (#1986) or the ' +
+              'session rail (#834) — or it has expired. A retired-rail intent is refused before ' +
+              'the expiry flip, so nothing is written.',
+          },
           '502': errorResponse,
         },
       },
@@ -5018,7 +5038,7 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '409': errorResponse,
-          '410': errorResponse,
+          '410': { ...errorResponse, description: 'A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid.' },
           '429': errorResponse,
           '502': errorResponse,
         },
@@ -5171,7 +5191,12 @@ export const openapiSpec = {
           '403': agentAuthForbidden,
           '410': {
             ...errorResponse,
-            description: 'The account is on the retired session rail — no state is read (#993 fail-closed contract).',
+            description:
+              'The account is on the retired SESSION rail — no state is read (#993 fail-closed ' +
+              'contract). Deliberately NOT extended to the Safe / AllowanceModule rail by #1986: ' +
+              'this endpoint REPORTS spend authority rather than exercising any, and the ' +
+              'retirement keeps accounts and history readable. The refusal belongs on the spend ' +
+              'paths, and that is where it is.',
           },
           '502': errorResponse,
         },
@@ -5351,7 +5376,10 @@ export const openapiSpec = {
             },
           },
           '410': {
-            description: 'Idempotent replay of a request whose payment has expired.',
+            description:
+              'Either the account is on a retired rail — the Safe / AllowanceModule rail (#1986) ' +
+              'or the session rail (#834), refused before any intent or approval row is written — ' +
+              'or this is an idempotent replay of a request whose payment has expired.',
             content: {
               'application/json': {
                 schema: { type: 'object', additionalProperties: true },

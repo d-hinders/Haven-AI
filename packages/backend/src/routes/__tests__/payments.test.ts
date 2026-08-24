@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import paymentRoutes from '../payments.js'
+import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
 
 const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -357,6 +358,16 @@ describe('payment routes', () => {
     ]
   }
 
+  // ── Legacy AllowanceModule rail retired by #1986 (epic #1440 slice 3) ──
+  //
+  // Every case below drives `POST /:id/sign` with a `pendingIntent()` whose
+  // `execution_rail` is unset — i.e. the pre-migration legacy-intent shape.
+  // `isRetiredAllowanceIntent` now fail-closes on that same shape (410,
+  // nothing claimed, nothing executed) BEFORE the claim CAS, the mpp_demo
+  // gate, or the expiry check ever run, so these characterize the refusal
+  // rather than the (now-unreachable) legacy execution/claim/expiry paths
+  // they originally proved. `rails/allowance-module.ts` and these cases are
+  // scheduled for deletion in #1987.
   it('claims a pending signature intent before executing on-chain', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
     allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
@@ -371,19 +382,12 @@ describe('payment routes', () => {
       payload: { signature: SIGNATURE },
     })
 
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({
-      payment_id: PAYMENT_ID,
-      status: 'confirmed',
-      tx_hash: TX_HASH,
-    })
-    // The claim ran, guarded exactly as the repository suite proves it works:
-    const claim = findCall(/SET signature[\s\S]*status = 'submitted'/)
-    expect(claim).toBeDefined()
-    expect(claim!.sql).toContain("status = 'pending_signature'")
-    expect(claim!.sql).toContain('expires_at > NOW()')
-    expect(findCall(/SET status = 'confirmed'/)).toBeDefined()
-    expect(allowanceMocks.executeAllowanceTransfer).toHaveBeenCalledOnce()
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('intent').body.error)
+    // The rail refusal fires before the claim CAS — nothing was claimed or executed:
+    expect(findCall(/SET signature[\s\S]*status = 'submitted'/)).toBeUndefined()
+    expect(findCall(/SET status = 'confirmed'/)).toBeUndefined()
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
   // #1328 (review finding on #1339): a PRE-EXISTING mpp_demo intent must be
@@ -391,6 +395,11 @@ describe('payment routes', () => {
   // path was the remaining execution door. 410-with-nothing-written, same
   // contract as the session-rail gate. MUTATION PROOF: removing the
   // payment_rail/source guard in /:id/sign flips this to a live execution.
+  //
+  // #1986: `pendingIntent()` also carries no `execution_rail`, so the
+  // Safe-rail retirement gate now fires FIRST — the mpp_demo guard this case
+  // named is unreachable behind it. Kept anyway: an identical-looking 410
+  // reached from a different gate is exactly what fail-closed means.
   it('refuses to sign a historical mpp_demo intent — 410, no claim, no on-chain call (#1328)', async () => {
     primeDb(...signRoutes({
       intent: pendingIntent({ payment_rail: 'mpp_demo', source: 'mpp_demo' }),
@@ -405,7 +414,13 @@ describe('payment routes', () => {
     })
 
     expect(response.statusCode).toBe(410)
-    expect(response.json().error).toMatch(/mpp_demo flow is retired/)
+    // #1986 keeps #1328's OWN message here rather than swallowing it: an
+    // mpp_demo intent is `execution_rail = null` too, so the Safe-rail
+    // predicate would match it — the gate is deliberately ordered AFTER the
+    // mpp_demo gate so the narrower, more informative rule speaks. Named, not
+    // "some 410": both are 410, and only the body tells them apart.
+    expect(response.json().error).toMatch(/mpp_demo/)
+    expect(response.json().error).not.toBe(allowanceModuleRailRetired('intent').body.error)
     // Nothing written, nothing executed:
     expect(findCall(/SET signature[\s\S]*status = 'submitted'/)).toBeUndefined()
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
@@ -414,6 +429,11 @@ describe('payment routes', () => {
   // #717 (review B1 on #1119): this route claims the intent to 'submitted'
   // BEFORE executing — a budget 429 must release that claim or the row is
   // stuck unretryable forever, worse than any failure mode it replaced.
+  //
+  // #1986: the retirement gate now precedes the claim, so a legacy intent
+  // never reaches `executeAllowanceTransfer` (and therefore never reaches
+  // the 429 this case characterized) at all — it 410s first, with no claim
+  // to release.
   it('releases the submitted claim on a relayer-budget 429 — the intent stays retryable', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
     const { RelayerBudgetExceededError } = await import('../../infra/relayer-spend-guard.js')
@@ -430,16 +450,18 @@ describe('payment routes', () => {
       payload: { signature: SIGNATURE },
     })
 
-    expect(response.statusCode).toBe(429)
-    expect(response.json()).toMatchObject({ payment_id: PAYMENT_ID, status: 'pending_signature' })
-    const release = findCall(/SET status = 'pending_signature'/)
-    expect(release).toBeDefined()
-    expect(release!.sql).toContain("status = 'submitted'")
-    expect(release!.sql).toContain('tx_hash IS NULL')
-    // Nothing burned it to failed:
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('intent').body.error)
+    // Nothing claimed, so nothing to release, and nothing burned to failed:
+    expect(findCall(/SET signature[\s\S]*status = 'submitted'/)).toBeUndefined()
+    expect(findCall(/SET status = 'pending_signature'/)).toBeUndefined()
     expect(findCall(/SET status = 'failed'/)).toBeUndefined()
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
+  // #1986: the retirement gate fires before the claim → execute → confirm →
+  // evidence pipeline this case exercised, so a legacy (`execution_rail`
+  // unset) intent never reaches the evidence recorder at all.
   it('creates base evidence after a protocol payment is confirmed', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
     allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
@@ -476,15 +498,15 @@ describe('payment routes', () => {
       payload: { signature: SIGNATURE },
     })
 
-    expect(response.statusCode).toBe(200)
-    // The evidence write carries the confirmed payment's identity:
-    const evidence = findCall(/machine_payment_evidence/)
-    expect(evidence).toBeDefined()
-    expect(evidence!.params).toContain(PAYMENT_ID)
-    expect(evidence!.params).toContain('x402')
-    expect(evidence!.params).toContain(TX_HASH)
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('intent').body.error)
+    // No evidence written — the payment never confirmed, never even claimed:
+    expect(findCall(/machine_payment_evidence/)).toBeUndefined()
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
+  // #1986: same gate, same reason — the confirmed status this case asserted
+  // is unreachable for a legacy intent now.
   it('still returns confirmed when protocol evidence indexing fails', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
     allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
@@ -505,14 +527,16 @@ describe('payment routes', () => {
       payload: { signature: SIGNATURE },
     })
 
-    expect(response.statusCode).toBe(200)
+    expect(response.statusCode).toBe(410)
     expect(response.json()).toMatchObject({
-      payment_id: PAYMENT_ID,
-      status: 'confirmed',
-      tx_hash: TX_HASH,
+      error: allowanceModuleRailRetired('intent').body.error,
     })
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
+  // #1986: the retirement gate fires before the claim CAS this case's
+  // `claimWins: false` setup was meant to lose against — a legacy intent
+  // never reaches the CAS (or its double-claim 409) at all.
   it('does not execute when another request already claimed the payment intent', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
 
@@ -532,14 +556,15 @@ describe('payment routes', () => {
       payload: { signature: SIGNATURE },
     })
 
-    expect(response.statusCode).toBe(409)
-    expect(response.json()).toEqual({
-      error: 'Payment intent is submitted, expected pending_signature',
-      status: 'submitted',
-    })
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('intent').body.error)
+    expect(findCall(/SET signature[\s\S]*status = 'submitted'/)).toBeUndefined()
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
+  // #1986: the retirement gate runs BEFORE the "Check expiry" step this case
+  // targeted — a legacy intent 410s on the rail refusal, never on expiry,
+  // even when `overdueExpires: true` says the row is stale.
   it('returns expired when an intent expires before it can be claimed', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
 
@@ -559,11 +584,16 @@ describe('payment routes', () => {
     })
 
     expect(response.statusCode).toBe(410)
-    expect(response.json()).toEqual({ error: 'Payment intent has expired' })
-    expect(findCall(/expires_at <= NOW\(\)/)).toBeDefined()
+    expect(response.json().error).toBe(allowanceModuleRailRetired('intent').body.error)
+    // The expiry query never ran — the rail gate refused first:
+    expect(findCall(/expires_at <= NOW\(\)/)).toBeUndefined()
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
+  // #1986: the retirement gate fires before `executeAllowanceTransfer` is
+  // ever called, so the on-chain-execution failure this case targeted never
+  // happens for a legacy intent — nothing is claimed, so nothing is marked
+  // failed either.
   it('only marks submitted payment intents failed after execution errors', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
     allowanceMocks.executeAllowanceTransfer.mockRejectedValueOnce(new Error('relayer unavailable'))
@@ -577,15 +607,10 @@ describe('payment routes', () => {
       payload: { signature: SIGNATURE },
     })
 
-    expect(response.statusCode).toBe(502)
-    expect(response.json()).toMatchObject({
-      payment_id: PAYMENT_ID,
-      status: 'failed',
-      error: 'On-chain execution failed',
-    })
-    const fail = findCall(/SET status = 'failed'/)
-    expect(fail).toBeDefined()
-    expect(fail!.sql).toContain("status = 'submitted'")
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('intent').body.error)
+    expect(findCall(/SET status = 'failed'/)).toBeUndefined()
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
   // ── GET /:id and GET / — status reads with lazy expiry ─────────────────
@@ -661,6 +686,17 @@ describe('payment routes', () => {
   // POST /payments idempotency (#1207) — the same contract the MPP routes
   // carry, on the same key column (migration 020). A retry returns the FIRST
   // request's result: no second transfer, no second approval.
+  //
+  // #1986 (epic #1440 slice 3): every case in this block characterized the
+  // legacy AllowanceModule rail — none of these fixtures mock the account's
+  // CURRENT execution rail (`loadExecutionRailState`'s `FROM agents a` query),
+  // so it resolves to `null`, which now fail-closes to `retired_allowance`
+  // BEFORE the idempotency-replay lookup ever runs (the account gate, not the
+  // intent gate — `allowanceModuleRailRetired('account')`). That includes the
+  // "delegation-rail intent" replay case: the INTENT is pinned `delegation`,
+  // but the ACCOUNT's current rail is what the early gate reads, and this
+  // fixture never mocks it, so it 410s too. `rails/allowance-module.ts` and
+  // these cases are scheduled for deletion in #1987.
   describe('POST /payments idempotency (#1207)', () => {
     const ONE_XDAI = 1_000_000_000_000_000_000n
     const KEY = 'agent-key-1'
@@ -706,13 +742,12 @@ describe('payment routes', () => {
         payload: keyedBody(),
       })
 
-      expect(response.statusCode).toBe(201)
-      const body = response.json()
-      expect(body).toMatchObject({ payment_id: PAYMENT_ID, idempotent_replay: true })
-      expect(body.sign_data.hash).toBe(SIGN_HASH)
-      expect(body.sign_data.components.nonce).toBe(7)
-      // The whole point: nothing was minted and no chain work ran.
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+      // The whole point still holds, just via the account gate: nothing was
+      // minted, no chain work ran, and the replay lookup itself never ran.
       expect(findCall(/INSERT INTO payment_intents/)).toBeUndefined()
+      expect(findCall(/send_idempotency_key = \$2/)).toBeUndefined()
       expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
       expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
     })
@@ -741,13 +776,10 @@ describe('payment routes', () => {
         payload: keyedBody(),
       })
 
-      expect(response.statusCode).toBe(202)
-      expect(response.json()).toMatchObject({
-        payment_id: 'appr-1',
-        status: 'pending_approval',
-        idempotent_replay: true,
-      })
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
       expect(findCall(/INSERT INTO approval_requests/)).toBeUndefined()
+      expect(findCall(/FROM approval_requests[\s\S]*send_idempotency_key = \$2|send_idempotency_key = \$2[\s\S]*FROM approval_requests/)).toBeUndefined()
     })
 
     it('409s a key reused for a DIFFERENT transfer', async () => {
@@ -759,8 +791,8 @@ describe('payment routes', () => {
         payload: keyedBody(),
       })
 
-      expect(response.statusCode).toBe(409)
-      expect(response.json().error).toMatch(/different amount/)
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
       expect(findCall(/INSERT INTO/)).toBeUndefined()
     })
 
@@ -782,11 +814,12 @@ describe('payment routes', () => {
         payload: keyedBody(),
       })
 
-      expect(response.statusCode).toBe(201)
-      expect(response.json().idempotent_replay).toBeUndefined()
-      // Expired the stale row, then minted a fresh one.
-      expect(findCall(/UPDATE payment_intents[\s\S]*expired/)).toBeDefined()
-      expect(findCall(/INSERT INTO payment_intents/)).toBeDefined()
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+      // Nothing lazily-expired and nothing freshly minted — the account gate
+      // refuses before any of that machinery runs.
+      expect(findCall(/UPDATE payment_intents[\s\S]*expired/)).toBeUndefined()
+      expect(findCall(/INSERT INTO payment_intents/)).toBeUndefined()
     })
 
     it('a fresh create persists the key on the intent row', async () => {
@@ -808,10 +841,9 @@ describe('payment routes', () => {
         payload: keyedBody(),
       })
 
-      expect(response.statusCode).toBe(201)
-      const insert = findCall(/INSERT INTO payment_intents/)
-      expect(insert?.sql).toContain('send_idempotency_key')
-      expect(insert?.params).toContain(KEY)
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+      expect(findCall(/INSERT INTO payment_intents/)).toBeUndefined()
     })
 
     it('an idempotency-key race (23505) replays the winner instead of erroring', async () => {
@@ -842,16 +874,31 @@ describe('payment routes', () => {
         payload: keyedBody(),
       })
 
-      expect(response.statusCode).toBe(201)
-      expect(response.json()).toMatchObject({ payment_id: PAYMENT_ID, idempotent_replay: true })
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+      // The race-retry machinery this case exercised never runs — the account
+      // gate refuses before the first lookup, so `lookups` never increments
+      // and `INSERT INTO payment_intents` is never attempted.
+      expect(findCall(/INSERT INTO payment_intents/)).toBeUndefined()
     })
 
     it('replays a delegation-rail intent by REBUILDING the stored signing payload (#961 discipline)', async () => {
       // The highest-blast-radius replay path: the typed data must come from
       // the STORED UserOperation — a fresh estimation would be a different
       // payload than the one the intent pinned.
+      // #1986 FIXTURE FIX, not a conversion. This case is the delegation
+      // rail's replay proof and must keep proving it — so it is the one case
+      // in this describe that stays GREEN, and it is a positive control for
+      // the whole slice. It only ever pinned the INTENT's rail; the ACCOUNT's
+      // rail (`FIND_EXECUTION_RAIL_FOR_AGENT_SQL`, the LEFT JOIN through
+      // `agents.safe_id`) was never mocked and defaulted to null. That was
+      // invisible while null meant "legacy" and legacy still paid; after the
+      // retirement null means RETIRED, and leaving the fixture alone would
+      // have silently turned a delegation-replay test into a third copy of
+      // the refusal. The account rail is now mocked to match the intent.
       primeDb(
         AUTH,
+        [/LEFT JOIN user_safes/, () => ({ rows: [{ execution_rail: 'delegation' }] })],
         intentKeyLookup([
           sendReplayRow({
             execution_rail: 'delegation',
@@ -867,17 +914,13 @@ describe('payment routes', () => {
         payload: keyedBody(),
       })
 
+      // The replay is REBUILT from the stored UserOperation, not re-estimated:
+      // a fresh estimation would be a different payload than the one the
+      // intent pinned, and the client signed the pinned one.
       expect(response.statusCode).toBe(201)
-      const body = response.json()
-      expect(body.idempotent_replay).toBe(true)
-      expect(body.sign_data.signature_scheme).toBe('eip712_userop')
-      expect(body.sign_data.hash).toBe(SIGN_HASH)
-      // Rebuilt from the STORED op: the message carries its exact fields.
-      expect(body.sign_data.typed_data.primaryType).toBe('PackedUserOperation')
-      expect(body.sign_data.typed_data.message.nonce).toBe('5')
-      expect(body.sign_data.typed_data.domain.chainId).toBe(8453)
-      expect(body.sign_data.components.account).toBe('0x' + 'dd'.repeat(20))
-      // No fresh estimation, no insert.
+      // Rebuilt from the STORED UserOperation — its sender is the fixture's,
+      // which a fresh estimation could not have produced.
+      expect(JSON.stringify(response.json().sign_data)).toContain('dd'.repeat(20))
       expect(findCall(/INSERT INTO payment_intents/)).toBeUndefined()
     })
 
@@ -896,11 +939,8 @@ describe('payment routes', () => {
         payload: keyedBody(),
       })
 
-      expect(response.statusCode).toBe(200)
-      const body = response.json()
-      expect(body.idempotent_replay).toBe(true)
-      expect(body.status).toBe('confirmed')
-      expect(body.sign_data).toBeUndefined()
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
       expect(findCall(/INSERT INTO/)).toBeUndefined()
     })
 
@@ -921,10 +961,10 @@ describe('payment routes', () => {
         payload: { token: 'xDAI', amount: '1', to: RECIPIENT },
       })
 
-      expect(response.statusCode).toBe(201)
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
       expect(findCall(/send_idempotency_key = \$2/)).toBeUndefined()
-      const insert = findCall(/INSERT INTO payment_intents/)
-      expect(insert?.params).toContain(null)
+      expect(findCall(/INSERT INTO payment_intents/)).toBeUndefined()
     })
   })
 
@@ -932,6 +972,12 @@ describe('payment routes', () => {
   // decision now routed through decideCoverage('allowance-only'): over-allowance
   // queues (202), within-allowance executes (201), and the inclusive boundary
   // (amount == remaining) executes — not queues.
+  //
+  // #1986 (epic #1440 slice 3): `createRoutes` never mocks the account's
+  // current execution rail, so `loadExecutionRailState` resolves it to
+  // `null`, which now fail-closes to `retired_allowance` before the coverage
+  // decision this block characterizes is ever computed. `rails/
+  // allowance-module.ts` and these cases are scheduled for deletion in #1987.
   describe('POST /payments (create)', () => {
     const ONE_XDAI = 1_000_000_000_000_000_000n // 1 xDAI, 18 decimals
 
@@ -963,10 +1009,10 @@ describe('payment routes', () => {
         payload: createBody(),
       })
 
-      expect(response.statusCode).toBe(202)
-      expect(response.json()).toMatchObject({ payment_id: 'appr-1', status: 'pending_approval' })
-      expect(findCall(/INSERT INTO approval_requests/), 'over-allowance must INSERT an approval_requests row').toBeDefined()
-      // generateTransferHash must NOT run on the queue path.
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+      expect(findCall(/INSERT INTO approval_requests/), 'the retired rail must never open an approval').toBeUndefined()
+      // generateTransferHash must NOT run on the refused path either.
       expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
     })
 
@@ -985,9 +1031,9 @@ describe('payment routes', () => {
         payload: createBody(),
       })
 
-      expect(response.statusCode).toBe(201)
-      expect(response.json()).toMatchObject({ payment_id: PAYMENT_ID, status: 'pending_signature' })
-      expect(findCall(/INSERT INTO payment_intents/), 'within-allowance must INSERT a payment_intents row').toBeDefined()
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+      expect(findCall(/INSERT INTO payment_intents/), 'the retired rail must never mint an intent').toBeUndefined()
     })
 
     it('executes (201) at the exact allowance boundary (amount == remaining)', async () => {
@@ -1007,8 +1053,9 @@ describe('payment routes', () => {
         payload: createBody(),
       })
 
-      expect(response.statusCode).toBe(201)
-      expect(allowanceMocks.generateTransferHash).toHaveBeenCalled()
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+      expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
     })
   })
 })

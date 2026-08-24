@@ -140,6 +140,10 @@ Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../
 
 1. Review the complete candidate change against `origin/dev`, including staged changes, unstaged tracked changes, and untracked files. If review happens after committing, inspect `git diff origin/dev...HEAD` and separately inspect any later working-tree changes. Never use a committed range that omits the current candidate diff. Use the reviewer role from [haven-agent-workflow](../haven-agent-workflow/SKILL.md); delegate to an independent reviewer when supported, otherwise perform a distinct findings-first review pass. **For `area:frontend` diffs, run a second, rendered pass** with the [design-reviewer role](../haven-agent-workflow/references/design-reviewer.md) (`haven-design-reviewer`) over the #896 screenshots — code review and visual review are complementary, and a finding from either trips the frontend merge gate (see [`frontend.md`](../../../docs/contributing/ship-playbooks/frontend.md) §5–6).
 2. Apply clear, scoped blocking and should-fix findings, then rerun affected checks.
+   **A fixed finding is not a cleared finding until the same reviewer says so.** Re-run the
+   pass that raised it over the *fixed* diff — for `haven-design-reviewer`, over freshly
+   captured screenshots of the changed surface, not the ones the finding was raised on.
+   The author asserting "addressed" is not a reviewer verdict and never substitutes for one.
 3. Ask the user before applying ambiguous architectural, product, security, money-movement, authorization, or schema findings.
 4. Record applied and deferred findings with reasons. When a deferred finding is filed
    as its own issue **and must land before something already queued**, write
@@ -183,7 +187,9 @@ Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../
    - intentionally excluded work;
    - generated-artifact and handoff impact;
    - CASP/MiCA status when applicable;
-   - review findings and resolution;
+   - review findings and resolution, including the **named verdict line for every pass**
+     (`haven-reviewer: passed | skipped because ___`, and on `area:frontend` the same for
+     `haven-design-reviewer`) — an unfilled line blocks the merge gate below;
    - merge readiness: CI, local checks, review status, risk, why safe, residual risk, and merge order.
 7. Include `Closes #<issue>`.
 8. Monitor pull-request activity when the client supports it.
@@ -286,10 +292,21 @@ review confirms zero behavioral change — say so explicitly in the PR.
 
 Classification drives the **playbook and the testing bar**, not a merge pause. A money-path diff still loads `money.md`, still needs characterization tests before existing behavior changes, and still states its classification in the pull-request body.
 
+**Before arming anything, the reviewer verdict has to be written down.** Do not enable
+auto-merge while the pull request's `haven-reviewer:` line is unfilled — a filled
+`skipped because <reason>` is enough to proceed, a blank is not. The point is that a
+skipped pass leaves a trace a human can argue with, not that skipping is forbidden;
+`AGENTS.md` § *Run `haven-reviewer` on every pull request* is why the default is "ran".
+
 Route the merge:
 
 - **Migration:** leave the pull request for independent code-owner approval and merge (`.github/CODEOWNERS`). The author's own approval does not satisfy it.
-- **Frontend UI:** if either review pass flags a UX, copy, or design-system concern, ask the user before enabling auto-merge.
+- **Frontend UI:** a UX, copy, or design-system finding from either review pass pauses
+  auto-merge. Clearing it does **not** need a second human ack (#1968): fix the finding,
+  re-run the pass that raised it over fresh rendered evidence, and a clean re-review
+  re-arms auto-merge on its own. Ask the user in the three cases a re-review does not
+  cover — the re-review raises a **new** finding, the finding is being **deferred or
+  disputed** rather than fixed, or there is no re-review at all.
 - **Everything else, money-path included:** after local gates pass and independent review has no blocking or should-fix findings, enable squash auto-merge — `gh pr merge <pr> --auto --squash --delete-branch` right after opening; do not sit in a poll loop waiting.
 
 Merge method, stated once because the two rules cross-contaminate: **feature → dev

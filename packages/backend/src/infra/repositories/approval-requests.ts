@@ -281,21 +281,11 @@ export const FIND_MACHINE_APPROVAL_BY_KEY_OR_CHALLENGE_SQL = `SELECT id, chain_i
      ORDER BY created_at DESC
      LIMIT 1`
 
-export async function findMachineApprovalByKeyOrChallenge(
-  agentId: string,
-  idempotencyKey: string | null,
-  challengeId: string | null,
-  rail: string,
-  db: Executor = pool,
-): Promise<MachineApprovalRow | null> {
-  const result = await db.query<MachineApprovalRow>(FIND_MACHINE_APPROVAL_BY_KEY_OR_CHALLENGE_SQL, [
-    agentId,
-    idempotencyKey,
-    challengeId,
-    rail,
-  ])
-  return result.rows[0] ?? null
-}
+// #1987 (epic #1440): `findMachineApprovalByKeyOrChallenge` is DELETED — its
+// only caller on `origin/dev` was `modules/mpp/authorize.ts`, removed by this
+// slice. The three INSERT helpers below are equally uncalled but stay as one
+// cluster for #1990; see the note in `payment-intents.ts` for why.
+
 
 // ── Status (lib/agent-payment-status.ts) ─────────────────────────────────────
 

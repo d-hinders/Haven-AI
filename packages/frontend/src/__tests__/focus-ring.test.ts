@@ -104,13 +104,22 @@ const BACKGROUNDS: Record<string, string[]> = {
   // Light product chrome. `brand-soft` is reached via `hover:bg-…-soft` on the
   // several icon buttons that tint on hover while focused.
   //
-  // `warning-soft` is here because a BRAND ring lands on it — the case that is
-  // easy to miss, since the surface is a different semantic tone from the ring:
-  // ApprovalNotifications.tsx's bell is `bg-[var(--v2-warning-soft)]` whenever
-  // `actionableCount > 0`, a static state rather than a hover. It clears the bar
-  // today (3.93:1) and is registered anyway: an unregistered pair is not
-  // "passing", it is UNMEASURED, and would regress silently under any future
-  // palette or alpha change.
+  // `warning-soft` was registered because a BRAND ring landed on it — the case
+  // that is easy to miss, since the surface is a different semantic tone from
+  // the ring. Its named call-site was `ApprovalNotifications.tsx`'s bell
+  // (`bg-[var(--v2-warning-soft)]` whenever `actionableCount > 0`, a static
+  // state rather than a hover), and #1989 DELETED that component with the Safe
+  // rail.
+  //
+  // ⚠️ It is RETAINED, and honestly labelled: I swept all 21 surviving
+  // `bg-[var(--v2-warning-soft)]` call-sites and none of them currently
+  // contains a brand-ring control — they are banners, badges and `Row`/
+  // `StatusBadge` tones. So this pair is a token-level floor with NO verified
+  // live call-site today. It still measures a real contrast ratio (3.93:1) and
+  // still fails loudly if the palette moves, so it is not a guard over the
+  // empty set; what it is not, any more, is evidence that a rendered pairing
+  // passes. Registered-but-uncalled beats deleted: the moment a brand-ring
+  // control lands inside a warning banner, this is already measured.
   //
   // `danger-soft` STAYS, and the reason it nearly did not is the most useful
   // thing in this file.
@@ -119,10 +128,19 @@ const BACKGROUNDS: Record<string, string[]> = {
   // hover while their ring stayed brand. #1792 fixed one and #1809 the other, so
   // #1809 asked for this entry to be deleted as "its last real call-site". That
   // premise was wrong, and a grep could not have shown it: the surviving
-  // call-site is `ApprovalQueue.tsx:289`, whose reject-confirmation panel is a
+  // call-site was `ApprovalQueue.tsx:289`, whose reject-confirmation panel is a
   // `bg-[var(--v2-danger-soft)]` CONTAINER holding a `<Button variant="ghost">`
   // ("Keep request") that carries `ring-brand/80`. Tab to it and a brand ring
   // renders on `danger-soft` at 3.95:1.
+  //
+  // ⚠️ #1989 deleted `ApprovalQueue.tsx` with the Safe rail, so that call-site
+  // is gone too. Same disposition and same honesty as `warning-soft` above: I
+  // swept the surviving `bg-[var(--v2-danger-soft)]` call-sites and none is a
+  // container holding a brand-ring control. RETAINED as a measured token floor,
+  // recorded as having no verified live call-site — the parent-supplied
+  // background is exactly the shape no grep over the control's own classes can
+  // find, so "I could not find one" is weaker evidence here than anywhere else
+  // in this file, which is a second reason not to delete the entry.
   //
   // The background arrives from a PARENT, not from the control's own class
   // string, so every hover-based grep over `hover:bg-[var(--v2-danger-soft)]`
@@ -252,7 +270,7 @@ describe('one focus-ring treatment (#1746)', () => {
   it('offsets, where used at all, are all ring-offset-2', () => {
     // Offset is deliberately NOT universal: `Row` draws `ring-inset` because a
     // full-bleed row would clip an outset ring, and most icon buttons sit in
-    // tight containers. What IS unified is the SIZE — Table/Sidebar/ApprovalQueue
+    // tight containers. What IS unified is the SIZE — Table/Sidebar
     // each used offset-1 against everything else's offset-2 (#1746).
     const offsets = uses
       .filter((u) => /^ring-offset-\d+$/.test(u.utility))
@@ -626,7 +644,8 @@ describe('destructive controls have a focus indicator at all (#1819)', () => {
  * `design-system.md` § *Button-shaped controls that are not `Button`* publishes
  * a grep for controls that copy the FULL base signature, and states its own
  * blind spot: button-shaped controls built from scratch (`CodeBlock`'s copy
- * button, `ApprovalNotifications.tsx`'s styled `next/link`) do not appear,
+ * button; `ApprovalNotifications.tsx`'s styled `next/link` was the second
+ * example until #1989 deleted it) do not appear,
  * because the check classifies by class-string spelling rather than by rendered
  * role. That blind spot is inherited here deliberately — a rule over "everything
  * that looks like a button" would need a classifier nobody has scoped, and #1819

@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: research
 covers:
   - packages/cli/**
-last-verified: "2026-08-10" # weekly #1248 audit: package SHIPPED — status header rewritten to record what was built vs the sketch (Tier A/B live as @haven_ai/cli; Tier C/D unbuilt; no connect code reuse; unplanned SIE export shipped); covers: corrected to the package this doc is actually about
+last-verified: "2026-08-24" # #1988: the Tier-C deep-link sketch cited `/user/safes/:id/approvers/tx` as a live example of a backend that already returns unsigned tx data. #1988 deleted it, so the example is marked historical and the agent-connection-setup flow carries the point. Tier C is still NOT built and nothing else here was re-verified. Prior: weekly #1248 audit: package SHIPPED — status header rewritten to record what was built vs the sketch (Tier A/B live as @haven_ai/cli; Tier C/D unbuilt; no connect code reuse; unplanned SIE export shipped); covers: corrected to the package this doc is actually about
 ---
 
 # Sketch — `haven` CLI (terminal-native parallel to the dashboard)
@@ -93,8 +93,9 @@ Every read command supports `--json` for piping; default output is human-readabl
 Three escalating options; ship the first, design toward the third:
 
 1. **Deep link (P-now).** The CLI calls the backend to create the pending action
-   (it already returns unsigned tx data — e.g. `/user/safes/:id/approvers/tx`,
-   the agent-connection-setup flow) and prints a dashboard URL to finish signing
+   (it already returns unsigned tx data — e.g. the agent-connection-setup flow;
+   `/user/safes/:id/approvers/tx` was the other example until #1988 deleted it
+   with the Safe rail) and prints a dashboard URL to finish signing
    in the browser. Honest, zero new signing surface.
 2. **WalletConnect in terminal (P-later).** `haven connect-wallet` pairs a mobile/
    desktop wallet over WalletConnect; the CLI builds the SafeTx and the wallet

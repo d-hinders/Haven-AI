@@ -20,7 +20,6 @@ import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
-  bindPasskeySignerToSafe,
   bindPasskeyToSafe,
   findPasskeyForSafe,
   findUserPasskeyByCredential,
@@ -149,22 +148,6 @@ describeDb('user-passkeys repository (#1229)', () => {
 
     expect(await bindPasskeyToSafe(mine, credentialId, SAFE_A)).toBe(false)
     expect((await findUserPasskeyByCredential(theirs, BASE, credentialId))?.safe_address).toBeNull()
-  })
-
-  it('binds by signer address case-blind — the approver route knows an address, not a credential', async () => {
-    // An owner change names a checksummed address; the stored one is
-    // lower-cased at enrolment. A case-sensitive comparison here would leave
-    // every backup approver unbound, which is silent until the user needs it.
-    const user = await seedUser()
-    const { credentialId, signerAddress } = await seedPasskey({
-      userId: user,
-      signerAddress: '0x0802e96a6dd7e1dd80620cf5d759d41b714c0ce2',
-    })
-
-    expect(
-      await bindPasskeySignerToSafe(user, BASE, signerAddress.toUpperCase().replace('0X', '0x'), SAFE_A),
-    ).toBe(true)
-    expect((await findUserPasskeyByCredential(user, BASE, credentialId))?.safe_address).toBe(SAFE_A)
   })
 
   it('finds a Safe-bound passkey case-blind, and only for its own Safe', async () => {

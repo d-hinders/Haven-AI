@@ -1,27 +1,18 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  COUNT_SAFES_FOR_USER_SQL,
   FIND_OLDEST_SAFE_FOR_USER_SQL,
   FIND_OWNED_SAFE_ADDRESS_SQL,
   FIND_OWNED_SAFE_DEFAULT_FLAG_SQL,
-  FIND_OWNED_SAFE_SQL,
-  FIND_SAFE_ID_BY_ADDRESS_AND_CHAIN_SQL,
   CLEAR_DEFAULT_SAFES_FOR_USER_SQL,
-  LIST_KNOWN_APPROVERS_FOR_USER_SQL,
   LIST_SAFES_FOR_USER_SQL,
   RENAME_SAFE_FOR_USER_SQL,
   SET_LEGACY_USER_SAFE_ADDRESS_SQL,
-  countSafesForUser,
   deleteSafeForUser,
-  findOwnedSafe,
   findOwnedSafeAddress,
   findOwnedSafeDefaultFlag,
-  findSafeIdByAddressAndChain,
-  listKnownApproversForUser,
   listSafesForUser,
   renameSafeForUser,
   setDefaultSafeForUser,
-  setLegacyUserSafeAddress,
   type Executor,
 } from '../user-safes.js'
 
@@ -40,15 +31,11 @@ describe('tenant scoping is required and effective — cross-tenant access retur
   it('every tenant-scoped statement filters on user_id in SQL', () => {
     for (const sql of [
       LIST_SAFES_FOR_USER_SQL,
-      FIND_SAFE_ID_BY_ADDRESS_AND_CHAIN_SQL,
-      COUNT_SAFES_FOR_USER_SQL,
       FIND_OWNED_SAFE_ADDRESS_SQL,
       FIND_OWNED_SAFE_DEFAULT_FLAG_SQL,
-      FIND_OWNED_SAFE_SQL,
       RENAME_SAFE_FOR_USER_SQL,
       CLEAR_DEFAULT_SAFES_FOR_USER_SQL,
       FIND_OLDEST_SAFE_FOR_USER_SQL,
-      LIST_KNOWN_APPROVERS_FOR_USER_SQL,
     ]) {
       expect(sql).toMatch(/user_id = \$\d/)
     }
@@ -62,21 +49,17 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     expect(await listSafesForUser(OWNER, db)).toHaveLength(1)
   })
 
-  it('findSafeIdByAddressAndChain: duplicate detection is per-tenant', async () => {
-    const db = tenantExecutor({ id: 'safe-1' })
-    expect(await findSafeIdByAddressAndChain(ATTACKER, '0xabc', 8453, db)).toBeNull()
-    expect(await findSafeIdByAddressAndChain(OWNER, '0xabc', 8453, db)).toBe('safe-1')
-  })
-
-  it('countSafesForUser passes the tenant scope as its only parameter', async () => {
-    const query = vi.fn(async () => ({ rows: [{ count: '2' }], rowCount: 1 }))
-    const db = { query } as unknown as Executor
-    expect(await countSafesForUser(OWNER, db)).toBe(2)
-    expect(query).toHaveBeenCalledWith(COUNT_SAFES_FOR_USER_SQL, [OWNER])
-  })
+  // `findSafeIdByAddressAndChain` (import duplicate detection),
+  // `countSafesForUser` (first-Safe-becomes-default), `findOwnedSafe` (the
+  // approver routes' ownership check), `setLegacyUserSafeAddress` and
+  // `listKnownApproversForUser` had per-tenant cases here. All five functions
+  // are deleted with their callers in #1988; a scoping test for a function
+  // that does not exist is a guard over an empty set. The SQL constant
+  // `SET_LEGACY_USER_SAFE_ADDRESS_SQL` survives — re-default and unlink still
+  // issue it — and its parameter scoping is still pinned below, at the two
+  // transaction functions that are its remaining callers.
 
   it.each([
-    ['findOwnedSafe', findOwnedSafe],
     ['findOwnedSafeAddress', findOwnedSafeAddress],
     ['findOwnedSafeDefaultFlag', findOwnedSafeDefaultFlag],
   ] as const)('%s: another tenant gets null for an existing safe', async (_name, fn) => {
@@ -91,18 +74,6 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     expect(await renameSafeForUser('X', 'safe-1', OWNER, db)).not.toBeNull()
   })
 
-  it('setLegacyUserSafeAddress: the UPDATE is pinned to the caller’s users row', async () => {
-    const query = vi.fn(async () => ({ rows: [], rowCount: 1 }))
-    const db = { query } as unknown as Executor
-    await setLegacyUserSafeAddress('0xabc', OWNER, db)
-    expect(query).toHaveBeenCalledWith(SET_LEGACY_USER_SAFE_ADDRESS_SQL, ['0xabc', OWNER])
-  })
-
-  it('listKnownApproversForUser: the registry is per-tenant', async () => {
-    const db = tenantExecutor({ address: '0xabc', type: 'eoa', label: null, safe_ids: [] })
-    expect(await listKnownApproversForUser(ATTACKER, db)).toEqual([])
-    expect(await listKnownApproversForUser(OWNER, db)).toHaveLength(1)
-  })
 })
 
 describe('transaction functions keep their statement order and scope', () => {

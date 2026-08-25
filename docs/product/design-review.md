@@ -12,15 +12,13 @@ covers:
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/components/ui/**
   - packages/frontend/src/components/haven/**
-  - packages/frontend/src/components/SendModal.tsx
   - packages/frontend/src/components/ReceiveFundsModal.tsx
   - packages/frontend/src/components/AddFundsModal.tsx
   - packages/frontend/src/components/ConnectAgentModal.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
-  - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
-last-verified: "2026-08-21" # the haven-reviewer rule is unconditional (owner decision 2026-08-21) — this file scoped it to a risk list, which is the licence three skips in one session were drawn from. AGENTS.md is canonical. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-25" # #1989: the app-shell review checklist told reviewers to verify the "Approvals badge"; the sidebar entry and its live badge are deleted with the Safe rail. Scope: that one checklist line — no other claim in this file was re-read. Prior: the haven-reviewer rule is unconditional (owner decision 2026-08-21) — this file scoped it to a risk list, which is the licence three skips in one session were drawn from. AGENTS.md is canonical. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Haven AI UX Review
@@ -138,8 +136,10 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
   excluded work, review status, risk level, merge rationale, residual risk, and
   recommended merge order when multiple PRs are open.
 - For table changes, verify amount sorting uses raw values rather than formatted strings.
-- For app-shell changes, verify sidebar active state, Approvals badge, TopBar
-  back links, environment badge, network switcher, skip link, and mobile
-  navigation.
+- For app-shell changes, verify sidebar active state, TopBar back links,
+  environment badge, network switcher, skip link, and mobile navigation. (The
+  Approvals badge was on this list until
+  [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) deleted the nav
+  entry with the Safe rail.)
 - For animation/style changes, verify the class remains stable across state
   transitions and reduced-motion behavior is covered.

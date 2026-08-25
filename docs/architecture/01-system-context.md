@@ -24,10 +24,9 @@ covers:
   - packages/sdk/src/tool-descriptions.ts
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
-  - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/signer.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-08-24" # #1984: same "import-only" correction — the legacy rail is now closed to new accounts entirely, by deploy AND by import. The context boundaries and actors re-read against the diff and unchanged: no new external system, no new trust edge. Prior: #1199: signer-removal recovery change re-verified; custody boundary unchanged
+last-verified: "2026-08-25" # #1992: the "Two rails" callout said the legacy rail was "RETIRING ... existing accounts only", which reads as still-serving. It is retired: existing Safe accounts stay READABLE but cannot spend. Rewritten to frame the diagram below as the retired baseline. Scope: that callout. Prior: #1989: the "User-authorized execution" bullet linked `hooks/useSendTransaction.ts`, which this diff DELETES, and read as though a dashboard screen still composes an arbitrary Safe transfer. Corrected: the signing/relay path is unchanged and still runs, but only for the surviving agent-lifecycle transactions and for a direct `POST /safe/exec`. Scope: that bullet only; the rest of the doc was NOT re-read this pass. Prior: #1988: the "Owner authority remains on-chain" bullet described approver management as a live read of `getOwners()` plus stored metadata. Those routes are deleted; Haven now neither signs nor constructs an owner change, and the bullet says so — the custody claim gets STRONGER, not weaker, because owner management moves entirely to the user's own key. Scope: that bullet; the mermaid context diagram and the other invariants were not re-verified. Prior: #1984: same "import-only" correction — the legacy rail is now closed to new accounts entirely, by deploy AND by import. The context boundaries and actors re-read against the diff and unchanged: no new external system, no new trust edge. Prior: #1199: signer-removal recovery change re-verified; custody boundary unchanged
 ---
 
 # Haven — System Context
@@ -40,9 +39,11 @@ with the user. Haven operates the web app, backend, hosted MCP, and gas relayers
 but does not hold user or agent spending keys. The agent's delegate key stays in
 its local signer or fully local MCP runtime.
 
-> **Two rails.** The diagram and notes below describe the **legacy AllowanceModule
-> rail** (RETIRING under #1440 — closed to new accounts entirely since #1984;
-> existing accounts only). New accounts run on the **delegation
+> **One live rail; this diagram is the retired baseline.** The diagram and notes
+> below describe the **legacy AllowanceModule rail**, which is **RETIRED** (#1440):
+> closed to new accounts (#1984), HTTP 410 on every payment and x402 entry point
+> (#1986), machinery deleted (#1987/#1988/#1989). Existing Safe accounts stay
+> readable but cannot spend. All accounts that can spend run on the **delegation
 > rail** (epic #821, `account_type='delegator_hybrid'`), where the Haven wallet is
 > a MetaMask Hybrid DeleGator smart account and the policy is a signed delegation
 > with caveat enforcers instead of an AllowanceModule allowance. The Smart Sessions
@@ -154,18 +155,26 @@ flowchart LR
   Safe validates the user's complete signature package
   ([allowance execution](../../packages/backend/src/rails/allowance-module.ts),
   [passkey Safe execution](../../packages/backend/src/routes/safe-exec.ts)).
-- **Owner authority remains on-chain.** Linking an existing Haven wallet trusts
-  the user-supplied Safe address at import time. Approver management later reads
-  the authoritative owner list from `getOwners()` and stores only display
-  metadata such as label and owner type
+- **Owner authority remains on-chain, and Haven no longer touches it at all.**
+  Membership truth was always `getOwners()`; Haven stored only display metadata
+  such as label and owner type, and it never signed an owner change. Since
+  #1988 it does not construct one either — the approver routes are deleted, and
+  a legacy Safe's owner set is managed by its owner directly, with their own
+  key, outside Haven
   ([Haven wallet routes](../../packages/backend/src/routes/user-safes.ts)).
 - **User-authorized execution depends on signer type and threshold.** An EOA
   owner submits the Safe transaction through its connected wallet. A passkey
   signs locally and Haven relays the already-signed transaction. A Safe with a
   threshold above one is proposed to the Safe Transaction Service for the
   remaining signatures
-  ([Safe transaction execution](../../packages/frontend/src/lib/safe-tx.ts),
-  [send routing](../../packages/frontend/src/hooks/useSendTransaction.ts)).
+  ([Safe transaction execution](../../packages/frontend/src/lib/safe-tx.ts)).
+  **Since [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) no
+  dashboard screen composes an arbitrary Safe transfer** — the Send modal and
+  its `useSendTransaction` hook are deleted with the Safe rail. The signing and
+  relay path above is unchanged and still runs, but only for the agent
+  lifecycle transactions that remain (`lib/agent-setup.ts`,
+  `lib/revoke-agent.ts`, `EditAgentModal`) and for anything an owner posts
+  directly to `POST /safe/exec`.
 - **x402 has separate funding and merchant legs.** Haven can fund the
   agent-controlled delegate EOA from the Safe within the approved allowance.
   The local signer then creates the merchant-bound EIP-3009 payment header, and

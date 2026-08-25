@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import Fastify, { type FastifyInstance } from 'fastify'
 import paymentRoutes from '../payments.js'
 import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
@@ -53,6 +55,26 @@ import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
  * allowance read runs at all, regardless of the requested amount — collapsed
  * into one parametrized case rather than the original three, since all three
  * inputs now produce the identical early refusal.
+ *
+ * ⚠️ **#1987 AMENDMENT — the not-called spies stopped being evidence, and
+ * saying so is the point of this block.** #1986 proved "the delegation branch
+ * performs no off-chain coverage arithmetic" with `not.toHaveBeenCalled()`
+ * spies on `computeEffectiveAllowance` / `getTokenAllowance` /
+ * `generateTransferHash`. That was a real behavioural claim while
+ * `routes/payments.ts` still imported those functions and chose a branch at
+ * runtime. Slice #1987 deleted the legacy branch, `generateTransferHash`,
+ * `executeAllowanceTransfer` and `domain/payment-coverage.ts`'s
+ * `decideCoverage` outright — so the route no longer imports any of them and
+ * the spies became **guaranteed true by construction**: a guard whose glob
+ * matches the empty set, which this repo has on record as its own defect
+ * class. They would pass just as happily if the whole route were deleted.
+ *
+ * They are kept (a re-added call would still trip them) but they are no
+ * longer what carries the red line. The claim is now STRUCTURAL — the
+ * arithmetic is not reachable from the payment path because it is not
+ * imported there at all — and it is asserted structurally below, over the
+ * route's real import bindings, with a positive control proving the extractor
+ * can say yes. That assertion CAN fail: re-add the import and it goes red.
  */
 
 const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() => ({
@@ -134,11 +156,43 @@ function intentRow(overrides: Record<string, unknown> = {}) {
   }
 }
 
-/** Every off-chain "how much is left" computation this suite must never see run on the delegation rail. */
+/**
+ * Every off-chain "how much is left" computation this suite must never see run
+ * on the delegation rail.
+ *
+ * #1987: retained, but see the header — post-deletion these are true by
+ * construction, not by branch discipline. The load-bearing proof is
+ * `PAYMENT_PATH_IMPORTS` below.
+ */
 function expectNoOffChainCoverageArithmetic() {
   expect(allowanceMocks.computeEffectiveAllowance).not.toHaveBeenCalled()
   expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
   expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+}
+
+/**
+ * The import BINDINGS of `routes/payments.ts`, read from source.
+ *
+ * Deliberately not a substring scan of the whole file: `payments.ts` names
+ * `executeAllowanceTransfer` in a comment explaining why the retirement gate
+ * above it still matters, and a `toContain` check would call that a violation.
+ * A grep that confirms a line exists does not say which block owns it — so
+ * this parses the `import { ... } from '...'` clauses and collects only what
+ * is actually bound into the module scope.
+ */
+function paymentPathImportBindings(): Set<string> {
+  const src = readFileSync(
+    fileURLToPath(new URL('../payments.ts', import.meta.url)),
+    'utf8',
+  )
+  const bindings = new Set<string>()
+  for (const m of src.matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+'[^']+'/g)) {
+    for (const raw of m[1].split(',')) {
+      const name = raw.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0].trim()
+      if (name) bindings.add(name)
+    }
+  }
+  return bindings
 }
 
 describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () => {
@@ -184,6 +238,37 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
       expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
     },
   )
+
+  // ── STRUCTURAL: the arithmetic is not merely unused, it is UNREACHABLE ──
+
+  it('RED LINE #4 (structural, #1987): the payment path imports NO off-chain coverage arithmetic', () => {
+    const bindings = paymentPathImportBindings()
+
+    // Positive control FIRST — prove the extractor can say yes before a "no"
+    // is allowed to mean anything. Without this, a regex that silently matched
+    // nothing would report a perfect, empty, meaningless pass.
+    expect(bindings.has('prepareDelegationPayment')).toBe(true)
+    expect(bindings.has('submitDelegationPayment')).toBe(true)
+    expect(bindings.size).toBeGreaterThan(20)
+
+    // The real assertion: none of the legacy rail's spend arithmetic is bound
+    // into the payment route's module scope, so no branch inside it — present
+    // or future — can reach the numbers Haven used to compute off-chain.
+    for (const banned of [
+      'computeEffectiveAllowance',
+      'getTokenAllowance',
+      'getLatestBlockTimeSec',
+      'decideCoverage',
+      'generateTransferHash',
+      'recoverSigner',
+      'executeAllowanceTransfer',
+      'readSharedWatermark',
+      'waitForFreshAllowanceNonce',
+      'hasTokenAllowanceConfigured',
+    ]) {
+      expect(bindings.has(banned), `${banned} must not be imported by routes/payments.ts`).toBe(false)
+    }
+  })
 
   // ── DELEGATION RAIL: the on-chain simulation is the only gate ────────────
 

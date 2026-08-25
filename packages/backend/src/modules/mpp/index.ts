@@ -21,7 +21,15 @@
  * dispatch helpers themselves.
  */
 
-export { authorizeMachinePayment, type AuthorizeMachinePaymentInput } from './authorize.js'
+// #1987 (epic #1440): `authorizeMachinePayment` and `AuthorizeMachinePaymentInput`
+// are gone with `authorize.ts`. That orchestration WAS the legacy MPP
+// AllowanceModule flow, and it had no production caller left: `POST
+// /machine-payments/authorize` has been a #1328 `mppDemoRetired()` stub since
+// before this slice, and #1986 then 410'd the rail underneath it. Trimming it
+// to a refusal would have left an unreachable guard with 400 lines of replay
+// machinery kept alive by its own tests — the empty-set guard this retirement
+// exists to remove. The route's refusal is unchanged and lives in
+// `routes/machine-payments.ts`.
 export { mppDemoRetired } from './challenge.js'
 export { handleSend } from './send.js'
 export { handleGetAllowances } from './allowances.js'

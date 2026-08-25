@@ -103,7 +103,9 @@ import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
  * forward: `neighbour` was found with `if (b.left <= box.right) continue` —
  * "the nearest control to the toggle's RIGHT". A control the toggle is sitting
  * on top of has `b.left` inside the toggle, so the filter skipped it and
- * happily measured the next control along (the notification bell, 160px away).
+ * happily measured the next control along (the notification bell, 160px away —
+ * the bell has since been deleted by #1989; this records what was measured at
+ * the time).
  * The one assertion written to catch a swallowed neighbour could not see a
  * neighbour that had already been swallowed. It now takes the LEFTMOST control
  * in the band, overlapping or not, and compares hit rectangle against hit
@@ -160,9 +162,12 @@ const LEGIBLE_SEGMENT_PX = 24
  */
 const SM_BREAKPOINT_PX = 640
 /**
- * The wallet control's collapsed box below `sm` — the notification bell's own
- * 40px square, deliberately, so the phone bar reads as one row of equally
- * sized controls rather than as three different shapes.
+ * The wallet control's collapsed box below `sm`. It was set to the
+ * notification bell's own 40px square, deliberately, so the phone bar read as
+ * one row of equally sized controls rather than as three different shapes.
+ * #1989 deleted the bell with the Safe rail; the bar is now two controls and
+ * the number no longer mirrors a sibling. Kept at 40 — the tap-target floor is
+ * what this constant defends, and that is unchanged.
  */
 const COLLAPSED_WALLET_PX = 40
 
@@ -330,8 +335,10 @@ async function measureToggle(page: Page): Promise<Measurement> {
       // two consecutive ones. Reclaiming the toggle's 32px has to come out of
       // something in an over-subscribed row: if the widest item cannot
       // truncate, it does not shrink — it OVERFLOWS its parent and paints over
-      // the notification bell, which is a different defect of the same shape
-      // one control further along.
+      // whatever sits one control further along, which is a different defect of
+      // the same shape. (That neighbour was the notification bell when this was
+      // written; #1989 deleted it. The geometry argument is unchanged — the
+      // sweep reads the real bar, not a named control.)
       // Reported as the smallest GAP rather than the worst overlap: "they do
       // not overlap" was satisfied at 390px by two controls touching at exactly
       // 210.61 — a coincidence of the current account name, one line away from

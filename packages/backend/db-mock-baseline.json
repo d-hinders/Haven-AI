@@ -161,15 +161,15 @@
   },
   "packages/backend/src/routes/__tests__/non-custody-authz.contract.test.ts": {
     "db-mock": 1,
-    "positional": 12
+    "positional": 1
   },
   "packages/backend/src/routes/__tests__/non-custody-onchain-gate.contract.test.ts": {
     "db-mock": 1,
-    "positional": 11
+    "positional": 2
   },
   "packages/backend/src/routes/__tests__/non-custody-relay.contract.test.ts": {
     "db-mock": 1,
-    "positional": 7
+    "positional": 1
   },
   "packages/backend/src/routes/__tests__/passkeys.test.ts": {
     "db-mock": 1,
@@ -205,13 +205,9 @@
     "db-mock": 1,
     "positional": 5
   },
-  "packages/backend/src/routes/__tests__/user-safes-approvers.test.ts": {
-    "db-mock": 1,
-    "positional": 14
-  },
   "packages/backend/src/routes/__tests__/user-safes-characterization.test.ts": {
     "db-mock": 1,
-    "positional": 10
+    "positional": 4
   },
   "packages/backend/src/routes/__tests__/user-safes-delete.test.ts": {
     "db-mock": 1

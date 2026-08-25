@@ -3,8 +3,9 @@
  * callers (routes, tests) must import ONLY from this file — see the
  * `no-deep-cross-module-import` dependency-cruiser rule in
  * `.dependency-cruiser.cjs`. Internal files (`helpers.ts`, `scheme-selection.ts`,
- * `replay.ts`, `delegation-authorize.ts`, `legacy-authorize.ts`, `authorize.ts`,
- * `settle.ts`) are private.
+ * `replay.ts`, `delegation-authorize.ts`, `authorize.ts`, `settle.ts`) are
+ * private. (`legacy-authorize.ts` was deleted with the AllowanceModule rail,
+ * #1987 / epic #1440.)
  *
  * `routes/x402.ts` keeps request validation, auth middleware wiring, rate
  * limiting, and response serialization; the authorize orchestration (scheme

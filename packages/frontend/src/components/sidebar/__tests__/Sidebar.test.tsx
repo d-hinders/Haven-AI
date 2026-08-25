@@ -4,7 +4,6 @@ import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseAuth = vi.fn()
-const mockUseApprovals = vi.fn()
 const mockUsePathname = vi.fn()
 const mockPush = vi.fn()
 
@@ -12,9 +11,6 @@ vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
 }))
 
-vi.mock('@/hooks/useApprovals', () => ({
-  useApprovals: () => mockUseApprovals(),
-}))
 
 vi.mock('next/navigation', () => ({
   usePathname: () => mockUsePathname(),
@@ -30,12 +26,10 @@ import Sidebar from '@/components/sidebar/Sidebar'
 describe('Sidebar', () => {
   beforeEach(() => {
     mockUseAuth.mockReset()
-    mockUseApprovals.mockReset()
     mockUsePathname.mockReset()
     mockPush.mockReset()
 
     mockUsePathname.mockReturnValue('/dashboard')
-    mockUseApprovals.mockReturnValue({ actionableCount: 0 })
     mockUseAuth.mockReturnValue({
       user: {
         name: 'Ada Lovelace',
@@ -57,8 +51,11 @@ describe('Sidebar', () => {
     const nav = links.filter((href) =>
       ['/dashboard', '/accounts', '/transactions', '/agents', '/approvals', '/catalog', '/contacts', '/reporting', '/custody'].includes(href ?? ''),
     )
+    // '/approvals' stays in the FILTER above deliberately: the filter is what
+    // makes this assertion able to see a re-added Approvals entry. Removing it
+    // from both sides would turn the equality into a guard over the empty set.
     expect(nav).toEqual([
-      '/dashboard', '/accounts', '/transactions', '/agents', '/approvals',
+      '/dashboard', '/accounts', '/transactions', '/agents',
       '/catalog', '/contacts',
       '/reporting', '/custody',
     ])
@@ -68,12 +65,32 @@ describe('Sidebar', () => {
     expect(money.compareDocumentPosition(tools) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('keeps the live Approvals badge inside the core cluster', () => {
-    mockUseApprovals.mockReturnValue({ actionableCount: 3 })
+  // #1989 (epic #1440): the Approvals entry and its live badge are DELETED, for
+  // every user — not hidden per-account as #1079 had it. The approval queue was
+  // a legacy-rail concept, `POST /approvals/:id/approve` answers 410 (#1986),
+  // and the queue UI is gone, so the nav entry could only dead-end.
+  //
+  // Asserted on a MIXED-rail user, which is the case #1079's old
+  // `onlyDelegationAccounts` predicate deliberately kept the entry for. If the
+  // entry ever comes back, it comes back here first.
+  it('offers no Approvals entry even for a user holding a legacy Safe account', () => {
+    mockUseAuth.mockReturnValue({
+      user: {
+        name: 'Ada Lovelace',
+        email: 'ada@example.com',
+        safes: [
+          { id: 's1', account_type: 'safe' },
+          { id: 's2', account_type: 'delegator_hybrid' },
+        ],
+      },
+      logout: vi.fn(),
+    })
     render(<Sidebar />)
-    const approvals = screen.getByRole('link', { name: /Approvals/ })
-    expect(approvals).toHaveAttribute('href', '/approvals')
-    expect(approvals.textContent).toContain('3')
+    expect(screen.queryByRole('link', { name: /Approvals/ })).toBeNull()
+    const hrefs = Array.from(document.querySelector('nav')!.querySelectorAll('a')).map((a) =>
+      a.getAttribute('href'),
+    )
+    expect(hrefs).not.toContain('/approvals')
   })
 
   it('opens profile from the bottom-left identity area', () => {

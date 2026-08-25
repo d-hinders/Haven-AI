@@ -11,8 +11,10 @@
  *
  * It also could not catch the mistake that was actually in the list. `/dashboard`
  * was in `CHAIN_FED_ROUTES`, justified as "useAgentPanelState + ApprovalQueue",
- * and neither is mounted there — `AgentPanel` is on `/agents`, `ApprovalQueue`
- * on `/approvals`. Five scenarios pass through `/dashboard` on their way to a
+ * and neither was mounted there — `AgentPanel` is on `/agents`, `ApprovalQueue`
+ * was on `/approvals` (both that component and that route are deleted by #1989,
+ * epic #1440; the point about the guard's old shape stands). Scenarios pass
+ * through `/dashboard` on their way to a
  * modal, so that one wrong entry would have made
  * `npm run screenshot -- --scenario=all` fail on unchanged `dev`: an alarm that
  * is always on, which this repo has learned twice over is an alarm nobody reads.
@@ -26,9 +28,10 @@
  *   • every pattern covers at least one route that reaches the hook.
  *
  * Why that hook and not `usePublicClient`: calling `usePublicClient` issues no
- * request. `ApprovalQueue`, `ManageApprovers` and `useSendTransaction` all call
- * it to GATE a control or inside a click handler, and a resting capture of those
- * screens legitimately makes no chain request. Only a read that runs at render
+ * request. `EditAgentModal` calls it to GATE a control, and a resting capture
+ * of that screen legitimately makes no chain request. (`ApprovalQueue`,
+ * `ManageApprovers` and `useSendTransaction` were the original three examples;
+ * #1989 deleted all three.) Only a read that runs at render
  * can be missing from a PNG, which is the entire subject of the guard.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'

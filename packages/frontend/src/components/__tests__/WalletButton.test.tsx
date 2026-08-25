@@ -482,15 +482,14 @@ describe('WalletButton', () => {
    * ── What these tests do and do not prove ────────────────────────────────
    *
    * They prove the COMPONENT's contract, because they hand `WalletButton` a
-   * `delegator_passkey` through the mocked `useActiveSigner` directly. They do
-   * NOT prove a reachable production state, and that distinction is stated
-   * rather than glossed: the real `useActiveSigner` refuses to return a
-   * `delegator_passkey` at all unless `hybridPasskeyOnDevice` already matched
-   * (`lib/signer.ts`, pinned by `signer.test.ts` > "does NOT resolve the hybrid
-   * signer when the device marker is missing"). So there is no fixture — and no
-   * `npm run screenshot` scenario — that can drive a real browser into this
-   * render, and none is faked here to make the acceptance criterion look met.
-   * The upstream gate is filed separately.
+   * `delegator_passkey` through the mocked `useActiveSigner` directly. Since
+   * #1969 (owner decision 2026-08-26) this is ALSO a reachable production
+   * state: the real `useActiveSigner` resolves a `delegator_passkey` for any
+   * non-empty hydrated signer set, so a marker-less user reaches this render
+   * through the ordinary hydration path. The reachable-state proof lives in
+   * `e2e/wallet-signer-offering.spec.ts`, which drives a real browser into
+   * both states without mocking the hook; these unit tests keep pinning the
+   * component's rendering contract in isolation.
    */
   it('Hybrid dropdown: names the passkeys[0] fallback and says it IS a fallback (#1952)', () => {
     const KEY_A = '0x' + '11'.repeat(32)

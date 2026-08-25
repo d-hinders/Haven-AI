@@ -180,6 +180,20 @@ rows in that table, so the guard passes for them and their teardown remains the
 on-chain revoke path. The guard only ever REFUSES: it grants nothing, signs
 nothing, and touches no chain.
 
+**Credential revocation closes new grant lifecycle steps (#2025).** An agent
+already revoked at request entry cannot build or activate a fresh delegation:
+both routes refuse before constructing a budget, parsing an owner signature,
+deploying an account, or changing delegation state. The build and activation
+database transactions re-check the lifecycle row before their writes, so a
+revoke that races the initial read cannot create a new pending or active record
+(it may still do preliminary activation work before the later lock). Of the ten
+owner-scoped lifecycle callers, only build and activate are guarded; the list
+read, account-signer read/prepare/submit, revoke-all prepare/submit, and
+per-hash revoke prepare/submit remain deliberately exempt for audit, recovery,
+and removal of authority already issued. This is deliberately not a replacement
+for the owner signature or the on-chain caveats, which remain the authority and
+enforcement.
+
 ## 4. Exit story — design + acceptance test (#832's contract)
 
 **Claim to keep true:** *a user can enumerate and revoke every authority on

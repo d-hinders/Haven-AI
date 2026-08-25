@@ -80,7 +80,100 @@ export interface AgentIdStatusRow {
   status: string
 }
 
+/** Owner-scoped delegation lifecycle account read (#2025). */
+export interface DelegationAgentRow {
+  agent_id: string
+  status: string
+  delegate_address: string | null
+  chain_id: number
+  treasury_address: string | null
+  account_type: string | null
+}
+
 // ── Reads ────────────────────────────────────────────────────────────────────
+
+/**
+ * Includes revoked agents deliberately: owner-facing reads and revocation must
+ * remain available after credential revocation. Grant routes decide whether the
+ * returned lifecycle status may receive a new budget.
+ */
+export async function loadOwnedDelegationAgent(
+  agentId: string,
+  userId: string,
+  db: Executor = pool,
+): Promise<DelegationAgentRow | null> {
+  const result = await db.query<DelegationAgentRow>(
+    `SELECT a.id AS agent_id, a.status, a.delegate_address, us.chain_id,
+            us.safe_address AS treasury_address, us.account_type
+     FROM agents a
+     LEFT JOIN user_safes us ON us.id = a.safe_id
+     WHERE a.id = $1 AND a.user_id = $2`,
+    [agentId, userId],
+  )
+  return result.rows[0] ?? null
+}
+
+/**
+ * Serializes an activation with agent credential revocation (#2025). The
+ * caller supplies its transaction executor, so the row lock lasts through the
+ * delegation status write rather than just this read.
+ */
+export async function lockOwnedNonRevokedDelegationAgent(
+  agentId: string,
+  userId: string,
+  db: Executor,
+): Promise<boolean> {
+  const result = await db.query(
+    `SELECT id FROM agents
+     WHERE id = $1 AND user_id = $2 AND status <> 'revoked'
+     FOR UPDATE`,
+    [agentId, userId],
+  )
+  return result.rowCount !== 0
+}
+
+export interface PendingDelegationInsert {
+  agentId: string
+  userId: string
+  chainId: number
+  tokenAddress: string
+  recipientAddress: string | null
+  delegationHash: string
+  delegationJson: string
+  version: number
+  budgetAtomic: string
+  periodSeconds: number
+  startDate: number
+  expiresAt: number
+}
+
+/**
+ * Locks the lifecycle row and inserts the pending grant in the same
+ * transaction, so a credential revoke cannot commit between eligibility and
+ * the fresh delegation record (#2025).
+ */
+export async function insertPendingDelegationForOwnedNonRevokedAgent(
+  input: PendingDelegationInsert,
+  db: Executor = pool,
+): Promise<boolean> {
+  return withTransaction(db, async (tx) => {
+    if (!(await lockOwnedNonRevokedDelegationAgent(input.agentId, input.userId, tx))) return false
+    await tx.query(
+      `INSERT INTO agent_delegations (
+         agent_id, chain_id, token_address, recipient_address, delegation_hash,
+         delegation_json, version, status, budget_atomic, period_seconds,
+         start_date, expires_at
+       ) VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, 'pending', $8, $9, $10, $11)
+       ON CONFLICT (delegation_hash) DO NOTHING`,
+      [
+        input.agentId, input.chainId, input.tokenAddress, input.recipientAddress,
+        input.delegationHash, input.delegationJson, input.version, input.budgetAtomic,
+        input.periodSeconds, input.startDate, input.expiresAt,
+      ],
+    )
+    return true
+  })
+}
 
 /**
  * The list read: NO status filter (#1069 — pending_approval agents included).

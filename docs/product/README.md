@@ -19,7 +19,7 @@ covers:
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/hooks/useEscapeToClose.ts
-last-verified: "2026-08-23" # #1702: indexed the new `agent-key-rotation.md` beside `account-recovery.md`, which is the doc it is most often confused with. Index entry only; no other row re-verified. Prior: #1726: the §8 "Known implementation gap" note on 36/40px Button sizes was stale once the hit area reached 44px — rewritten to point at the tap-target rule and to scope the manual check to non-Button controls. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-25" # #2038: the tooltip keyboard-focus line gains the composite-control exception. Verified ONLY that line, against `ui/Tooltip.tsx`: focus does not bubble DOWNWARD, so a trigger inside a focusable ancestor gets no `tabIndex` and receives no `onFocus` — the blanket claim was factually wrong for `McpServerName` inside `AgentCard`'s `role="link"`. The second clause ("must not carry essential copy") is load-bearing: without it the exception reads as permission. Line ~186 re-read and left unchanged — still accurate. NOT a re-read of this file; no other row was checked. Prior: #1702: indexed the new `agent-key-rotation.md` beside `account-recovery.md`, which is the doc it is most often confused with. Index entry only; no other row re-verified. Prior: #1726: the §8 "Known implementation gap" note on 36/40px Button sizes was stale once the hit area reached 44px — rewritten to point at the tap-target rule and to scope the manual check to non-Button controls. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Haven Product & UX Guide
@@ -226,7 +226,7 @@ Rules:
 - Escape closes modals and dropdowns unless an execution step intentionally blocks dismissal.
 - Loading, saving, sending, and error statuses should be announced with appropriate live regions when practical.
 - Toasts use live regions: polite for informational/success feedback, assertive for errors.
-- Tooltips must be available on keyboard focus when they explain a focusable control or truncated value.
+- Tooltips must be available on keyboard focus when they explain a focusable control or truncated value, except where the trigger sits inside a composite focusable control (a button, link, or card); there the tooltip stays hover-only and must not carry essential copy (#2038).
 - Use `aria-busy` around loading regions that replace page content.
 - Preserve the skip link to `main#main-content` in the authenticated shell.
 - Respect `prefers-reduced-motion` for decorative animation.

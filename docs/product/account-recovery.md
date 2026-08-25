@@ -11,7 +11,7 @@ covers:
   - packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx
   - packages/backend/src/routes/passkeys.ts
   - packages/backend/src/routes/safe-exec.ts
-last-verified: "2026-08-24" # #1988: the "Legacy passkey Safes" section told a user to add a backup owner through Settings → Approvers. That surface is deleted with the Safe rail, so the instruction was a dead end for exactly the population the section exists to help. Rewritten to say what an owner CAN still do — move funds out via the still-open owner-signed relay, manage owners themselves at Safe's own interfaces, and use a backup owner already on the list — and to say plainly that a sole-passkey Safe with no backup should be emptied and closed. The exposure paragraph is unchanged and was already correct. Scope: that section; the delegation-rail half of the doc was not re-verified. Prior: #1702: new section "Not the same thing: replacing an agent's key" — the account-signer / agent-delegate distinction stated from THIS side, paired with the same distinction stated from `agent-key-rotation.md` (the epic asked for both directions, because a reader arrives at whichever page their search terms hit and only one of them is right for a lost account signer). No existing claim changed: the two-signer rule, the single-signer limit, the removal floor and the legacy-Safe section were all re-read against `hybrid-signer-actions.ts` and `delegation-rail-security-model.md` §7 and stand. Scope: the new section only; no recovery flow was re-executed. Prior: #1199: both signer-removal paths permit an informed two-to-one transition
+last-verified: "2026-08-25" # #1989: "Move the funds out ... works exactly as it did" was made FALSE by this diff, and in the worst direction — #1988 left `POST /safe/exec` open, but this slice deletes the Send screen that composed the transaction, and a PASSKEY-owned legacy Safe has no app.safe.global fallback because Haven's passkey Safe signer is a custom WebAuthn scheme. Rewritten to split the bullet by owner type and say plainly that a passkey owner currently has no self-serve exit. Scope: that bullet. Prior: #1988: the "Legacy passkey Safes" section told a user to add a backup owner through Settings → Approvers. That surface is deleted with the Safe rail, so the instruction was a dead end for exactly the population the section exists to help. Rewritten to say what an owner CAN still do — move funds out via the still-open owner-signed relay, manage owners themselves at Safe's own interfaces, and use a backup owner already on the list — and to say plainly that a sole-passkey Safe with no backup should be emptied and closed. The exposure paragraph is unchanged and was already correct. Scope: that section; the delegation-rail half of the doc was not re-verified. Prior: #1702: new section "Not the same thing: replacing an agent's key" — the account-signer / agent-delegate distinction stated from THIS side, paired with the same distinction stated from `agent-key-rotation.md` (the epic asked for both directions, because a reader arrives at whichever page their search terms hit and only one of them is right for a lost account signer). No existing claim changed: the two-signer rule, the single-signer limit, the removal floor and the legacy-Safe section were all re-read against `hybrid-signer-actions.ts` and `delegation-rail-security-model.md` §7 and stand. Scope: the new section only; no recovery flow was re-executed. Prior: #1199: both signer-removal paths permit an informed two-to-one transition
 ---
 
 # Account recovery (delegation-rail accounts)
@@ -149,9 +149,26 @@ signed an owner change and now does not construct one either.
 
 What you can still do, and it is the whole of it:
 
-- **Move the funds out.** Haven still relays any Safe transaction *you* sign as
-  an owner, so sending the balance to an account you control — a Haven account
-  on the delegation rail, or any wallet — works exactly as it did.
+- **Move the funds out — but not from inside Haven any more, and the answer
+  differs by owner type.** `POST /safe/exec` still relays any Safe transaction
+  *you* sign as an owner, and it is unchanged. What is gone is the **screen**
+  that composed one:
+  [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) deleted the Send
+  modal for legacy Safe accounts along with the rest of the Safe rail, so the
+  account page now shows balances and history with no Send action.
+  - If your Safe is owned by a **wallet address**, this costs you nothing real
+    — sign the transfer at [app.safe.global](https://app.safe.global) with that
+    wallet, exactly as the next bullet describes for owner changes.
+  - If your Safe is owned only by a **passkey**, say plainly that there is
+    currently **no self-serve way to move the funds out**. Haven's passkey Safe
+    signer is a custom WebAuthn scheme that Safe's own interfaces do not
+    understand, and Haven no longer offers a screen that builds the transfer.
+    The capability still exists in the API; the product surface for it does
+    not. If this is your situation, contact Haven rather than assuming the
+    funds are stuck — and note that the on-chain census taken for
+    [#1440](https://github.com/d-hinders/Haven-AI/issues/1440) found no
+    passkey-owned Safe on Base mainnet, which is why this was accepted as a
+    narrowing rather than treated as a blocker.
 - **Manage owners yourself.** A Safe owned by a wallet address is managed at
   [app.safe.global](https://app.safe.global) with that wallet, independently of
   Haven. This was always true; it is the point of a non-custodial account, and

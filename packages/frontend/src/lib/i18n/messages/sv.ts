@@ -27,10 +27,6 @@ export const sv: Messages = {
       english: 'English',
       swedish: 'Svenska',
     },
-    approvalAlerts: {
-      label: 'Godkännandeaviseringar',
-      detail: 'Få en notis när en transaktion behöver godkännas.',
-    },
     agentSpendAlerts: {
       label: 'Aviseringar om agentutgifter',
       detail: 'Få uppdateringar när agenter använder sin budget.',
@@ -65,8 +61,8 @@ export const sv: Messages = {
       limitationsLabel: 'Begränsningar för återställning',
       limitationsDetail:
         'Haven kan hjälpa dig hitta kontouppgifter, men kan inte kringgå dina plånböcker eller passkeys, eller återställa medel som skickats på fel nätverk.',
-      backupLabel: 'Reservgodkännare',
-      backupDetail: 'Att lägga till reservgodkännare är inte tillgängligt ännu.',
+      backupLabel: 'Säkerhetskopiering och återställning',
+      backupDetail: 'Säkerhetskopior hanteras per konto, under Säkerhetskopiering och återställning på någon av dess agenter.',
       sessionsLabel: 'Aktiva sessioner',
       sessionsDetail: 'Granska inloggade enheter och återkalla sessioner.',
       exitPathLabel: 'Din exit-väg',

@@ -205,11 +205,14 @@ export default function SettingsClient() {
               />
             )}
           />
-          <SettingRow
-            label={t.settings.approvalAlerts.label}
-            detail={t.settings.approvalAlerts.detail}
-            action={<ComingSoonToggle label={t.settings.approvalAlerts.label} comingSoonText={t.common.comingSoon} />}
-          />
+          {/*
+            "Approval alerts" (notify me when a transaction needs approval) is
+            removed with the approval queue itself (#1989, epic #1440). It was a
+            legacy Safe / AllowanceModule concept; the delegation rail enforces
+            budgets on-chain and never queues a payment, so there is nothing
+            left to be notified about. A "coming soon" toggle for a flow the
+            product has just deleted promises the wrong future.
+          */}
           <SettingRow
             label={t.settings.agentSpendAlerts.label}
             detail={t.settings.agentSpendAlerts.detail}

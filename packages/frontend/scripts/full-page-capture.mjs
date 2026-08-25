@@ -173,42 +173,41 @@ export const SETTLED_TALL_FACTOR = 1.25
  * rendered route including its empty states, and false of every loading state,
  * whatever the loading state happens to look like.
  *
- * MEASURED, not guessed, and the first numbers were WRONG. The floor has to sit
- * between two live populations, and it must not hug either one:
+ * MEASURED, not guessed — and the measurement had to be taken TWICE, because
+ * the first re-reading of it was wrong in an instructive way.
  *
- *   the loading fallback     `/dashboard`'s `next/dynamic` placeholder is a
- *                            pulse dot plus a `<span>`: 10 chars, 3 elements
- *                            (read off a real refusing run, not from the JSX);
- *   the thinnest real route  `/agents` on the populated fixture renders
- *                            105 chars in 30 elements — far leaner than
- *                            `/dashboard`'s 466-1243 chars / 112-250 elements.
+ * Warm, on the populated fixture, live capture runs record:
  *
- * The first draft of these floors was 80 chars, chosen against `/dashboard`
- * alone: 8x clear of the loading state but only 1.3x clear of `/agents`, i.e.
- * a false-positive waiting for one route to lose a line. They now sit near the
- * geometric middle of the two populations — ~4x above the loading state and
- * ~2.6x below the leanest rendered route — so neither side is hugged. Both
- * numbers are pinned by `full-page-capture.test.ts` against the measurements
- * they came from, and a run records what each capture cleared, so the next
- * person re-centres from data rather than from taste.
+ *   the loading fallback   `/dashboard`'s `next/dynamic` placeholder —
+ *                          10 chars, 3 elements (read off a real refusing run,
+ *                          not from the JSX);
+ *   `/dashboard`           466 chars, 112 elements — the leanest FULLY
+ *                          rendered route measured;
+ *   `/agents`              851 chars, 138 elements;
+ *   `/design-system`       30,720 chars, 1,624 elements.
  *
- * ONE CAUSE NAME, TWO SITUATIONS, said plainly rather than left to be
- * discovered: `still-loading` is also what a route that resolved into an
- * `<ErrorBoundary>` fallback (or into any equally empty finished state) is
- * reported as. Both are "the shell rendered and the route did not", both must
- * refuse the capture, and splitting them would need a second probe to tell a
- * chunk that never arrived from a render that threw — which the console-error
- * summary this harness already prints answers better. The message says so.
+ * A run under load average ~490 also produced `/agents` at 105 chars / 30
+ * elements, and that number was briefly mistaken for "the leanest real route"
+ * and used to LOWER this floor. It is not: it is `/agents` caught PARTIALLY
+ * rendered, and re-centring on it would have made the guard weaker against
+ * exactly the population it exists to refuse. The lesson is recorded here
+ * rather than only in the pull request, because the next person to re-tune
+ * these will be looking at numbers from a contended box too: read a floor
+ * against a WARM run, and treat a lean reading under load as a data point
+ * about the machine.
  *
- * KNOWN LIMIT, stated rather than papered over: a route whose genuine rendered
- * state is smaller than these floors would be refused. None exists today
- * (measured across the captured set on both fixture modes), and the refusal is
- * loud and prints both numbers — the opposite of the silent success it
- * replaces. The remedy if one ever appears is to raise that route's real
- * content, or to give this check a per-route override; it is not to delete the
- * floor.
+ * So 80 / 8 stands, and now with both sides measured: 8x above the loading
+ * state and 5.8x below the leanest fully rendered route on characters, 2.7x
+ * and 14x on elements. Both margins are pinned by `full-page-capture.test.ts`.
+ *
+ * KNOWN LIMIT, and it is the honest boundary of the claim: a route caught
+ * PARTIALLY rendered — `/agents` at 105/30 — clears these floors and is
+ * captured. This guard asserts that the route rendered SOMETHING, not that it
+ * rendered everything; the second question needs per-route named content and is
+ * a separate piece of work. What it removes is the case #2036 was filed about,
+ * where the region holds nothing at all.
  */
-export const MIN_CONTENT_CHARS = 40
+export const MIN_CONTENT_CHARS = 80
 export const MIN_CONTENT_ELEMENTS = 8
 
 /**

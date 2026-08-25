@@ -600,12 +600,13 @@ const DASHBOARD_RENDERED: ContentProbe = {
 }
 
 /**
- * `/agents` on the populated fixture — the LEANEST rendered route measured on
- * this app, read off a real capture run (`content_settle` in the manifest), not
- * estimated from the JSX. `/dashboard` measured 466-1243 chars in 112-250
- * elements on the same runs; this is the one the floor has to clear.
+ * `/agents` caught PARTIALLY rendered, measured on a real run at load average
+ * ~490. Kept as a fixture because it is the guard's honest BOUNDARY, not its
+ * target: it clears the floors and is captured. Briefly mistaken for "the
+ * leanest real route" and used to lower the floor — warm, `/agents` measures
+ * 851 chars in 138 elements.
  */
-const AGENTS_RENDERED_LEAN: ContentProbe = {
+const AGENTS_PARTIAL: ContentProbe = {
   found: true,
   docScrollHeight: 1_400,
   viewportHeight: 800,
@@ -708,32 +709,33 @@ describe('judgeContentSettled', () => {
   it('pins the floors against the two live populations they sit between', () => {
     // If someone moves these, this is the test that should have to be edited
     // deliberately — and the numbers below say what the edit would cost.
-    expect(MIN_CONTENT_CHARS).toBe(40)
+    expect(MIN_CONTENT_CHARS).toBe(80)
     expect(MIN_CONTENT_ELEMENTS).toBe(8)
-    // Above the real loading fallback and below the LEANEST real route, with
-    // room on both sides. The first draft was 80 chars, picked against
-    // `/dashboard` alone; a live run then measured `/agents` at 105, i.e. a
-    // 1.3x margin — a false positive waiting for one route to lose a line.
+    // Above the real loading fallback, below the leanest FULLY rendered route,
+    // with room on both sides. Both measured warm on live capture runs.
     expect(DASHBOARD_LOADING.contentChars).toBeLessThan(MIN_CONTENT_CHARS)
     expect(DASHBOARD_LOADING.contentElements).toBeLessThan(MIN_CONTENT_ELEMENTS)
-    expect(AGENTS_RENDERED_LEAN.contentChars).toBeGreaterThan(MIN_CONTENT_CHARS)
-    expect(AGENTS_RENDERED_LEAN.contentElements).toBeGreaterThan(MIN_CONTENT_ELEMENTS)
-    // Neither side may be hugged. Both margins are asserted, so a future edit
-    // that clears one population by a hair fails HERE rather than in a capture
-    // run somebody has to debug.
-    expect(MIN_CONTENT_CHARS / DASHBOARD_LOADING.contentChars!).toBeGreaterThanOrEqual(3)
-    expect(AGENTS_RENDERED_LEAN.contentChars! / MIN_CONTENT_CHARS).toBeGreaterThanOrEqual(2)
+    expect(DASHBOARD_RENDERED.contentChars).toBeGreaterThan(MIN_CONTENT_CHARS)
+    expect(DASHBOARD_RENDERED.contentElements).toBeGreaterThan(MIN_CONTENT_ELEMENTS)
+    // Neither side may be hugged. Asserted as ratios, so an edit that clears
+    // one population by a hair fails HERE rather than in a capture run somebody
+    // has to debug at load average 400.
+    expect(MIN_CONTENT_CHARS / DASHBOARD_LOADING.contentChars!).toBeGreaterThanOrEqual(4)
+    expect(DASHBOARD_RENDERED.contentChars! / MIN_CONTENT_CHARS).toBeGreaterThanOrEqual(4)
     expect(MIN_CONTENT_ELEMENTS / DASHBOARD_LOADING.contentElements!).toBeGreaterThanOrEqual(2)
-    expect(AGENTS_RENDERED_LEAN.contentElements! / MIN_CONTENT_ELEMENTS).toBeGreaterThanOrEqual(2)
+    expect(DASHBOARD_RENDERED.contentElements! / MIN_CONTENT_ELEMENTS).toBeGreaterThanOrEqual(4)
   })
 
-  it('says YES to the LEANEST route this app actually renders', () => {
-    // The positive control that matters more than `/dashboard`'s: a guard tuned
-    // to a busy screen is trivially satisfiable. `/agents` is the thin one.
-    const verdict = judgeContentSettled(AGENTS_RENDERED_LEAN)
+  it('states its own boundary: a PARTIALLY rendered route still passes', () => {
+    // Not an aspiration — a limit, asserted so it cannot quietly stop being
+    // true and so nobody reads this guard as more than it is. `/agents` was
+    // measured at 105 chars / 30 elements under load average ~490, mid-render;
+    // warm it is 851/138. This guard's claim is "the route rendered SOMETHING",
+    // never "the route rendered everything". The second question needs
+    // per-route named content and is separate work.
+    const verdict = judgeContentSettled(AGENTS_PARTIAL)
 
     expect(verdict.settled).toBe(true)
-    expect(verdict.reason).toBe('settled')
   })
 })
 

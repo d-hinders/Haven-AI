@@ -47,8 +47,8 @@ import {
 
 /**
  * How long to wait for the shared count before giving up and using the local
- * one. Matches the allowance-nonce coordinator's bound (#718) and the reason
- * is identical: a rejection is the easy failure, a query that is slow but
+ * one. Matches the bound the allowance-nonce coordinator carried (#718;
+ * deleted with its rail by #1987) and the reason is identical: a rejection is the easy failure, a query that is slow but
  * never settles is the one that would actually hang a request — and neither
  * the pool (no `statement_timeout`) nor Fastify (no request timeout) would
  * stop it.

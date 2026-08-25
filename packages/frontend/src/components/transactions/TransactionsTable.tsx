@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { DirectionMark, ExternalDetailsLink } from '@/components/haven'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { Table } from '@/components/ui/Table'
+import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
 import { Amount } from '@/components/haven'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -120,17 +120,17 @@ function LoadingTable({ columns, padY }: { columns: TransactionColumnId[]; padY:
       </td>
     ),
     initiator: (key) => (
-      <td key={key} className={`hidden px-4 ${padY} md:table-cell`}>
+      <td key={key} className={`px-4 ${padY} ${tableColumnClass('md')}`}>
         <Skeleton variant="text" className="h-2 w-20" />
       </td>
     ),
     fromTo: (key) => (
-      <td key={key} className={`hidden px-4 ${padY} md:table-cell`}>
+      <td key={key} className={`px-4 ${padY} ${tableColumnClass('md')}`}>
         <Skeleton variant="text" className="h-2 w-28" />
       </td>
     ),
     date: (key) => (
-      <td key={key} className={`hidden px-4 ${padY} md:table-cell`}>
+      <td key={key} className={`px-4 ${padY} ${tableColumnClass('md')}`}>
         <Skeleton variant="text" className="h-2 w-14" />
       </td>
     ),
@@ -242,12 +242,12 @@ export default function TransactionsTable({
             </Table.HeaderCell>
           ) : null}
           {showCol('initiator') ? (
-            <Table.HeaderCell sticky={isSticky} align="left" hideBelowMd className="w-[120px]">
+            <Table.HeaderCell sticky={isSticky} align="left" revealAt="md" className="w-[120px]">
               Initiator
             </Table.HeaderCell>
           ) : null}
           {showCol('fromTo') ? (
-            <Table.HeaderCell sticky={isSticky} align="left" hideBelowMd className="w-[140px]">
+            <Table.HeaderCell sticky={isSticky} align="left" revealAt="md" className="w-[140px]">
               From / To
             </Table.HeaderCell>
           ) : null}
@@ -257,7 +257,7 @@ export default function TransactionsTable({
               direction={directionOf('date')}
               onSort={() => handleSort('date')}
               tooltip={sortTooltip}
-              hideBelowMd
+              revealAt="md"
               sticky={isSticky}
               className="w-[90px]"
             />
@@ -358,7 +358,7 @@ export default function TransactionsTable({
                   // cell IS allowed to sit below min-content, so this is the
                   // idiom that lets the flexible column absorb the leftover
                   // width and ellipsise. It is the ONLY flexible column here;
-                  // every other one is fixed-width or `hidden md:table-cell`.
+                  // every other one is fixed-width or on the `md` container stage.
                   //
                   // Deliberately NOT an `overflow-x-auto` wrapper (the fix the
                   // issue guessed at): `overflow-x: auto` forces `overflow-y`
@@ -390,7 +390,7 @@ export default function TransactionsTable({
                       ) : null}
                     </div>
                     {showCol('fromTo') ? (
-                      <div className="mt-0.5 text-xs text-[var(--v2-ink-2)] md:hidden">
+                      <div className={`mt-0.5 text-xs text-[var(--v2-ink-2)] ${tableHideFromClass('md')}`}>
                         {movement}
                       </div>
                     ) : null}
@@ -398,19 +398,19 @@ export default function TransactionsTable({
                 ) : null}
 
                 {showCol('initiator') ? (
-                  <td className={`hidden md:table-cell w-[120px] px-4 ${padY}`}>
+                  <td className={`${tableColumnClass('md')} w-[120px] px-4 ${padY}`}>
                     <span className="text-xs text-[var(--v2-ink-2)] truncate block">{initiator}</span>
                   </td>
                 ) : null}
 
                 {showCol('fromTo') ? (
-                  <td className={`hidden md:table-cell w-[140px] px-4 ${padY}`}>
+                  <td className={`${tableColumnClass('md')} w-[140px] px-4 ${padY}`}>
                     <span className="text-xs text-[var(--v2-ink-2)] truncate block">{movement}</span>
                   </td>
                 ) : null}
 
                 {showCol('date') ? (
-                  <td className={`hidden md:table-cell w-[90px] px-4 ${padY} whitespace-nowrap`}>
+                  <td className={`${tableColumnClass('md')} w-[90px] px-4 ${padY} whitespace-nowrap`}>
                     <span className="v2-tabular text-xs text-[var(--v2-ink-3)]">
                       {timeAgo(tx.timestamp * 1000)}
                     </span>

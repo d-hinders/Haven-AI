@@ -1615,44 +1615,38 @@ export function createToolHandlers(
         // no merchant probe of its own, so this is the first thing that runs.
         const cap = readMaxAmountCap(args, { required: false })
         try {
-          // Enforce the optional price cap against the merchant-authoritative
-          // selected option, before creating the funding intent.
-          const option = selectStandardPaymentOption(payReq.accepts)
-          if (option) {
-            // #1351: this path holds a payment OPTION rather than a built
-            // quote, so decimals come from the same address→token binding
-            // X402Quote.decimals is built from — the merchant's own
-            // asset/network, never an assumed 6.
-            const optionToken = resolveTokenFromAddress(option.asset, option.network)
-            const capAtomic = resolveCapAtomic(cap, {
-              decimals: optionToken?.decimals ?? null,
-              token: optionToken?.symbol ?? 'the merchant asset',
-              asset: option.asset,
-              network: option.network,
-            })
-            assertWithinMaxAmount(
-              x402AuthorizationAmount(option),
-              capAtomic.atomic,
-              optionToken?.symbol,
-              capAtomic.label,
-            )
-          } else if (cap.kind !== 'none' && !selectErc7710PaymentOption(payReq.accepts)) {
-            // #2041: "no standard option" stopped meaning "nothing Haven can
-            // settle" the moment this tool could reach erc7710. A merchant that
-            // advertises ONLY an erc7710 entry is payable now, so refusing a
-            // CAPPED call here — while the same call uncapped succeeded — would
-            // make stating a spending limit the thing that breaks the purchase.
-            // Its cap is enforced against the selected option below, still
-            // before any authorize and so still before any funds move.
-            //
-            // No selectable option means there is no merchant-authoritative
-            // amount to compare a cap against — for EITHER spelling. Before
-            // #1351 the cap was simply skipped here, which left the agent
-            // believing the purchase was capped when nothing had been checked;
-            // the honest answer is to refuse. This only ever narrows: the
-            // uncapped call behaves exactly as it always did, and a
-            // payment_required with no settleable option was never going to
-            // produce a valid purchase anyway.
+          // ── #2041: ONE cap assertion, against the option actually selected ──
+          // This tool used to assert the cap HERE, pre-network, against
+          // `selectStandardPaymentOption`. #1453 made that selector and
+          // `selectErc7710PaymentOption` mutually exclusive, so a cap checked
+          // before selection is a cap checked against an option that may not be
+          // the one authorized — and that is wrong in BOTH directions:
+          //
+          //   cheap standard + expensive erc7710 -> the cap UNDER-binds, and a
+          //     merchant-controlled payment_required walks straight through a
+          //     stated spending limit (measured at 900 USDC against a 1 USDC
+          //     cap on the sibling tools, #2051);
+          //   expensive standard + cheap erc7710 -> the cap OVER-binds and
+          //     refuses a purchase that was never going to cost that much,
+          //     citing an amount nothing would have authorized.
+          //
+          // Two cap checks guarding two selectors is how that happened twice —
+          // once in each direction. So the scheme is selected FIRST and the cap
+          // is asserted exactly ONCE, after selection, against
+          // `selection.option`. The reordering costs one read-only agent GET
+          // ahead of a refusal that used to be pure; no authorize is created on
+          // either path, which is the property that actually protects money.
+          //
+          // What still runs pre-network is the honest precondition: a cap
+          // cannot be enforced against a payment_required that carries no
+          // payable option of EITHER kind, because then there is no
+          // merchant-authoritative amount to compare it against. That test is
+          // rail-independent, so it does not need the agent.
+          if (
+            cap.kind !== 'none' &&
+            !selectStandardPaymentOption(payReq.accepts) &&
+            !selectErc7710PaymentOption(payReq.accepts)
+          ) {
             const capField = cap.kind === 'human' ? 'max_amount_human' : 'max_amount'
             throw new HostedToolError({
               code: AgentPaymentFailureCode.MaxAmountUnconvertible,
@@ -1694,26 +1688,14 @@ export function createToolHandlers(
             delegationRail: prefetchedAgent?.executionRail === 'delegation',
           })
 
-          if (selection?.scheme === 'erc7710') {
-            // #2041 (haven-reviewer, BLOCKING): the cap MUST bind the option
-            // that is actually authorized. #1453 made the two selectors
-            // mutually exclusive — `selectStandardPaymentOption` skips
-            // erc7710-tagged entries and `selectErc7710PaymentOption` selects
-            // only them — so the pre-network check above compared against a
-            // DIFFERENT accepts[] entry than this branch sends, and nothing
-            // ties their amounts together.
-            //
-            // `payment_required` is merchant-controlled input, which turns
-            // that from a guard that fails to bind into one that can be
-            // STEERED AROUND: advertise a cheap standard entry beside an
-            // expensive erc7710 entry and the cap passes against the cheap one
-            // while the expensive one is authorized. Measured on the shipped
-            // sibling tools at 900 USDC authorized against a 1 USDC cap
-            // (#2051, filed separately — those are NOT fixed here).
-            //
-            // Re-assert against this option's OWN asset and decimals: a human
-            // cap ("1" = 1 USDC) converts with the decimals of the asset being
-            // paid, never the other entry's.
+          // THE cap assertion — one, here, against whichever option the
+          // selector actually chose, using that option's OWN asset/decimals
+          // (#1351: a human cap converts with the decimals of the asset being
+          // paid, never a different entry's). `selection` is null only when
+          // nothing payable was selected at all, in which case
+          // createX402Intent below raises the pre-existing
+          // no-compatible-option refusal and there is nothing to cap.
+          if (selection) {
             const selectedToken = resolveTokenFromAddress(
               selection.option.asset,
               selection.option.network,
@@ -1730,7 +1712,9 @@ export function createToolHandlers(
               selectedToken?.symbol,
               selectedCap.label,
             )
+          }
 
+          if (selection?.scheme === 'erc7710') {
             const prepared = await haven.prepareX402Erc7710(payReq, {
               delegationRail: true,
               // #2041 (haven-reviewer, BLOCKING): the 3009 fallback below has

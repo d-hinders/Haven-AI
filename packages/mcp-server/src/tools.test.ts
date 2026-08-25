@@ -572,9 +572,18 @@ describe('haven_pay_x402_quote', () => {
     expect(payload.success).toBe(false)
     if (payload.success) throw new Error('expected failure')
     expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
-    // Guard is pure + pre-funding: neither the agent fetch nor the intent ran.
-    expect(calls.find((c) => c.url.includes('/agent'))).toBeUndefined()
+    // #2041 CHARACTERIZATION CHANGE, stated rather than quietly dropped: this
+    // used to also assert the agent fetch had not run. The cap is now asserted
+    // AFTER scheme selection — because a cap checked before selection is a cap
+    // checked against an option that may not be the one authorized, which was
+    // wrong in both directions (#2051, and the over-binding mirror) — and
+    // selection needs the account's rail. So a read-only GET now precedes this
+    // refusal.
+    //
+    // The property that protects money is unchanged and still pinned: no
+    // authorize is created, so no funding intent exists and no funds moved.
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+    expect(calls.every((c) => c.method === 'GET')).toBe(true)
   })
 
   it('returns the unsigned funding hash + x402 data for the edge, signing nothing', async () => {
@@ -819,6 +828,69 @@ describe('haven_resume_x402_payment', () => {
     expect(result.data.payment_required).toBeDefined()
     expect(result.data.x402).toBeDefined()
     expect(result.data.tx_hash).toBe('0xfunded')
+  })
+
+  /**
+   * #2041 (re-review NIT): the erc7710 disposition was an ARGUMENT in a comment
+   * and nothing would have failed if a future change let an erc7710 intent
+   * reach this handler. Pin the invariant instead of resting it on prose.
+   *
+   * The gate requires nextAction === 'retry_original_x402_request', which the
+   * backend emits for exactly one state: 'executed', meaning the user completed
+   * the FUNDING payment. A successful erc7710 settle instead leaves the intent
+   * at 'submitted' (#1508) — the merchant redeems the chain afterwards. So this
+   * models the real end state of an erc7710 payment and pins that resume
+   * REFUSES it, rather than half-resuming a flow that has no funding leg to
+   * retry. If someone later routes erc7710 into the resume lifecycle, this test
+   * is what makes them confront the question.
+   */
+  it('#2041: refuses a SUBMITTED erc7710 intent — the resume lifecycle is the funding one', async () => {
+    stubFetch({
+      'GET /machine-payments/pay_7710_submitted/status': {
+        status: 200,
+        body: {
+          payment_id: 'pay_7710_submitted',
+          status: 'submitted',
+          // NOT retry_original_x402_request: nothing was funded, so there is no
+          // funding payment for the user to have completed.
+          next_action: 'check_status_later',
+          rail: 'x402',
+          tx_hash: null,
+          message: 'The payment was submitted and is waiting for confirmation.',
+        },
+      },
+    })
+
+    const result = await handlers().haven_resume_x402_payment({
+      resume_state: {
+        rail: 'x402' as const,
+        paymentId: 'pay_7710_submitted',
+        paymentRequired: PAYMENT_REQUIRED,
+        accepted: PAYMENT_REQUIRED.accepts[0],
+        url: 'https://merchant.test/paid',
+        resourceUrl: 'https://merchant.test/paid',
+        description: null,
+        amountAtomic: '2500000',
+        amount: '2.50',
+        token: 'USDC',
+        asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+        network: 'base',
+        chainId: 8453,
+        merchantAddress: '0xMerchant',
+      },
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    // The gate refuses with the payment-state 409 rather than handing back a
+    // resume context. (The message is the backend's own — the handler prefers
+    // it over its fallback string — so the invariant is asserted on the refusal
+    // and its status, not on prose that a backend copy edit could change.)
+    expect((result as unknown as Record<string, unknown>).statusCode).toBe(409)
+    // And critically: no signing context for a scheme whose signing step has
+    // already happened.
+    expect((result as unknown as Record<string, unknown>).payload_hash).toBeUndefined()
+    expect((result as unknown as Record<string, unknown>).x402).toBeUndefined()
   })
 
   it('rejects when no payment_id and no resume_state provided', async () => {
@@ -4640,6 +4712,31 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
       },
     ],
   }
+  /**
+   * The MIRROR of the fixture above: an EXPENSIVE standard entry beside a CHEAP
+   * erc7710 one. Same root cause, opposite direction — here a cap compared
+   * against the unselected standard entry OVER-binds and refuses a purchase
+   * that was never going to cost that much.
+   */
+  const EXPENSIVE_STANDARD_ATOMIC = '3000000' // 3.00 USDC — never authorized on the erc7710 branch
+  const CHEAP_ERC7710_ATOMIC = '500000' // 0.50 USDC — what actually gets authorized
+  const CHEAP_ERC7710_PAYMENT_REQUIRED = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: EXPENSIVE_STANDARD_ATOMIC,
+        maxAmountRequired: EXPENSIVE_STANDARD_ATOMIC,
+      },
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: CHEAP_ERC7710_ATOMIC,
+        maxAmountRequired: CHEAP_ERC7710_ATOMIC,
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR] },
+      },
+    ],
+  }
+
   /** A merchant advertising erc7710 and NOTHING else — no standard entry. */
   const ERC7710_ONLY_PAYMENT_REQUIRED = {
     ...PAYMENT_REQUIRED,
@@ -4831,6 +4928,48 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
       expect(payload.success).toBe(false)
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+    })
+
+    it('does NOT over-bind: a cheap erc7710 entry is payable under a cap the standard entry exceeds', async () => {
+      // The mirror defect, found by the re-review. Before the reordering the
+      // pre-network check refused this outright with
+      //   "Authorized amount 3000000 exceeds max_amount_human 1 USDC"
+      // — a refusal citing an amount that was never going to be authorized. It
+      // failed SAFE, which is exactly why it could ship unnoticed; it also hit
+      // the recipient-pinned population this issue exists to unblock, since
+      // they are the ones on the erc7710 branch.
+      const res = await quotePay(CHEAP_ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
+        max_amount_human: '1',
+      })
+
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(authorizeBody().amount).toBe(CHEAP_ERC7710_ATOMIC)
+    })
+
+    it('the atomic spelling does not over-bind either', async () => {
+      const res = await quotePay(CHEAP_ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
+        max_amount: CHEAP_ERC7710_ATOMIC, // exactly the erc7710 price
+      })
+
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(authorizeBody().amount).toBe(CHEAP_ERC7710_ATOMIC)
+    })
+
+    it('POSITIVE CONTROL — the same fixture on a LEGACY rail IS refused, because there the expensive entry is the authorized one', async () => {
+      // The control that keeps the fix honest: "do not over-bind" must not
+      // decay into "do not bind". Same payment_required, same cap; only the
+      // rail differs, and with it which entry is authorized.
+      const payload = await rawQuotePay(
+        CHEAP_ERC7710_PAYMENT_REQUIRED,
+        LEGACY_AGENT,
+        false,
+        { max_amount_human: '1' },
+      )
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+      expect(calls.find((c) => new URL(c.url).pathname === '/x402')).toBeUndefined()
     })
 
     it('POSITIVE CONTROL — the 3009 branch keeps capping against the standard entry', async () => {

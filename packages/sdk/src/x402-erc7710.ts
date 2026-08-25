@@ -145,6 +145,22 @@ export class X402Erc7710 {
        * re-threaded, which the guided catalog path (#1305) exists to remove.
        */
       mcpCallContext?: X402McpCallContext
+      /**
+       * #2041: replay key for this authorization, exactly as the 3009 path's
+       * `createX402Intent` already sends one.
+       *
+       * The backend has supported full replay dedup on THIS branch all along —
+       * `runDelegationAuthorize` looks an existing intent up by key before it
+       * ever branches on the funding shape, and the erc7710 insert carries
+       * `conflictTarget: 'x402_idempotency_key'`. The dedup was simply never
+       * invoked, because this options bag had no way to say the key. A retried
+       * call therefore minted a SECOND independently-signable settlement child
+       * for the same purchase — a double-authorize hazard on the one scheme
+       * whose signed artifact is spend authority rather than a funding step.
+       *
+       * Omitted, the backend behaves exactly as before (no key, no dedup).
+       */
+      idempotencyKey?: string
     } = {},
   ): Promise<{
     paymentId: string
@@ -197,6 +213,9 @@ export class X402Erc7710 {
       // becomes a loud mismatch instead of a silent reroute to the 3009 leg.
       payTo: merchantPayTo,
       settlementScheme: 'erc7710',
+      // #2041: sent only when the caller supplied one, so an omitting caller's
+      // request body is byte-identical to the pre-#2041 shape.
+      ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
       amount: amountAtomic,
       asset: option.asset,
       network: option.network,

@@ -18,6 +18,7 @@ import {
   discoverMerchantMcpUrl,
   resolveTokenFromAddress,
   sameUrl,
+  selectErc7710PaymentOption,
   selectStandardPaymentOption,
   validateStandardX402PaymentHeader,
   X402PaymentHeaderValidationError,
@@ -769,7 +770,18 @@ export function createToolHandlers(
         // confirm; here it is the settlement child and there is no funding
         // transaction to relay, wait for, or later sweep.
         if (args.settlement_scheme === 'erc7710') {
-          const paymentHeader = await haven.submitX402Erc7710(args.payment_id, args.signature)
+          // #2041 (haven-reviewer, SHOULD-FIX): route this through the SAME
+          // expiry mapping the 3009 relay uses. The settlement child's own
+          // expiry is the binding window on this scheme and it is the SHORTEST
+          // one in the system, so an expired settle is MORE likely here, not
+          // less — leaving it as a raw error was the wrong asymmetry. The
+          // mapping is scheme-agnostic (it keys on rail 'x402' + an expired
+          // status behind a 410), so it applies unchanged.
+          const paymentHeader = await submitErc7710WithExpiryMapping(
+            haven,
+            args.payment_id,
+            args.signature,
+          )
           return {
             payment_id: args.payment_id,
             settlement_scheme: 'erc7710',
@@ -782,13 +794,22 @@ export function createToolHandlers(
             funding_tx_hash: null,
             payment_header: paymentHeader,
             ...buildAgentGuidance({
+              // The shared vocabulary's value for "retry the merchant" (#1308).
+              // Its own doc comment mentions resuming, so the reason below says
+              // explicitly that no resume call is involved: haven_resume_x402_payment
+              // is the APPROVAL-resume flow and is unreachable on this scheme
+              // (see the note on that handler), and nextTool is deliberately
+              // omitted because the next step is the agent's own HTTP retry,
+              // not a Haven tool.
               nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
               safeToContinue: true,
               reason:
                 'Retry the ORIGINAL merchant request yourself with this payment_header as the ' +
                 'X-PAYMENT header. Do NOT call haven_x402_sign_header: on this scheme Haven ' +
                 'assembled the header, there is nothing to build locally, and there is no funding ' +
-                'transaction to wait for or sweep — the merchant pulls from the treasury directly.',
+                'transaction to wait for or sweep — the merchant pulls from the treasury directly. ' +
+                'Do NOT call haven_resume_x402_payment either: nothing is pending, and that tool ' +
+                'resumes user-approved FUNDING payments, which this scheme does not have.',
               summary: { payment_id: args.payment_id, status: 'submitted' },
             }),
           }
@@ -1615,7 +1636,15 @@ export function createToolHandlers(
               optionToken?.symbol,
               capAtomic.label,
             )
-          } else if (cap.kind !== 'none') {
+          } else if (cap.kind !== 'none' && !selectErc7710PaymentOption(payReq.accepts)) {
+            // #2041: "no standard option" stopped meaning "nothing Haven can
+            // settle" the moment this tool could reach erc7710. A merchant that
+            // advertises ONLY an erc7710 entry is payable now, so refusing a
+            // CAPPED call here — while the same call uncapped succeeded — would
+            // make stating a spending limit the thing that breaks the purchase.
+            // Its cap is enforced against the selected option below, still
+            // before any authorize and so still before any funds move.
+            //
             // No selectable option means there is no merchant-authoritative
             // amount to compare a cap against — for EITHER spelling. Before
             // #1351 the cap was simply skipped here, which left the agent
@@ -1666,7 +1695,55 @@ export function createToolHandlers(
           })
 
           if (selection?.scheme === 'erc7710') {
-            const prepared = await haven.prepareX402Erc7710(payReq, { delegationRail: true })
+            // #2041 (haven-reviewer, BLOCKING): the cap MUST bind the option
+            // that is actually authorized. #1453 made the two selectors
+            // mutually exclusive — `selectStandardPaymentOption` skips
+            // erc7710-tagged entries and `selectErc7710PaymentOption` selects
+            // only them — so the pre-network check above compared against a
+            // DIFFERENT accepts[] entry than this branch sends, and nothing
+            // ties their amounts together.
+            //
+            // `payment_required` is merchant-controlled input, which turns
+            // that from a guard that fails to bind into one that can be
+            // STEERED AROUND: advertise a cheap standard entry beside an
+            // expensive erc7710 entry and the cap passes against the cheap one
+            // while the expensive one is authorized. Measured on the shipped
+            // sibling tools at 900 USDC authorized against a 1 USDC cap
+            // (#2051, filed separately — those are NOT fixed here).
+            //
+            // Re-assert against this option's OWN asset and decimals: a human
+            // cap ("1" = 1 USDC) converts with the decimals of the asset being
+            // paid, never the other entry's.
+            const selectedToken = resolveTokenFromAddress(
+              selection.option.asset,
+              selection.option.network,
+            )
+            const selectedCap = resolveCapAtomic(cap, {
+              decimals: selectedToken?.decimals ?? null,
+              token: selectedToken?.symbol ?? 'the merchant asset',
+              asset: selection.option.asset,
+              network: selection.option.network,
+            })
+            assertWithinMaxAmount(
+              x402AuthorizationAmount(selection.option),
+              selectedCap.atomic,
+              selectedToken?.symbol,
+              selectedCap.label,
+            )
+
+            const prepared = await haven.prepareX402Erc7710(payReq, {
+              delegationRail: true,
+              // #2041 (haven-reviewer, BLOCKING): the 3009 fallback below has
+              // always passed this. Without it a retried call minted a SECOND
+              // independently-signable settlement child instead of replaying
+              // the first — and on this scheme the signed artifact IS spend
+              // authority, not a funding step. The backend's dedup existed all
+              // along (`findX402IntentByIdempotencyKey` runs before the
+              // funding-shape branch; the erc7710 insert carries
+              // `conflictTarget: 'x402_idempotency_key'`); it was simply never
+              // invoked from here.
+              ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),
+            })
             return {
               payment_id: prepared.paymentId,
               status: 'pending_signature',
@@ -1780,6 +1857,20 @@ export function createToolHandlers(
     },
 
     haven_resume_x402_payment: async (input) => {
+      // #2041: this tool is the APPROVAL-resume flow, and it is structurally
+      // unreachable for an erc7710 intent rather than broken for one. Its gate
+      // below requires nextAction === 'retry_original_x402_request', which the
+      // backend emits for exactly one state — status 'executed', meaning "the
+      // user completed the FUNDING payment" (agent-payment-status.ts). erc7710
+      // has no funding payment, a successful settle leaves the intent at
+      // 'submitted' (#1508), and an over-budget erc7710 authorize returns
+      // pending_signature rather than entering the approval lifecycle at all
+      // (#2023) — so no erc7710 intent reaches 'executed'. Note also that the
+      // resume state's `accepted` is SYNTHESIZED as a plain exact option with
+      // no extra.assetTransferMethod, so a resumed quote would select 3009 by
+      // construction. Left unchanged deliberately: the 3009 path through here
+      // is byte-identical, and inventing an erc7710 resume would be inventing
+      // a flow no state machine produces.
       const args = parse('haven_resume_x402_payment', input)
       // #1328: the mpp-rail redirect (haven_resume_mpp_payment) is retired —
       // a non-x402 resume_state now falls through to resolveResumeState's own
@@ -2824,6 +2915,31 @@ async function submitSignatureWithExpiryMapping(
 ): ReturnType<HavenClient['submitSignature']> {
   try {
     return await haven.submitSignature(paymentId, signature)
+  } catch (err) {
+    const mapped = await paymentWindowExpiredErrorFor(haven, paymentId, err)
+    if (mapped) throw mapped
+    throw err
+  }
+}
+
+/**
+ * #2041: the erc7710 twin of `submitSignatureWithExpiryMapping`.
+ *
+ * Same mapping, different call: on this scheme the signature is the settlement
+ * CHILD, so it goes to `POST /x402/:id/settle` rather than the funding relay.
+ * `paymentWindowExpiredErrorFor` keys on rail + expired status behind a 410 and
+ * is scheme-agnostic, so an expired child yields the structured
+ * `payment_window_expired` refusal instead of a raw API error — which matters
+ * more here than on the bridge, because the child's window is the shortest in
+ * the system.
+ */
+async function submitErc7710WithExpiryMapping(
+  haven: HavenClient,
+  paymentId: string,
+  signature: string,
+): Promise<string> {
+  try {
+    return await haven.submitX402Erc7710(paymentId, signature)
   } catch (err) {
     const mapped = await paymentWindowExpiredErrorFor(haven, paymentId, err)
     if (mapped) throw mapped

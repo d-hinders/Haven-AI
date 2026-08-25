@@ -4614,13 +4614,40 @@ describe('haven_submit_catalog_entry (#1716)', () => {
  */
 describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
   const FACILITATOR = '0x4444444444444444444444444444444444444444'
-  /** The load-bearing fixture: a plain-HTTP merchant that ADVERTISES erc7710. */
+  /**
+   * The load-bearing fixture: a plain-HTTP merchant that ADVERTISES erc7710.
+   *
+   * The two entries carry **deliberately different amounts**, and that is the
+   * point of the fixture rather than incidental detail. #1453 made the two
+   * option selectors mutually exclusive, so the cap is compared against one
+   * accepts[] entry while the erc7710 branch authorizes the OTHER — and
+   * nothing ties their amounts together. Building the erc7710 entry as a plain
+   * spread of the standard one (which is what #1456's fixtures do) gives both
+   * entries the same amount, which makes that entire failure mode invisible to
+   * a green suite. See #2051.
+   */
+  const STANDARD_ATOMIC = '1500000' // 1.50 USDC — PAYMENT_REQUIRED's maxAmountRequired
+  const ERC7710_ATOMIC = '2500000' // 2.50 USDC — what the erc7710 branch really authorizes
   const ERC7710_PAYMENT_REQUIRED = {
     ...PAYMENT_REQUIRED,
     accepts: [
       ...PAYMENT_REQUIRED.accepts,
       {
         ...PAYMENT_REQUIRED.accepts[0],
+        amount: ERC7710_ATOMIC,
+        maxAmountRequired: ERC7710_ATOMIC,
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR] },
+      },
+    ],
+  }
+  /** A merchant advertising erc7710 and NOTHING else — no standard entry. */
+  const ERC7710_ONLY_PAYMENT_REQUIRED = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: ERC7710_ATOMIC,
+        maxAmountRequired: ERC7710_ATOMIC,
         extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR] },
       },
     ],
@@ -4642,18 +4669,28 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
    * a legacy account meeting a 7710-advertising merchant must still get the
    * 3009 intent back, which is the case a careless helper gets wrong.
    */
-  async function quotePay(
+  async function rawQuotePay(
     paymentRequired: unknown,
     agent: Record<string, unknown>,
     expectErc7710 = false,
+    extraArgs: Record<string, unknown> = {},
   ) {
     stubFetch({
       'GET /machine-payments/agent': { status: 200, body: agent },
       'POST /x402': { status: 201, body: expectErc7710 ? CHILD : X402_INTENT_RESPONSE },
     })
-    return ok(
-      await handlers().haven_pay_x402_quote({ payment_required: paymentRequired }),
-    ) as { data: Record<string, any> }
+    return handlers().haven_pay_x402_quote({ payment_required: paymentRequired, ...extraArgs })
+  }
+
+  async function quotePay(
+    paymentRequired: unknown,
+    agent: Record<string, unknown>,
+    expectErc7710 = false,
+    extraArgs: Record<string, unknown> = {},
+  ) {
+    return ok(await rawQuotePay(paymentRequired, agent, expectErc7710, extraArgs)) as {
+      data: Record<string, any>
+    }
   }
 
   function authorizeBody() {
@@ -4680,6 +4717,10 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
     // No funding target, so no separate merchant field and no funding leg.
     expect(body).not.toHaveProperty('merchantPayTo')
     expect(body.facilitatorAddresses).toEqual([FACILITATOR])
+    // The authorized amount is the ERC7710 entry's own, not the standard
+    // entry's — stated here because everything about the cap depends on it.
+    expect(body.amount).toBe(ERC7710_ATOMIC)
+    expect(res.data.amount_atomic).toBe(ERC7710_ATOMIC)
   })
 
   it('POSITIVE CONTROL — a merchant that does NOT advertise erc7710 still takes the 3009 bridge', async () => {
@@ -4740,6 +4781,145 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
   it('the optional-cap nudge still fires on the erc7710 branch', async () => {
     const res = await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
     expect(res.data.cap_warning).toBeTruthy()
+  })
+
+  /**
+   * #2051 in miniature, fixed for THIS branch only.
+   *
+   * `payment_required` is merchant-controlled input. Because #1453 made the two
+   * option selectors mutually exclusive, a cap compared against the standard
+   * entry says nothing about the erc7710 entry the branch actually authorizes —
+   * so a merchant could advertise a cheap standard price beside an expensive
+   * erc7710 one and walk straight through a user-stated spending limit. That is
+   * a bypass an attacker chooses to trigger, not a guard that merely fails to
+   * fire, which is why it is proven in both directions here.
+   */
+  describe('the cap binds the option that is ACTUALLY authorized', () => {
+    it('REFUSES when the erc7710 entry exceeds the cap, though the standard entry does not', async () => {
+      // 2 USDC cap. Standard entry 1.50 (under), erc7710 entry 2.50 (over).
+      // Pre-#2041-review this returned a signable child for 2.50 USDC.
+      const payload = await rawQuotePay(
+        ERC7710_PAYMENT_REQUIRED,
+        DELEGATION_AGENT,
+        true,
+        { max_amount_human: '2' },
+      )
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+      // The cap is PRE-network on this branch too: nothing was authorized.
+      expect(calls.find((c) => new URL(c.url).pathname === '/x402')).toBeUndefined()
+    })
+
+    it('POSITIVE CONTROL — an IN-cap erc7710 payment still succeeds', async () => {
+      // Same fixture, same branch, cap raised above the erc7710 entry. Proves
+      // the fix refuses the right thing rather than refusing everything.
+      const res = await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
+        max_amount_human: '3',
+      })
+
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(authorizeBody().amount).toBe(ERC7710_ATOMIC)
+    })
+
+    it('the atomic spelling of the cap binds the erc7710 entry too', async () => {
+      const payload = await rawQuotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
+        max_amount: STANDARD_ATOMIC, // exactly the standard entry's price
+      })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+    })
+
+    it('POSITIVE CONTROL — the 3009 branch keeps capping against the standard entry', async () => {
+      // The same cap that refuses above must still ALLOW the bridge, because
+      // there the standard entry IS the authorized one. A fix that simply
+      // capped harder everywhere would break this.
+      const res = await quotePay(PAYMENT_REQUIRED, LEGACY_AGENT, false, {
+        max_amount_human: '2',
+      })
+
+      expect(res.data.payment_id).toBe('pay_x402')
+      expect(authorizeBody().settlementScheme).toBe('eip3009')
+    })
+  })
+
+  /**
+   * A merchant advertising ONLY erc7710 is payable now, so a CAPPED call must
+   * not be refused as "no payment option Haven can settle" while the same call
+   * uncapped succeeds — stating a spending limit must never be the thing that
+   * breaks a purchase.
+   */
+  describe('a merchant advertising ONLY erc7710', () => {
+    it('is payable with a cap that covers it', async () => {
+      const res = await quotePay(ERC7710_ONLY_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
+        max_amount_human: '3',
+      })
+
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(authorizeBody().amount).toBe(ERC7710_ATOMIC)
+    })
+
+    it('still REFUSES a cap it exceeds — the widened guard did not disable the cap', async () => {
+      const payload = await rawQuotePay(
+        ERC7710_ONLY_PAYMENT_REQUIRED,
+        DELEGATION_AGENT,
+        true,
+        { max_amount_human: '1' },
+      )
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+      expect(calls.find((c) => new URL(c.url).pathname === '/x402')).toBeUndefined()
+    })
+
+    it('is still refused on a LEGACY rail, which genuinely cannot settle it', async () => {
+      const payload = await rawQuotePay(ERC7710_ONLY_PAYMENT_REQUIRED, LEGACY_AGENT, false, {
+        max_amount_human: '3',
+      })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.message).toContain('No compatible payment option')
+    })
+  })
+
+  /**
+   * The backend has supported replay dedup on this branch all along — the
+   * lookup runs before the funding-shape branch and the erc7710 insert carries
+   * `conflictTarget: 'x402_idempotency_key'`. It was never invoked, because the
+   * SDK options bag had no way to say the key. A retried call therefore minted
+   * a second INDEPENDENTLY SIGNABLE settlement child for one purchase, and on
+   * this scheme the signed artifact is spend authority, not a funding step.
+   */
+  describe('idempotency on the erc7710 branch', () => {
+    it('sends the caller idempotency_key on the authorize, so a retry can replay', async () => {
+      await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
+        idempotency_key: 'x402:generic-7710:abc',
+      })
+
+      expect(authorizeBody().idempotencyKey).toBe('x402:generic-7710:abc')
+    })
+
+    it('sends the SAME key on a repeated call, which is what makes the replay one purchase', async () => {
+      const seen: unknown[] = []
+      for (let i = 0; i < 2; i++) {
+        calls = []
+        await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
+          idempotency_key: 'x402:generic-7710:abc',
+        })
+        seen.push(authorizeBody().idempotencyKey)
+      }
+      expect(seen).toEqual(['x402:generic-7710:abc', 'x402:generic-7710:abc'])
+    })
+
+    it('omits the field entirely when the caller gave no key, keeping the old request shape', async () => {
+      await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
+      expect(authorizeBody()).not.toHaveProperty('idempotencyKey')
+    })
   })
 
   /**
@@ -4839,6 +5019,50 @@ describe('haven_submit — erc7710 settle (#2041)', () => {
     expect(res.data.payment_header).toBeUndefined()
     expect(calls.find((c) => c.url.includes('/settle'))).toBeUndefined()
     expect(calls.find((c) => c.url.includes('/sign'))).toBeDefined()
+  })
+
+  it('maps an EXPIRED settlement child to the structured window-expired refusal', async () => {
+    // The child's window is the shortest in the system, so this is MORE likely
+    // on this scheme than on the bridge — leaving it as a raw API error was the
+    // wrong asymmetry.
+    stubFetch({
+      'POST /x402/pay_expired_child/settle': {
+        status: 410,
+        body: { error: 'Settlement child expired before it could be redeemed' },
+      },
+      'GET /machine-payments/pay_expired_child/status': {
+        status: 200,
+        body: {
+          payment_id: 'pay_expired_child',
+          kind: 'payment_intent',
+          rail: 'x402',
+          status: 'expired',
+          phase: 'expired',
+          next_action: 'request_again_if_user_still_wants_it',
+          amount: '2.50',
+          token: 'USDC',
+          resource_url: 'http://merchant.test/paid',
+          merchant_address: '0xMerchant',
+          tx_hash: null,
+          expires_at: '2000-01-01T00:00:00.000Z',
+          chain_id: 8453,
+          message: 'The payment expired before it was completed.',
+          idempotency_key: 'idem-7710',
+        },
+      },
+    })
+
+    const payload = await handlers().haven_submit({
+      payment_id: 'pay_expired_child',
+      signature: SIG,
+      settlement_scheme: 'erc7710',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.PaymentWindowExpired)
+    expect(payload.next_action).toBe(AgentPaymentNextAction.PaymentWindowExpired)
+    expect(payload.idempotency_key).toBe('idem-7710')
+    expect(payload.retry_with_new_quote).toBe(true)
   })
 
   it("an explicit 'eip3009' behaves identically to omitting it", async () => {

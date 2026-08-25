@@ -1030,6 +1030,12 @@ export class HavenClient {
        * (#1307).
        */
       mcpCallContext?: X402McpCallContext
+      /**
+       * #2041: replay key, as `createX402Intent` already takes one. Without it
+       * a retried authorize mints a second signable settlement child instead
+       * of replaying the first.
+       */
+      idempotencyKey?: string
     } = {},
   ): Promise<{
     paymentId: string

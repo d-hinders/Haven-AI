@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-08-22" # #1745: §3's passport-attest procedure LOSES its duplicate-hunt steps — the re-mint is now guarded in code (a re-anchor needs the prior tx's nonce consumed by something else), so cancelling a stuck nonce can no longer release a queued duplicate, and the cancel is self-completing: the burned nonce IS the evidence the sweep needs. A hand-run fee bump is named as the remaining hazard, since it leaves no outbound record. Prior: #1735: §3 gains a FOURTH failure class — a passport attest that broadcasts and does not confirm, which unlike the deploy does not self-heal; numbered operator runbook added, sequenced around the #1745 re-mint race. Prior: #1722: §3 gains a third failure class — a deploy that broadcasts and does not confirm is bounded at 120 s and handed to the #1558 bump worker, NOT relayer exhaustion; §1's gas-payer claims re-read against the code and unchanged. Prior: #1721: §1 and §3 re-read against the code — the relayer-paid factory deploy now has TWO trigger sites (grant activation in routes/agent-delegations.ts and, since #1667, the first erc7710 authorize in modules/x402/delegation-authorize.ts), so the drained-relayer blast radius and the erc7710 "sponsors nothing" line were corrected and the 502/429 surfaces named. §2 credential claims spot-checked (delegationRailBundlerUrl, DELEGATION_RAIL_SPONSORSHIP_POLICY_ID); §§4-5 are policy/incident prose, unchanged. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
+last-verified: "2026-08-25" # #1743: §3's fourth failure class gains its ENCODED recovery — step 2 now runs `ops:cancel-stuck-attest` (operator-triggered, Option A; no timer) instead of prescribing a hand-run 0-value self-send, step 3 names the hand-run cancel itself as a hazard the command removes, and the closing paragraph flips from "automating it is a known gap" to "the trigger stays human by owner decision". Both race outcomes documented as self-resolving (attest wins → receipt recovery on the original anchor + lane-cap incident alert for the dead cancel; cancel wins → burned nonce is the #1745 evidence and the sweep re-mints once). Only §3 re-verified in this pass. Prior: #1745: §3's passport-attest procedure LOSES its duplicate-hunt steps — the re-mint is now guarded in code (a re-anchor needs the prior tx's nonce consumed by something else), so cancelling a stuck nonce can no longer release a queued duplicate, and the cancel is self-completing: the burned nonce IS the evidence the sweep needs. A hand-run fee bump is named as the remaining hazard, since it leaves no outbound record. Prior: #1735: §3 gains a FOURTH failure class — a passport attest that broadcasts and does not confirm, which unlike the deploy does not self-heal; numbered operator runbook added, sequenced around the #1745 re-mint race. Prior: #1722: §3 gains a third failure class — a deploy that broadcasts and does not confirm is bounded at 120 s and handed to the #1558 bump worker, NOT relayer exhaustion; §1's gas-payer claims re-read against the code and unchanged. Prior: #1721: §1 and §3 re-read against the code — the relayer-paid factory deploy now has TWO trigger sites (grant activation in routes/agent-delegations.ts and, since #1667, the first erc7710 authorize in modules/x402/delegation-authorize.ts), so the drained-relayer blast radius and the erc7710 "sponsors nothing" line were corrected and the 502/429 surfaces named. §2 credential claims spot-checked (delegationRailBundlerUrl, DELEGATION_RAIL_SPONSORSHIP_POLICY_ID); §§4-5 are policy/incident prose, unchanged. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)
@@ -177,12 +177,33 @@ warning. Operator response:
    **Mined** (either status) → the next bump tick closes the record itself from
    the receipt; nothing to do but confirm it cleared.
 2. **Still pending, or dropped** → the lane needs a same-nonce replacement that
-   is NOT another attest: send a 0-value self-transfer from the relayer at that
-   nonce with bumped fees to cancel it. Once that cancel mines, the stuck
-   attest can never mine — its nonce is spent — and issuance recovers **on its
-   own**: the next sweep tick sees the burned nonce, declares the old
-   transaction dead and anchors a fresh attestation. There is nothing further
-   to do by hand.
+   is NOT another attest: a 0-value relayer self-send at that nonce with bumped
+   fees. Since [#1743](https://github.com/d-hinders/Haven-AI/issues/1743) this
+   is **encoded** — run it with the row id from the alert:
+
+   ```bash
+   npm run ops:cancel-stuck-attest -w packages/backend -- <outbound-row-id>
+   ```
+
+   The command re-verifies the row is really the wedge before sending anything
+   (fail-closed: it refuses a young/slow broadcast, an already-mined one, a
+   row already cancelled, or a bump-worker-owned submitter — and it closes a
+   mined row from the receipt instead of cancelling). The cancel goes through
+   the outbound pipeline (`infra/outbound-lane-cancel.ts`): nonce, chain and
+   wallet come from the stuck row itself, and the cancel gets a durable
+   `outbound_txs` record the bump worker reconciles like any other broadcast —
+   including fee-replacing the cancel itself if it sticks. Running it twice is
+   safe; the second run is refused.
+
+   Once the cancel mines, the stuck attest can never mine — its nonce is spent
+   — and issuance recovers **on its own**: the next sweep tick sees the burned
+   nonce, declares the old transaction dead and anchors a fresh attestation.
+   If the attest wins the race instead, its unchanged hash means #1043's
+   receipt recovery closes on the original anchor and no duplicate is minted;
+   the losing cancel burns the lane's bump attempts and surfaces as the
+   worker's lane-cap incident alert — confirm on the explorer that the attest
+   mined, and that alert is resolved. Either way there is nothing further to
+   do by hand.
 
    **Do this even when the transaction has vanished from the mempool.** It is
    tempting to assume a dropped transaction frees its own nonce and that
@@ -194,9 +215,11 @@ warning. Operator response:
    the issuance.
 3. Do **not** re-broadcast the stored attest calldata by hand — that is the
    duplicate-credential path this whole gate exists to prevent. A hand-run
-   *fee bump* is the same hazard wearing a different hat: it leaves no
-   `outbound_txs` record, so the guard in step 2 cannot see it. Cancel, never
-   bump.
+   *fee bump* is the same hazard wearing a different hat, and so is a hand-run
+   *cancel*: both leave no `outbound_txs` record, so the guards cannot see
+   them — and the hand-run cancel adds its own hazards (typo'd nonce, wrong
+   chain, wrong wallet) that the encoded command removes. Use the command,
+   never a bare transaction.
 
 > **Fixed by [#1745](https://github.com/d-hinders/Haven-AI/issues/1745) — this
 > procedure used to be more dangerous, and the history is worth keeping.**
@@ -222,10 +245,11 @@ with a different automatic path (`passport_revoke` **is** on
 `REBROADCAST_SAFE_SUBMITTERS`, so the bump worker does fee-replace it), and it
 hands the "an attest is holding the lower nonce" case back to this section.
 
-Step 2's cancel is still a manual action; automating it is a known gap,
-deliberately left to an owner decision
-(#1743); see [`backend-scaling.md`](backend-scaling.md) § *Single point of
-stall*.
+Step 2's cancel stays **operator-triggered by owner decision** (#1743,
+Option A): no timer anywhere decides on its own that an attest is dead — the
+human judges, the system executes. What used to be the gap (the cancel itself
+being a hand-run transaction) is closed; see
+[`backend-scaling.md`](backend-scaling.md) § *Single point of stall*.
 
 Probes:
 - `ops:check-bundler` — bundler up + EntryPoint v0.7 + gas oracle. It resolves

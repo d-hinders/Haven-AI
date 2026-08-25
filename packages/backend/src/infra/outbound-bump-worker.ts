@@ -66,6 +66,13 @@ export const REBROADCAST_SAFE_SUBMITTERS: ReadonlySet<string> = new Set([
   'sweep',
   'hybrid_deploy',
   'passport_revoke',
+  // #1743: the operator lane cancel's 0-value relayer self-send. The
+  // canonical rebroadcast-safe payload — a duplicate broadcast moves nothing
+  // and its hash keys no recovery — so a fee-stuck cancel is fee-replaced by
+  // this worker instead of becoming a second wedge, and a cancel that LOST
+  // its race (the attest mined at the shared nonce) is closed `failed` here
+  // when its bump attempt gets "nonce too low".
+  'lane_cancel',
 ])
 
 export interface BumpFees {

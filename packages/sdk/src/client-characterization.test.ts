@@ -405,3 +405,107 @@ describe('HavenClient representative read, sweep, and tool facades', () => {
     routes.assertAllUsed()
   })
 })
+
+describe('catalog discovery + submission (#1716)', () => {
+  function client() {
+    return new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'https://haven.test' })
+  }
+
+  const MIXED = {
+    entries: [
+      {
+        id: 'dir_1', name: 'Directory Summarizer', description: 'd', category: 'api',
+        resource_url: 'https://directory.example.com/mcp', rail: 'x402', protocol: 'mcp',
+        tool_name: 'summarize', tool_arguments: null,
+        price_display: null, price_atomic: null, asset: null, network: null,
+        status: 'active', verified_at: '2026-08-23T10:00:00.000Z',
+        source: 'ingestion', domain_verified: true, verified_payable: true,
+      },
+      {
+        id: 'cur_1', name: 'Curated API', description: 'd', category: 'ai',
+        resource_url: 'https://api.example.com/paid', rail: 'x402', protocol: 'http',
+        tool_name: null, tool_arguments: null,
+        price_display: '$0.01 USDC', price_atomic: '10000', asset: 'USDC', network: 'eip155:8453',
+        status: 'active', verified_at: '2026-08-01T00:00:00.000Z',
+        source: 'operator', domain_verified: false, verified_payable: false,
+      },
+    ],
+  }
+
+  it('maps badge fields and filters on verified/operator without an extra query param', async () => {
+    const routes = installRoutes({
+      'GET https://haven.test/catalog': [
+        () => json(MIXED),
+        () => json(MIXED),
+        () => json(MIXED),
+      ],
+    })
+
+    const all = await client().discoverTools({})
+    expect(all).toHaveLength(2)
+    expect(all[0]).toMatchObject({
+      source: 'ingestion',
+      domainVerified: true,
+      verifiedPayable: true,
+    })
+
+    const verified = await client().discoverTools({ verified: 'verified' })
+    expect(verified.map((e) => e.id)).toEqual(['dir_1'])
+
+    const operator = await client().discoverTools({ verified: 'operator' })
+    expect(operator.map((e) => e.id)).toEqual(['cur_1'])
+
+    for (const call of routes.calls) expect(call.url).not.toContain('verified')
+    routes.assertAllUsed()
+  })
+
+  it('submits a catalog entry and maps the token response', async () => {
+    const routes = installRoutes({
+      'POST https://haven.test/catalog/submit': (call) => {
+        expect(call.init.body).toContain('"resource_url":"https://merchant.example/mcp"')
+        return json(
+          { id: 's1', verify_token: 'tok'.repeat(8), status: 'submitted' },
+          201,
+        )
+      },
+    })
+
+    const result = await client().submitCatalogEntry('https://merchant.example/mcp')
+    expect(result).toEqual({ id: 's1', verifyToken: 'tok'.repeat(8), status: 'submitted' })
+    routes.assertAllUsed()
+  })
+
+  it('reads back a submission status with instructions', async () => {
+    const routes = installRoutes({
+      'GET https://haven.test/catalog/submit/s1': () =>
+        json({
+          id: 's1',
+          status: 'submitted',
+          created_at: '2026-08-23T00:00:00.000Z',
+          updated_at: '2026-08-23T00:00:00.000Z',
+          last_verified_at: null,
+          name: null,
+          description: null,
+          entrypoint: null,
+          instructions: {
+            expires_at: '2026-08-30T00:00:00.000Z',
+            well_known: {
+              url: 'https://merchant.example/.well-known/haven-verify-token.txt',
+              content: 'haven-domain-verification=v1.s1.proof',
+              instruction: 'Serve this line',
+            },
+            dns_txt: {
+              name: '_haven-verify.merchant.example',
+              value: 'haven-domain-verification=v1.s1.proof',
+              instruction: 'Publish this TXT record',
+            },
+          },
+        }),
+    })
+
+    const status = await client().getCatalogSubmissionStatus('s1')
+    expect(status.status).toBe('submitted')
+    expect(status.instructions?.well_known.url).toContain('.well-known/haven-verify-')
+    routes.assertAllUsed()
+  })
+})

@@ -94,8 +94,8 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
       </div>
 
       {loadError ? (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
-          <p className="text-sm text-[var(--v2-ink-2)]">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3">
+          <p className="text-sm text-[var(--v2-danger)]">
             Haven could not load how this account is approved.
           </p>
           <Button size="sm" variant="ghost" onClick={() => void reload()}>

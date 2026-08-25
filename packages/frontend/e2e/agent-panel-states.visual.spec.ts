@@ -239,6 +239,13 @@ async function seedPanel(page: Page, seed: { agents: ReadonlyArray<Record<string
 
 /** A delegate the module reports and `/agents` does not — the whole product state. */
 const UNMANAGED_DELEGATE = '0x4444444444444444444444444444444444444444'
+/**
+ * The revoke control's accessible name speaks the TRUNCATED address (the
+ * card's rendered `Address` form), derived here independently rather than
+ * imported from the component's own helper — the assertion should not be
+ * able to re-derive its expectation from the code under test.
+ */
+const UNMANAGED_DELEGATE_SHORT = `${UNMANAGED_DELEGATE.slice(0, 6)}…${UNMANAGED_DELEGATE.slice(-4)}`
 
 /**
  * The unmanaged delegate's on-chain budget.
@@ -1100,7 +1107,7 @@ test.describe('agent panel empty states and card banners', () => {
     // delegate — on-chain from Agents" copy points HERE, so a card without
     // this control makes that copy a lie again.
     await expect(
-      card.getByRole('button', { name: `Revoke delegate ${UNMANAGED_DELEGATE}` }),
+      card.getByRole('button', { name: `Revoke delegate ${UNMANAGED_DELEGATE_SHORT}` }),
       `${label}: the revoke affordance is missing — this card shows live ` +
         `spending authority and must answer how the user stops it (#1980).`,
     ).toBeVisible()
@@ -1146,7 +1153,7 @@ test.describe('agent panel empty states and card banners', () => {
     // The affordance, then the established destructive-confirm pattern: the
     // button alone commits NOTHING — the dialog stands between the click and
     // the Safe transaction, exactly as AgentCard's revoke does.
-    await card.getByRole('button', { name: `Revoke delegate ${UNMANAGED_DELEGATE}` }).click()
+    await card.getByRole('button', { name: `Revoke delegate ${UNMANAGED_DELEGATE_SHORT}` }).click()
     await expect(page.getByText('Revoke this delegate?')).toBeVisible()
     // Money copy, not decoration: the dialog names the authority being
     // removed and that the user approves the update.

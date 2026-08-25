@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Clock, TriangleAlert } from 'lucide-react'
 import ConfirmDialog from '../ConfirmDialog'
-import { Address } from '@/components/haven/Address'
+import { Address, truncateAddress } from '@/components/haven/Address'
 import { Icon } from '@/components/ui/Icon'
 import { type AllowanceInfo } from '@/lib/allowance-module'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
@@ -98,7 +98,9 @@ export function UnmanagedDelegateCard({
           <button
             onClick={() => setRevokeOpen(true)}
             disabled={revoking}
-            aria-label={`Revoke delegate ${delegate}`}
+            // Speak the truncated form, not 42 hex characters (design-review NIT,
+            // #1980); the full address stays one copy-affordance away above.
+            aria-label={`Revoke delegate ${truncateAddress(delegate)}`}
             className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80"
           >
             {revoking ? 'Revoking...' : 'Revoke'}

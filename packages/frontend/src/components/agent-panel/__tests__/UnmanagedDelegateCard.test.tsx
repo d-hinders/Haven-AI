@@ -15,6 +15,9 @@ import { fireEvent, render, screen } from '@testing-library/react'
 const { UnmanagedDelegateCard } = await import('../UnmanagedDelegateCard')
 
 const DELEGATE = '0x' + '44'.repeat(20)
+// The control speaks the truncated form (`0x4444…4444`), matching the card's
+// rendered Address display rather than 42 raw hex characters.
+const DELEGATE_SHORT = `${DELEGATE.slice(0, 6)}…${DELEGATE.slice(-4)}`
 
 function renderCard({
   pendingHavenSetup = false,
@@ -52,13 +55,13 @@ describe('UnmanagedDelegateCard revoke affordance (#1980)', () => {
   it('an external delegate gets a Revoke control', () => {
     renderCard()
     expect(
-      screen.getByRole('button', { name: `Revoke delegate ${DELEGATE}` }),
+      screen.getByRole('button', { name: `Revoke delegate ${DELEGATE_SHORT}` }),
     ).toBeTruthy()
   })
 
   it('revoke goes through the confirm dialog: nothing fires on the button alone', () => {
     const { onRevoke } = renderCard()
-    fireEvent.click(screen.getByRole('button', { name: `Revoke delegate ${DELEGATE}` }))
+    fireEvent.click(screen.getByRole('button', { name: `Revoke delegate ${DELEGATE_SHORT}` }))
 
     // The click opened the dialog, not the action.
     expect(onRevoke).not.toHaveBeenCalled()
@@ -73,7 +76,7 @@ describe('UnmanagedDelegateCard revoke affordance (#1980)', () => {
 
   it('cancel closes the dialog without revoking', () => {
     const { onRevoke } = renderCard()
-    fireEvent.click(screen.getByRole('button', { name: `Revoke delegate ${DELEGATE}` }))
+    fireEvent.click(screen.getByRole('button', { name: `Revoke delegate ${DELEGATE_SHORT}` }))
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(onRevoke).not.toHaveBeenCalled()
     expect(screen.queryByText('Revoke this delegate?')).toBeNull()
@@ -82,14 +85,14 @@ describe('UnmanagedDelegateCard revoke affordance (#1980)', () => {
   it('the pendingHavenSetup branch has NO revoke control', () => {
     renderCard({ pendingHavenSetup: true })
     expect(
-      screen.queryByRole('button', { name: `Revoke delegate ${DELEGATE}` }),
+      screen.queryByRole('button', { name: `Revoke delegate ${DELEGATE_SHORT}` }),
     ).toBeNull()
   })
 
   it('while revoking, the control is disabled and says so', () => {
     renderCard({ revoking: true })
     const button = screen.getByRole('button', {
-      name: `Revoke delegate ${DELEGATE}`,
+      name: `Revoke delegate ${DELEGATE_SHORT}`,
     }) as HTMLButtonElement
     expect(button.disabled).toBe(true)
     expect(button.textContent).toBe('Revoking...')

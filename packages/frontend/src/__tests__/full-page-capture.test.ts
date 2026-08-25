@@ -599,6 +599,21 @@ const DASHBOARD_RENDERED: ContentProbe = {
   contentElements: 460,
 }
 
+/**
+ * `/agents` on the populated fixture — the LEANEST rendered route measured on
+ * this app, read off a real capture run (`content_settle` in the manifest), not
+ * estimated from the JSX. `/dashboard` measured 466-1243 chars in 112-250
+ * elements on the same runs; this is the one the floor has to clear.
+ */
+const AGENTS_RENDERED_LEAN: ContentProbe = {
+  found: true,
+  docScrollHeight: 1_400,
+  viewportHeight: 800,
+  renderedChars: 2_600,
+  contentChars: 105,
+  contentElements: 30,
+}
+
 function fakeContentPage(probes: ContentProbe[]) {
   let index = 0
   const waits: number[] = []
@@ -690,17 +705,35 @@ describe('judgeContentSettled', () => {
     expect(refused).toEqual(['/agents'])
   })
 
-  it('pins the floors against the markup they were measured from', () => {
-    // If someone raises these to a number a real empty state cannot clear, this
-    // is the test that should have to be edited deliberately.
-    expect(MIN_CONTENT_CHARS).toBe(80)
+  it('pins the floors against the two live populations they sit between', () => {
+    // If someone moves these, this is the test that should have to be edited
+    // deliberately — and the numbers below say what the edit would cost.
+    expect(MIN_CONTENT_CHARS).toBe(40)
     expect(MIN_CONTENT_ELEMENTS).toBe(8)
-    // The floors must sit strictly above the real loading fallback and strictly
-    // below the real rendered route, or they discriminate nothing.
+    // Above the real loading fallback and below the LEANEST real route, with
+    // room on both sides. The first draft was 80 chars, picked against
+    // `/dashboard` alone; a live run then measured `/agents` at 105, i.e. a
+    // 1.3x margin — a false positive waiting for one route to lose a line.
     expect(DASHBOARD_LOADING.contentChars).toBeLessThan(MIN_CONTENT_CHARS)
-    expect(DASHBOARD_RENDERED.contentChars).toBeGreaterThan(MIN_CONTENT_CHARS)
     expect(DASHBOARD_LOADING.contentElements).toBeLessThan(MIN_CONTENT_ELEMENTS)
-    expect(DASHBOARD_RENDERED.contentElements).toBeGreaterThan(MIN_CONTENT_ELEMENTS)
+    expect(AGENTS_RENDERED_LEAN.contentChars).toBeGreaterThan(MIN_CONTENT_CHARS)
+    expect(AGENTS_RENDERED_LEAN.contentElements).toBeGreaterThan(MIN_CONTENT_ELEMENTS)
+    // Neither side may be hugged. Both margins are asserted, so a future edit
+    // that clears one population by a hair fails HERE rather than in a capture
+    // run somebody has to debug.
+    expect(MIN_CONTENT_CHARS / DASHBOARD_LOADING.contentChars!).toBeGreaterThanOrEqual(3)
+    expect(AGENTS_RENDERED_LEAN.contentChars! / MIN_CONTENT_CHARS).toBeGreaterThanOrEqual(2)
+    expect(MIN_CONTENT_ELEMENTS / DASHBOARD_LOADING.contentElements!).toBeGreaterThanOrEqual(2)
+    expect(AGENTS_RENDERED_LEAN.contentElements! / MIN_CONTENT_ELEMENTS).toBeGreaterThanOrEqual(2)
+  })
+
+  it('says YES to the LEANEST route this app actually renders', () => {
+    // The positive control that matters more than `/dashboard`'s: a guard tuned
+    // to a busy screen is trivially satisfiable. `/agents` is the thin one.
+    const verdict = judgeContentSettled(AGENTS_RENDERED_LEAN)
+
+    expect(verdict.settled).toBe(true)
+    expect(verdict.reason).toBe('settled')
   })
 })
 

@@ -173,11 +173,24 @@ export const SETTLED_TALL_FACTOR = 1.25
  * rendered route including its empty states, and false of every loading state,
  * whatever the loading state happens to look like.
  *
- * MEASURED, not guessed. On the populated fixture the floors clear by more than
- * an order of magnitude, and the loading fallback sits an order of magnitude
- * BELOW them — `dashboard/page.tsx`'s fallback is a pulse dot plus a `<span>`:
- * 3 elements, 10 characters. The margins either side are recorded on #2036's
- * pull request and pinned by `full-page-capture.test.ts`.
+ * MEASURED, not guessed, and the first numbers were WRONG. The floor has to sit
+ * between two live populations, and it must not hug either one:
+ *
+ *   the loading fallback     `/dashboard`'s `next/dynamic` placeholder is a
+ *                            pulse dot plus a `<span>`: 10 chars, 3 elements
+ *                            (read off a real refusing run, not from the JSX);
+ *   the thinnest real route  `/agents` on the populated fixture renders
+ *                            105 chars in 30 elements — far leaner than
+ *                            `/dashboard`'s 466-1243 chars / 112-250 elements.
+ *
+ * The first draft of these floors was 80 chars, chosen against `/dashboard`
+ * alone: 8x clear of the loading state but only 1.3x clear of `/agents`, i.e.
+ * a false-positive waiting for one route to lose a line. They now sit near the
+ * geometric middle of the two populations — ~4x above the loading state and
+ * ~2.6x below the leanest rendered route — so neither side is hugged. Both
+ * numbers are pinned by `full-page-capture.test.ts` against the measurements
+ * they came from, and a run records what each capture cleared, so the next
+ * person re-centres from data rather than from taste.
  *
  * ONE CAUSE NAME, TWO SITUATIONS, said plainly rather than left to be
  * discovered: `still-loading` is also what a route that resolved into an
@@ -195,7 +208,7 @@ export const SETTLED_TALL_FACTOR = 1.25
  * content, or to give this check a per-route override; it is not to delete the
  * floor.
  */
-export const MIN_CONTENT_CHARS = 80
+export const MIN_CONTENT_CHARS = 40
 export const MIN_CONTENT_ELEMENTS = 8
 
 /**

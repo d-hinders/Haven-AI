@@ -120,10 +120,6 @@ vi.mock('../../db.js', () => ({
 vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 vi.mock('../../rails/delegation-authorization.js', () => delegationMocks)
-vi.mock('../../infra/repositories/allowance-nonce-watermarks.js', () => ({
-  findAllowanceNonceWatermark: async () => null,
-  raiseAllowanceNonceWatermark: async () => {},
-}))
 
 import paymentRoutes from '../payments.js'
 import x402Routes from '../x402.js'

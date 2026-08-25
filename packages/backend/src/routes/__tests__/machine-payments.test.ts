@@ -45,14 +45,6 @@ const { mockQuery, allowanceMocks, fiatMocks, reportingMocks } = vi.hoisted(() =
   },
 }))
 
-// #1196 wired the allowance-nonce coordinator into this path, so it now reads
-// the shared watermark alongside its chain reads. It is fail-open and
-// orthogonal to what these tests assert — stub the repository rather than
-// answer its query through the content-dispatch stub below.
-vi.mock('../../infra/repositories/allowance-nonce-watermarks.js', () => ({
-  findAllowanceNonceWatermark: async () => null,
-  raiseAllowanceNonceWatermark: async () => {},
-}))
 vi.mock('../../db.js', () => ({
   default: {
     query: (...args: unknown[]) => mockQuery(...args),

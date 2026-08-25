@@ -206,10 +206,19 @@ async function rpc(rpcUrl: string, method: string, params: unknown[]): Promise<u
     throw new EnforcerProbeTransportError(`${method} failed to reach ${rpcUrl}`, { cause })
   }
   if (!response.ok) {
-    // 429/5xx are the endpoint, not the enforcer.
+    // 429/5xx are the endpoint, not the enforcer. The HTTP status is
+    // AUTHORITATIVE and is checked before the body is even parsed: a rate
+    // limiter is free to return a body that looks like anything, including
+    // something that would decode as a revert, and letting the body win would
+    // let an endpoint under load fabricate a Red Line #4 verdict.
     throw new EnforcerProbeTransportError(`${method} → HTTP ${response.status} from ${rpcUrl}`)
   }
-  return (await response.json()) as unknown
+  try {
+    return (await response.json()) as unknown
+  } catch (cause) {
+    // An HTML error page or a truncated body is the endpoint, not a verdict.
+    throw new EnforcerProbeTransportError(`${method} returned an unparseable body`, { cause })
+  }
 }
 
 /** True when the endpoint answers and serves the chain the probe is pinned to. */

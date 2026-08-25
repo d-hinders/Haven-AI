@@ -90,7 +90,9 @@ import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
  * a function that is gone, so those three spies are unfalsifiable, not merely
  * quiet. The two that could still fire (`computeEffectiveAllowance`,
  * `getTokenAllowance`) survive on the live READ path, so for those the original
- * claim does hold. Either way they are no longer what carries the red line. The claim is now STRUCTURAL — the
+ * claim does hold. Either way they are no longer what carries the red line.
+ * Removing the three dead ones is filed as #2044, deliberately not widened
+ * into #2004's diff. The claim is now STRUCTURAL — the
  * arithmetic is not reachable from the payment path because it is not
  * imported there at all — and it is asserted structurally below, over the
  * route's real import bindings, with a positive control proving the extractor

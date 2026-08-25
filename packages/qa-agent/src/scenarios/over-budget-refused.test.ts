@@ -65,17 +65,15 @@ const SIGNABLE = {
   },
 }
 
-const ctx = {
+const ctx: ScenarioContext = {
   cfg: {
     apiUrl: 'https://dev.example',
-    agentApiKey: 'sk_legacy',
-    delegateKey: '0x' + '11'.repeat(32),
     paymentTo: MERCHANT,
     delegationAgentApiKey: 'sk_delegation',
     delegationDelegateKey: '0x' + '22'.repeat(32),
     demoMerchantUrl: 'https://merchant.example',
   },
-} as unknown as ScenarioContext
+}
 
 function allowances(remaining: string, fromChain = true) {
   return {
@@ -165,7 +163,7 @@ describe('over-budget-refused (POST /payments)', () => {
   })
 
   it('SKIPS, not passes, without the delegation identity', async () => {
-    const bare = { cfg: { ...ctx.cfg, delegationAgentApiKey: undefined } } as unknown as ScenarioContext
+    const bare: ScenarioContext = { cfg: { ...ctx.cfg, delegationAgentApiKey: undefined } }
     const r = await overBudgetRefused.run(bare)
     expect(r.skipped).toBe(true)
   })

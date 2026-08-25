@@ -15,7 +15,7 @@ dev stack (which the mocked Playwright suite structurally can't):
 
 Implemented: the shared **config contract** (`src/config.ts`), the **dev seed**
 (`src/seed.ts`, #574 item 1), and the **money-flow harness** (`src/run.ts`, #575)
-with the scenarios registered in `SCENARIOS` — three legacy-rail legs plus the
+with the scenarios registered in `SCENARIOS` — three direct money-path legs plus the
 delegation-rail suite. `run.ts` is the source of truth for the list and its
 order; the canonical per-scenario table lives in
 [`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md).
@@ -139,26 +139,18 @@ for the `QA_*` env (all **testnet/dev-only**). The seed reads the separate
 | Env | Meaning |
 |---|---|
 | `QA_HAVEN_API_URL` | Shared dev backend, hit **directly** (Node→API, no CORS) |
-| `QA_AGENT_API_KEY` | Legacy AllowanceModule agent identity (`sk_agent_*`) — **the seed no longer produces one**, see below |
-| `QA_DELEGATE_PRIVATE_KEY` | That agent's delegate EOA key — signs locally, testnet-only |
 | `QA_PAYMENT_TO` | Recipient for direct-send scenarios |
 | `QA_DEMO_MERCHANT_URL` | Dev demo-merchant base URL; required for every merchant round-trip leg |
 
 `loadQaConfig()` fails fast with a clear error listing every missing var.
 
-⚠️ **`QA_AGENT_API_KEY` / `QA_DELEGATE_PRIVATE_KEY` can no longer be obtained.**
-They name a legacy AllowanceModule identity, and that rail is retired: no new
-Safe can be created (#1984) and an existing one cannot pay (#1986). They are
-still *required* by `loadQaConfig()`, and **no scenario reads them any more**:
-#2016 re-based the last three legs that did onto `QA_DELEGATION_*`, which the
-seed does produce. One consumer is left — `lib/preflight.ts` reads
-`cfg.delegateKey` to report the legacy delegate's residual balance — so
-dropping the two vars needs that line removed with them. Dropping the requirement is [#2011](https://github.com/d-hinders/Haven-AI/issues/2011)
-— until it lands, `qa-dev` runs from the existing Actions secrets but cannot
-run from a clean database.
+`QA_AGENT_API_KEY` and `QA_DELEGATE_PRIVATE_KEY` belonged to the retired
+AllowanceModule rail and are intentionally not part of the harness. The seed
+prints the `QA_DELEGATION_*` identity used by every payment scenario, so a
+freshly seeded dev database can run `qa:dev` without legacy credentials.
 
 Keep these values in an external dotenv file, source it before a local run, and
-store the same five names as encrypted repository secrets for
+store the required names as encrypted repository secrets for
 `.github/workflows/qa-dev.yml`. Never commit the values.
 
 ## Scripts

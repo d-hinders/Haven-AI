@@ -179,6 +179,14 @@ export const SETTLED_TALL_FACTOR = 1.25
  * 3 elements, 10 characters. The margins either side are recorded on #2036's
  * pull request and pinned by `full-page-capture.test.ts`.
  *
+ * ONE CAUSE NAME, TWO SITUATIONS, said plainly rather than left to be
+ * discovered: `still-loading` is also what a route that resolved into an
+ * `<ErrorBoundary>` fallback (or into any equally empty finished state) is
+ * reported as. Both are "the shell rendered and the route did not", both must
+ * refuse the capture, and splitting them would need a second probe to tell a
+ * chunk that never arrived from a render that threw — which the console-error
+ * summary this harness already prints answers better. The message says so.
+ *
  * KNOWN LIMIT, stated rather than papered over: a route whose genuine rendered
  * state is smaller than these floors would be refused. None exists today
  * (measured across the captured set on both fixture modes), and the refusal is
@@ -283,9 +291,11 @@ export async function resolveContentSettled(
         `After waiting ${waitedMs}ms it holds ${verdict.chars ?? 'no'} character(s) of text in ` +
         `${verdict.elements ?? 'no'} element(s), below the floor of ${MIN_CONTENT_CHARS} characters / ` +
         `${MIN_CONTENT_ELEMENTS} elements that every rendered route clears. This is a picture of a ` +
-        `LOADING STATE, not of the route: the app shell renders around it, so the PNG looks like ` +
-        `evidence and is not. Usually a cold "next dev" chunk compile under load — re-run against a ` +
-        `warm server; if it persists, the route itself is not resolving.`,
+        `LOADING STATE or of an equally empty failure, not of the route: the app shell renders around ` +
+        `it either way, so the PNG looks like evidence and is not. Usually a cold "next dev" chunk ` +
+        `compile under load — re-run against a warm server. If it persists, the route is not ` +
+        `resolving at all: a chunk that never arrives and a render that threw into <ErrorBoundary> ` +
+        `both land here, and both are refusals rather than captures.`,
       { probe, waitedMs, verdict },
     )
   }
@@ -568,8 +578,17 @@ export async function captureFullPage(page, { path, label, viewportDevicePx, sel
       throw err
     }
     // Content that arrived DURING the wait grew the region after the un-clip
-    // walk had already run. Re-walk so `fullPage` paints the settled height
-    // rather than the height the page had while it was still a spinner.
+    // walk had already run. What this re-walk buys is the REFLOW PAUSE inside
+    // `unclipFrom`, not the un-clipping — review checked, and the obvious
+    // reading is wrong: the first walk already set `height: auto` /
+    // `overflow: visible` `!important` up to `<html>`, so late content reflows
+    // the un-clipped tree live and `fullPage` re-measures at capture time
+    // anyway. The recomputed `shell.height` is genuinely surplus for an
+    // UNCLIPPED capture (only the `no-scroll-shell` branch reads it); it is
+    // refreshed rather than dropped so the field never describes the page as
+    // it was while it was still a spinner. Written down because the next
+    // reader would otherwise delete this line as dead weight and take the
+    // settle pause with it.
     if (content.raced) shell.height = await unclipFrom(page, root)
   }
 

@@ -5224,3 +5224,337 @@ describe('haven_submit — erc7710 settle (#2041)', () => {
     expect(calls.find((c) => c.url.includes('/settle'))).toBeUndefined()
   })
 })
+
+/**
+ * #2051 — the spending cap must bind the option that is ACTUALLY authorized.
+ *
+ * #1453 made `selectStandardPaymentOption` and `selectErc7710PaymentOption`
+ * mutually exclusive by construction. The cap was asserted against the first
+ * while `prepareX402Erc7710` independently re-selected and authorized the
+ * second, and nothing tied their amounts together. `payment_required` is
+ * MERCHANT-CONTROLLED, so that is not a guard that merely fails to bind — it
+ * is one the merchant can STEER: advertise a cheap standard entry beside an
+ * expensive erc7710 entry and the cap passes against the cheap one while the
+ * expensive one is sent. Measured live at 900 USDC authorized against a
+ * 1 USDC cap, with the response reporting 1 USDC.
+ *
+ * Two directions, both tested, because fixing only the dangerous one leaves
+ * the mirror-image bug (proved live on #2052): an EXPENSIVE standard entry
+ * beside a CHEAP erc7710 entry was wrongly REFUSED, citing an amount that was
+ * never going to be authorized. Fail-safe, but it defeats the purpose of the
+ * cap working. The rule is: check the cap ONCE, against whichever option the
+ * scheme selector actually returned.
+ *
+ * The fixtures below give the two entries GENUINELY DIFFERENT amounts. The
+ * #1456/#1547-era fixtures spread the standard entry into the erc7710 one, so
+ * both carried the identical `1000000` — that construction is precisely why a
+ * green suite could not see this.
+ */
+describe('#2051 — cap binds the authorized option', () => {
+  const FACILITATORS = ['0x4444444444444444444444444444444444444444']
+  const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+  const LEGACY_AGENT = { ...AGENT_RESPONSE, execution_rail: 'legacy' }
+  const CHILD = {
+    payment_id: 'pay_7710',
+    status: 'pending_signature',
+    sign_data: {
+      hash: '0x' + '11'.repeat(32),
+      signature_scheme: 'eip712_delegation',
+      typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+    },
+  }
+
+  /** Two payable Base-USDC entries that differ in amount and in the erc7710 tag. */
+  function merchant(standardAtomic: string, erc7710Atomic: string | null) {
+    const base = PAYMENT_REQUIRED.accepts[0]
+    return {
+      ...PAYMENT_REQUIRED,
+      accepts: [
+        { ...base, amount: standardAtomic, maxAmountRequired: standardAtomic },
+        ...(erc7710Atomic === null
+          ? []
+          : [
+              {
+                ...base,
+                amount: erc7710Atomic,
+                maxAmountRequired: erc7710Atomic,
+                extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: FACILITATORS },
+              },
+            ]),
+      ],
+    }
+  }
+
+  /** The authorize request body — assert on what was SENT, never on call counts. */
+  function x402Body() {
+    const call = calls.find((c) => new URL(c.url).pathname === '/x402')
+    if (!call) return undefined
+    const raw = call.body
+    return (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, any>
+  }
+
+  const CATALOG_ENTRY = {
+    id: 'cat_1',
+    name: 'CloudNest 50GB',
+    description: 'Cloud storage tier',
+    category: 'compute',
+    resource_url: 'http://merchant.test/mcp',
+    rail: 'x402',
+    protocol: 'mcp',
+    tool_name: 'create_text',
+    tool_arguments: { prompt: 'Hello' },
+    price_display: '$1.50 USDC',
+    price_atomic: '1500000',
+    asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+    network: 'eip155:8453',
+    status: 'active',
+    verified_at: '2026-06-16T08:50:39.772Z',
+  }
+
+  function allowances(remaining: string, rail: 'legacy' | 'delegation') {
+    return {
+      agent_id: 'agt_1',
+      safe_address: '0xSafe',
+      delegate_address: '0xDelegate',
+      chain_id: 8453,
+      allowances: [
+        {
+          id: rail === 'delegation' ? 'delegation-1' : 'allowance-1',
+          token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+          token_symbol: 'USDC',
+          allowance_amount: '5.000000',
+          reset_period_min: 1440,
+          onchain: { amount: '5000000', spent: '0', remaining, is_active: true },
+        },
+      ],
+    }
+  }
+
+  describe('haven_pay_mcp_tool', () => {
+    async function pay(
+      pr: unknown,
+      agent: Record<string, unknown>,
+      cap: Record<string, string>,
+      erc7710Intent = false,
+    ) {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
+        },
+        'GET /machine-payments/agent': { status: 200, body: agent },
+        'POST /x402': { status: 201, body: erc7710Intent ? CHILD : X402_INTENT_RESPONSE },
+      })
+      return handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        ...cap,
+      })
+    }
+
+    it('THE EXPLOIT: refuses an over-cap erc7710 entry advertised beside an under-cap standard entry', async () => {
+      // 1 USDC standard (passes the cap) + 900 USDC erc7710 (the one actually sent).
+      // erc7710Intent: true — the merchant/backend stubs are the SUCCESSFUL
+      // ones, so an unfixed build does not merely error here, it SUCCEEDS at
+      // 900000000 with the response reporting 1000000. The refusal below is
+      // therefore the fix's doing and nothing else's.
+      const res = await pay(
+        merchant('1000000', '900000000'),
+        DELEGATION_AGENT,
+        { max_amount_human: '1' },
+        true,
+      )
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('PRICE_EXCEEDS_MAX')
+      // Refused BEFORE the authorize: no settlement child was ever minted.
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('THE MIRROR: allows a cheap erc7710 entry advertised beside an over-cap standard entry', async () => {
+      // 3 USDC standard (over the 1 USDC cap) + 0.50 USDC erc7710 (what is sent).
+      // Refusing here would cite an amount that was never going to be authorized.
+      const res = ok<Record<string, any>>(
+        await pay(merchant('3000000', '500000'), DELEGATION_AGENT, { max_amount_human: '1' }, true),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()?.amount).toBe('500000')
+      expect(x402Body()?.settlementScheme).toBe('erc7710')
+    })
+
+    it('reports amount_atomic as the amount ACTUALLY authorized on the erc7710 branch', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('1000000', '2500000'), DELEGATION_AGENT, { max_amount_human: '5' }, true),
+      )
+      expect(x402Body()?.amount).toBe('2500000')
+      expect(res.data.amount_atomic).toBe('2500000')
+      expect(res.data.amount).toBe('2.5')
+      // agent_summary is what an agent surfaces to the user and logs as its
+      // receipt. The first mutation sweep found it UNPINNED — reverting it
+      // alone to `quote.amountAtomic` survived a green suite, which is the
+      // same "invisible to the tests" property the whole defect had.
+      expect(res.data.agent_summary).toMatchObject({
+        amount_atomic: '2500000',
+        amount: '2.5',
+        token: 'USDC',
+      })
+    })
+
+    it('reports amount_atomic as the amount ACTUALLY authorized on the 3009 branch', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('1000000', '2500000'), LEGACY_AGENT, { max_amount_human: '5' }),
+      )
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(x402Body()?.settlementScheme).toBe('eip3009')
+      expect(x402Body()?.amount).toBe('1000000')
+    })
+
+    it('the same fixture still REFUSES on a legacy account, where the expensive entry IS the authorized one', async () => {
+      // The mirror test must not be read as "3 USDC is always fine now". On a
+      // legacy-rail account the erc7710 entry is unreachable, the 3 USDC
+      // standard entry is what would be authorized, and the cap must bite.
+      const res = await pay(merchant('3000000', '500000'), LEGACY_AGENT, { max_amount_human: '1' })
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('PRICE_EXCEEDS_MAX')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('positive control: an in-cap erc7710 payment still succeeds', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('1000000', '900000'), DELEGATION_AGENT, { max_amount_human: '1' }, true),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()?.amount).toBe('900000')
+    })
+
+    it('positive control: a 3009-only merchant still bridges on a delegation account', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('1000000', null), DELEGATION_AGENT, { max_amount_human: '2' }),
+      )
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(x402Body()?.settlementScheme).toBe('eip3009')
+      expect(x402Body()?.amount).toBe('1000000')
+    })
+
+    it('positive control: an UNCAPPED call is still refused before any network call', async () => {
+      const res = await pay(merchant('1000000', '900000000'), DELEGATION_AGENT, {})
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('INVALID_INPUT')
+      expect(calls).toHaveLength(0)
+    })
+  })
+
+  describe('haven_prepare_catalog_purchase', () => {
+    async function prepare(
+      pr: unknown,
+      agent: Record<string, unknown>,
+      cap: Record<string, string>,
+      opts: { erc7710Intent?: boolean; remaining?: string } = {},
+    ) {
+      const rail =
+        (agent as { execution_rail?: string }).execution_rail === 'delegation'
+          ? 'delegation'
+          : 'legacy'
+      stubFetch({
+        'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY },
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
+        },
+        'POST /x402': { status: 201, body: opts.erc7710Intent ? CHILD : X402_INTENT_RESPONSE },
+        'GET /machine-payments/agent': { status: 200, body: agent },
+        'GET /machine-payments/allowances': {
+          status: 200,
+          body: allowances(opts.remaining ?? '5000000000', rail),
+        },
+      })
+      return handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', ...cap })
+    }
+
+    it('THE EXPLOIT: refuses an over-cap erc7710 entry advertised beside an under-cap standard entry', async () => {
+      // erc7710Intent: true — see the sibling case: an unfixed build SUCCEEDS
+      // here at 900000000 rather than erroring for an unrelated reason.
+      const res = await prepare(
+        merchant('1000000', '900000000'),
+        DELEGATION_AGENT,
+        { max_amount_human: '1' },
+        { erc7710Intent: true },
+      )
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('PRICE_EXCEEDS_MAX')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('THE MIRROR: allows a cheap erc7710 entry advertised beside an over-cap standard entry', async () => {
+      const res = ok<Record<string, any>>(
+        await prepare(merchant('3000000', '500000'), DELEGATION_AGENT, { max_amount_human: '1' }, {
+          erc7710Intent: true,
+        }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()?.amount).toBe('500000')
+    })
+
+    it('reports amount_atomic as the amount ACTUALLY authorized on the erc7710 branch', async () => {
+      const res = ok<Record<string, any>>(
+        await prepare(merchant('1000000', '2500000'), DELEGATION_AGENT, { max_amount_human: '5' }, {
+          erc7710Intent: true,
+        }),
+      )
+      expect(x402Body()?.amount).toBe('2500000')
+      expect(res.data.amount_atomic).toBe('2500000')
+      expect(res.data.amount).toBe('2.5')
+      // agent_summary is what an agent surfaces to the user and logs as its
+      // receipt. The first mutation sweep found it UNPINNED — reverting it
+      // alone to `quote.amountAtomic` survived a green suite, which is the
+      // same "invisible to the tests" property the whole defect had.
+      expect(res.data.agent_summary).toMatchObject({
+        amount_atomic: '2500000',
+        amount: '2.5',
+        token: 'USDC',
+      })
+    })
+
+    it('the delegation BUDGET pre-check also reads the authorized option, not the cheap standard one', async () => {
+      // Same steer, aimed at the other client-side guard on this path: a
+      // 0.50 USDC standard entry would sail past a 1 USDC remaining budget
+      // while the 900 USDC erc7710 entry is what gets authorized.
+      const res = await prepare(
+        merchant('500000', '900000000'),
+        DELEGATION_AGENT,
+        { max_amount_human: '1000' },
+        { remaining: '1000000', erc7710Intent: true },
+      )
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('DELEGATION_BUDGET_EXCEEDED')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('positive control: an in-cap erc7710 purchase still succeeds, with the catalog fields kept', async () => {
+      const res = ok<Record<string, any>>(
+        await prepare(merchant('1000000', '900000'), DELEGATION_AGENT, { max_amount_human: '1' }, {
+          erc7710Intent: true,
+        }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(res.data.catalog_id).toBe('cat_1')
+      expect(res.data.allowance).toMatchObject({ rail: 'delegation', sufficient: true })
+      expect(x402Body()?.amount).toBe('900000')
+    })
+
+    it('positive control: a 3009-only merchant still bridges on a delegation account', async () => {
+      const res = ok<Record<string, any>>(
+        await prepare(merchant('1000000', null), DELEGATION_AGENT, { max_amount_human: '2' }),
+      )
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(x402Body()?.settlementScheme).toBe('eip3009')
+    })
+
+    it('positive control: an UNCAPPED call is still refused before any network call', async () => {
+      const res = await prepare(merchant('1000000', '900000000'), DELEGATION_AGENT, {})
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('INVALID_INPUT')
+      expect(calls).toHaveLength(0)
+    })
+  })
+})

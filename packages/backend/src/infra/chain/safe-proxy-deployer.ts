@@ -1,55 +1,34 @@
 /**
- * Safe proxy deployment on-chain calls (#994 extraction from
- * routes/safe-deploy.ts, shared with routes/safe-exec.ts for the passkey
- * signer factory deploy both routes need).
+ * The passkey SIGNER factory deploy, kept for `routes/safe-exec.ts` (#994
+ * extraction; trimmed by #1988).
  *
- * Does NOT belong on the `ChainClient` port: CREATE2 address prediction,
- * the Safe `setup()` calldata shape, and the passkey signer factory are all
+ * This file used to own Safe proxy deployment too — `encodeSafeSetupCalldata`,
+ * `predictSafeProxyAddress`, `extractSafeAddressFromReceipt` and
+ * `getProxyFactoryContract`. `routes/safe-deploy.ts` was their only caller and
+ * it is a 410 tombstone as of epic #1440 slice 5, so they are deleted with it.
+ *
+ * What remains is reached from `POST /safe/exec`, which deliberately stays
+ * OPEN: it is owner-signed Safe execution relayed for gas only, and it is how
+ * an owner still moves funds out of an account they hold. A passkey-owned
+ * Safe whose signer contract was never deployed cannot verify a signature at
+ * all, so `ensurePasskeySignerDeployed` is part of that path, not part of the
+ * retired inflow.
+ *
+ * ⚠️ This half of #1755 is therefore NOT buried by the retirement: the bare
+ * `tx.wait()` below is still live and still has no durable outbound record.
+ * See #1755 and the #1988 pull request.
+ *
+ * Does NOT belong on the `ChainClient` port: the passkey signer factory is
  * specific to the legacy rail's own contracts — there is no delegation-rail
  * equivalent to substitute against, so a generic interface would be
- * speculative. Moved here purely to get `ethers` (`Contract`, `Interface`,
- * `getCreate2Address`, `keccak256`, `solidityPacked`,
- * `solidityPackedKeccak256`, `ZeroAddress`, `getAddress`) out of
- * `routes/**`. Every function below is a verbatim relocation of what used
- * to be route-local — no logic changed.
+ * speculative. It lives here purely to keep `ethers` out of `routes/**`.
  */
-import {
-  Contract,
-  Interface,
-  ZeroAddress,
-  getAddress,
-  getCreate2Address,
-  keccak256,
-  solidityPacked,
-  solidityPackedKeccak256,
-  type Wallet,
-} from 'ethers'
+import { Contract, type Wallet } from 'ethers'
 import { withRelayerSendLock } from '../relayer.js'
-
-const SAFE_SETUP_ABI = [
-  'function setup(address[] _owners, uint256 _threshold, address to, bytes data, address fallbackHandler, address paymentToken, uint256 payment, address paymentReceiver)',
-] as const
-
-const PROXY_FACTORY_ABI = [
-  'function createProxyWithNonce(address _singleton, bytes initializer, uint256 saltNonce) returns (address proxy)',
-  'function proxyCreationCode() view returns (bytes)',
-  'event ProxyCreation(address proxy, address singleton)',
-] as const
 
 const PASSKEY_SIGNER_FACTORY_ABI = [
   'function createSigner(uint256 x, uint256 y, uint176 verifiers) returns (address signer)',
 ] as const
-
-const SAFE_SETUP_IFACE = new Interface(SAFE_SETUP_ABI)
-const PROXY_FACTORY_IFACE = new Interface(PROXY_FACTORY_ABI)
-
-interface SafeProxyFactoryContract {
-  createProxyWithNonce(singleton: string, initializer: string, saltNonce: bigint): Promise<{
-    hash: string
-    wait(): Promise<{ logs: Array<{ address?: string; topics?: string[]; data?: string }> } | null>
-  }>
-  proxyCreationCode(): Promise<string>
-}
 
 interface PasskeySignerFactoryContract {
   createSigner(x: bigint, y: bigint, verifiers: bigint): Promise<{
@@ -58,76 +37,10 @@ interface PasskeySignerFactoryContract {
   }>
 }
 
-/** `SAFE_SETUP_IFACE.encodeFunctionData('setup', ...)` for a single-owner (the passkey signer), threshold-1 Safe. */
-export function encodeSafeSetupCalldata(args: { owner: string; fallbackHandler: string }): string {
-  return SAFE_SETUP_IFACE.encodeFunctionData('setup', [
-    [args.owner],
-    1n,
-    ZeroAddress,
-    '0x',
-    args.fallbackHandler,
-    ZeroAddress,
-    0n,
-    ZeroAddress,
-  ])
-}
-
-export function predictSafeProxyAddress(args: {
-  factoryAddress: string
-  singletonAddress: string
-  initializer: string
-  saltNonce: bigint
-  proxyCreationCode: string
-}): string {
-  const deploymentData = solidityPacked(
-    ['bytes', 'uint256'],
-    [args.proxyCreationCode, BigInt(args.singletonAddress)],
-  )
-  const salt = solidityPackedKeccak256(
-    ['bytes32', 'uint256'],
-    [keccak256(args.initializer), args.saltNonce],
-  )
-
-  return getCreate2Address(
-    args.factoryAddress,
-    salt,
-    keccak256(deploymentData),
-  )
-}
-
-export function extractSafeAddressFromReceipt(
-  factoryAddress: string,
-  receipt: { logs: Array<{ address?: string; topics?: string[]; data?: string }> },
-): string {
-  for (const log of receipt.logs) {
-    if (log.address?.toLowerCase() !== factoryAddress.toLowerCase()) {
-      continue
-    }
-
-    try {
-      const parsed = PROXY_FACTORY_IFACE.parseLog({
-        topics: log.topics ?? [],
-        data: log.data ?? '0x',
-      })
-      if (parsed?.name === 'ProxyCreation') {
-        return getAddress(parsed.args[0])
-      }
-    } catch {
-      // Ignore unrelated logs from the same tx.
-    }
-  }
-
-  throw new Error('Safe deployment transaction succeeded but ProxyCreation event not found')
-}
-
 /** `provider.getCode` for the relayer's own provider — '0x' when unconfigured, matching the pre-#994 inline check. */
 export async function getRelayerProviderCode(relayer: Wallet, address: string): Promise<string> {
   const provider = relayer.provider
   return provider ? await provider.getCode(address) : '0x'
-}
-
-export function getProxyFactoryContract(factoryAddress: string, relayer: Wallet): SafeProxyFactoryContract {
-  return new Contract(factoryAddress, PROXY_FACTORY_ABI, relayer) as unknown as SafeProxyFactoryContract
 }
 
 function getPasskeySignerFactoryContract(
@@ -138,9 +51,9 @@ function getPasskeySignerFactoryContract(
 }
 
 /**
- * Deploy the passkey signer contract if it isn't already deployed — shared
- * by safe-deploy (new Safe) and safe-exec (an existing Safe whose signer
- * somehow wasn't deployed yet).
+ * Deploy the passkey signer contract if it isn't already deployed. Reached
+ * only from `POST /safe/exec` now that safe-deploy is a tombstone: an existing
+ * Safe whose signer contract somehow was never deployed.
  */
 export async function ensurePasskeySignerDeployed(args: {
   chainId: number

@@ -3,7 +3,8 @@ import fastifyJwt from '@fastify/jwt'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * The inflow is CLOSED (#1984, epic #1440 slice 1).
+ * The inflow is CLOSED (#1984, epic #1440 slice 1) and the implementation
+ * behind it is DELETED (#1988, slice 5).
  *
  * This file is the single place that proves the Safe rail refuses new
  * accounts. There are FOUR ways a Safe could enter Haven, and a closure that
@@ -26,12 +27,20 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
  *
  * A fourth assertion pins ORDER: authentication still runs first, so an
  * unauthenticated caller gets 401 and never learns the route's disposition.
- * The refusal is a route `preHandler`, and `authMiddleware` is an `onRequest`
- * hook, so this is a real ordering guarantee rather than a coincidence.
+ * `authMiddleware` is an `onRequest` hook and the refusal is the route
+ * HANDLER, so this is a real ordering guarantee rather than a coincidence.
  *
- * What is NOT closed here, deliberately (later slices of #1440): an existing
- * `allowance_module` account still reads, still edits and still pays. The
- * payment 410 is #1986, sequenced after this slice on purpose.
+ * **#1988 changed the shape underneath these assertions and they still hold,
+ * which is the point.** #1984 refused in a route `preHandler` so the live
+ * handler bodies could stay verbatim for this slice to delete. Those bodies
+ * are gone, so the refusal is now the handler itself
+ * (`retiredSafeInflowHandler`) — one code path, nothing to reach around. The
+ * "nothing was touched" assertions survive the change of mechanism because
+ * they assert on the database and the relayer, not on Fastify's lifecycle.
+ *
+ * The same slice deleted the APPROVER surface, so this file also pins its
+ * absence — a deletion nobody asserts is a deletion that comes back — and
+ * pins that `POST /safe/exec` did NOT go with it.
  */
 
 // db-mock-exempt: this suite's whole point is that the database is NEVER
@@ -45,14 +54,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 // they assert the routes still SERVE, and their query semantics stay pinned
 // where they already are, in user-safes-characterization.test.ts and the
 // repository suites.
-const { mockPoolQuery, mockClientQuery, mockRelease, mockConnect, mockRelaySafeDeploy } =
-  vi.hoisted(() => ({
-    mockPoolQuery: vi.fn(),
-    mockClientQuery: vi.fn(),
-    mockRelease: vi.fn(),
-    mockConnect: vi.fn(),
-    mockRelaySafeDeploy: vi.fn(),
-  }))
+const { mockPoolQuery, mockClientQuery, mockRelease, mockConnect } = vi.hoisted(() => ({
+  mockPoolQuery: vi.fn(),
+  mockClientQuery: vi.fn(),
+  mockRelease: vi.fn(),
+  mockConnect: vi.fn(),
+}))
 
 vi.mock('../../db.js', () => ({
   default: {
@@ -61,15 +68,12 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../modules/accounts/index.js', async () => {
-  const actual =
-    await vi.importActual<typeof import('../../modules/accounts/index.js')>(
-      '../../modules/accounts/index.js',
-    )
-  return { ...actual, relaySafeDeploy: (...args: unknown[]) => mockRelaySafeDeploy(...args) }
-})
+// #1984 mocked `relaySafeDeploy` here to prove the refusal never reached it.
+// #1988 deleted the function and its module, which is a strictly stronger
+// statement than a mock that was never called: there is nothing left to call.
 
 import safeDeployRoutes from '../safe-deploy.js'
+import safeExecRoutes from '../safe-exec.js'
 import userSafesRoutes from '../user-safes.js'
 import userRoutes from '../user.js'
 import { safeRailRetired } from '../../middleware/safe-inflow-retired.js'
@@ -78,7 +82,7 @@ const USER = 'user-1'
 const SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
 const OWNER_ADDRESS = '0x2222222222222222222222222222222222222222'
 
-describe('Safe-rail inflow is closed (#1984)', () => {
+describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#1988)', () => {
   let app: FastifyInstance
   let token: string
 
@@ -86,6 +90,7 @@ describe('Safe-rail inflow is closed (#1984)', () => {
     app = Fastify({ logger: false })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(safeDeployRoutes, { prefix: '/safe' })
+    await app.register(safeExecRoutes, { prefix: '/safe' })
     await app.register(userSafesRoutes, { prefix: '/user/safes' })
     await app.register(userRoutes, { prefix: '/user' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
@@ -100,7 +105,6 @@ describe('Safe-rail inflow is closed (#1984)', () => {
     mockClientQuery.mockReset()
     mockRelease.mockReset()
     mockConnect.mockReset()
-    mockRelaySafeDeploy.mockReset()
     // Deliberately generous: if any handler DID run, these resolve happily and
     // the "nothing was touched" assertions are what catches it — not a crash
     // that could be mistaken for the refusal working.
@@ -110,7 +114,6 @@ describe('Safe-rail inflow is closed (#1984)', () => {
       query: (...args: unknown[]) => mockClientQuery(...args),
       release: mockRelease,
     })
-    mockRelaySafeDeploy.mockResolvedValue({ safeAddress: SAFE_ADDRESS, txHash: '0xdeadbeef' })
   })
 
   function auth() {
@@ -186,7 +189,6 @@ describe('Safe-rail inflow is closed (#1984)', () => {
         expect(mockPoolQuery).not.toHaveBeenCalled()
         expect(mockConnect).not.toHaveBeenCalled()
         expect(mockClientQuery).not.toHaveBeenCalled()
-        expect(mockRelaySafeDeploy).not.toHaveBeenCalled()
       })
 
       it('still authenticates first — an anonymous caller gets 401, not 410', async () => {
@@ -245,6 +247,19 @@ describe('Safe-rail inflow is closed (#1984)', () => {
       expect(res.json().name).toBe('Renamed')
     })
 
+    it('PUT /user/safes/:safeId/default still re-defaults an existing Safe', async () => {
+      mockPoolQuery.mockResolvedValue({ rows: [{ id: 'safe-1', safe_address: SAFE_ADDRESS }] })
+      mockClientQuery.mockResolvedValue({ rows: [] })
+
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/user/safes/safe-1/default',
+        headers: auth(),
+      })
+
+      expect(res.statusCode).toBe(200)
+    })
+
     it('DELETE /user/safes/:safeId still unlinks an existing Safe', async () => {
       mockPoolQuery.mockResolvedValue({ rows: [{ is_default: false }] })
       mockClientQuery.mockResolvedValue({ rows: [] })
@@ -256,6 +271,60 @@ describe('Safe-rail inflow is closed (#1984)', () => {
       })
 
       expect(res.statusCode).toBe(200)
+    })
+  })
+
+  /**
+   * #1988's own deletions, asserted rather than assumed.
+   *
+   * A deletion that nothing pins is a deletion that grows back — and the
+   * post-deletion failure mode this repo has on record is the opposite one: a
+   * guard left behind that now guards an empty set. So both directions are
+   * measured here. The approver paths must be GONE (404 from the router, not
+   * 410: they are not a retired flow a client should be told about, they are
+   * routes that no longer exist), and `POST /safe/exec` must still be THERE.
+   */
+  describe('the approver surface is deleted (#1988)', () => {
+    const APPROVER_PATHS = [
+      { method: 'GET' as const, url: '/user/safes/known-approvers' },
+      { method: 'GET' as const, url: '/user/safes/safe-1/approvers' },
+      { method: 'POST' as const, url: '/user/safes/safe-1/approvers/tx' },
+      { method: 'POST' as const, url: '/user/safes/safe-1/approvers' },
+      {
+        method: 'DELETE' as const,
+        url: '/user/safes/safe-1/approvers/0x3333333333333333333333333333333333333333',
+      },
+    ]
+
+    for (const path of APPROVER_PATHS) {
+      it(`${path.method} ${path.url} no longer exists`, async () => {
+        const res = await app.inject({
+          method: path.method,
+          url: path.url,
+          headers: auth(),
+          payload: { action: 'add', address: OWNER_ADDRESS },
+        })
+
+        expect(res.statusCode).toBe(404)
+        expect(mockPoolQuery).not.toHaveBeenCalled()
+        expect(mockConnect).not.toHaveBeenCalled()
+      })
+    }
+  })
+
+  /**
+   * The boundary #1986 set deliberately and #1988 holds: owner-signed Safe
+   * execution stays OPEN. It is owner authority, not the retired rail's agent
+   * authority, and it is how an owner still moves funds out of an account they
+   * hold. Asserted as 401-not-404 with no credentials: 404 would mean the
+   * route is gone, and this suite would be the last thing to notice.
+   */
+  describe('POST /safe/exec stays open (#1986 boundary, held by #1988)', () => {
+    it('is still registered — an anonymous caller is refused by AUTH, not by the router', async () => {
+      const res = await app.inject({ method: 'POST', url: '/safe/exec', payload: {} })
+
+      expect(res.statusCode).toBe(401)
+      expect(res.statusCode).not.toBe(404)
     })
   })
 })

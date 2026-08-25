@@ -17,15 +17,16 @@
  *                                client calls it, which is exactly why it
  *                                would have been the hole left open.
  *
- * **Why a preHandler and not an early `return` in each handler.** The refusal
- * has to be unconditional, and an unconditional early return leaves the whole
- * handler body as unreachable code — which either gets deleted (that is
- * deletion slices #1987/#1988, deliberately not this one) or sits there
- * tripping lint. A route-level `preHandler` refuses *before* the handler runs,
- * so the bodies stay exactly as they are for the deletion slices to remove,
- * and no code path inside a handler can reach around the guard. Fastify
- * short-circuits as soon as the hook sends a reply, so nothing below it runs:
- * no database connection, no relayer touch, no funnel event.
+ * **Why a shared handler and not a per-route stub (#1988, slice 5).** #1984
+ * shipped this as a route `preHandler` so the live handler bodies underneath
+ * could stay verbatim for the deletion slices to remove. Those bodies are now
+ * gone, so there is nothing left to run ahead of: a `preHandler` guarding an
+ * empty handler is a guard over an empty set, which is the exact shape this
+ * retirement exists to clean up. Each closed inflow is therefore registered
+ * with `retiredSafeInflowHandler(kind)` as its ONE handler — no second code
+ * path, nothing to reach around, and the refusal body still has exactly one
+ * producer (`safeRailRetired`). A tombstone per route would have duplicated
+ * that producer four times.
  *
  * 410 rather than 404, per the #834 session-rail and #1328 mpp_demo
  * precedents: a permanently-gone flow should not read as a transient routing
@@ -36,17 +37,21 @@
  * - it does not stop an EXISTING Safe account from paying. That is #1986's
  *   410 on /payments + x402, sequenced after this one on purpose, so an
  *   `allowance_module` account keeps working until that slice lands;
- * - it removes no rail code (#1987) and no route (#1988);
+ * - it removes no rail code — that is #1987;
  * - it drops no data (#1990). `user_safes` rows and the `account_type` /
  *   `execution_rail` columns stay: Hybrid lives in the same table, and the
  *   rail seam stays for reversibility.
  *
- * Every READ and every EDIT of an existing account is untouched — listing,
- * renaming, re-defaulting, unlinking, balances, approvers and history all
- * behave exactly as before. The inflow is closed; nothing else is.
+ * **Updated by #1988 (slice 5).** The deploy/import handler bodies these
+ * refusals used to shadow are deleted, and so is the approver surface. What
+ * remains at each of the four addresses is this tombstone and nothing else.
+ * Every READ and every EDIT of an existing account is still untouched —
+ * listing, renaming, re-defaulting, unlinking, balances and history behave
+ * exactly as before, and `POST /safe/exec` (owner-signed execution) stays
+ * open, which is how an owner still moves funds out of an account they hold.
  */
 
-import type { FastifyReply, FastifyRequest, RouteShorthandOptions } from 'fastify'
+import type { FastifyReply, FastifyRequest } from 'fastify'
 
 /** Which entry point refused — only the closing clause differs. */
 export type SafeInflowKind = 'deploy' | 'import'
@@ -69,16 +74,21 @@ export function safeRailRetired(kind: SafeInflowKind): {
 }
 
 /**
- * Route options that close one Safe inflow. Spread into the route's options
- * object so the refusal runs ahead of the handler:
+ * The handler for a closed Safe inflow. Register it as the route's only
+ * handler:
  *
- *   app.post('/deploy', { ...retiredSafeInflow('deploy') }, handler)
+ *   app.post('/deploy', retiredSafeInflowHandler('deploy'))
+ *
+ * Auth still runs first: `authMiddleware` is an `onRequest` hook on each of
+ * these route modules, and Fastify's lifecycle runs onRequest before the
+ * handler — so an anonymous caller gets 401, not 410. That ordering is
+ * asserted in `routes/__tests__/safe-inflow-retired.test.ts`, not assumed.
  */
-export function retiredSafeInflow(kind: SafeInflowKind): RouteShorthandOptions {
-  return {
-    preHandler: async (_request: FastifyRequest, reply: FastifyReply) => {
-      const retired = safeRailRetired(kind)
-      return reply.code(retired.statusCode).send(retired.body)
-    },
+export function retiredSafeInflowHandler(
+  kind: SafeInflowKind,
+): (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply> {
+  return async (_request: FastifyRequest, reply: FastifyReply) => {
+    const retired = safeRailRetired(kind)
+    return reply.code(retired.statusCode).send(retired.body)
   }
 }

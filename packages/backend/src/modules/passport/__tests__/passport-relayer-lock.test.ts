@@ -221,10 +221,22 @@ const WRITE_SHAPED = /\.(sendTransaction|attest|revoke|execTransaction|executeAl
 const LEGACY_LOCK_ONLY = new Set([
   'infra/relayer.ts', // the lock's home; no broadcast of its own
   'infra/outbound-queue.ts', // the pipeline itself broadcasts, by design
-  'rails/allowance-module.ts',
   'routes/safe-exec.ts',
-  'routes/safe-deploy.ts',
-  'modules/accounts/safe-deployer.ts',
+  // Shrunk by #1988 (epic #1440), three entries at once:
+  //   - `modules/accounts/safe-deployer.ts` — DELETED by this slice;
+  //   - `routes/safe-deploy.ts` — now a 410 tombstone that never touches the
+  //     relayer;
+  //   - `rails/allowance-module.ts` — trimmed to READS by #1987 (PR #2008).
+  //     It kept `getRelayerWallet` for `rails/sweep.ts` and the #946 bridge,
+  //     so it still mentions the relayer, but it no longer BROADCASTS: the
+  //     write half and its send-lock wiring went with the rail. A read-only
+  //     module does not belong in a set whose whole meaning is "allowed to
+  //     broadcast outside the outbound pipeline".
+  //
+  // The strengthened assertion below is what caught that third one, on the
+  // merge with #1987 rather than months later. It is exempt from the FIRST
+  // test by that test's own `writes.length === 0` skip, so removing it here
+  // loosens nothing: the file has no write-shaped line left to police.
   'infra/chain/safe-proxy-deployer.ts',
 ])
 
@@ -253,9 +265,33 @@ describe('scan: no submitter outside the outbound pipeline (#1559)', () => {
     // A pinned allowlist rots when entries linger after their file dies or
     // stops broadcasting; each entry must still earn its place, so removals
     // are forced through this test the same way additions are.
+    //
+    // #1988 strengthened the second half, because it was not being checked.
+    // `readFileSync` alone catches a DELETED entry — that is how this test
+    // caught `modules/accounts/safe-deployer.ts` — but `routes/safe-deploy.ts`
+    // became a 410 tombstone with no relayer call in it at all and would have
+    // sat here indefinitely, existing and broadcasting nothing: an allowlist
+    // entry excusing a file from a rule it no longer comes near.
+    //
+    // ⚠️ The first version of this assertion was `toContain('getRelayer')`,
+    // and `haven-reviewer` showed it was satisfied by a SUBSTRING: this file's
+    // own `getRelayerProviderCode`. Deleting the actual broadcast from
+    // `safe-proxy-deployer.ts` left it green. A guard matched on a name
+    // fragment is not a guard on the behaviour that name belongs to. What
+    // earns an entry its place here is holding the SEND LOCK while
+    // broadcasting, so that is what is asserted, and it is mutation-proven:
+    // removing the `withRelayerSendLock(` call turns this red.
+    //
+    // `infra/relayer.ts` and `infra/outbound-queue.ts` are exempt for the
+    // reason their own comments give — one is the lock's home, the other IS
+    // the pipeline — so the clause would be circular for them.
+    const NO_BROADCAST_OF_ITS_OWN = new Set(['infra/relayer.ts', 'infra/outbound-queue.ts'])
     for (const rel of LEGACY_LOCK_ONLY) {
       const source = readFileSync(join(BACKEND_SRC, rel), 'utf8')
       expect(source.length).toBeGreaterThan(0)
+      if (NO_BROADCAST_OF_ITS_OWN.has(rel)) continue
+      expect(source, `${rel} is pinned as a legacy relayer site but no longer broadcasts under the lock`)
+        .toContain('withRelayerSendLock(')
     }
   })
 

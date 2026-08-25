@@ -211,6 +211,13 @@ function expectNoOffChainCoverageArithmetic() {
  * A grep that confirms a line exists does not say which block owns it — so
  * this parses the `import { ... } from '...'` clauses and collects only what
  * is actually bound into the module scope.
+ *
+ * ⚠️ **What this does NOT cover, named so it cannot be over-read** (#2049,
+ * pre-existing since #1987): NAMED import clauses only. A namespace import
+ * (`import * as AM from '../rails/allowance-module.js'`) or a dynamic
+ * `await import(...)` would reintroduce the arithmetic with this assertion
+ * still green. The retained spies above would still fire on such a CALL, but
+ * not on an unused binding. Widening it is filed as #2049.
  */
 function paymentPathImportBindings(): Set<string> {
   const src = readFileSync(

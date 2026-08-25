@@ -360,6 +360,42 @@ describe('AccountDetailClient', () => {
     })
 
     /**
+     * `haven-design-reviewer` blocked the first version of this, which put the
+     * explanation in a `Tooltip`: the bubble is `whitespace-nowrap` with no
+     * max-width, and its `onFocus` never fires because both the wrapper and
+     * `StatusBadge` are non-focusable spans — so the copy was unreachable by
+     * touch AND keyboard, on a list a user may be auditing to decide whether
+     * they still control the account. It is visible text now, and these two
+     * assertions are what stop it regressing back behind a hover.
+     */
+    it('explains Unknown in visible text, not behind a hover', () => {
+      asUser(WALLET_OWNER, [PASSKEY_SIGNER])
+      withOwners([STRANGER])
+
+      render(<AccountDetailClient />)
+
+      // No hover, no focus, no click — it is simply on the page.
+      expect(
+        screen.getByText(/Haven holds no record identifying that approver/i),
+      ).toBeInTheDocument()
+    })
+
+    it('does not show the Unknown explanation when every approver is identified', () => {
+      asUser(WALLET_OWNER, [PASSKEY_SIGNER])
+      withOwners([PASSKEY_SIGNER, WALLET_OWNER])
+
+      render(<AccountDetailClient />)
+
+      // Positive control: the list rendered, so the absence below is real.
+      expect(screen.getByText('Approvers')).toBeInTheDocument()
+      expect(screen.getByText('Passkey')).toBeInTheDocument()
+
+      expect(
+        screen.queryByText(/Haven holds no record identifying that approver/i),
+      ).toBeNull()
+    })
+
+    /**
      * A user with no connected wallet at all. Under the old predicate EVERY
      * owner outside the passkey record read 'Wallet', including for an account
      * where Haven knows of no wallet whatsoever.

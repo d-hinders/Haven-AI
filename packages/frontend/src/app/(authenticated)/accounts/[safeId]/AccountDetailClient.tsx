@@ -118,8 +118,24 @@ const APPROVER_TYPE_LABEL: Record<ApproverType, string> = {
   unknown: 'Unknown',
 }
 
-const UNKNOWN_APPROVER_TOOLTIP =
-  'Haven holds no record identifying this approver. It could be a passkey enrolled outside Haven, a rotated or revoked one, or a wallet — the label says what Haven knows, not what the approver is.'
+/**
+ * Shown as VISIBLE text under the list whenever any owner is 'unknown', not as
+ * a tooltip. Two reasons, and the second is the load-bearing one:
+ *
+ * 1. `design-review.md:108` — tooltips "do not hide essential instructions".
+ *    Without this sentence, `Unknown` is an unexplained gap on a list a user
+ *    may be auditing to decide whether they still control the account.
+ * 2. `Tooltip` cannot carry it. Its bubble is `whitespace-nowrap` with no
+ *    max-width (`Tooltip.tsx:96`), so a sentence renders as one unwrapped bar
+ *    far wider than a 390px viewport; and its `onFocus`/`onBlur` never fire,
+ *    because the wrapper is a plain `<span>` and `StatusBadge` is a
+ *    non-focusable `<span>` too, so the copy would be unreachable by touch
+ *    AND by keyboard. Every other `Tooltip` caller passes a short address or
+ *    name, which is why neither limit has bitten before. Both are shared-
+ *    primitive debt filed separately rather than fixed under a badge issue.
+ */
+const UNKNOWN_APPROVER_NOTE =
+  'Unknown means Haven holds no record identifying that approver — it could be a passkey enrolled outside Haven, a rotated one, or a wallet. The label reports what Haven knows, not what the approver is.'
 
 /**
  * #2017: classify one on-chain Safe owner for the Approvers badge, from
@@ -649,13 +665,7 @@ export default function AccountDetailClient() {
                     )}
                     <CopyButton text={owner} />
                     <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', owner)} label="Open approver externally" />
-                    {approverType === 'unknown' ? (
-                      <Tooltip label={UNKNOWN_APPROVER_TOOLTIP}>
-                        <StatusBadge>{APPROVER_TYPE_LABEL.unknown}</StatusBadge>
-                      </Tooltip>
-                    ) : (
-                      <StatusBadge>{APPROVER_TYPE_LABEL[approverType]}</StatusBadge>
-                    )}
+                    <StatusBadge>{APPROVER_TYPE_LABEL[approverType]}</StatusBadge>
                     {isYou && (
                       <StatusBadge tone="brand">You</StatusBadge>
                     )}
@@ -663,6 +673,15 @@ export default function AccountDetailClient() {
                 )
               })}
             </div>
+            {details.owners.some(
+              (owner) =>
+                classifyApprover(owner.toLowerCase(), passkeyAddresses, knownWalletOwner) ===
+                'unknown',
+            ) && (
+              <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                {UNKNOWN_APPROVER_NOTE}
+              </p>
+            )}
           </div>
         )}
 

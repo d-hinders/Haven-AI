@@ -20,7 +20,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-08-25" # #2012: the QA seed now refuses a same-delegate agent unless its status is active or pending_approval; it names the agent and gives the rotate-or-deliberately-restore remedy, so re-seeding cannot silently restore disabled authority. Re-read the seed, the local-run steps, and the package README. Prior: #2007: the seed is re-based on the DELEGATION RAIL — it no longer deploys a Safe or calls `POST /user/safes` (410 since #1984; an `allowance_module` account also cannot pay since #1986), and instead provisions a Hybrid DeleGator via `POST /accounts/hybrid` plus an owner-signed budget delegation. Re-verified and corrected in this pass: the seed env block (`SEED_RPC_URL` removed — the seed opens no RPC connection), the funding table (owner EOA needs no ETH; "Safe" row becomes the Hybrid account), the "Run the seed locally" step list, the `could not decode result data` troubleshooting entry (replaced by a `410` entry), the operations table's seed row, the "Seeding the delegation-rail identity" section (the seed now produces `QA_DELEGATION_*` itself, so its manual steps are re-framed as a description plus a by-hand recipe), and the `insufficient funds` balance-by-role list (owner ETH no longer required). Also recorded: the seed no longer produces `QA_AGENT_API_KEY`/`QA_DELEGATE_PRIVATE_KEY`, which `loadQaConfig` still requires and three legacy legs still consume — tracked separately, NOT fixed here. The scenario table, the harness sections and the merchant/hosted-leg prose were NOT re-verified in this pass. Prior: #1882: front-matter only — the `last-verified` chain had DROPPED `#1515`. Same shape as `07-edge-signer.md`: the note at `b3627c15` (PR #1517, 2026-08-17) chained but compressed #1516's entry to "added the merchant-reason surfacing", and `#1515` was cited inside the prose it dropped. #1516's original entry is restored verbatim from `b3627c15^` at the chain tail. Nothing in the body was re-verified in this pass. #1674: the x402-erc7710-fresh-agent leg is added — the cold-start counterfactual case #1667 fixed, previously invisible because every QA identity was long-lived and already deployed; the scenario table gains its row, and the throwaway-identity provisioning is absorbed into lib/throwaway-identity.ts (delegation-lifecycle now consumes it too, behaviour unchanged and its suite green). Prior: #1578: unknown MCP session ids now fail closed (404/-32001) before the payment gate; the stale-session troubleshooting entry documents the re-initialize remedy and separates it from payment refusals. Prior: #1547: x402-catalog-guided-purchase is scheme-aware — the guided prepare now runs the #1450 settlement-scheme preference, so the leg's erc7710 shape (haven_sign, settle by payment_id+signature only, inverted money proof: funding_tx_hash is a FAILURE, delegate untouched, treasury→merchant direct) is expected on dev and the 3009 two-leg proof stays as the fallback shape; the scenario table row and the guided-leg prose section are updated to match. No env, secret, or gating change. Prior: #1531: adds "What this session cannot see, and what to ask for" — the out-of-reach table and the ordered ask-for list, linked from Troubleshooting. Documentation only, deliberately not a gate: the fixable gap was that the request list did not exist. Prior: #1533/#1534: the legacy-rail `x402-settle` and `x402-sweep-recovery` legs removed — x402 coverage is delegation-rail only; the scenario table is now eleven legs (matching the count the prose already claimed). Reviewer correction: this is an ACCEPTED COVERAGE LOSS, not a deduplication — the legacy x402 execute branch now has no live leg; the "sixth scenario" ordinal is replaced by the scenario name so it cannot drift again. Prior: #1530: the preflight now reports every consumable resource before the first leg and refuses to run when one is below floor; the demo-merchant settlement wallet is added to the funding table it was missing from, and its balance is read from the merchant's own /healthz because the address derives from SETTLEMENT_PRIVATE_KEY in the merchant env. No harness credential, target, or scenario semantics change. Prior: #1519: merchant checks authorizationState/balanceOf before submitting, so an already-settled purchase serves the goods instead of 402ing a paid buyer; Troubleshooting gains "a merchant 402 that the chain says was paid". Prior: #1517: merchant faults are reported (and logged) as faults rather than collapsing to "Payment failed"; Troubleshooting now covers three 402 shapes — rejection, fault, bare challenge. Prior: #1516 added the merchant-reason surfacing; #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added) Prior: #1516: x402 legs now append the merchant's own 402 reason instead of a fixed string, and Troubleshooting explains the two 402 shapes (rejection vs lost session, #1515).
+last-verified: "2026-08-25" # #2011: the QA harness no longer reads the retired AllowanceModule `QA_AGENT_API_KEY` / `QA_DELEGATE_PRIVATE_KEY` credentials. The config, preflight, seed output, workflow, required-env table, local and Actions examples, and missing-env troubleshooting loop were re-read: every live scenario uses the delegation-rail identity, so a fresh seed produces a complete `qa:dev` environment. Prior: #2012: the QA seed now refuses a same-delegate agent unless its status is active or pending_approval; it names the agent and gives the rotate-or-deliberately-restore remedy, so re-seeding cannot silently restore disabled authority. Re-read the seed, the local-run steps, and the package README. Prior: #2007: the seed is re-based on the DELEGATION RAIL — it no longer deploys a Safe or calls `POST /user/safes` (410 since #1984; an `allowance_module` account also cannot pay since #1986), and instead provisions a Hybrid DeleGator via `POST /accounts/hybrid` plus an owner-signed budget delegation. Re-verified and corrected in this pass: the seed env block (`SEED_RPC_URL` removed — the seed opens no RPC connection), the funding table (owner EOA needs no ETH; "Safe" row becomes the Hybrid account), the "Run the seed locally" step list, the `could not decode result data` troubleshooting entry (replaced by a `410` entry), the operations table's seed row, the "Seeding the delegation-rail identity" section (the seed now produces `QA_DELEGATION_*` itself, so its manual steps are re-framed as a description plus a by-hand recipe), and the `insufficient funds` balance-by-role list (owner ETH no longer required). Prior: #1882: front-matter only — the `last-verified` chain had DROPPED `#1515`. Same shape as `07-edge-signer.md`: the note at `b3627c15` (PR #1517, 2026-08-17) chained but compressed #1516's entry to "added the merchant-reason surfacing", and `#1515` was cited inside the prose it dropped. #1516's original entry is restored verbatim from `b3627c15^` at the chain tail. Nothing in the body was re-verified in this pass. Prior: #1674: x402-erc7710-fresh-agent is added; #1578: unknown MCP session ids fail closed; #1547: x402-catalog-guided-purchase is scheme-aware; #1531: out-of-reach documentation added; #1533/#1534: legacy x402 legs removed; #1530: preflight resource reporting added; #1519: merchant settled-purchase handling added; #1517/#1516: merchant fault and reason reporting added; #1457: hosted erc7710 variant added; #1312: guided catalog purchase QA leg added; #1515: lost-session troubleshooting added.
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -163,7 +163,7 @@ preflight — resources this run consumes:
       only 0 settlement(s) of gas left — top this wallet up, or every x402 leg
       needing a merchant-side settlement will fail with a merchant error that
       does not name gas (the 2026-08-17 outage)
-  ✓ legacy delegate residual (USDC) 0x1a64…14F1: 0.0 USDC
+  ✓ delegation delegate residual (USDC) 0x1a64…14F1: 0.0 USDC
 ```
 
 Three properties worth knowing, because each was a deliberate choice:
@@ -221,16 +221,10 @@ The old call was invisible because it sat behind a reuse branch that only a
 `packages/backend/src/openapi/qa-seed-routes.test.ts` now fails if the seed
 calls a route the API has retired or no longer registers.
 
-⚠️ The seed therefore no longer produces `QA_AGENT_API_KEY` or
-`QA_DELEGATE_PRIVATE_KEY` — they named a legacy AllowanceModule identity that
-can no longer be created. `loadQaConfig` still requires them, but since #2016
-**no scenario reads them**: the last three legs that did were re-based onto the
-delegation identity. Dropping the requirement is
-[#2011](https://github.com/d-hinders/Haven-AI/issues/2011) — note it has two
-call sites to remove, not one: `lib/preflight.ts` still reads `cfg.delegateKey`
-for the legacy delegate-residual line. Until it lands,
-`qa-dev` runs from the existing Actions secrets but cannot run from a clean
-database.
+The seed prints all credential-bearing `QA_*` values the harness needs. It does
+not print or require `QA_AGENT_API_KEY` or `QA_DELEGATE_PRIVATE_KEY`: those
+belonged to the retired AllowanceModule rail, while every live payment scenario
+uses the delegation identity.
 
 An API key is shown only when a new agent is created. If the agent already
 exists and its key was lost or exposed, rotate it instead of creating duplicate
@@ -285,8 +279,6 @@ Keep `/secure/path/qa-run.env` outside the repository:
 
 ```bash
 QA_HAVEN_API_URL=https://havenbackend-dev-8b95.up.railway.app
-QA_AGENT_API_KEY=<testnet QA agent API key>
-QA_DELEGATE_PRIVATE_KEY=<throwaway Base Sepolia delegate key>
 QA_PAYMENT_TO=<Base Sepolia recipient address>
 QA_DEMO_MERCHANT_URL=https://demo-merchant-dev-84e4.up.railway.app
 
@@ -303,7 +295,7 @@ QA_X402_BINDING_SIGNER=<dev x402 binding-signer address, 0x…>
 
 `QA_DEMO_MERCHANT_URL` is technically optional in the config loader, but it is
 required to exercise the merchant scenarios. A leading `#` comments out a
-variable; do not write `# QA_AGENT_API_KEY=...`.
+variable; do not comment out a required value.
 
 #### Seeding the delegation-rail identity (`x402-delegation-3009`)
 
@@ -312,11 +304,10 @@ by printing `QA_DELEGATION_AGENT_API_KEY` and naming the delegate key to pair
 with it. The steps below are kept as the description of what the seed does, and
 as the recipe for provisioning a second delegation-rail identity by hand.
 
-The `x402-delegation-3009` scenario needs an agent **separate from the legacy
-`QA_AGENT_API_KEY` one**, because the execution rail is a property of the
-account: no header makes a legacy AllowanceModule agent exercise the delegation
-rail. Without the two `QA_DELEGATION_*` values the scenario **skips** — it never
-fails the run for being unconfigured.
+The `x402-delegation-3009` scenario uses the delegation-rail identity because
+the execution rail is a property of the account. Without the two
+`QA_DELEGATION_*` values the scenario **skips** — it never fails the run for
+being unconfigured.
 
 That agent must have an **open (unpinned) budget delegation**. A
 recipient-pinned budget cannot fund the delegate EOA, and per the owner decision
@@ -475,8 +466,6 @@ editing it or after opening a new terminal.
 The repository needs these encrypted Actions secrets:
 
 - `QA_HAVEN_API_URL`
-- `QA_AGENT_API_KEY`
-- `QA_DELEGATE_PRIVATE_KEY`
 - `QA_PAYMENT_TO`
 - `QA_DEMO_MERCHANT_URL`
 
@@ -878,7 +867,7 @@ The dotenv file was not sourced, a variable is commented out, or the shell was
 restarted. Source it and verify names without printing values:
 
 ```bash
-for name in QA_HAVEN_API_URL QA_AGENT_API_KEY QA_DELEGATE_PRIVATE_KEY QA_PAYMENT_TO QA_DEMO_MERCHANT_URL \
+for name in QA_HAVEN_API_URL QA_PAYMENT_TO QA_DEMO_MERCHANT_URL \
             QA_DELEGATION_AGENT_API_KEY QA_DELEGATION_DELEGATE_PRIVATE_KEY \
             QA_HOSTED_MCP_URL QA_X402_BINDING_SIGNER; do
   printenv "$name" >/dev/null && echo "$name: present" || echo "$name: MISSING"

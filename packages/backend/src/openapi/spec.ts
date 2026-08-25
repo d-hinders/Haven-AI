@@ -1305,7 +1305,7 @@ export const openapiSpec = {
           '409': {
             ...errorResponse,
             description:
-              'Not on the delegation rail, a re-key already in flight, a colliding delegate address, or an undispositioned residual balance.',
+              'Not on the delegation rail, a re-key already in flight (the body names its rekey_id, stage and the new_delegate_address it is bound to, #1868), a colliding delegate address, or an undispositioned residual balance.',
           },
           '503': {
             ...errorResponse,
@@ -1321,7 +1321,7 @@ export const openapiSpec = {
         operationId: 'prepareRekeyRevocation',
         summary: 'Re-key step 1a: prepare the batched revoke of every live delegation (#1698).',
         description:
-          'Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage with an empty carry.',
+          'Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage — inheriting an abandoned predecessor’s frozen carry when one qualifies (#1868), otherwise with an empty carry.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }, rekeyIdParam],
         requestBody: {
@@ -7679,14 +7679,39 @@ export const openapiSpec = {
           {
             type: 'object',
             description:
-              'Nothing to revoke on-chain — an agent that never held a budget, or one already revoked. No signature is needed and the re-key is advanced straight to the metered stage with an empty carry.',
+              'Nothing to revoke on-chain — an agent that never held a budget, one already revoked, or one whose previous re-key was abandoned after its revoke landed (#1868). No signature is needed and the re-key advances straight to the metered stage. When an abandoned predecessor froze a carry after its own on-chain revoke and no grant has been made since, that measurement is INHERITED rather than forfeited: carry holds the frozen entries, tx_hash is the predecessor’s revoke transaction, and carry_inherited_from_rekey_id names the abandoned re-key. Otherwise the carry is empty.',
             required: ['revoked', 'stage', 'agent_has_no_authority', 'next_step'],
             properties: {
               revoked: { type: 'boolean', enum: [true] },
-              tx_hash: { type: 'string', nullable: true },
-              delegation_hashes: delegationHashList,
+              tx_hash: {
+                type: 'string',
+                nullable: true,
+                description:
+                  'Null on the empty walk; the ABANDONED predecessor’s revoke transaction when its carry was inherited.',
+              },
+              // May be empty — the short-circuit revokes nothing on-chain.
+              delegation_hashes: { type: 'array', items: delegationHash },
               stage: { type: 'string' },
-              carry: { type: 'array', items: { type: 'object', additionalProperties: true } },
+              carry: {
+                type: 'array',
+                description:
+                  'Empty on the plain short-circuit; the inherited frozen measurement when an abandoned predecessor’s carry was adopted (#1868).',
+                items: {
+                  type: 'object',
+                  required: ['delegation_hash', 'remaining_atomic', 'from_chain'],
+                  properties: {
+                    delegation_hash: delegationHash,
+                    remaining_atomic: { type: 'string' },
+                    from_chain: { type: 'boolean' },
+                  },
+                },
+              },
+              carry_inherited_from_rekey_id: {
+                type: 'string',
+                format: 'uuid',
+                description:
+                  'Present only when the carry was inherited: the abandoned re-key whose frozen measurement this re-key adopted (#1868).',
+              },
               agent_has_no_authority: { type: 'boolean' },
               next_step: { type: 'string' },
             },

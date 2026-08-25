@@ -95,7 +95,7 @@ import {
 import {
   ownershipInstructions,
   type OwnershipClaim,
-} from '../modules/catalog/ownership.js'
+} from '../modules/catalog/index.js'
 import { catalogSubmitRateLimit } from '../middleware/rate-limit.js'
 
 /** Pending-queue ceiling — a flood cannot grow the pending set past this. */

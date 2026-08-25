@@ -16,39 +16,42 @@ covers:
   - packages/demo-merchant-mcp/package.json
   - .github/workflows/publish.yml
   - scripts/release-bump.mjs
-last-verified: "2026-08-24" # #1988: the Approvers paragraph and its API-table row described a surface this diff deletes — Haven no longer constructs an owner-change transaction, and the routes 404. Both corrected in place rather than left as a promise; the non-custody framing is strengthened, not softened, because owner management moving entirely to the user's own key IS the non-custody claim. The Safe-inflow row now says the 410s have nothing behind them. Scope: those three places; no other README claim re-verified. Prior: #1702: the delegate-key-loss answer here was the PRE-#1694 one — "pause or revoke the agent and create a new key path". Epic #1694 made a delegation-rail agent's key REPLACEABLE (re-key: same agent, new key, budget remainder and period boundary carried), so the guidance is now split by rail rather than stated as one blanket answer. Found by the cross-epic doc sweep #1702's acceptance criteria asked for, not by the coupling gate — no `covers:` glob connects this file to `routes/agent-rekey.ts`. Scope: that one sentence in the credential paragraph; the rest of the README was not re-verified. Prior: #1328 — /demo/mpp/* retired from the endpoints table
+last-verified: "2026-08-25" # #1992: the non-custody paragraph re-based from Safe to the Hybrid DeleGator + signed-delegation model, and every claim the retirement falsified corrected against source: the Core Model diagram and the "two on-chain policy rails" line, the quickstart (step 5 walked the reader into `POST /safe/deploy`, which answers 410 - it is now the passkey Hybrid flow), the How-It-Works architecture and its 6 numbered steps, the payment-API table, the security-model and key-management tables, the Tech Stack rows, and two code-fence examples: the payment-intent response still showed the LEGACY signing shape (`components.safe`, `nonce`, "raw ECDSA") where the live route returns `signature_scheme: 'eip712_userop'` + `typed_data`, and the over-budget paragraph promised a `202 pending_approval` that no code path can now create. Scope: those sections, plus two the first draft of this note failed to name (haven-doc-reviewer caught the omission): the `RELAYER_PRIVATE_KEY` row in the env-var table ("relayed Safe/module transactions" -> "relayed transactions") and the `packages/backend` / `packages/frontend` rows in the repo table. The REST of the env-var table, the SDK snippets and the token tables were not re-verified. Prior: #1988: the Approvers paragraph and its API-table row described a surface this diff deletes — Haven no longer constructs an owner-change transaction, and the routes 404. Both corrected in place rather than left as a promise; the non-custody framing is strengthened, not softened, because owner management moving entirely to the user's own key IS the non-custody claim. The Safe-inflow row now says the 410s have nothing behind them. Scope: those three places; no other README claim re-verified. Prior: #1702: the delegate-key-loss answer here was the PRE-#1694 one — "pause or revoke the agent and create a new key path". Epic #1694 made a delegation-rail agent's key REPLACEABLE (re-key: same agent, new key, budget remainder and period boundary carried), so the guidance is now split by rail rather than stated as one blanket answer. Found by the cross-epic doc sweep #1702's acceptance criteria asked for, not by the coupling gate — no `covers:` glob connects this file to `routes/agent-rekey.ts`. Scope: that one sentence in the credential paragraph; the rest of the README was not re-verified. Prior: #1328 — /demo/mpp/* retired from the endpoints table
 ---
 
 # Haven
 
 Haven is an agentic stablecoin payment wallet. Users create or link a Haven account, add funds to a Haven wallet, and give AI agents constrained spending ability through agent rules and budgets.
 
-Haven is non-custodial smart account software. User funds stay in a user-controlled Safe, shown in product copy as a Haven wallet. Haven helps users configure agent authority, construct payment payloads, relay independently signed transactions, and understand activity. It does not hold user or agent private keys, make API credentials sufficient to spend, or make discretionary transfer decisions.
+Haven is non-custodial smart account software. User funds stay in a **user-controlled MetaMask Hybrid DeleGator smart account**, shown in product copy as a Haven wallet. An agent's spending authority is a **delegation you sign** — a budget with audited caveat enforcers (period budget with native refill, optional recipient pin, expiry) that the DelegationManager enforces on-chain at redemption. Haven helps users configure that authority, construct payment payloads, relay independently signed transactions, and understand activity. It does not hold user or agent private keys, make API credentials sufficient to spend, or make discretionary transfer decisions — and it holds no key that can change an account's signer set or redeem a delegation you did not sign.
 
 ## Core Model
 
 Agents should not be wallets. They should be payment actors with constrained authority.
 
 ```
-User -> Haven wallet / Safe (funds and owner authority)
-Agent -> Haven credential (identity) + delegate signing key (payment signatures)
-Haven -> UI, API, pre-checks, relay, receipts, approval state
-Safe AllowanceModule -> On-chain agent budget enforcement
+User   -> Haven wallet / Hybrid DeleGator (funds and signer authority)
+Agent  -> Haven credential (identity) + delegate signing key (payment signatures)
+Haven  -> UI, API, pre-checks, relay, receipts, status
+Signed delegation + caveat enforcers -> On-chain agent budget enforcement
 ```
 
-API auth is identity. Signature is authority. On-chain module state is enforcement.
+API auth is identity. Signature is authority. On-chain delegation state is enforcement.
 
-Haven runs **two on-chain policy rails**, both non-custodial. The line above is
-the **legacy AllowanceModule rail** (RETIRING under #1440 — closed to new accounts entirely since #1984; existing accounts only; the Smart
-Sessions session rail is retired, #834). New accounts are
-provisioned on the **delegation rail** (epic #821): the Haven wallet is a MetaMask
-Hybrid DeleGator smart account and the budget is a signed delegation with audited
-caveat enforcers (period budget with native refill, optional recipient pin,
-expiry) redeemed via the DelegationManager — funds move account→recipient
-directly, no funding leg and no approval queue. Same identity/authority split,
-different enforcement primitive. See
-[`docs/security/delegation-rail-security-model.md`](docs/security/delegation-rail-security-model.md)
-and your non-custody [exit path](docs/exit/README.md).
+Haven runs **one live on-chain policy rail**: the **delegation rail** (epic #821).
+Funds move account→recipient directly — no funding leg, **no approval queue**, and a
+payment outside the budget, recipient pin or expiry **reverts during gas estimation**
+rather than queueing for a human.
+
+The **legacy Safe + AllowanceModule rail is RETIRED** (epic #1440), not frozen: no account
+can be created or imported on it (#1984, four inflows answer HTTP 410), no account on it
+can spend (#1986, HTTP 410 on every payment and x402 entry point), and its execution
+machinery is deleted (#1987/#1988/#1989). Existing Safe accounts stay **fully readable** —
+balances, tokens, agents and history all render. The Smart Sessions session rail is
+likewise retired (#834). See
+[`docs/security/delegation-rail-security-model.md`](docs/security/delegation-rail-security-model.md),
+[`docs/product/account-recovery.md`](docs/product/account-recovery.md) for what a legacy
+Safe owner can still do, and your non-custody [exit path](docs/exit/README.md).
 
 ## What's in the Repo
 
@@ -56,8 +59,8 @@ This is a TypeScript monorepo:
 
 | Package | Description |
 |---|---|
-| `packages/backend` | Fastify API for auth, Haven wallets, agents, approvals, payments, x402/MPP demos, receipts, the Fortnox reporting feed, and OpenAPI |
-| `packages/frontend` | Next.js dashboard for Haven accounts, Haven wallets, agent rules, connect-agent handoff, approvals, and activity |
+| `packages/backend` | Fastify API for auth, Haven wallets, agents, payments, x402/MPP, receipts, the Fortnox reporting feed, and OpenAPI (the legacy approval queue is readable and rejectable only — retired with the Safe rail, #1440) |
+| `packages/frontend` | Next.js dashboard for Haven accounts, Haven wallets, agent rules, connect-agent handoff, and activity |
 | `packages/sdk` | `@haven_ai/sdk` for direct agent integrations, tool definitions, x402/MPP quote/pay/resume helpers, and payment state handling |
 | `packages/mcp` | `@haven_ai/mcp` local stdio MCP server that reads a local credential file and signs locally |
 | `packages/mcp-server` | `@haven_ai/mcp-server` hosted/keyless Streamable HTTP MCP server that constructs and relays but never signs |
@@ -85,7 +88,7 @@ This is a TypeScript monorepo:
   or [`fnm`](https://github.com/Schniz/fnm), run `nvm use` / `fnm use` in the repo
   root to match it automatically (otherwise `npm install` warns `EBADENGINE`).
 - **Docker Desktop** (for local hosting) — [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
-- **A browser wallet** (MetaMask, Rabby, etc.) with Gnosis Chain or Base configured
+- **A browser wallet** (MetaMask, Rabby, etc.) with Gnosis Chain or Base configured — optional: signup uses a passkey, and a wallet is only needed if you want to enrol one as an account signer
 
 ## Getting Started
 
@@ -111,7 +114,7 @@ Edit `.env` and fill in the required values:
 | `JWT_SECRET` | Yes | Secret for dashboard auth tokens; use a long random string in production |
 | `RPC_URL` | No | Gnosis Chain RPC (default: `https://rpc.gnosischain.com`) |
 | `RPC_URL_BASE` | No | Base RPC (default: `https://mainnet.base.org`) |
-| `RELAYER_PRIVATE_KEY` | Yes for on-chain execution | EOA private key that pays gas for relayed Safe/module transactions; it cannot access user funds |
+| `RELAYER_PRIVATE_KEY` | Yes for on-chain execution | EOA private key that pays gas for relayed transactions; it cannot access user funds |
 | `GNOSISSCAN_API_KEY` | No | Gnosis explorer API key for transaction display |
 | `BASESCAN_API_KEY` | No | Base explorer API key when using an Etherscan-style Base source; Base currently defaults to Blockscout for transactions |
 | `COINGECKO_API_KEY` | No | Token price lookups |
@@ -152,16 +155,18 @@ npm run dev
 - **Frontend** → [http://localhost:3000](http://localhost:3000)
 - **Backend API** → [http://localhost:3001](http://localhost:3001)
 
-### 5. Set up your Safe
+### 5. Create your Haven account
 
 1. Go to [http://localhost:3000](http://localhost:3000)
 2. Click **Get Early Access** → create an account
-3. Log in and connect your browser wallet
-4. Select your target network (Gnosis Chain or Base) in the deploy modal
-5. Deploy a Safe — confirm the transaction in your wallet
-6. You'll land on the dashboard with your Safe address
+3. Pick your network, then **create the account with a passkey** — one Face ID / Touch ID prompt
+4. You'll land on the dashboard with your Haven wallet address
 
-> **Note:** Deploying a Safe requires native gas tokens. For Gnosis Chain, use [gnosisfaucet.com](https://gnosisfaucet.com). For Base, bridge ETH via [bridge.base.org](https://bridge.base.org).
+> **One onboarding path, no transaction.** Signup provisions a counterfactual passkey-owned
+> **Hybrid DeleGator** (`POST /accounts/hybrid`) — zero transactions and no gas, so no faucet
+> is needed to get an address. You need native gas tokens only if you later send from the
+> account yourself. Creating or importing a **Safe** is retired (#1984) and answers HTTP 410;
+> there is no deploy modal.
 
 ### 6. Create an agent
 
@@ -169,7 +174,7 @@ npm run dev
 2. Click **Create Agent**
 3. Pick the Haven wallet and network the agent will spend from
 4. Set the agent budget: token, amount, and reset period
-5. Confirm the Safe transaction in your wallet so the on-chain allowance is created
+5. Sign the budget delegation with your passkey or wallet — one signature, no transaction for you to pay for
 6. Save the one-time Haven credential when the Done step appears
 7. Use **Connect your agent** to add Haven to Claude Code, Cursor, VS Code, Codex CLI, OpenCode, Goose, Amp, or another runtime
 
@@ -283,7 +288,7 @@ npm run agent:demo -- "Pay 0.01 EURe to 0xABC... for API access"
 
 Claude receives the task, calls the `make_payment` tool when appropriate, Haven validates the signed request and relays it on-chain, and Claude summarizes the result.
 
-**What this proves:** A real AI agent requested and signed a payment from a Safe within strict on-chain guardrails, without holding keys to the Safe and without understanding blockchain mechanics.
+**What this proves:** A real AI agent requested and signed a payment from a user-controlled smart account within strict on-chain guardrails, without holding keys to the account and without understanding blockchain mechanics.
 
 ## How It Works
 
@@ -293,28 +298,30 @@ Claude receives the task, calls the `make_payment` tool when appropriate, Haven 
 Agent runtime
   -> SDK / local MCP / hosted MCP
   -> Haven API (identity, policy mirror, construct, relay, status)
-  -> Safe AllowanceModule (on-chain budget enforcement)
-  -> Haven wallet / Safe (user funds)
+  -> Signed delegation + caveat enforcers (on-chain budget enforcement)
+  -> Haven wallet / Hybrid DeleGator (user funds)
 ```
 
 1. **Agent** sends a simple payment intent: `{ token: "EURe", amount: "5.00", to: "0x..." }`
-2. **Haven** authenticates the API key, loads the Haven wallet and agent budget, and checks the remaining on-chain allowance
-3. **Haven** returns a payload hash to sign, or queues a pending approval when the request is outside the remaining budget
+2. **Haven** authenticates the API key, loads the Haven wallet, and selects the agent's budget delegation for that token and recipient
+3. **Haven** prepares a redeeming UserOperation and returns the account's exact EIP-712 typed data to sign
 4. **Agent/runtime** signs locally with the delegate key; the key never goes to Haven
-5. **Haven** verifies the signature and relays the transaction without changing amount, token, recipient, or authority boundary
-6. **AllowanceModule** verifies the signature and budget on-chain before tokens move from the Safe
+5. **Haven** submits the sponsored UserOperation without changing amount, token, recipient, or authority boundary
+6. **The caveat enforcers** check budget, recipient and expiry **on-chain during gas estimation** — anything outside the envelope reverts there. Funds move account→recipient directly, with no funding leg
 
 ### Payment API (3-step flow)
 
 | Step | Endpoint | What happens |
 |---|---|---|
-| 1. Create intent | `POST /payments` | Haven validates, checks policy + on-chain allowance, returns hash to sign |
-| 2. Sign & submit | `POST /payments/:id/sign` | Agent signs hash, Haven verifies and executes on-chain via relayer |
+| 1. Create intent | `POST /payments` | Haven validates, selects the budget delegation, returns typed data to sign |
+| 2. Sign & submit | `POST /payments/:id/sign` | Agent signs the typed data, Haven verifies and submits the sponsored UserOperation |
 | 3. Check status | `GET /payments/:id` | Poll until `confirmed` / `failed` |
 
-All endpoints authenticate with `Authorization: Bearer sk_agent_xxx`. Authentication is not payment authority: executable transfers still require the agent-held delegate signature and on-chain Safe/module allowance.
+All endpoints authenticate with `Authorization: Bearer sk_agent_xxx`. Authentication is not payment authority: executable transfers still require the agent-held delegate signature and the on-chain delegation it redeems against.
 
-For x402 and MPP, the SDK and MCP tools use quote/pay/resume flows. Standard merchant x402 has two legs: a Haven funding leg constrained by the Haven wallet budget, then an agent merchant leg using the standard `X-PAYMENT` header. Production merchant facilitation, acquiring, fiat/card rails, settlement, swaps, yield, and advice are not current Haven production surfaces.
+An account on the **retired** Safe rail (`execution_rail='allowance_module'`) gets **HTTP 410** from all of these, fail-closed with nothing written (#1986).
+
+For x402 and MPP, the SDK and MCP tools use quote/pay/resume flows. The preferred merchant scheme is **ERC-7710 direct settlement** — one leg, account→merchant, no funding hop. Where a merchant's facilitator cannot redeem a delegation chain (still most of them today), the **EIP-3009 bridge** (#946) transiently funds the agent EOA from the budget delegation so it can sign a standard `X-PAYMENT` header; that path deliberately reintroduces a bounded funding leg, which is why the sweep and delegate-balance monitoring machinery is kept. Production merchant facilitation, acquiring, fiat/card rails, settlement, swaps, yield, and advice are not current Haven production surfaces.
 
 ### Security Model
 
@@ -322,27 +329,27 @@ Independent layers keep the API and signing boundaries separate:
 
 | Layer | What it does | Where it lives |
 |---|---|---|
-| **Safe smart account** | Multi-owner, threshold signatures, holds all funds | On-chain |
-| **AllowanceModule** | Per-token, per-delegate budgets and reset periods | On-chain |
-| **Delegate signing key** | Signs payment payloads within the approved allowance | Agent/runtime/user environment |
-| **Haven policy mirror** | Pre-checks, approval routing, audit trail, status, and copy | Haven backend |
+| **Hybrid DeleGator smart account** | User-managed signer set (passkey and/or wallet), holds all funds | On-chain |
+| **Signed delegation + caveat enforcers** | Per-agent period budget with native refill, optional recipient pin, expiry — checked at redemption | On-chain |
+| **Delegate signing key** | Signs payment payloads within the delegated budget | Agent/runtime/user environment |
+| **Haven policy mirror** | Pre-checks, audit trail, status, and copy — a mirror, never the real spend control | Haven backend |
 | **Credential scoping** | API-key identity, prefix display, rotation, and revocation state | Haven backend |
 
-If Haven is compromised, API keys alone cannot sign transactions. A Safe owner can pause or revoke an agent in Haven and can also revoke Safe permissions through Safe-compatible tooling without needing Haven.
+If Haven is compromised, API keys alone cannot sign transactions. An account owner can pause or revoke an agent in Haven, and can revoke the underlying on-chain authority directly without needing Haven — see the [independent exit path](docs/exit/README.md).
 
-Approver (Safe owner) management is **retired** (#1988, epic #1440). Haven never signed an owner change and no longer constructs one either: the backend routes are deleted and the Settings surface goes with #1989. Owners of a linked Safe manage its owner set directly through Safe's own interfaces with their own key — which was always true, and is the reason removing Haven's builder takes nothing away that Haven was the only source of. `POST /safe/exec` stays open, so an owner-signed Safe transaction is still relayed for gas.
+Approver (Safe owner) management is **retired** (#1988/#1989, epic #1440). Haven never signed an owner change and no longer constructs one: the backend routes and the Settings surface are both deleted. Owners of a legacy Safe manage its owner set directly through Safe's own interfaces with their own key — which was always true, and is the reason removing Haven's builder takes nothing away that Haven was the only source of. `POST /safe/exec` stays open, so an owner-signed Safe transaction is still relayed for gas — but **#1989 also deleted the screen that composed one**, and the route is not the screen. A **wallet-owned** Safe loses nothing (sign at [app.safe.global](https://app.safe.global)); a **passkey-owned** Safe currently has **no self-serve way to move funds out**, because Haven's passkey Safe signer is a custom WebAuthn scheme Safe's own interfaces cannot drive. The epic's Base-mainnet census found no passkey-owned Safe, which is why this was accepted as a narrowing — but a census is not a proof and it does not cover non-mainnet accounts. Full user-facing wording: [`docs/product/account-recovery.md`](docs/product/account-recovery.md).
 
 ### Key Management
 
 | Key | Who holds it | What it can do |
 |---|---|---|
-| Safe owner key | User wallet/passkey/hardware environment | Full Safe control: deploy, modify permissions, revoke agents |
-| Delegate private key | Your agent | Sign payment intents within allowance limits only |
+| Account signer (passkey / wallet) | User device or wallet/hardware environment | Full account control: add or remove signers, grant and revoke agent budgets. On a legacy Safe, the equivalent is the Safe owner key |
+| Delegate private key | Your agent | Sign payment intents within the delegated budget only |
 | Agent API key | Your agent | Authenticate with Haven API; no signing ability |
 | Hosted MCP bearer token | Agent runtime config | Same API identity role as the agent API key |
 | Relayer key | Haven server | Pay gas for independently valid signed transactions; no fund access |
 
-Haven **never** holds Safe owner keys or delegate private keys.
+Haven **never** holds account signer keys, Safe owner keys, or delegate private keys.
 
 For architecture constraints around custody, transfer-service risk, relaying, x402/merchant demos, fiat/card rails, swaps, and investment advice, use [`docs/regulatory/casp-risk-guardrails.md`](docs/regulatory/casp-risk-guardrails.md) as the required perimeter guardrail.
 
@@ -379,7 +386,9 @@ POST /payments
 }
 ```
 
-When the request exceeds the remaining on-chain allowance, Haven returns `202` with `status: "pending_approval"` and `next_action: "wait_for_user_approval"` instead of a signable hash. The agent should tell the user it is waiting in Haven, then poll payment status or use the SDK/MCP resume helpers after approval.
+**Sign `sign_data.typed_data` verbatim, never the bare `hash`.** The account validates the typed data, not the 4337 hash; `@haven_ai/sdk` and the MCP signer do this for you.
+
+There is **no over-budget approval queue** on the delegation rail. A request outside the budget, recipient pin or expiry **reverts during on-chain gas estimation** — it does not become a pending approval. A `202` with `status: "pending_approval"` is now only ever an idempotent replay of an approval row created before the Safe rail was retired (#1440); no code path creates a new one.
 
 ### Payment intent response
 
@@ -390,14 +399,15 @@ When the request exceeds the remaining on-chain allowance, Haven returns `202` w
   "expires_at": "2025-01-01T00:10:00Z",
   "sign_data": {
     "hash": "0x...",
+    "signature_scheme": "eip712_userop",
+    "typed_data": { "domain": {}, "types": {}, "primaryType": "PackedUserOperation", "message": {} },
     "components": {
-      "safe": "0x...",
+      "account": "0x...",
       "token": "0x...",
       "to": "0x...",
-      "amount": "5000000000000000000",
-      "nonce": 1
+      "amount": "5000000000000000000"
     },
-    "instructions": "Sign the hash with raw ECDSA (not eth_sign)..."
+    "instructions": "Sign sign_data.typed_data with your delegate key using EIP-712 (signTypedData)..."
   }
 }
 ```
@@ -449,7 +459,7 @@ Haven-AI/
 |-- ABOUT_HAVEN.md             # Product and architecture mental model
 |-- docs/                      # architecture, product/UX, contributing, operations, regulatory docs (see docs/README.md)
 |-- packages/
-|   |-- backend/               # Fastify API, database migrations, Safe/module relaying, OpenAPI
+|   |-- backend/               # Fastify API, database migrations, relaying, OpenAPI
 |   |-- frontend/              # Next.js dashboard and connect-agent UX
 |   |-- sdk/                   # @haven_ai/sdk
 |   |-- mcp/                   # Local stdio MCP server; signs locally from a credential file
@@ -484,8 +494,8 @@ Haven-AI/
 - **TypeScript** throughout (backend + frontend)
 - **Fastify** — backend API
 - **Next.js 15** — frontend dashboard
-- **PostgreSQL** — agents, policies, payment intents, approvals, receipts, audit trail
-- **Safe SDK + AllowanceModule** — smart account + on-chain spending limits (legacy rail)
+- **PostgreSQL** — agents, policies, payment intents, receipts, audit trail (plus the retired rail's approval rows, kept readable until #1990 drops them)
+- **Safe + AllowanceModule** — legacy rail, **retired** (#1440): reads and owner-signed relay only, no `@safe-global/protocol-kit`
 - **MetaMask smart-accounts-kit + permissionless** — Hybrid DeleGator delegation rail
 - **wagmi + viem** — wallet connection + blockchain interaction
 - **ethers v6** — backend blockchain operations

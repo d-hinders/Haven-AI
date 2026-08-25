@@ -24,7 +24,6 @@ covers:
   - packages/mcp-server/src/tools.ts
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
-  - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
 # #1496: a casp-changelog shard satisfies this doc too — every money-path PR
 # already writes one, and mandatory note-prepends to last-verified caused three

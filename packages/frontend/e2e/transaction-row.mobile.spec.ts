@@ -192,118 +192,23 @@ for (const route of ['/transactions', '/design-system'] as const) {
 }
 
 /**
- * `SendModal` is the one consumer of `TransactionMovement` that no URL reaches
- * and no screenshot scenario exists for (#1409's shape), so it had never been
- * measured at any width — the gap `haven-design-reviewer` named on #1835.
+ * The `SendModal` measurement that used to live here is DELETED (#1989, epic
+ * #1440), together with its subject.
  *
- * It is also plausibly the TIGHTEST consumer, not the loosest: the modal is
- * `w-full max-w-md mx-4` (SendModal.tsx:427), so at 390px it is 358px, and the
- * review body is `p-6` (:834) with the movement inside a `-mx-6 ... px-6` block
- * (:847). That leaves the component LESS room than `ApprovalQueue`'s `p-4`
- * panel, which does have rendered evidence. Waiving it as "the wider case"
- * would have skipped the more dangerous one.
+ * It drove `/dashboard` → Send → the review step, then clamped a live
+ * `TransactionMovement` on `/approvals` to the modal's measured width. Both
+ * surfaces are gone with the legacy Safe rail: `SendModal`, `useSendTransaction`
+ * and `ApprovalQueue` are deleted and `/approvals` no longer routes.
  *
- * The review step cannot be driven under the standard fixture — `Continue` is
- * `disabled` while `signingUnavailable`, and the fixture account's passkey is
- * on another device. So this measures the modal's real content width from the
- * step that IS reachable (same block geometry either way), then applies that
- * width to a REAL `TransactionMovement` instance and asserts the same two
- * properties the route guards assert.
+ * Deleted rather than repointed at `DelegationSendModal`, deliberately. The
+ * test's own recorded result was that the mutation it was written to catch
+ * PASSES at `SendModal`'s width — 310px is roughly double the ~150px where the
+ * arrow can strand — so it was kept only for being width-ADAPTIVE against a
+ * future narrowing of a modal that no longer exists. Repointing it at a
+ * different modal would carry the shape across while quietly re-baselining the
+ * number it exists to keep honest, and would assert nothing the two route
+ * sweeps above do not already assert at 320/390/393px.
  *
- * Deliberately NOT a hardcoded 310px. A constant copied out of a class-name
- * calculation is exactly the sort that quietly stops matching the layout; this
- * reads the number off the running modal every time.
- *
- * This is a headless equivalent, NOT a substitute for rendered evidence. A PNG
- * of the real review step is still owed and is filed separately.
+ * What the route sweeps still cover is unchanged: they are the assertions that
+ * go red on the #1774 defect, and they were never the SendModal test's.
  */
-test('SendModal: the movement holds its shape at the modal measured width', async ({ page }) => {
-  test.slow()
-  await mockHavenApi(page)
-  await seedAuthenticatedSession(page)
-  await page.setViewportSize({ width: 390, height: 900 })
-  await page.goto('/dashboard')
-  await page.waitForSelector('main', { timeout: 60_000 })
-  await dismissMobileSidebar(page)
-
-  await page.getByRole('button', { name: /^Send$/i }).first().click()
-  const dialog = page.getByRole('dialog', { name: 'Send payment' })
-  await dialog.waitFor({ timeout: 30_000 })
-
-  const modalContentWidth = await dialog.evaluate(
-    (el) => +(el.getBoundingClientRect().width - 48).toFixed(1),
-  )
-
-  // MEASURED: 310px at a 390px viewport. That is the number this test exists
-  // to keep honest, and it carries a result that inverts the concern which
-  // prompted it.
-  //
-  // MUTATION EVIDENCE, reported because it PASSED and that is informative:
-  // flattening `TransactionMovement` back to the orphaning three-sibling shape
-  // leaves these assertions GREEN. The test is not weak — the assertions are
-  // the same ones that go red on `/transactions` and `/design-system`. The
-  // mutated line is simply NOT EXERCISED at this width: the arrow can only
-  // strand below roughly 150px of container, and `SendModal` gives the
-  // primitive about double that. `From Operating wallet` (168px) + an 8px gap
-  // + a 17px arrow is 193px, which fits on one line inside 310px with room to
-  // spare.
-  //
-  // So the reviewer's worry that `SendModal` might be the TIGHTER and
-  // therefore more dangerous consumer is half right and half wrong: it IS
-  // tighter than `ApprovalQueue`'s `p-4` panel, and it is still comfortably
-  // above the threshold where #1774's defect can appear. That was established
-  // by measuring, not by arguing from class names.
-  //
-  // The test is kept rather than deleted because it is width-ADAPTIVE: it
-  // reads the modal's real width every run, so if `SendModal` is ever narrowed
-  // to where the defect can bite, these assertions start doing real work
-  // automatically. What it must not be read as today is proof that the fix is
-  // what keeps this surface correct — the width is.
-  expect(modalContentWidth).toBeGreaterThan(200)
-  expect(modalContentWidth).toBeLessThan(390)
-
-  await page.keyboard.press('Escape')
-
-  await page.goto('/approvals')
-  await page.waitForSelector('main', { timeout: 60_000 })
-  await dismissMobileSidebar(page)
-  // `main` resolves before the approval card's data has rendered, so wait for
-  // the glyph itself rather than the shell — otherwise the clamp finds nothing
-  // and the test fails for a reason that has nothing to do with geometry.
-  await page.waitForFunction(
-    () =>
-      Array.from(document.querySelectorAll('[aria-hidden="true"]')).some(
-        (el) => (el.textContent ?? '').trim() === '\u2192' && el.getClientRects().length > 0,
-      ),
-    undefined,
-    { timeout: 30_000 },
-  )
-
-  const clamped = await page.evaluate((width) => {
-    const arrow = Array.from(document.querySelectorAll('[aria-hidden="true"]')).find(
-      (el) => (el.textContent ?? '').trim() === '\u2192' && el.getClientRects().length > 0,
-    )
-    if (!arrow) return false
-    let root: Element | null = arrow
-    while (root) {
-      const t = root.textContent ?? ''
-      if (t.includes('From ') && t.includes('To ')) break
-      root = root.parentElement
-    }
-    if (!root || !(root.parentElement instanceof HTMLElement)) return false
-    root.parentElement.style.width = width + 'px'
-    root.parentElement.style.maxWidth = width + 'px'
-    return true
-  }, modalContentWidth)
-
-  expect(clamped, 'no live TransactionMovement found on /approvals to clamp').toBe(true)
-  await page.waitForTimeout(200)
-
-  const movements = await readMovements(page)
-  expect(movements.length).toBeGreaterThan(0)
-  for (const movement of movements) {
-    expect(movement.parts, 'at ' + modalContentWidth + 'px: movement lost a labelled half').toBe(2)
-    expect(movement.arrowWidth, 'at ' + modalContentWidth + 'px: arrow squeezed to nothing').toBeGreaterThan(4)
-    expect(movement.arrowAlone, 'at ' + modalContentWidth + 'px: arrow orphaned on its own line').toBe(false)
-  }
-})

@@ -35,7 +35,8 @@ import {
 // Authenticated routes a user reaches from primary navigation. Each is checked
 // for the one failure mode that is invisible at 1280px: content wider than the
 // screen.
-const ROUTES = ['/dashboard', '/agents', '/transactions', '/approvals'] as const
+// '/approvals' left this sweep with the route itself (#1989, epic #1440).
+const ROUTES = ['/dashboard', '/agents', '/transactions'] as const
 
 /**
  * Routes with a KNOWN, FILED content-overflow defect. The route still runs —

@@ -58,21 +58,15 @@ test.describe('dashboard browser UX', () => {
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })
 
-  test('keeps the approval path reachable from the dashboard alert', async ({ page }) => {
-    const browserErrors = collectBrowserErrors(page)
-
-    await page.goto('/dashboard')
-    await dismissMobileSidebar(page)
-    await page.getByRole('link', { name: 'Open approvals' }).click()
-
-    await expect(page).toHaveURL(/\/approvals$/)
-    await expect(page.getByRole('heading', { name: 'Approvals' })).toBeVisible()
-    await expect(page.getByText('Research agent', { exact: true })).toBeVisible()
-    await expect(page.getByText('12.50 USDC')).toBeVisible()
-    expect(await expectNoHorizontalOverflow(page)).toMatchObject({
-      hasOverflow: false,
-      contentRegionFound: true,
-    })
-    expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
-  })
+  // REMOVED (#1989): 'keeps the approval path reachable from the dashboard
+  // alert'. Its entire subject — the dashboard's approvals alert, the "Open
+  // approvals" link and the `/approvals` page it led to — is deleted with the
+  // Safe rail. The approval queue was a legacy-rail concept; the delegation
+  // rail enforces budgets on-chain and produces no approvals, so there is no
+  // path left for a repaired version of this test to keep reachable.
+  //
+  // Deleted rather than inverted HERE because the absence is asserted where it
+  // can actually fail: `auth.spec.ts` pins it on a dashboard whose fixture
+  // still serves `actionableApprovals: 1`. A second copy in this file would
+  // assert the same thing without adding a case.
 })

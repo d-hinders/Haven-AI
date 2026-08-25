@@ -29,7 +29,6 @@ covers:
   - packages/frontend/src/context/AuthContext.tsx
   - packages/frontend/src/lib/api.ts
   - packages/frontend/src/lib/passkey*.ts
-  - packages/frontend/src/lib/safePasskeySigner.ts
   - packages/connect/src/runtime.ts
   - packages/connect/src/key.ts
   - packages/connect/src/storage.ts

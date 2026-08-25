@@ -51,7 +51,6 @@ covers:
   - packages/frontend/src/app/(authenticated)/accounting/**
   - packages/frontend/src/app/(authenticated)/reporting/**
   - packages/frontend/src/components/AddFundsModal.tsx
-  - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/frontend/src/components/UsingYourAgentInfo.tsx
   - packages/sdk/src/**
   - packages/cli/src/**

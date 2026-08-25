@@ -82,7 +82,6 @@ import {
 } from '../src/infra/repositories/agent-passports.js'
 import {
   CANCEL_SETUP_SQL,
-  COPY_SETUP_ALLOWANCES_SQL,
   FIND_ACTIVE_AGENT_BY_DELEGATE_SQL,
   FIND_DEFAULT_USER_SAFE_SQL,
   ACTIVATE_AGENT_SQL,
@@ -108,7 +107,6 @@ import {
 import {
   AGENT_HAS_LIVE_DELEGATIONS_SQL,
   ARCHIVE_AGENT_SQL,
-  DELETE_AGENT_ALLOWANCE_SQL,
   UNARCHIVE_AGENT_SQL,
   FIND_AGENT_FOR_USER_ALL_STATUSES_SQL,
   FIND_AGENT_ID_FOR_USER_SQL,
@@ -118,22 +116,16 @@ import {
   FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
   FIND_SAFE_INFO_SQL,
   FIND_USER_SAFE_ID_FOR_USER_SQL,
-  INSERT_AGENT_ALLOWANCE_SQL,
   INSERT_AGENT_WITH_KEY_SQL,
   LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL,
-  LIST_ALLOWANCES_FOR_AGENTS_SQL,
-  LIST_ALLOWANCES_FOR_AGENT_SQL,
-  LIST_ALLOWANCES_FOR_AGENT_UNORDERED_SQL,
   PAUSE_AGENT_SQL,
   RESUME_AGENT_SQL,
   REVOKE_AGENT_SQL,
   ROTATE_AGENT_API_KEY_SQL,
   UPDATE_AGENT_PROFILE_SQL,
-  UPSERT_AGENT_ALLOWANCE_SQL,
 } from '../src/infra/repositories/agents.js'
 import {
   FIND_AGENT_DELEGATE_ADDRESS_SQL,
-  LIST_ALLOWANCE_CONFIG_FOR_AGENT_SQL,
   AGENT_BY_API_KEY_SQL,
   TOUCH_AGENT_LAST_SEEN_SQL,
 } from '../src/infra/repositories/agents.js'
@@ -298,7 +290,6 @@ import {
   HAS_FIRST_AGENT_PAYMENT_SQL,
   INSERT_PORTFOLIO_SNAPSHOT_SQL,
   LIST_DASHBOARD_AGENTS_SQL,
-  LIST_DASHBOARD_ALLOWANCES_SQL,
   LIST_DASHBOARD_SAFES_SQL,
   SUM_MONTHLY_APPROVAL_SPEND_SQL,
   SUM_MONTHLY_PAYMENT_SPEND_SQL,
@@ -349,7 +340,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'setup: insert allowance', sql: INSERT_SETUP_ALLOWANCE_SQL },
   { name: 'setup: update connector metadata', sql: UPDATE_CONNECTOR_METADATA_SQL },
   { name: 'setup: insert pending agent on register', sql: INSERT_AGENT_SQL },
-  { name: 'setup: copy setup allowances to agent', sql: COPY_SETUP_ALLOWANCES_SQL },
   { name: 'setup: mark registered (token consumed)', sql: MARK_SETUP_REGISTERED_SQL },
   { name: 'setup: merge install status', sql: MERGE_INSTALL_STATUS_SQL },
   { name: 'setup: apply approval state', sql: UPDATE_APPROVAL_STATE_SQL },
@@ -361,9 +351,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: list for user, ALL statuses (#1069)', sql: LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL },
   { name: 'agents: find for user, ALL statuses (#1069)', sql: FIND_AGENT_FOR_USER_ALL_STATUSES_SQL },
   { name: 'agents: delegate-balance read (status-agnostic, #1403)', sql: FIND_DELEGATE_AGENT_FOR_USER_SQL },
-  { name: 'agents: allowances for many agents', sql: LIST_ALLOWANCES_FOR_AGENTS_SQL },
-  { name: 'agents: allowances for one agent (ordered)', sql: LIST_ALLOWANCES_FOR_AGENT_SQL },
-  { name: 'agents: allowances for one agent (PUT path, unordered)', sql: LIST_ALLOWANCES_FOR_AGENT_UNORDERED_SQL },
   { name: 'agents: safe ownership check on create', sql: FIND_USER_SAFE_ID_FOR_USER_SQL },
   { name: 'agents: default safe fallback on create', sql: FIND_DEFAULT_USER_SAFE_ID_SQL },
   { name: 'agents: duplicate-delegate pre-check', sql: FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL },
@@ -371,7 +358,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: id+status gate (tenant-scoped)', sql: FIND_AGENT_ID_STATUS_FOR_USER_SQL },
   { name: 'agents: insert with API key', sql: INSERT_AGENT_WITH_KEY_SQL },
   { name: 'agents: safe info inside create tx', sql: FIND_SAFE_INFO_SQL },
-  { name: 'agents: insert allowance inside create tx', sql: INSERT_AGENT_ALLOWANCE_SQL },
   { name: 'agents: profile update (CTE, tenant-scoped)', sql: UPDATE_AGENT_PROFILE_SQL },
   { name: 'agents: archive revoked agent (#1401)', sql: ARCHIVE_AGENT_SQL },
   { name: 'agents: live-delegation guard for archive (#1436)', sql: AGENT_HAS_LIVE_DELEGATIONS_SQL },
@@ -380,8 +366,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: rotate API key', sql: ROTATE_AGENT_API_KEY_SQL },
   { name: 'agents: pause', sql: PAUSE_AGENT_SQL },
   { name: 'agents: resume', sql: RESUME_AGENT_SQL },
-  { name: 'agents: allowance upsert (mirror row)', sql: UPSERT_AGENT_ALLOWANCE_SQL },
-  { name: 'agents: allowance delete', sql: DELETE_AGENT_ALLOWANCE_SQL },
   // User-safes aggregate (#988). IMPORTED from the repository — verbatim from
   // routes/user-safes.ts. Nine statements left with #1988 (epic #1440): the
   // four approver-metadata ones, the three import-path writes/reads, and the
@@ -437,7 +421,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'dashboard: account list', sql: LIST_DASHBOARD_SAFES_SQL },
   { name: 'dashboard: agent preview (safe join)', sql: LIST_DASHBOARD_AGENTS_SQL },
   { name: 'dashboard: first-agent-payment milestone', sql: HAS_FIRST_AGENT_PAYMENT_SQL },
-  { name: 'dashboard: legacy allowance mirror for agents', sql: LIST_DASHBOARD_ALLOWANCES_SQL },
   { name: 'dashboard: portfolio snapshots for today+yesterday', sql: FIND_PORTFOLIO_SNAPSHOTS_SQL },
   { name: 'dashboard: portfolio snapshot upsert', sql: INSERT_PORTFOLIO_SNAPSHOT_SQL },
   { name: 'dashboard: month-to-date payment spend', sql: SUM_MONTHLY_PAYMENT_SPEND_SQL },
@@ -748,7 +731,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'merchant receipts: first-write-wins insert (#956)', sql: INSERT_MERCHANT_RECEIPT_SQL },
   { name: 'merchant receipts: read by evidence id', sql: GET_MERCHANT_RECEIPT_SQL },
   // agents-aggregate money-path reads:
-  { name: 'agents: /allowances config projection', sql: LIST_ALLOWANCE_CONFIG_FOR_AGENT_SQL },
   { name: 'agents: delegate address for residue check (#716)', sql: FIND_AGENT_DELEGATE_ADDRESS_SQL },
   // account entitlements:
   { name: 'entitlements: has (unrevoked) check', sql: HAS_ENTITLEMENT_SQL },

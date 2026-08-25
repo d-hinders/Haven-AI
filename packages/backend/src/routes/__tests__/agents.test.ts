@@ -44,11 +44,9 @@ vi.mock('../../middleware/auth.js', () => ({
 // pass against a payload production can never produce.
 const AGENT_UUID = '4f9a1c2e-7b3d-4a10-9c55-2f8e6d0b1a34'
 const SAFE_UUID = 'b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16'
-const ALLOWANCE_UUID = '9e6b0f37-52c1-4d8a-b3f9-71a4c8e2d905'
 
 const VALID_DELEGATE = '0x1111111111111111111111111111111111111111'
 const VALID_TOKEN = '0x3333333333333333333333333333333333333333'
-const UINT96_OVERFLOW = (1n << 96n).toString()
 
 const VALID_ALLOWANCE = {
   token_address: VALID_TOKEN,
@@ -64,37 +62,30 @@ describe('agent routes', () => {
     mockIssueBestEffort.mockReset()
   })
 
-  it('fetches one agent with allowances and null mcp_last_seen_at when never called', async () => {
+  it('fetches one agent with empty allowances and null mcp_last_seen_at when never called', async () => {
     const app = Fastify({ logger: false })
     await app.register(agentRoutes, { prefix: '/agents' })
 
-    mockQuery
-      .mockResolvedValueOnce({
-        rows: [{
-          id: AGENT_UUID,
-          name: 'Research Agent',
-          description: null,
-          delegate_address: '0x1111111111111111111111111111111111111111',
-          safe_id: SAFE_UUID,
-          safe_address: '0x2222222222222222222222222222222222222222',
-          safe_name: 'Main wallet',
-          safe_chain_id: 8453,
-          api_key_prefix: 'sk_agent_abc',
-          status: 'active',
-          created_at: '2026-05-25T12:00:00.000Z',
-          mcp_last_seen_at: null,
-        }],
-      })
-      .mockResolvedValueOnce({
-        rows: [{
-          id: ALLOWANCE_UUID,
-          agent_id: AGENT_UUID,
-          token_address: '0x3333333333333333333333333333333333333333',
-          token_symbol: 'USDC',
-          allowance_amount: '25',
-          reset_period_min: 10080,
-        }],
-      })
+    // #2020: a non-delegator_hybrid agent gets `allowances: []` with NO
+    // second query against `agent_allowances` — the mirror is retired with
+    // the Safe rail. A single mocked call is enough; a leftover second one
+    // would go unconsumed if the handler regressed into reading it.
+    mockQuery.mockResolvedValueOnce({
+      rows: [{
+        id: AGENT_UUID,
+        name: 'Research Agent',
+        description: null,
+        delegate_address: '0x1111111111111111111111111111111111111111',
+        safe_id: SAFE_UUID,
+        safe_address: '0x2222222222222222222222222222222222222222',
+        safe_name: 'Main wallet',
+        safe_chain_id: 8453,
+        api_key_prefix: 'sk_agent_abc',
+        status: 'active',
+        created_at: '2026-05-25T12:00:00.000Z',
+        mcp_last_seen_at: null,
+      }],
+    })
 
     const response = await app.inject({
       method: 'GET',
@@ -105,7 +96,7 @@ describe('agent routes', () => {
     expect(response.json()).toMatchObject({
       id: AGENT_UUID,
       name: 'Research Agent',
-      allowances: [{ id: ALLOWANCE_UUID, token_symbol: 'USDC' }],
+      allowances: [],
       mcp_last_seen_at: null,
     })
     // #1069: pending_approval agents are SURFACED, not hidden — an abandoned
@@ -114,6 +105,8 @@ describe('agent routes', () => {
     // 'Needs setup' and links to the page where the budget grant activates.
     expect(String(mockQuery.mock.calls[0][0])).not.toContain("pending_approval")
     expect(mockQuery.mock.calls[0][1]).toEqual(['user-1', AGENT_UUID])
+    // Only the single agent-row query — no `agent_allowances` read (#2020).
+    expect(mockQuery).toHaveBeenCalledTimes(1)
     // The populated shape is where drift would actually show.
     expectMatchesSpec('GET', '/agents/{id}', response.json())
 
@@ -183,17 +176,14 @@ describe('agent routes', () => {
     await app.close()
   })
 
-  it.each([
-    ['bad token address', { ...VALID_ALLOWANCE, token_address: 'not-an-address' }, /Valid token address/],
-    ['blank token symbol', { ...VALID_ALLOWANCE, token_symbol: '   ' }, /Token symbol is required/],
-    ['overlong token symbol', { ...VALID_ALLOWANCE, token_symbol: 'A'.repeat(21) }, /20 characters or fewer/],
-    ['zero allowance amount', { ...VALID_ALLOWANCE, allowance_amount: '0' }, /positive decimal atomic amount/],
-    ['signed allowance amount', { ...VALID_ALLOWANCE, allowance_amount: '+1' }, /positive decimal atomic amount/],
-    ['scientific allowance amount', { ...VALID_ALLOWANCE, allowance_amount: '1e6' }, /positive decimal atomic amount/],
-    ['uint96 overflow allowance amount', { ...VALID_ALLOWANCE, allowance_amount: UINT96_OVERFLOW }, /uint96/],
-    ['negative reset period', { ...VALID_ALLOWANCE, reset_period_min: -1 }, /0 to 65535/],
-    ['uint16 overflow reset period', { ...VALID_ALLOWANCE, reset_period_min: 65536 }, /0 to 65535/],
-  ])('rejects invalid create-agent allowance input: %s', async (_label, allowance, errorPattern) => {
+  // #2020 (epic #1440): per-item allowance validation on create — bad token
+  // address, blank/overlong symbol, non-positive/overflowing amount,
+  // out-of-range reset period, duplicate tokens — is REMOVED behavior. There
+  // is nothing left to validate per-item because a non-empty `allowances`
+  // array is refused outright, before any of that shape is inspected. One
+  // well-formed allowance is enough to prove the refusal does not depend on
+  // the array being invalid.
+  it('rejects ANY non-empty create-agent allowances array — 400, before any transaction', async () => {
     const app = Fastify({ logger: false })
     await app.register(agentRoutes, { prefix: '/agents' })
 
@@ -203,55 +193,29 @@ describe('agent routes', () => {
       payload: {
         name: 'Research Agent',
         delegate_address: VALID_DELEGATE,
-        allowances: [allowance],
+        allowances: [VALID_ALLOWANCE],
       },
     })
 
     expect(response.statusCode).toBe(400)
-    expect(response.json().error).toMatch(errorPattern)
+    expect(response.json()).toEqual({
+      error:
+        'Per-token allowances are retired with the Safe rail (#1440). Grant the agent a budget delegation instead.',
+    })
     expect(mockQuery).not.toHaveBeenCalled()
 
     await app.close()
   })
 
-  it('rejects duplicate create-agent allowances after token address normalization', async () => {
+  // #2020: POST /agents/:id/allowances is now a 410 tombstone, same shape as
+  // DELETE /agents/:id (#1401) and the session rail (#834) — no ownership
+  // lookup, no body validation, nothing written. The old per-item validation,
+  // pending-approval/revoked 409 gates, and normalize-and-upsert happy path
+  // this replaces are all removed behavior: there is no longer a live write
+  // for any of them to gate.
+  it('POST /agents/:id/allowances is a 410 tombstone regardless of body or agent state — nothing read or written', async () => {
     const app = Fastify({ logger: false })
     await app.register(agentRoutes, { prefix: '/agents' })
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/agents',
-      payload: {
-        name: 'Research Agent',
-        delegate_address: VALID_DELEGATE,
-        allowances: [
-          VALID_ALLOWANCE,
-          {
-            ...VALID_ALLOWANCE,
-            token_address: VALID_TOKEN.toUpperCase().replace('X', 'x'),
-            allowance_amount: '50000000',
-          },
-        ],
-      },
-    })
-
-    expect(response.statusCode).toBe(400)
-    expect(response.json().error).toMatch(/Duplicate token/)
-    expect(mockQuery).not.toHaveBeenCalled()
-
-    await app.close()
-  })
-
-  it('blocks allowance updates while Connect Agent 2 setup is pending wallet approval', async () => {
-    const app = Fastify({ logger: false })
-    await app.register(agentRoutes, { prefix: '/agents' })
-
-    mockQuery.mockResolvedValueOnce({
-      rows: [{
-        id: 'agent-1',
-        status: 'pending_approval',
-      }],
-    })
 
     const response = await app.inject({
       method: 'POST',
@@ -264,131 +228,12 @@ describe('agent routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(409)
-    expect(response.json().error).toMatch(/pending wallet approval/)
-    expect(mockQuery).toHaveBeenCalledTimes(1)
-
-    await app.close()
-  })
-
-  it.each([
-    ['bad token address', { ...VALID_ALLOWANCE, token_address: 'not-an-address' }, /Valid token address/],
-    ['zero allowance amount', { ...VALID_ALLOWANCE, allowance_amount: '0' }, /positive decimal atomic amount/],
-    ['hex allowance amount', { ...VALID_ALLOWANCE, allowance_amount: '0x10' }, /positive decimal atomic amount/],
-    ['uint96 overflow allowance amount', { ...VALID_ALLOWANCE, allowance_amount: UINT96_OVERFLOW }, /uint96/],
-    ['fractional reset period', { ...VALID_ALLOWANCE, reset_period_min: 1.5 }, /0 to 65535/],
-    ['uint16 overflow reset period', { ...VALID_ALLOWANCE, reset_period_min: 65536 }, /0 to 65535/],
-  ])('rejects invalid allowance update input before agent lookup: %s', async (_label, allowance, errorPattern) => {
-    const app = Fastify({ logger: false })
-    await app.register(agentRoutes, { prefix: '/agents' })
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/agents/agent-1/allowances',
-      payload: allowance,
+    expect(response.statusCode).toBe(410)
+    expect(response.json()).toEqual({
+      error:
+        'Per-token allowances are retired with the Safe rail (#1440). Grant the agent a budget delegation instead.',
     })
-
-    expect(response.statusCode).toBe(400)
-    expect(response.json().error).toMatch(errorPattern)
     expect(mockQuery).not.toHaveBeenCalled()
-
-    await app.close()
-  })
-
-  it('normalizes allowance update inputs before writing the mirror row', async () => {
-    const app = Fastify({ logger: false })
-    await app.register(agentRoutes, { prefix: '/agents' })
-
-    mockQuery
-      .mockResolvedValueOnce({
-        rows: [{
-          id: 'agent-1',
-          status: 'active',
-        }],
-      })
-      .mockResolvedValueOnce({
-        rows: [{
-          id: 'allowance-1',
-          agent_id: 'agent-1',
-          token_address: VALID_TOKEN,
-          token_symbol: 'USDC',
-          allowance_amount: '25000000',
-          reset_period_min: 1440,
-        }],
-      })
-      .mockResolvedValueOnce({ rows: [] }) // schedule-state lookup (#802) — no schedule
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/agents/agent-1/allowances',
-      payload: {
-        token_address: '0x3333333333333333333333333333333333333333'.toUpperCase().replace('X', 'x'),
-        token_symbol: '  USDC  ',
-        allowance_amount: '00025000000',
-        reset_period_min: 1440,
-      },
-    })
-
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({
-      token_address: VALID_TOKEN,
-      token_symbol: 'USDC',
-      allowance_amount: '25000000',
-    })
-    expect(mockQuery.mock.calls[1][1]).toEqual([
-      'agent-1',
-      VALID_TOKEN,
-      'USDC',
-      '25000000',
-      1440,
-    ])
-
-    await app.close()
-  })
-
-  it('blocks allowance updates for revoked agents', async () => {
-    const app = Fastify({ logger: false })
-    await app.register(agentRoutes, { prefix: '/agents' })
-
-    mockQuery.mockResolvedValueOnce({
-      rows: [{
-        id: 'agent-1',
-        status: 'revoked',
-      }],
-    })
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/agents/agent-1/allowances',
-      payload: VALID_ALLOWANCE,
-    })
-
-    expect(response.statusCode).toBe(409)
-    expect(response.json().error).toMatch(/Revoked agent/)
-    expect(mockQuery).toHaveBeenCalledTimes(1)
-
-    await app.close()
-  })
-
-  it('blocks allowance deletes while Connect Agent 2 setup is pending wallet approval', async () => {
-    const app = Fastify({ logger: false })
-    await app.register(agentRoutes, { prefix: '/agents' })
-
-    mockQuery.mockResolvedValueOnce({
-      rows: [{
-        id: 'agent-1',
-        status: 'pending_approval',
-      }],
-    })
-
-    const response = await app.inject({
-      method: 'DELETE',
-      url: '/agents/agent-1/allowances/0x3333333333333333333333333333333333333333',
-    })
-
-    expect(response.statusCode).toBe(409)
-    expect(response.json().error).toMatch(/pending wallet approval/)
-    expect(mockQuery).toHaveBeenCalledTimes(1)
 
     await app.close()
   })
@@ -409,25 +254,26 @@ describe('agent routes', () => {
     await app.close()
   })
 
-  it('blocks allowance deletes for revoked agents', async () => {
+  // #2020: same tombstone contract as the POST above, for a well-formed
+  // token address — the pending-approval/revoked 409 gates and the delete
+  // happy path this replaces no longer exist. A malformed address still 400s
+  // (pinned separately above): `normalizeAgentAllowanceTokenAddress` runs
+  // before the 410, same as it always has.
+  it('DELETE /agents/:id/allowances/:tokenAddress is a 410 tombstone for a well-formed address — no ownership lookup, nothing deleted', async () => {
     const app = Fastify({ logger: false })
     await app.register(agentRoutes, { prefix: '/agents' })
-
-    mockQuery.mockResolvedValueOnce({
-      rows: [{
-        id: 'agent-1',
-        status: 'revoked',
-      }],
-    })
 
     const response = await app.inject({
       method: 'DELETE',
       url: `/agents/agent-1/allowances/${VALID_TOKEN}`,
     })
 
-    expect(response.statusCode).toBe(409)
-    expect(response.json().error).toMatch(/Revoked agent/)
-    expect(mockQuery).toHaveBeenCalledTimes(1)
+    expect(response.statusCode).toBe(410)
+    expect(response.json()).toEqual({
+      error:
+        'Per-token allowances are retired with the Safe rail (#1440). Revoke or change the agent’s budget delegation instead.',
+    })
+    expect(mockQuery).not.toHaveBeenCalled()
 
     await app.close()
   })
@@ -556,11 +402,6 @@ describe('delegation-rail budget view derives from active delegations (#1090)', 
     safe_chain_id: 84532, api_key_prefix: 'sk_a', status: 'active',
     created_at: '2026-08-05T00:00:00.000Z', mcp_last_seen_at: null, has_stranded_funds: false,
   }
-  const STALE_MIRROR = {
-    id: 'al-1', agent_id: 'agent-1', token_address: SEPOLIA_USDC,
-    token_symbol: 'USDC', allowance_amount: '10.00', reset_period_min: 1440,
-  }
-
   beforeEach(() => {
     mockQuery.mockReset()
   })
@@ -574,7 +415,6 @@ describe('delegation-rail budget view derives from active delegations (#1090)', 
       if (/FROM agents a/.test(s)) {
         return { rows: [{ ...AGENT_BASE, account_type: opts.accountType }] }
       }
-      if (/FROM agent_allowances/.test(s)) return { rows: [STALE_MIRROR] }
       if (/FROM agent_delegations/.test(s)) return { rows: opts.delegations ?? [] }
       return { rows: [] }
     })
@@ -609,12 +449,17 @@ describe('delegation-rail budget view derives from active delegations (#1090)', 
     expect(res.json().allowances).toEqual([])
   })
 
-  it('legacy agents return the agent_allowances rows byte-identically — the derivation must not leak onto that rail', async () => {
+  // #2020, reversing the byte-identical mirror pin this replaces: the Safe
+  // rail is retired and `agent_allowances` is no longer read anywhere, so a
+  // legacy (non-delegator_hybrid) agent reports NO allowances rather than the
+  // frozen mirror.
+  it('legacy agents get empty allowances — the mirror is retired, and neither allowance table is consulted', async () => {
     mockReads({ accountType: null, delegations: [ACTIVE_DELEGATION] })
     const res = await getAgents('/agents')
-    expect(res.json().agents[0].allowances).toEqual([STALE_MIRROR])
-    // And the delegations table is never consulted for a legacy-only listing:
+    expect(res.json().agents[0].allowances).toEqual([])
+    // Neither table is consulted for a legacy-only listing:
     expect(mockQuery.mock.calls.some((c) => /FROM agent_delegations/.test(String(c[0])))).toBe(false)
+    expect(mockQuery.mock.calls.some((c) => /FROM agent_allowances/.test(String(c[0])))).toBe(false)
   })
 
   it('an unlisted token degrades to a generic view instead of dropping the budget', async () => {

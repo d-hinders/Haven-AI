@@ -141,11 +141,10 @@ const allowanceConfigured = (configured: boolean): DbRoute => [
   () => ({ rows: configured ? [{ allowance_amount: '10000' }] : [] }),
 ]
 
-/** listAllowanceConfigForAgent (GET /allowances, legacy rail). */
-const allowanceConfigRows = (rows: unknown[]): DbRoute => [
-  /FROM agent_allowances\s+WHERE agent_id = \$1\s+ORDER BY created_at ASC/,
-  () => ({ rows }),
-]
+// #2020: `allowanceConfigRows` (listAllowanceConfigForAgent, GET /allowances
+// on the legacy rail) is gone — that rail's allowances read is retired and
+// the SQL it primed no longer runs; see "GET /allowances — Safe rail retired
+// (#2020, reversing #1986)" below.
 
 /** deriveDelegationBudgets / listDelegationJsonByIds (GET /allowances, delegation rail). */
 const delegationRows = (rows: unknown[]): DbRoute => [/FROM agent_delegations/, () => ({ rows })]
@@ -356,102 +355,26 @@ describe('machine payment routes', () => {
     expect(response.json().execution_rail).toBe('delegation')
   })
 
-  it('returns configured allowances with on-chain remaining spend', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValue({
-      amount: 10000n,
-      spent: 2500n,
-      resetTimeMin: 60,
-      lastResetMin: 100,
-      nonce: 7,
-    })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValue({
-      remaining: 7500n,
-      effectiveSpent: 2500n,
-      isResetPending: false,
-    })
-
-    primeDb(
-      AUTH,
-      allowanceConfigRows([{
-        id: 'allowance-1',
-        token_address: USDC,
-        token_symbol: 'USDC',
-        allowance_amount: '10000',
-        reset_period_min: 60,
-      }]),
-    )
-
-    const response = await app.inject({
-      method: 'GET',
-      url: '/machine-payments/allowances',
-      headers: { authorization: 'Bearer sk_agent_test' },
-    })
-
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toEqual({
-      agent_id: AGENT.id,
-      safe_address: AGENT.safe_address,
-      delegate_address: AGENT.delegate_address,
-      chain_id: AGENT.chain_id,
-      allowances: [{
-        id: 'allowance-1',
-        token_address: USDC,
-        token_symbol: 'USDC',
-        configured_amount: '10000',
-        reset_period_min: 60,
-        onchain: {
-          amount: '10000',
-          spent: '2500',
-          remaining: '7500',
-          effective_spent: '2500',
-          reset_time_min: 60,
-          last_reset_min: 100,
-          nonce: 7,
-          is_reset_pending: false,
-        },
-      }],
-    })
-    expect(allowanceMocks.getTokenAllowance).toHaveBeenCalledWith(
-      AGENT.chain_id,
-      AGENT.safe_address,
-      AGENT.delegate_address,
-      USDC,
-    )
-  })
-
-  describe('GET /allowances — legacy-rail characterization (#1135, pinned BEFORE the rail branch)', () => {
-    // money.md: the legacy AllowanceModule rail's response is pinned here —
-    // exact JSON shape, exact onchain.* fields — so the rail-aware change can
-    // prove it left this rail untouched.
-
-    function legacyOnchainRead() {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({
-        amount: 10000n,
-        spent: 2500n,
-        resetTimeMin: 60,
-        lastResetMin: 100,
-        nonce: 7,
-      })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_750_000_000)
-      allowanceMocks.computeEffectiveAllowance.mockReturnValue({
-        remaining: 7500n,
-        effectiveSpent: 2500n,
-        isResetPending: false,
-      })
+  // #2020 (epic #1440), reversing #1986's left-readable decision (owner call
+  // recorded 2026-08-25 on the issue): a `retired_allowance` account — the
+  // implicit-null rail AUTH/AGENT resolves to, same as an explicit
+  // 'allowance_module' — now gets the fail-closed 410 from
+  // `allowanceModuleRailRetired('account')` rather than a state read. This
+  // replaces both the standalone "returns configured allowances with
+  // on-chain remaining spend" pin and the "GET /allowances — legacy-rail
+  // characterization (#1135, pinned BEFORE the rail branch)" suite (the
+  // byte-identical AllowanceModule snapshot, the empty-array-for-no-tokens
+  // case, and the 502-on-chain-failure case) — all three pinned a read that
+  // no longer happens on this rail.
+  describe('GET /allowances — Safe rail retired (#2020, reversing #1986)', () => {
+    function expectNoAllowanceStateRead() {
+      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+      expect(allowanceMocks.getLatestBlockTimeSec).not.toHaveBeenCalled()
+      expect(sqlCalls().some((c) => /FROM agent_allowances|FROM agent_delegations/.test(c.sql))).toBe(false)
     }
 
-    it('an explicit allowance_module rail returns the AllowanceModule snapshot byte-identically', async () => {
-      legacyOnchainRead()
-      primeDb(
-        authAs({ ...AGENT, execution_rail: 'allowance_module' }),
-        allowanceConfigRows([{
-          id: 'allowance-1',
-          token_address: USDC,
-          token_symbol: 'USDC',
-          allowance_amount: '10000',
-          reset_period_min: 60,
-        }]),
-      )
+    it('an implicit retired-rail agent (no execution_rail column) gets the 410, not a chain read', async () => {
+      primeDb(AUTH)
 
       const response = await app.inject({
         method: 'GET',
@@ -459,40 +382,14 @@ describe('machine payment routes', () => {
         headers: { authorization: 'Bearer sk_agent_test' },
       })
 
-      expect(response.statusCode).toBe(200)
-      expect(response.json()).toEqual({
-        agent_id: AGENT.id,
-        safe_address: AGENT.safe_address,
-        delegate_address: AGENT.delegate_address,
-        chain_id: AGENT.chain_id,
-        allowances: [{
-          id: 'allowance-1',
-          token_address: USDC,
-          token_symbol: 'USDC',
-          configured_amount: '10000',
-          reset_period_min: 60,
-          onchain: {
-            amount: '10000',
-            spent: '2500',
-            remaining: '7500',
-            effective_spent: '2500',
-            reset_time_min: 60,
-            last_reset_min: 100,
-            nonce: 7,
-            is_reset_pending: false,
-          },
-        }],
-      })
-      expect(allowanceMocks.getTokenAllowance).toHaveBeenCalledWith(
-        AGENT.chain_id,
-        AGENT.safe_address,
-        AGENT.delegate_address,
-        USDC,
-      )
+      const retired = allowanceModuleRailRetired('account')
+      expect(response.statusCode).toBe(retired.statusCode)
+      expect(response.json()).toEqual(retired.body)
+      expectNoAllowanceStateRead()
     })
 
-    it('a legacy agent with no configured tokens returns an empty allowances array (200)', async () => {
-      primeDb(AUTH, allowanceConfigRows([]))
+    it('an explicit allowance_module rail gets the same 410', async () => {
+      primeDb(authAs({ ...AGENT, execution_rail: 'allowance_module' }))
 
       const response = await app.inject({
         method: 'GET',
@@ -500,43 +397,10 @@ describe('machine payment routes', () => {
         headers: { authorization: 'Bearer sk_agent_test' },
       })
 
-      expect(response.statusCode).toBe(200)
-      expect(response.json()).toEqual({
-        agent_id: AGENT.id,
-        safe_address: AGENT.safe_address,
-        delegate_address: AGENT.delegate_address,
-        chain_id: AGENT.chain_id,
-        allowances: [],
-      })
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
-    })
-
-    it('an on-chain read failure returns 502 naming the token that failed', async () => {
-      allowanceMocks.getTokenAllowance.mockRejectedValueOnce(new Error('rpc down'))
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_750_000_000)
-      primeDb(
-        AUTH,
-        allowanceConfigRows([{
-          id: 'allowance-1',
-          token_address: USDC,
-          token_symbol: 'USDC',
-          allowance_amount: '10000',
-          reset_period_min: 60,
-        }]),
-      )
-
-      const response = await app.inject({
-        method: 'GET',
-        url: '/machine-payments/allowances',
-        headers: { authorization: 'Bearer sk_agent_test' },
-      })
-
-      expect(response.statusCode).toBe(502)
-      expect(response.json()).toEqual({
-        error: 'Failed to read on-chain allowance',
-        token_address: USDC,
-        details: 'rpc down',
-      })
+      const retired = allowanceModuleRailRetired('account')
+      expect(response.statusCode).toBe(retired.statusCode)
+      expect(response.json()).toEqual(retired.body)
+      expectNoAllowanceStateRead()
     })
   })
 

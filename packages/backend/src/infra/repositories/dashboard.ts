@@ -159,32 +159,11 @@ export async function hasFirstAgentPayment(
 }
 
 // ── Allowances ───────────────────────────────────────────────────────────────
-
-export const LIST_DASHBOARD_ALLOWANCES_SQL = `SELECT agent_id, token_symbol, allowance_amount, reset_period_min
-             FROM agent_allowances
-             WHERE agent_id = ANY($1)
-             ORDER BY created_at ASC`
-
-/**
- * The legacy-rail allowance mirror for a set of agents.
- *
- * NOT tenant-scoped in SQL: `agentIds` comes from `listDashboardAgents`, which
- * is already filtered by `user_id`. The empty-list short-circuit travels with
- * the query — `= ANY('{}')` matches nothing, so issuing it would be a
- * round-trip for a guaranteed-empty result.
- *
- * On the delegation rail this table is a FROZEN onboarding mirror and is not
- * what the dashboard shows; the caller overwrites those agents' entries from
- * the active delegation set (#1090).
- */
-export async function listDashboardAllowances(
-  agentIds: string[],
-  db: Executor = pool,
-): Promise<DashboardAllowanceRow[]> {
-  if (agentIds.length === 0) return []
-  const result = await db.query<DashboardAllowanceRow>(LIST_DASHBOARD_ALLOWANCES_SQL, [agentIds])
-  return result.rows
-}
+// #2020: `LIST_DASHBOARD_ALLOWANCES_SQL` / `listDashboardAllowances` are gone —
+// the dashboard shows the active delegation set for delegation-rail agents and
+// nothing for the retired legacy rail; `agent_allowances` is never read. The
+// `DashboardAllowanceRow` shape stays: it is the wire shape the derived
+// delegation view fills.
 
 // ── Daily portfolio snapshots ────────────────────────────────────────────────
 

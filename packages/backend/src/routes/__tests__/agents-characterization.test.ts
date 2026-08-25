@@ -59,7 +59,6 @@ vi.mock('../../middleware/auth.js', () => ({
 }))
 
 const VALID_DELEGATE = '0x1111111111111111111111111111111111111111'
-const VALID_TOKEN = '0x3333333333333333333333333333333333333333'
 
 async function makeApp() {
   const app = Fastify({ logger: false })
@@ -209,16 +208,14 @@ describe('GET /agents/:id/delegate-balance', () => {
 })
 
 describe('POST /agents — create-flow transaction sequence', () => {
+  // #2020: `allowances` is gone from the create body fixture — a non-empty
+  // array now 400s before any transaction (pinned in agents.test.ts), so it
+  // no longer belongs in a fixture whose whole point is exercising the
+  // transaction that runs when creation SUCCEEDS.
   const CREATE_BODY = {
     name: 'Research Agent',
     delegate_address: VALID_DELEGATE,
     safe_id: 'safe-1',
-    allowances: [{
-      token_address: VALID_TOKEN,
-      token_symbol: 'USDC',
-      allowance_amount: '25000000',
-      reset_period_min: 1440,
-    }],
   }
 
   function mockHappyCreate() {
@@ -243,14 +240,11 @@ describe('POST /agents — create-flow transaction sequence', () => {
       if (/SELECT safe_address, name AS safe_name/.test(s)) {
         return { rows: [{ safe_address: '0x2222222222222222222222222222222222222222', safe_name: 'Main', safe_chain_id: 8453 }] }
       }
-      if (/INSERT INTO agent_allowances/.test(s)) {
-        return { rows: [{ id: 'al-1', agent_id: 'agent-1', ...CREATE_BODY.allowances[0] }] }
-      }
       return { rows: [] }
     })
   }
 
-  it('runs safe check, duplicate check, then BEGIN → INSERT agent → safe info → INSERT allowance → COMMIT', async () => {
+  it('runs safe check, duplicate check, then BEGIN → INSERT agent → safe info → COMMIT — no allowance insert (#2020)', async () => {
     const app = await makeApp()
     mockHappyCreate()
 
@@ -259,7 +253,7 @@ describe('POST /agents — create-flow transaction sequence', () => {
     const body = res.json()
     expect(body.id).toBe('agent-1')
     expect(body.api_key).toMatch(/^sk_agent_/)
-    expect(body.allowances).toHaveLength(1)
+    expect(body.allowances).toEqual([])
     expect(body.safe_address).toBe('0x2222222222222222222222222222222222222222')
 
     const sqls = mockQuery.mock.calls.map(([sql]) => String(sql))
@@ -269,7 +263,6 @@ describe('POST /agents — create-flow transaction sequence', () => {
       begin: sqls.findIndex((s) => s === 'BEGIN'),
       insertAgent: sqls.findIndex((s) => /INSERT INTO agents/.test(s)),
       safeInfo: sqls.findIndex((s) => /SELECT safe_address, name AS safe_name/.test(s)),
-      insertAllowance: sqls.findIndex((s) => /INSERT INTO agent_allowances/.test(s)),
       commit: sqls.findIndex((s) => s === 'COMMIT'),
     }
     expect(Object.values(idx).every((i) => i !== -1)).toBe(true)
@@ -277,8 +270,9 @@ describe('POST /agents — create-flow transaction sequence', () => {
     expect(idx.dupCheck).toBeLessThan(idx.begin)
     expect(idx.begin).toBeLessThan(idx.insertAgent)
     expect(idx.insertAgent).toBeLessThan(idx.safeInfo)
-    expect(idx.safeInfo).toBeLessThan(idx.insertAllowance)
-    expect(idx.insertAllowance).toBeLessThan(idx.commit)
+    expect(idx.safeInfo).toBeLessThan(idx.commit)
+    // No allowance write rides in the transaction any more.
+    expect(sqls.some((s) => /INSERT INTO agent_allowances/.test(s))).toBe(false)
     // The delegate address is lowercased before the duplicate check and insert.
     expect(mockQuery.mock.calls[idx.dupCheck][1]).toEqual(['user-1', VALID_DELEGATE, 'revoked'])
     await app.close()
@@ -329,22 +323,21 @@ describe('POST /agents — create-flow transaction sequence', () => {
 })
 
 describe('PUT /agents/:id', () => {
-  it('updates name/description and returns the row with its allowances', async () => {
+  // #2020: a non-delegator_hybrid agent's `allowances` is always `[]` — the
+  // mirror row this test used to read back (`al-1`) is retired with the Safe
+  // rail, and PUT never queries `agent_allowances` any more.
+  it('updates name/description and returns [] allowances for a non-delegation agent — no agent_allowances read', async () => {
     const app = await makeApp()
-    mockQuery
-      .mockResolvedValueOnce({
-        rows: [{
-          id: 'agent-1', name: 'Renamed', description: 'new desc',
-          delegate_address: VALID_DELEGATE, safe_id: 'safe-1',
-          safe_address: '0x2222222222222222222222222222222222222222',
-          safe_name: 'Main', safe_chain_id: 8453, account_type: null,
-          api_key_prefix: 'sk_agent_abcd', status: 'active',
-          created_at: '2026-08-05T00:00:00.000Z', mcp_last_seen_at: null,
-        }],
-      })
-      .mockResolvedValueOnce({
-        rows: [{ id: 'al-1', agent_id: 'agent-1', token_address: VALID_TOKEN, token_symbol: 'USDC', allowance_amount: '25000000', reset_period_min: 1440 }],
-      })
+    mockQuery.mockResolvedValueOnce({
+      rows: [{
+        id: 'agent-1', name: 'Renamed', description: 'new desc',
+        delegate_address: VALID_DELEGATE, safe_id: 'safe-1',
+        safe_address: '0x2222222222222222222222222222222222222222',
+        safe_name: 'Main', safe_chain_id: 8453, account_type: null,
+        api_key_prefix: 'sk_agent_abcd', status: 'active',
+        created_at: '2026-08-05T00:00:00.000Z', mcp_last_seen_at: null,
+      }],
+    })
 
     const res = await app.inject({
       method: 'PUT',
@@ -352,10 +345,52 @@ describe('PUT /agents/:id', () => {
       payload: { name: '  Renamed  ', description: ' new desc ' },
     })
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toMatchObject({ id: 'agent-1', name: 'Renamed', allowances: [{ id: 'al-1' }] })
+    expect(res.json()).toMatchObject({ id: 'agent-1', name: 'Renamed', allowances: [] })
     // Trimmed inputs, tenant-scoped params, in this exact order.
     expect(mockQuery.mock.calls[0][1]).toEqual(['agent-1', 'user-1', 'Renamed', 'new desc'])
-    expect(mockQuery.mock.calls[1][1]).toEqual(['agent-1'])
+    // Only the UPDATE ran — no second query for a legacy/non-delegation agent.
+    expect(mockQuery).toHaveBeenCalledTimes(1)
+    await app.close()
+  })
+
+  // #2020: the delegator_hybrid side of the same branch PUT shares with
+  // GET — derived from the active delegation set, never the mirror.
+  it('returns the derived active-delegation view for a delegator_hybrid agent', async () => {
+    const app = await makeApp()
+    mockQuery.mockImplementation(async (sql: string) => {
+      const s = String(sql)
+      if (/UPDATE agents/.test(s)) {
+        return {
+          rows: [{
+            id: 'agent-1', name: 'Renamed', description: null,
+            delegate_address: VALID_DELEGATE, safe_id: 'safe-1',
+            safe_address: '0x2222222222222222222222222222222222222222',
+            safe_name: 'Main', safe_chain_id: 8453, account_type: 'delegator_hybrid',
+            api_key_prefix: 'sk_agent_abcd', status: 'active',
+            created_at: '2026-08-05T00:00:00.000Z', mcp_last_seen_at: null,
+          }],
+        }
+      }
+      if (/FROM agent_delegations/.test(s)) {
+        return {
+          rows: [{
+            id: 'd-1', agent_id: 'agent-1', chain_id: 8453,
+            token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+            budget_atomic: '1000000', period_seconds: 86_400,
+          }],
+        }
+      }
+      return { rows: [] }
+    })
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/agents/agent-1',
+      payload: { name: 'Renamed' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().allowances).toHaveLength(1)
+    expect(res.json().allowances[0]).toMatchObject({ id: 'd-1', token_symbol: 'USDC' })
     await app.close()
   })
 
@@ -514,36 +549,11 @@ describe('POST /agents/:id/pause and /resume', () => {
   })
 })
 
-describe('DELETE /agents/:id/allowances/:tokenAddress — happy path', () => {
-  it('deletes the allowance after the ownership/status gate', async () => {
-    const app = await makeApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [{ id: 'agent-1', status: 'active' }] })
-      .mockResolvedValueOnce({ rows: [{ id: 'al-1' }] })
-
-    const res = await app.inject({
-      method: 'DELETE',
-      url: `/agents/agent-1/allowances/${VALID_TOKEN}`,
-    })
-    expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ success: true })
-    expect(mockQuery.mock.calls[0][1]).toEqual(['agent-1', 'user-1'])
-    expect(mockQuery.mock.calls[1][1]).toEqual(['agent-1', VALID_TOKEN])
-    await app.close()
-  })
-
-  it('404s when no allowance row matched', async () => {
-    const app = await makeApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [{ id: 'agent-1', status: 'active' }] })
-      .mockResolvedValueOnce({ rows: [] })
-
-    const res = await app.inject({
-      method: 'DELETE',
-      url: `/agents/agent-1/allowances/${VALID_TOKEN}`,
-    })
-    expect(res.statusCode).toBe(404)
-    expect(res.json().error).toMatch(/Allowance not found/)
-    await app.close()
-  })
-})
+// #2020 (epic #1440): the "DELETE /agents/:id/allowances/:tokenAddress —
+// happy path" describe block that stood here (the 200 delete-after-gate case
+// and its 404-when-missing sibling) pinned removed behavior — the route is a
+// 410 tombstone now with no ownership lookup and nothing deleted, for ANY
+// well-formed token address, gate or no gate. That contract is pinned in
+// `agents.test.ts` ("DELETE /agents/:id/allowances/:tokenAddress is a 410
+// tombstone for a well-formed address …"), which already owns the
+// malformed-address-still-400 case this suite's sibling test asserted.

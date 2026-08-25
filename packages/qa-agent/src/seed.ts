@@ -255,7 +255,6 @@ async function ensureAgent(
   cfg: SeedConfig,
   token: string,
   account: SessionSafe,
-  budgetAtomic: string,
   existing: Agent | undefined,
 ): Promise<{ agentId: string; apiKey: string | null }> {
   if (existing) {
@@ -273,18 +272,10 @@ async function ensureAgent(
         description: 'Automated QA harness identity (epic #573). Testnet-only.',
         delegate_address: cfg.delegateAddress,
         safe_id: account.id,
-        allowances: [
-          {
-            token_symbol: 'USDC',
-            token_address: ADDR.usdc,
-            // Atomic units — the backend validates allowance_amount as an
-            // atomic integer. On the delegation rail this row is written at
-            // connection setup and never read back for display (#1090); the
-            // authority that matters is the delegation granted in phase 4.
-            allowance_amount: budgetAtomic,
-            reset_period_min: cfg.periodMin,
-          },
-        ],
+        // #2020: no `allowances` — POST /agents refuses a non-empty array now
+        // that the mirror is retired. The comment this replaced already said
+        // the row was vestigial; the authority that matters is the delegation
+        // granted in phase 4.
       },
     },
   )
@@ -391,7 +382,7 @@ export async function main(): Promise<void> {
   console.log('\n[2/4] QA account (Hybrid DeleGator, delegation rail)')
   const account = await ensureAccount(cfg, token, owner)
   console.log('\n[3/4] QA agent')
-  const { agentId, apiKey } = await ensureAgent(cfg, token, account, budgetAtomic, existingAgent)
+  const { agentId, apiKey } = await ensureAgent(cfg, token, account, existingAgent)
   console.log('\n[4/4] Budget delegation')
   await ensureBudget(cfg, token, agentId, budgetAtomic)
 

@@ -216,10 +216,12 @@ calls a route the API has retired or no longer registers.
 
 ⚠️ The seed therefore no longer produces `QA_AGENT_API_KEY` or
 `QA_DELEGATE_PRIVATE_KEY` — they named a legacy AllowanceModule identity that
-can no longer be created. `loadQaConfig` still requires them, and three legacy
-legs (`within-budget-settle`, `over-budget-queue`,
-`x402-over-budget-rejected`) still run against them; retiring both is tracked
-separately.
+can no longer be created. `loadQaConfig` still requires them, but since #2016
+**no scenario reads them**: the last three legs that did were re-based onto the
+delegation identity. Dropping the requirement is
+[#2011](https://github.com/d-hinders/Haven-AI/issues/2011); until it lands,
+`qa-dev` runs from the existing Actions secrets but cannot run from a clean
+database.
 
 An API key is shown only when a new agent is created. If the agent already
 exists and its key was lost or exposed, rotate it instead of creating duplicate
@@ -231,9 +233,9 @@ The deterministic harness runs twelve scenarios in order:
 
 | Scenario | Expected result |
 |---|---|
-| `within-budget-settle` | A 0.1 USDC payment settles on-chain and has a receipt |
-| `over-budget-queue` | An over-budget payment queues for approval and does not execute |
-| `x402-over-budget-rejected` | An unaffordable x402 request is rejected before a signable intent |
+| `within-budget-settle` | A 0.01 USDC **delegation-rail** payment settles on-chain and has a receipt: `POST /payments` → sign the `eip712_userop` typed data → poll to `confirmed`. Re-based from the legacy raw-hash scheme by #2016. Doubles as the suite's **positive control** — the leg that proves the money path can still say YES, which is what makes the two refusals below mean anything. **Skips** without `QA_DELEGATION_*` |
+| `over-budget-refused` | An over-budget payment is refused **before it becomes signable**, by the on-chain caveat enforcer — HTTP 502 with no intent row. Renamed from `over-budget-queue` by #2016: that leg asserted `pending_approval`, and the approval queue was legacy-rail-only and no longer exists anywhere (#1986/#1989). A bare 502 is NOT accepted as proof — the amount is derived from a **live** enforcer read (a fallback reading or an exhausted budget fails the leg rather than passing it), a within-budget request against the same account must still be offered, and the ABI-encoded revert reason must decode to a **named caveat enforcer** |
+| `x402-over-budget-rejected` | The same refusal on the x402 **EIP-3009 funding leg**, with the same three discriminators. Re-based by #2016, which found it **passing for the wrong reason**: driven against the retired legacy identity it was satisfied by the rail-retirement 410, and would have passed with over-budget enforcement deleted outright. ⚠️ Over-budget on **erc7710** is a known gap — that scheme returns a signable child delegation for any amount and the budget is enforced at merchant redemption; recorded on #1993 |
 | `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and no residual may sit at or above the 1 USDC sweep floor. **Skips** without `QA_DELEGATION_*` |
 | `delegation-lifecycle` | Authority can be TAKEN AWAY: on a **throwaway per-run identity** (funded ~0.006 USDC from the standing delegation identity, then abandoned) — grant → activate (relayer-deploys) → within-budget payment settles → replace leaves **exactly one** active row (the #1053-finding-4 transactional-activate regression) → owner-signed revoke → the same payment shape is refused **403 "no active budget delegation"**, never a 502 (a 502 would mean authority was still offered to the chain). Ephemeral keys, all signing client-side |
 | `x402-erc7710-settle` | The delegation rail's PRIMARY x402 path: authorize (payTo = merchant) builds a narrowed child delegation, the delegate signs it, `POST /x402/:id/settle` wraps the header, and the MERCHANT redeems `[child, budget]` on-chain — treasury pays the merchant **directly**, budget metered by the settlement itself (treasury −amount exactly), **delegate EOA untouched** (no funding leg — the #713 stranded-funds class structurally absent). Needs `MERCHANT_X402_ERC7710=1` + `MERCHANT_ERC7710_DELEGATION_MANAGER` on the dev merchant; skips (→ run FAILS under #1066) with that exact remedy when the merchant is 3009-only |

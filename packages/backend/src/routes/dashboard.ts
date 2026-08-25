@@ -6,7 +6,6 @@ import {
   hasFirstAgentPayment,
   insertPortfolioSnapshot,
   listDashboardAgents,
-  listDashboardAllowances,
   listDashboardSafes,
   sumMonthlyApprovalSpend,
   sumMonthlyPaymentSpend,
@@ -87,18 +86,10 @@ export default async function dashboardRoutes(
 
     const activeAgents = agents.filter((agent) => agent.status === 'active')
 
-    const agentIds = agents.map((agent) => agent.id)
-    const allowanceRows = await listDashboardAllowances(agentIds)
-
+    // Delegation-rail agents: the live budget is the active delegation set
+    // (#1090). Legacy-rail agents get no allowance entries — the Safe rail is
+    // retired (#1440/#2020) and `agent_allowances` is no longer read.
     const allowancesByAgent = new Map<string, DashboardAllowanceRow[]>()
-    for (const row of allowanceRows) {
-      const existing = allowancesByAgent.get(row.agent_id) ?? []
-      existing.push(row)
-      allowancesByAgent.set(row.agent_id, existing)
-    }
-
-    // Delegation-rail agents: the live budget is the active delegation set,
-    // not the frozen agent_allowances onboarding mirror (#1090).
     const delegationAgentIds = agents
       .filter((agent) => agent.account_type === 'delegator_hybrid')
       .map((agent) => agent.id)

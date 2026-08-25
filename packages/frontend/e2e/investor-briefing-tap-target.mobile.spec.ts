@@ -39,7 +39,9 @@ import { expect, test, type Page } from '@playwright/test'
  * measured alongside on every run, so a walk that has silently stopped seeing
  * anything reports 36 for BOTH and the run goes red on the wrong assertion
  * rather than passing in silence. That validation is the reason the pre-fix 36
- * above is a measurement and not an absence of one.
+ * above is a measurement and not an absence of one. (The hero's lg CTA is now
+ * "View product thesis" — #1956 removed the hero's duplicate
+ * "Contact the team" pair, so the instrument anchors on the surviving one.)
  *
  * ── Both halves of the invariant ────────────────────────────────────────────
  * Reaching 44px is half the promise. The other half is that NOTHING MOVED: a
@@ -116,10 +118,16 @@ async function measure(page: Page): Promise<{
       (a) => (a.textContent ?? '').trim() === 'Contact the team',
     )
     const headerCta = contacts.find((a) => !!header && header.contains(a))
-    const heroCta = contacts.find((a) => a !== headerCta)
+    // Instrument anchor. The hero no longer repeats the header CTA (#1956); its
+    // remaining `size="lg"` CTA ("View product thesis") paints 44px in exactly
+    // the old position — same InvestorButton, same geometry — so the instrument
+    // check below keeps its bite unchanged.
+    const heroCta = Array.from(document.querySelectorAll('a')).find(
+      (a) => (a.textContent ?? '').trim() === 'View product thesis',
+    )
     if (!headerCta || !heroCta) {
       throw new Error(
-        `expected a header and a hero "Contact the team" CTA, found ${contacts.length} total`,
+        `expected a header "Contact the team" CTA and a hero "View product thesis" CTA, found ${contacts.length} contact links`,
       )
     }
 

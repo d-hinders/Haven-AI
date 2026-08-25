@@ -817,7 +817,7 @@ export const openapiSpec = {
         operationId: 'createAgent',
         summary: 'Create a Haven agent identity and API key.',
         description:
-          'Creates the API identity for an agent. Payment authority still comes from the user-controlled Safe, the agent-held delegate key, and on-chain allowance state.',
+          'Creates the API identity for an agent — identity and credential only. Payment authority arrives separately as an owner-signed budget delegation, enforced on-chain (#1440/#2020: the per-token allowance mirror is retired; the response’s `allowances` is always empty at creation).',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -1305,7 +1305,7 @@ export const openapiSpec = {
           '409': {
             ...errorResponse,
             description:
-              'Not on the delegation rail, a re-key already in flight, a colliding delegate address, or an undispositioned residual balance.',
+              'Not on the delegation rail, a re-key already in flight (the body names its rekey_id, stage and the new_delegate_address it is bound to, #1868), a colliding delegate address, or an undispositioned residual balance.',
           },
           '503': {
             ...errorResponse,
@@ -1321,7 +1321,7 @@ export const openapiSpec = {
         operationId: 'prepareRekeyRevocation',
         summary: 'Re-key step 1a: prepare the batched revoke of every live delegation (#1698).',
         description:
-          'Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage with an empty carry.',
+          'Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage — inheriting an abandoned predecessor’s frozen carry when one qualifies (#1868), otherwise with an empty carry.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }, rekeyIdParam],
         requestBody: {
@@ -4222,48 +4222,26 @@ export const openapiSpec = {
       post: {
         tags: ['Agents'],
         operationId: 'setAgentAllowance',
-        summary: 'Set a per-token allowance on the legacy AllowanceModule rail.',
+        summary: 'RETIRED (410): per-token allowances died with the Safe rail.',
         description:
-          "Records the allowance Haven will execute against. **The authority itself is the on-chain AllowanceModule grant, not this row** — writing it here does not grant anything the chain has not been told about. `schedule_warning` is always null: session schedules are retired (#834) and the field survives only so existing clients keep parsing. Retiring rail (#1440).",
+          'Retired with the Safe rail (#1440/#2020). Always answers 410 and writes nothing — spend authority on the delegation rail is a signed budget delegation (`POST /agents/{id}/delegations/prepare` → activate), never a per-token allowance row. The typed operation stays as a tombstone so older clients get a stable, explicit answer rather than a 404.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         requestBody: {
-          required: true,
+          required: false,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
-                properties: {
-                  token_address: address,
-                  token_symbol: { type: 'string' },
-                  allowance_amount: { type: 'string', description: 'Human-denominated amount.' },
-                  reset_period_min: { type: 'integer', description: 'Refill period in minutes; 0 means one-time.' },
-                },
+                additionalProperties: true,
+                description: 'Ignored — the endpoint refuses before reading the body.',
               },
             },
           },
         },
         responses: {
-          '200': {
-            description: 'The stored allowance.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  additionalProperties: true,
-                  required: ['schedule_warning'],
-                  properties: {
-                    schedule_warning: { type: 'null', description: 'Always null — retained for client compatibility (#834).' },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
+          '410': { ...errorResponse, description: 'Always. The Safe rail is retired; grant a budget delegation instead.' },
           '401': errorResponse,
-          '404': errorResponse,
-          '409': { ...errorResponse, description: 'The agent is revoked, or its Connect setup is still awaiting wallet approval — either way the allowance is refused before anything is written.' },
         },
       },
     },
@@ -4271,17 +4249,15 @@ export const openapiSpec = {
       delete: {
         tags: ['Agents'],
         operationId: 'deleteAgentAllowance',
-        summary: "Remove an allowance row for one token.",
+        summary: 'RETIRED (410): per-token allowances died with the Safe rail.',
         description:
-          "Removes Haven's record. **It does NOT revoke the on-chain grant** — the AllowanceModule allowance survives until the owner changes it on-chain, so deleting this row stops Haven executing against it but is not itself a revocation. Retiring rail (#1440).",
+          'Retired with the Safe rail (#1440/#2020). Always answers 410 and deletes nothing (a malformed token address still gets its 400). Revoke or change the agent’s budget delegation instead.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }, { name: 'tokenAddress', in: 'path', required: true, schema: address }],
         responses: {
-          '200': { description: 'Row removed.', content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } } },
+          '410': { ...errorResponse, description: 'Always, for a well-formed token address.' },
           '400': errorResponse,
           '401': errorResponse,
-          '404': errorResponse,
-          '409': { ...errorResponse, description: 'The agent is revoked, or its Connect setup is still awaiting wallet approval.' },
         },
       },
     },
@@ -4976,7 +4952,7 @@ export const openapiSpec = {
         operationId: 'getMachinePaymentAllowances',
         summary: 'Fetch live spend-authority state for the authenticated agent.',
         description:
-          'Rail-aware (#1135): on the legacy rail this reads the on-chain AllowanceModule per configured token; on the delegation rail the same response shape carries the ACTIVE budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). A retired session-rail account gets 410. Reporting only — enforcement stays on-chain on every rail.',
+          'Rail-aware (#1135): on the delegation rail the response carries the ACTIVE budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). BOTH retired rails answer 410 — the session rail (#993) and, since #2020 reversed #1986’s left-readable decision, the Safe/AllowanceModule rail too. Reporting only — enforcement stays on-chain.',
         security: [{ AgentApiKey: [] }],
         responses: {
           '200': {
@@ -4992,11 +4968,10 @@ export const openapiSpec = {
           '410': {
             ...errorResponse,
             description:
-              'The account is on the retired SESSION rail — no state is read (#993 fail-closed ' +
-              'contract). Deliberately NOT extended to the Safe / AllowanceModule rail by #1986: ' +
-              'this endpoint REPORTS spend authority rather than exercising any, and the ' +
-              'retirement keeps accounts and history readable. The refusal belongs on the spend ' +
-              'paths, and that is where it is.',
+              'The account is on a RETIRED rail — session (#993) or Safe/AllowanceModule ' +
+              '(#2020, reversing #1986’s left-readable decision on the recorded owner call: ' +
+              'the accounts are emptied and unsupported, so no state is read). Fail-closed; ' +
+              'nothing is read or written.',
           },
           '502': errorResponse,
         },
@@ -6631,16 +6606,12 @@ export const openapiSpec = {
           safe_id: uuid,
           allowances: {
             type: 'array',
+            maxItems: 0,
+            description:
+              'RETIRED (#1440/#2020): per-token allowances died with the Safe rail. A non-empty array is refused with 400 — grant the agent a budget delegation after creation instead. The field survives (empty-only) so older clients sending `allowances: []` keep working.',
             items: {
               type: 'object',
-              required: ['token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
-              properties: {
-                token_address: address,
-                token_symbol: tokenSymbol,
-                allowance_amount: allowanceAtomicAmount,
-                reset_period_min: allowanceResetPeriodMin,
-              },
-              additionalProperties: false,
+              additionalProperties: true,
             },
           },
         },
@@ -7679,14 +7650,39 @@ export const openapiSpec = {
           {
             type: 'object',
             description:
-              'Nothing to revoke on-chain — an agent that never held a budget, or one already revoked. No signature is needed and the re-key is advanced straight to the metered stage with an empty carry.',
+              'Nothing to revoke on-chain — an agent that never held a budget, one already revoked, or one whose previous re-key was abandoned after its revoke landed (#1868). No signature is needed and the re-key advances straight to the metered stage. When an abandoned predecessor froze a carry after its own on-chain revoke and no grant has been made since, that measurement is INHERITED rather than forfeited: carry holds the frozen entries, tx_hash is the predecessor’s revoke transaction, and carry_inherited_from_rekey_id names the abandoned re-key. Otherwise the carry is empty.',
             required: ['revoked', 'stage', 'agent_has_no_authority', 'next_step'],
             properties: {
               revoked: { type: 'boolean', enum: [true] },
-              tx_hash: { type: 'string', nullable: true },
-              delegation_hashes: delegationHashList,
+              tx_hash: {
+                type: 'string',
+                nullable: true,
+                description:
+                  'Null on the empty walk; the ABANDONED predecessor’s revoke transaction when its carry was inherited.',
+              },
+              // May be empty — the short-circuit revokes nothing on-chain.
+              delegation_hashes: { type: 'array', items: delegationHash },
               stage: { type: 'string' },
-              carry: { type: 'array', items: { type: 'object', additionalProperties: true } },
+              carry: {
+                type: 'array',
+                description:
+                  'Empty on the plain short-circuit; the inherited frozen measurement when an abandoned predecessor’s carry was adopted (#1868).',
+                items: {
+                  type: 'object',
+                  required: ['delegation_hash', 'remaining_atomic', 'from_chain'],
+                  properties: {
+                    delegation_hash: delegationHash,
+                    remaining_atomic: { type: 'string' },
+                    from_chain: { type: 'boolean' },
+                  },
+                },
+              },
+              carry_inherited_from_rekey_id: {
+                type: 'string',
+                format: 'uuid',
+                description:
+                  'Present only when the carry was inherited: the abandoned re-key whose frozen measurement this re-key adopted (#1868).',
+              },
               agent_has_no_authority: { type: 'boolean' },
               next_step: { type: 'string' },
             },

@@ -229,29 +229,12 @@ export const FIND_DELEGATE_AGENT_FOR_USER_SQL = `SELECT a.delegate_address, us.c
        WHERE a.user_id = $1 AND a.id = $2
        LIMIT 1`
 
-export const LIST_ALLOWANCES_FOR_AGENTS_SQL = `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
-       FROM agent_allowances WHERE agent_id = ANY($1) ORDER BY created_at ASC`
-
-export const LIST_ALLOWANCES_FOR_AGENT_SQL = `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
-       FROM agent_allowances WHERE agent_id = $1 ORDER BY created_at ASC`
-
-/**
- * The PUT-path allowance read. Unlike `LIST_ALLOWANCES_FOR_AGENT_SQL` it has
- * no ORDER BY — pre-existing divergence, preserved verbatim rather than tidied
- * (an extraction is behaviour-preserving; see the header).
- */
-export const LIST_ALLOWANCES_FOR_AGENT_UNORDERED_SQL = `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
-         FROM agent_allowances WHERE agent_id = $1`
-
-/**
- * The `/machine-payments/allowances` projection — narrower than
- * `LIST_ALLOWANCES_FOR_AGENT_SQL` (no `agent_id` column). Pre-existing
- * divergence, preserved verbatim rather than widened (#995).
- */
-export const LIST_ALLOWANCE_CONFIG_FOR_AGENT_SQL = `SELECT id, token_address, token_symbol, allowance_amount, reset_period_min
-       FROM agent_allowances
-       WHERE agent_id = $1
-       ORDER BY created_at ASC`
+// #2020: the `agent_allowances` read surface is retired. The four LIST_* SQL
+// constants that stood here (list/agent/unordered/config projections) died
+// with their callers — GET /agents, GET /agents/:id, PUT /agents/:id and
+// GET /machine-payments/allowances all serve the delegation-derived view or
+// the 410 retirement answer now, so nothing reads the table. The table itself
+// is dropped by #1990's follow-through once #2055 lands too.
 
 export const FIND_AGENT_DELEGATE_ADDRESS_SQL = `SELECT delegate_address FROM agents WHERE id = $1`
 
@@ -322,60 +305,14 @@ export async function findDelegateAgentForUser(
   return result.rows[0] ?? null
 }
 
-/** Scoped by the caller: `agentIds` must come from a tenant-scoped read. */
-export async function listAllowancesForAgents(
-  agentIds: string[],
-  db: Executor = pool,
-): Promise<AgentAllowanceRow[]> {
-  const result = await db.query<AgentAllowanceRow>(LIST_ALLOWANCES_FOR_AGENTS_SQL, [agentIds])
-  return result.rows
-}
-
-export async function listAllowancesForAgent(
-  agentId: string,
-  db: Executor = pool,
-): Promise<AgentAllowanceRow[]> {
-  const result = await db.query<AgentAllowanceRow>(LIST_ALLOWANCES_FOR_AGENT_SQL, [agentId])
-  return result.rows
-}
-
-export async function listAllowancesForAgentUnordered(
-  agentId: string,
-  db: Executor = pool,
-): Promise<AgentAllowanceRow[]> {
-  const result = await db.query<AgentAllowanceRow>(LIST_ALLOWANCES_FOR_AGENT_UNORDERED_SQL, [
-    agentId,
-  ])
-  return result.rows
-}
 
 // #1987 (epic #1440): `FIND_TOKEN_ALLOWANCE_AMOUNT_SQL` and
-// `hasTokenAllowanceConfigured` are gone with the AllowanceModule rail. They
-// were the per-token policy gate for the legacy and session rails only — the
-// delegation rail never consulted them — and their four callers
-// (routes/payments.ts, modules/mpp/{authorize,send}.ts,
-// modules/x402/legacy-authorize.ts) all died with the rail. The
-// `agent_allowances` TABLE stays until #1990; only the gate is removed.
-//
-// `LIST_ALLOWANCE_CONFIG_FOR_AGENT_SQL` below is deliberately NOT removed: it
-// backs `GET /machine-payments/allowances`, which #1986 left readable on
-// purpose.
-
-export interface AllowanceConfigRow {
-  id: string
-  token_address: string
-  token_symbol: string
-  allowance_amount: string
-  reset_period_min: number
-}
-
-export async function listAllowanceConfigForAgent(
-  agentId: string,
-  db: Executor = pool,
-): Promise<AllowanceConfigRow[]> {
-  const result = await db.query<AllowanceConfigRow>(LIST_ALLOWANCE_CONFIG_FOR_AGENT_SQL, [agentId])
-  return result.rows
-}
+// `hasTokenAllowanceConfigured` are gone with the AllowanceModule rail.
+// #2020 finished the job: `LIST_ALLOWANCE_CONFIG_FOR_AGENT_SQL` /
+// `listAllowanceConfigForAgent` — kept by #1987 because #1986 left
+// `GET /machine-payments/allowances` readable — are gone too, on the recorded
+// owner reversal (2026-08-25, on #2020): that endpoint now serves the
+// delegation-derived view and answers 410 on the legacy rail.
 
 /** The agent's delegate EOA, or null (#716 residue reconciliation read). */
 export async function findAgentDelegateAddress(
@@ -456,10 +393,6 @@ export const INSERT_AGENT_WITH_KEY_SQL = `INSERT INTO agents (user_id, name, des
 export const FIND_SAFE_INFO_SQL = `SELECT safe_address, name AS safe_name, chain_id AS safe_chain_id
              FROM user_safes WHERE id = $1`
 
-export const INSERT_AGENT_ALLOWANCE_SQL = `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
-             VALUES ($1, $2, $3, $4, $5)
-             RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min`
-
 export interface NewAgent {
   userId: string
   name: string
@@ -490,25 +423,19 @@ export interface CreatedAgent {
     | 'mcp_server_name'
   >
   safeInfo: SafeInfoRow
-  savedAllowances: AgentAllowanceRow[]
 }
 
 /**
- * Insert the agent and its allowance mirror rows as ONE unit, exactly as the
- * route's BEGIN/COMMIT block did. An agent row without the allowances the user
- * configured describes authority the user never granted, so the writes are not
- * separable. A unique-delegate violation (23505 on
+ * Insert the agent and read its Safe info as ONE unit. #2020 removed the
+ * allowance-mirror inserts that used to ride in this transaction — the
+ * `agent_allowances` write surface is retired with the Safe rail; an agent's
+ * spend authority on the delegation rail is granted as a delegation, never as
+ * a row here. A unique-delegate violation (23505 on
  * `idx_agents_user_delegate_non_revoked_unique`) rolls back and rethrows for
  * the route to map to its 409.
  */
-export async function createAgentWithAllowances(
+export async function createAgent(
   input: NewAgent,
-  allowances: Array<{
-    token_address: string
-    token_symbol: string
-    allowance_amount: string
-    reset_period_min: number
-  }>,
   db: Executor = pool,
 ): Promise<CreatedAgent> {
   return withTransaction(db, async (tx) => {
@@ -531,19 +458,7 @@ export async function createAgentWithAllowances(
       safe_chain_id: null,
     }
 
-    const savedAllowances: AgentAllowanceRow[] = []
-    for (const a of allowances) {
-      const res = await tx.query<AgentAllowanceRow>(INSERT_AGENT_ALLOWANCE_SQL, [
-        agent.id,
-        a.token_address,
-        a.token_symbol,
-        a.allowance_amount,
-        a.reset_period_min,
-      ])
-      savedAllowances.push(res.rows[0])
-    }
-
-    return { agent, safeInfo, savedAllowances }
+    return { agent, safeInfo }
   })
 }
 
@@ -724,48 +639,10 @@ export async function resumeAgent(
   return result.rows.length > 0
 }
 
-export const UPSERT_AGENT_ALLOWANCE_SQL = `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (agent_id, token_address)
-       DO UPDATE SET allowance_amount = $4, reset_period_min = $5, token_symbol = $3, updated_at = NOW()
-       RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min`
-
-/**
- * Not tenant-scoped in SQL: the route gates on `findAgentIdStatusForUser`
- * (ownership + status) before calling this — authorization stays in the route
- * per #988. Callers outside that route must gate the same way.
- */
-export async function upsertAgentAllowance(
-  agentId: string,
-  allowance: {
-    token_address: string
-    token_symbol: string
-    allowance_amount: string
-    reset_period_min: number
-  },
-  db: Executor = pool,
-): Promise<AgentAllowanceRow> {
-  const result = await db.query<AgentAllowanceRow>(UPSERT_AGENT_ALLOWANCE_SQL, [
-    agentId,
-    allowance.token_address,
-    allowance.token_symbol,
-    allowance.allowance_amount,
-    allowance.reset_period_min,
-  ])
-  return result.rows[0]
-}
-
-export const DELETE_AGENT_ALLOWANCE_SQL = 'DELETE FROM agent_allowances WHERE agent_id = $1 AND token_address = $2 RETURNING id'
-
-/** Same gating contract as `upsertAgentAllowance`. */
-export async function deleteAgentAllowance(
-  agentId: string,
-  tokenAddress: string,
-  db: Executor = pool,
-): Promise<boolean> {
-  const result = await db.query<{ id: string }>(DELETE_AGENT_ALLOWANCE_SQL, [agentId, tokenAddress])
-  return result.rows.length > 0
-}
+// #2020: `UPSERT_AGENT_ALLOWANCE_SQL` / `DELETE_AGENT_ALLOWANCE_SQL` and their
+// functions are gone — the PUT/DELETE allowance routes they backed are 410
+// tombstones now; per-token spend authority is a delegation grant on the
+// delegation rail, never a mirror row.
 
 // ── Agent authentication (moved from middleware/agentAuth.ts, #999) ─────────
 

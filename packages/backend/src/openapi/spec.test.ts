@@ -85,26 +85,38 @@ describe('openapiSpec', () => {
     )
   })
 
-  it('documents allowance input constraints for owner-created agent rules', () => {
-    const createAgentAllowance =
-      openapiSpec.components.schemas.CreateAgentRequest.properties.allowances.items
+  it('documents allowance input constraints for connect-setup agent rules', () => {
+    // #2020: POST /agents no longer accepts allowance rows (the field is
+    // pinned empty-only below), so the constraints apply only to the
+    // connect-setup input, which still carries the requested budgets that
+    // become the delegation grant.
     const setupAllowance =
       openapiSpec.components.schemas.AgentConnectionAllowanceInput
 
-    for (const schema of [createAgentAllowance, setupAllowance]) {
-      expect(schema.properties.token_symbol).toMatchObject({
-        minLength: 1,
-        maxLength: 20,
-      })
-      expect(schema.properties.allowance_amount).toMatchObject({
-        type: 'string',
-        pattern: '^[0-9]+$',
-      })
-      expect(schema.properties.reset_period_min).toMatchObject({
-        minimum: 0,
-        maximum: 65535,
-      })
-    }
+    expect(setupAllowance.properties.token_symbol).toMatchObject({
+      minLength: 1,
+      maxLength: 20,
+    })
+    expect(setupAllowance.properties.allowance_amount).toMatchObject({
+      type: 'string',
+      pattern: '^[0-9]+$',
+    })
+    expect(setupAllowance.properties.reset_period_min).toMatchObject({
+      minimum: 0,
+      maximum: 65535,
+    })
+  })
+
+  it('pins the retired POST /agents allowances field to empty-only (#2020)', () => {
+    const allowances = openapiSpec.components.schemas.CreateAgentRequest.properties.allowances
+    expect(allowances.maxItems).toBe(0)
+    // The tombstoned CRUD operations answer 410, never 200.
+    const setOp = openapiSpec.paths['/agents/{id}/allowances'].post
+    const deleteOp = openapiSpec.paths['/agents/{id}/allowances/{tokenAddress}'].delete
+    expect(Object.keys(setOp.responses)).toContain('410')
+    expect(Object.keys(setOp.responses)).not.toContain('200')
+    expect(Object.keys(deleteOp.responses)).toContain('410')
+    expect(Object.keys(deleteOp.responses)).not.toContain('200')
   })
 
   it('documents reconciliation event response statuses', () => {

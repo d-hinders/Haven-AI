@@ -75,7 +75,6 @@ function snapshotDate(offsetDays = 0): string {
 function installQueryMock(overrides: {
   safes?: unknown[]
   agents?: unknown[]
-  allowances?: unknown[]
   snapshots?: unknown[]
   paymentSpend?: unknown[]
   approvalSpend?: unknown[]
@@ -93,9 +92,9 @@ function installQueryMock(overrides: {
     if (sql.includes("status IN ('pending', 'approved')")) {
       return Promise.resolve({ rows: [{ count: '0' }] })
     }
-    if (sql.includes('FROM agent_allowances')) {
-      return Promise.resolve({ rows: overrides.allowances ?? [] })
-    }
+    // #2020: no `FROM agent_allowances` branch — the dashboard never issues
+    // that query any more (legacy agents get `[]`, delegation agents derive
+    // from `agent_delegations`), so there is nothing left to stub here.
     if (sql.includes('FROM user_daily_portfolio_snapshots')) {
       return Promise.resolve({ rows: overrides.snapshots ?? [] })
     }
@@ -290,25 +289,19 @@ describe('dashboard aggregates (characterization, #1167)', () => {
   })
 
   describe('agent allowances', () => {
-    it('maps legacy-rail allowance rows onto their agent', async () => {
+    // #2020 (epic #1440), reversing the byte-identical mirror pin this
+    // replaces: the Safe rail is retired and `agent_allowances` is never
+    // queried by the dashboard any more, so a legacy (non-delegator_hybrid)
+    // agent reports NO allowance entries rather than mapping the mirror rows.
+    it('legacy agents get [] allowances — the mirror is retired and never queried', async () => {
       installQueryMock({
         agents: [AGENT],
-        allowances: [
-          {
-            agent_id: AGENT.id,
-            token_symbol: 'USDC',
-            allowance_amount: '500.000000',
-            reset_period_min: 1440,
-          },
-        ],
       })
 
       const body = (await getOverview()).json()
 
-      expect(body.agents[0].allowances).toEqual([
-        { tokenSymbol: 'USDC', allowanceAmount: '500.000000', resetPeriodMin: 1440 },
-      ])
-      expect(callsMatching('FROM agent_allowances')[0][1]).toEqual([[AGENT.id]])
+      expect(body.agents[0].allowances).toEqual([])
+      expect(callsMatching('FROM agent_allowances')).toHaveLength(0)
     })
 
     it('skips the allowance read entirely when the user has no agents', async () => {

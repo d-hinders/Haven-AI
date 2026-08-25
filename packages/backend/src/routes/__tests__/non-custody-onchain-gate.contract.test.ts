@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import Fastify, { type FastifyInstance } from 'fastify'
 import paymentRoutes from '../payments.js'
 import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
@@ -203,35 +204,195 @@ function expectNoOffChainCoverageArithmetic() {
 }
 
 /**
- * The import BINDINGS of `routes/payments.ts`, read from source.
+ * The retired rail's off-chain spend arithmetic — every "how much is left"
+ * name that must never be reachable from the payment route again. Three of
+ * these (`computeEffectiveAllowance`, `getTokenAllowance`,
+ * `getLatestBlockTimeSec`) are still live exports of
+ * `rails/allowance-module.ts`, so they can be re-imported today; the other
+ * seven were deleted with the rail by #1987 and are kept as tombstones so a
+ * re-created symbol lands on a guard rather than on nothing.
+ */
+const BANNED_ARITHMETIC = [
+  'computeEffectiveAllowance',
+  'getTokenAllowance',
+  'getLatestBlockTimeSec',
+  'decideCoverage',
+  'generateTransferHash',
+  'recoverSigner',
+  'executeAllowanceTransfer',
+  'readSharedWatermark',
+  'waitForFreshAllowanceNonce',
+  'hasTokenAllowanceConfigured',
+] as const
+
+/**
+ * The modules that hold (or held) that arithmetic. A module-level rule is what
+ * catches the shapes that bind no banned NAME at all — `import * as AM from`,
+ * `await import('…')`, a bare side-effect import, `export * from`.
+ */
+const BANNED_MODULES = [
+  'rails/allowance-module',
+  'domain/payment-coverage',
+  'infra/repositories/allowance-nonce-watermarks',
+] as const
+
+/**
+ * Which of `specs` name a retired-rail module — agnostic to extension, to how
+ * deep the relative prefix is, and to a URL query/hash suffix.
+ *
+ * The suffix strip is not decoration: Node's ESM loader treats
+ * `import('../rails/allowance-module.js?bust=1')` as a real load of that module
+ * (the standard cache-busting idiom), so a specifier that ends in a query would
+ * otherwise re-import the arithmetic past a rule that only knew about `.js`.
+ * Mutation-proven, not reasoned about (#2049).
+ */
+function bannedModuleRefs(specs: Iterable<string>): string[] {
+  return [...specs].filter((s) => {
+    const normalized = s.split(/[?#]/)[0].replace(/\.(m?[jt]s)$/, '')
+    return BANNED_MODULES.some((b) => normalized === b || normalized.endsWith(`/${b}`))
+  })
+}
+
+type PaymentPathImports = {
+  /**
+   * Names bound into the route's module scope by a static import clause: every
+   * named specifier (BOTH its original name and its local alias), a default
+   * binding, and a namespace binding's local name.
+   */
+  bindings: Set<string>
+  /**
+   * Names re-exported by name from another module (`export { x } from '…'`).
+   * These bind nothing locally, so the binding rule cannot see them — but they
+   * put the symbol back on the payment route's own public surface.
+   */
+  reexports: Set<string>
+  /**
+   * Module specifiers reached by a STATIC form: `import … from '…'`,
+   * side-effect `import '…'`, `export … from '…'`, `export * from '…'`.
+   */
+  staticModuleRefs: Set<string>
+  /**
+   * Every string literal in the file's CODE. Comments are not AST nodes, so
+   * nothing written in one can appear here — which is what makes a
+   * literal-level rule safe on a file that deliberately names retired symbols
+   * in prose. This is the backstop for every runtime shape: `import('…')`,
+   * `createRequire(import.meta.url)('…')`, and whatever is invented next.
+   */
+  codeStringLiterals: Set<string>
+  /**
+   * Count of dynamic `import(...)` calls whose specifier is not a literal
+   * (a variable, a concatenation, a template with substitutions). No static
+   * analysis can resolve one, so its presence on this route IS the finding.
+   */
+  unresolvableDynamicImports: number
+}
+
+/**
+ * The import STRUCTURE of `routes/payments.ts`, parsed from source with the
+ * TypeScript parser.
  *
  * Deliberately not a substring scan of the whole file: `payments.ts` names
- * `executeAllowanceTransfer` in a comment explaining why the retirement gate
- * above it still matters, and a `toContain` check would call that a violation.
- * A grep that confirms a line exists does not say which block owns it — so
- * this parses the `import { ... } from '...'` clauses and collects only what
- * is actually bound into the module scope.
+ * retired symbols in comments explaining why the retirement gate above them
+ * still matters, and a `toContain` check would call that a violation. Parsing
+ * gives that for free — a comment is not a node, so nothing in prose can make
+ * this red, and nothing in code can hide from it behind formatting.
  *
- * ⚠️ **What this does NOT cover, named so it cannot be over-read** (#2049,
- * pre-existing since #1987): NAMED import clauses only. A namespace import
- * (`import * as AM from '../rails/allowance-module.js'`) or a dynamic
- * `await import(...)` would reintroduce the arithmetic with this assertion
- * still green. The retained spies above would still fire on such a CALL, but
- * not on an unused binding. Widening it is filed as #2049.
+ * **Why an AST and not a wider regex (#2049).** The previous extractor matched
+ * `import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+'[^']+'` — named clauses in single
+ * quotes, and nothing else. Measured against the shapes a reintroduction could
+ * take, it missed eight: namespace import, dynamic `import()` (destructured or
+ * whole-namespace), a computed dynamic specifier, `createRequire`-style
+ * `require('…')`, `export { … } from`, `export * from`, side-effect `import '…'`,
+ * and — not in the ticket, found while measuring — a perfectly ordinary named
+ * clause written with DOUBLE quotes. Orthogonal to all eight, a specifier can
+ * also carry a URL query suffix (`…/allowance-module.js?bust=1`), which Node's
+ * ESM loader resolves to the same module. A regex grown to cover eight cases is
+ * itself hard to falsify, and it stops matching silently when a ninth appears.
+ *
+ * ⚠️ **What this still does NOT see, named here so it cannot be over-read.**
+ * 1. **Transitive reach.** It reads ONE file. An allowed module that itself
+ *    imports the arithmetic and re-exposes it is invisible — and that path is
+ *    real: `routes/payments.ts` → `modules/mpp/index.ts` →
+ *    `modules/mpp/allowances.ts` (#2044). What covers a transitive CALL is the
+ *    `vi.mock` spy set above, which is live for exactly that reason.
+ * 2. **Other payment surfaces.** `routes/x402.ts` and the machine-payment path
+ *    are not read here; their own suites carry them.
+ * 3. **Arithmetic re-implemented inline**, importing nothing. No import-shaped
+ *    guard can see that; the spies cannot either.
+ * 4. **`eval` / `new Function` string indirection.** Rule (5) below catches a
+ *    computed `import()`, but not a module name assembled and eval'd.
+ * 5. **A directory-index specifier.** `bannedModuleRefs()` normalizes an
+ *    extension and a query/hash suffix, not a trailing `/index` — so
+ *    `…/allowance-module/index.js` would slip rule (3)/(4). Not currently
+ *    expressible: every banned module is a FILE, so that path resolves to
+ *    nothing — but if one is ever re-created as a directory, this line is
+ *    the reminder that the normalization must learn `/index` first.
  */
-function paymentPathImportBindings(): Set<string> {
-  const src = readFileSync(
-    fileURLToPath(new URL('../payments.ts', import.meta.url)),
-    'utf8',
+function paymentPathImports(): PaymentPathImports {
+  return parseImportFacts(
+    readFileSync(fileURLToPath(new URL('../payments.ts', import.meta.url)), 'utf8'),
   )
-  const bindings = new Set<string>()
-  for (const m of src.matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+'[^']+'/g)) {
-    for (const raw of m[1].split(',')) {
-      const name = raw.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0].trim()
-      if (name) bindings.add(name)
-    }
+}
+
+/**
+ * The parser itself, taking source text so the extractor-control test below
+ * can prove EVERY fact bucket is populatable from a fixture. Without that,
+ * rules (2) and (5) rest on buckets no real input has ever filled — the same
+ * "guard that cannot fail" defect this file exists to prevent, relocated into
+ * its own instrument.
+ */
+function parseImportFacts(src: string): PaymentPathImports {
+  const sourceFile = ts.createSourceFile(
+    'payments.ts',
+    src,
+    ts.ScriptTarget.ESNext,
+    /* setParentNodes */ true,
+    ts.ScriptKind.TS,
+  )
+
+  const facts: PaymentPathImports = {
+    bindings: new Set<string>(),
+    reexports: new Set<string>(),
+    staticModuleRefs: new Set<string>(),
+    codeStringLiterals: new Set<string>(),
+    unresolvableDynamicImports: 0,
   }
-  return bindings
+
+  const walk = (node: ts.Node): void => {
+    if (ts.isStringLiteralLike(node)) facts.codeStringLiterals.add(node.text)
+
+    if (ts.isImportDeclaration(node)) {
+      if (ts.isStringLiteralLike(node.moduleSpecifier)) {
+        facts.staticModuleRefs.add(node.moduleSpecifier.text)
+      }
+      const clause = node.importClause
+      if (clause?.name) facts.bindings.add(clause.name.text) // default import
+      const named = clause?.namedBindings
+      if (named && ts.isNamespaceImport(named)) facts.bindings.add(named.name.text)
+      if (named && ts.isNamedImports(named)) {
+        for (const el of named.elements) {
+          facts.bindings.add((el.propertyName ?? el.name).text) // original name
+          facts.bindings.add(el.name.text) // local alias
+        }
+      }
+    } else if (ts.isExportDeclaration(node)) {
+      if (node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)) {
+        facts.staticModuleRefs.add(node.moduleSpecifier.text)
+        const clause = node.exportClause
+        if (clause && ts.isNamedExports(clause)) {
+          for (const el of clause.elements) facts.reexports.add((el.propertyName ?? el.name).text)
+        }
+      }
+    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      const specifier = node.arguments[0]
+      if (!specifier || !ts.isStringLiteralLike(specifier)) facts.unresolvableDynamicImports += 1
+    }
+
+    ts.forEachChild(node, walk)
+  }
+  ts.forEachChild(sourceFile, walk)
+
+  return facts
 }
 
 describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () => {
@@ -282,33 +443,106 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
 
   // ── STRUCTURAL: the arithmetic is not merely unused, it is UNREACHABLE ──
 
-  it('RED LINE #4 (structural, #1987): the payment path imports NO off-chain coverage arithmetic', () => {
-    const bindings = paymentPathImportBindings()
+  it('RED LINE #4 — extractor control (#2049): every fact bucket the five rules read is populatable from a fixture', () => {
+    // Rules (2) and (5) below read `reexports` and `unresolvableDynamicImports`
+    // — buckets the REAL `payments.ts` never fills, so the in-place positive
+    // control cannot prove them. Without this fixture, a refactor that silently
+    // stopped collecting either bucket would leave both rules green forever:
+    // the exact "guard that cannot fail" defect this suite exists to prevent,
+    // relocated into its own instrument (raised by haven-reviewer on #2049).
+    const facts = parseImportFacts([
+      `import def from './a.js'`,
+      `import * as ns from "./b.js"`, // double quotes, deliberately
+      `import { orig as alias } from './c.js'`,
+      `import './side-effect.js'`,
+      `export { reexported } from './d.js'`,
+      `export * from './e.js'`,
+      `const lit = await import('./f.js?bust=1')`,
+      `const computed = await import('./g/' + lit)`,
+      `// commented('./not-code.js') never lands in codeStringLiterals`,
+    ].join('\n'))
 
-    // Positive control FIRST — prove the extractor can say yes before a "no"
-    // is allowed to mean anything. Without this, a regex that silently matched
+    expect(facts.bindings.has('def')).toBe(true)
+    expect(facts.bindings.has('ns')).toBe(true)
+    expect(facts.bindings.has('orig')).toBe(true)
+    expect(facts.bindings.has('alias')).toBe(true)
+    expect(facts.reexports.has('reexported')).toBe(true) // rule (2)'s bucket
+    expect(facts.staticModuleRefs).toEqual(
+      new Set(['./a.js', './b.js', './c.js', './side-effect.js', './d.js', './e.js']),
+    )
+    expect(facts.codeStringLiterals.has('./f.js?bust=1')).toBe(true)
+    expect(facts.codeStringLiterals.has('./not-code.js')).toBe(false) // comments are not nodes
+    expect(facts.unresolvableDynamicImports).toBe(1) // rule (5)'s bucket
+
+    // And the normalization the module rules share: extension-, prefix-, and
+    // query/hash-agnostic, on the module list the real rules use.
+    expect(bannedModuleRefs(['../rails/allowance-module.js?bust=1'])).toEqual([
+      '../rails/allowance-module.js?bust=1',
+    ])
+    expect(bannedModuleRefs(['../rails/allowance-module'])).toEqual(['../rails/allowance-module'])
+    expect(bannedModuleRefs(['./unrelated.js', '../modules/mpp/index.js'])).toEqual([])
+  })
+
+  it('RED LINE #4 (structural, #1987/#2049): the payment path imports NO off-chain coverage arithmetic, in ANY import shape', () => {
+    const imports = paymentPathImports()
+
+    // Positive control FIRST — prove the parser can say YES before a "no" is
+    // allowed to mean anything. Without this, a parse that silently produced
     // nothing would report a perfect, empty, meaningless pass.
-    expect(bindings.has('prepareDelegationPayment')).toBe(true)
-    expect(bindings.has('submitDelegationPayment')).toBe(true)
-    expect(bindings.size).toBeGreaterThan(20)
+    expect(imports.bindings.has('prepareDelegationPayment')).toBe(true)
+    expect(imports.bindings.has('submitDelegationPayment')).toBe(true)
+    expect(imports.bindings.size).toBeGreaterThan(20)
+    expect(imports.staticModuleRefs.has('../rails/delegation-authorization.js')).toBe(true)
+    expect(imports.codeStringLiterals.size).toBeGreaterThan(20)
 
-    // The real assertion: none of the legacy rail's spend arithmetic is bound
-    // into the payment route's module scope, so no branch inside it — present
-    // or future — can reach the numbers Haven used to compute off-chain.
-    for (const banned of [
-      'computeEffectiveAllowance',
-      'getTokenAllowance',
-      'getLatestBlockTimeSec',
-      'decideCoverage',
-      'generateTransferHash',
-      'recoverSigner',
-      'executeAllowanceTransfer',
-      'readSharedWatermark',
-      'waitForFreshAllowanceNonce',
-      'hasTokenAllowanceConfigured',
-    ]) {
-      expect(bindings.has(banned), `${banned} must not be imported by routes/payments.ts`).toBe(false)
+    // (1) BOUND NAMES. No retired arithmetic is bound into the route's module
+    // scope by any static clause — named, aliased, or default — and either
+    // quote style, since the parser does not care which one was typed.
+    for (const banned of BANNED_ARITHMETIC) {
+      expect(
+        imports.bindings.has(banned),
+        `${banned} must not be imported by routes/payments.ts`,
+      ).toBe(false)
     }
+
+    // (2) RE-EXPORTS. `export { computeEffectiveAllowance } from '…'` binds
+    // nothing locally — rule (1) is blind to it — but it puts the arithmetic
+    // straight back onto the payment route's own public surface.
+    for (const banned of BANNED_ARITHMETIC) {
+      expect(
+        imports.reexports.has(banned),
+        `${banned} must not be re-exported by routes/payments.ts`,
+      ).toBe(false)
+    }
+
+    // (3) STATIC MODULE REACH. `import * as AM from`, `export * from` and a
+    // bare side-effect `import '…'` bind no banned NAME at all, so only a
+    // module-level rule can see them. A namespace binding is the shape #2049
+    // was filed for.
+    expect(
+      bannedModuleRefs(imports.staticModuleRefs),
+      'routes/payments.ts must not statically reference a retired-rail module in ANY clause form',
+    ).toEqual([])
+
+    // (4) RUNTIME MODULE REACH. Every string literal in the file's code is in
+    // scope here, so `await import('…')` and a `createRequire(import.meta.url)`
+    // `require('…')` fall to the same rule without either being enumerated.
+    // Comments are not nodes, so prose naming a retired symbol stays green.
+    // This rule structurally SUBSUMES (3) for any literal specifier; (3) is
+    // kept so the failure names the static shape rather than just the string.
+    expect(
+      bannedModuleRefs(imports.codeStringLiterals),
+      'routes/payments.ts must not name a retired-rail module in any runtime import() or require()',
+    ).toEqual([])
+
+    // (5) UNRESOLVABLE SPECIFIERS. A dynamic `import(expr)` — variable,
+    // concatenation, or template with substitutions — cannot be resolved by
+    // rule (4) or by anything else reading source. Its presence on this route
+    // IS the finding: this route has no legitimate need for one.
+    expect(
+      imports.unresolvableDynamicImports,
+      'routes/payments.ts must not use a computed dynamic import() specifier — it cannot be checked',
+    ).toBe(0)
   })
 
   // ── DELEGATION RAIL: the on-chain simulation is the only gate ────────────

@@ -3,7 +3,6 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/rails/allowance-module.ts
-  - packages/backend/src/loop-harness/**
   - packages/frontend/src/lib/allowance-math.ts
   - packages/frontend/src/lib/loop-harness/**
   - packages/backend/src/modules/mpp/**
@@ -11,7 +10,7 @@ covers:
   - packages/backend/package.json
   - packages/frontend/package.json
   - .github/workflows/ci.yml
-last-verified: "2026-08-24" # #1987: re-read against the AllowanceModule deletion. LP-1 STAYS and its target survives, but its stated purpose was wrong post-deletion (it drives the allowances report, not routing) — corrected. `domain/payment-coverage.ts` dropped from `covers:` (deleted), and two of the three candidate loops withdrawn because their surfaces are gone. LP-2 (frontend) untouched — that is #1989. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-25" # #2020: LP-1 WITHDRAWN — its target computeEffectiveAllowance lost its last caller when GET /machine-payments/allowances went 410 on the retired rail (owner reversal of #1986); function, harness and test:loop script deleted together, maintenance notes updated to LP-2-only. Prior: #1987: re-read against the AllowanceModule deletion. LP-1 STAYS and its target survives, but its stated purpose was wrong post-deletion (it drives the allowances report, not routing) — corrected. `domain/payment-coverage.ts` dropped from `covers:` (deleted), and two of the three candidate loops withdrawn because their surfaces are gone. LP-2 (frontend) untouched — that is #1989. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Loop Harness Index
@@ -28,14 +27,20 @@ Each row is a permanent harness that runs in CI as a regression/drift guard.
 
 ## Live loops
 
-### LP-1 · Backend allowance routing math
+### ~~LP-1 · Backend allowance routing math~~ — WITHDRAWN (#2020)
 
-- **Target:** `computeEffectiveAllowance` in `packages/backend/src/rails/allowance-module.ts` — **since #1987 this drives the allowances REPORT, not routing.** The auto-execute-vs-queue decision it used to make is gone with the AllowanceModule rail's execution half; the function survives because `GET /machine-payments/allowances` still reads it (#1986 kept that surface readable), so the loop still guards a live function and stays. The clock-source finding below is what makes keeping it worthwhile: a report that predicts a reset wrongly is still wrong.
-- **Oracle:** reference model of the Safe AllowanceModule reset semantics (`packages/backend/src/loop-harness/reference-allowance-module.ts`). Not yet machine-certified against the live contract (clock-source divergences are still confirmed bugs regardless).
-- **Harness:** `packages/backend/src/loop-harness/`
-- **Run:** `npm --prefix packages/backend run test:loop`
-- **Status:** ✅ Converged (green ratchet, 0 open findings).
-- **Findings:** F-1/F-2 — routing keyed off the relayer wall-clock (`Date.now()`) instead of chain `block.timestamp`; clock skew flipped the decision (false auto-execute → on-chain revert). *Resolved* (PR merged): function takes an explicit `nowSec` sourced from `getLatestBlockTimeSec`; locked by a regression guard.
+**WITHDRAWN (#2020, epic #1440).** The target — `computeEffectiveAllowance` in
+`packages/backend/src/rails/allowance-module.ts` — is deleted along with its
+last consumer: #1987 had kept it alive only because `GET
+/machine-payments/allowances` still read it (#1986's left-readable decision),
+and #2020 reversed that decision on a recorded owner call — the endpoint now
+answers the fail-closed 410 on the retired rail. With zero production callers
+there was nothing left to guard, so the function, the reference model, the
+harness (`packages/backend/src/loop-harness/`) and the `test:loop` script were
+removed together — the same treatment #1987 gave `decideCoverage`. The loop's
+converged findings (F-1/F-2: routing keyed off relayer wall-clock instead of
+chain `block.timestamp`) remain a good story in git history; the frontend twin
+of the arithmetic lives on under LP-2.
 
 ### LP-2 · Frontend allowance display math
 
@@ -60,12 +65,11 @@ work.
 
 ## Maintenance notes
 
-- LP-1 and LP-2 are two copies of the *same* arithmetic with two reference
-  models. A shared cross-package module would collapse them into one oracle — a
-  worthwhile future cleanup (the two `EffectiveAllowance` types differ: the
-  frontend adds `nextResetTime`).
-- Neither reference model is certified against the live deployed contract. If a
-  fork-conformance tier is ever added (anvil + Gnosis fork), certify both models
-  there and remove the "candidate finding" caveat from the READMEs.
+- LP-2 is now the only copy of the reset arithmetic (LP-1's backend twin was
+  deleted with its target, #2020), so the old collapse-into-one-oracle cleanup
+  is moot.
+- LP-2's reference model is not certified against the live deployed contract.
+  If a fork-conformance tier is ever added (anvil + fork), certify it there and
+  remove the "candidate finding" caveat from its README.
 - When you open or converge a loop, update this file and the harness `README.md`
   findings log in the same change.

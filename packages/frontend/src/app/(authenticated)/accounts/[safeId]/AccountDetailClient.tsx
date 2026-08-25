@@ -167,14 +167,30 @@ export default function AccountDetailClient() {
   } = useSafeDetails(safe?.account_type === 'delegator_hybrid' ? null : safeAddress, { chainId })
 
   // #1989: what a legacy account's owner can still DO about their funds
-  // depends entirely on whether any owner is a WALLET. `unknown` while the
-  // on-chain owner set is loading or failed to load — the notice then claims
-  // nothing, which is the only safe answer in both directions.
+  // depends on whether any owner is a WALLET, and BOTH branches require
+  // POSITIVE evidence. The obvious predicate — "some owner is not a passkey we
+  // know about, therefore a wallet" — reasons from ABSENCE, and its failure
+  // mode is the one that hurts: `POST /safe/exec` deliberately authorises a
+  // backup passkey that Haven holds no binding row for (that is the #1229 fast
+  // path being absent, not the passkey being absent), so an owner Haven cannot
+  // identify is NOT evidence of a wallet. Reading it as one would tell a
+  // passkey-only owner to go and sign at Safe's interface, which cannot help
+  // them, about funds they may not otherwise be able to reach.
+  //
+  // So: a known wallet owner proves 'wallet'. Every owner being a known passkey
+  // proves 'passkey-only'. Anything else — an owner we cannot classify, or a
+  // still-loading/failed owner read — is 'unknown', and the notice then claims
+  // nothing about how to reach the funds. The asymmetry is deliberate: being
+  // wrongly told to contact Haven costs a message, being wrongly told to use
+  // Safe's interface costs trust at the worst possible moment.
+  const knownWalletOwner = user?.wallet_address?.toLowerCase()
   const retiredRailOwnerAccess: RetiredRailOwnerAccess = !details
     ? 'unknown'
-    : details.owners.some((owner) => !passkeyAddresses.has(owner.toLowerCase()))
+    : details.owners.some((owner) => owner.toLowerCase() === knownWalletOwner)
       ? 'wallet'
-      : 'passkey-only'
+      : details.owners.every((owner) => passkeyAddresses.has(owner.toLowerCase()))
+        ? 'passkey-only'
+        : 'unknown'
 
   const {
     totalUsd,
@@ -559,6 +575,15 @@ export default function AccountDetailClient() {
                 const normalizedOwner = owner.toLowerCase()
                 const isYou =
                   user?.wallet_address?.toLowerCase() === normalizedOwner || passkeyAddresses.has(normalizedOwner)
+                // ⚠️ This reasons from ABSENCE — "not a passkey we hold a row
+                // for, therefore a Wallet" — and that inference is unsound for
+                // the reason #2017 records: `POST /safe/exec` authorises backup
+                // passkeys Haven holds no binding row for. Pre-dates #1989 and
+                // is left alone here because it is COSMETIC (no action depends
+                // on the label), unlike `retiredRailOwnerAccess` above, which
+                // is the same reasoning applied to an actionable funds-access
+                // claim and was corrected to require positive evidence.
+                // Do not copy this pattern; see #2017.
                 const approverType = passkeyAddresses.has(normalizedOwner) ? 'Passkey' : 'Wallet'
                 const ownerAlias = getOwnerAlias(owner)
                 return (

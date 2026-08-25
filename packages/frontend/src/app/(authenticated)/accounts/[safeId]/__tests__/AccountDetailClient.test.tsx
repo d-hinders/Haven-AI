@@ -327,13 +327,13 @@ describe('AccountDetailClient', () => {
           loading: owners === null,
           error: null,
         })
-      const asPasskeyUser = () =>
+      const asPasskeyUser = (walletAddress: string | null = null) =>
         mockUseAuth.mockReturnValue({
           user: {
             id: 'user-1',
             name: 'Ada',
             email: 'ada@example.com',
-            wallet_address: null,
+            wallet_address: walletAddress,
             safes: [SAFE],
           },
           activeSafe: SAFE,
@@ -352,7 +352,9 @@ describe('AccountDetailClient', () => {
         })
 
       // ── wallet owner: Safe's own interface is a real answer ──────────────
-      asPasskeyUser()
+      // The user's OWN wallet is on the owner list — positive evidence, not
+      // "this owner isn't a passkey we recognise".
+      asPasskeyUser('0x5555555555555555555555555555555555555555')
       withOwners(['0x5555555555555555555555555555555555555555'])
       const wallet = render(<AccountDetailClient />)
       expect(screen.getByText(/move them at any time/i)).toBeInTheDocument()
@@ -366,6 +368,23 @@ describe('AccountDetailClient', () => {
       expect(screen.getByText(/no self-serve way to move them out/i)).toBeInTheDocument()
       expect(screen.queryByText(/move them at any time/i)).toBeNull()
       passkeyOnly.unmount()
+
+      // ── an UNRECOGNISED owner: claim nothing ─────────────────────────────
+      // This is the case the first version of the predicate got dangerously
+      // wrong. An owner Haven holds no passkey row for is NOT proof of a
+      // wallet — `POST /safe/exec` authorises exactly such an unbound backup
+      // passkey against the on-chain owner list. Reasoning from absence here
+      // would send a passkey-only owner to an interface that cannot sign for
+      // them.
+      asPasskeyUser()
+      withOwners(['0x9999999999999999999999999999999999999999'])
+      const unrecognised = render(<AccountDetailClient />)
+      expect(
+        screen.getByText(/Haven no longer sends payments from this account/i),
+      ).toBeInTheDocument()
+      expect(screen.queryByText(/move them at any time/i)).toBeNull()
+      expect(screen.queryByText(/no self-serve way to move them out/i)).toBeNull()
+      unrecognised.unmount()
 
       // ── unknown: claim NOTHING, while still rendering the notice ─────────
       asPasskeyUser()

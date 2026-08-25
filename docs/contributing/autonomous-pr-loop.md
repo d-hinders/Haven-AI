@@ -399,6 +399,19 @@ least twice.
   passes on rerun. Stability-gate reruns rather than chasing the payment code
   (the 2026-08-12 promotion lesson).
 
+  **#2004 widened where this signature can appear.** The backend test job now
+  reaches Base Sepolia too: `non-custody-onchain-enforcer.contract.test.ts` is
+  the executable proof of CASP Red Line #4 and `eth_call`s the deployed caveat
+  enforcers. It **fails the run** when the endpoint is unreachable in CI rather
+  than skipping — a green run that quietly dropped a regulatory proof is the
+  worse outcome — so this is the one flake signature that can redden a
+  backend-only PR. Its failure message says in words that it is a **transport
+  failure, not a policy failure**; read that line before diagnosing, because an
+  unreachable RPC says nothing about whether the enforcers refuse an
+  out-of-policy redemption. One rerun, as above. If it recurs, point
+  `HAVEN_ENFORCER_PROBE_RPC_URL` at a reliable Base Sepolia endpoint rather
+  than weakening the gate.
+
 ## What stays manual (by design)
 
 - Deciding what to build — defining a well-scoped task or epic sub-issue — once. (Writing the issue text itself is automatable via `new-task`; deciding *which* work to queue is the human call.)

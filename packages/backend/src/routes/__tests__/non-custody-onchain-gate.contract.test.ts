@@ -44,11 +44,22 @@ import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
  * over-budget/wrong-recipient/expired redemption.** That is on-chain Solidity
  * behaviour, exercised by the bundler during real gas estimation — outside a
  * backend unit test's reach by construction, since `prepareDelegationPayment`
- * is mocked here as the network seam. Proving the enforcer itself needs an
- * on-chain/integration proof (a forked-chain or testnet call against the
- * deployed DelegationManager+enforcers) — this is a BLOCKING FINDING reported
- * to the captain, for #1991 (the CASP rewrite) to pick up; do not treat this
- * file's green as closing that gap.
+ * is mocked here as the network seam.
+ *
+ * ✅ **#2004 CLOSED THAT GAP — the proof now exists, in a sibling file:**
+ * `non-custody-onchain-enforcer.contract.test.ts`. It compiles a delegation
+ * with Haven's real caveat compiler and `eth_call`s each DEPLOYED enforcer's
+ * `beforeHook` at Haven's pinned Base Sepolia address, asserting the exact
+ * on-chain revert for an over-budget, wrong-recipient and expired redemption,
+ * each against an in-policy positive control on the same enforcer. Read the
+ * two files together: THIS one proves Haven does no arithmetic of its own and
+ * forwards the chain's verdict; THAT one proves the verdict refuses what it
+ * claims to refuse. Neither is sufficient alone.
+ *
+ * One remainder is still open and is deliberately not claimed by either file:
+ * a full `redeemDelegations` round trip proving the manager runs the whole
+ * caveat stack in order needs a funded testnet delegator and a signature, i.e.
+ * operator-held keys. See that file's header and the #2004 CASP shard.
  *
  * The legacy-rail cases are kept as an ADDITIONAL, STRICTLY STRONGER
  * assertion (#1986): the retired rail now refuses BEFORE any on-chain

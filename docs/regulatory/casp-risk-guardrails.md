@@ -28,6 +28,8 @@ covers:
   - packages/backend/src/modules/catalog/catalog-discovery.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
   - packages/backend/src/domain/machine-payment-lifecycle.ts
+  - packages/core/src/machine-payment-lifecycle.ts
+  - packages/signer/**
   - packages/backend/src/infra/relayer*.ts
   - packages/backend/src/infra/outbound-*.ts
   - packages/backend/src/infra/delegate-*.ts

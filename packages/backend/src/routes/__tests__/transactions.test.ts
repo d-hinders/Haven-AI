@@ -22,15 +22,14 @@ const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 
 /** SQL-routing feed mock — the db-mock ratchet (#1227) forbids growing the
  * positional resolved-once chain in this file, so new feed tests route
- * queries by table instead (same pattern as machine-payments.test.ts). */
-function routeFeedQueries(
-  rows: { payment_intents?: unknown[]; approval_requests?: unknown[] } = {},
-) {
+ * queries by table instead (same pattern as machine-payments.test.ts).
+ * #2055: no more `approval_requests` branch — the table (and every query
+ * against it) is gone, so `payment_intents` is the only feed source left. */
+function routeFeedQueries(rows: { payment_intents?: unknown[] } = {}) {
   return vi.spyOn(pool, 'query').mockImplementation(
     (async (sql: unknown) => {
       const text = String(sql)
       if (text.includes('FROM payment_intents')) return { rows: rows.payment_intents ?? [] }
-      if (text.includes('FROM approval_requests')) return { rows: rows.approval_requests ?? [] }
       return { rows: [] }
     }) as never,
   )
@@ -510,16 +509,15 @@ describe('mergeX402Transactions', () => {
     )
 
     const paymentIntentSql = String(queryMock.mock.calls[0][0])
-    const approvalRequestSql = String(queryMock.mock.calls[1][0])
 
     expect(paymentIntentSql).toContain('LOWER(us.safe_address) = LOWER(pi.safe_address)')
     expect(paymentIntentSql).toContain('pi.chain_id IS NOT NULL')
     expect(paymentIntentSql).toContain('us.chain_id = pi.chain_id')
     expect(paymentIntentSql).not.toContain('us.id = a.safe_id')
-    expect(approvalRequestSql).toContain('LOWER(us.safe_address) = LOWER(ar.safe_address)')
-    expect(approvalRequestSql).toContain('ar.chain_id IS NOT NULL')
-    expect(approvalRequestSql).toContain('us.chain_id = ar.chain_id')
-    expect(approvalRequestSql).not.toContain('us.id = a.safe_id')
+    // #2055: `findConfirmedX402ApprovalRequests` is gone with
+    // `approval_requests` — confirmed x402 history is payment_intents alone,
+    // so exactly one query fires here now.
+    expect(queryMock.mock.calls).toHaveLength(1)
   })
 
   it('normalizes x402 funding intents into merchant-facing transactions', async () => {
@@ -677,87 +675,16 @@ describe('mergeX402Transactions', () => {
     })
   })
 
-  it('normalizes manually approved x402 approval requests into merchant-facing transactions', async () => {
-    vi.spyOn(pool, 'query')
-      .mockResolvedValueOnce({ rows: [] } as never)
-      .mockResolvedValueOnce({
-        rows: [
-          {
-            id: 'approval-id',
-            tx_hash: TX_HASH,
-            agent_id: 'agent-id',
-            agent_name: 'Research assistant',
-            safe_id: 'safe-id',
-            safe_address: SAFE_ADDRESS,
-            safe_name: 'Main wallet',
-            chain_id: 8453,
-            token_symbol: 'USDC',
-            token_address: USDC_ADDRESS,
-            to_address: '0x1111111111111111111111111111111111111111',
-            amount_raw: '10000',
-            amount_human: '0.01',
-            merchant_address: '0x2222222222222222222222222222222222222222',
-            payment_resource_url: 'https://mcp.soundside.ai/mcp',
-            payment_proof_status: 'protocol_receipt_attached',
-            payment_reconciliation_event_type: null,
-            executed_at: '2026-05-22T07:50:10Z',
-            created_at: '2026-05-22T07:49:55Z',
-          },
-        ],
-      } as never)
-
-    const result = await mergeX402Transactions(
-      'user-id',
-      [{
-        id: 'safe-id',
-        safe_address: SAFE_ADDRESS,
-        chain_id: 8453,
-        name: 'Main wallet',
-      }],
-      [{
-        hash: TX_HASH,
-        type: 'erc20',
-        from: SAFE_ADDRESS,
-        to: '0x1111111111111111111111111111111111111111',
-        value: '10000',
-        valueFormatted: '0.01',
-        asset: 'USDC',
-        decimals: 6,
-        direction: 'out',
-        timestamp: 1779436199,
-        blockNumber: 45725826,
-        isError: false,
-        tokenAddress: USDC_ADDRESS,
-        tokenSymbol: 'USDC',
-        chainId: 8453,
-        safeId: 'safe-id',
-        safeAddress: SAFE_ADDRESS,
-        safeName: 'Main wallet',
-      }],
-    )
-
-    expect(result).toHaveLength(1)
-    expect(result[0]).toMatchObject({
-      hash: TX_HASH,
-      from: SAFE_ADDRESS,
-      to: '0x2222222222222222222222222222222222222222',
-      value: '10000',
-      valueFormatted: '0.01',
-      asset: 'USDC',
-      direction: 'out',
-      source: 'x402',
-      x402ResourceUrl: 'https://mcp.soundside.ai/mcp',
-      x402MerchantAddress: '0x2222222222222222222222222222222222222222',
-      safeId: 'safe-id',
-      safeName: 'Main wallet',
-      agentId: 'agent-id',
-      agentName: 'Research assistant',
-      paymentId: 'approval-id',
-      paymentProofStatus: 'protocol_receipt_attached',
-      paymentFlowStatus: 'paid',
-      paymentAttentionReason: null,
-    })
-  })
+  // #2055 (epic #1440, #2021 readability waiver): was "normalizes manually
+  // approved x402 approval requests into merchant-facing transactions" —
+  // `findConfirmedX402ApprovalRequests` is gone with `approval_requests`, so
+  // there is no longer a second, approval-sourced merchant-facing x402
+  // transaction to normalize. The behaviour it pinned (funding record →
+  // merchant-facing transaction, with agent/proof enrichment) survives
+  // unchanged on the payment_intents path and stays proven by "normalizes
+  // x402 funding intents into merchant-facing transactions" above — this
+  // test is deleted rather than converted because it would just be a
+  // byte-for-byte duplicate of that one with the row source swapped.
 
   it('carries settlement_scheme from machine_metadata on a confirmed x402 payment intent (eip3009)', async () => {
     const spy = routeFeedQueries({
@@ -801,11 +728,16 @@ describe('mergeX402Transactions', () => {
     expect(String(spy.mock.calls[0][0])).toContain("machine_metadata->>'settlement_scheme'")
   })
 
-  it('carries settlement_scheme from machine_metadata on an executed x402 approval request (erc7710)', async () => {
+  // #2055: was "...on an executed x402 approval request (erc7710)" —
+  // `findConfirmedX402ApprovalRequests` is gone with `approval_requests`;
+  // `settlement_scheme` is carried on `payment_intents.machine_metadata` the
+  // same way regardless of scheme, so this is re-anchored there (same as the
+  // eip3009 case above it, different scheme value).
+  it('carries settlement_scheme from machine_metadata on a confirmed x402 payment intent (erc7710)', async () => {
     const spy = routeFeedQueries({
-      approval_requests: [
+      payment_intents: [
         {
-          id: 'approval-id',
+          id: 'payment-id',
           tx_hash: TX_HASH,
           agent_id: 'agent-id',
           agent_name: 'Research assistant',
@@ -818,12 +750,12 @@ describe('mergeX402Transactions', () => {
           to_address: '0x1111111111111111111111111111111111111111',
           amount_raw: '10000',
           amount_human: '0.01',
-          merchant_address: '0x2222222222222222222222222222222222222222',
-          payment_resource_url: 'https://mcp.soundside.ai/mcp',
+          x402_merchant_address: '0x2222222222222222222222222222222222222222',
+          x402_resource_url: 'https://mcp.soundside.ai/mcp',
           payment_proof_status: 'payment_confirmed',
           payment_reconciliation_event_type: null,
           settlement_scheme: 'erc7710',
-          executed_at: '2026-05-22T07:50:10Z',
+          confirmed_at: '2026-05-22T07:50:10Z',
           created_at: '2026-05-22T07:49:55Z',
         },
       ],
@@ -837,8 +769,8 @@ describe('mergeX402Transactions', () => {
 
     expect(result).toHaveLength(1)
     expect(result[0].settlementScheme).toBe('erc7710')
-    expect(String(spy.mock.calls[1][0])).toContain('FROM approval_requests')
-    expect(String(spy.mock.calls[1][0])).toContain("machine_metadata->>'settlement_scheme'")
+    expect(String(spy.mock.calls[0][0])).toContain('FROM payment_intents')
+    expect(String(spy.mock.calls[0][0])).toContain("machine_metadata->>'settlement_scheme'")
   })
 
   it('leaves settlementScheme null-in-null-out when the metadata key is absent', async () => {
@@ -1047,71 +979,20 @@ describe('enrichTransactionsWithAgents', () => {
     ])
   })
 
-  it('enriches raw explorer transfers from executed x402 approvals by Safe and chain', async () => {
-    const queryMock = vi.spyOn(pool, 'query')
-      .mockResolvedValueOnce({ rows: [] } as never)
-      .mockResolvedValueOnce({
-        rows: [
-          {
-            id: 'approval-id',
-            tx_hash: TX_HASH.toLowerCase(),
-            safe_id: 'safe-base',
-            chain_id: 8453,
-            agent_id: 'agent-id',
-            agent_name: 'Soundside agent',
-            source: 'x402',
-            payment_resource_url: 'https://mcp.soundside.ai/mcp',
-            merchant_address: '0x2222222222222222222222222222222222222222',
-            payment_proof_status: null,
-            payment_reconciliation_event_type: null,
-          },
-        ],
-      } as never)
-      .mockResolvedValueOnce({ rows: [] } as never)
-
-    const result = await enrichTransactionsWithAgents('user-id', [
-      explorerTransfer(),
-      explorerTransfer({
-        safeId: 'safe-gnosis',
-        chainId: 100,
-        safeName: 'Gnosis',
-      }),
-    ])
-
-    expect(result[0]).toMatchObject({
-      hash: TX_HASH,
-      source: 'x402',
-      x402ResourceUrl: 'https://mcp.soundside.ai/mcp',
-      x402MerchantAddress: '0x2222222222222222222222222222222222222222',
-      agentId: 'agent-id',
-      agentName: 'Soundside agent',
-      paymentId: 'approval-id',
-      paymentProofStatus: 'payment_confirmed',
-    })
-    expect(result[1]).toMatchObject({
-      hash: TX_HASH,
-      safeId: 'safe-gnosis',
-      chainId: 100,
-    })
-    expect(result[1].agentId).toBeUndefined()
-    expect(result[1].paymentId).toBeUndefined()
-
-    const approvalRequestSql = String(queryMock.mock.calls[1][0])
-    expect(approvalRequestSql).toContain('JOIN user_safes us')
-    expect(approvalRequestSql).toContain('LOWER(us.safe_address) = LOWER(ar.safe_address)')
-    expect(approvalRequestSql).toContain('us.id = ANY($3)')
-    expect(approvalRequestSql).toContain('us.chain_id = ar.chain_id')
-    expect(approvalRequestSql).not.toContain('us.id = a.safe_id')
-    expect(queryMock.mock.calls[1][1]).toEqual([
-      [TX_HASH.toLowerCase()],
-      'user-id',
-      ['safe-base', 'safe-gnosis'],
-    ])
-  })
+  // #2055 (epic #1440, #2021 readability waiver): was "enriches raw explorer
+  // transfers from executed x402 approvals by Safe and chain" —
+  // `findApprovalRequestAgentMatches` is gone with `approval_requests`, and
+  // with it the approval-sourced attribution pass this pinned. x402
+  // attribution from a funding record survives unchanged on the
+  // payment_intents pass, already proven above by "scopes payment intent
+  // enrichment to the matching Safe and chain" — deleted rather than
+  // converted for the same reason as its `mergeX402Transactions` sibling.
 
   it('labels submitted delegate sweeps with agent context by Safe and chain', async () => {
+    // #2055: the enrichment pipeline is payment_intents → delegate_sweeps
+    // now (the approval_requests pass in between is gone), so the sweep
+    // query is the SECOND call, not the third.
     const queryMock = vi.spyOn(pool, 'query')
-      .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({
         rows: [
@@ -1162,12 +1043,12 @@ describe('enrichTransactionsWithAgents', () => {
     expect(result[1].activityType).toBeUndefined()
     expect(result[1].agentId).toBeUndefined()
 
-    const sweepSql = String(queryMock.mock.calls[2][0])
+    const sweepSql = String(queryMock.mock.calls[1][0])
     expect(sweepSql).toContain('FROM delegate_sweeps ds')
     expect(sweepSql).toContain('LOWER(us.safe_address) = LOWER(ds.to_address)')
     expect(sweepSql).toContain('us.chain_id = ds.chain_id')
     expect(sweepSql).toContain("ds.status = 'submitted'")
-    expect(queryMock.mock.calls[2][1]).toEqual([
+    expect(queryMock.mock.calls[1][1]).toEqual([
       [TX_HASH.toLowerCase()],
       'user-id',
       ['safe-base', 'safe-gnosis'],
@@ -1306,8 +1187,9 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
           rows: agentId && validAgentIds.includes(agentId) ? [{ id: agentId }] : [],
         } as never
       }
-      // payment_intents / approval_requests / delegate_sweeps enrichment
-      // and x402 merge queries — no machine-payment activity in these fixtures.
+      // payment_intents / delegate_sweeps enrichment and x402 merge queries
+      // (#2055: the approval_requests pass is gone) — no machine-payment
+      // activity in these fixtures.
       return { rows: [] } as never
     })
   }

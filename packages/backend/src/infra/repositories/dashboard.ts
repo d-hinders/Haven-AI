@@ -121,31 +121,23 @@ export async function listDashboardAgents(
 
 // ── Counters ─────────────────────────────────────────────────────────────────
 
-export const HAS_FIRST_AGENT_PAYMENT_SQL = `SELECT (
-           EXISTS (
-             SELECT 1
-             FROM payment_intents
-             WHERE user_id = $1
-               AND status = 'confirmed'
-               AND tx_hash IS NOT NULL
-           )
-           OR EXISTS (
-             SELECT 1
-             FROM approval_requests
-             WHERE user_id = $1
-               AND status = 'executed'
-               AND tx_hash IS NOT NULL
-           )
+// #2055: the approval_requests EXISTS branch is gone with the table — a
+// confirmed payment intent is the only payment record now.
+export const HAS_FIRST_AGENT_PAYMENT_SQL = `SELECT EXISTS (
+           SELECT 1
+           FROM payment_intents
+           WHERE user_id = $1
+             AND status = 'confirmed'
+             AND tx_hash IS NOT NULL
          ) AS has_first_agent_payment`
 
-/** `userId` is REQUIRED — tenant scope for the approval queue count. */
 /**
  * `userId` is REQUIRED — tenant scope for the onboarding milestone.
  *
- * Authoritative on PAYMENT RECORDS, both rails: a confirmed intent with a
- * tx_hash, or an executed approval with one. Anything softer (an agent
- * existing, an allowance granted) would mark the milestone reached before
- * money ever moved.
+ * Authoritative on PAYMENT RECORDS: a confirmed intent with a tx_hash
+ * (#2055 removed the executed-approval half with its table). Anything softer
+ * (an agent existing, an allowance granted) would mark the milestone reached
+ * before money ever moved.
  */
 export async function hasFirstAgentPayment(
   userId: string,
@@ -247,30 +239,6 @@ export const SUM_MONTHLY_PAYMENT_SPEND_SQL = `SELECT token_symbol,
            AND confirmed_at >= DATE_TRUNC('month', NOW())
          GROUP BY token_symbol`
 
-export const SUM_MONTHLY_APPROVAL_SPEND_SQL = `SELECT token_symbol,
-                COALESCE(SUM(usd_value), 0)::TEXT AS usd_sum,
-                COALESCE(SUM(eur_value), 0)::TEXT AS eur_sum,
-                COALESCE(
-                  SUM(
-                    CASE
-                      WHEN usd_value IS NULL OR eur_value IS NULL
-                        OR (
-                          COALESCE(usd_value, 0) = 0
-                          AND COALESCE(eur_value, 0) = 0
-                          AND amount_human::NUMERIC > 0
-                        )
-                        THEN amount_human::NUMERIC
-                      ELSE 0
-                    END
-                  ),
-                  0
-                )::TEXT AS fallback_amount
-         FROM approval_requests
-         WHERE user_id = $1
-           AND status = 'executed'
-           AND executed_at >= DATE_TRUNC('month', NOW())
-         GROUP BY token_symbol`
-
 /** `userId` is REQUIRED — month-to-date spend is per-tenant. */
 export async function sumMonthlyPaymentSpend(
   userId: string,
@@ -280,11 +248,5 @@ export async function sumMonthlyPaymentSpend(
   return result.rows
 }
 
-/** `userId` is REQUIRED — month-to-date spend is per-tenant. */
-export async function sumMonthlyApprovalSpend(
-  userId: string,
-  db: Executor = pool,
-): Promise<MonthlySpendRow[]> {
-  const result = await db.query<MonthlySpendRow>(SUM_MONTHLY_APPROVAL_SPEND_SQL, [userId])
-  return result.rows
-}
+// #2055: `SUM_MONTHLY_APPROVAL_SPEND_SQL` / `sumMonthlyApprovalSpend` are
+// gone with `approval_requests` — monthly spend is payment_intents alone.

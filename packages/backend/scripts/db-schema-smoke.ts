@@ -161,17 +161,6 @@ import {
   RELEASE_SUBMITTED_CLAIM_SQL,
 } from '../src/infra/repositories/payment-intents.js'
 import {
-  EXPIRE_OVERDUE_APPROVAL_SQL,
-  FIND_APPROVAL_STATUS_ROW_SQL,
-  FIND_MACHINE_APPROVAL_BY_KEY_OR_CHALLENGE_SQL,
-  FIND_SEND_APPROVAL_BY_KEY_SQL,
-  FIND_X402_APPROVAL_BY_KEY_SQL,
-  INSERT_MACHINE_APPROVAL_SQL,
-  INSERT_PAYMENT_APPROVAL_SQL,
-  INSERT_SEND_APPROVAL_SQL,
-  COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL,
-} from '../src/infra/repositories/approval-requests.js'
-import {
   CONFIRM_X402_INTENT_SQL,
   COUNT_RECENT_X402_INTENTS_SQL,
   FAIL_X402_INTENT_SQL,
@@ -188,11 +177,9 @@ import {
   ATTACH_EVIDENCE_FOR_INTENT_SQL,
   CLAIM_PREPARED_SWEEP_SQL,
   EXPIRE_PREPARED_SWEEP_SQL,
-  FIND_APPROVAL_FOR_EVIDENCE_SQL,
   FIND_EVIDENCE_ANCHOR_FOR_AGENT_SQL,
   FIND_INTENT_EVIDENCE_SOURCE_SQL,
   FIND_INTENT_FOR_EVIDENCE_SQL,
-  FIND_RECONCILIATION_APPROVAL_SQL,
   FIND_RECONCILIATION_EVENT_FOR_APPROVAL_SQL,
   FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL,
   FIND_RECONCILIATION_INTENT_SQL,
@@ -243,8 +230,6 @@ import {
   LIST_SESSION_SAFES_FOR_USER_SQL,
 } from '../src/infra/repositories/user-safes.js'
 import {
-  FIND_APPROVAL_REQUEST_AGENT_MATCHES_SQL,
-  FIND_CONFIRMED_X402_APPROVAL_REQUESTS_SQL,
   FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL,
   FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL,
   FIND_MACHINE_PAYMENT_EVIDENCE_DETAIL_SQL,
@@ -291,14 +276,10 @@ import {
   INSERT_PORTFOLIO_SNAPSHOT_SQL,
   LIST_DASHBOARD_AGENTS_SQL,
   LIST_DASHBOARD_SAFES_SQL,
-  SUM_MONTHLY_APPROVAL_SPEND_SQL,
   SUM_MONTHLY_PAYMENT_SPEND_SQL,
 } from '../src/infra/repositories/dashboard.js'
 import {
-  COUNT_PENDING_APPROVALS_FOR_AGENT_SQL,
-  LIST_AGENT_APPROVALS_SQL,
   LIST_AGENT_PAYMENTS_SQL,
-  LIST_FEED_APPROVALS_SQL,
   LIST_FEED_PAYMENTS_SQL,
   SUM_AGENT_SPEND_ALL_TIME_SQL,
   SUM_AGENT_SPEND_TODAY_SQL,
@@ -424,22 +405,17 @@ const QUERIES: SmokeQuery[] = [
   { name: 'dashboard: portfolio snapshots for today+yesterday', sql: FIND_PORTFOLIO_SNAPSHOTS_SQL },
   { name: 'dashboard: portfolio snapshot upsert', sql: INSERT_PORTFOLIO_SNAPSHOT_SQL },
   { name: 'dashboard: month-to-date payment spend', sql: SUM_MONTHLY_PAYMENT_SPEND_SQL },
-  { name: 'dashboard: month-to-date approval spend', sql: SUM_MONTHLY_APPROVAL_SPEND_SQL },
   // Agent-activity read model (#1167). IMPORTED — verbatim from
   // routes/agent-activity.ts. The four-table payment/approval joins are the
   // highest-value additions in this block: they reach machine_payment_evidence
   // and machine_payment_reconciliation_events, which no other smoke query
   // touches from this angle.
   { name: 'agent-activity: single-agent payments (evidence joins)', sql: LIST_AGENT_PAYMENTS_SQL },
-  { name: 'agent-activity: single-agent approvals (evidence joins)', sql: LIST_AGENT_APPROVALS_SQL },
   { name: 'agent-activity: feed payments (evidence joins)', sql: LIST_FEED_PAYMENTS_SQL },
-  { name: 'agent-activity: feed approvals (evidence joins)', sql: LIST_FEED_APPROVALS_SQL },
   { name: 'agent-activity: spend all time', sql: SUM_AGENT_SPEND_ALL_TIME_SQL },
   { name: 'agent-activity: spend today', sql: SUM_AGENT_SPEND_TODAY_SQL },
   { name: 'agent-activity: spend this week', sql: SUM_AGENT_SPEND_WEEK_SQL },
-  { name: 'agent-activity: pending approvals for agent', sql: COUNT_PENDING_APPROVALS_FOR_AGENT_SQL },
   // One statement, two surfaces (#1179) — the dashboard and the activity feed.
-  { name: 'approvals: actionable count for user', sql: COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL },
   { name: 'agent-tool-invocations: read for agent', sql: LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL },
   { name: 'agent-tool-invocations: read for agent set', sql: LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL },
   { name: 'agents: name map for activity feed', sql: LIST_AGENT_NAMES_FOR_USER_SQL },
@@ -682,14 +658,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'intents: status projection with funded-but-unsettled join', sql: FIND_INTENT_STATUS_ROW_SQL },
   { name: 'intents: settled receipt row (evidence join)', sql: FIND_SETTLED_PAYMENT_RECEIPT_SQL },
   // approval_requests aggregate:
-  { name: 'approvals: direct-payment over-allowance insert', sql: INSERT_PAYMENT_APPROVAL_SQL },
-  { name: 'approvals: /send over-allowance insert (send key)', sql: INSERT_SEND_APPROVAL_SQL },
-  { name: 'approvals: machine insert with ON CONFLICT arbiter', sql: INSERT_MACHINE_APPROVAL_SQL },
-  { name: 'approvals: /send idempotency replay lookup', sql: FIND_SEND_APPROVAL_BY_KEY_SQL },
-  { name: 'approvals: x402 idempotency lookup', sql: FIND_X402_APPROVAL_BY_KEY_SQL },
-  { name: 'approvals: machine key/challenge idempotency lookup', sql: FIND_MACHINE_APPROVAL_BY_KEY_OR_CHALLENGE_SQL },
-  { name: 'approvals: lazy expire before status read', sql: EXPIRE_OVERDUE_APPROVAL_SQL },
-  { name: 'approvals: status projection', sql: FIND_APPROVAL_STATUS_ROW_SQL },
   // x402 authorization lifecycle:
   { name: 'x402: hourly cap config read (#961)', sql: GET_MAX_X402_PER_HOUR_SQL },
   { name: 'x402: hourly cap usage count (#961)', sql: COUNT_RECENT_X402_INTENTS_SQL },
@@ -705,13 +673,11 @@ const QUERIES: SmokeQuery[] = [
   { name: 'evidence: base upsert anchored on approval', sql: UPSERT_EVIDENCE_BASE_FOR_APPROVAL_SQL },
   { name: 'evidence: intent source read (optional agent scope)', sql: FIND_INTENT_EVIDENCE_SOURCE_SQL },
   { name: 'evidence: intent source read (agent-scoped)', sql: FIND_INTENT_FOR_EVIDENCE_SQL },
-  { name: 'evidence: approval source read (agent-scoped)', sql: FIND_APPROVAL_FOR_EVIDENCE_SQL },
   { name: 'evidence: proof attach on intent', sql: ATTACH_EVIDENCE_FOR_INTENT_SQL },
   { name: 'evidence: proof attach on approval', sql: ATTACH_EVIDENCE_FOR_APPROVAL_SQL },
   { name: 'evidence: receipts list with settlement-scheme join (#1063)', sql: LIST_EVIDENCE_RECEIPTS_SQL },
   { name: 'evidence: intent settlement-fields echo (#1118)', sql: GET_INTENT_SETTLEMENT_FIELDS_SQL },
   { name: 'reconciliation: intent lookup', sql: FIND_RECONCILIATION_INTENT_SQL },
-  { name: 'reconciliation: approval lookup', sql: FIND_RECONCILIATION_APPROVAL_SQL },
   { name: 'reconciliation: event upsert keyed on intent', sql: UPSERT_RECONCILIATION_EVENT_FOR_INTENT_SQL },
   { name: 'reconciliation: event upsert keyed on approval', sql: UPSERT_RECONCILIATION_EVENT_FOR_APPROVAL_SQL },
   { name: 'reconciliation: event reload keyed on intent', sql: FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL },
@@ -744,10 +710,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'tx-history: Safe ownership, any chain', sql: FIND_SAFE_OWNERSHIP_ANY_CHAIN_SQL },
   { name: 'tx-history: Safe ownership, pinned chain', sql: FIND_SAFE_OWNERSHIP_FOR_CHAIN_SQL },
   { name: 'tx-history: payment_intents agent attribution', sql: FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL },
-  { name: 'tx-history: approval_requests agent attribution', sql: FIND_APPROVAL_REQUEST_AGENT_MATCHES_SQL },
   { name: 'tx-history: delegate_sweeps agent attribution', sql: FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL },
   { name: 'tx-history: confirmed x402 payment_intents funding', sql: FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL },
-  { name: 'tx-history: confirmed x402 approval_requests funding', sql: FIND_CONFIRMED_X402_APPROVAL_REQUESTS_SQL },
   { name: 'tx-history: machine-payment evidence detail', sql: FIND_MACHINE_PAYMENT_EVIDENCE_DETAIL_SQL },
   { name: 'catalog-submissions: insert with pending-host dedupe', sql: INSERT_CATALOG_SUBMISSION_SQL },
   { name: 'catalog-submissions: pending row by host (no-op path)', sql: FIND_PENDING_CATALOG_SUBMISSION_BY_HOST_SQL },

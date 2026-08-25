@@ -3472,254 +3472,16 @@ export const openapiSpec = {
     // Second, approving executes NOTHING. It records consent and hands back
     // the payment details; the user's own wallet executes the Safe
     // transaction and reports the hash to /executed. Haven never signs it.
-    //
-    // RETIRING SURFACE (#1440): this queue belongs to the Safe rail, which the
-    // owner decided to retire. Documented because it is live today; do not
-    // build new callers against it.
-    '/approvals': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'listApprovalRequests',
-        summary: "List the caller's approval requests, actionable ones first.",
-        description:
-          "**This read has a write side effect, deliberately**: it first expires every stale pending/approved request of the caller's, so the list can never show an actionable item that time has already killed. Ordering puts pending and approved ahead of everything else, then newest first. `source` and `x402_resource_url` are derived (payment_rail preferred over the legacy source column, payment_resource_url over the legacy x402 column) so this list and the approve response always agree. `actionable_count` and `pending_count` carry the SAME number — the second is a legacy alias kept for existing clients, not a different count.",
-        security: [{ DashboardJwt: [] }],
-        parameters: [
-          { name: 'status', in: 'query', schema: { type: 'string' }, description: "Filter by status, or 'all'. Defaults to 'pending'." },
-          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 }, description: 'Capped at 100.' },
-          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
-        ],
-        responses: {
-          '200': {
-            description: 'Approval requests plus the actionable count.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['approvals', 'actionable_count', 'pending_count'],
-                  properties: {
-                    approvals: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        required: [
-                          'id', 'agent_id', 'agent_name', 'safe_address', 'chain_id',
-                          'token_symbol', 'token_address', 'to_address', 'amount_raw',
-                          'amount_human', 'reason', 'source', 'x402_resource_url',
-                          'merchant_address', 'payment_rail', 'payment_resource_url',
-                          'status', 'tx_hash', 'reviewed_at', 'created_at', 'expires_at',
-                        ],
-                        properties: {
-                          id: { type: 'string', format: 'uuid' },
-                          agent_id: { type: 'string', format: 'uuid' },
-                          agent_name: { type: 'string', description: "'Unknown Agent' when the agent row is gone — the request stays readable." },
-                          safe_address: address,
-                          chain_id: { type: 'integer' },
-                          token_symbol: { type: 'string' },
-                          token_address: { type: 'string' },
-                          to_address: { type: 'string' },
-                          amount_raw: { type: 'string', description: 'Atomic units.' },
-                          amount_human: { type: 'string' },
-                          reason: { type: ['string', 'null'] },
-                          source: { type: 'string', description: "Derived: payment_rail, else the legacy source column, else 'direct'." },
-                          x402_resource_url: { type: ['string', 'null'], description: 'Derived: payment_resource_url, else the legacy x402 column.' },
-                          merchant_address: { type: ['string', 'null'] },
-                          payment_rail: { type: ['string', 'null'] },
-                          payment_resource_url: { type: ['string', 'null'] },
-                          status: { type: 'string' },
-                          tx_hash: { type: ['string', 'null'] },
-                          reviewed_at: { type: ['string', 'null'], format: 'date-time' },
-                          created_at: { type: 'string', format: 'date-time' },
-                          expires_at: { type: 'string', format: 'date-time' },
-                        },
-                      },
-                    },
-                    actionable_count: { type: 'integer', description: 'Pending plus approved.' },
-                    pending_count: { type: 'integer', description: 'Legacy alias — identical to actionable_count.' },
-                  },
-                },
-              },
-            },
-          },
-          '401': errorResponse,
-        },
-      },
-    },
-    '/approvals/{id}/approve': {
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'approveApprovalRequest',
-        summary: 'Record consent and hand back the payment to execute.',
-        description:
-          "**Approving executes nothing.** It flips the request to approved and returns the payment details; the user's own wallet then executes the Safe transaction and reports the hash to /executed. Ownership, pending status and a live expiry are all conditions of the UPDATE itself, so an expired, foreign or already-actioned request writes nothing — the 404 covers all of those without distinguishing them, because to a caller who does not own it they are the same answer. A retired-rail request is the one exception that IS distinguished (410 via a diagnostic read on the failure path): it stays readable and rejectable but can never be approved, because approving it would hand the frontend an executable funding transaction for a rail that no longer exists. The response repeats the resolved resource URL in BOTH x402_resource_url and payment_resource_url so callers never have to coalesce client-side.",
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Approval-request id.' }],
-        responses: {
-          '200': {
-            description: 'Consent recorded; execute the payment yourself.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['id', 'status', 'message', 'payment'],
-                  properties: {
-                    id: { type: 'string', format: 'uuid' },
-                    status: { type: 'string', enum: ['approved'] },
-                    message: { type: 'string' },
-                    payment: {
-                      type: 'object',
-                      required: [
-                        'token_symbol', 'token_address', 'to_address', 'amount_raw',
-                        'amount_human', 'safe_address', 'source', 'x402_resource_url',
-                        'merchant_address', 'payment_rail', 'payment_resource_url',
-                      ],
-                      properties: {
-                        token_symbol: { type: 'string' },
-                        token_address: { type: 'string' },
-                        to_address: { type: 'string' },
-                        amount_raw: { type: 'string' },
-                        amount_human: { type: 'string' },
-                        safe_address: address,
-                        source: { type: 'string' },
-                        x402_resource_url: { type: ['string', 'null'] },
-                        merchant_address: { type: ['string', 'null'] },
-                        payment_rail: { type: ['string', 'null'] },
-                        payment_resource_url: { type: ['string', 'null'] },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': { ...errorResponse, description: "Not found, not the caller's, already actioned, or expired — deliberately one answer." },
-          '410': {
-            ...errorResponse,
-            description:
-              'ALWAYS, since #1986. Every approval request is an AllowanceModule-rail artifact ' +
-              '(the delegation rail has no approval queue), and that rail is retired — so a ' +
-              'queued approval is readable and rejectable, never approvable. The refusal runs ' +
-              'before the lookup, so a missing request gets this too rather than a 404.',
-          },
-        },
-      },
-    },
-    '/approvals/{id}/proposed': {
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'markApprovalProposed',
-        summary: 'Record that a multi-signature payment was submitted for co-signing.',
-        description:
-          'For a Safe that needs more than one signature: the transaction is proposed, not yet executed, and this records that intermediate state so the queue does not show it as still awaiting the user. Same WHERE-clause guards as approve, and the same retired-rail refusal.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Approval-request id.' }],
-        responses: {
-          '200': {
-            description: 'Marked as proposed.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['id', 'status'],
-                  properties: {
-                    id: { type: 'string', format: 'uuid' },
-                    status: { type: 'string', enum: ['proposed'] },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-          '410': {
-            ...errorResponse,
-            description:
-              'ALWAYS, since #1986 — same unconditional refusal as /approve. Closing /approve ' +
-              'alone would leave a row that was already approved before the retirement able to ' +
-              'advance to co-signing.',
-          },
-        },
-      },
-    },
-    '/approvals/{id}/reject': {
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'rejectApprovalRequest',
-        summary: 'Reject a pending or approved request.',
-        description:
-          "Deliberately broader than approve in three ways. It accepts an already-APPROVED request, because consent given is consent that can be withdrawn while nothing has executed; it carries NO retired-rail guard; and it does not require a live expiry, so a request that has aged out but has not yet been lazily marked expired can still be rejected. All three follow from the same rule: never trap a request in a user queue. Rejecting executes nothing and un-does nothing on-chain — if the payment was already sent, rejecting the record does not recall it.",
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Approval-request id.' }],
-        responses: {
-          '200': {
-            description: 'Rejected.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['id', 'status'],
-                  properties: {
-                    id: { type: 'string', format: 'uuid' },
-                    status: { type: 'string', enum: ['rejected'] },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-        },
-      },
-    },
-    '/approvals/{id}/executed': {
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'recordApprovalExecution',
-        summary: 'Report the transaction hash after executing the approved payment.',
-        description:
-          "Closes the loop: the user's wallet executed the Safe transaction, and this records the hash and snapshots the fiat value at execution time. The state is checked TWICE on purpose — once to load the request and once again inside the UPDATE — so a request that stopped being approved while the fiat lookup was in flight answers **409 rather than being overwritten**. That 409 is distinct from the 404: 404 means it was never approvable for this caller, 409 means it was and no longer is. The hash is recorded, never verified here; Haven does not confirm the transaction on-chain at this point.",
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Approval-request id.' }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['tx_hash'],
-                properties: { tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' } },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'Execution recorded.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['id', 'status', 'tx_hash'],
-                  properties: {
-                    id: { type: 'string', format: 'uuid' },
-                    status: { type: 'string', enum: ['executed'] },
-                    tx_hash: { type: 'string' },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': { ...errorResponse, description: "Not found, not the caller's, or not in an approved state." },
-          '409': { ...errorResponse, description: 'It stopped being approved between the read and the write.' },
-        },
-      },
-    },
+    // #2055 (epic #1440): the /approvals surface is REMOVED, not tombstoned.
+    // The queue belonged to the Safe rail; #1986 closed its actionable
+    // transitions, the owner decision on #2021 waived queue-history
+    // readability, and the `approval_requests` table is dropped (migration
+    // 070) — so the five operations that stood here (list / approve /
+    // proposed / reject / executed) are deregistered and now answer 404.
+    // Unlike the payment-path tombstones (which stayed as 410s because a
+    // retired SPEND flow must not read as retryable), a deleted dashboard
+    // queue has no such ambiguity: #1989 removed its only UI, and nothing
+    // programmatic ever called it.
     // ── Session + passkeys (#1446) ──────────────────────────────────────────
     // CREDENTIAL BOUNDARY: no response here returns a password, a hash, or a
     // passkey's private material. The passkey routes echo an id, the derived
@@ -3979,7 +3741,7 @@ export const openapiSpec = {
                     all_time: spendTotals,
                     today: spendTotals,
                     this_week: spendTotals,
-                    pending_approvals: { type: 'integer' },
+                    pending_approvals: { type: 'integer', description: 'Always 0 since #2055 — the approval queue died with the Safe rail; kept for wire compatibility.' },
                   },
                 },
               },
@@ -3996,7 +3758,7 @@ export const openapiSpec = {
         operationId: 'getActivityFeed',
         summary: 'Combined activity across every agent the caller owns.',
         description:
-          "The same three entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` counts everything actionable across the account, not just what appears in this page.",
+          "The same three entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` is always 0 since #2055 (the approval queue died with the Safe rail); the field survives for wire compatibility.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
@@ -4012,7 +3774,7 @@ export const openapiSpec = {
                   required: ['activity', 'pending_approvals'],
                   properties: {
                     activity: { type: 'array', items: activityEntry },
-                    pending_approvals: { type: 'integer' },
+                    pending_approvals: { type: 'integer', description: 'Always 0 since #2055 — the approval queue died with the Safe rail; kept for wire compatibility.' },
                   },
                 },
               },
@@ -7577,8 +7339,8 @@ export const openapiSpec = {
             },
             additionalProperties: false,
           },
-          actionableApprovals: { type: 'integer' },
-          pendingApprovals: { type: 'integer', description: 'Duplicate of actionableApprovals (same query), kept for compatibility.' },
+          actionableApprovals: { type: 'integer', description: 'Always 0 since #2055 — the approval queue died with the Safe rail and its table is dropped; the field survives for wire compatibility.' },
+          pendingApprovals: { type: 'integer', description: 'Duplicate of actionableApprovals; always 0 since #2055, kept for compatibility.' },
           onboardingProgress: {
             type: 'object',
             required: ['hasFirstAgentPayment'],

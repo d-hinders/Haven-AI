@@ -800,7 +800,6 @@ export async function findMachineIntentByKeyOrChallenge(
 // separated the two.
 //
 // Deliberately NOT removed here, and handed to #1990 as one unit: the three
-// `approval_requests` INSERT helpers in `infra/repositories/approval-requests.ts`
 // (`insertPaymentApproval`, `insertSendApproval`, `insertMachineApproval`). They
 // are equally uncalled now, but they are a cluster #1990 retires together with
 // the table itself, and `rails/execution-rail.ts` names all three by hand in the

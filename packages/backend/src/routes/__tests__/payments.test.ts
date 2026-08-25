@@ -107,49 +107,66 @@ function pendingIntent(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function x402Approval(overrides: Record<string, unknown> = {}) {
+// #2055 (epic #1440, #2021 readability waiver): `approval_requests` is
+// dropped, so the `x402Approval()`/`mppApproval()`/`approvalRoute()` fixtures
+// this file used to build no longer describe a reachable path —
+// `getAgentPaymentStatus` has no fallback left to query them with. The
+// resume-state behaviour they pinned (x402/MPP context rehydration, expiry,
+// rail_not_resumable) is still live, just reached through `payment_intents`
+// only now, so it is re-anchored below on `FIND_INTENT_STATUS_ROW_SQL`
+// (matched on its `funded_but_unsettled` column, unique to that query)
+// rather than deleted outright.
+
+function x402IntentRow(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'approval-123',
+    id: PAYMENT_ID,
     chain_id: 8453,
     token_symbol: 'USDC',
     token_address: USDC,
     amount_human: '0.01',
     amount_raw: '10000',
-    status: 'pending',
+    status: 'pending_signature',
     tx_hash: null,
     expires_at: '2099-01-02T00:00:00.000Z',
+    delegate_address: AGENT.delegate_address,
     source: 'x402',
     payment_rail: 'x402',
     payment_resource_url: 'https://mcp.soundside.ai/mcp',
     x402_resource_url: 'https://mcp.soundside.ai/mcp',
     merchant_address: RECIPIENT.toLowerCase(),
+    x402_merchant_address: RECIPIENT.toLowerCase(),
+    x402_idempotency_key: null,
     machine_challenge_id: null,
-    machine_idempotency_key: 'x402:approval',
+    machine_idempotency_key: 'x402:intent',
     machine_metadata: JSON.stringify({
       protocol: 'x402',
       network: 'base',
       description: 'create_image via luma',
     }),
+    funded_but_unsettled: false,
     ...overrides,
   }
 }
 
-function mppApproval(overrides: Record<string, unknown> = {}) {
+function mppIntentRow(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'approval-mpp',
+    id: PAYMENT_ID,
     chain_id: 8453,
     token_symbol: 'USDC',
     token_address: USDC,
     amount_human: '0.01',
     amount_raw: '10000',
-    status: 'pending',
+    status: 'pending_signature',
     tx_hash: null,
     expires_at: '2099-01-02T00:00:00.000Z',
+    delegate_address: AGENT.delegate_address,
     source: 'mpp_demo',
     payment_rail: 'mpp_demo',
     payment_resource_url: 'https://haven.example/demo/mpp/market-summary',
     x402_resource_url: null,
     merchant_address: RECIPIENT.toLowerCase(),
+    x402_merchant_address: null,
+    x402_idempotency_key: null,
     machine_challenge_id: 'challenge-123',
     machine_idempotency_key: 'mpp_demo:test',
     machine_metadata: JSON.stringify({
@@ -157,13 +174,14 @@ function mppApproval(overrides: Record<string, unknown> = {}) {
       network: 'base',
       description: 'Haven market summary demo',
     }),
+    funded_but_unsettled: false,
     ...overrides,
   }
 }
 
-/** The approval row as BOTH the status probe and the resume fetch see it. */
-const approvalRoute = (row: Record<string, unknown> | null): DbRoute => [
-  /FROM approval_requests/,
+/** The intent row as BOTH the status probe and the resume fetch see it. */
+const intentStatusRoute = (row: Record<string, unknown> | null): DbRoute => [
+  /funded_but_unsettled/,
   () => ({ rows: row ? [row] : [] }),
 ]
 
@@ -186,20 +204,23 @@ describe('payment routes', () => {
     fiatMocks.getBookTimeSekValue.mockResolvedValue(null)
   })
 
-  it('rehydrates x402 resume state from an approval request id', async () => {
-    primeDb(AUTH, approvalRoute(x402Approval()))
+  // #2055: was "...from an approval request id" — `approval_requests` is
+  // dropped, so the same rehydration is now reached (and proven) through
+  // `payment_intents` alone.
+  it('rehydrates x402 resume state from a payment intent id', async () => {
+    primeDb(AUTH, intentStatusRoute(x402IntentRow()))
 
     const response = await app.inject({
       method: 'GET',
-      url: '/payments/approval-123/resume_state',
+      url: `/payments/${PAYMENT_ID}/resume_state`,
       headers: { authorization: 'Bearer sk_agent_test' },
     })
 
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({
       rail: 'x402',
-      paymentId: 'approval-123',
-      idempotencyKey: 'x402:approval',
+      paymentId: PAYMENT_ID,
+      idempotencyKey: 'x402:intent',
       url: 'https://mcp.soundside.ai/mcp',
       resourceUrl: 'https://mcp.soundside.ai/mcp',
       description: 'create_image via luma',
@@ -231,12 +252,13 @@ describe('payment routes', () => {
     })
   })
 
-  it('rehydrates MPP resume state from an approval request id', async () => {
-    primeDb(AUTH, approvalRoute(mppApproval()))
+  // #2055: was "...from an approval request id".
+  it('rehydrates MPP resume state from a payment intent id', async () => {
+    primeDb(AUTH, intentStatusRoute(mppIntentRow()))
 
     const response = await app.inject({
       method: 'GET',
-      url: '/payments/approval-mpp/resume_state',
+      url: `/payments/${PAYMENT_ID}/resume_state`,
       headers: { authorization: 'Bearer sk_agent_test' },
     })
 
@@ -244,7 +266,7 @@ describe('payment routes', () => {
     expect(response.json()).toMatchObject({
       rail: 'mpp',
       paymentRail: 'mpp_demo',
-      paymentId: 'approval-mpp',
+      paymentId: PAYMENT_ID,
       idempotencyKey: 'mpp_demo:test',
       url: 'https://haven.example/demo/mpp/market-summary',
       resourceUrl: 'https://haven.example/demo/mpp/market-summary',
@@ -271,12 +293,16 @@ describe('payment routes', () => {
     })
   })
 
-  it('does not rehydrate resume state for another agent payment or approval', async () => {
-    primeDb(AUTH, approvalRoute(null))
+  // #2055: was "...for another agent payment or approval" — there is no
+  // approval fallback left to fall through to, so a missing intent row is
+  // unconditionally 404 now (the response text is unchanged; it was always
+  // generic, not approval-specific).
+  it('does not rehydrate resume state for another agent payment, or an id that is no longer a payment at all', async () => {
+    primeDb(AUTH, intentStatusRoute(null))
 
     const response = await app.inject({
       method: 'GET',
-      url: '/payments/approval-123/resume_state',
+      url: `/payments/${PAYMENT_ID}/resume_state`,
       headers: { authorization: 'Bearer sk_agent_test' },
     })
 
@@ -284,12 +310,13 @@ describe('payment routes', () => {
     expect(response.json()).toEqual({ error: 'Payment or approval request not found' })
   })
 
-  it('returns 410 when an approval resume state has expired', async () => {
-    primeDb(AUTH, approvalRoute(x402Approval({ status: 'expired' })))
+  // #2055: was "...when an approval resume state has expired".
+  it('returns 410 when a payment intent resume state has expired', async () => {
+    primeDb(AUTH, intentStatusRoute(x402IntentRow({ status: 'expired' })))
 
     const response = await app.inject({
       method: 'GET',
-      url: '/payments/approval-123/resume_state',
+      url: `/payments/${PAYMENT_ID}/resume_state`,
       headers: { authorization: 'Bearer sk_agent_test' },
     })
 
@@ -297,7 +324,7 @@ describe('payment routes', () => {
     expect(response.json()).toMatchObject({
       error: 'Payment approval expired and cannot be resumed',
       error_code: 'expired',
-      payment_id: 'approval-123',
+      payment_id: PAYMENT_ID,
       rail: 'x402',
       status: 'expired',
     })
@@ -309,21 +336,22 @@ describe('payment routes', () => {
     // endpoint only implements x402 and MPP today. Clients must be able to
     // distinguish "rail not supported" from generic "cannot resume right
     // now" — the structured error_code makes that pattern-matchable.
+    // #2055: re-anchored on a payment intent — same as above.
     primeDb(
       AUTH,
-      approvalRoute(x402Approval({ source: 'stripe_deposit', payment_rail: 'stripe_deposit' })),
+      intentStatusRoute(x402IntentRow({ source: 'stripe_deposit', payment_rail: 'stripe_deposit' })),
     )
 
     const response = await app.inject({
       method: 'GET',
-      url: '/payments/approval-123/resume_state',
+      url: `/payments/${PAYMENT_ID}/resume_state`,
       headers: { authorization: 'Bearer sk_agent_test' },
     })
 
     expect(response.statusCode).toBe(422)
     expect(response.json()).toMatchObject({
       error_code: 'rail_not_resumable',
-      payment_id: 'approval-123',
+      payment_id: PAYMENT_ID,
       rail: 'stripe_deposit',
     })
   })
@@ -722,10 +750,12 @@ describe('payment routes', () => {
       /send_idempotency_key = \$2[\s\S]*FROM payment_intents|FROM payment_intents[\s\S]*send_idempotency_key = \$2/,
       () => ({ rows }),
     ]
-    const approvalKeyLookup = (rows: unknown[]): DbRoute => [
-      /FROM approval_requests[\s\S]*send_idempotency_key = \$2|send_idempotency_key = \$2[\s\S]*FROM approval_requests/,
-      () => ({ rows }),
-    ]
+    // #2055: `findSendApprovalByIdempotencyKey` is deleted — no code path
+    // can ever issue a `FROM approval_requests ... send_idempotency_key`
+    // query any more, so there is nothing left to prime a route for. An
+    // unknown key now proceeds as a fresh payment (`intentKeyLookup([])`
+    // covers that; below, every case in this block still 410s at the
+    // earlier account gate regardless).
 
     it('replays a still-signable legacy intent — same sign_data, no new transfer, no chain reads', async () => {
       primeDb(AUTH, intentKeyLookup([sendReplayRow()]))
@@ -746,23 +776,12 @@ describe('payment routes', () => {
       expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
     })
 
-    it('replays a pending approval as 202 — a retry never opens a second approval', async () => {
-      primeDb(
-        AUTH,
-        intentKeyLookup([]),
-        approvalKeyLookup([
-          {
-            id: 'appr-1',
-            status: 'pending',
-            expires_at: '2099-01-01T00:00:00.000Z',
-            token_symbol: 'xDAI',
-            amount_human: '1',
-            token_address: TOKEN,
-            to_address: RECIPIENT.toLowerCase(),
-            amount_raw: '1000000000000000000',
-          },
-        ]),
-      )
+    // #2055: was "replays a pending approval as 202 — a retry never opens a
+    // second approval". There is no approval fallback left to replay from —
+    // an unmatched intent key now falls straight through to the (retired)
+    // account gate, same as every other case in this block.
+    it('an unmatched key with no approval fallback left still 410s at the account gate', async () => {
+      primeDb(AUTH, intentKeyLookup([]))
 
       const response = await app.inject({
         method: 'POST', url: '/payments',
@@ -772,8 +791,8 @@ describe('payment routes', () => {
 
       expect(response.statusCode).toBe(410)
       expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
-      expect(findCall(/INSERT INTO approval_requests/)).toBeUndefined()
-      expect(findCall(/FROM approval_requests[\s\S]*send_idempotency_key = \$2|send_idempotency_key = \$2[\s\S]*FROM approval_requests/)).toBeUndefined()
+      expect(findCall(/INSERT INTO/)).toBeUndefined()
+      expect(sqlCalls().some((c) => /approval_requests/i.test(c.sql))).toBe(false)
     })
 
     it('409s a key reused for a DIFFERENT transfer', async () => {
@@ -824,7 +843,6 @@ describe('payment routes', () => {
       primeDb(
         AUTH,
         intentKeyLookup([]),
-        approvalKeyLookup([]),
         [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
         [/INSERT INTO payment_intents/, () => ({ rows: [pendingIntent()] })],
       )
@@ -853,7 +871,6 @@ describe('payment routes', () => {
           // First lookup (pre-insert): nothing. Second (post-race): the winner.
           () => ({ rows: ++lookups === 1 ? [] : [sendReplayRow()] }),
         ],
-        approvalKeyLookup([]),
         [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
         [/INSERT INTO payment_intents/, () => {
           const err = new Error('duplicate key') as Error & { code: string }
@@ -983,9 +1000,6 @@ describe('payment routes', () => {
     const createRoutes: DbRoute[] = [
       AUTH,
       [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
-      [/INSERT INTO approval_requests/, () => ({
-        rows: [{ id: 'appr-1', status: 'pending', expires_at: '2099-01-01T00:00:00.000Z' }],
-      })],
       [/INSERT INTO payment_intents/, () => ({ rows: [pendingIntent()] })],
     ]
 
@@ -1005,7 +1019,10 @@ describe('payment routes', () => {
 
       expect(response.statusCode).toBe(410)
       expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
-      expect(findCall(/INSERT INTO approval_requests/), 'the retired rail must never open an approval').toBeUndefined()
+      // #2055: the retired rail must never open an approval — and since
+      // `approval_requests` is dropped, no code path could issue that INSERT
+      // even if it tried.
+      expect(sqlCalls().some((c) => /approval_requests/i.test(c.sql))).toBe(false)
       // generateTransferHash must NOT run on the refused path either.
       expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
     })

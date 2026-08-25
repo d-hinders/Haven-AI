@@ -3,16 +3,12 @@ import { authMiddleware } from '../middleware/auth.js'
 import { getExplorerUrl } from '../domain/chains.js'
 import { machinePaymentLifecycle } from '../domain/machine-payment-lifecycle.js'
 import { agentExistsForUser, listAgentNamesForUser } from '../infra/repositories/agents.js'
-import { countActionableApprovalsForUser } from '../infra/repositories/approval-requests.js'
 import {
   listToolInvocationsForAgent,
   listToolInvocationsForAgents,
 } from '../infra/repositories/agent-tool-invocations.js'
 import {
-  countPendingApprovalsForAgent,
-  listAgentApprovals,
   listAgentPayments,
-  listFeedApprovals,
   listFeedPayments,
   sumAgentSpendAllTime,
   sumAgentSpendThisWeek,
@@ -42,9 +38,9 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
     // Fetch payments
     const payments = await listAgentPayments(id, limit, offset)
 
-    // Fetch approval requests
-    const approvals = await listAgentApprovals(id, limit, offset)
-
+    // #2055: the approval-request feed entries are gone with the table —
+    // queue history is waived (owner decision on #2021); the activity feed is
+    // payments + tool invocations now.
     // Fetch MCP tool invocations (audit log)
     const invocations = await listToolInvocationsForAgent(id, limit, offset)
 
@@ -91,38 +87,6 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           created_at: p.created_at,
         }
       }),
-      ...approvals.map((a) => {
-        const proofStatus = a.payment_proof_status ?? (a.status === 'executed' ? 'payment_confirmed' : null)
-        const lifecycle = machinePaymentLifecycle({
-          rail: a.source,
-          paymentStatus: a.status,
-          paymentProofStatus: proofStatus,
-          reconciliationEventType: a.payment_reconciliation_event_type,
-        })
-
-        return {
-          type: 'approval' as const,
-          id: a.id,
-          token: a.token_symbol,
-          amount: a.amount_human,
-          to: a.to_address,
-          reason: a.reason,
-          status: a.status,
-          tx_hash: a.tx_hash,
-          payment_proof_status: proofStatus,
-          payment_flow_status: lifecycle.paymentFlowStatus,
-          payment_attention_reason: lifecycle.paymentAttentionReason,
-          source: a.source ?? 'direct',
-          x402_resource_url: a.x402_resource_url,
-          chain_id: a.chain_id,
-          token_address: a.token_address,
-          safe_id: a.safe_id,
-          safe_address: a.safe_address,
-          safe_name: a.safe_name,
-          explorer_url: a.tx_hash ? getExplorerUrl(a.chain_id, 'tx', a.tx_hash) : null,
-          created_at: a.created_at,
-        }
-      }),
       ...invocations.map((inv) => ({
         type: 'mcp_tool_call' as const,
         id: inv.id,
@@ -160,8 +124,9 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
       // Spent this week
       const weekTotals = await sumAgentSpendThisWeek(id)
 
-      // Pending approvals count
-      const pendingApprovals = await countPendingApprovalsForAgent(id)
+      // #2055: pending approvals are structurally zero — the queue died with
+      // the AllowanceModule rail; the wire field survives for compatibility.
+      const pendingApprovals = 0
 
       return {
         all_time: totals.map((r) => ({
@@ -205,7 +170,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
     const payments = await listFeedPayments(agentIds, limit, offset)
 
     // Recent approval requests
-    const approvals = await listFeedApprovals(agentIds, limit, offset)
+    // #2055: approval feed entries died with the table (see the per-agent
+    // handler above).
 
     // Recent MCP tool invocations (audit log)
     const invocations = await listToolInvocationsForAgents(agentIds, limit, offset)
@@ -255,40 +221,6 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           created_at: p.created_at,
         }
       }),
-      ...approvals.map((a) => {
-        const proofStatus = a.payment_proof_status ?? (a.status === 'executed' ? 'payment_confirmed' : null)
-        const lifecycle = machinePaymentLifecycle({
-          rail: a.source,
-          paymentStatus: a.status,
-          paymentProofStatus: proofStatus,
-          reconciliationEventType: a.payment_reconciliation_event_type,
-        })
-
-        return {
-          type: 'approval' as const,
-          id: a.id,
-          agent_id: a.agent_id,
-          agent_name: agentNames.get(a.agent_id) ?? 'Unknown',
-          token: a.token_symbol,
-          amount: a.amount_human,
-          to: a.to_address,
-          reason: a.reason,
-          status: a.status,
-          tx_hash: a.tx_hash,
-          payment_proof_status: proofStatus,
-          payment_flow_status: lifecycle.paymentFlowStatus,
-          payment_attention_reason: lifecycle.paymentAttentionReason,
-          source: a.source ?? 'direct',
-          x402_resource_url: a.x402_resource_url,
-          chain_id: a.chain_id,
-          token_address: a.token_address,
-          safe_id: a.safe_id,
-          safe_address: a.safe_address,
-          safe_name: a.safe_name,
-          explorer_url: a.tx_hash ? getExplorerUrl(a.chain_id, 'tx', a.tx_hash) : null,
-          created_at: a.created_at,
-        }
-      }),
       ...invocations.map((inv) => ({
         type: 'mcp_tool_call' as const,
         id: inv.id,
@@ -305,8 +237,9 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
     ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
      .slice(0, limit)
 
-    // Pending approvals count
-    const pendingApprovals = await countActionableApprovalsForUser(sub)
+    // #2055: structurally zero — the approval queue died with the
+    // AllowanceModule rail; the wire field survives for compatibility.
+    const pendingApprovals = 0
 
     return {
       activity,

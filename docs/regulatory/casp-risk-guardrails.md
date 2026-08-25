@@ -19,7 +19,6 @@ covers:
   - packages/backend/src/modules/reporting/fortnox-connection.ts
   - packages/backend/src/rails/**
   - packages/backend/src/infra/repositories/payment-intents.ts
-  - packages/backend/src/infra/repositories/approval-requests.ts
   - packages/backend/src/infra/repositories/x402-authorizations.ts
   - packages/backend/src/infra/repositories/machine-payments.ts
   - packages/backend/src/infra/repositories/account-entitlements.ts
@@ -44,7 +43,6 @@ covers:
   - packages/backend/src/routes/safe-deploy.ts
   - packages/backend/src/routes/user-safes.ts
   - packages/backend/src/routes/safe-exec.ts
-  - packages/backend/src/routes/approvals.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts

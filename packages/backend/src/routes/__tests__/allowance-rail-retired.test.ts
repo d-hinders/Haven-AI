@@ -44,8 +44,12 @@ import fastifyJwt from '@fastify/jwt'
  *                                   that can never complete.
  *   POST /approvals/:id/approve, /proposed — the owner-facing half: approving
  *                                   hands the dashboard an executable Safe
- *                                   transaction. Pinned in `approvals.test.ts`,
- *                                   named here so the table is complete.
+ *                                   transaction. Named here so the table stays
+ *                                   complete; as of #2055 the route itself is
+ *                                   deregistered (404, not 410 — see "the
+ *                                   approval queue" section below), so this
+ *                                   entry-point closed by deletion rather than
+ *                                   by refusal.
  *
  * Each refusal gets four assertions, because "returns 410" alone would still
  * pass if the handler had already written a row or funded the delegate on its
@@ -132,7 +136,6 @@ vi.mock('../../rails/delegation-authorization.js', () => delegationMocks)
 import paymentRoutes from '../payments.js'
 import x402Routes from '../x402.js'
 import machinePaymentRoutes from '../machine-payments.js'
-import approvalRoutes from '../approvals.js'
 import {
   allowanceModuleRailRetired,
   sessionRailRetired,
@@ -263,7 +266,9 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
     await app.register(paymentRoutes, { prefix: '/payments' })
     await app.register(x402Routes, { prefix: '/x402' })
     await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
-    await app.register(approvalRoutes, { prefix: '/approvals' })
+    // #2055: `/approvals` is NOT registered here — the route is deregistered
+    // repo-wide, so every path under it is a plain unmatched-route 404 rather
+    // than an app-level refusal. See "the approval queue" section below.
     token = app.jwt.sign({ sub: agentRow(null).user_id, email: 'ada@example.com' })
   })
 
@@ -407,33 +412,30 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
     })
   })
 
-  describe('the approval queue — readable and rejectable, never approvable', () => {
-    it.each(['/approve', '/proposed'])(
-      'POST /approvals/:id%s refuses — 410, nothing queried',
-      async (suffix) => {
-        primeDb()
-        const res = await app.inject({
-          method: 'POST',
-          url: `/approvals/${PAYMENT_ID}${suffix}`,
-          headers: { authorization: `Bearer ${token}` },
-        })
+  // #2055 (epic #1440): `routes/approvals.ts` is deleted and `/approvals` is
+  // deregistered outright — the table it read is dropped (migration 070).
+  // Pre-#2055 this suite proved approve/proposed refused 410 while reject
+  // still cleared the queue (#1986); the #2021 owner decision that carried
+  // that distinction — "queue-history readability for legacy accounts is
+  // waived" — removed the reason to keep any of the five operations live, so
+  // there is no longer a queue to be readable, rejectable, or approvable.
+  // Every one of them, GET and every POST transition alike, is now a plain
+  // unmatched-route 404 rather than an app-level refusal.
+  describe('the approval queue is gone — /approvals 404s everywhere (#2055, #2021)', () => {
+    it.each([
+      ['GET', '/approvals'],
+      ['POST', `/approvals/${PAYMENT_ID}/approve`],
+      ['POST', `/approvals/${PAYMENT_ID}/proposed`],
+      ['POST', `/approvals/${PAYMENT_ID}/reject`],
+      ['POST', `/approvals/${PAYMENT_ID}/executed`],
+    ] as const)('%s /approvals... is 404 — the route is deregistered, not refused', async (method, url) => {
+      primeDb()
+      const res = await app.inject({ method, url, headers: { authorization: `Bearer ${token}` } })
 
-        expect(res.statusCode).toBe(410)
-        expect(res.json().error).toBe(allowanceModuleRailRetired('approval').body.error)
-        // A route preHandler: Fastify short-circuits before any query at all.
-        expect(mockQuery).not.toHaveBeenCalled()
-      },
-    )
-
-    it('POST /approvals/:id/reject still works — the queue can still be cleared', async () => {
-      primeDb([/UPDATE approval_requests/, () => ({ rows: [{ id: PAYMENT_ID }] })])
-      const res = await app.inject({
-        method: 'POST',
-        url: `/approvals/${PAYMENT_ID}/reject`,
-        headers: { authorization: `Bearer ${token}` },
-      })
-      expect(res.statusCode).toBe(200)
-      expect(res.json()).toEqual({ id: PAYMENT_ID, status: 'rejected' })
+      expect(res.statusCode).toBe(404)
+      // Not the on-chain-rail 410: there is no handler left to produce it.
+      expect(res.json().error).not.toBe(allowanceModuleRailRetired('approval').body.error)
+      expect(mockQuery).not.toHaveBeenCalled()
     })
   })
 

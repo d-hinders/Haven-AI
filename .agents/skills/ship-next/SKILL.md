@@ -243,8 +243,10 @@ you need the reasoning. Never edit one without the other — CI will not let you
   review, which found the delegate balance monitor unlisted while its equally
   read-only sibling `infra/relayer-balance-monitor.ts` was matched by prefix accident —
   the two even share an alert channel);
-- `routes/safe-exec.ts`, `routes/approvals.ts`, or `routes/hybrid-accounts.ts`
-  (user-signed execution, the approval queue, account provisioning);
+- `routes/safe-exec.ts` or `routes/hybrid-accounts.ts`
+  (user-signed execution and account provisioning; the approval queue's route
+  file was deleted with its table by #2055, so its glob left the perimeter
+  rather than being repointed — the code is dead, not moved);
 - `packages/sdk/src/signer.ts` and `packages/signer/` (signing schemes are spend
   authority — the SDK entry point was listed; the edge-signer package that
   actually holds the delegate key material was on no list at all, and is the

@@ -1,13 +1,11 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import { countActionableApprovalsForUser } from '../infra/repositories/approval-requests.js'
 import {
   findPortfolioSnapshots,
   hasFirstAgentPayment,
   insertPortfolioSnapshot,
   listDashboardAgents,
   listDashboardSafes,
-  sumMonthlyApprovalSpend,
   sumMonthlyPaymentSpend,
   type DashboardAllowanceRow,
   type MonthlySpendRow,
@@ -75,14 +73,15 @@ export default async function dashboardRoutes(
     const [
       safes,
       agents,
-      actionableApprovals,
       firstAgentPayment,
     ] = await Promise.all([
       listDashboardSafes(sub),
       listDashboardAgents(sub),
-      countActionableApprovalsForUser(sub),
       hasFirstAgentPayment(sub),
     ])
+    // #2055: structurally zero — the approval queue died with the
+    // AllowanceModule rail; both wire fields survive for compatibility.
+    const actionableApprovals = 0
 
     const activeAgents = agents.filter((agent) => agent.status === 'active')
 
@@ -123,18 +122,14 @@ export default async function dashboardRoutes(
     const previousEur = Number(yesterdaySnapshot?.total_eur ?? '0')
     const changeAvailable = Boolean(yesterdaySnapshot)
 
-    const [paymentSpendRows, approvalSpendRows] = await Promise.all([
-      sumMonthlyPaymentSpend(sub),
-      sumMonthlyApprovalSpend(sub),
-    ])
+    // #2055: the approval-spend bucket is gone with approval_requests —
+    // monthly spend is payment_intents alone now (historical executed-approval
+    // spend disappears with the table, per the #2021 readability waiver).
+    const paymentSpendRows = await sumMonthlyPaymentSpend(sub)
+    const paymentSpend = await accumulateMonthlySpend(paymentSpendRows)
 
-    const [paymentSpend, approvalSpend] = await Promise.all([
-      accumulateMonthlySpend(paymentSpendRows),
-      accumulateMonthlySpend(approvalSpendRows),
-    ])
-
-    const monthlySpendUsd = paymentSpend.usd + approvalSpend.usd
-    const monthlySpendEur = paymentSpend.eur + approvalSpend.eur
+    const monthlySpendUsd = paymentSpend.usd
+    const monthlySpendEur = paymentSpend.eur
 
     const mergedTransactions: EnrichedTransaction[] = []
     const transactionResults = await Promise.allSettled(

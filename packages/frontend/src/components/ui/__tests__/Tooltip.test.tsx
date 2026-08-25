@@ -53,6 +53,12 @@ describe('Tooltip reachability (#2038)', () => {
     const bubble = screen.getByRole('tooltip')
     expect(bubble).toHaveTextContent('0x1111111111111111111111111111111111111111')
     expect(trigger.getAttribute('aria-describedby')).toBe(bubble.getAttribute('id'))
+
+    // This primitive is what made the span focusable, so the focus treatment
+    // is part of this change — a bare browser outline beside `Table`'s and
+    // `Sidebar`'s brand rings on the same page is the primitive's own defect.
+    expect(trigger.className).toContain('focus-visible:ring-2')
+    expect(trigger.className).toContain('focus-visible:ring-brand/80')
   })
 
   it('leaves an interactive trigger as the only tab stop and still opens on its focus', async () => {
@@ -69,6 +75,10 @@ describe('Tooltip reachability (#2038)', () => {
     expect(button).toHaveFocus()
     expect(triggerOf(button)).not.toHaveFocus()
     expect(screen.getByRole('tooltip')).toHaveTextContent('Sorts the 40 loaded transactions')
+
+    // And NO ring on the wrapper: the button carries its own identical one,
+    // so a second here would draw two rings around a single control.
+    expect(triggerOf(button).className).not.toContain('focus-visible:ring-2')
   })
 
   it('opens on tap and closes on a second tap where the trigger is not interactive', () => {
@@ -131,6 +141,71 @@ describe('Tooltip reachability (#2038)', () => {
     // The card navigates on tap. A toggle here would fire alongside it and
     // strand a bubble over the page the user just left for.
     expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+
+  it('ignores the synthetic mouse events Chrome emits right after a tap', () => {
+    // The mutation that proved this test was missing: `haven-reviewer` removed
+    // the suppression and all 8 tests stayed green. Without it, the mouse path
+    // reopens what the tap closed — and on a trigger nested in a card link it
+    // opens a bubble that then outlives the navigation.
+    render(
+      <Tooltip label={LONG_LABEL}>
+        <span data-testid="child">not recorded</span>
+      </Tooltip>,
+    )
+    const trigger = triggerOf(screen.getByTestId('child'))
+
+    tap(trigger)
+    expect(screen.getByRole('tooltip')).toBeInTheDocument()
+
+    tap(trigger)
+    expect(screen.queryByRole('tooltip')).toBeNull()
+
+    // Chrome's compatibility sequence, arriving a moment later.
+    fireEvent.mouseEnter(trigger)
+    expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+
+  it('never opens through the mouse path on a trigger it refuses to own', () => {
+    render(
+      <div role="link" tabIndex={0} aria-label="View Research agent">
+        <Tooltip label={LONG_LABEL}>
+          <span data-testid="child">not recorded</span>
+        </Tooltip>
+      </div>,
+    )
+    const trigger = triggerOf(screen.getByTestId('child'))
+
+    tap(trigger)
+    fireEvent.mouseEnter(trigger)
+
+    expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+
+  it('lets a hybrid device hover again once the tap echo has passed', () => {
+    // The other half of the trade-off, and the reason the suppression is a
+    // WINDOW and not a latch: on a touchscreen laptop, one incidental tap must
+    // not kill hover on this trigger for the rest of its life.
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-08-25T12:00:00Z'))
+      render(
+        <Tooltip label={LONG_LABEL}>
+          <span data-testid="child">not recorded</span>
+        </Tooltip>,
+      )
+      const trigger = triggerOf(screen.getByTestId('child'))
+
+      tap(trigger)
+      tap(trigger)
+      expect(screen.queryByRole('tooltip')).toBeNull()
+
+      vi.setSystemTime(new Date('2026-08-25T12:00:05Z'))
+      fireEvent.mouseEnter(trigger)
+      expect(screen.getByRole('tooltip')).toHaveTextContent(LONG_LABEL)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('dismisses a tapped-open tooltip on Escape', () => {

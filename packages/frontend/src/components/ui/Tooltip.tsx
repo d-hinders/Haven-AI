@@ -49,7 +49,10 @@
  *
  * No `role` is asserted on the standalone wrapper. `role="button"` would
  * promise an activation this element does not perform; a focusable element
- * carrying `aria-describedby` is announced correctly without the lie.
+ * carrying `aria-describedby` is announced correctly without the lie. It does
+ * take the brand `focus-visible` ring, because this primitive is what made it
+ * focusable — a bare UA outline beside `Table`'s and `Sidebar`'s rings on the
+ * same page would be this primitive's own defect, not inherited debt.
  *
  * ## Width
  *
@@ -100,6 +103,20 @@ const INTERACTIVE_ANCESTOR = `${FOCUSABLE}, [role="link"], [role="button"], [rol
 /** Keep-inside-the-viewport gutter for the bubble, in px. */
 const VIEWPORT_MARGIN = 8
 
+/**
+ * How long a touch suppresses the mouse path, in ms.
+ *
+ * A WINDOW rather than a sticky flag, and the difference is the hybrid device.
+ * Chrome emits compatibility `mouseenter`/`mousemove` within a few hundred ms
+ * of a tap (the legacy click delay), which is what reopened a bubble the tap
+ * had just closed — and, on a trigger nested in a card link, opened one that
+ * then survived the navigation. A latch fixes that and breaks something else:
+ * on a touchscreen laptop, one incidental tap would kill hover on that trigger
+ * for the rest of the component's life. A second is far past every synthetic
+ * event and far short of a user coming back with a trackpad.
+ */
+const MOUSE_AFTER_TOUCH_MS = 1000
+
 export function Tooltip({
   label,
   side = 'top',
@@ -114,9 +131,9 @@ export function Tooltip({
   const [coords, setCoords] = useState<Coords>(null)
   const [mounted, setMounted] = useState(false)
   const [standalone, setStandalone] = useState(false)
-  // Once a touch has driven this trigger, the synthetic mouse events browsers
+  // When this trigger was last touched. The synthetic mouse events browsers
   // emit after a tap must not re-open what the tap just closed.
-  const touchDriven = useRef(false)
+  const lastTouchAt = useRef(0)
 
   useEffect(() => {
     setMounted(true)
@@ -192,29 +209,43 @@ export function Tooltip({
     }
   }, [open])
 
+  /** True only for the compatibility mouse events a tap just produced. */
+  const echoingATouch = () => Date.now() - lastTouchAt.current < MOUSE_AFTER_TOUCH_MS
+
   const show = () => {
-    if (touchDriven.current) return
+    if (echoingATouch()) return
     setOpen(true)
   }
   const hide = () => {
-    if (touchDriven.current) return
+    if (echoingATouch()) return
     setOpen(false)
   }
 
   const onPointerDown = (event: { pointerType?: string }) => {
     if (event.pointerType !== 'touch') return
-    // Set BEFORE the standalone check, and measured rather than tidy: Chrome
-    // emits synthetic `mouseenter` after a tap, so without this a tap on a
-    // NON-standalone trigger still opened the bubble through the mouse path —
-    // and then the card navigated, stranding it over the next page. Suppress
-    // the mouse path for every touch-driven trigger; open only where the
-    // toggle is ours to own.
-    touchDriven.current = true
+    // Stamped BEFORE the standalone check, and measured rather than tidy:
+    // Chrome emits synthetic `mouseenter` after a tap, so without this a tap
+    // on a NON-standalone trigger still opened the bubble through the mouse
+    // path — and then the card navigated, stranding it over the next page.
+    // Suppress the mouse path after every touch; open only where the toggle
+    // is ours to own.
+    lastTouchAt.current = Date.now()
     if (!standalone) return
     setOpen((wasOpen) => !wasOpen)
   }
 
-  const wrapperClass = block ? 'block' : 'inline-flex'
+  // The brand focus treatment, and only where this primitive is what MADE the
+  // element focusable. `Table`'s sort button and `Sidebar`'s kebab carry their
+  // own identical ring; adding a second one on the wrapper around them would
+  // draw two rings for one control.
+  const wrapperClass = [
+    block ? 'block' : 'inline-flex',
+    standalone
+      ? 'rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80'
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
   const refCallback = (el: HTMLElement | null) => {
     triggerRef.current = el
   }

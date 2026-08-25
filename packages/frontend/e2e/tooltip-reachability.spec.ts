@@ -120,25 +120,47 @@ test.describe('Tooltip width and keyboard reach (#2038)', () => {
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })
 
-  test('a standalone trigger is in the tab order and exposes its content on focus', async ({
-    page,
-  }) => {
-    await page.goto('/design-system')
+  // Both of `/design-system`'s standalone triggers, not one: `Address` renders
+  // its trigger as a bare `<span>` and `WalletIdentityBlock` as a `<p>`. They
+  // are the two shapes every other standalone call site reuses, so covering
+  // both here is what makes the shared-code-path inference for
+  // `AccountDetailClient` and `AgentDetailClient` an inference about markup
+  // that has actually been rendered rather than only read.
+  for (const [name, index] of [
+    ['Address (span trigger)', 0],
+    ['WalletIdentityBlock (p trigger)', 1],
+  ] as const) {
+    test(`${name} is in the tab order, rings on focus, and exposes its content`, async ({
+      page,
+    }) => {
+      await page.goto('/design-system')
 
-    const trigger = page.getByText(SAMPLE_TRUNCATED).first()
-    await expect(trigger).toBeVisible()
+      const trigger = page.getByText(SAMPLE_TRUNCATED).nth(index)
+      await expect(trigger).toBeVisible()
 
-    // The wrapper the primitive renders. `tabindex="0"` on a visible, enabled
-    // element IS the tab-order claim, in the real DOM rather than in jsdom's
-    // model of it.
-    const wrapper = trigger.locator('xpath=ancestor::*[@tabindex="0"][1]')
-    await expect(wrapper).toHaveCount(1)
+      // The wrapper the primitive renders. `tabindex="0"` on a visible,
+      // enabled element IS the tab-order claim, in the real DOM rather than in
+      // jsdom's model of it.
+      const wrapper = trigger.locator('xpath=ancestor::*[@tabindex="0"][1]')
+      await expect(wrapper).toHaveCount(1)
 
-    await wrapper.focus()
-    await expect(page.locator('[role="tooltip"]')).toHaveText(SAMPLE_ADDRESS)
-    // The description is wired to the focused element, which is what an
-    // assistive technology follows.
-    const describedBy = await wrapper.getAttribute('aria-describedby')
-    expect(describedBy).toBe(await page.locator('[role="tooltip"]').getAttribute('id'))
-  })
+      // Set keyboard modality before focusing, or `:focus-visible` does not
+      // engage and the ring assertion below measures the wrong state.
+      await page.keyboard.press('Tab')
+      await wrapper.focus()
+
+      await expect(page.locator('[role="tooltip"]')).toHaveText(SAMPLE_ADDRESS)
+      // The description is wired to the focused element, which is what an
+      // assistive technology follows.
+      const describedBy = await wrapper.getAttribute('aria-describedby')
+      expect(describedBy).toBe(await page.locator('[role="tooltip"]').getAttribute('id'))
+
+      // This primitive is what made the element focusable, so the focus
+      // treatment is part of this change. Read the COMPUTED shadow rather than
+      // screenshotting: a ring paints OUTSIDE the border box, so a capture
+      // scoped to the trigger clips exactly the thing being shown (#1873).
+      const ring = await wrapper.evaluate((el) => getComputedStyle(el).boxShadow)
+      expect(ring, 'brand focus ring on the newly focusable trigger').not.toBe('none')
+    })
+  }
 })

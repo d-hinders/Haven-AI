@@ -173,32 +173,48 @@ export const SETTLED_TALL_FACTOR = 1.25
  * rendered route including its empty states, and false of every loading state,
  * whatever the loading state happens to look like.
  *
- * MEASURED, not guessed — and the measurement had to be taken TWICE, because
- * the first re-reading of it was wrong in an instructive way.
+ * MEASURED, not guessed — and the measurement had to be taken THREE times,
+ * because the first two readings of it were wrong in different instructive
+ * ways. The floor sits between two live populations and must hug neither.
  *
- * Warm, on the populated fixture, live capture runs record:
+ * Populated fixture, warm (`content_settle` in the manifest):
  *
- *   the loading fallback   `/dashboard`'s `next/dynamic` placeholder —
- *                          10 chars, 3 elements (read off a real refusing run,
- *                          not from the JSX);
- *   `/dashboard`           466 chars, 112 elements — the leanest FULLY
- *                          rendered route measured;
- *   `/agents`              851 chars, 138 elements;
- *   `/design-system`       30,720 chars, 1,624 elements.
+ *   `/dashboard`      466 chars, 112 elements
+ *   `/agents`         851 chars, 138 elements
+ *   `/design-system`  30,720 chars, 1,624 elements
  *
- * A run under load average ~490 also produced `/agents` at 105 chars / 30
- * elements, and that number was briefly mistaken for "the leanest real route"
- * and used to LOWER this floor. It is not: it is `/agents` caught PARTIALLY
- * rendered, and re-centring on it would have made the guard weaker against
- * exactly the population it exists to refuse. The lesson is recorded here
- * rather than only in the pull request, because the next person to re-tune
- * these will be looking at numbers from a contended box too: read a floor
- * against a WARM run, and treat a lean reading under load as a data point
- * about the machine.
+ * `SCREENSHOT_FIXTURE=empty`, warm — the population that actually constrains
+ * this floor, and the one both earlier readings failed to measure:
  *
- * So 80 / 8 stands, and now with both sides measured: 8x above the loading
- * state and 5.8x below the leanest fully rendered route on characters, 2.7x
- * and 14x on elements. Both margins are pinned by `full-page-capture.test.ts`.
+ *   `/dashboard`  mobile   298 chars, 109 elements
+ *   `/contacts`   mobile   116 chars,  23 elements
+ *   `/accounts`   desktop  129 chars,  15 elements
+ *   `/accounts`   mobile    87 chars,  33 elements  ← the LEANEST real screen
+ *
+ * Against a `/dashboard` loading fallback of 10 chars in 3 elements.
+ *
+ * Two corrections are recorded here rather than only in the pull request,
+ * because the next person to re-tune these will make the same two mistakes:
+ *
+ *   1. A run at load average ~490 produced `/agents` at 105 chars / 30
+ *      elements. That was briefly taken for "the leanest real route" and used
+ *      to LOWER this floor. It is `/agents` caught PARTIALLY rendered — warm it
+ *      is 851/138 — and re-centring on it would have weakened the guard against
+ *      exactly the population it refuses. Read a floor against a WARM run; a
+ *      lean reading under load is a fact about the machine.
+ *   2. The floor then stood at 80 chars, reasoned — not measured — to be safely
+ *      under every real empty state. Independent design review refused that
+ *      reasoning precisely because it was inference wearing a measured voice,
+ *      and the measurement it asked for found `/accounts` empty at 87 chars:
+ *      a margin of 1.09x. One word shorter and a legitimate empty state would
+ *      have been silently refused — the guard's own defect, pointed at the
+ *      screens that most need photographing.
+ *
+ * So the floors are set from the empty-state population, near the geometric
+ * middle of the two: 3.0x above the loading fallback and 2.9x below the leanest
+ * real screen on characters, 2.0x and 2.5x on elements. Every one of those
+ * margins is asserted in `full-page-capture.test.ts`, against the measurements
+ * above, so a re-tune fails a named test rather than a capture run.
  *
  * KNOWN LIMIT, and it is the honest boundary of the claim: a route caught
  * PARTIALLY rendered — `/agents` at 105/30 — clears these floors and is
@@ -207,8 +223,8 @@ export const SETTLED_TALL_FACTOR = 1.25
  * a separate piece of work. What it removes is the case #2036 was filed about,
  * where the region holds nothing at all.
  */
-export const MIN_CONTENT_CHARS = 80
-export const MIN_CONTENT_ELEMENTS = 8
+export const MIN_CONTENT_CHARS = 30
+export const MIN_CONTENT_ELEMENTS = 6
 
 /**
  * How long the content region gets to resolve, and how often it is re-probed.

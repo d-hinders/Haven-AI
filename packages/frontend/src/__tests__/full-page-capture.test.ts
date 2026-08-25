@@ -615,6 +615,24 @@ const AGENTS_PARTIAL: ContentProbe = {
   contentElements: 30,
 }
 
+/**
+ * `/accounts` on `SCREENSHOT_FIXTURE=empty`, mobile — the LEANEST screen this
+ * app genuinely renders, measured warm on a real run. This is the population
+ * that constrains the floor, and the one the first two tunings never measured:
+ * design review refused "80 is surely safe for empty states" as inference
+ * wearing a measured voice, and the measurement found 87 chars — a 1.09x
+ * margin. Sibling readings: `/contacts` mobile 116/23, `/accounts` desktop
+ * 129/15, `/dashboard` empty mobile 298/109.
+ */
+const EMPTY_STATE_LEANEST: ContentProbe = {
+  found: true,
+  docScrollHeight: 900,
+  viewportHeight: 800,
+  renderedChars: 2_300,
+  contentChars: 87,
+  contentElements: 15,
+}
+
 function fakeContentPage(probes: ContentProbe[]) {
   let index = 0
   const waits: number[] = []
@@ -709,21 +727,31 @@ describe('judgeContentSettled', () => {
   it('pins the floors against the two live populations they sit between', () => {
     // If someone moves these, this is the test that should have to be edited
     // deliberately — and the numbers below say what the edit would cost.
-    expect(MIN_CONTENT_CHARS).toBe(80)
-    expect(MIN_CONTENT_ELEMENTS).toBe(8)
-    // Above the real loading fallback, below the leanest FULLY rendered route,
-    // with room on both sides. Both measured warm on live capture runs.
+    expect(MIN_CONTENT_CHARS).toBe(30)
+    expect(MIN_CONTENT_ELEMENTS).toBe(6)
+    // Above the real loading fallback, below the LEANEST REAL SCREEN — which is
+    // an empty state, not a populated route. Both measured warm on live runs.
     expect(DASHBOARD_LOADING.contentChars).toBeLessThan(MIN_CONTENT_CHARS)
     expect(DASHBOARD_LOADING.contentElements).toBeLessThan(MIN_CONTENT_ELEMENTS)
-    expect(DASHBOARD_RENDERED.contentChars).toBeGreaterThan(MIN_CONTENT_CHARS)
-    expect(DASHBOARD_RENDERED.contentElements).toBeGreaterThan(MIN_CONTENT_ELEMENTS)
-    // Neither side may be hugged. Asserted as ratios, so an edit that clears
-    // one population by a hair fails HERE rather than in a capture run somebody
-    // has to debug at load average 400.
-    expect(MIN_CONTENT_CHARS / DASHBOARD_LOADING.contentChars!).toBeGreaterThanOrEqual(4)
-    expect(DASHBOARD_RENDERED.contentChars! / MIN_CONTENT_CHARS).toBeGreaterThanOrEqual(4)
+    expect(EMPTY_STATE_LEANEST.contentChars).toBeGreaterThan(MIN_CONTENT_CHARS)
+    expect(EMPTY_STATE_LEANEST.contentElements).toBeGreaterThan(MIN_CONTENT_ELEMENTS)
+    // Neither side may be hugged. Asserted as ratios, because the defect these
+    // floors nearly shipped was a 1.09x margin that looked fine as a bare
+    // inequality — `/accounts` empty at 87 chars against a floor of 80.
+    expect(MIN_CONTENT_CHARS / DASHBOARD_LOADING.contentChars!).toBeGreaterThanOrEqual(3)
+    expect(EMPTY_STATE_LEANEST.contentChars! / MIN_CONTENT_CHARS).toBeGreaterThanOrEqual(2)
     expect(MIN_CONTENT_ELEMENTS / DASHBOARD_LOADING.contentElements!).toBeGreaterThanOrEqual(2)
-    expect(DASHBOARD_RENDERED.contentElements! / MIN_CONTENT_ELEMENTS).toBeGreaterThanOrEqual(4)
+    expect(EMPTY_STATE_LEANEST.contentElements! / MIN_CONTENT_ELEMENTS).toBeGreaterThanOrEqual(2)
+  })
+
+  it('says YES to the leanest EMPTY STATE the app renders (#2036 design review)', () => {
+    // The positive control that matters most, and the one that was missing.
+    // A guard tuned against populated screens refuses the sparse ones — which
+    // are exactly the screens a design reviewer most needs photographed.
+    const verdict = judgeContentSettled(EMPTY_STATE_LEANEST)
+
+    expect(verdict.settled).toBe(true)
+    expect(verdict.reason).toBe('settled')
   })
 
   it('states its own boundary: a PARTIALLY rendered route still passes', () => {

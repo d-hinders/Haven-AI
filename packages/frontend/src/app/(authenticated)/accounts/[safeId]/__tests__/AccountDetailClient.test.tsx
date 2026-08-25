@@ -305,6 +305,79 @@ describe('AccountDetailClient', () => {
       ).toBeInTheDocument()
     })
 
+    /**
+     * The notice's second paragraph is branched on owner type, and this is the
+     * guard for it. `haven-reviewer` caught the first version telling EVERY
+     * legacy account its funds were "reachable with your own Safe tooling" —
+     * false for a passkey-only Safe, and contradicting `account-recovery.md`
+     * and `CLAUDE.md` in the same pull request.
+     *
+     * All three branches are asserted, and the `unknown` one matters most: it
+     * is the state where claiming either answer would be a guess, so the
+     * notice must claim NEITHER. A test that only checked the two confident
+     * branches would pass against a component that guessed while loading.
+     */
+    it('tells a wallet-owned Safe it can exit via Safe, and a passkey-only Safe that it cannot', () => {
+      const PASSKEY_SIGNER = '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2'
+      const withOwners = (owners: string[] | null) =>
+        mockUseSafeDetails.mockReturnValue({
+          details: owners
+            ? { address: SAFE.safe_address, owners, threshold: 1, nonce: 1 }
+            : null,
+          loading: owners === null,
+          error: null,
+        })
+      const asPasskeyUser = () =>
+        mockUseAuth.mockReturnValue({
+          user: {
+            id: 'user-1',
+            name: 'Ada',
+            email: 'ada@example.com',
+            wallet_address: null,
+            safes: [SAFE],
+          },
+          activeSafe: SAFE,
+          setActiveSafe: vi.fn(),
+          loading: false,
+          passkeys: [
+            {
+              id: 'passkey-1',
+              credential_id: 'cred-primary',
+              signer_address: PASSKEY_SIGNER,
+              chain_id: SAFE.chain_id,
+              safe_address: SAFE.safe_address,
+              created_at: '2026-05-12T00:00:00Z',
+            },
+          ],
+        })
+
+      // ── wallet owner: Safe's own interface is a real answer ──────────────
+      asPasskeyUser()
+      withOwners(['0x5555555555555555555555555555555555555555'])
+      const wallet = render(<AccountDetailClient />)
+      expect(screen.getByText(/move them at any time/i)).toBeInTheDocument()
+      expect(screen.queryByText(/no self-serve way to move them out/i)).toBeNull()
+      wallet.unmount()
+
+      // ── passkey-only: it is not, and the notice must not pretend ─────────
+      asPasskeyUser()
+      withOwners([PASSKEY_SIGNER])
+      const passkeyOnly = render(<AccountDetailClient />)
+      expect(screen.getByText(/no self-serve way to move them out/i)).toBeInTheDocument()
+      expect(screen.queryByText(/move them at any time/i)).toBeNull()
+      passkeyOnly.unmount()
+
+      // ── unknown: claim NOTHING, while still rendering the notice ─────────
+      asPasskeyUser()
+      withOwners(null)
+      render(<AccountDetailClient />)
+      expect(
+        screen.getByText(/Haven no longer sends payments from this account/i),
+      ).toBeInTheDocument()
+      expect(screen.queryByText(/move them at any time/i)).toBeNull()
+      expect(screen.queryByText(/no self-serve way to move them out/i)).toBeNull()
+    })
+
     it('keeps Send on a delegation account and shows it no retirement note', () => {
       mockUseAuth.mockReturnValue({
         user: {

@@ -1943,6 +1943,62 @@ export const SCENARIOS = {
       await shoot(dialog, 'approve-verification-open')
     },
   },
+  'retired-rail-account': {
+    description:
+      'Account detail for a LEGACY Safe account after the rail retirement (#1989) — RetiredRailNotice present, no Send action',
+    // #1989's design review named this gap: `RetiredRailNotice` is the one
+    // surface the slice ADDS, and no existing capture can show it. Every other
+    // account fixture is `delegator_hybrid`, which by construction renders the
+    // Send button and never renders the notice — so the shared fixture proves
+    // the opposite of what this scenario is for.
+    //
+    // The ONE override is `account_type: 'safe'`, spread from the shared
+    // fixture, exactly as `connect-agent-approve-legacy` above does it. The
+    // account is otherwise identical, which is what makes the pair readable:
+    // the same account on the other rail.
+    api(apiPath) {
+      if (apiPath === '/auth/me') {
+        return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      }
+      if (apiPath === '/user/safes') {
+        return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, {
+        waitUntil: 'networkidle',
+        timeout: 60_000,
+      })
+      await dismissMobileSidebar(page, vp)
+
+      const main = page.locator('main')
+      await main.waitFor({ timeout: 30_000 })
+
+      // The subject.
+      await page
+        .getByText(/Haven no longer sends payments from this account/)
+        .waitFor({ timeout: 20_000 })
+
+      // The READ boundary, asserted on the render rather than argued: the
+      // account is still fully readable next to the notice. Without these the
+      // capture could be filed for a page that failed to load its data and
+      // showed the notice over skeletons.
+      await page.getByRole('heading', { name: FIXTURE_SAFE.name }).waitFor({ timeout: 20_000 })
+      await page.getByRole('button', { name: 'Receive' }).waitFor({ timeout: 20_000 })
+
+      // The negative half, and the reason this scenario is evidence at all.
+      // A notice proves a notice; it does not prove the spend affordance is
+      // gone. If a regression rendered Send ALONGSIDE the notice, every wait
+      // above would still pass and the PNG would be filed under this name.
+      await refuseIfPresent(
+        page.getByRole('button', { name: 'Send', exact: true }),
+        'retired-rail-account · Send button',
+      )
+
+      await shoot(main, 'account')
+    },
+  },
   'connect-agent-approve-legacy': {
     description: 'Connect agent modal, step 4, the APPROVE screen on the LEGACY rail (#1684)',
     // The delegation twin of this (`connect-agent-approve`) cannot reach this

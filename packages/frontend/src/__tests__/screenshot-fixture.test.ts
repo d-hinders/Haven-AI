@@ -429,6 +429,49 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       })
     })
 
+    /**
+     * #1989: the legacy-account capture. Its whole value is that it differs
+     * from the shared fixture in exactly ONE field, so the contract worth
+     * pinning is that difference and nothing else — a scenario that quietly
+     * rebuilt the account would capture a different account and still look
+     * right.
+     */
+    describe('retired-rail-account (#1989)', () => {
+      const legacy = (SCENARIOS as Record<string, ScenarioShape>)['retired-rail-account']
+
+      it('puts the SHARED fixture account on the legacy rail, changing only account_type', () => {
+        const me = legacy.api('/auth/me', 'GET') as {
+          email: string
+          safes: Array<Record<string, unknown>>
+        }
+        const list = legacy.api('/user/safes', 'GET') as {
+          safes: Array<Record<string, unknown>>
+        }
+
+        // Both readers must agree. `AccountDetailClient` resolves the account
+        // from AuthContext, but a disagreeing /user/safes would make the
+        // capture depend on which one won.
+        expect(me.safes[0].account_type).toBe('safe')
+        expect(list.safes[0].account_type).toBe('safe')
+
+        // Same account, not a lookalike — the id is what the capture navigates
+        // to, so a drifted id would 404 into "Account not found" and the
+        // scenario's own absence check would pass for the wrong reason.
+        expect(me.safes[0].id).toBe(FIXTURE_SAFE_ID)
+        expect(me.email).toBe('fixture@haven.test')
+
+        // And ONLY account_type differs. Asserted positively so this fails if
+        // the scenario starts rebuilding the fixture instead of spreading it.
+        expect(me.safes[0].safe_address).toBe(FIXTURE_SAFE_ADDRESS)
+        expect(me.safes[0].is_default).toBe(true)
+      })
+
+      it('leaves every other endpoint to the shared fixture', () => {
+        expect(legacy.api('/agents', 'GET')).toBeUndefined()
+        expect(legacy.api(`/balances/${FIXTURE_SAFE_ADDRESS}`, 'GET')).toBeUndefined()
+      })
+    })
+
     // The 'send-review' (#1856) fixture contract was asserted here. Both the
     // scenario and its subject (`SendModal`) are deleted by #1989 (epic #1440),
     // so the assertions went with them rather than being repointed — a fixture

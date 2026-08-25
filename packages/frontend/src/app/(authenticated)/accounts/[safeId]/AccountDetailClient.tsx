@@ -19,7 +19,7 @@ import TransactionsTable from '@/components/transactions/TransactionsTable'
 import DelegationSendModal from '@/components/DelegationSendModal'
 import AccountSignersCard from '@/components/AccountSignersCard'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
-import RetiredRailNotice from '@/components/RetiredRailNotice'
+import RetiredRailNotice, { type RetiredRailOwnerAccess } from '@/components/RetiredRailNotice'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -165,6 +165,16 @@ export default function AccountDetailClient() {
     // details 500s and pollutes every console session on the default rail.
     // The signer set (Backup & recovery card) is that rail's approval story.
   } = useSafeDetails(safe?.account_type === 'delegator_hybrid' ? null : safeAddress, { chainId })
+
+  // #1989: what a legacy account's owner can still DO about their funds
+  // depends entirely on whether any owner is a WALLET. `unknown` while the
+  // on-chain owner set is loading or failed to load — the notice then claims
+  // nothing, which is the only safe answer in both directions.
+  const retiredRailOwnerAccess: RetiredRailOwnerAccess = !details
+    ? 'unknown'
+    : details.owners.some((owner) => !passkeyAddresses.has(owner.toLowerCase()))
+      ? 'wallet'
+      : 'passkey-only'
 
   const {
     totalUsd,
@@ -319,7 +329,9 @@ export default function AccountDetailClient() {
         }
       />
 
-      {safe.account_type !== 'delegator_hybrid' ? <RetiredRailNotice /> : null}
+      {safe.account_type !== 'delegator_hybrid' ? (
+        <RetiredRailNotice ownerAccess={retiredRailOwnerAccess} />
+      ) : null}
 
       <Card hover={false} elevation="raised" className="overflow-hidden">
         <Card.Header padding="none" className="px-5 py-5 sm:px-6">

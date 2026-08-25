@@ -11,7 +11,12 @@ vi.mock('@/lib/api', async () => {
   }
 })
 
-import { executeSafeTx, proposeSafeTx, type SafeTxParams } from '@/lib/safe-tx'
+import {
+  executeSafeTx,
+  proposeSafeTx,
+  SafeTxReceiptTimeoutError,
+  type SafeTxParams,
+} from '@/lib/safe-tx'
 
 describe('proposeSafeTx', () => {
   beforeEach(() => {
@@ -96,5 +101,59 @@ describe('executeSafeTx (#1229)', () => {
     expect(mockExecSafe).toHaveBeenCalledWith(
       expect.objectContaining({ credential_id: 'cred-backup' }),
     )
+  })
+})
+
+describe('executeSafeTx relayed confirmation state (#1754)', () => {
+  const safeTx: SafeTxParams = {
+    to: '0x1111111111111111111111111111111111111111' as Address,
+    value: 0n,
+    data: '0x',
+    operation: 0,
+    safeTxGas: 0n,
+    baseGas: 0n,
+    gasPrice: 0n,
+    gasToken: '0x0000000000000000000000000000000000000000' as Address,
+    refundReceiver: '0x0000000000000000000000000000000000000000' as Address,
+    nonce: 1n,
+  }
+
+  function relay() {
+    return executeSafeTx(
+      {
+        type: 'passkey',
+        address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2' as Address,
+        credentialId: 'cred-1',
+        chainId: 100,
+      },
+      {} as never,
+      '0x07058311f995c89F4DbE17Db61fa1A3CDe638975' as Address,
+      safeTx,
+      `0x${'ab'.repeat(32)}`,
+      100,
+    )
+  }
+
+  it('raises the same typed timeout error the direct-signing path raises', async () => {
+    // The relay answers 202 + status 'pending' when it broadcast the tx but
+    // stopped waiting. Reading that as a plain success would report a
+    // confirmed transaction that has not confirmed — the mirror image of the
+    // 502 "reverted" this issue removed, and equally untrue.
+    mockExecSafe.mockResolvedValue({ tx_hash: '0xpending', chain_id: 100, status: 'pending' })
+
+    await expect(relay()).rejects.toBeInstanceOf(SafeTxReceiptTimeoutError)
+    await expect(relay()).rejects.toMatchObject({ txHash: '0xpending' })
+  })
+
+  it('returns the hash normally when the relay confirms', async () => {
+    mockExecSafe.mockResolvedValue({ tx_hash: '0xmined', chain_id: 100, status: 'confirmed' })
+
+    await expect(relay()).resolves.toEqual({ txHash: '0xmined' })
+  })
+
+  it('treats a response with no status field as confirmed (older backend)', async () => {
+    mockExecSafe.mockResolvedValue({ tx_hash: '0xmined', chain_id: 100 })
+
+    await expect(relay()).resolves.toEqual({ txHash: '0xmined' })
   })
 })

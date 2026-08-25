@@ -24,6 +24,7 @@ import { openOutboundRecord, submitRecorded } from '../../infra/outbound-queue.j
 import {
   findOutboundEvidenceTxHash,
   findOutboundTxByHash,
+  findOutboundTxById,
 } from '../../infra/repositories/outbound-txs.js'
 import { getEasDeployment, getPassportSchemaUid } from './schema.js'
 import type { Anchor, AnchorResult, PassportClaim } from './issuance.js'
@@ -429,11 +430,26 @@ export async function classifyAnchorTxLiveness(
   //    and the nonce it stamped at broadcast is the fact we need.
   const record = await findOutboundTxByHash(chainId, txHash)
   if (!record || record.nonce === null) return 'live'
-  // A replaced row means another transaction at the SAME nonce carries this
-  // payload forward; re-minting at a fresh nonce would duplicate it rather
-  // than replace it. (`passport_attest` is withheld from replacement by
-  // #1735, so this is defence for a hand-run bump, not a live path.)
-  if (record.status === 'replaced' || record.status === 'mined') return 'live'
+  if (record.status === 'mined') return 'live'
+  // A replaced row USUALLY means another transaction at the SAME nonce
+  // carries this payload forward — a fee bump — and re-minting at a fresh
+  // nonce would duplicate it rather than replace it. But since #1743 there is
+  // a second kind of replacement: the operator LANE CANCEL, a 0-value
+  // self-send that deliberately does NOT carry the payload and exists so the
+  // burned nonce becomes exactly the death evidence below. Walking the link
+  // and comparing calldata is what tells them apart — a replacement whose
+  // payload differs carried nothing forward, so the nonce evidence (step 3)
+  // stays the arbiter. An unwalkable link is treated as a payload-carrying
+  // bump: `live`, the conservative reading, because guessing death is the
+  // one mistake this probe exists to never make.
+  if (record.status === 'replaced') {
+    const replacement = record.replaced_by ? await findOutboundTxById(record.replaced_by) : null
+    if (!replacement || replacement.data === record.data) return 'live'
+    // A cancel-style replacement: fall through to the nonce evidence. Note
+    // the receipt re-read in step 4 still protects the race where the ATTEST
+    // mined despite the cancel — the consumed nonce plus our own receipt
+    // reads `live`, and #1043's recovery closes on the original anchor.
+  }
 
   // 3. Has the slot been consumed by something else, durably? Read as of a
   //    finalized/buried block, never the head — see `settledReadBlock`. The

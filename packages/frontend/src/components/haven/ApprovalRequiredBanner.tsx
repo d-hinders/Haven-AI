@@ -40,13 +40,24 @@ const TONE_STYLES: Record<BannerTone, { frame: string; badge: string; icon: type
   },
 }
 
+/**
+ * `title` is REQUIRED, deliberately (#1947). The prop used to default to
+ * "Payments above budget need approval" — a queue-and-approve claim that is
+ * false on the delegation rail, where budget, recipient and expiry are
+ * enforced on-chain and an over-budget payment is declined during prepare
+ * rather than queued (`routes/payments.ts`, `rails/execution-rail.ts`). A
+ * default that is wrong for the default rail is worse than no default: every
+ * call site was already naming its own fact ("Paused in Haven", "Network not
+ * confirmed", ...), so the default's only remaining job was to smuggle the
+ * legacy model into any future call site that forgot to think about it.
+ */
 export function ApprovalRequiredBanner({
-  title = 'Payments above budget need approval',
+  title,
   children,
   density = 'normal',
   tone = 'warning',
 }: {
-  title?: string
+  title: string
   children: ReactNode
   density?: 'normal' | 'compact'
   tone?: BannerTone

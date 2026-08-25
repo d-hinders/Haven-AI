@@ -29,6 +29,7 @@ import {
   type HavenCatalogEntry,
   type SweepAuthorization,
   type X402McpTransport,
+  type X402PaymentOption,
   type X402PaymentRequired,
   selectX402SettlementScheme,
   normalizePaymentRequired,
@@ -852,11 +853,6 @@ export function createToolHandlers(
             toolArguments: (args.arguments as Record<string, unknown> | undefined) ?? {},
             idempotencyKey: args.idempotency_key as string | undefined,
           })
-          // Enforce the required price cap against the LIVE merchant price,
-          // before creating the funding intent. The catalog price is only a hint.
-          // #1351: a human cap binds to the LIVE quote's own asset/decimals here.
-          const capAtomic = resolveCapAtomic(cap, quote)
-          assertWithinMaxAmount(quote.amountAtomic, capAtomic.atomic, quote.token, capAtomic.label)
           const prefetchedAgent = await agentPrefetch
           const prefetchedDelegate = prefetchedAgent?.delegateAddress
 
@@ -870,6 +866,23 @@ export function createToolHandlers(
             (quote.paymentRequired as X402PaymentRequired).accepts,
             { delegationRail: prefetchedAgent?.executionRail === 'delegation' },
           )
+
+          // Enforce the required price cap against the LIVE merchant price,
+          // before creating any intent — funding or settlement child.
+          // The catalog price is only a hint. #1351: a human cap binds to the
+          // LIVE asset/decimals.
+          //
+          // #2051: this now runs AFTER scheme selection and prices the option
+          // that will ACTUALLY be authorized, not whichever entry
+          // `selectStandardPaymentOption` happened to return. See
+          // `priceSelectedOption`. `quote.accepted` is the fallback only for
+          // completeness — `buildX402Quote` already threw if no standard
+          // option existed, so a non-null quote guarantees the selector found
+          // at least the 3009 one.
+          //
+          // Moving it below the agent prefetch changes no error ordering: the
+          // prefetch is `.then(a => a, () => undefined)`, so it cannot throw.
+          const priced = priceSelectedOption(cap, paySelection?.option ?? quote.accepted)
 
           if (paySelection?.scheme === 'erc7710') {
             const prepared = await haven.prepareX402Erc7710(
@@ -885,9 +898,14 @@ export function createToolHandlers(
                 merchant_pay_to: prepared.settlement.merchantPayTo,
                 facilitator_addresses: prepared.settlement.facilitatorAddresses,
               },
-              amount_atomic: quote.amountAtomic,
-              amount: quote.amount,
-              token: quote.token,
+              // #2051: the amount ACTUALLY authorized, from the option this
+              // branch selected — not `quote.amountAtomic`, which is the
+              // UNSELECTED standard entry's price. Reporting that number is
+              // what let a steered cap bypass look like a 1 USDC purchase in
+              // the agent's own logs.
+              amount_atomic: prepared.settlement.amountAtomic,
+              amount: priced.amount,
+              token: priced.token,
               merchant_url: merchantUrl,
               ...(merchantUrl !== args.merchant_url
                 ? { merchant_url_discovered_from: args.merchant_url }
@@ -912,9 +930,11 @@ export function createToolHandlers(
                 summary: {
                   payment_id: prepared.paymentId,
                   status: 'pending_signature',
-                  amount: quote.amount,
-                  amount_atomic: quote.amountAtomic,
-                  token: quote.token,
+                  // #2051: same correction as the top-level fields — the
+                  // summary is what an agent surfaces to the user.
+                  amount: priced.amount,
+                  amount_atomic: prepared.settlement.amountAtomic,
+                  token: priced.token,
                   network: prepared.settlement.network,
                   expires_at: undefined,
                   product: args.tool_name,
@@ -1091,21 +1111,48 @@ export function createToolHandlers(
             idempotencyKey: args.idempotency_key as string | undefined,
           })
 
-          // 3. A cap is REQUIRED on this guided path (readMaxAmountCap above,
-          // before any network call) — no cap_warning softness. Enforced
-          // against the LIVE quote BEFORE any funding intent is created
-          // (mutation-tested: reordering this after createX402Intent below
-          // must fail a test). #1351: a human cap resolves against the LIVE
-          // quote's asset/decimals here, never the catalog's indicative price.
-          const capAtomic = resolveCapAtomic(cap, quote)
-          assertWithinMaxAmount(quote.amountAtomic, capAtomic.atomic, quote.token, capAtomic.label)
-
-          // 4. Rail-aware allowance/budget report. A failed read NEVER fails
-          // this preflight — sufficient degrades to null with a warning, and
-          // the on-chain policy remains the actual gate either way.
+          // 3. Resolve the account's RAIL. A hard pre-intent refusal (#1319):
+          // every check below branches on it, so a failed read cannot be
+          // degraded here the way the allowance read at step 5 can.
           const agent = await agentPromise
           const rail = agent.executionRail
           const source = rail === 'delegation' ? 'active_delegations' : 'allowance_module'
+
+          // 4. Both halves of the #1450 rule: the merchant must advertise
+          // erc7710 AND the account must be on the delegation rail. #1453's
+          // selector is the single place that rule lives; #1547 wired it into
+          // this guided path, which was hard-wired to the 3009 funding leg —
+          // the recommended catalog route forced the fallback scheme while
+          // haven_pay_mcp_tool got the preferred one. Unlike that tool's
+          // prefetch, the agent read here is a hard pre-intent refusal
+          // (#1319), so the rail is always known by this point.
+          //
+          // #2051 moved this ABOVE the cap and budget checks so both can be
+          // asked about the option that will actually be authorized. Nothing
+          // between here and the branch talks to the merchant or creates an
+          // intent, so "refused before any funds move" is unchanged; the
+          // reordering only means a failing agent read now surfaces ahead of a
+          // cap violation, and that read was already a hard refusal one line
+          // above.
+          const catalogSelection = selectX402SettlementScheme(
+            (quote.paymentRequired as X402PaymentRequired).accepts,
+            { delegationRail: rail === 'delegation' },
+          )
+
+          // 5. A cap is REQUIRED on this guided path (readMaxAmountCap above,
+          // before any network call) — no cap_warning softness. Enforced
+          // BEFORE any intent is created, funding or settlement child
+          // (mutation-tested: reordering this after createX402Intent below
+          // must fail a test). #1351: a human cap resolves against the LIVE
+          // asset/decimals, never the catalog's indicative price. #2051: and
+          // against the SELECTED option's asset/decimals, never the
+          // unselected standard entry's — see `priceSelectedOption`.
+          const priced = priceSelectedOption(cap, catalogSelection?.option ?? quote.accepted)
+          const authorizedAsset = (catalogSelection?.option ?? quote.accepted).asset
+
+          // 5b. Rail-aware allowance/budget report. A failed read NEVER fails
+          // this preflight — sufficient degrades to null with a warning, and
+          // the on-chain policy remains the actual gate either way.
           const warnings: AgentPaymentWarning[] = []
           let allowanceBlock: {
             rail: 'legacy' | 'delegation'
@@ -1124,13 +1171,18 @@ export function createToolHandlers(
             const allowancesResult = await allowancesPromise
             if (!allowancesResult.ok) throw allowancesResult.error
             const allowances = allowancesResult.value
+            // #2051: match and compare against the SELECTED option's asset
+            // and amount. This pre-check is the other client-side guard on
+            // this path, and it was steerable the same way the cap was — a
+            // cheap standard entry sailed past a small remaining budget while
+            // an expensive erc7710 entry was what got authorized.
             const match = allowances.allowances.find(
-              (a) => a.tokenAddress.toLowerCase() === quote.asset.toLowerCase(),
+              (a) => a.tokenAddress.toLowerCase() === authorizedAsset.toLowerCase(),
             )
             const remainingAtomic = match ? match.onchain.remaining : '0'
             allowanceBlock = {
               rail,
-              sufficient: BigInt(remainingAtomic) >= BigInt(quote.amountAtomic),
+              sufficient: BigInt(remainingAtomic) >= BigInt(priced.amountAtomic),
               remaining_atomic: remainingAtomic,
               source,
             }
@@ -1150,7 +1202,7 @@ export function createToolHandlers(
                 code: AgentPaymentWarningCode.AllowanceReadOptimistic,
                 message:
                   'The reported remaining delegation budget could not be read live from chain, so ' +
-                  `${remainingAtomic} ${quote.token} atomic is the configured full budget, not a confirmed ` +
+                  `${remainingAtomic} ${priced.token} atomic is the configured full budget, not a confirmed ` +
                   'live figure. The on-chain policy (the budget caveat enforcer) remains the actual ' +
                   'spend gate at redemption regardless of this report.',
               })
@@ -1166,7 +1218,7 @@ export function createToolHandlers(
             })
           }
 
-          // 5. Delegation rail: over-budget REVERTS at prepare, no approval
+          // 6. Delegation rail: over-budget REVERTS at prepare, no approval
           // queue exists on that rail (#1090) — refuse BEFORE any funding
           // intent (mutation-tested: reading agent_allowances here instead of
           // the derived budgets must fail a test).
@@ -1174,8 +1226,9 @@ export function createToolHandlers(
             throw new HostedToolError({
               code: 'DELEGATION_BUDGET_EXCEEDED',
               message:
-                `The live quoted amount (${quote.amountAtomic} ${quote.token} atomic) exceeds the agent's ` +
-                `remaining active delegation budget (${allowanceBlock.remaining_atomic} ${quote.token} atomic). ` +
+                `The amount this purchase would authorize (${priced.amountAtomic} ${priced.token} atomic) ` +
+                `exceeds the agent's remaining active delegation budget ` +
+                `(${allowanceBlock.remaining_atomic} ${priced.token} atomic). ` +
                 'There is no approval queue on the delegation rail — an over-budget redemption would revert ' +
                 'on-chain. Ask the wallet owner to grant or raise the budget in Haven before retrying.',
               statusCode: 403,
@@ -1184,36 +1237,31 @@ export function createToolHandlers(
             })
           }
 
-          // 6. Catalog price is indicative; the live quote above is
+          // 7. Catalog price is indicative; the live quote above is
           // authoritative — warn (never refuse) when they disagree. Computed
           // BEFORE the scheme branch: both settlement shapes carry it.
-          if (entry.priceAtomic && entry.priceAtomic !== quote.amountAtomic) {
+          // #2051: compared against the amount that will ACTUALLY be
+          // authorized — on erc7710 that is a different accepts[] entry than
+          // the quote's, so comparing the quote's would describe a price the
+          // user is not being asked to pay.
+          if (entry.priceAtomic && entry.priceAtomic !== priced.amountAtomic) {
             warnings.push({
               code: AgentPaymentWarningCode.CatalogPriceDiffers,
               message:
                 `The catalog's indicative price (${entry.priceAtomic} atomic) differs from the live ` +
-                `merchant quote (${quote.amountAtomic} ${quote.token} atomic). The live quote is authoritative.`,
+                `merchant quote (${priced.amountAtomic} ${priced.token} atomic). The live quote is authoritative.`,
             })
           }
 
-          // 7. Both halves of the #1450 rule: the merchant must advertise
-          // erc7710 AND the account must be on the delegation rail. #1453's
-          // selector is the single place that rule lives; #1547 wires it into
-          // this guided path, which was hard-wired to the 3009 funding leg —
-          // the recommended catalog route forced the fallback scheme while
-          // haven_pay_mcp_tool got the preferred one. Unlike that tool's
-          // prefetch, the agent read here is a hard pre-intent refusal
-          // (#1319), so the rail is always known by this point.
+          // 8. The scheme was selected at step 4 (#2051), so the cap and the
+          // budget pre-check could both be asked about the option that will
+          // actually be authorized rather than a different accepts[] entry.
           const catalogCallContext = {
             merchantUrl,
             toolName: entry.toolName,
             arguments: entry.toolArguments ?? {},
             ...(quote.mcpTransport ? { mcpTransport: quote.mcpTransport } : {}),
           }
-          const catalogSelection = selectX402SettlementScheme(
-            (quote.paymentRequired as X402PaymentRequired).accepts,
-            { delegationRail: rail === 'delegation' },
-          )
 
           if (catalogSelection?.scheme === 'erc7710') {
             const prepared = await haven.prepareX402Erc7710(
@@ -1236,9 +1284,11 @@ export function createToolHandlers(
                 merchant_pay_to: prepared.settlement.merchantPayTo,
                 facilitator_addresses: prepared.settlement.facilitatorAddresses,
               },
-              amount_atomic: quote.amountAtomic,
-              amount: quote.amount,
-              token: quote.token,
+              // #2051: the amount ACTUALLY authorized, from the option this
+              // branch selected — not the unselected standard entry's price.
+              amount_atomic: prepared.settlement.amountAtomic,
+              amount: priced.amount,
+              token: priced.token,
               merchant_url: merchantUrl,
               tool_name: entry.toolName,
               arguments: entry.toolArguments ?? {},
@@ -1267,9 +1317,10 @@ export function createToolHandlers(
                 summary: {
                   payment_id: prepared.paymentId,
                   status: 'pending_signature',
-                  amount: quote.amount,
-                  amount_atomic: quote.amountAtomic,
-                  token: quote.token,
+                  // #2051: same correction as the top-level fields.
+                  amount: priced.amount,
+                  amount_atomic: prepared.settlement.amountAtomic,
+                  token: priced.token,
                   network: prepared.settlement.network,
                   // The child's own short expiry is the binding window here,
                   // not the intent's — no quote-expiry warning applies.
@@ -1287,7 +1338,7 @@ export function createToolHandlers(
             }
           }
 
-          // 8. EIP-3009 bridge (the merchant does not advertise erc7710, or
+          // 9. EIP-3009 bridge (the merchant does not advertise erc7710, or
           // the account is not on the delegation rail): create the funding
           // intent — IDENTICAL machinery to haven_pay_mcp_tool
           // (mcpCallContext persisted per #1307), so the signer flow from
@@ -1695,23 +1746,17 @@ export function createToolHandlers(
           // nothing payable was selected at all, in which case
           // createX402Intent below raises the pre-existing
           // no-compatible-option refusal and there is nothing to cap.
+          //
+          // #2051 extracted the body of this check into `priceSelectedOption`
+          // and gave the same call to `haven_pay_mcp_tool` and
+          // `haven_prepare_catalog_purchase`, which carried the identical
+          // defect on already-shipped surfaces. Three inline copies of one
+          // spending control is how the two directions of this bug got fixed
+          // in one place and left standing in two; there is now one function
+          // and three callers. Behaviour here is unchanged — same selector,
+          // same asset/decimals, same assertion, same order.
           if (selection) {
-            const selectedToken = resolveTokenFromAddress(
-              selection.option.asset,
-              selection.option.network,
-            )
-            const selectedCap = resolveCapAtomic(cap, {
-              decimals: selectedToken?.decimals ?? null,
-              token: selectedToken?.symbol ?? 'the merchant asset',
-              asset: selection.option.asset,
-              network: selection.option.network,
-            })
-            assertWithinMaxAmount(
-              x402AuthorizationAmount(selection.option),
-              selectedCap.atomic,
-              selectedToken?.symbol,
-              selectedCap.label,
-            )
+            priceSelectedOption(cap, selection.option)
           }
 
           if (selection?.scheme === 'erc7710') {
@@ -2645,6 +2690,93 @@ function resolveCapAtomic(
     })
   }
   return { atomic: atomic.toString(), label: `max_amount_human ${cap.value} ${quote.token}` }
+}
+
+/**
+ * Atomic → human display for an amount whose decimals were resolved from the
+ * asset itself. The SDK's `decimalFromUsdcAtomic` hardcodes 6, which is right
+ * for every asset Haven can settle today and wrong the moment that changes;
+ * this one is handed the decimals the same `resolveTokenFromAddress` lookup
+ * produced the cap conversion from, so the display and the cap can never
+ * disagree about what a token is worth.
+ */
+function atomicToDisplay(atomic: string, decimals: number): string {
+  const value = BigInt(atomic)
+  const unit = 10n ** BigInt(decimals)
+  const whole = value / unit
+  const fraction = (value % unit).toString().padStart(decimals, '0').replace(/0+$/, '')
+  return fraction ? `${whole}.${fraction}` : whole.toString()
+}
+
+/**
+ * #2051 — price the SELECTED payment option and bind the user's cap to it.
+ *
+ * The defect this exists to close: #1453 made `selectStandardPaymentOption`
+ * and `selectErc7710PaymentOption` mutually exclusive by construction, so a
+ * cap checked against the standard entry constrained a DIFFERENT `accepts[]`
+ * entry than `prepareX402Erc7710` goes on to authorize — and nothing tied
+ * their amounts together. Because `payment_required` is merchant-controlled,
+ * the merchant got to choose which entry the cap was compared against: that
+ * is a guard an attacker can STEER, not one that merely fails to bind.
+ * Measured live on the shipped tools at 900 USDC authorized against a stated
+ * 1 USDC cap, with the response reporting 1 USDC (#2051).
+ *
+ * Two properties, and both matter:
+ *
+ * 1. **Checked ONCE, against whichever option the selector actually
+ *    returned.** Leaving the standard-entry check in place ahead of scheme
+ *    selection leaves the mirror-image bug — an expensive standard entry
+ *    beside a cheap erc7710 entry gets refused citing an amount that was
+ *    never going to be authorized. Fail-safe, but it makes stating a
+ *    spending limit the thing that breaks a payable purchase, which defeats
+ *    the point of the cap working. (Proved live on #2052 at 3 USDC standard /
+ *    0.50 USDC erc7710 against a 1 USDC cap.)
+ *
+ * 2. **Converted with the selected option's OWN asset and decimals.** A human
+ *    cap ("1" = 1 USDC) is meaningless without them, and borrowing the other
+ *    entry's is the same class of mistake one level down.
+ *
+ * The returned amounts are then what the response REPORTS, so the receipt an
+ * agent logs is the amount that was actually authorized. The misreport shares
+ * this root cause and is not fixed by fixing the cap alone.
+ *
+ * All THREE hosted call sites go through this one function —
+ * `haven_pay_x402_quote` (#2041/#2052, which established the shape inline),
+ * `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` — so the rule
+ * cannot drift into three shapes of the same check. It got fixed in one place
+ * and left standing in two exactly once already; that is what this extraction
+ * is for.
+ *
+ * There is deliberately NO backend backstop for this: `runDelegationAuthorize`
+ * takes `amountRaw` as given, so the client is the only place `max_amount`
+ * exists at all. What still binds is the on-chain BUDGET at merchant
+ * redemption, via the caveat enforcer — a different mechanism, and the reason
+ * the blast radius is bounded rather than unbounded.
+ */
+function priceSelectedOption(
+  cap: MaxAmountCap,
+  option: X402PaymentOption,
+): { amountAtomic: string; amount: string; token: string; decimals: number | null } {
+  const amountAtomic = x402AuthorizationAmount(option)
+  const token = resolveTokenFromAddress(option.asset, option.network)
+  const decimals = token?.decimals ?? null
+  const capAtomic = resolveCapAtomic(cap, {
+    decimals,
+    token: token?.symbol ?? 'the merchant asset',
+    asset: option.asset,
+    network: option.network,
+  })
+  assertWithinMaxAmount(amountAtomic, capAtomic.atomic, token?.symbol, capAtomic.label)
+  return {
+    amountAtomic,
+    // `decimals === null` means Haven does not recognise the asset. A human
+    // cap already refused above (`resolveCapAtomic` fails closed there); an
+    // ATOMIC cap can still be enforced, so fall back to echoing the atomic
+    // figure rather than converting against a guess.
+    amount: decimals === null ? amountAtomic : atomicToDisplay(amountAtomic, decimals),
+    token: token?.symbol ?? 'USDC',
+    decimals,
+  }
 }
 
 function parse<TName extends HostedToolName>(name: TName, input: unknown): Record<string, any> {

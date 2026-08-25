@@ -186,6 +186,11 @@ describe('Tooltip reachability (#2038)', () => {
     // The other half of the trade-off, and the reason the suppression is a
     // WINDOW and not a latch: on a touchscreen laptop, one incidental tap must
     // not kill hover on this trigger for the rest of its life.
+    //
+    // NOTE what this does NOT prove. Five seconds is far past any plausible
+    // value of the constant, so this passes identically at 300ms or 4000ms.
+    // It pins that the window EXPIRES, never that 1000 is the right width —
+    // that needs a real-device trace (#2046).
     vi.useFakeTimers()
     try {
       vi.setSystemTime(new Date('2026-08-25T12:00:00Z'))

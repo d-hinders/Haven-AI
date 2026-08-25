@@ -112,8 +112,15 @@ const VIEWPORT_MARGIN = 8
  * had just closed — and, on a trigger nested in a card link, opened one that
  * then survived the navigation. A latch fixes that and breaks something else:
  * on a touchscreen laptop, one incidental tap would kill hover on that trigger
- * for the rest of the component's life. A second is far past every synthetic
- * event and far short of a user coming back with a trackpad.
+ * for the rest of the component's life.
+ *
+ * The window's EXISTENCE is proven by test; the specific `1000` is not. The
+ * test advances five seconds, so it passes identically at 300 or 4000 — a
+ * condition that holds says nothing about how close it is. "A second is far
+ * past every synthetic event and far short of a user returning with a
+ * trackpad" is reasoning, not a measurement. Settling it needs a real-device
+ * trace of the `touchend` → synthetic `mouseenter` gap: #2046, which also
+ * carries the `performance.now()` swap (this clock is non-monotonic).
  */
 const MOUSE_AFTER_TOUCH_MS = 1000
 

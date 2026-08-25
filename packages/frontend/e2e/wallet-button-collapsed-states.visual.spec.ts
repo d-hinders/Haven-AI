@@ -164,9 +164,11 @@ const SM_BREAKPOINT_PX = 640
 const MOBILE = VIEWPORTS.find((vp) => vp.width < SM_BREAKPOINT_PX)
 
 /**
- * The collapsed box, from `COLLAPSE_BELOW_SM`'s `h-10 w-10` — and the
- * notification bell's own painted box, which is the point of the number
- * (`WalletButton.tsx:106-108`). Asserted as PAINTED geometry so the capture is
+ * The collapsed box, from `COLLAPSE_BELOW_SM`'s `h-10 w-10`. It was chosen to
+ * match the notification bell's own painted box, which WAS the point of the
+ * number (`WalletButton.tsx:106-108`) — #1989 deleted the bell with the Safe
+ * rail, so 40 is now simply the collapsed wallet's size and mirrors nothing.
+ * The value is unchanged and still asserted; only its rationale expired. Asserted as PAINTED geometry so the capture is
  * known to be of a 40px square and not of a control that quietly regrew.
  */
 const COLLAPSED_BOX_PX = 40
@@ -222,8 +224,11 @@ const OTHER_STATE_NAMES = ['Connect wallet', 'Wrong network', 'Passkey'] as cons
  *
  * `TopBar.tsx` renders exactly two regions plus an optional action slot, with
  * the wallet last inside the right one: `<div className="ml-auto flex ...">`
- * containing `<ApprovalNotifications />` then `<WalletButton />`. So: the last
- * direct `div` child of the bar, and the last `button` in it. The same
+ * containing `<WalletButton />`. It also held `<ApprovalNotifications />`
+ * before it until #1989 deleted that with the Safe rail, so the wallet is now
+ * the region's ONLY child — the positional handle is unchanged and still
+ * correct, but "last of several" is now "the only one". So: the last direct
+ * `div` child of the bar, and the last `button` in it. The same
  * positional handle `mobile-nav-tap-target.mobile.spec.ts` uses, for the same
  * reason it uses it.
  *
@@ -344,7 +349,7 @@ async function expectCollapsedState(
   await expect(
     control,
     `${context}: no wallet control at the end of the bar's right region. ` +
-      `TopBar renders ApprovalNotifications then WalletButton there; a count of 0 ` +
+      `TopBar renders WalletButton at the end of that region; a count of 0 ` +
       `means the region moved, not that a branch chose wrong.`,
   ).toHaveCount(1)
 

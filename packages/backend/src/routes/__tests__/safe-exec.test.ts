@@ -90,6 +90,9 @@ vi.mock('ethers', async () => {
 })
 
 import { buildApp } from '../../__tests__/helpers.js'
+import { SAFE_EXEC_CONFIRM_TIMEOUT_MS } from '../safe-exec.js'
+import { PASSKEY_SIGNER_DEPLOY_CONFIRM_TIMEOUT_MS } from '../../infra/chain/safe-proxy-deployer.js'
+import { STALE_BROADCAST_SECONDS } from '../../infra/outbound-bump-worker.js'
 
 describe('Safe exec routes', () => {
   let app: FastifyInstance
@@ -223,6 +226,10 @@ describe('Safe exec routes', () => {
     expect(response.json()).toEqual({
       tx_hash: '0xtxhash',
       chain_id: 100,
+      // #1754: explicit discriminator, so a client branches on one field
+      // rather than on the HTTP status. Additive — `tx_hash`/`chain_id` are
+      // byte-identical to what this route answered before.
+      status: 'confirmed',
     })
     expect(mockWarnIfRelayerLow).toHaveBeenCalledWith(100)
     expect(mockGetRelayer).toHaveBeenCalledWith(100)
@@ -438,6 +445,201 @@ describe('Safe exec routes', () => {
       BigInt('0xffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100'),
       BigInt('0x445a0683e494ea0c5af3e83c5159fbe47cf9e765'),
     )
+  })
+
+  // ── Confirmation-wait boundedness: timeout vs revert (#1754, #1755) ──
+  //
+  // The premise, verified against ethers 6.16.0 rather than assumed:
+  // `TransactionResponse.wait(_confirms, _timeout)` computes
+  // `timeout = (_timeout == null) ? 0 : _timeout` and only arms the rejecting
+  // timer `if (timeout > 0)`. So the pre-#1754 bare `tx.wait()` could not
+  // reject with TIMEOUT at all — the timeout case did not exist to be
+  // mis-mapped; the wait simply never returned. A revert is separately
+  // distinguishable (`CALL_EXCEPTION`), but nothing branched on it: the outer
+  // catch answered `502 "Safe execution reverted on-chain"` for every
+  // rejection. These tests pin BOTH halves — the new pending answer AND the
+  // unchanged revert answer — because a test that only exercises one proves
+  // nothing about the distinction.
+
+  /** What ethers v6 rejects a timed-out `wait()` with. */
+  function waitTimeoutError(): Error {
+    const err = new Error('wait for transaction timeout')
+    ;(err as unknown as { code: string }).code = 'TIMEOUT'
+    return err
+  }
+
+  /** What ethers v6 rejects a mined-and-reverted `wait()` with. */
+  function callExceptionError(): Error {
+    const err = new Error('transaction execution reverted')
+    ;(err as unknown as { code: string }).code = 'CALL_EXCEPTION'
+    return err
+  }
+
+  /**
+   * The Safe-bound onboarding passkey, answered by WHAT the route asks rather
+   * than by call order — the #1227 ratchet's rule. These tests own the
+   * DECISION taken after the wait, not the queries.
+   */
+  function stubSingleOwnerPasskey(): void {
+    stubPasskeyQueries({
+      bound: [{
+        public_key_x: Buffer.from(
+          '11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff',
+          'hex',
+        ),
+        public_key_y: Buffer.from(
+          'ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100',
+          'hex',
+        ),
+        signer_address: signerAddress,
+      }],
+    })
+  }
+
+  function execRequest(token: string) {
+    return app.inject({
+      method: 'POST',
+      url: '/safe/exec',
+      headers: { authorization: `Bearer ${token}` },
+      payload: validBody,
+    })
+  }
+
+  it('POST /safe/exec bounds the confirmation wait instead of waiting indefinitely', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    stubSingleOwnerPasskey()
+    const wait = vi.fn().mockResolvedValue({})
+    mockExecTransaction.mockResolvedValue({ hash: '0xtxhash', wait })
+
+    const response = await execRequest(token)
+
+    expect(response.statusCode).toBe(201)
+    // The whole defect starts here: no second argument means no deadline.
+    expect(wait.mock.calls).toEqual([[1, SAFE_EXEC_CONFIRM_TIMEOUT_MS]])
+  })
+
+  it('POST /safe/exec reports a confirmation TIMEOUT as pending, not as a revert', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    stubSingleOwnerPasskey()
+    mockExecTransaction.mockResolvedValue({
+      hash: '0xpendinghash',
+      wait: vi.fn().mockRejectedValue(waitTimeoutError()),
+    })
+
+    const response = await execRequest(token)
+
+    expect(response.statusCode).toBe(202)
+    const body = response.json()
+    expect(body.status).toBe('pending')
+    // The hash is the whole hand-off: nothing else on this path can reconcile
+    // the submission, so the caller must leave with it.
+    expect(body.tx_hash).toBe('0xpendinghash')
+    expect(body.chain_id).toBe(100)
+    // The named assertion this issue exists for: the user must NOT be told
+    // their transaction reverted when it may still confirm.
+    expect(JSON.stringify(body).toLowerCase()).not.toContain('revert')
+    expect(body.error).toContain('has not confirmed yet')
+  })
+
+  it('POST /safe/exec reports a null receipt as pending too (#690 lagging RPC)', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    stubSingleOwnerPasskey()
+    mockExecTransaction.mockResolvedValue({
+      hash: '0xnullreceipt',
+      wait: vi.fn().mockResolvedValue(null),
+    })
+
+    const response = await execRequest(token)
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json().status).toBe('pending')
+    expect(response.json().tx_hash).toBe('0xnullreceipt')
+  })
+
+  it('POST /safe/exec still reports a real on-chain revert as 502 reverted', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    stubSingleOwnerPasskey()
+    mockExecTransaction.mockResolvedValue({
+      hash: '0xreverthash',
+      wait: vi.fn().mockRejectedValue(callExceptionError()),
+    })
+
+    const response = await execRequest(token)
+
+    expect(response.statusCode).toBe(502)
+    expect(response.json().error).toBe('Safe execution reverted on-chain')
+    expect(response.json().status).toBeUndefined()
+  })
+
+  it('POST /safe/exec does not widen the timeout branch to any other wait failure', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    stubSingleOwnerPasskey()
+    const replaced = new Error('transaction was replaced')
+    ;(replaced as unknown as { code: string }).code = 'TRANSACTION_REPLACED'
+    mockExecTransaction.mockResolvedValue({
+      hash: '0xreplaced',
+      wait: vi.fn().mockRejectedValue(replaced),
+    })
+
+    const response = await execRequest(token)
+
+    // Not a timeout. Deliberately unchanged behaviour — this guards
+    // `isWaitTimeout` against being widened into "never fail anything".
+    expect(response.statusCode).toBe(502)
+  })
+
+  it('POST /safe/exec reports an unconfirmed passkey signer deploy as 504, not a revert (#1755)', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    stubSingleOwnerPasskey()
+    mockGetRelayer.mockReturnValue({
+      address: '0xrelayer',
+      provider: { getCode: vi.fn().mockResolvedValue('0x') },
+    })
+    const signerWait = vi.fn().mockRejectedValue(waitTimeoutError())
+    mockCreateSigner.mockResolvedValue({ hash: '0xsignerpending', wait: signerWait })
+
+    const response = await execRequest(token)
+
+    // The helper's own wait must carry a deadline; a bare `wait()` in ethers
+    // v6 arms no timer and so can never produce the TIMEOUT this branch maps.
+    expect(signerWait.mock.calls).toEqual([[1, PASSKEY_SIGNER_DEPLOY_CONFIRM_TIMEOUT_MS]])
+    expect(response.statusCode).toBe(504)
+    const body = response.json()
+    expect(body.status).toBe('signer_deploy_pending')
+    expect(body.signer_deploy_tx_hash).toBe('0xsignerpending')
+    // The asymmetry that makes this a different answer from the 202: the
+    // prerequisite did not confirm, so the user's Safe transaction was never
+    // broadcast. Nothing of theirs is in flight.
+    expect(mockExecTransaction).not.toHaveBeenCalled()
+    expect(body.error).toContain('NOT submitted')
+    expect(JSON.stringify(body).toLowerCase()).not.toContain('revert')
+  })
+
+  it('POST /safe/exec still reports a reverted passkey signer deploy as 502 (#1755)', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    stubSingleOwnerPasskey()
+    mockGetRelayer.mockReturnValue({
+      address: '0xrelayer',
+      provider: { getCode: vi.fn().mockResolvedValue('0x') },
+    })
+    mockCreateSigner.mockResolvedValue({
+      hash: '0xsignerrevert',
+      wait: vi.fn().mockRejectedValue(callExceptionError()),
+    })
+
+    const response = await execRequest(token)
+
+    expect(response.statusCode).toBe(502)
+    expect(response.json().error).toBe('Safe execution reverted on-chain')
+  })
+
+  it('the exec and signer-deploy deadlines both sit under the bump worker stale threshold', () => {
+    expect(SAFE_EXEC_CONFIRM_TIMEOUT_MS).toBeLessThan(STALE_BROADCAST_SECONDS * 1_000)
+    expect(PASSKEY_SIGNER_DEPLOY_CONFIRM_TIMEOUT_MS).toBeLessThan(STALE_BROADCAST_SECONDS * 1_000)
+    // One user action, three legs (relayed exec, its prerequisite deploy, and
+    // the frontend's own direct-signing wait in `lib/safe-tx.ts`). They must
+    // not disagree about how long "not yet confirmed" takes.
+    expect(PASSKEY_SIGNER_DEPLOY_CONFIRM_TIMEOUT_MS).toBe(SAFE_EXEC_CONFIRM_TIMEOUT_MS)
   })
 
   // ── Multi-passkey resolution (#1229) ──────────────────────────────────

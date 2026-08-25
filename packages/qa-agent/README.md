@@ -36,47 +36,51 @@ report, and **exits non-zero on any failure**. It reads the `QA_*` env (see
 ([`.github/workflows/qa-dev.yml`](../../.github/workflows/qa-dev.yml)) runs it in
 CI from the `QA_*` Actions secrets.
 
-Scenarios (`src/scenarios/`) — the **legacy-rail** legs, the only ones that still
-run the legacy AllowanceModule identity. That identity is **no longer seeded**
-(see the Config contract below); these legs consume a credential that predates
-the Safe rail's retirement:
+Scenarios (`src/scenarios/`) — the three direct money-path legs. All three ran
+the legacy AllowanceModule identity until #2016 and were **re-based onto the
+delegation rail**: since #1986 that account answers HTTP 410 from `POST
+/payments` and the x402 path, so two of them were guaranteed red and the third
+was passing on the retirement's refusal instead of on the budget check it
+exists to prove. The invariants outlived the rail; only the instruments changed.
 
-| Scenario | #420 invariant | Status |
+| Scenario | #420 invariant | Instrument on the delegation rail |
 |---|---|---|
-| `within-budget-settle` | A payment inside the allowance settles on-chain + is logged | live |
-| `over-budget-queue` | A payment over the allowance is queued (`pending_approval`), never auto-executed | live |
-| `x402-over-budget-rejected` | A priced x402 call above the allowance is rejected (`insufficient_funds`), never a signable intent | live |
+| `within-budget-settle` | A payment inside the budget settles on-chain + is logged | `POST /payments` → sign the `eip712_userop` typed data → poll to `confirmed`. Also the suite's **positive control**: the leg that proves the money path can still say YES |
+| `over-budget-refused` | A payment over the budget is refused before it becomes signable, never auto-executed | The ERC20PeriodTransferEnforcer reverts during gas estimation → HTTP 502, **no intent row**. Renamed from `over-budget-queue`: the approval QUEUE it asserted does not exist on this rail and no longer exists anywhere |
+| `x402-over-budget-rejected` | A priced x402 call above the budget is refused, never a signable intent | The same enforcer, on the **EIP-3009 funding leg** of `POST /x402/authorize` |
+
+**A 502 is not proof, and these legs do not treat it as proof.** A bundler
+outage, an RPC failure and a policy refusal all produce the same status, so the
+two over-budget legs additionally (1) derive their amount from a **live**
+enforcer read and refuse to run on a fallback number or an exhausted budget,
+(2) require a within-budget request against the same account to still be
+offered, and (3) decode the ABI-encoded revert reason and require it to **name
+a caveat enforcer** (`lib/revert-reason.ts`). Asserting only the status is the
+defect #2016 was filed about.
+
+⚠️ **Known gap — over-budget on erc7710 is NOT covered.** On erc7710 direct
+settlement, `POST /x402/authorize` returns 201 with a signable child delegation
+for any amount; the budget is enforced when the merchant redeems the chain
+on-chain. So "never turned into a signable intent" is false on the preferred
+scheme, and proving the redemption-side revert needs a merchant that attempts
+it. Verified live on 2026-08-25 and recorded on #1993 rather than asserted
+around.
 
 **x402 settlement is covered on the delegation rail only.** The legacy
-`x402-settle` and `x402-sweep-recovery` legs were removed by owner decision —
-the delegation rail is the base for every new account, and the legacy rail is
-import-only for existing dev-pilot Safes.
-
-This is an **accepted coverage loss, not a deduplication.**
-`x402-delegation-3009` / `x402-delegation-3009-sweep` assert the same
-merchant-facing invariants but execute different code — `modules/x402/authorize.ts`
-dispatches on the rail — so the legacy x402 *execute* branch
-(`recordX402Signature` → `executeAllowanceTransfer` → `confirmX402Intent`) now
-has no live coverage, only mocked unit tests. Neither kept legacy leg closes
-that gap: `within-budget-settle` drives `/payments`, and
-`x402-over-budget-rejected` sends no signature so never enters the branch.
-Revisit if dev-pilot legacy Safes start carrying real x402 volume.
-
-The three legs above stay because their invariants have no delegation-rail
-counterpart (that rail has no approval queue at all — over-budget reverts
-on-chain).
+`x402-settle` and `x402-sweep-recovery` legs were removed by owner decision
+(#1535). With the legacy rail retired outright (epic #1440) and
+`legacy-authorize.ts` deleted (#1987), the execute branch that removal left
+uncovered no longer exists — the note is history, not outstanding debt.
 
 The delegation-rail legs are the majority of the suite and are documented, with
 their env requirements and skip conditions, in the canonical table in
 [`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md).
 
-> **Infra dependency:** `within-budget-settle` moves real testnet USDC, so the
-> dev **relayer** (`RELAYER_PRIVATE_KEY`) must hold Base Sepolia **ETH** for gas —
-> it submits the AllowanceModule transfer. A gas-empty relayer surfaces as
-> `execution failed: insufficient funds …` (the harness reports the on-chain
-> reason, not just a 502). Note the relayer's nonce lane is a known dev
-> infrastructure defect (#1533) — a `NONCE_EXPIRED` failure on this leg is that,
-> not a money-path regression.
+> **Infra dependency:** `within-budget-settle` moves real testnet USDC. On the
+> delegation rail the redemption is a **sponsored UserOp**, so the dependency is
+> the bundler/paymaster (`DELEGATION_RAIL_*`), not the relayer's gas balance —
+> a sponsorship or bundler failure surfaces as `execution failed: …` with the
+> on-chain reason, not just a 502.
 
 For a clean local checkout, build the workspace SDK before the harness:
 
@@ -90,10 +94,14 @@ The GitHub workflow performs the SDK build automatically.
 
 ## Seed — provision the QA identity (#574)
 
-`npm run seed -w packages/qa-agent` idempotently creates, on **Base Sepolia**: a
-QA user → a **Hybrid DeleGator** account (`POST /accounts/hybrid`, counterfactual
-and zero transactions) → a `QA Agent` → an owner-signed **budget delegation**. It
-then prints the `QA_*` block to set as secrets.
+`npm run seed -w packages/qa-agent` idempotently provisions, on **Base Sepolia**:
+a QA user → a **Hybrid DeleGator** account (`POST /accounts/hybrid`,
+counterfactual and zero transactions) → a `QA Agent` → an owner-signed **budget
+delegation**. It reuses only an active or `pending_approval` agent with the
+configured delegate address. If that address belongs to a paused, revoked, or
+unknown-status agent, it stops before creating or reusing an agent or granting a
+budget delegation; rotate `SEED_DELEGATE_ADDRESS` or deliberately restore the
+named agent before retrying. It then prints the `QA_*` block to set as secrets.
 
 **It seeds no Safe (#2007, epic #1440).** `POST /user/safes` has answered HTTP
 410 since #1984 and an `allowance_module` account cannot pay since #1986, so the
@@ -141,10 +149,13 @@ for the `QA_*` env (all **testnet/dev-only**). The seed reads the separate
 ⚠️ **`QA_AGENT_API_KEY` / `QA_DELEGATE_PRIVATE_KEY` can no longer be obtained.**
 They name a legacy AllowanceModule identity, and that rail is retired: no new
 Safe can be created (#1984) and an existing one cannot pay (#1986). They are
-still *required* by `loadQaConfig()`, and three legs — `within-budget-settle`,
-`over-budget-queue`, `x402-over-budget-rejected` — still run against them.
-Retiring the two vars and those three legs is tracked separately; every other
-leg runs on `QA_DELEGATION_*`, which the seed does produce.
+still *required* by `loadQaConfig()`, and **no scenario reads them any more**:
+#2016 re-based the last three legs that did onto `QA_DELEGATION_*`, which the
+seed does produce. One consumer is left — `lib/preflight.ts` reads
+`cfg.delegateKey` to report the legacy delegate's residual balance — so
+dropping the two vars needs that line removed with them. Dropping the requirement is [#2011](https://github.com/d-hinders/Haven-AI/issues/2011)
+— until it lands, `qa-dev` runs from the existing Actions secrets but cannot
+run from a clean database.
 
 Keep these values in an external dotenv file, source it before a local run, and
 store the same five names as encrypted repository secrets for

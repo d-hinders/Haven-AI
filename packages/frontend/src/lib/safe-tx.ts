@@ -368,6 +368,16 @@ export async function executeSafeTx(
     credential_id: signer.credentialId,
   })
 
+  // #1754: the relay answers 202 + `status: 'pending'` when it broadcast the
+  // transaction but stopped waiting for the receipt. Same fact as the
+  // direct-signing path's 120 s timeout above, so raise the same typed error
+  // — callers already route it to "finish saving" instead of re-running the
+  // batch. Before #1754 this arrived as a 502 "reverted on-chain" and surfaced
+  // to the user as a definite failure of a transaction that may have landed.
+  if (result.status === 'pending') {
+    throw new SafeTxReceiptTimeoutError(result.tx_hash as Hash)
+  }
+
   return { txHash: result.tx_hash as Hash }
 }
 

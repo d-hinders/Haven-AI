@@ -72,6 +72,13 @@ approval if it exceeds it), and shows up in your Haven dashboard activity feed.
 
 ## Step-by-Step API
 
+Discovery and listing: `discoverTools({ verified?: 'any' | 'verified' | 'operator' })` returns the merged
+catalog — operator-curated plus `verified_payable` directory entries (epic #1717), each with `source`,
+`domainVerified` and `verifiedPayable`. `submitCatalogEntry(resourceUrl)` submits a merchant endpoint to
+the Verified Payable Directory (queue-only; the seller still must prove domain ownership before listing),
+and `getCatalogSubmissionStatus(id)` returns coarse status plus the ownership-proof instructions while
+the submission can still prove ownership.
+
 For agents that need control over each step (e.g., external signing):
 
 ```typescript

@@ -14,10 +14,18 @@ import type { QaConfig } from '../config.js'
 export interface CreatePaymentResult {
   payment_id: string
   status: string
-  sign_data?: { hash: string; components?: Record<string, unknown> }
+  sign_data?: {
+    hash: string
+    /** Delegation rail (#2016): `eip712_userop` — the account validates the typed data. */
+    signature_scheme?: string
+    typed_data?: TypedDataPayload
+    components?: Record<string, unknown>
+  }
   expires_at?: string
   message?: string
   error?: string
+  /** Present on a delegation-rail 502: the bundler/simulation failure (#2016). */
+  details?: string
 }
 
 export interface PaymentStatus {
@@ -38,6 +46,8 @@ export interface X402AuthorizeResult {
   phase?: string
   shortfall?: number | string
   remaining_allowance?: number | string
+  /** Present on a delegation-rail 502: the bundler/simulation failure (#2016). */
+  details?: string
   /** erc7710 direct settlement (#1064): the child-delegation typed data the delegate signs. */
   sign_data?: { signature_scheme?: string; typed_data?: TypedDataPayload }
 }
@@ -52,6 +62,14 @@ export interface TypedDataPayload {
 export interface X402AuthorizeBody {
   url: string
   payTo: string
+  /**
+   * EIP-3009 bridge shape (#946): `payTo` is the agent's own delegate EOA (the
+   * funding target) and this is the real merchant. The pair is how a client
+   * SAYS which settlement scheme it wants.
+   */
+  merchantPayTo?: string
+  /** Validated against the payTo shape; sent explicitly rather than inferred (#1360). */
+  settlementScheme?: string
   amount: string // atomic units
   asset: string // token contract address
   network: string // CAIP-2 (e.g. eip155:84532) or x402 network name
@@ -113,6 +131,21 @@ export interface CatalogEntry {
   tool_name?: string | null
   tool_arguments?: Record<string, unknown> | null
   status?: string
+}
+
+/** `GET /machine-payments/allowances` as the over-budget legs need it (#2016). */
+export interface AgentAllowancesResponse {
+  allowances?: {
+    token_symbol?: string
+    configured_amount?: string
+    onchain?: {
+      /** Atomic units. */
+      remaining?: string
+      /** False when the live enforcer read failed and this is a fallback. */
+      remaining_is_from_chain?: boolean
+    }
+  }[]
+  error?: string
 }
 
 export class HavenApi {
@@ -184,6 +217,19 @@ export class HavenApi {
    */
   getCatalog(): Promise<ApiResponse<{ entries?: CatalogEntry[] }>> {
     return this.call('GET', '/catalog')
+  }
+
+  /**
+   * The agent's on-chain budget as the backend reads it (#2016).
+   *
+   * `onchain.remaining` on the delegation rail comes from a live
+   * ERC20PeriodTransferEnforcer read, and `remaining_is_from_chain` says so.
+   * An over-budget scenario needs both: the number to build an amount that is
+   * genuinely over the budget, and the provenance flag to know the number is
+   * the chain's rather than a fallback echo of the configured budget.
+   */
+  getAllowances(): Promise<ApiResponse<AgentAllowancesResponse>> {
+    return this.call('GET', '/machine-payments/allowances')
   }
 
   /** This agent's own identity, including the account holding the funds. */

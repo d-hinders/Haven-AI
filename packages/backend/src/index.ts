@@ -69,7 +69,11 @@ import reportingRoutes from './routes/reporting.js'
 import { registerConnector } from './modules/reporting/index.js'
 import { FortnoxConnector } from './modules/reporting/index.js'
 import { fortnoxConfigured } from './modules/reporting/index.js'
-import { refreshCatalog, type QueryableLike } from './modules/catalog/index.js'
+import {
+  refreshCatalog,
+  runCatalogIngestTick,
+  type QueryableLike,
+} from './modules/catalog/index.js'
 import { ingestDiscoveredCatalog } from './modules/catalog/index.js'
 import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
 import { registerAgentLastSeenHook } from './middleware/agentAuth.js'
@@ -292,6 +296,32 @@ if (fortnoxConfigured()) {
 const CATALOG_REFRESH_INTERVAL_MS = 60 * 60 * 1000 // hourly
 
 /**
+ * Catalogue ingestion (#1714, epic #1717): the leader-locked tick that walks
+ * self-submitted queue rows through ownership proof -> verification probe and
+ * keeps the table bounded. Slow cadence on purpose: each probe is bounded by
+ * the per-hostname cooldown up-stack, and re-verification is at most daily.
+ */
+const CATALOG_INGEST_INTERVAL_MS = 5 * 60 * 1000
+
+/** Best-effort ops webhook, same Slack-compatible `{ text }` shape as the
+ * delegate/relayer monitors. A failed alert never affects the tick. */
+async function sendCatalogOpsAlert(text: string): Promise<void> {
+  const url = process.env.DELEGATE_ALERT_WEBHOOK_URL
+  if (!url) return
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(10_000),
+    })
+  } catch (err) {
+    // Deliberately silent for the same reason the monitors swallow it:
+    // alerting is best-effort in every monitor in this file.
+  }
+}
+
+/**
  * #1680: the sweep only reclaims space — every read already filters on expiry,
  * so a late run costs dead rows, never a wrong count. Five minutes keeps the
  * table small without adding a chatty query to a busy database.
@@ -347,6 +377,29 @@ const start = async () => {
     }
     void runCatalogRefresh()
     setInterval(runCatalogRefresh, CATALOG_REFRESH_INTERVAL_MS).unref()
+
+    // Catalogue ingestion (epic #1717, #1714): walk submitted queue rows
+    // through ownership proof and the SSRF-hardened verification probe, and
+    // bound the table. Leader-locked like every tick here — probes must run
+    // once per interval, not once per replica. Alerts are edge-triggered by
+    // the lifecycle module, so a sustained condition alarms once instead of
+    // on every interval.
+    const runCatalogIngest = async () => {
+      try {
+        await runIfLeader(LEADER_LOCK_KEYS.catalogIngest, async () => {
+          const report = await runCatalogIngestTick()
+          if (report.acted) app.log.info(report, 'Catalog ingestion tick')
+          for (const text of report.alerts) {
+            app.log.warn({ text }, 'Catalog ingestion alert')
+            await sendCatalogOpsAlert(text)
+          }
+        })
+      } catch (err) {
+        app.log.warn({ err }, 'Catalog ingestion failed')
+      }
+    }
+    void runCatalogIngest()
+    setInterval(runCatalogIngest, CATALOG_INGEST_INTERVAL_MS).unref()
 
     // Expired rate-limit counters (#1680): nothing else removes them, and the
     // table is written by UNAUTHENTICATED traffic — so without a sweep,

@@ -39,8 +39,30 @@
  * tells those apart. One line of `text-[12px] leading-tight` plus `py-1.5` is
  * ~27px; the wrapped result is several times that. 40px sits above any single
  * line and far below the real value.
+ *
+ * ## If a test here fails in a batch and passes in isolation, suspect contention
+ *
+ * Recorded because the alternative reading is "regression", and twice now it
+ * has not been one. Two separate observations, both first-hand:
+ *
+ * 1. During the #2038 review, two tests in this file failed on a first run and
+ *    passed cleanly on their own. The cause was **confirmed, not inferred**: a
+ *    second, unrequested Playwright process was driving the same dev server.
+ * 2. During the #2038 fix-forward, `tooltip-reachability.mobile.spec.ts`'s
+ *    composite-card test failed the same way with **no** second Playwright
+ *    process running — five other worktrees' `next dev` servers were simply
+ *    competing for CPU, and the run hit the route cold (38.2s, against 16.6s
+ *    once warm). It passed in isolation and then 2/2 on a warm route.
+ *
+ * So the shared cause is contention, and a second Playwright process is one way
+ * to get it rather than the only way. Warm the route and re-run before
+ * diagnosing anything in this file. The per-worktree port reservation and
+ * identity probe in `playwright.config.ts` (#1816) stop a run adopting a
+ * *different* worktree's server; they do not stop two runs in the SAME worktree
+ * from sharing one, and they do not buy CPU. Never "fix" this with an unscoped
+ * `pkill -f`.
  */
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import {
   collectBrowserErrors,
   dismissMobileSidebar,
@@ -65,6 +87,20 @@ const MIN_WRAPPED_HEIGHT_PX = 40
 /** `/design-system`'s sample address, and its `truncate()` display form. */
 const SAMPLE_ADDRESS = '0x8f4F0f6d712C5c5C9Bb02F4a5B5c0D7F462A6f4C'
 const SAMPLE_TRUNCATED = '0x8f4F…6f4C'
+
+/**
+ * One `/design-system` demo section, addressed by its own unique `<h2>`.
+ *
+ * `/design-system` renders every primitive against the SAME `sampleAddress`, so
+ * the page is full of near-identical text. The section heading is the one thing
+ * on it that says which demo you are looking at, which makes it the right
+ * anchor for "this component's trigger" — and the reason a positional locator
+ * was wrong here rather than merely brittle.
+ */
+const designSystemSection = (page: Page, title: string) =>
+  page.locator('section').filter({
+    has: page.getByRole('heading', { level: 2, name: title, exact: true }),
+  })
 
 test.describe('Tooltip width and keyboard reach (#2038)', () => {
   test.beforeEach(async ({ page }) => {
@@ -126,17 +162,67 @@ test.describe('Tooltip width and keyboard reach (#2038)', () => {
   // both here is what makes the shared-code-path inference for
   // `AccountDetailClient` and `AgentDetailClient` an inference about markup
   // that has actually been rendered rather than only read.
-  for (const [name, index] of [
-    ['Address (span trigger)', 0],
-    ['WalletIdentityBlock (p trigger)', 1],
+  //
+  // ## Why these are scoped locators and not `nth(index)`
+  //
+  // The first version of this block addressed the two triggers positionally —
+  // `getByText(SAMPLE_TRUNCATED).nth(0)` and `.nth(1)`. That string resolves to
+  // SIX elements on this page, in document order: `Address`' three demo rows
+  // (`<span>`, `<span>`, `<a>`), two unrelated `Base · 0x8f4F…6f4C` `<p>`s, and
+  // only THEN `WalletIdentityBlock`'s `<p>`. So `nth(1)` was `Address`' own
+  // check-pop copy row — **a second test of `Address`** — while the test's name,
+  // the pull request body and the commit message all claimed it covered
+  // `WalletIdentityBlock`. The `<p>` shape was exercised by neither test nor
+  // render (#2038 fix-forward, after PR #2047 merged).
+  //
+  // An ordinal into an ambiguous match is a coverage claim that retargets
+  // **silently** whenever the demo page gains, loses, or reorders a row — the
+  // test stays green while quietly measuring something else. So each case now
+  // names its component by identity instead:
+  //
+  //   1. scoped to the owning `Section` via that section's unique `<h2>`, the
+  //      idiom `marketing-cta-focus.spec.ts:201` already uses;
+  //   2. `exact: true`, which drops the two `Base · …` rows outright;
+  //   3. `toHaveCount(1)`, so a future page edit that reintroduces ambiguity
+  //      FAILS instead of silently picking one;
+  //   4. an explicit tag assertion, so a case named "(p trigger)" cannot pass
+  //      against a `<span>`.
+  //
+  // (3) and (4) are the part that cannot drift: the locator does not merely
+  // happen to be right today, it refuses to run against anything but the shape
+  // it names.
+  for (const { name, tag, locate } of [
+    {
+      name: 'Address (span trigger)',
+      tag: 'span',
+      locate: (page: Page) =>
+        designSystemSection(page, 'Amount & Address — the two core display objects')
+          .locator('p')
+          .filter({ hasText: '— hover for the full address' })
+          .getByText(SAMPLE_TRUNCATED, { exact: true }),
+    },
+    {
+      name: 'WalletIdentityBlock (p trigger)',
+      tag: 'p',
+      locate: (page: Page) =>
+        designSystemSection(page, 'Wallet and activity').getByText(SAMPLE_TRUNCATED, {
+          exact: true,
+        }),
+    },
   ] as const) {
     test(`${name} is in the tab order, rings on focus, and exposes its content`, async ({
       page,
     }) => {
       await page.goto('/design-system')
 
-      const trigger = page.getByText(SAMPLE_TRUNCATED).nth(index)
+      const trigger = locate(page)
+      // Identity, asserted — not assumed. See the block comment above.
+      await expect(trigger, `${name}: the scoped locator must resolve to exactly one element`).toHaveCount(1)
       await expect(trigger).toBeVisible()
+      expect(
+        await trigger.evaluate((el) => el.tagName.toLowerCase()),
+        `${name}: the trigger must be the markup shape this case is named for`,
+      ).toBe(tag)
 
       // The wrapper the primitive renders. `tabindex="0"` on a visible,
       // enabled element IS the tab-order claim, in the real DOM rather than in

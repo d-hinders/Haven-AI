@@ -19,12 +19,6 @@ const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
   },
 }))
 
-// The nonce coordinator (#1196) is fail-open and orthogonal to what these
-// tests assert; stub the repository so its reads never reach the dispatcher.
-vi.mock('../../infra/repositories/allowance-nonce-watermarks.js', () => ({
-  findAllowanceNonceWatermark: async () => null,
-  raiseAllowanceNonceWatermark: async () => {},
-}))
 vi.mock('../../db.js', () => ({
   default: {
     query: (...args: unknown[]) => mockQuery(...args),

@@ -3,7 +3,7 @@
  * the rate limiter.
  *
  * Convention: `README.md` in this directory. One deviation, deliberate and
- * load-bearing, and the same one `allowance-nonce-watermarks.ts` makes:
+ * load-bearing:
  *
  * **The increment is FAIL-OPEN.** An error returns `null` and the caller
  * degrades to its per-replica in-process count — the pre-#1680 behaviour —

@@ -22,14 +22,6 @@ const { mockQuery, allowanceMocks, fiatMocks, evidenceMocks } = vi.hoisted(() =>
   },
 }))
 
-// The allowance-nonce coordinator (#718) rides a shared Postgres watermark
-// along with every legacy-rail authorize; it is fail-open and orthogonal to
-// what these tests assert, so stub the repository rather than answer its
-// query through the content-dispatch stub below.
-vi.mock('../../infra/repositories/allowance-nonce-watermarks.js', () => ({
-  findAllowanceNonceWatermark: async () => null,
-  raiseAllowanceNonceWatermark: async () => {},
-}))
 vi.mock('../../db.js', () => ({
   default: {
     query: (...args: unknown[]) => mockQuery(...args),

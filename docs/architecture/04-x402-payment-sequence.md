@@ -530,16 +530,23 @@ Sequence:
    promotion-gating QA scenario's pass detail.
 4. A spending cap is **required** on this tool, as on `haven_pay_mcp_tool` —
    this IS the guided path, so there is no `cap_warning`
-   softness. Enforced against the LIVE quote via the SAME
-   `assertWithinMaxAmount` guard, before any funding intent exists
-   (`PRICE_EXCEEDS_MAX`).
+   softness. Enforced against the amount actually authorized — the option
+   `selectX402SettlementScheme` selected, via the shared `priceSelectedOption`
+   guard — never the unselected standard entry (#2051: the two selectors are
+   mutually exclusive by #1453, so "the live quote" and "the amount authorized"
+   are DIFFERENT `accepts[]` entries on the erc7710 branch, and a
+   merchant-controlled 402 could steer the cap onto the cheap one while the
+   expensive one was sent). Asserted before any intent exists, funding or
+   settlement child (`PRICE_EXCEEDS_MAX`).
 
    **Two spellings, one cap (#1351).** `max_amount` is atomic units;
    `max_amount_human` is the same cap in whole tokens, so `"1"` means 1 USDC
    rather than 0.000001 USDC. Exactly one may be sent. The human form is
-   converted using the decimals of the **live quote's** asset (`X402Quote.decimals`,
-   resolved from the same address→token binding that produces `token`) — never a
-   caller-supplied token name, never an assumed 6. Three refusals, all before any
+   converted using the decimals of the **selected option's own** asset
+   (`resolveTokenFromAddress(option.asset, option.network)` inside
+   `priceSelectedOption` — the same address→token binding that produces
+   `token`) — never the unselected standard entry's, never a caller-supplied
+   token name, never an assumed 6. Three refusals, all before any
    merchant probe, funding intent, or signature, and none of which can widen the
    on-chain budget:
 
@@ -594,9 +601,11 @@ Sequence:
    `payment_id`.
 8. The catalog's `price_atomic`/`price_display` are surfaced as
    `catalog_price_atomic`/`catalog_price_display` with
-   `catalog_price_is_indicative: true` — NEVER authoritative. The live quote
-   (`amount`/`amount_atomic`/`token`) is authoritative; a
-   `CATALOG_PRICE_DIFFERS` warning fires when the two disagree.
+   `catalog_price_is_indicative: true` — NEVER authoritative. The amount actually
+   being authorized (`amount`/`amount_atomic`/`token`, from the selected
+   option — the quote's own price only on the EIP-3009 branch, #2051) is
+   authoritative; a `CATALOG_PRICE_DIFFERS` warning fires when the two
+   disagree.
 
 No new backend endpoint was needed: `GET /catalog/:id`, `GET
 /machine-payments/agent`, `GET /machine-payments/allowances`, and `POST

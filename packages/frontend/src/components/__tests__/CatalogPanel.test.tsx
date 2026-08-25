@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { mockUseCatalog, mockUseAgents, mockUseAuth } = vi.hoisted(() => ({
@@ -21,7 +21,12 @@ vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
 }))
 
-import CatalogPanel, { agentInstruction, withinBudget, networkToChainId } from '../CatalogPanel'
+import CatalogPanel, {
+  agentInstruction,
+  isVerified,
+  withinBudget,
+  networkToChainId,
+} from '../CatalogPanel'
 import type { CatalogEntry } from '@/hooks/useCatalog'
 
 function entry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
@@ -44,6 +49,12 @@ function entry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
     network: 'eip155:8453',
     status: 'active',
     verified_at: new Date().toISOString(),
+    // #1715: the route emits these on every row; operator rows carry no
+    // verification claim (the operator vouches), so the default fixture is
+    // operator and only badge/filter tests opt into `ingestion`.
+    source: 'operator',
+    domain_verified: false,
+    verified_payable: false,
     ...overrides,
   }
 }
@@ -139,11 +150,13 @@ describe('CatalogPanel', () => {
     expect(screen.getByText('Media thing')).toBeDefined()
     expect(screen.getByText('Data thing')).toBeDefined()
 
-    fireEvent.click(screen.getByRole('button', { name: 'data' }))
+    // Two filter groups each carry an "All" reset, so address the category one.
+    const categoryGroup = screen.getByRole('group', { name: 'Filter by category' })
+    fireEvent.click(within(categoryGroup).getByRole('button', { name: 'data' }))
     expect(screen.queryByText('Media thing')).toBeNull()
     expect(screen.getByText('Data thing')).toBeDefined()
 
-    fireEvent.click(screen.getByRole('button', { name: 'All' }))
+    fireEvent.click(within(categoryGroup).getByRole('button', { name: 'All' }))
     expect(screen.getByText('Media thing')).toBeDefined()
   })
 
@@ -246,5 +259,105 @@ describe('CatalogPanel', () => {
     expect(screen.getByText('No services on Gnosis Chain yet')).toBeDefined()
     fireEvent.click(screen.getByText('View all networks'))
     expect(screen.getByText('Base service')).toBeDefined()
+  })
+})
+
+describe('CatalogPanel verification badge and filter (#1715)', () => {
+  beforeEach(() => {
+    mockUseAgents.mockReturnValue({ agents: [activeAgent] })
+    // Active chain = Base mainnet, like the default fixture entries.
+    mockUseAuth.mockReturnValue({ activeSafe: { id: 's1', chain_id: 8453 } })
+  })
+
+  function mixedCatalog() {
+    mockUseCatalog.mockReturnValue({
+      entries: [
+        entry({
+          id: 'ingested-1',
+          name: 'Ingested service',
+          source: 'ingestion',
+          domain_verified: true,
+          verified_payable: true,
+        }),
+        entry({ id: 'curated-1', name: 'Curated service', source: 'operator' }),
+      ],
+      loading: false,
+      error: null,
+    })
+  }
+
+  it('only treats ingestion entries as verified', () => {
+    expect(isVerified({ source: 'ingestion' })).toBe(true)
+    expect(isVerified({ source: 'operator' })).toBe(false)
+  })
+
+  it('renders the verified badge only on ingestion entries, with the honest claim', () => {
+    mixedCatalog()
+    render(<CatalogPanel />)
+
+    // The badge exactly states the epic claim: domain controlled and
+    // verified payable — never merchant honesty, quality or reliability.
+    const ingestedCard = screen.getByTestId('catalog-card-ingested-1')
+    expect(
+      within(ingestedCard).getByTitle('Domain controlled and verified payable'),
+    ).toBeDefined()
+    expect(within(ingestedCard).getByText('Verified')).toBeDefined()
+
+    const curatedCard = screen.getByTestId('catalog-card-curated-1')
+    expect(within(curatedCard).queryByTitle('Domain controlled and verified payable')).toBeNull()
+    expect(within(curatedCard).queryByText('Verified')).toBeNull()
+
+    // Badge copy never claims trust, safety or legitimacy.
+    expect(screen.queryByText(/trusted/i)).toBeNull()
+    expect(screen.queryByText(/safe/i)).toBeNull()
+    expect(screen.queryByText(/legitimate/i)).toBeNull()
+  })
+
+  it('filters by verification source: All, Verified, Operator-curated', () => {
+    mixedCatalog()
+    render(<CatalogPanel />)
+
+    expect(screen.getByTestId('catalog-card-ingested-1')).toBeDefined()
+    expect(screen.getByTestId('catalog-card-curated-1')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Verified' }))
+    expect(screen.getByTestId('catalog-card-ingested-1')).toBeDefined()
+    expect(screen.queryByTestId('catalog-card-curated-1')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Operator-curated' }))
+    expect(screen.queryByTestId('catalog-card-ingested-1')).toBeNull()
+    expect(screen.getByTestId('catalog-card-curated-1')).toBeDefined()
+
+    // Back to Verified restores the ingestion row.
+    fireEvent.click(screen.getByRole('button', { name: 'Verified' }))
+    expect(screen.getByTestId('catalog-card-ingested-1')).toBeDefined()
+    expect(screen.queryByTestId('catalog-card-curated-1')).toBeNull()
+
+    // All shows both again.
+    fireEvent.click(screen.getByRole('button', { name: 'All' }))
+    expect(screen.getByTestId('catalog-card-ingested-1')).toBeDefined()
+    expect(screen.getByTestId('catalog-card-curated-1')).toBeDefined()
+  })
+
+  it('shows a next step when the verified filter has no results yet', () => {
+    mockUseCatalog.mockReturnValue({
+      entries: [entry({ id: 'curated-1', name: 'Curated service', source: 'operator' })],
+      loading: false,
+      error: null,
+    })
+    render(<CatalogPanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Verified' }))
+    expect(screen.getByText('No verified listings yet')).toBeDefined()
+    expect(screen.getByText(/List your payable service and it will appear/)).toBeDefined()
+  })
+
+  it('opens the submission flow from the list your payable service CTA', () => {
+    mockUseCatalog.mockReturnValue({ entries: [], loading: false, error: null })
+    render(<CatalogPanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'List your payable service' }))
+    expect(screen.getByRole('dialog')).toBeDefined()
+    expect(screen.getByText('Resource URL')).toBeDefined()
   })
 })

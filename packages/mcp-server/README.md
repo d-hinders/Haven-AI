@@ -56,7 +56,8 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_pay_mcp_tool` | merchant MCP quote probe + `POST /x402` | no — edge signs |
 | `haven_settle_mcp_tool` | `POST /payments/:id/sign`, then merchant MCP endpoint + evidence/reconciliation APIs | no — relays signed artifacts |
 | `haven_complete_mcp_tool` | merchant MCP endpoint + evidence/reconciliation APIs | no — relays signed header |
-| `haven_discover_tools` | `GET /catalog` | no |
+| `haven_discover_tools` | `GET /catalog` (badge fields + `verified` filter, epic #1717) | no |
+| `haven_submit_catalog_entry` | `POST /catalog/submit` (queue-only; ownership proof + quote probe required before listing) | no |
 | `haven_get_payment_status` | `GET /machine-payments/:id/status` | no |
 | `haven_get_resume_state` | `GET /machine-payments/:id/status` as resume state | no |
 | `haven_list_receipts` | `GET /machine-payments/receipts` | no |

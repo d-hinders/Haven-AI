@@ -126,7 +126,9 @@ async function main(): Promise<void> {
 
   // #2016 left `api`, `delegateKey` and `delegateAddress` here UNUSED: every
   // leg now builds its own `HavenApi` on the delegation identity, and no
-  // scenario reads the legacy fields. They are deliberately not removed in
+  // scenario reads the legacy fields. One consumer survives outside the
+  // scenarios — `preflight.ts` reads `cfg.delegateKey` for the legacy
+  // delegate-residual line — so #2011 has two call sites to remove, not one. They are deliberately not removed in
   // this change — `QA_AGENT_API_KEY` / `QA_DELEGATE_PRIVATE_KEY` are still
   // `required` in `loadQaConfig`, and dropping that requirement is #2011's
   // coverage decision, not this one's. Removing the fields without the config

@@ -219,7 +219,9 @@ calls a route the API has retired or no longer registers.
 can no longer be created. `loadQaConfig` still requires them, but since #2016
 **no scenario reads them**: the last three legs that did were re-based onto the
 delegation identity. Dropping the requirement is
-[#2011](https://github.com/d-hinders/Haven-AI/issues/2011); until it lands,
+[#2011](https://github.com/d-hinders/Haven-AI/issues/2011) — note it has two
+call sites to remove, not one: `lib/preflight.ts` still reads `cfg.delegateKey`
+for the legacy delegate-residual line. Until it lands,
 `qa-dev` runs from the existing Actions secrets but cannot run from a clean
 database.
 

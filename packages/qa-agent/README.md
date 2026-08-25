@@ -145,9 +145,11 @@ for the `QA_*` env (all **testnet/dev-only**). The seed reads the separate
 ⚠️ **`QA_AGENT_API_KEY` / `QA_DELEGATE_PRIVATE_KEY` can no longer be obtained.**
 They name a legacy AllowanceModule identity, and that rail is retired: no new
 Safe can be created (#1984) and an existing one cannot pay (#1986). They are
-still *required* by `loadQaConfig()`, and **nothing reads them any more**: #2016
-re-based the last three legs that did onto `QA_DELEGATION_*`, which the seed
-does produce. Dropping the requirement is [#2011](https://github.com/d-hinders/Haven-AI/issues/2011)
+still *required* by `loadQaConfig()`, and **no scenario reads them any more**:
+#2016 re-based the last three legs that did onto `QA_DELEGATION_*`, which the
+seed does produce. One consumer is left — `lib/preflight.ts` reads
+`cfg.delegateKey` to report the legacy delegate's residual balance — so
+dropping the two vars needs that line removed with them. Dropping the requirement is [#2011](https://github.com/d-hinders/Haven-AI/issues/2011)
 — until it lands, `qa-dev` runs from the existing Actions secrets but cannot
 run from a clean database.
 

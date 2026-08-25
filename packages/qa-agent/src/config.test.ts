@@ -3,8 +3,6 @@ import { loadQaConfig, QaConfigError } from './config.js'
 
 const fullEnv = {
   QA_HAVEN_API_URL: 'https://dev-backend.up.railway.app/',
-  QA_AGENT_API_KEY: 'sk_agent_test',
-  QA_DELEGATE_PRIVATE_KEY: '0xabc',
   QA_PAYMENT_TO: '0xrecipient',
 } as NodeJS.ProcessEnv
 
@@ -12,8 +10,6 @@ describe('loadQaConfig', () => {
   it('loads a valid config and strips the API URL trailing slash', () => {
     const config = loadQaConfig(fullEnv)
     expect(config.apiUrl).toBe('https://dev-backend.up.railway.app')
-    expect(config.agentApiKey).toBe('sk_agent_test')
-    expect(config.delegateKey).toBe('0xabc')
     expect(config.paymentTo).toBe('0xrecipient')
     expect(config.demoMerchantUrl).toBeUndefined()
   })
@@ -30,16 +26,29 @@ describe('loadQaConfig', () => {
     } catch (err) {
       const message = (err as Error).message
       expect(message).toContain('QA_HAVEN_API_URL')
-      expect(message).toContain('QA_AGENT_API_KEY')
-      expect(message).toContain('QA_DELEGATE_PRIVATE_KEY')
       expect(message).toContain('QA_PAYMENT_TO')
+      expect(message).not.toContain('QA_AGENT_API_KEY')
+      expect(message).not.toContain('QA_DELEGATE_PRIVATE_KEY')
     }
   })
 
   it('treats blank/whitespace values as missing', () => {
-    expect(() => loadQaConfig({ ...fullEnv, QA_AGENT_API_KEY: '   ' } as NodeJS.ProcessEnv)).toThrow(
+    expect(() => loadQaConfig({ ...fullEnv, QA_PAYMENT_TO: '   ' } as NodeJS.ProcessEnv)).toThrow(
       QaConfigError,
     )
+  })
+
+  it('loads the clean environment printed by the delegation seed without legacy credentials (#2011)', () => {
+    const config = loadQaConfig({
+      ...fullEnv,
+      QA_DELEGATION_AGENT_API_KEY: 'sk_agent_delegation',
+      QA_DELEGATION_DELEGATE_PRIVATE_KEY: '0xdef',
+    })
+    expect(config).toMatchObject({ apiUrl: fullEnv.QA_HAVEN_API_URL!.replace(/\/$/, '') })
+    expect(config.delegationAgentApiKey).toBe('sk_agent_delegation')
+    expect(config.delegationDelegateKey).toBe('0xdef')
+    expect(config).not.toHaveProperty('agentApiKey')
+    expect(config).not.toHaveProperty('delegateKey')
   })
 
   describe('delegation-rail credentials for the EIP-3009 bridge (#946)', () => {

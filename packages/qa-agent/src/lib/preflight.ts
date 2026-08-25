@@ -185,7 +185,6 @@ export async function runPreflight(
   if (cfg.demoMerchantUrl) {
     checks.push(await checkMerchantSettlement(cfg.demoMerchantUrl, fetchImpl))
   }
-  checks.push(await checkDelegateResidual('legacy', cfg.delegateKey, provider))
   if (cfg.delegationDelegateKey) {
     checks.push(await checkDelegateResidual('delegation', cfg.delegationDelegateKey, provider))
   }

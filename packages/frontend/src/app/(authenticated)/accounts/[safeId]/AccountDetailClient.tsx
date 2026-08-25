@@ -16,10 +16,10 @@ import { useContacts } from '@/hooks/useContacts'
 import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useUserSafes } from '@/hooks/useUserSafes'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
-import SendModal from '@/components/SendModal'
 import DelegationSendModal from '@/components/DelegationSendModal'
 import AccountSignersCard from '@/components/AccountSignersCard'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
+import RetiredRailNotice, { type RetiredRailOwnerAccess } from '@/components/RetiredRailNotice'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -166,6 +166,32 @@ export default function AccountDetailClient() {
     // The signer set (Backup & recovery card) is that rail's approval story.
   } = useSafeDetails(safe?.account_type === 'delegator_hybrid' ? null : safeAddress, { chainId })
 
+  // #1989: what a legacy account's owner can still DO about their funds
+  // depends on whether any owner is a WALLET, and BOTH branches require
+  // POSITIVE evidence. The obvious predicate — "some owner is not a passkey we
+  // know about, therefore a wallet" — reasons from ABSENCE, and its failure
+  // mode is the one that hurts: `POST /safe/exec` deliberately authorises a
+  // backup passkey that Haven holds no binding row for (that is the #1229 fast
+  // path being absent, not the passkey being absent), so an owner Haven cannot
+  // identify is NOT evidence of a wallet. Reading it as one would tell a
+  // passkey-only owner to go and sign at Safe's interface, which cannot help
+  // them, about funds they may not otherwise be able to reach.
+  //
+  // So: a known wallet owner proves 'wallet'. Every owner being a known passkey
+  // proves 'passkey-only'. Anything else — an owner we cannot classify, or a
+  // still-loading/failed owner read — is 'unknown', and the notice then claims
+  // nothing about how to reach the funds. The asymmetry is deliberate: being
+  // wrongly told to contact Haven costs a message, being wrongly told to use
+  // Safe's interface costs trust at the worst possible moment.
+  const knownWalletOwner = user?.wallet_address?.toLowerCase()
+  const retiredRailOwnerAccess: RetiredRailOwnerAccess = !details
+    ? 'unknown'
+    : details.owners.some((owner) => owner.toLowerCase() === knownWalletOwner)
+      ? 'wallet'
+      : details.owners.every((owner) => passkeyAddresses.has(owner.toLowerCase()))
+        ? 'passkey-only'
+        : 'unknown'
+
   const {
     totalUsd,
     totalEur,
@@ -266,12 +292,17 @@ export default function AccountDetailClient() {
             <StatusBadge>{chain.name}</StatusBadge>
             {safeAddress && (
               <>
-                {/* Send exists on BOTH rails now (#1083): Safe accounts get
-                    the Safe transaction modal, delegation accounts the
-                    sponsored owner-send. */}
-                <Button onClick={() => setSendOpen(true)}>
-                  Send
-                </Button>
+                {/* #1083 gave Send to BOTH rails. #1989 (epic #1440) took it
+                    back off the legacy Safe rail: that path signed a Safe
+                    transaction through `SendModal`, which is deleted with the
+                    rail. Delegation accounts keep the sponsored owner-send.
+                    Hidden rather than disabled, per #1079 — a legacy account
+                    stays fully readable and simply offers no spend action. */}
+                {safe.account_type === 'delegator_hybrid' ? (
+                  <Button onClick={() => setSendOpen(true)}>
+                    Send
+                  </Button>
+                ) : null}
                 <Button variant="ghost" onClick={() => setReceiveOpen(true)}>
                   Receive
                 </Button>
@@ -313,6 +344,10 @@ export default function AccountDetailClient() {
           </div>
         }
       />
+
+      {safe.account_type !== 'delegator_hybrid' ? (
+        <RetiredRailNotice ownerAccess={retiredRailOwnerAccess} />
+      ) : null}
 
       <Card hover={false} elevation="raised" className="overflow-hidden">
         <Card.Header padding="none" className="px-5 py-5 sm:px-6">
@@ -540,6 +575,15 @@ export default function AccountDetailClient() {
                 const normalizedOwner = owner.toLowerCase()
                 const isYou =
                   user?.wallet_address?.toLowerCase() === normalizedOwner || passkeyAddresses.has(normalizedOwner)
+                // ⚠️ This reasons from ABSENCE — "not a passkey we hold a row
+                // for, therefore a Wallet" — and that inference is unsound for
+                // the reason #2017 records: `POST /safe/exec` authorises backup
+                // passkeys Haven holds no binding row for. Pre-dates #1989 and
+                // is left alone here because it is COSMETIC (no action depends
+                // on the label), unlike `retiredRailOwnerAccess` above, which
+                // is the same reasoning applied to an actionable funds-access
+                // claim and was corrected to require positive evidence.
+                // Do not copy this pattern; see #2017.
                 const approverType = passkeyAddresses.has(normalizedOwner) ? 'Passkey' : 'Wallet'
                 const ownerAlias = getOwnerAlias(owner)
                 return (
@@ -644,23 +688,6 @@ export default function AccountDetailClient() {
           accountAddress={safeAddress}
           chainId={chainId}
           onSent={handleSendSuccess}
-        />
-      )}
-      {sendOpen && safeAddress && safe.account_type !== 'delegator_hybrid' && (
-        <SendModal
-          open
-          onClose={() => setSendOpen(false)}
-          safeAddress={safeAddress}
-          safeName={safe.name}
-          safeDetails={details}
-          balances={balances}
-          onSuccess={handleSendSuccess}
-          contacts={contacts}
-          contactsError={contactsError}
-          resolveAddress={resolveAddress}
-          chainId={chainId}
-          contextLoading={detailsLoading}
-          contextError={detailsError}
         />
       )}
       <ReceiveFundsModal

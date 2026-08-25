@@ -19,7 +19,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Select } from '@/components/ui/Select'
 import { Textarea } from '@/components/ui/Textarea'
-import { Table } from '@/components/ui/Table'
+import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { StepProgress } from '@/components/ui/StepProgress'
 import { CodeBlock } from '@/components/ui/CodeBlock'
@@ -582,18 +582,22 @@ export default function DesignSystemPage() {
         title="Layering — the z-index scale"
         description="Every stacking layer has a named token in globals.css. Reach for a token, never a fresh number: two independently chosen values (a z-[100] top bar over a z-[60] navigation toggle) left the mobile sidebar toggle painted and hit-tested under the top bar on every authenticated route, and a third ad-hoc number is how that recurs. Tiers are spaced by 10 so a genuinely new layer lands between two without renumbering."
       >
-        {/* `collapseBelowMd={false}` + `overflow-x-auto`: Table.Head hides the
-            header below md on the assumption that mobile rows carry their own
-            labels. These rows are a bare token, a bare integer and a
+        {/* `collapseWhenNarrow={false}` + `overflow-x-auto`: Table.Head hides
+            the header while the container is narrow on the assumption that
+            those rows carry their own labels. These rows are a bare token, a bare integer and a
             description — nothing self-labelling — so at 390px the table would
             otherwise open on "--v2-z-content / 10 / …" with no way to tell
             which column is which. This is exactly the case the primitive's own
             docstring names, and it is paired with the horizontal scroll that
-            docstring asks for. */}
+            docstring asks for. The primitive's inline-size container sits
+            between the wrapper and this deliberately `min-w-[560px]` table
+            and does NOT defeat the scroll — measured at 390px: the table
+            still lays out at 560px, the wrapper still reports scrollWidth
+            560 / clientWidth 340, and scrollLeft reaches 220 (#1999). */}
         <Card hover={false} className="overflow-hidden">
           <div className="overflow-x-auto">
           <Table className="min-w-[560px]">
-            <Table.Head collapseBelowMd={false}>
+            <Table.Head collapseWhenNarrow={false}>
               <tr>
                 <Table.HeaderCell align="left">Token</Table.HeaderCell>
                 <Table.HeaderCell align="left">Value</Table.HeaderCell>
@@ -1414,7 +1418,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Transaction history"
-        description="Tables render through the Table primitive: Table.Head (collapses below md, optional sticky), Table.HeaderCell (srLabel for icon columns, hideBelowMd for the responsive-collapse pattern), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
+        description="Tables render through the Table primitive: Table.Head (collapses when narrow, optional sticky), Table.HeaderCell (srLabel for icon columns, revealAt for container-keyed collapse), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
       >
         <Card hover={false} className="overflow-hidden">
           <Table>
@@ -1422,9 +1426,75 @@ export default function DesignSystemPage() {
               <tr>
                 <Table.HeaderCell srLabel="Direction" className="w-10" />
                 <Table.HeaderCell align="left">Activity</Table.HeaderCell>
-                <Table.HeaderCell align="left" hideBelowMd>Initiator</Table.HeaderCell>
-                <Table.HeaderCell align="left" hideBelowMd>From / To</Table.HeaderCell>
-                <Table.SortableHeaderCell label="Date" direction="desc" onSort={() => toast.info('Sorts the loaded set')} hideBelowMd />
+                {/* Initiator and Date reveal at the `xl` CONTAINER stage
+                    (974px), not the `md` one (718px) — #1827, re-keyed onto
+                    the container by #1999.
+                    MEASURED, Failed row title measure / lines / row height on
+                    the seven-columns-at-`md` layout this replaced: 71.1px / 5
+                    / 156 at 768px, 82.5px / 4 / 132 at 800px, 118px / 3 / 92
+                    at 900px, then 71.1px / 5 / 156 AGAIN at 1024px. The
+                    repeat is the whole point: TWO things step at `lg` and
+                    both take width — `Sidebar.tsx` goes `fixed` ->
+                    `lg:static` at `w-[240px]` (border-box, so its 1px
+                    `border-r` is INSIDE the 240, measured: `main` is 784px at
+                    a 1024px viewport), AND the authenticated layout's `main`
+                    steps `p-6` -> `lg:p-8`, which is 16px more across the
+                    pair. 240 + 16 = 256px handed back in one breakpoint.
+                    (#1827 wrote 241 + 16 = 257 here. The conclusion was
+                    right and the number was not; corrected from a direct
+                    reading of the sidebar box.) So the content available to
+                    this table is a SAWTOOTH in viewport width:
+
+                      viewport   390  767  768  900  1023  1024  1279  1280
+                      container  340  717  718  850   973   718   973   974
+
+                    which is why the stages are CONTAINER queries now. A
+                    container query does NOT make the second stage
+                    unnecessary — the container really is 718px at a 1024px
+                    viewport, so a single-stage reveal starves the title there
+                    exactly as before. What it removes is the need to
+                    rediscover the sawtooth to pick the viewport that clears
+                    both teeth: 974px is simply the width at which seven
+                    columns fit.
+                    Pinning the `md`+ columns the way `TransactionsTable` does
+                    was tried during #1774 and is NOT the answer — it grew
+                    desktop rows 85px -> 133px, because a 140px `From / To`
+                    wraps this showcase's longer names.
+                    What the two deferred columns cost is NOT the same, and
+                    the difference is worth naming rather than smoothing over.
+                    The DATE is not dropped at any width — it rides under the
+                    Amount until the `xl` stage, the same place the narrow
+                    layout puts it, and it is hidden by
+                    `tableHideFromClass('xl')` so it can never disagree with
+                    the column it stands in for. The INITIATOR genuinely is
+                    dropped between the two stages. For two of the three demo
+                    rows that costs nothing visible, because the title already
+                    says it ("x402 payment BY RESEARCH ASSISTANT"); for the
+                    first row it is a real loss — "Received payment" is
+                    initiated by "You" and nothing else on the row says so.
+                    That is an acceptable trade here (the narrow layout drops
+                    the initiator outright) but it IS a loss, and a showcase
+                    whose job is to teach the collapse pattern should not
+                    claim otherwise.
+                    WHY THE DATE IS NOT HANDED BACK EARLIER. It was MEASURED,
+                    not judged: restoring the Date column at a 973px container
+                    (a 1024px viewport is 718px, but 1023px and 1279px are
+                    both 973px) put the Failed row back to 109.9px across
+                    THREE lines in a 108px row at 1024px under the old
+                    viewport keying, because 1024px is the bottom tooth. The
+                    container query answers the same question directly: 973px
+                    is one pixel short of the stage, 974px clears it.
+                    After: 141.7px / 2 / 100 at 768px and 1024px; 1280px is
+                    unchanged to the pixel, so no visual baseline moves.
+                    Gated by geometry in `e2e/transaction-title-measure.spec.ts`
+                    (the pixel gate renders 1280 and 390 only, so it cannot
+                    see any width this is about) and by
+                    `e2e/table-container-collapse.spec.ts`, which resizes the
+                    CONTAINER at a fixed viewport — the only assertion that
+                    can tell a container query from a viewport one. */}
+                <Table.HeaderCell align="left" revealAt="xl">Initiator</Table.HeaderCell>
+                <Table.HeaderCell align="left" revealAt="md">From / To</Table.HeaderCell>
+                <Table.SortableHeaderCell label="Date" direction="desc" onSort={() => toast.info('Sorts the loaded set')} revealAt="xl" />
                 <Table.SortableHeaderCell label="Amount" direction={null} onSort={() => toast.info('Sorts the loaded set')} align="right" />
                 <Table.HeaderCell srLabel="External details" className="w-8" />
               </tr>
@@ -1526,24 +1596,24 @@ export default function DesignSystemPage() {
                       </p>
                       {row.failed ? <StatusBadge tone="danger">Failed</StatusBadge> : null}
                     </div>
-                    <div className="mt-1 md:hidden">
+                    <div className={`mt-1 ${tableHideFromClass('md')}`}>
                       <TransactionMovement from={row.from} to={row.to} />
                     </div>
                   </td>
-                  <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-2)] md:table-cell">
+                  <td className={`px-4 py-4 align-middle text-sm text-[var(--v2-ink-2)] ${tableColumnClass('xl')}`}>
                     {row.initiator}
                   </td>
-                  <td className="hidden px-4 py-4 align-middle md:table-cell">
+                  <td className={`px-4 py-4 align-middle ${tableColumnClass('md')}`}>
                     <TransactionMovement from={row.from} to={row.to} />
                   </td>
-                  <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] md:table-cell">
+                  <td className={`px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] ${tableColumnClass('xl')}`}>
                     {row.date}
                   </td>
                   <td className="w-[110px] px-2 py-4 align-middle text-right md:w-auto md:px-4">
                     <p>
                       <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
                     </p>
-                    <p className="mt-1 text-xs text-[var(--v2-ink-3)] md:hidden">{row.date}</p>
+                    <p className={`mt-1 text-xs text-[var(--v2-ink-3)] ${tableHideFromClass('xl')}`}>{row.date}</p>
                   </td>
                   <td className="w-8 px-2 py-4 align-middle text-right md:w-auto md:px-4">
                     <ExternalDetailsLink href="#" />
@@ -1830,15 +1900,17 @@ export default function DesignSystemPage() {
         <div className="grid gap-5 lg:grid-cols-2">
           {/*
             `inert` + `aria-hidden`: these are static ILLUSTRATIONS of a
-            popover, not live overlays, and `WalletPopover`'s root carries
-            `role="dialog"`. Without this the page exposes three dialogs at
-            once — which is wrong for a screen reader and also breaks
-            `e2e/modal-scroll-cue.spec.ts`, whose unscoped
-            `getByRole('dialog')` then hits a strict-mode violation
-            ("resolved to 3 elements", measured, not predicted). `inert`
-            also keeps the demo's Copy/Switch buttons out of the tab order,
-            which `aria-hidden` alone would not do. Same deliberate
-            treatment design-system.md § 6 records for the modal demo.
+            popover, not live overlays. THIS wrapper is what keeps them out
+            of the accessibility tree and out of the tab order. The
+            `presentational` prop below is a SEPARATE mechanism doing a
+            SEPARATE job — keep both; neither is redundant because the other
+            exists.
+
+            Which does what, and the measurements behind that claim, are
+            recorded ONCE — on the `presentational` prop's doc-comment in
+            `components/WalletButton.tsx` (#1982). Read it there. It is not
+            restated here on purpose: four synchronised copies of the same
+            paragraph is the rot surface #1982 existed to remove.
           */}
           <div className="min-h-[290px]">
             <div inert aria-hidden="true" className="relative h-0 w-72">
@@ -1862,15 +1934,17 @@ export default function DesignSystemPage() {
           </div>
           {/*
             `inert` + `aria-hidden`: these are static ILLUSTRATIONS of a
-            popover, not live overlays, and `WalletPopover`'s root carries
-            `role="dialog"`. Without this the page exposes three dialogs at
-            once — which is wrong for a screen reader and also breaks
-            `e2e/modal-scroll-cue.spec.ts`, whose unscoped
-            `getByRole('dialog')` then hits a strict-mode violation
-            ("resolved to 3 elements", measured, not predicted). `inert`
-            also keeps the demo's Copy/Switch buttons out of the tab order,
-            which `aria-hidden` alone would not do. Same deliberate
-            treatment design-system.md § 6 records for the modal demo.
+            popover, not live overlays. THIS wrapper is what keeps them out
+            of the accessibility tree and out of the tab order. The
+            `presentational` prop below is a SEPARATE mechanism doing a
+            SEPARATE job — keep both; neither is redundant because the other
+            exists.
+
+            Which does what, and the measurements behind that claim, are
+            recorded ONCE — on the `presentational` prop's doc-comment in
+            `components/WalletButton.tsx` (#1982). Read it there. It is not
+            restated here on purpose: four synchronised copies of the same
+            paragraph is the rot surface #1982 existed to remove.
           */}
           <div className="min-h-[290px]">
             <div inert aria-hidden="true" className="relative h-0 w-72">

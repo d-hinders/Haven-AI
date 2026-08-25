@@ -667,8 +667,8 @@ export type paths = {
         get: operations["listUserSafes"];
         put?: never;
         /**
-         * Link (import) an existing Safe to the caller's account.
-         * @description Registration only — this moves nothing on-chain and grants Haven no authority over the Safe. The same address on the same chain cannot be linked twice (409). The first Safe a user links becomes their default.
+         * RETIRED — always answers 410. Importing a Safe is closed.
+         * @description **RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** The Safe rail is being retired outright, and importing is one of the four ways a Safe could enter Haven; all four are closed. The refusal is a route preHandler, so it precedes every read and write. The route is kept as a compatibility tombstone rather than removed — a 410 tells an old client the flow is permanently gone, where a 404 reads as a transient routing error and invites retries (the #834 session-rail / #1328 mpp_demo pattern); the route itself goes in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Existing linked Safes are unaffected: GET /user/safes, rename, re-default, unlink and every read path behave exactly as before. Historically this was registration only — it moved nothing on-chain and granted Haven no authority over the Safe.
          */
         post: operations["addUserSafe"];
         delete?: never;
@@ -687,8 +687,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Deploy a new Safe with the relayer paying gas.
-         * @description The relayer sponsors the deployment and returns the deployed address plus the transaction hash. Deployment does NOT link the Safe: registration is a separate POST /user/safes call, so onboarding and add-account take the identical path. The deployed Safe is owned by owner_address (single owner, threshold 1) and never by Haven. Note that owner_address is NOT checked against the caller: any authenticated user can have a Safe deployed for any address, so this is a relayer-gas surface bounded only by the global rate limit, not a per-caller ownership check.
+         * RETIRED — always answers 410. Haven no longer deploys Safes.
+         * @description **RETIRED (#1984, epic #1440) — always answers 410 and spends no relayer gas.** The refusal is a route preHandler, so it precedes the relayer entirely. Kept as a compatibility tombstone; removed in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Historically the relayer sponsored the deployment and returned the deployed address plus the transaction hash, and owner_address was NOT checked against the caller — an unbounded-by-ownership relayer-gas surface that this retirement closes as a side effect.
          */
         post: operations["deployUserSafe"];
         delete?: never;
@@ -736,90 +736,6 @@ export type paths = {
         put: operations["setDefaultUserSafe"];
         post?: never;
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/user/safes/known-approvers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * The caller's approver registry across all their Safes.
-         * @description Distinct by address, carrying the most recent label/type and every safe_id the approver is known on — so a picker can offer reuse on another account while excluding the Safes it already approves (#417). Haven metadata only; it confers nothing on-chain.
-         */
-        get: operations["listKnownApprovers"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/user/safes/{safeId}/approvers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Read a Safe's on-chain owners, decorated with stored labels.
-         * @description The owner list and threshold are read live from the chain (`getOwners()`), not from Haven — an owner added outside Haven appears here with no label rather than being invisible.
-         */
-        get: operations["listSafeApprovers"];
-        put?: never;
-        /**
-         * Record an approver's label and type after the on-chain change lands.
-         * @description Metadata only, and idempotent: this does not add an owner. Call it after relaying the transaction from /approvers/tx. Enrolling a passkey approver also binds it to the Safe as a signing fast-path — deliberately non-fatal, because /safe/exec re-derives the binding from the on-chain owner list when it is missing.
-         */
-        post: operations["upsertSafeApproverMetadata"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/user/safes/{safeId}/approvers/tx": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Build the UNSIGNED owner-change transaction for the user to sign.
-         * @description Haven constructs and guards; the user signs and relays through /safe/exec. Haven never signs an owner change. The guards run against the LIVE owner list, before any transaction is produced: removing the final owner is refused (409), as is adding an owner the Safe already has; removing an address that is not an owner is a 404.
-         */
-        post: operations["buildSafeApproverTx"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/user/safes/{safeId}/approvers/{address}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Drop an approver's stored metadata after the on-chain removal.
-         * @description Cleans up the decoration row only — it removes no owner. The last-owner guard lives on /approvers/tx, where the actual removal is built.
-         */
-        delete: operations["deleteSafeApproverMetadata"];
         options?: never;
         head?: never;
         patch?: never;
@@ -874,8 +790,8 @@ export type paths = {
         };
         get?: never;
         /**
-         * Set the caller's legacy safe_address and link it as the default Safe.
-         * @description Writes the legacy users.safe_address column AND links the Safe into user_safes as the default — the multi-Safe table is the real home, this column is history. The order matters and is deliberate: the legacy column write is attempted FIRST and a vanished account refuses before anything is linked, rather than leaving a link whose owner no longer exists. Returns the narrower identity projection.
+         * RETIRED — always answers 410. This link is an import.
+         * @description **RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** This route wrote the legacy users.safe_address column AND linked the Safe into user_safes as the default, emitting the `safe_imported` funnel event: it is an IMPORT, so it retires with the rail. It is named here explicitly because no shipped client calls it, which is exactly what would have made it the hole left open. Kept as a compatibility tombstone; create a Haven account on the delegation rail instead (POST /accounts/hybrid).
          */
         put: operations["updateUserSafe"];
         post?: never;
@@ -7523,42 +7439,6 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Safe linked. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        id: string;
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        safe_address: string;
-                        chain_id: number;
-                        /** @description Display label; defaults to 'My account' when none is given. */
-                        name: string;
-                        /** @description The first Safe a user links becomes the default. */
-                        is_default: boolean;
-                        /** Format: date-time */
-                        created_at: string;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             /** @description Error response */
             401: {
                 headers: {
@@ -7574,8 +7454,8 @@ export interface operations {
                     };
                 };
             };
-            /** @description This Safe is already linked to the account. */
-            409: {
+            /** @description Always. The Safe rail is retired; the message names POST /accounts/hybrid. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7609,34 +7489,6 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Safe deployed; link it with POST /user/safes. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        safe_address: string;
-                        tx_hash: string;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             /** @description Error response */
             401: {
                 headers: {
@@ -7652,8 +7504,8 @@ export interface operations {
                     };
                 };
             };
-            /** @description Relay deployment failed. */
-            500: {
+            /** @description Always. The Safe rail is retired; the message names POST /accounts/hybrid. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7892,434 +7744,6 @@ export interface operations {
             };
         };
     };
-    listKnownApprovers: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Known approvers, distinct by address. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        approvers: {
-                            /**
-                             * @description Checksummed, as the chain returns it — membership comes from getOwners(), not from Haven.
-                             * @example 0x1111111111111111111111111111111111111111
-                             */
-                            address: string;
-                            /**
-                             * @description Decoration only; defaults to 'eoa' for an owner Haven has no metadata row for.
-                             * @enum {string}
-                             */
-                            type: "eoa" | "passkey";
-                            /** @description Trimmed and capped at 120 characters. */
-                            label: string | null;
-                            safe_ids: string[];
-                        }[];
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    listSafeApprovers: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Linked-Safe id. */
-                safeId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description On-chain owners plus the Safe threshold. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        threshold: number;
-                        approvers: {
-                            /**
-                             * @description Checksummed, as the chain returns it — membership comes from getOwners(), not from Haven.
-                             * @example 0x1111111111111111111111111111111111111111
-                             */
-                            address: string;
-                            /**
-                             * @description Decoration only; defaults to 'eoa' for an owner Haven has no metadata row for.
-                             * @enum {string}
-                             */
-                            type: "eoa" | "passkey";
-                            /** @description Trimmed and capped at 120 characters. */
-                            label: string | null;
-                        }[];
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Could not read owners from the network. */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    upsertSafeApproverMetadata: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Linked-Safe id. */
-                safeId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @example 0x1111111111111111111111111111111111111111 */
-                    address: string;
-                    /**
-                     * @description Defaults to 'eoa'.
-                     * @enum {string}
-                     */
-                    type?: "eoa" | "passkey";
-                    /** @description Trimmed and capped at 120 characters; blank becomes null. */
-                    label?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Metadata recorded. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    buildSafeApproverTx: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Linked-Safe id. */
-                safeId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @enum {string} */
-                    action: "add" | "remove";
-                    /** @example 0x1111111111111111111111111111111111111111 */
-                    address: string;
-                };
-            };
-        };
-        responses: {
-            /** @description The unsigned Safe self-call. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        chain_id: number;
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        safe_address: string;
-                        tx: {
-                            /**
-                             * @description The Safe itself — owner changes are self-calls.
-                             * @example 0x1111111111111111111111111111111111111111
-                             */
-                            to: string;
-                            /** @enum {string} */
-                            value: "0";
-                            data: string;
-                            /**
-                             * @description CALL, never DELEGATECALL.
-                             * @enum {integer}
-                             */
-                            operation: 0;
-                        };
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Safe not found, or the address to remove is not an owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Would remove the last owner, or the owner already exists. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Could not read owners from the network. */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    deleteSafeApproverMetadata: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Linked-Safe id. */
-                safeId: string;
-                /** @description Approver address. */
-                address: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Metadata removed. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
     updateUserProfile: {
         parameters: {
             query?: never;
@@ -8499,37 +7923,6 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The updated identity projection. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        id: string;
-                        name: string | null;
-                        email: string;
-                        wallet_address: string | null;
-                        safe_address: string | null;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             /** @description Error response */
             401: {
                 headers: {
@@ -8545,8 +7938,8 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
-            404: {
+            /** @description Always. The Safe rail is retired; the message names POST /accounts/hybrid. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10656,7 +10049,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The request belongs to a retired rail: readable and rejectable, never approvable. */
+            /** @description ALWAYS, since #1986. Every approval request is an AllowanceModule-rail artifact (the delegation rail has no approval queue), and that rail is retired — so a queued approval is readable and rejectable, never approvable. The refusal runs before the lookup, so a missing request gets this too rather than a 404. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -10744,7 +10137,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Retired rail. */
+            /** @description ALWAYS, since #1986 — same unconditional refusal as /approve. Closing /approve alone would leave a row that was already approved before the retirement able to advance to co-signing. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -13219,6 +12612,21 @@ export interface operations {
                     };
                 };
             };
+            /** @description A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
             /** @description Error response */
             502: {
                 headers: {
@@ -13401,7 +12809,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The intent is pinned to a retired rail — the AllowanceModule rail (#1986) or the session rail (#834) — or it has expired. A retired-rail intent is refused before the expiry flip, so nothing is written. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -13728,7 +13136,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -14186,7 +13594,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The account is on the retired session rail — no state is read (#993 fail-closed contract). */
+            /** @description The account is on the retired SESSION rail — no state is read (#993 fail-closed contract). Deliberately NOT extended to the Safe / AllowanceModule rail by #1986: this endpoint REPORTS spend authority rather than exercising any, and the retirement keeps accounts and history readable. The refusal belongs on the spend paths, and that is where it is. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -14495,7 +13903,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Idempotent replay of a request whose payment has expired. */
+            /** @description Either the account is on a retired rail — the Safe / AllowanceModule rail (#1986) or the session rail (#834), refused before any intent or approval row is written — or this is an idempotent replay of a request whose payment has expired. */
             410: {
                 headers: {
                     [name: string]: unknown;

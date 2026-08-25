@@ -15,7 +15,7 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/middleware/agentToolAudit.ts
-last-verified: "2026-08-21" # #1672: the local-MCP example command drops --runtime claude-code — runtime selection is detection-first now (see mcp-runtime-compatibility.md); everything else re-read and unchanged. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
+last-verified: "2026-08-24" # #1986: the rail split re-read — the hosted keyless x402 construct now has NO working rail, because the allowance rail it served fails closed. Added; the local-vs-hosted signing/relay distinction itself is unchanged and re-verified. Prior: #1672: the local-MCP example command drops --runtime claude-code — runtime selection is detection-first now (see mcp-runtime-compatibility.md); everything else re-read and unchanged. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Haven — Local MCP vs Hosted MCP + Edge Signer
@@ -100,6 +100,15 @@ EIP-712 typed data. The hosted keyless construct rejects typed-data funding
 intents with a hard `HavenSigningError` before any signing context reaches the
 edge signer, so x402 for delegation-rail accounts currently requires the local
 flow (`HavenClient` with `delegateKey`).
+
+⚠️ **Since #1986 that leaves hosted x402 with no working rail at all.** The
+hosted construct only ever served the legacy AllowanceModule rail, and that
+rail no longer executes payments — `POST /x402/authorize` answers HTTP 410 for
+an `allowance_module` account, above the funding leg, so no funding intent
+reaches the edge signer from either rail. Hosted x402 is therefore a local-flow
+capability today, full stop; restoring it means building it on the delegation
+rail. Direct payments are unaffected in kind: `POST /payments` serves both
+rails and its delegation branch is untouched.
 
 ## Related docs
 

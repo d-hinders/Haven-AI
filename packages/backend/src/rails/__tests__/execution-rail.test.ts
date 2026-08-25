@@ -9,6 +9,8 @@ const {
   serializeUserOp,
   sessionRailRetired,
   isRetiredRailIntent,
+  allowanceModuleRailRetired,
+  isRetiredAllowanceIntent,
 } = await import('../execution-rail.js')
 
 const PERMISSION_ID = ('0x' + 'ab'.repeat(32)) as `0x${string}`
@@ -36,12 +38,67 @@ describe('resolveExecutionRail — retirement decided in the seam (#993)', () =>
     expect(resolveExecutionRail(state)).toEqual({ rail: 'retired_session' })
   })
 
+  // #1986 (epic #1440 slice 3): the same three states used to route to a LIVE
+  // legacy rail. They are now retired. Note which one the issue's own wording
+  // would have missed: `execution_rail='allowance_module'` is the literal
+  // string, but `null` (the LEFT-JOIN miss in FIND_EXECUTION_RAIL_FOR_AGENT_SQL)
+  // and any unknown value reached the same AllowanceModule executor. Closing
+  // the string alone would have left a spend path open.
   it.each([
     ['default legacy safe', { ...full, safeExecutionRail: 'allowance_module' }],
     ['missing safe row', { ...full, safeExecutionRail: null }],
     ['unknown safe rail value', { ...full, safeExecutionRail: 'something_else' }],
-  ])('everything not session-marked routes legacy when %s', (_label, state) => {
-    expect(resolveExecutionRail(state)).toEqual({ rail: 'allowance_module' })
+  ])('everything not session-marked and not delegation is RETIRED when %s', (_label, state) => {
+    expect(resolveExecutionRail(state)).toEqual({ rail: 'retired_allowance' })
+  })
+
+  // The positive control at the seam: the one live rail keeps its own answer,
+  // and it is named — a guard against a fork has to say which branch it is on.
+  it('the delegation rail is NOT retired — it gets its own decision', () => {
+    expect(resolveExecutionRail({ ...full, safeExecutionRail: 'delegation' })).toEqual({
+      rail: 'delegation',
+    })
+  })
+
+  // Both tombstones coexist: #1986 must not swallow #834's message.
+  it('a session-marked account still answers retired_session, not retired_allowance', () => {
+    expect(resolveExecutionRail({ ...full, safeExecutionRail: 'session_key' })).toEqual({
+      rail: 'retired_session',
+    })
+  })
+})
+
+describe('allowanceModuleRailRetired — the ONE Safe-rail refusal producer (#1986)', () => {
+  it('produces 410 for all three kinds, each naming what refused', () => {
+    expect(allowanceModuleRailRetired('account').statusCode).toBe(410)
+    expect(allowanceModuleRailRetired('account').body.error).toMatch(/Safe rail is retired/)
+    expect(allowanceModuleRailRetired('account').body.error).toMatch(/delegation rail/)
+    expect(allowanceModuleRailRetired('intent').statusCode).toBe(410)
+    expect(allowanceModuleRailRetired('intent').body.error).toMatch(/can no longer execute/)
+    expect(allowanceModuleRailRetired('approval').statusCode).toBe(410)
+    expect(allowanceModuleRailRetired('approval').body.error).toMatch(/queued approval/)
+    // The queue stays readable and rejectable — the refusal says so.
+    expect(allowanceModuleRailRetired('approval').body.error).toMatch(/rejected/)
+  })
+
+  it('does not collide with the session-rail refusal (#834 stays distinct)', () => {
+    expect(allowanceModuleRailRetired('account').body.error).not.toBe(
+      sessionRailRetired('account').body.error,
+    )
+    expect(sessionRailRetired('account').body.error).toMatch(/session rail is retired/)
+  })
+
+  it('isRetiredAllowanceIntent catches the null pin, spares delegation and session', () => {
+    // The population it must catch is mostly `null`: payment_intents
+    // .execution_rail is nullable and legacy inserts leave it unset.
+    expect(isRetiredAllowanceIntent(null)).toBe(true)
+    expect(isRetiredAllowanceIntent(undefined)).toBe(true)
+    expect(isRetiredAllowanceIntent('allowance_module')).toBe(true)
+    expect(isRetiredAllowanceIntent('something_else')).toBe(true)
+    // Named branches — the delegation pin is what makes the negative safe.
+    expect(isRetiredAllowanceIntent('delegation')).toBe(false)
+    // #834 keeps its own message.
+    expect(isRetiredAllowanceIntent('session_key')).toBe(false)
   })
 })
 

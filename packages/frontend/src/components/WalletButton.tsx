@@ -196,17 +196,67 @@ interface PopoverProps {
    * Render as a static ILLUSTRATION rather than a live overlay (#1952).
    *
    * `/design-system` shows this popover's two signing-credential states side by
-   * side, permanently open. A showcase copy is not a dialog: exposing three
-   * `role="dialog"` nodes at once is wrong for a screen reader, and it also
-   * broke `e2e/modal-scroll-cue.spec.ts`, which reaches for
-   * `document.querySelector('[role="dialog"]')` and would otherwise find a demo
-   * instead of the Modal under test — a raw DOM query no `aria-hidden` or
-   * `inert` wrapper can redirect. Measured, not predicted: without this the
-   * suite reports "strict mode violation: getByRole('dialog') resolved to 3
-   * elements".
+   * side, permanently open. A showcase copy is not a dialog.
+   *
+   * ## What the role swap actually buys — corrected and measured (#1982)
+   *
+   * This block is the SINGLE account of the two-mechanism story. The showcase's
+   * wrapper comments in `app/(authenticated)/design-system/page.tsx` and the
+   * guard test's header point here rather than restating it: #1982 was a stale
+   * comment, and four synchronised copies of the correction would rebuild the
+   * same rot surface it removed. Correct it here; leave the pointers alone.
+   *
+   * NOT screen-reader exposure, which is what this comment used to claim. Both
+   * demos sit inside a `<div inert aria-hidden="true">` wrapper, and
+   * `aria-hidden` on an ancestor drops the entire subtree from the
+   * accessibility tree regardless of any descendant's role. Measured, not
+   * reasoned: with this swap reverted to a bare `role="dialog"` the page held
+   * three dialog nodes, and Playwright's accessibility-tree-mediated
+   * `getByRole('dialog')` still resolved to exactly one — no strict-mode
+   * violation in any of the four tests. The WRAPPER is what keeps these
+   * illustrations out of the accessibility tree; `inert` additionally keeps
+   * their Copy/Switch buttons out of the tab order.
+   *
+   * The one currently-live effect is narrower, and worth naming exactly.
+   * `e2e/modal-scroll-cue.spec.ts` (#1893) asks DOCUMENT-WIDE for the Modal
+   * under test with a raw `document.querySelector('[role="dialog"]')`. That
+   * query is not accessibility-tree-mediated, so no `aria-hidden` or `inert`
+   * wrapper can redirect it, and the showcase sits ABOVE the Modal demo in DOM
+   * order — it would be the node returned. On the same revert exactly one named
+   * assertion went red: `expect(geometry.wrapperContainsBody).toBe(true)`, in the
+   * test named `the scroll box is the body, not the role="dialog" wrapper`.
+   * That one, and no other.
+   *
+   * ## Why `group` specifically, and why it stays
+   *
+   * `group` describes what this node IS — a labelled cluster of address text
+   * and buttons — so it is the honest role for something that must not read as
+   * a dialog. Do not "simplify" it to `presentation`/`none`, which would
+   * additionally suppress the grouping semantics of the nested content, nor to
+   * `img`, which would misdescribe structured content as a flat image.
+   *
+   * Do NOT read it as a safety net that would let the `inert`/`aria-hidden`
+   * wrapper be dropped. An earlier revision of this comment called it "defense
+   * in depth"; the design pass on #1982 was right that this overclaims, so it
+   * is stated the other way round. Remove that wrapper and this subtree
+   * re-enters the accessibility tree as a labelled "Wallet menu" whose
+   * Copy/Switch handlers are `NOOP` — a silently broken control group, and a
+   * WORSE trap than three dialogs, because three simultaneous dialogs is a
+   * detectable anomaly and a plausible-looking dead menu is not. The wrapper is
+   * load-bearing on its own terms; this role is not a substitute for it.
    *
    * Product call sites never pass it, so the real popover keeps full dialog
-   * semantics.
+   * semantics — and that is ENFORCED, not merely requested (#1975).
+   * `__tests__/wallet-popover-presentational-guard.test.ts` fails if any call
+   * site outside `app/(authenticated)/design-system/` passes this prop, if one
+   * of `WalletButton`'s own popovers passes it, or if the default below is
+   * flipped to `true`. Do not silence an accessibility complaint on a real
+   * surface by reaching for it: the guard will refuse, which is the point.
+   *
+   * It refuses the CARELESS route, not every route — a `{...spread}` or a
+   * renamed import is invisible to a text scan. That limit is enumerated in
+   * the guard file's own "What this guard cannot see" section; read it there
+   * before concluding the confinement is airtight.
    */
   presentational?: boolean
   open: boolean

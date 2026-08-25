@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/rails/execution-rail.ts
   - packages/backend/src/__tests__/non-custody.invariants.test.ts
   - packages/frontend/src/lib/revoke-agent.ts
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-24" # #1988: the "control surface already exposed" bullet cited `/user/safes/:id/approvers` in the present tense; that route is deleted with the Safe rail, so the example is repointed. ⚠️ My first repoint invented `GET /user/safes/:safeId`, which does not exist — `routes/user-safes.ts` registers `GET /` and nothing per-id — and `haven-reviewer` caught it: a doc pass fixing a false claim introduced a different one, which is the failure mode the pass exists to prevent. Corrected to the routes that actually serve, and the owner list is now attributed to `/safe/:addr/details`, which is where the approver route read it from anyway. Scope: that bullet. Prior: #1987: the Row 5 addendum named `decideCoverage` as a live symbol the delegation branch merely "never calls" — it is now DELETED, and the spy-based proof it describes went vacuous by construction, so the addendum records the replacement structural assertion and its positive control. Also #1987: re-read after the AllowanceModule EXECUTION half was deleted — the `allowance-module.ts:232` mechanism claim and the References line both named code that no longer exists; both corrected in place with the live delegation-rail equivalent named. The invariants table itself was NOT re-verified in this pass and is left as #1986 wrote it. Prior: #1986: the invariants table rows 4 and 5 re-read against the AllowanceModule retirement — row 5's mechanism ("queued for approval") is legacy-rail-only and gone, and Red Line #4 is now only PARTIALLY proven on the live rail; addendum added naming the gap (#2004, Depends-on into #1991). Rows 1-3 and 6+ unaffected. Part 2/Phasing left alone — its "design proposal" framing is pre-existing drift, not this diff's. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Design — make non-custody provable (CI invariants + "verify your control")
@@ -22,10 +22,20 @@ last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no cl
 ## Why this, and why now
 
 Haven's custody-critical controls are **already on-chain**: the Safe
-AllowanceModule enforces per-token amount and reset period keyed by
-`(safe, delegate, token)`, and `executeAllowanceTransfer` is authorised by the
-**delegate's signature** — the relayer only pays gas
-([`allowance-module.ts`](../../packages/backend/src/rails/allowance-module.ts):232).
+AllowanceModule enforced per-token amount and reset period keyed by
+`(safe, delegate, token)`, and `executeAllowanceTransfer` was authorised by the
+**delegate's signature** — the relayer only paid gas.
+
+> ⚠️ **#1987 (epic #1440): that mechanism no longer exists in the codebase.**
+> `executeAllowanceTransfer` — with `generateTransferHash`, `recoverSigner` and
+> the allowance-nonce coordinator — was **deleted** with the AllowanceModule
+> rail's execution half; the line reference this paragraph used to carry
+> (`allowance-module.ts:232`) is gone. The file survives as **reads only**, and
+> the equivalent live claim is the delegation rail's: an agent's authority is a
+> signed delegation whose budget, recipient and expiry are enforced ON-CHAIN by
+> audited caveat enforcers during redemption, and the relayer still only pays
+> gas. The historical statement is kept above because the invariants table below
+> is written against it; read it as the rail's *former* mechanism.
 The model is sound. The gap is **demonstrability**: the guardrails doc asks us to
 "maintain evidence that Haven does not control funds" (§ of the same name) and to
 keep the property "if Haven's backend disappeared, the Safe would still be
@@ -56,8 +66,12 @@ What the codebase shows today:
   (nullable). Per policy, "API auth is identity, signature is authority" — but
   the plaintext column should be fully retired.
 - **Control surface already exposed.** `/safe/:addr/details` (owners,
-  threshold), `/user/safes/:id/approvers`, on-chain allowances, and the agents
-  API already return everything a "verify your control" view needs.
+  threshold), `GET /user/safes` (the caller's linked accounts), on-chain
+  allowances, and the agents API already return everything a "verify your
+  control" view needs. (`/user/safes/:id/approvers` was on this list until
+  #1988 deleted it with the Safe rail. The owner list it served is still
+  readable — from `/safe/:addr/details`, which is where it always came from:
+  the approver route read `getOwners()` too and merely decorated the result.)
 
 These facts are true *now* — the point of Part 1 is to keep them true.
 
@@ -86,6 +100,57 @@ recorded, not implicit.
 relying on reviewer memory — exactly the "maintain evidence" the doc asks for,
 and the strongest possible answer to a CASP perimeter question. Zero UX, zero
 fund movement.
+
+### Safe / AllowanceModule rail retirement (#1986, epic #1440) — what rows 4 and 5 now mean
+
+> **Read this before rows 4 and 5 above.** Both were written against the legacy
+> AllowanceModule rail, and #1986 fail-closes that rail: every payment entry
+> point answers HTTP 410 for an `allowance_module` account. A rail that cannot
+> spend cannot demonstrate "only a valid signature releases a transfer", so the
+> three contract suites (`non-custody-authz`, `non-custody-onchain-gate`,
+> `non-custody-relay`) were **re-based onto the delegation rail** rather than
+> converted into refusal assertions — a proof that can only say no is not a
+> proof.
+
+**Row 4 (Red Line #3) — still proven, on the live rail.** The delegation-rail
+cases assert that an authenticated request with no signature, a
+shape-invalid signature, or a signature the account rejects on-chain never
+releases a payment, and the positive control in the same run shows a correct
+signature does. **Scope limit, stated:** the suite proves Haven *forwards* the
+account's verdict; it does not prove the delegate smart account's
+`validateUserOp` itself rejects a non-delegate signature, which is on-chain
+code behind the mocked bundler seam.
+
+**Row 5 (Red Line #4) — PARTIALLY proven, and the gap is filed.** The row's
+described mechanism — *"an over-allowance payment is queued for approval"* — is
+**legacy-rail-only and no longer exists**. The delegation rail has no approval
+queue at all: an out-of-policy redemption reverts on-chain during bundler gas
+estimation, enforced by the caveat enforcers. What the re-based suite proves is
+that Haven performs **no off-chain coverage arithmetic** on that rail and
+forwards a rejection verbatim with nothing written.
+
+> ⚠️ **#1987 — how that first half is proven CHANGED, because the original
+> proof went vacuous.** #1986 asserted it with `not.toHaveBeenCalled()` spies
+> on `computeEffectiveAllowance` / `getTokenAllowance` / `decideCoverage`. That
+> was a real behavioural claim while `routes/payments.ts` still imported those
+> functions and chose a branch at runtime. #1987 deleted the legacy branch, and
+> deleted `decideCoverage` (with `domain/payment-coverage.ts`) outright — so
+> the route imports none of them and the spies became **true by construction**:
+> a guard matching the empty set, which would pass just as happily if the
+> payment route were deleted. Measured rather than assumed — re-adding a banned
+> import turned the new check red while every old spy stayed green. The claim
+> is now asserted **structurally**, over the payment route's parsed import
+> bindings, with a positive control proving the extractor can say yes before a
+> "no" is allowed to count. See
+> [`casp-changelog/2026-08-24-1987.md`](../regulatory/casp-changelog/2026-08-24-1987.md).
+
+What it does **not** prove, and structurally cannot from a backend unit
+test, is that the enforcers revert correctly. That gap is tracked as
+[#2004](https://github.com/d-hinders/Haven-AI/issues/2004) and is a hard
+`Depends on` for [#1991](https://github.com/d-hinders/Haven-AI/issues/1991), the
+CASP rewrite — so the guardrails cannot be re-based onto the delegation rail
+while claiming a control is proven on every PR that nothing proves. It needs a
+forked-chain or testnet integration proof, with a positive control.
 
 ### Session-key rail extension (#736, ADR #719 Stage 2)
 
@@ -174,5 +239,5 @@ link + honest labels.
 ## References
 
 - [`casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md) — the source of every invariant above.
-- [`allowance-module.ts`](../../packages/backend/src/rails/allowance-module.ts) — on-chain allowance read + relayer-gas-only transfer.
+- [`allowance-module.ts`](../../packages/backend/src/rails/allowance-module.ts) — on-chain allowance READ. (The relayer-gas-only transfer it also held was deleted by #1987; see the addendum above.)
 - [`02-identity-and-custody.md`](../architecture/02-identity-and-custody.md) — the custody model this makes provable.

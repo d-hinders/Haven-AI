@@ -5,6 +5,52 @@ import { authMiddleware } from '../middleware/auth.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
 import { mppDemoRetired } from '../modules/mpp/index.js'
 import { getApprovalRail } from '../infra/repositories/approval-requests.js'
+import { allowanceModuleRailRetired } from '../rails/execution-rail.js'
+
+/**
+ * The approval queue's ACTIONABLE transitions are closed (#1986, epic #1440
+ * slice 3).
+ *
+ * Every `approval_requests` row is an AllowanceModule-rail artifact: the
+ * delegation rail has no approval queue at all (its budget is enforced
+ * on-chain by the caveat enforcers, so there is nothing to queue), and all
+ * three inserts — `insertPaymentApproval`, `insertSendApproval`,
+ * `insertMachineApproval` — sit on legacy code paths, every one of which now
+ * refuses upstream. So the refusal here is unconditional rather than
+ * rail-conditional; there is no live-rail approval for a predicate to spare.
+ *
+ * A route `preHandler` rather than an early `return`, for the #1984 reason:
+ * an unconditional early return would strand each handler body as unreachable
+ * code, forcing a deletion that belongs to #1988. The hook replies before the
+ * handler runs, so the bodies stay verbatim, Fastify short-circuits before
+ * any `pool.query`, and no path inside a handler can reach around it.
+ * `authMiddleware` is an `onRequest` hook, so 401 still precedes 410.
+ *
+ * Scoped to `/approve` and `/proposed` — the two transitions that make a
+ * queued payment executable. Deliberately NOT closed:
+ *
+ * - `GET /` and `POST /:id/reject` — the epic's "accounts/history stay
+ *   READABLE" plus the ability to clear the queue. Readable and rejectable,
+ *   never approvable: the #1328 mpp_demo shape exactly.
+ * - `POST /:id/executed` — post-hoc bookkeeping of a Safe transaction the
+ *   OWNER signed and broadcast themselves. Haven cannot prevent that
+ *   transaction (it is owner authority, and `POST /safe/exec` stays open
+ *   because approver management rides on it, #1229), so refusing the record
+ *   would not stop a single wei from moving — it would only lose the audit
+ *   trail for something that already happened. Closing `/approve` is what
+ *   stops a NEW row reaching `approved`.
+ */
+function retiredApprovalTransition() {
+  return {
+    preHandler: async (
+      _request: import('fastify').FastifyRequest,
+      reply: import('fastify').FastifyReply,
+    ) => {
+      const retired = allowanceModuleRailRetired('approval')
+      return reply.code(retired.statusCode).send(retired.body)
+    },
+  }
+}
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -152,6 +198,7 @@ export default async function approvalRoutes(app: FastifyInstance): Promise<void
   // POST /:id/approve — mark an approval request as approved
   app.post<{ Params: { id: string } }>(
     '/:id/approve',
+    retiredApprovalTransition(),
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { id } = request.params
@@ -217,6 +264,7 @@ export default async function approvalRoutes(app: FastifyInstance): Promise<void
   // POST /:id/proposed — record that a multi-approval payment was submitted
   app.post<{ Params: { id: string } }>(
     '/:id/proposed',
+    retiredApprovalTransition(),
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { id } = request.params

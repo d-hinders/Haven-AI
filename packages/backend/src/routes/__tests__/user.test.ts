@@ -159,45 +159,27 @@ describe('User routes', () => {
   })
 
   // --- PUT /user/safe ---
+  // INFLOW CLOSED (#1984, epic #1440). This route linked a Safe into
+  // `user_safes` and emitted the `safe_imported` funnel event — it is an
+  // import, so it is retired with the rail. The behavioural cases that used
+  // to live here (200 on a valid address, 400 on a bad one, the Base
+  // chain_id default, the #1178 vanished-row 404) all exercised a handler
+  // that can no longer run; the full refusal proof, including that nothing
+  // is written on the way to it, lives in `safe-inflow-retired.test.ts`.
   describe('PUT /user/safe', () => {
-    it('returns updated user for valid address + valid JWT', async () => {
-      const token = signToken({ sub: 'user-1', email: 'test@example.com' })
-      const safeAddress = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd'
-
-      mockQuery.mockResolvedValueOnce({
-        rows: [{
-          id: 'user-1',
-          email: 'test@example.com',
-          wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
-          safe_address: safeAddress,
-        }],
-      })
-
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/user/safe',
-        headers: { authorization: `Bearer ${token}` },
-        payload: { safe_address: safeAddress },
-      })
-
-      expect(response.statusCode).toBe(200)
-      const body = response.json()
-      expect(body.id).toBe('user-1')
-      expect(body.safe_address).toBe(safeAddress)
-    })
-
-    it('returns 400 for invalid address', async () => {
+    it('is retired — 410, and no Safe is linked', async () => {
       const token = signToken({ sub: 'user-1', email: 'test@example.com' })
 
       const response = await app.inject({
         method: 'PUT',
         url: '/user/safe',
         headers: { authorization: `Bearer ${token}` },
-        payload: { safe_address: '0xinvalid' },
+        payload: { safe_address: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd' },
       })
 
-      expect(response.statusCode).toBe(400)
-      expect(response.json().error).toBe('Invalid Ethereum address')
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toMatch(/Safe rail is retired/)
+      expect(mockQuery, 'the retired route wrote nothing').not.toHaveBeenCalled()
     })
 
     it('returns 401 without auth', async () => {
@@ -210,35 +192,8 @@ describe('User routes', () => {
       expect(response.statusCode).toBe(401)
       expect(response.json().error).toBe('Unauthorized')
     })
-
-    it('defaults chain_id to 8453 (Base) when the body omits it', async () => {
-      // Guards the Base-default change: a body without chain_id must link the
-      // Safe on Base (8453), not Gnosis (100).
-      const token = signToken({ sub: 'user-1', email: 'test@example.com' })
-      const safeAddress = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd'
-
-      mockQuery
-        .mockResolvedValueOnce({
-          rows: [{ id: 'user-1', email: 'test@example.com', wallet_address: '0x1234567890abcdef1234567890abcdef12345678', safe_address: safeAddress }],
-        }) // UPDATE users
-        .mockResolvedValueOnce({ rows: [] }) // INSERT INTO user_safes
-
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/user/safe',
-        headers: { authorization: `Bearer ${token}` },
-        payload: { safe_address: safeAddress }, // no chain_id
-      })
-
-      expect(response.statusCode).toBe(200)
-      const insertCall = mockQuery.mock.calls.find(
-        (c) => typeof c[0] === 'string' && /INSERT INTO user_safes/.test(c[0] as string),
-      )
-      expect(insertCall, 'a user_safes INSERT was issued').toBeDefined()
-      // params: [user_id, safe_address, chain_id, ...]
-      expect((insertCall![1] as unknown[])[2]).toBe(8453)
-    })
   })
+
 
   describe('GET /user/owners', () => {
     it('dedupes current on-chain owners across linked accounts and applies private aliases', async () => {
@@ -484,7 +439,6 @@ describe('a vanished user row is a 404, not a hang or a 500 (#1178)', () => {
   it.each([
     ['PUT', '/user/profile', { name: 'Ada Lovelace' }],
     ['PUT', '/user/wallet', { wallet_address: '0x1234567890abcdef1234567890abcdef12345678' }],
-    ['PUT', '/user/safe', { safe_address: '0x1234567890abcdef1234567890abcdef12345678' }],
     ['PUT', '/user/preferences', { currency_preference: 'EUR' }],
   ])('%s %s answers 404', async (method, url, payload) => {
     mockQuery.mockResolvedValue({ rows: [] })
@@ -499,19 +453,8 @@ describe('a vanished user row is a 404, not a hang or a 500 (#1178)', () => {
     expect(response.statusCode).toBe(404)
   })
 
-  it('PUT /user/safe refuses before linking the Safe', async () => {
-    mockQuery.mockResolvedValue({ rows: [] })
-
-    await app.inject({
-      method: 'PUT',
-      url: '/user/safe',
-      headers: { authorization: `Bearer ${token()}` },
-      payload: { safe_address: '0x1234567890abcdef1234567890abcdef12345678' },
-    })
-
-    // Exactly one query — the UPDATE that found nothing. Linking a Safe to an
-    // account that no longer exists is not a partial success worth keeping.
-    expect(mockQuery).toHaveBeenCalledTimes(1)
-    expect(mockQuery.mock.calls.some(([sql]) => /INSERT INTO user_safes/.test(String(sql)))).toBe(false)
-  })
+  // PUT /user/safe is absent from both the table above and this file's
+  // vanished-row cases on purpose: it is retired (#1984) and answers 410
+  // before it reads the user row at all, so it can no longer distinguish a
+  // vanished user. Its refusal is pinned in `safe-inflow-retired.test.ts`.
 })

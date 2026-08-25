@@ -66,7 +66,9 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-24" # #1714 (epic #1717): catalogue ingestion lifecycle added to the catalog module — modules/catalog/lifecycle.ts drives the self-service submission queue (ownership proof → SSRF-hardened probe → re-verification → retention) on the new leader-locked catalogIngest monitor in index.ts; the operator-curated refresh and discovery are unchanged. Prior: #1199: signer-removal recovery change re-verified; delegation authority overview unchanged
+<<<<<<< HEAD
+last-verified: "2026-08-24" # #1714 (epic #1717): catalogue ingestion lifecycle added to the catalog module — modules/catalog/lifecycle.ts drives the self-service submission queue (ownership proof → SSRF-hardened probe → re-verification → retention) on the new leader-locked catalogIngest monitor in index.ts; the operator-curated refresh and discovery are unchanged. Prior: #1199: signer-removal recovery change re-verified; delegation authority overview unchanged Prior: last-verified: "2026-08-24" # #1984: the rail line said the legacy AllowanceModule rail was "import-only" — #1984 closes IMPORT too, so nothing enters it by any route; corrected to closed-to-new-accounts. The rest of the overview re-read against the diff: the delegation rail is still where new accounts are provisioned, and the custody boundary is unchanged. Prior: #1199: signer-removal recovery change re-verified; delegation authority overview unchanged
+>>>>>>> origin/dev
 ---
 
 # Haven — Architecture Overview
@@ -81,7 +83,7 @@ line holds the security model:
 **API auth = identity, signature = authority, on-chain AllowanceModule state =
 enforcement for automatic Safe funding.**
 
-That line describes the **legacy AllowanceModule rail** (import-only, existing
+That line describes the **legacy AllowanceModule rail** (RETIRING under #1440 — closed to new accounts entirely since #1984; existing
 accounts). Haven runs **two on-chain policy rails** — the Smart Sessions
 **session rail is retired** (#834; accounts still marked
 `execution_rail='session_key'` get HTTP 410 from the payment paths).

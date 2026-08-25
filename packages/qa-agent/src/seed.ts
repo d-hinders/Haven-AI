@@ -1,66 +1,83 @@
 /**
- * QA dev-identity seed (epic #573, #574 item 1).
+ * QA dev-identity seed (epic #573, #574 item 1; re-based on the delegation
+ * rail by #2007, epic #1440).
  *
  * Idempotently provisions the dedicated QA identity on **Base Sepolia (84532)**
- * against the shared dev backend, so the deterministic money-flow harness (#575)
- * has a real agent + Safe + on-chain allowance to run against:
+ * against the shared dev backend, so the money-flow harness (#575) has a real
+ * agent with real on-chain spend authority to run against:
  *
- *   1. QA user        — POST /auth/signup (falls back to /auth/login)
- *   2. QA Safe        — EOA-owned Safe (owner = SEED_OWNER key, threshold 1),
- *                       deployed via SafeProxyFactory and linked via POST /user/safes
- *   3. Spend gate     — owner-signed multiSend {enableModule, addDelegate,
- *                       setAllowance} submitted directly by the owner EOA
- *   4. QA Agent       — POST /agents with the delegate address + USDC allowance
+ *   1. QA user     — POST /auth/signup (falls back to /auth/login)
+ *   2. QA account  — Hybrid DeleGator via POST /accounts/hybrid
+ *                    (counterfactual, ZERO transactions, owner = SEED_OWNER)
+ *   3. QA agent    — POST /agents with the delegate address
+ *   4. Budget      — POST /agents/:id/delegations/build → owner signs the
+ *                    EIP-712 payload → POST …/activate
  *
  * It then prints the `QA_*` env block (#574 secrets) for the harness.
  *
- * ── Funding model (verified against backend `lib/allowance-module.ts`) ────────
- *   - Ordinary payments use delegate signatures + relayer submission. The direct
- *     sweep-recovery scenario additionally needs delegate gas. Pass only the
- *     delegate *address* here (SEED_DELEGATE_ADDRESS).
- *   - The **Safe** holds the spendable test **USDC** (fund via Circle faucet).
- *   - The dev **relayer** (RELAYER_PRIVATE_KEY on the backend) pays gas for the
- *     allowance transfers during harness runs.
- *   - The **SEED_OWNER** EOA needs Base Sepolia **ETH** for the Safe deployment
- *     and the owner-approved allowance setup.
+ * ── Why this no longer seeds a Safe (#2007) ──────────────────────────────────
+ * It used to deploy an EOA-owned Safe and register it with `POST /user/safes`,
+ * then enable the AllowanceModule and set an on-chain allowance. Every part of
+ * that is gone:
  *
- * ⚠️ The on-chain steps are NOT exercised in CI (no funded testnet wallets here).
- *    Run this once against funded Base Sepolia wallets; iterate on any on-chain
- *    error. Everything is testnet/dev-only — never a production credential.
+ *   - `POST /user/safes` has answered **HTTP 410** since #1984 — the Safe rail's
+ *     inflow is closed, so no new Safe can enter Haven at all;
+ *   - `execution_rail='allowance_module'` accounts answer **410** from
+ *     /payments and x402 since #1986, so a seeded Safe could not pay even if
+ *     one could still be created.
  *
- * Run:  npx tsx packages/qa-agent/src/seed.ts
+ * The breakage was invisible because `ensureSafe()` short-circuited on an
+ * already-linked Safe: the dead call sat behind a reuse branch and only fired
+ * for a **fresh** QA account — which is precisely the case a database reset or
+ * a new environment produces, and `qa-dev` feeds the `qa-freshness` gate on
+ * `dev → main`.
+ *
+ * ⚠️ **Read the account list from `/auth/me`, never `GET /user/safes`.** That
+ * route's projection has no `account_type` column, so it cannot tell a retired
+ * Safe from a Hybrid account — a reuse check written against it would happily
+ * adopt the QA user's existing dead Safe and reintroduce the same hidden
+ * precondition one layer down. `/auth/me` carries `account_type`, which is what
+ * makes the reuse branch here honest.
+ *
+ * ── Funding model ────────────────────────────────────────────────────────────
+ *   - The **Hybrid account** holds the spendable test **USDC** (fund via the
+ *     Circle faucet). Payments move account → recipient DIRECTLY; there is no
+ *     funding leg and no delegate hot balance on this rail.
+ *   - The dev **relayer** sponsors the UserOps, including the counterfactual
+ *     account's first deployment.
+ *   - **SEED_OWNER needs no ETH.** Provisioning is counterfactual and the grant
+ *     is a signature, not a transaction — this seed sends nothing on-chain and
+ *     opens no RPC connection.
+ *
+ * Everything is testnet/dev-only — never a production credential.
+ *
+ * Run:  npm run seed -w packages/qa-agent
  */
 
 import { ethers } from 'ethers'
 
 // ── Base Sepolia (84532) constants ───────────────────────────────────────────
-// Source of truth: backend `lib/chains.ts` (BASE_SEPOLIA). Mirrored here to keep
-// this package self-contained. Every address verified deployed on Base Sepolia
-// via eth_getCode. NOTE: the AllowanceModule is the **v0.1.1** deployment
-// (0xAA46…) — v0.1.0's 0xCFbF… address is NOT on Base Sepolia (identical ABI).
+// Source of truth: `@haven_ai/core`'s chain registry. Mirrored here to keep this
+// package self-contained.
 const CHAIN_ID = 84532
 const ADDR = {
-  safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
-  safeSingletonL2: '0xfb1bffC9d739B8D520DaF37dF666da4C687191EA',
-  fallbackHandler: '0x017062a1dE2FE6b99BE3d9d37841FeD19F573804',
-  allowanceModule: '0xAA46724893dedD72658219405185Fb0Fc91e091C',
-  multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
   usdc: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
 } as const
-const ZERO = '0x0000000000000000000000000000000000000000'
 const USDC_DECIMALS = 6
+
+/** The rail marker a Hybrid DeleGator account carries in `user_safes`. */
+const HYBRID_ACCOUNT_TYPE = 'delegator_hybrid'
 
 // ── Config ───────────────────────────────────────────────────────────────────
 interface SeedConfig {
   apiUrl: string
-  rpcUrl: string
   ownerKey: string
   delegateAddress: string
   paymentTo: string
   qaEmail: string
   qaPassword: string
-  allowanceUsdc: string
-  resetMin: number
+  budgetUsdc: string
+  periodMin: number
 }
 
 function loadSeedConfig(env: NodeJS.ProcessEnv = process.env): SeedConfig {
@@ -72,14 +89,16 @@ function loadSeedConfig(env: NodeJS.ProcessEnv = process.env): SeedConfig {
   }
   const cfg: SeedConfig = {
     apiUrl: req('SEED_HAVEN_API_URL').replace(/\/+$/, ''),
-    rpcUrl: (env.SEED_RPC_URL?.trim() || 'https://sepolia.base.org').replace(/\/+$/, ''),
     ownerKey: req('SEED_OWNER_PRIVATE_KEY'),
     delegateAddress: req('SEED_DELEGATE_ADDRESS'),
     paymentTo: req('SEED_PAYMENT_TO'),
     qaEmail: req('SEED_QA_EMAIL'),
     qaPassword: req('SEED_QA_PASSWORD'),
-    allowanceUsdc: env.SEED_ALLOWANCE_USDC?.trim() || '5',
-    resetMin: Number(env.SEED_RESET_MIN?.trim() || '1440'),
+    // Names kept from the AllowanceModule era so an existing operator env keeps
+    // working; on the delegation rail they mean the delegation's period budget
+    // and its period length.
+    budgetUsdc: env.SEED_ALLOWANCE_USDC?.trim() || '5',
+    periodMin: Number(env.SEED_RESET_MIN?.trim() || '1440'),
   }
   if (missing.length > 0) {
     throw new Error(
@@ -92,6 +111,9 @@ function loadSeedConfig(env: NodeJS.ProcessEnv = process.env): SeedConfig {
   }
   if (!ethers.isAddress(cfg.paymentTo)) {
     throw new Error(`SEED_PAYMENT_TO is not a valid address: ${cfg.paymentTo}`)
+  }
+  if (!Number.isFinite(cfg.periodMin) || cfg.periodMin <= 0) {
+    throw new Error(`SEED_RESET_MIN must be a positive number of minutes: ${cfg.periodMin}`)
   }
   return cfg
 }
@@ -148,230 +170,50 @@ async function ensureUser(cfg: SeedConfig): Promise<string> {
   }
 }
 
-// ── Phase 2: QA Safe (reuse if the user already has one on 84532) ────────────
-interface UserSafe {
+// ── Phase 2: QA account (Hybrid DeleGator on the delegation rail) ────────────
+interface SessionSafe {
   id: string
   safe_address: string
   chain_id: number
+  account_type: string | null
 }
 
-async function ensureSafe(
+/** The account list as `/auth/me` reports it — the only projection with a rail marker. */
+async function listAccounts(cfg: SeedConfig, token: string): Promise<SessionSafe[]> {
+  const me = await api<{ safes?: SessionSafe[] }>(cfg, 'GET', '/auth/me', { token })
+  return me.safes ?? []
+}
+
+function findHybrid(accounts: SessionSafe[]): SessionSafe | undefined {
+  return accounts.find((s) => s.account_type === HYBRID_ACCOUNT_TYPE && s.chain_id === CHAIN_ID)
+}
+
+async function ensureAccount(
   cfg: SeedConfig,
   token: string,
   owner: ethers.Wallet,
-): Promise<UserSafe> {
-  const { safes: existing } = await api<{ safes: UserSafe[] }>(cfg, 'GET', '/user/safes', {
+): Promise<SessionSafe> {
+  const existing = findHybrid(await listAccounts(cfg, token))
+  if (existing) {
+    console.log(`  ✓ reusing Hybrid account ${existing.safe_address}`)
+    return existing
+  }
+
+  console.log('  • provisioning a Hybrid DeleGator account (counterfactual, no transaction)…')
+  await api(cfg, 'POST', '/accounts/hybrid', {
     token,
+    body: { chain_id: CHAIN_ID, owner_address: owner.address, name: 'QA Account' },
   })
-  const onChain = existing.find((s) => s.chain_id === CHAIN_ID)
-  if (onChain) {
-    console.log(`  ✓ reusing linked Safe ${onChain.safe_address}`)
-    return onChain
+
+  const account = findHybrid(await listAccounts(cfg, token))
+  if (!account) {
+    throw new Error('Provisioned Hybrid account did not appear in /auth/me')
   }
-
-  console.log('  • deploying a new EOA-owned Safe (owner pays one-time gas)…')
-  const safeAddress = await deploySafe(cfg, owner)
-  console.log(`  ✓ Safe deployed: ${safeAddress}`)
-
-  await api(cfg, 'POST', '/user/safes', {
-    token,
-    body: { safe_address: safeAddress, chain_id: CHAIN_ID, name: 'QA Safe' },
-  })
-  console.log('  ✓ Safe linked to QA user')
-  const { safes: refreshed } = await api<{ safes: UserSafe[] }>(cfg, 'GET', '/user/safes', {
-    token,
-  })
-  const safe = refreshed.find((s) => s.safe_address.toLowerCase() === safeAddress.toLowerCase())
-  if (!safe) throw new Error('Linked Safe not found after POST /user/safes')
-  return safe
+  console.log(`  ✓ Hybrid account provisioned: ${account.safe_address}`)
+  return account
 }
 
-// Mirrors backend `relaySafeDeploy` — single owner, threshold 1, no modules — but
-// sent from the owner wallet itself (headless, no relayer key needed locally).
-async function deploySafe(cfg: SeedConfig, owner: ethers.Wallet): Promise<string> {
-  const setupIface = new ethers.Interface([
-    'function setup(address[] _owners, uint256 _threshold, address to, bytes data, address fallbackHandler, address paymentToken, uint256 payment, address paymentReceiver)',
-  ])
-  const initializer = setupIface.encodeFunctionData('setup', [
-    [owner.address],
-    1,
-    ZERO,
-    '0x',
-    ADDR.fallbackHandler,
-    ZERO,
-    0,
-    ZERO,
-  ])
-  const factory = new ethers.Contract(
-    ADDR.safeProxyFactory,
-    [
-      'function createProxyWithNonce(address _singleton, bytes initializer, uint256 saltNonce) returns (address proxy)',
-      'event ProxyCreation(address proxy, address singleton)',
-    ],
-    owner,
-  )
-  const saltNonce = BigInt(Date.now())
-  const tx = await factory.createProxyWithNonce(ADDR.safeSingletonL2, initializer, saltNonce)
-  const receipt = await tx.wait()
-  const iface = new ethers.Interface([
-    'event ProxyCreation(address proxy, address singleton)',
-  ])
-  const topic = iface.getEvent('ProxyCreation')!.topicHash
-  const log = (receipt.logs as ethers.Log[]).find(
-    (l) =>
-      l.address.toLowerCase() === ADDR.safeProxyFactory.toLowerCase() && l.topics[0] === topic,
-  )
-  if (!log) throw new Error('ProxyCreation event not found in deploy receipt')
-  return iface.decodeEventLog('ProxyCreation', log.data, log.topics).proxy as string
-}
-
-// ── Phase 3: enable module + addDelegate + setAllowance (owner-signed) ────────
-// Built as one multiSend and submitted directly by the owner EOA. Each sub-step
-// is included only if not already on-chain (idempotent).
-async function ensureAllowance(
-  cfg: SeedConfig,
-  safe: UserSafe,
-  owner: ethers.Wallet,
-  provider: ethers.JsonRpcProvider,
-): Promise<void> {
-  const safeC = new ethers.Contract(
-    safe.safe_address,
-    [
-      'function isModuleEnabled(address module) view returns (bool)',
-      'function nonce() view returns (uint256)',
-      'function enableModule(address module)',
-    ],
-    provider,
-  )
-  const moduleC = new ethers.Contract(
-    ADDR.allowanceModule,
-    [
-      'function addDelegate(address delegate)',
-      'function setAllowance(address delegate, address token, uint96 allowanceAmount, uint16 resetTimeMin, uint32 resetBaseMin)',
-      'function getTokenAllowance(address safe, address delegate, address token) view returns (uint256[5])',
-    ],
-    provider,
-  )
-
-  const moduleEnabled: boolean = await safeC.isModuleEnabled(ADDR.allowanceModule)
-  const current = (await moduleC.getTokenAllowance(
-    safe.safe_address,
-    cfg.delegateAddress,
-    ADDR.usdc,
-  )) as bigint[]
-  // getTokenAllowance returns [amount, spent, resetTimeMin, lastResetMin, nonce].
-  const desired = ethers.parseUnits(cfg.allowanceUsdc, USDC_DECIMALS)
-  if (moduleEnabled && current[0] === desired) {
-    console.log('  ✓ module enabled + allowance already set — skipping')
-    return
-  }
-
-  // Build the inner calls.
-  const inner: { to: string; data: string }[] = []
-  if (!moduleEnabled) {
-    inner.push({
-      to: safe.safe_address,
-      data: safeC.interface.encodeFunctionData('enableModule', [ADDR.allowanceModule]),
-    })
-  }
-  inner.push({
-    to: ADDR.allowanceModule,
-    data: moduleC.interface.encodeFunctionData('addDelegate', [cfg.delegateAddress]),
-  })
-  inner.push({
-    to: ADDR.allowanceModule,
-    data: moduleC.interface.encodeFunctionData('setAllowance', [
-      cfg.delegateAddress,
-      ADDR.usdc,
-      desired,
-      cfg.resetMin,
-      0, // resetBaseMin — start the window now
-    ]),
-  })
-
-  const multiSendData = encodeMultiSend(inner)
-  const nonce: bigint = await safeC.nonce()
-
-  // SafeTx EIP-712 — domain + types mirror backend routes/safe-exec.ts exactly.
-  const domain = { chainId: CHAIN_ID, verifyingContract: safe.safe_address }
-  const types = {
-    SafeTx: [
-      { name: 'to', type: 'address' },
-      { name: 'value', type: 'uint256' },
-      { name: 'data', type: 'bytes' },
-      { name: 'operation', type: 'uint8' },
-      { name: 'safeTxGas', type: 'uint256' },
-      { name: 'baseGas', type: 'uint256' },
-      { name: 'gasPrice', type: 'uint256' },
-      { name: 'gasToken', type: 'address' },
-      { name: 'refundReceiver', type: 'address' },
-      { name: 'nonce', type: 'uint256' },
-    ],
-  }
-  const message = {
-    to: ADDR.multiSendCallOnly,
-    value: 0n,
-    data: multiSendData,
-    operation: 1, // delegatecall — required for MultiSendCallOnly
-    safeTxGas: 0n,
-    baseGas: 0n,
-    gasPrice: 0n,
-    gasToken: ZERO,
-    refundReceiver: ZERO,
-    nonce,
-  }
-  const safeTxHash = ethers.TypedDataEncoder.hash(domain, types, message)
-  // EOA owner, threshold 1: a raw ECDSA signature over the EIP-712 safeTxHash
-  // (v=27/28) is what Safe's checkSignatures verifies.
-  const signature = owner.signingKey.sign(safeTxHash).serialized
-
-  // The backend's /safe/exec relay is passkey-only, so for an EOA-owned Safe the
-  // owner submits execTransaction directly on-chain (owner pays gas).
-  const safeExec = new ethers.Contract(
-    safe.safe_address,
-    [
-      'function execTransaction(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,bytes signatures) payable returns (bool)',
-    ],
-    owner,
-  )
-  const tx = await safeExec.execTransaction(
-    message.to,
-    message.value,
-    message.data,
-    message.operation,
-    message.safeTxGas,
-    message.baseGas,
-    message.gasPrice,
-    message.gasToken,
-    message.refundReceiver,
-    signature,
-  )
-  await tx.wait()
-  console.log(
-    `  ✓ allowance set: ${cfg.allowanceUsdc} USDC → delegate, reset ${cfg.resetMin} min (tx ${tx.hash})`,
-  )
-}
-
-// Safe MultiSend payload: per tx = operation(1) ‖ to(20) ‖ value(32) ‖ len(32) ‖ data.
-function encodeMultiSend(txs: { to: string; data: string }[]): string {
-  const packed = txs
-    .map((t) => {
-      const data = t.data.startsWith('0x') ? t.data.slice(2) : t.data
-      const len = data.length / 2
-      return (
-        '00' + // operation = call
-        t.to.slice(2).toLowerCase().padStart(40, '0') +
-        '0'.repeat(64) + // value = 0
-        BigInt(len).toString(16).padStart(64, '0') +
-        data
-      )
-    })
-    .join('')
-  const iface = new ethers.Interface(['function multiSend(bytes transactions)'])
-  return iface.encodeFunctionData('multiSend', ['0x' + packed])
-}
-
-// ── Phase 4: QA agent (reuse if one already maps to this delegate) ───────────
+// ── Phase 3: QA agent (reuse if one already maps to this delegate) ───────────
 interface Agent {
   id: string
   name: string
@@ -381,74 +223,167 @@ interface Agent {
 async function ensureAgent(
   cfg: SeedConfig,
   token: string,
-  safe: UserSafe,
-): Promise<{ apiKey: string | null }> {
+  account: SessionSafe,
+  budgetAtomic: string,
+): Promise<{ agentId: string; apiKey: string | null }> {
   const { agents } = await api<{ agents: Agent[] }>(cfg, 'GET', '/agents', { token })
   const existing = agents.find(
     (a) => a.delegate_address?.toLowerCase() === cfg.delegateAddress.toLowerCase(),
   )
   if (existing) {
     console.log(`  ✓ QA agent already exists (${existing.id}) — api key not re-shown`)
-    return { apiKey: null }
+    return { agentId: existing.id, apiKey: null }
   }
-  const created = await api<{ api_key?: string; secret?: string }>(cfg, 'POST', '/agents', {
+  const created = await api<{ id?: string; api_key?: string; secret?: string }>(
+    cfg,
+    'POST',
+    '/agents',
+    {
+      token,
+      body: {
+        name: 'QA Agent',
+        description: 'Automated QA harness identity (epic #573). Testnet-only.',
+        delegate_address: cfg.delegateAddress,
+        safe_id: account.id,
+        allowances: [
+          {
+            token_symbol: 'USDC',
+            token_address: ADDR.usdc,
+            // Atomic units — the backend validates allowance_amount as an
+            // atomic integer. On the delegation rail this row is written at
+            // connection setup and never read back for display (#1090); the
+            // authority that matters is the delegation granted in phase 4.
+            allowance_amount: budgetAtomic,
+            reset_period_min: cfg.periodMin,
+          },
+        ],
+      },
+    },
+  )
+  if (!created.id) throw new Error('POST /agents did not return an agent id')
+  console.log('  ✓ QA agent created')
+  return { agentId: created.id, apiKey: created.api_key ?? created.secret ?? null }
+}
+
+// ── Phase 4: budget delegation (build → owner signs → activate) ──────────────
+// The agent's spend authority. Budget, recipient and expiry are enforced
+// ON-CHAIN by the caveat enforcers during redemption; Haven never holds the
+// signing key, so the owner signs the EIP-712 payload locally here.
+interface TypedDataPayload {
+  domain: Record<string, unknown>
+  types: Record<string, unknown>
+  message: Record<string, unknown>
+}
+
+interface DelegationRow {
+  chain_id: number
+  token_address: string | null
+  status: string
+  budget_atomic: string | null
+}
+
+async function ensureBudget(
+  cfg: SeedConfig,
+  token: string,
+  agentId: string,
+  budgetAtomic: string,
+): Promise<void> {
+  const { delegations } = await api<{ delegations: DelegationRow[] }>(
+    cfg,
+    'GET',
+    `/agents/${agentId}/delegations`,
+    { token },
+  )
+  const active = delegations.find(
+    (d) =>
+      d.status === 'active' &&
+      d.chain_id === CHAIN_ID &&
+      d.token_address?.toLowerCase() === ADDR.usdc.toLowerCase() &&
+      d.budget_atomic === budgetAtomic,
+  )
+  if (active) {
+    console.log('  ✓ active USDC budget delegation already granted — skipping')
+    return
+  }
+
+  const built = await api<{
+    delegation_hash?: string
+    signing_payload?: TypedDataPayload
+  }>(cfg, 'POST', `/agents/${agentId}/delegations/build`, {
     token,
     body: {
-      name: 'QA Agent',
-      description: 'Automated QA harness identity (epic #573). Testnet-only.',
-      delegate_address: cfg.delegateAddress,
-      safe_id: safe.id,
-      allowances: [
-        {
-          token_symbol: 'USDC',
-          token_address: ADDR.usdc,
-          // Atomic units — must match the on-chain setAllowance value, and the
-          // backend validates allowance_amount as an atomic integer.
-          allowance_amount: ethers.parseUnits(cfg.allowanceUsdc, USDC_DECIMALS).toString(),
-          reset_period_min: cfg.resetMin,
-        },
-      ],
+      token_address: ADDR.usdc,
+      // Open (unpinned) budget: the EIP-3009 bridge leg structurally requires
+      // one — a recipient-pinned delegation cannot fund the delegate EOA
+      // (owner decision 2026-07-15).
+      recipient_address: null,
+      budget_atomic: budgetAtomic,
+      period_seconds: cfg.periodMin * 60,
     },
   })
-  console.log('  ✓ QA agent created')
-  return { apiKey: created.api_key ?? created.secret ?? null }
+  if (!built.delegation_hash || !built.signing_payload) {
+    throw new Error('delegations/build did not return a signable payload')
+  }
+
+  const owner = new ethers.Wallet(cfg.ownerKey)
+  const { domain, types, message } = built.signing_payload
+  const signable = Object.fromEntries(
+    Object.entries(types).filter(([name]) => name !== 'EIP712Domain'),
+  )
+  const signature = await owner.signTypedData(
+    domain as never,
+    signable as never,
+    message as never,
+  )
+
+  await api(cfg, 'POST', `/agents/${agentId}/delegations/${built.delegation_hash}/activate`, {
+    token,
+    body: { signature },
+  })
+  console.log(
+    `  ✓ budget granted: ${cfg.budgetUsdc} USDC per ${cfg.periodMin} min (delegation ${built.delegation_hash})`,
+  )
 }
 
 // ── Orchestration ────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
   const cfg = loadSeedConfig()
-  const provider = new ethers.JsonRpcProvider(cfg.rpcUrl)
-  const net = await provider.getNetwork()
-  if (Number(net.chainId) !== CHAIN_ID) {
-    throw new Error(`SEED_RPC_URL is chain ${net.chainId}, expected Base Sepolia (${CHAIN_ID}).`)
-  }
-  const owner = new ethers.Wallet(cfg.ownerKey, provider)
-  const ownerEth = await provider.getBalance(owner.address)
+  const owner = new ethers.Wallet(cfg.ownerKey)
+  const budgetAtomic = ethers.parseUnits(cfg.budgetUsdc, USDC_DECIMALS).toString()
+
   console.log(`Seeding QA identity on Base Sepolia → ${cfg.apiUrl}`)
-  console.log(`  owner ${owner.address}  (${ethers.formatEther(ownerEth)} ETH)`)
-  if (ownerEth === 0n) {
-    console.warn('  ⚠ owner has 0 ETH — a fresh Safe deploy will fail. Fund it first.')
-  }
+  console.log(`  owner ${owner.address}  (no ETH needed — nothing here is sent on-chain)`)
 
   console.log('\n[1/4] QA user')
   const token = await ensureUser(cfg)
-  console.log('\n[2/4] QA Safe')
-  const safe = await ensureSafe(cfg, token, owner)
-  console.log('\n[3/4] Spend gate (module + delegate + allowance)')
-  await ensureAllowance(cfg, safe, owner, provider)
-  console.log('\n[4/4] QA agent')
-  const { apiKey } = await ensureAgent(cfg, token, safe)
+  console.log('\n[2/4] QA account (Hybrid DeleGator, delegation rail)')
+  const account = await ensureAccount(cfg, token, owner)
+  console.log('\n[3/4] QA agent')
+  const { agentId, apiKey } = await ensureAgent(cfg, token, account, budgetAtomic)
+  console.log('\n[4/4] Budget delegation')
+  await ensureBudget(cfg, token, agentId, budgetAtomic)
 
   console.log('\n─── QA env (set as #574 secrets — testnet/dev-only) ───')
   console.log(`QA_HAVEN_API_URL=${cfg.apiUrl}`)
   console.log(`QA_PAYMENT_TO=${cfg.paymentTo}`)
-  console.log('QA_DELEGATE_PRIVATE_KEY=<the delegate key for ' + cfg.delegateAddress + '>')
+  console.log(
+    'QA_DELEGATION_DELEGATE_PRIVATE_KEY=<the delegate key for ' + cfg.delegateAddress + '>',
+  )
   if (apiKey) {
-    console.log(`QA_AGENT_API_KEY=${apiKey}`)
+    console.log(`QA_DELEGATION_AGENT_API_KEY=${apiKey}`)
   } else {
-    console.log('QA_AGENT_API_KEY=<unchanged — agent already existed; rotate via dashboard if lost>')
+    console.log(
+      'QA_DELEGATION_AGENT_API_KEY=<unchanged — agent already existed; rotate via dashboard if lost>',
+    )
   }
-  console.log('\nSafe (fund with Base Sepolia USDC): ' + safe.safe_address)
+  console.log(
+    '\n⚠ QA_AGENT_API_KEY / QA_DELEGATE_PRIVATE_KEY are NOT produced any more.\n' +
+      '  They named a legacy AllowanceModule identity, and that rail is retired:\n' +
+      '  no new Safe can be created (#1984) and an existing one cannot pay (#1986).\n' +
+      '  `loadQaConfig` still requires them — removing that, and the three legacy\n' +
+      '  legs in run.ts they feed, is tracked separately (see #2007).',
+  )
+  console.log('\nAccount (fund with Base Sepolia USDC): ' + account.safe_address)
   console.log('Done.')
 }
 

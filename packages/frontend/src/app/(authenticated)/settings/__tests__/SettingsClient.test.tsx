@@ -21,12 +21,6 @@ vi.mock('@/hooks/usePreferences', () => ({
   usePreferences: () => mockUsePreferences(),
 }))
 
-// ManageApprovers pulls wagmi/signer/api; the page test only cares that the
-// Approvers section hosts it. The component has its own focused test.
-vi.mock('@/components/settings/ManageApprovers', () => ({
-  default: () => <div>Manage approvers component</div>,
-}))
-
 import SettingsClient from '@/app/(authenticated)/settings/SettingsClient'
 
 function renderSettings() {
@@ -65,11 +59,20 @@ describe('SettingsClient', () => {
     expect(screen.getByText('Recovery and safety')).toBeInTheDocument()
   })
 
-  it('hosts the per-account approver management under the Approvers section', () => {
+  /**
+   * #1989 (epic #1440): the Approvers section is deleted. It hosted
+   * `ManageApprovers`, whose only backend — the five approver routes — #1988
+   * removed. A section every action of which 404s is worse than no section.
+   *
+   * Asserted with a positive control first, so "no Approvers section" cannot
+   * be satisfied by the settings page failing to render at all.
+   */
+  it('offers no Approvers section', () => {
     renderSettings()
 
-    expect(screen.getByText('Approvers')).toBeInTheDocument()
-    expect(screen.getByText('Manage approvers component')).toBeInTheDocument()
+    expect(screen.getByText('Recovery and safety')).toBeInTheDocument()
+    expect(screen.queryByText('Approvers')).toBeNull()
+    expect(screen.queryByText('Manage approvers component')).toBeNull()
   })
 
   it('links profile management to the profile page', () => {

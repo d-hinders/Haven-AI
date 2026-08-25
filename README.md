@@ -16,7 +16,7 @@ covers:
   - packages/demo-merchant-mcp/package.json
   - .github/workflows/publish.yml
   - scripts/release-bump.mjs
-last-verified: "2026-08-23" # #1702: the delegate-key-loss answer here was the PRE-#1694 one — "pause or revoke the agent and create a new key path". Epic #1694 made a delegation-rail agent's key REPLACEABLE (re-key: same agent, new key, budget remainder and period boundary carried), so the guidance is now split by rail rather than stated as one blanket answer. Found by the cross-epic doc sweep #1702's acceptance criteria asked for, not by the coupling gate — no `covers:` glob connects this file to `routes/agent-rekey.ts`. Scope: that one sentence in the credential paragraph; the rest of the README was not re-verified. Prior: #1328 — /demo/mpp/* retired from the endpoints table
+last-verified: "2026-08-24" # #1988: the Approvers paragraph and its API-table row described a surface this diff deletes — Haven no longer constructs an owner-change transaction, and the routes 404. Both corrected in place rather than left as a promise; the non-custody framing is strengthened, not softened, because owner management moving entirely to the user's own key IS the non-custody claim. The Safe-inflow row now says the 410s have nothing behind them. Scope: those three places; no other README claim re-verified. Prior: #1702: the delegate-key-loss answer here was the PRE-#1694 one — "pause or revoke the agent and create a new key path". Epic #1694 made a delegation-rail agent's key REPLACEABLE (re-key: same agent, new key, budget remainder and period boundary carried), so the guidance is now split by rail rather than stated as one blanket answer. Found by the cross-epic doc sweep #1702's acceptance criteria asked for, not by the coupling gate — no `covers:` glob connects this file to `routes/agent-rekey.ts`. Scope: that one sentence in the credential paragraph; the rest of the README was not re-verified. Prior: #1328 — /demo/mpp/* retired from the endpoints table
 ---
 
 # Haven
@@ -39,7 +39,7 @@ Safe AllowanceModule -> On-chain agent budget enforcement
 API auth is identity. Signature is authority. On-chain module state is enforcement.
 
 Haven runs **two on-chain policy rails**, both non-custodial. The line above is
-the **legacy AllowanceModule rail** (import-only, existing accounts; the Smart
+the **legacy AllowanceModule rail** (RETIRING under #1440 — closed to new accounts entirely since #1984; existing accounts only; the Smart
 Sessions session rail is retired, #834). New accounts are
 provisioned on the **delegation rail** (epic #821): the Haven wallet is a MetaMask
 Hybrid DeleGator smart account and the budget is a signed delegation with audited
@@ -330,7 +330,7 @@ Independent layers keep the API and signing boundaries separate:
 
 If Haven is compromised, API keys alone cannot sign transactions. A Safe owner can pause or revoke an agent in Haven and can also revoke Safe permissions through Safe-compatible tooling without needing Haven.
 
-Approvers (Safe owners) can be managed per account from **Settings → Approvers** — add or remove an EOA address or a passkey, or reuse an existing approver across accounts. The signing threshold stays at 1, the last owner can never be removed, and each owner change is signed by a current owner and relayed (Haven never signs it).
+Approver (Safe owner) management is **retired** (#1988, epic #1440). Haven never signed an owner change and no longer constructs one either: the backend routes are deleted and the Settings surface goes with #1989. Owners of a linked Safe manage its owner set directly through Safe's own interfaces with their own key — which was always true, and is the reason removing Haven's builder takes nothing away that Haven was the only source of. `POST /safe/exec` stays open, so an owner-signed Safe transaction is still relayed for gas.
 
 ### Key Management
 
@@ -361,8 +361,7 @@ Dashboard endpoints use the signed-in user's JWT. The OpenAPI contract is served
 | Surface | Auth | Examples |
 |---|---|---|
 | Dashboard auth | None/JWT | `/auth/signup`, `/auth/login`, `/auth/me` |
-| Haven wallets | JWT | `/user/safes`, `/user/safes/deploy`, balances and account views |
-| Approvers (Safe owners) | JWT | `/user/safes/:id/approvers` (list), `/user/safes/:id/approvers/tx` (build add/remove owner-change tx), `/user/safes/known-approvers` (reuse across Safes) |
+| Haven wallets | JWT | `/user/safes` (list/rename/re-default/unlink), balances and account views. Creating or importing a Safe is **retired** — `/user/safes` POST, `/user/safes/deploy`, `/safe/deploy` and `PUT /user/safe` all answer 410 (#1984), with the implementations behind them deleted (#1988); new accounts come from `/accounts/hybrid` |
 | Agents | JWT | `/agents`, `/agents/:id`, `/agents/:id/pause`, `/agents/:id/resume`, `/agents/:id/revoke`, `/agents/:id/rotate-key`, `/agents/:id/allowances` |
 | Agent payments | API key | `/payments`, `/payments/:id/sign`, `/payments/:id`, `/payments` |
 | Agent info | API key | `/machine-payments/agent`, `/machine-payments/allowances`, `/machine-payments/receipts`, `/machine-payments/:id/status`, resume-state endpoints |

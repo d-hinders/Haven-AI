@@ -2,7 +2,6 @@
 
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
-import ApprovalNotifications from './ApprovalNotifications'
 import WalletButton from './WalletButton'
 import EnvBadge from './EnvBadge'
 import NetworkSwitcher from './NetworkSwitcher'
@@ -106,9 +105,10 @@ export default function TopBar({ actionSlot }: TopBarProps) {
         </div>
       ) : null}
 
-      {/* Right region: notifications + wallet */}
+      {/* Right region: wallet. The approval-notification bell was deleted with
+          the legacy Safe rail (#1989, epic #1440) — the delegation rail enforces
+          budgets on-chain and produces no approvals to notify about. */}
       <div className="ml-auto flex items-center gap-3">
-        <ApprovalNotifications />
         <WalletButton />
       </div>
     </header>

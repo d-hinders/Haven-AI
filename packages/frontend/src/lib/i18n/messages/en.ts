@@ -29,10 +29,6 @@ export const en = {
       english: 'English',
       swedish: 'Svenska',
     },
-    approvalAlerts: {
-      label: 'Approval alerts',
-      detail: 'Get notified when a transaction needs approval.',
-    },
     agentSpendAlerts: {
       label: 'Agent spend alerts',
       detail: 'Receive updates when agents use their budget.',
@@ -67,8 +63,8 @@ export const en = {
       limitationsLabel: 'Recovery limitations',
       limitationsDetail:
         'Haven can help you find account details, but it cannot bypass your wallets or passkeys or recover funds sent on the wrong network.',
-      backupLabel: 'Backup approver',
-      backupDetail: 'Adding backup approvers is not available yet.',
+      backupLabel: 'Backup and recovery',
+      backupDetail: 'Backups are managed per account, under Backup and recovery on any of its agents.',
       sessionsLabel: 'Active sessions',
       sessionsDetail: 'Review signed-in devices and revoke sessions.',
       exitPathLabel: 'Your exit path',

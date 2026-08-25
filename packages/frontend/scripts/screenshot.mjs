@@ -101,18 +101,15 @@
  * Deterministic: animations disabled, network idle awaited, fixed viewports.
  */
 import { chromium } from '@playwright/test'
-// Used ONLY by the on-chain read seam (#1935): the fixture answers viem's own
-// JSON-RPC calls, so it has to speak viem's encoding. Deliberately the same
-// library the app encodes WITH, so the two cannot drift over an ABI detail.
-import { decodeAbiParameters, encodeAbiParameters, parseAbiParameters, toFunctionSelector } from 'viem'
-// viem's OWN chain registry — the same object the app's client resolves
-// Multicall3 from, so the fixture cannot disagree with it about the address.
-import { base as viemBase, baseSepolia as viemBaseSepolia } from 'viem/chains'
-// The chain FACTS (AllowanceModule address, token addresses) come from the
-// shared registry the app itself reads, never restated here — a fixture that
-// hard-codes a contract address is a fixture that silently stops matching the
-// product the day the registry moves.
-import { getChainData, resolveToken } from '@haven_ai/core'
+// The chain FACTS (token addresses) come from the shared registry the app
+// itself reads, never restated here — a fixture that hard-codes a contract
+// address is a fixture that silently stops matching the product the day the
+// registry moves.
+import { resolveToken } from '@haven_ai/core'
+// The on-chain read seam's encoder (#1935/#1971), extracted by #1930 so the
+// visual-regression spec can answer the same reads without importing this CLI.
+// Re-exported below, beside the shared fixture that is built from it.
+import { makeAllowanceChainFixture } from './allowance-chain-fixture.mjs'
 import { spawn } from 'node:child_process'
 import { rm, stat, writeFile } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -472,6 +469,10 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname.startsWith('/portfolio/')) return FIXTURE_PORTFOLIO
   if (pathname.startsWith('/balances/')) return FIXTURE_BALANCES
   if (pathname === '/agents') return { agents: FIXTURE_AGENTS }
+  // `/approvals` still answers here even though the route is deleted (#1989):
+  // the fixture is keyed by API path, and `GET /approvals` remains a live,
+  // READABLE backend endpoint under the epic's accounts-and-history boundary.
+  // No capture navigates to it any more.
   if (pathname === '/approvals') {
     return { approvals: FIXTURE_APPROVALS, actionable_count: 1, pending_count: 1 }
   }
@@ -1179,222 +1180,14 @@ function setBackupRecoveryStage(next) {
 
 // ── The AllowanceModule chain fixture (#1935, generalised by #1971) ──────────
 //
-// `useOnChainAllowances` is the harness's only render-time chain read, and it
-// feeds four surfaces (AgentPanel via useAgentPanelState, AgentDetailClient,
-// EditAgentModal, and the unmanaged-delegate discovery inside AgentPanel). This
-// factory answers the exact reads that hook makes, for ONE (chain, safe,
-// delegates, rows) tuple, so the shared fixture and a scenario-local one are the
-// same code with different data rather than two fixtures that can drift.
-//
-// ── Why the shared fixture needed one at all (#1971) ─────────────────────────
-//
-// Until #1971 the shared fixture's chain (84532) had no wagmi transport:
-// `lib/wagmi.ts` registered only `base`, `@wagmi/core`'s `getClient` caught
-// `ChainNotConfiguredError` and returned `undefined`, and the hook returned at
-// its first line. ZERO JSON-RPC requests left the browser in a screenshot run,
-// so every one of those four surfaces was captured in its empty branch — and
-// because nothing threw, the PNGs looked fine. #1971 fixed the transport in
-// `lib/wagmi.ts` (the app OFFERS 84532; it was never the fixture that was
-// wrong), which means those reads now really happen. They must not reach a
-// public node — a capture whose data came off the live internet is not
-// deterministic evidence — so the harness answers them for every scenario,
-// not only for one that opts in.
-const MULTICALL3_AGGREGATE3 = toFunctionSelector(
-  'function aggregate3((address target, bool allowFailure, bytes callData)[]) returns ((bool success, bytes returnData)[])',
-)
-// Canonical across every chain Haven serves — ASSERTED rather than assumed,
-// because a wrong `to` here would be answered as if it were right, and the
-// factory below serves two chains from this one constant.
-const MULTICALL3_ADDRESS = viemBase.contracts.multicall3.address
-if (
-  viemBaseSepolia.contracts.multicall3.address.toLowerCase() !==
-  MULTICALL3_ADDRESS.toLowerCase()
-) {
-  throw new Error(
-    'screenshot fixture: Multicall3 is not at the same address on Base and Base Sepolia ' +
-      `(${MULTICALL3_ADDRESS} vs ${viemBaseSepolia.contracts.multicall3.address}) — ` +
-      'makeAllowanceChainFixture assumes one address for every chain it serves',
-  )
-}
-
-/**
- * A deterministic block, parameterised by timestamp.
- *
- * `useOnChainAllowances` reads `block.timestamp` alongside the allowances so the
- * reset math keys off chain time rather than the device clock, so this has to be
- * a real-shaped block or viem's formatter throws before the allowances are ever
- * mapped.
- */
-function fixtureBlock(timestampSec) {
-  return {
-    number: '0x1122334',
-    hash: `0x${'11'.repeat(32)}`,
-    parentHash: `0x${'22'.repeat(32)}`,
-    nonce: '0x0000000000000000',
-    sha3Uncles: `0x${'33'.repeat(32)}`,
-    logsBloom: `0x${'00'.repeat(256)}`,
-    transactionsRoot: `0x${'44'.repeat(32)}`,
-    stateRoot: `0x${'55'.repeat(32)}`,
-    receiptsRoot: `0x${'66'.repeat(32)}`,
-    miner: '0x4200000000000000000000000000000000000011',
-    difficulty: '0x0',
-    totalDifficulty: '0x0',
-    extraData: '0x',
-    size: '0x220',
-    gasLimit: '0x3938700',
-    gasUsed: '0x0',
-    timestamp: `0x${timestampSec.toString(16)}`,
-    baseFeePerGas: '0x1',
-    transactions: [],
-    uncles: [],
-  }
-}
-
-const FIXTURE_BLOCK_TIMESTAMP = Math.floor(Date.parse('2026-07-10T09:00:00.000Z') / 1000)
-
-/**
- * Build a `scenario.chain`-shaped answer function for one Safe's AllowanceModule.
- *
- * `rows` are the budgets the module reports for `delegates[0]`; amounts are
- * atomic and `resetTimeMin` must match a RESET_PERIODS entry so the row reads
- * "Daily" rather than a raw "1440m" fallthrough.
- */
-export function makeAllowanceChainFixture({ chainId, safeAddress, delegates, rows }) {
-  const allowanceModule = getChainData(chainId).contracts.allowanceModule
-
-  /** The reads `useOnChainAllowances` makes, by signature rather than hand-cut hex. */
-  const READS = {
-    isModuleEnabled: {
-      signature: 'function isModuleEnabled(address) view returns (bool)',
-      // `isModuleEnabled` is called ON THE SAFE; the rest on the module.
-      to: safeAddress,
-      returns: () => encodeAbiParameters(parseAbiParameters('bool'), [true]),
-    },
-    getDelegates: {
-      signature: 'function getDelegates(address,uint48,uint8) view returns (address[],uint48)',
-      to: allowanceModule,
-      returns: () =>
-        encodeAbiParameters(parseAbiParameters('address[], uint48'), [delegates, 0]),
-    },
-    getTokens: {
-      signature: 'function getTokens(address,address) view returns (address[])',
-      to: allowanceModule,
-      returns: () =>
-        encodeAbiParameters(parseAbiParameters('address[]'), [rows.map((r) => r.token)]),
-    },
-    getTokenAllowance: {
-      signature: 'function getTokenAllowance(address,address,address) view returns (uint256[5])',
-      to: allowanceModule,
-      // The token is the THIRD argument, and it is read out of the calldata
-      // rather than assumed, so two rows cannot come back identical — which is
-      // exactly the silent duplicate a positional fixture would produce.
-      returns: (data) => {
-        const token = `0x${data.slice(10).slice(64 * 2 + 24, 64 * 3)}`
-        const row = rows.find((r) => r.token.toLowerCase() === token.toLowerCase())
-        if (!row) throw new Error(`getTokenAllowance for an unseeded token ${token}`)
-        return encodeAbiParameters(parseAbiParameters('uint256[5]'), [
-          [row.amount, row.spent, BigInt(row.resetTimeMin), 0n, 1n],
-        ])
-      },
-    },
-  }
-
-  const SELECTORS = new Map(
-    Object.entries(READS).map(([name, read]) => [
-      toFunctionSelector(read.signature),
-      { name, ...read },
-    ]),
-  )
-
-  const block = fixtureBlock(FIXTURE_BLOCK_TIMESTAMP)
-
-  /** One un-batched contract read — also the body of each `aggregate3` member. */
-  function answerEthCall(to, data) {
-    const read = SELECTORS.get(data.slice(0, 10))
-    if (!read) return undefined
-    if ((to ?? '').toLowerCase() !== read.to.toLowerCase()) {
-      throw new Error(
-        `${read.name} was called on ${to} but this fixture seeds it on ${read.to} — ` +
-          'the app is reading a different contract than the fixture describes',
-      )
-    }
-    return read.returns(data)
-  }
-
-  /**
-   * Answer the app's own on-chain reads.
-   *
-   * Dispatches on the 4-byte selector AND checks the call's `to` — a selector
-   * collision or a read aimed at some other contract must fail loudly rather
-   * than be handed a plausible answer for the wrong address. Anything not
-   * listed returns `undefined`, which the seam records as a gap and fails the
-   * run on (see `CHAIN_READ_GAPS`): a fixture that quietly declines a read
-   * produces a surface with no budget rows, which is a photogenic wrong answer.
-   */
-  return function answerChain(method, params) {
-    if (method === 'eth_chainId') return `0x${chainId.toString(16)}`
-    if (method === 'eth_blockNumber') return block.number
-    if (method === 'eth_getBlockByNumber') return block
-    if (method !== 'eth_call') return undefined
-
-    const call = params?.[0] ?? {}
-    const data = call.data ?? call.input ?? '0x'
-
-    // MULTICALL, because that is what the app actually sends (#1935).
-    //
-    // Found by running this, not by reading it: wagmi enables viem's multicall
-    // batching by default, so `useOnChainAllowances`' reads never reach the wire
-    // as bare `eth_call`s to the AllowanceModule — every one of them is wrapped
-    // in Multicall3's `aggregate3`, with the real call as `bytes` inside it. A
-    // fixture that answered only the un-batched shape is served nothing, and
-    // because the hook swallows the failure into an empty map it would produce a
-    // surface with no budget list and no error on screen.
-    //
-    // MEASURED, because the obvious summary of that is wrong (review of #1935).
-    // "The four reads arrive as one `eth_call`" is what batching sounds like; it
-    // is not what this hook can produce. `useOnChainAllowances` is sequential —
-    // it awaits `isModuleEnabled` before `getDelegates` is queued, and awaits
-    // `getTokens` before the `getTokenAllowance`s are — and viem's batcher can
-    // only merge calls queued inside the same wait window. Logged live, one
-    // fetch cycle is FOUR aggregate3 POSTs plus one bare block read:
-    //
-    //   aggregate3[1] 0x2d9ad53d  isModuleEnabled
-    //   eth_getBlockByNumber      (not wrapped — not a contract read)
-    //   aggregate3[1] 0xeb37abe0  getDelegates
-    //   aggregate3[1] 0x8d0e8e1d  getTokens
-    //   aggregate3[2] 0x94b31fbd  getTokenAllowance x2  <- the only real batch
-    //
-    // So the thing a fixture must handle is not "one big batch": it is that a
-    // LONE read is wrapped too. The direct branch below is kept as a fallback
-    // rather than deleted, because it costs one line and the day someone
-    // disables multicall this is the difference between a fixture that still
-    // works and a silent empty list.
-    if (
-      data.slice(0, 10) === MULTICALL3_AGGREGATE3 &&
-      (call.to ?? '').toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()
-    ) {
-      const [inner] = decodeAbiParameters(
-        parseAbiParameters('(address target, bool allowFailure, bytes callData)[]'),
-        `0x${data.slice(10)}`,
-      )
-      const results = inner.map((c) => {
-        const answer = answerEthCall(c.target, c.callData)
-        if (answer === undefined) {
-          throw new Error(
-            `aggregate3 carried an unseeded call to ${c.target} (${c.callData.slice(0, 10)})`,
-          )
-        }
-        return { success: true, returnData: answer }
-      })
-      return encodeAbiParameters(
-        parseAbiParameters('(bool success, bytes returnData)[]'),
-        [results],
-      )
-    }
-
-    return answerEthCall(call.to, data)
-  }
-}
+// The factory itself now lives in `allowance-chain-fixture.mjs` (#1930) so the
+// visual-regression spec can answer the same reads without importing this CLI
+// — imported at the top with the rest. The move was mechanical; the reasoning
+// that shaped it — multicall unwrapping, the per-chain Multicall3 assertion,
+// why an unanswered read must be loud — travelled with the code and is
+// documented there. Re-exported because `screenshot-fixture.test.ts` and the
+// scenarios below both reach for it through this module.
+export { makeAllowanceChainFixture }
 
 // ── The SHARED fixture's chain answers (#1971) ───────────────────────────────
 //
@@ -2150,6 +1943,62 @@ export const SCENARIOS = {
       await shoot(dialog, 'approve-verification-open')
     },
   },
+  'retired-rail-account': {
+    description:
+      'Account detail for a LEGACY Safe account after the rail retirement (#1989) — RetiredRailNotice present, no Send action',
+    // #1989's design review named this gap: `RetiredRailNotice` is the one
+    // surface the slice ADDS, and no existing capture can show it. Every other
+    // account fixture is `delegator_hybrid`, which by construction renders the
+    // Send button and never renders the notice — so the shared fixture proves
+    // the opposite of what this scenario is for.
+    //
+    // The ONE override is `account_type: 'safe'`, spread from the shared
+    // fixture, exactly as `connect-agent-approve-legacy` above does it. The
+    // account is otherwise identical, which is what makes the pair readable:
+    // the same account on the other rail.
+    api(apiPath) {
+      if (apiPath === '/auth/me') {
+        return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      }
+      if (apiPath === '/user/safes') {
+        return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, {
+        waitUntil: 'networkidle',
+        timeout: 60_000,
+      })
+      await dismissMobileSidebar(page, vp)
+
+      const main = page.locator('main')
+      await main.waitFor({ timeout: 30_000 })
+
+      // The subject.
+      await page
+        .getByText(/Haven no longer sends payments from this account/)
+        .waitFor({ timeout: 20_000 })
+
+      // The READ boundary, asserted on the render rather than argued: the
+      // account is still fully readable next to the notice. Without these the
+      // capture could be filed for a page that failed to load its data and
+      // showed the notice over skeletons.
+      await page.getByRole('heading', { name: FIXTURE_SAFE.name }).waitFor({ timeout: 20_000 })
+      await page.getByRole('button', { name: 'Receive' }).waitFor({ timeout: 20_000 })
+
+      // The negative half, and the reason this scenario is evidence at all.
+      // A notice proves a notice; it does not prove the spend affordance is
+      // gone. If a regression rendered Send ALONGSIDE the notice, every wait
+      // above would still pass and the PNG would be filed under this name.
+      await refuseIfPresent(
+        page.getByRole('button', { name: 'Send', exact: true }),
+        'retired-rail-account · Send button',
+      )
+
+      await shoot(main, 'account')
+    },
+  },
   'connect-agent-approve-legacy': {
     description: 'Connect agent modal, step 4, the APPROVE screen on the LEGACY rail (#1684)',
     // The delegation twin of this (`connect-agent-approve`) cannot reach this
@@ -2567,152 +2416,12 @@ export const SCENARIOS = {
       await shoot(dialog, 'unresolved')
     },
   },
-  'send-review': {
-    description:
-      "Send modal STEP 2 (review) — the only TransactionMovement consumer never captured (#1856)",
-    // `TransactionMovement` is a shared primitive with five call sites.
-    // `SendModal.tsx:848` is the one no PNG has ever shown: no URL reaches
-    // step 2, and #1835 could only close the GEOMETRY half of the gap with a
-    // headless width guard. This scenario closes the picture half.
-    //
-    // Two fixture overrides, and the honesty of the capture rests on both
-    // being at boundaries the PRODUCT itself writes, so every line of app code
-    // between the boundary and the pixels is the real one:
-    //
-    //  1. `account_type` dropped → the Safe rail. Same override, for the same
-    //     reachability reason, as `add-funds`/`receive-funds`: the shared
-    //     fixture's `delegator_hybrid` safe has a hydrated passkey that is not
-    //     on this device, and the dashboard hero hides Send entirely for a
-    //     non-Safe-rail account (`DashboardClient.tsx:907`).
-    //  2. `seed` writes the device-local passkey record (see `seed()` below).
-    //     `useSafeOperationGate` returns `no_signer` without it, and
-    //     `SendModal.tsx:821` disables Continue while `signingUnavailable` —
-    //     which is precisely the blocker #1856 was filed on.
-    //
-    // Why that is FAITHFUL rather than a screen the product cannot enter: a
-    // stored passkey signer is the ordinary state of any user who enrolled a
-    // passkey on the device they are sending from — it is the majority path,
-    // not an exotic one. Nothing is stubbed downstream of it. The gate runs its
-    // real branch and returns `ready`; `useActiveSigner` resolves a real
-    // `passkey` signer, which is what makes "Approve with · Device approval"
-    // and "Network fees are paid by Haven (ETH)" render the words a passkey
-    // user actually reads; `OnchainActionGate` takes its unblocked path and
-    // `NetworkGate` renders children because no wallet is connected — again
-    // the real branch for a passkey user, not a bypass. No component is
-    // patched and no step state is forced: the run TYPES an amount and a
-    // recipient and CLICKS Continue, so `handleReview`'s own validation is
-    // what admits the capture.
-    //
-    // What the capture is therefore NOT evidence about: pressing Send. The
-    // seeded credential is not a real WebAuthn credential, so this scenario
-    // stops at review — which is all #1856 asks for, and the reason it stops
-    // is worth stating rather than discovering later.
-    //
-    // Per #1835's measurement the primitive gets ~310px here, roughly double
-    // the ~150px below which the arrow strands, so no defect is expected. This
-    // closes an evidence gap; it is not a bug hunt.
-    seed() {
-      // Exactly the record `setStoredPasskeySigner` writes, under exactly the
-      // key `passkeyStorageKey` computes. `getStoredPasskeySigner` VALIDATES
-      // every field and returns null on anything it does not recognise — a
-      // wrong `schemaVersion`, a non-address `address`, a public-key half
-      // without its twin — and a null there puts the gate silently back on
-      // `no_signer`. `screenshot-fixture.test.ts` runs this record through
-      // that parser and asserts it round-trips every field, so a schema bump
-      // or a dropped field fails a test rather than quietly un-reaching this
-      // capture. It does NOT pin the literal values below — they are fixture
-      // data, free to change, as long as the parser still accepts them.
-      return {
-        [`haven_passkey_${FIXTURE_SAFE.safe_address.toLowerCase()}_${FIXTURE_SAFE.chain_id}`]:
-          JSON.stringify({
-            schemaVersion: 1,
-            address: '0x5B1869D9A4C187F2Eaa108F3062412ECf0526B24',
-            credentialId: 'screenshot-fixture-credential',
-            publicKey: { x: `0x${'11'.repeat(32)}`, y: `0x${'22'.repeat(32)}` },
-            chainId: FIXTURE_SAFE.chain_id,
-            safeAddress: FIXTURE_SAFE.safe_address.toLowerCase(),
-            createdAt: Date.parse('2026-05-01T12:00:00.000Z'),
-          }),
-      }
-    },
-    api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE }] }
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE }] }
-      // Keyed explicitly rather than left to the generic empty fallback. That
-      // fallback happens to be truthy, so `!safeDetails` passes and Continue
-      // enables — by accident. `threshold` then reads `undefined ?? 1`, and a
-      // threshold of 1 vs 2 is the difference between the review screen under
-      // capture and one carrying an extra "will wait for approval" banner. A
-      // capture whose layout depends on an accident is not evidence.
-      if (apiPath === `/safe/${FIXTURE_SAFE.safe_address}/details`) {
-        return {
-          address: FIXTURE_SAFE.safe_address,
-          owners: ['0x5B1869D9A4C187F2Eaa108F3062412ECf0526B24'],
-          threshold: 1,
-          nonce: 7,
-        }
-      }
-      return undefined
-    },
-    async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
-      await dismissMobileSidebar(page, vp)
-
-      await page.getByRole('button', { name: 'Send', exact: true }).first().click()
-      const dialog = page.getByRole('dialog')
-
-      const amount = dialog.getByPlaceholder('0.00')
-      await amount.waitFor({ timeout: 20_000 })
-      await amount.fill('25.50')
-      // `ADDR.merchant`, deliberately, and NOT `ADDR.recipient`: the latter is
-      // `FIXTURE_CONTACTS[0]`'s address, so `handleRecipientChange` resolves it
-      // to "Cloud vendor" and the movement line renders a NAME. Both are real
-      // product states, but a pasted unknown address is the plain path and the
-      // one whose `To` half is a truncated address — the same shape the
-      // `ApprovalQueue` capture already evidences, so the two are comparable.
-      // Measured, not assumed: the first run of this scenario used
-      // `ADDR.recipient` and failed on the `To 0x9f8f…79A2` assertion because
-      // the screen said "To Cloud vendor".
-      await dialog
-        .getByPlaceholder('Paste address or choose a saved recipient')
-        .fill(ADDR.merchant)
-
-      // Asserted, not assumed. If the seed ever stops satisfying the gate this
-      // is where the run fails — loudly, with "Continue is disabled" as the
-      // message — instead of timing out somewhere downstream with a reason
-      // nobody can read. It is the blocker #1856 names, so it gets its own
-      // check rather than being inferred from a later failure.
-      const cont = dialog.getByRole('button', { name: 'Continue' })
-      if (await cont.isDisabled()) {
-        throw new Error(
-          'Continue is disabled on the send form — the operation gate is not `ready`, ' +
-            'so the review step cannot be driven (see this scenario\'s `seed()`).',
-        )
-      }
-      await cont.click()
-
-      // Confirmed by the review step's OWN copy and by the primitive this
-      // capture exists for. A run that shot a dialog without the movement line
-      // would be an evidence gap wearing a PNG, which is the exact failure
-      // #1856 is about.
-      await dialog.getByText('You are sending').waitFor({ timeout: 20_000 })
-      // `.first()` because the primitive nests its halves: three ancestors
-      // contain "From Operating wallet" as a substring, and a bare locator
-      // would trip strict mode rather than assert anything.
-      await dialog.getByText(`From ${FIXTURE_SAFE.name}`).first().waitFor({ timeout: 20_000 })
-      await dialog
-        .getByText(`To ${truncateFixtureAddress(ADDR.merchant)}`)
-        .first()
-        .waitFor({ timeout: 20_000 })
-      await shoot(dialog, 'review')
-    },
-  },
-}
-
-// Mirror of `truncate` in `src/lib/format.ts` — the review step renders the
-// recipient through it, so the assertion above has to spell the same string.
-function truncateFixtureAddress(address) {
-  return `${address.slice(0, 6)}…${address.slice(-4)}`
+  // 'send-review' (#1856) is DELETED with its subject (#1989, epic #1440): it
+  // drove the legacy `SendModal` to step 2, and that modal is gone with the
+  // Safe rail. Its `TransactionMovement` evidence gap is closed differently now
+  // — `/transactions` and `/design-system` both render the primitive and are
+  // captured, and the mobile geometry sweep in
+  // `e2e/transaction-row.mobile.spec.ts` measures it at 320/390/393px.
 }
 
 function resolveScenarios(names) {

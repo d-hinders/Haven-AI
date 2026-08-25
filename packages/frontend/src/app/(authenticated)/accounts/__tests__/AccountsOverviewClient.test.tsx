@@ -60,7 +60,6 @@ describe('AccountsOverviewClient — active account (#629)', () => {
     mockUseUserSafes.mockReturnValue({
       safes: [BASE, SEPOLIA],
       loading: false,
-      addSafe: vi.fn(),
       setDefault: vi.fn(),
     })
     mockUseAuth.mockReturnValue({ activeSafe: BASE, setActiveSafe: mockSetActiveSafe })
@@ -83,5 +82,54 @@ describe('AccountsOverviewClient — active account (#629)', () => {
 
     fireEvent.click(screen.getByLabelText('Set Sepolia account as active'))
     expect(mockSetActiveSafe).toHaveBeenCalledWith(SEPOLIA)
+  })
+})
+
+/**
+ * The dashboard half of the inflow closure (#1984, epic #1440).
+ *
+ * `AddSafeModal` was the only place in the signed-in app that could mint or
+ * attach a Safe: a three-mode modal (choose / deploy / import) reached from
+ * an "Add account" button in the page header and from the empty state's
+ * "Add your first account". Both routes it called now answer 410, so the
+ * trigger is gone with the modal. Asserting the ABSENCE of an affordance is
+ * weak by nature, so this asserts it in both states the page can be in and
+ * on both the accessible name and the modal's own headings — the specific
+ * strings a reintroduction would have to render.
+ */
+describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseAgents.mockReturnValue({ agents: [] })
+    mockUsePreferences.mockReturnValue({ currency: 'USD' })
+    mockUseAuth.mockReturnValue({ activeSafe: BASE, setActiveSafe: mockSetActiveSafe })
+  })
+
+  it('offers no Add-account entry point when accounts exist', () => {
+    mockUseUserSafes.mockReturnValue({
+      safes: [BASE, SEPOLIA],
+      loading: false,
+      setDefault: vi.fn(),
+    })
+
+    render(<AccountsOverviewClient />)
+
+    // The cards still render — this is a read/manage surface, not a deletion.
+    expect(screen.getByLabelText('Base account')).toBeInTheDocument()
+
+    expect(screen.queryByRole('button', { name: /add account/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /add your first account/i })).toBeNull()
+    expect(screen.queryByText('Import existing account')).toBeNull()
+    expect(screen.queryByText('Create Haven account')).toBeNull()
+  })
+
+  it('offers no Add-account entry point from the empty state either', () => {
+    mockUseUserSafes.mockReturnValue({ safes: [], loading: false, setDefault: vi.fn() })
+
+    render(<AccountsOverviewClient />)
+
+    expect(screen.getByText('No Haven accounts yet')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /add/i })).toBeNull()
+    expect(screen.queryByText('Import existing account')).toBeNull()
   })
 })

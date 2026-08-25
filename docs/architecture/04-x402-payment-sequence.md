@@ -7,7 +7,6 @@ covers:
   - packages/backend/src/modules/x402/**
   - packages/backend/src/routes/x402-resources.ts
   - packages/backend/src/modules/payments/agent-payment-status.ts
-  - packages/backend/src/domain/payment-coverage.ts
   - packages/backend/src/modules/x402/x402-delegation.ts
   - packages/backend/src/rails/delegation-rail.ts
   - packages/backend/src/routes/catalog.ts
@@ -25,14 +24,13 @@ covers:
   - packages/mcp-server/src/tools.ts
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
-  - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
 # #1496: a casp-changelog shard satisfies this doc too — every money-path PR
 # already writes one, and mandatory note-prepends to last-verified caused three
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-20" # #1640 re-verify: authMiddleware now refuses purpose-claim tokens and catalog.ts routes through it instead of a hand-rolled jwtVerify. Agent API-key auth (agentAuth.ts) is a separate credential type and untouched, so every x402 sequence claim here re-read against the diff stands. # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-24" # #1987: the "the code that implements it is still present" banner was future-tense and is now false (legacy-authorize.ts is deleted) — rewritten past-tense; the dead `domain/payment-coverage.ts` link removed from Source of truth (the file is deleted, the link 404'd); and the shared-writers paragraph no longer names legacy-authorize.ts as a live caller. Prior: #1986: the legacy AllowanceModule two-leg no longer RUNS — every x402 and payment entry point answers 410 for an allowance_module account. The sequence is kept as history (its code is deleted by #1987) and the rail banner now says so; the delegation-rail ERC-7710 sequence re-read against the diff and unchanged. Prior: #1984: "import-only" corrected. The two-leg funding model and both rails' x402 sequences re-read against the diff and unchanged — this slice closes account provisioning only, not payment. Prior: #1640 re-verify: authMiddleware now refuses purpose-claim tokens and catalog.ts routes through it instead of a hand-rolled jwtVerify. Agent API-key auth (agentAuth.ts) is a separate credential type and untouched, so every x402 sequence claim here re-read against the diff stands. # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -50,12 +48,25 @@ Standard merchant x402 has two legs:
 2. Merchant leg: the agent signs the standard EIP-3009 `X-PAYMENT` header from
    the delegate wallet and retries the merchant/resource request.
 
-> **This doc describes the legacy AllowanceModule rail** (import-only, existing
-> accounts) with its two-leg funding model. New accounts
+> ⚠️ **The legacy AllowanceModule two-leg described below NO LONGER RUNS.**
+> Under epic #1440 the Safe rail was closed to new accounts by #1984 and then
+> **fail-closed for spending by #1986**: `POST /x402/authorize`, `POST /x402`,
+> `POST /payments`, `POST /payments/:id/sign` and `POST /machine-payments/send`
+> all answer **HTTP 410** for an `allowance_module` account — nothing written,
+> no Safe→delegate funding transfer, no delegate hot balance. The sequence
+> below is kept as the record of what the rail DID. The code that implemented
+> it **has now been deleted** by #1987 — `modules/x402/legacy-authorize.ts` in
+> full, along with the AllowanceModule transfer, transfer-hash generation and
+> the allowance-nonce coordinator it drove. Read it as history: not behaviour
+> you can invoke, and no longer behaviour in the tree. Accounts, balances and
+> history stay readable.
+>
+> The live rail is the delegation rail: new accounts
 > (`account_type='delegator_hybrid'`) settle x402 in a **single direct leg** via
 > ERC-7710 — see [Delegation rail x402](#delegation-rail-x402-new-accounts)
-> below. The Smart Sessions **session rail is retired** (#834): the machine-payment
-> path answers HTTP 410 for `session_key` accounts, fail-closed.
+> below. The Smart Sessions **session rail is retired** (#834) and answers its
+> own, distinct HTTP 410 for `session_key` accounts; both tombstones coexist on
+> the rail seam (`rails/execution-rail.ts`).
 
 In SDK, local MCP, and generic hosted split flows, the agent retries the merchant
 request. For paid MCP tools, hosted MCP can proxy the HTTP/MCP request and
@@ -102,7 +113,6 @@ Source of truth:
   in by #998 — its only production consumers were already inside it) — it is
   the settlement *compiler* (typed-data / header assembly primitives), not
   route orchestration.
-- [`packages/backend/src/domain/payment-coverage.ts`](../../packages/backend/src/domain/payment-coverage.ts)
 - [`packages/mcp/src/tools.ts`](../../packages/mcp/src/tools.ts)
 - [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts)
 - [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
@@ -688,8 +698,8 @@ print — which is exactly why the API-side mapping exists.
 
 The legacy rail's `payment_intents`/`approval_requests` INSERTs are the SAME
 rail-agnostic `infra/repositories/` writers the mpp module uses for its own
-rails (`modules/mpp/`, #997) — `modules/x402/legacy-authorize.ts` and
-`modules/x402/delegation-authorize.ts` call them directly rather than through
+rails (`modules/mpp/`, #997) — `modules/x402/delegation-authorize.ts` calls
+them directly rather than through
 a `lib/machine-payments.ts` pass-through (removed by #997: it added no logic
 over the repository call and kept x402 coupled to a private mpp file once
 mpp's own orchestration moved into its module). Token resolution

@@ -75,14 +75,6 @@ export const BIND_PASSKEY_TO_SAFE_SQL = `UPDATE user_passkeys
          AND credential_id = $2
          AND safe_address IS NULL`
 
-/** Same claim, addressed by signer address — what the approver routes know. */
-export const BIND_PASSKEY_SIGNER_TO_SAFE_SQL = `UPDATE user_passkeys
-       SET safe_address = $4
-       WHERE user_id = $1
-         AND chain_id = $2
-         AND LOWER(signer_address) = LOWER($3)
-         AND safe_address IS NULL`
-
 export interface StoredPasskeySafeRow {
   credential_id: string
   public_key_x: Buffer
@@ -194,23 +186,8 @@ export async function bindPasskeyToSafe(
   return (result.rowCount ?? 0) > 0
 }
 
-/**
- * Bind by signer address rather than credential id — the form the approver
- * routes have, since an owner change names an address. Same no-op-when-bound
- * semantics as `bindPasskeyToSafe`.
- */
-export async function bindPasskeySignerToSafe(
-  userId: string,
-  chainId: number,
-  signerAddress: string,
-  safeAddress: string,
-  db: Executor = pool,
-): Promise<boolean> {
-  const result = await db.query(BIND_PASSKEY_SIGNER_TO_SAFE_SQL, [
-    userId,
-    chainId,
-    signerAddress,
-    safeAddress,
-  ])
-  return (result.rowCount ?? 0) > 0
-}
+// `bindPasskeySignerToSafe` — bind by signer ADDRESS rather than credential id,
+// the form the approver routes had — is deleted with them (#1988). Nothing
+// else called it. `bindPasskeyToSafe` above stays: `POST /safe/exec` claims an
+// unbound backup passkey on the fast path once it has verified the signer
+// against the Safe's live on-chain owner list, and that route stays open.

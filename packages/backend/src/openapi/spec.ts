@@ -359,39 +359,6 @@ const userSafe = {
   },
 } as const
 
-/** An approver (Safe owner) decorated with Haven-stored metadata. */
-const approver = {
-  type: 'object',
-  required: ['address', 'type', 'label'],
-  properties: {
-    address: {
-      ...address,
-      description: 'Checksummed, as the chain returns it — membership comes from getOwners(), not from Haven.',
-    },
-    type: {
-      type: 'string',
-      enum: ['eoa', 'passkey'],
-      description: "Decoration only; defaults to 'eoa' for an owner Haven has no metadata row for.",
-    },
-    label: { type: ['string', 'null'], description: 'Trimmed and capped at 120 characters.' },
-  },
-} as const
-
-/**
- * An unsigned Safe self-call for an owner change. Haven CONSTRUCTS and guards
- * it; the user signs and relays it through /safe/exec. Haven never signs.
- */
-const safeOwnerTx = {
-  type: 'object',
-  required: ['to', 'value', 'data', 'operation'],
-  properties: {
-    to: { ...address, description: 'The Safe itself — owner changes are self-calls.' },
-    value: { type: 'string', enum: ['0'] },
-    data: { type: 'string', pattern: '^0x[0-9a-fA-F]*$' },
-    operation: { type: 'integer', enum: [0], description: 'CALL, never DELEGATECALL.' },
-  },
-} as const
-
 
 // ── Dashboard account building blocks (#1446) ────────────────────────────────
 
@@ -2254,19 +2221,21 @@ export const openapiSpec = {
       },
     },
     // ── Safe (account) management (#1446) ───────────────────────────────────
-    // CUSTODY BOUNDARY: Haven links, labels and CONSTRUCTS owner-change
-    // transactions, but never signs one. Membership truth is on-chain
-    // (getOwners()); the approver rows here only decorate it with a label and
-    // a type. A user who deletes a Safe from Haven still owns it on-chain.
+    // CUSTODY BOUNDARY: Haven labels a linked Safe and nothing more. It never
+    // signed an owner change and, since #1988, no longer constructs one
+    // either. Membership truth was always on-chain (getOwners()). A user who
+    // deletes a Safe from Haven still owns it on-chain, and manages its owners
+    // with their own key wherever they like — which is the property that makes
+    // removing Haven's owner-change builder a narrowing rather than a loss.
     //
-    // RETIRING SURFACE (#1440, owner decision 2026-08-14: the Safe rail goes
-    // away entirely). Of the operations below, only the four plain-CRUD ones
-    // (list, rename, set-default, unlink) are expected to survive — user_safes
-    // is shared with the delegation rail. `deploy`, the import POST and every
-    // approver route are on that epic's removal list, and their entries here
-    // come out with them. Documented anyway, deliberately: the spec describes
-    // the API that exists TODAY, and an undocumented live route is the failure
-    // #1442 was opened on. Do not build new callers against the retiring half.
+    // RETIRED SURFACE (#1440, owner decision 2026-08-14: the Safe rail goes
+    // away entirely). Four plain-CRUD operations survive — list, rename,
+    // set-default, unlink — because `user_safes` is shared with the delegation
+    // rail. `deploy` and the import POST are TOMBSTONES: registered, answering
+    // 410, with no implementation behind them since #1988. Every approver
+    // route is deleted outright. Documented anyway, deliberately: the spec
+    // describes the API that exists TODAY, and a 410 a client can still reach
+    // is part of that API.
     '/user/safes': {
       get: {
         tags: ['Dashboard'],
@@ -2292,9 +2261,9 @@ export const openapiSpec = {
       post: {
         tags: ['Dashboard'],
         operationId: 'addUserSafe',
-        summary: 'Link (import) an existing Safe to the caller\'s account.',
+        summary: 'RETIRED — always answers 410. Importing a Safe is closed.',
         description:
-          'Registration only — this moves nothing on-chain and grants Haven no authority over the Safe. The same address on the same chain cannot be linked twice (409). The first Safe a user links becomes their default.',
+          '**RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** The Safe rail is being retired outright, and importing is one of the four ways a Safe could enter Haven; all four are closed. The refusal is a route preHandler, so it precedes every read and write. The route is kept as a compatibility tombstone rather than removed — a 410 tells an old client the flow is permanently gone, where a 404 reads as a transient routing error and invites retries (the #834 session-rail / #1328 mpp_demo pattern); the route itself goes in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Existing linked Safes are unaffected: GET /user/safes, rename, re-default, unlink and every read path behave exactly as before. Historically this was registration only — it moved nothing on-chain and granted Haven no authority over the Safe.',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -2313,13 +2282,8 @@ export const openapiSpec = {
           },
         },
         responses: {
-          '201': {
-            description: 'Safe linked.',
-            content: { 'application/json': { schema: userSafe } },
-          },
-          '400': errorResponse,
           '401': errorResponse,
-          '409': { ...errorResponse, description: 'This Safe is already linked to the account.' },
+          '410': { ...errorResponse, description: 'Always. The Safe rail is retired; the message names POST /accounts/hybrid.' },
         },
       },
     },
@@ -2327,9 +2291,9 @@ export const openapiSpec = {
       post: {
         tags: ['Dashboard'],
         operationId: 'deployUserSafe',
-        summary: 'Deploy a new Safe with the relayer paying gas.',
+        summary: 'RETIRED — always answers 410. Haven no longer deploys Safes.',
         description:
-          'The relayer sponsors the deployment and returns the deployed address plus the transaction hash. Deployment does NOT link the Safe: registration is a separate POST /user/safes call, so onboarding and add-account take the identical path. The deployed Safe is owned by owner_address (single owner, threshold 1) and never by Haven. Note that owner_address is NOT checked against the caller: any authenticated user can have a Safe deployed for any address, so this is a relayer-gas surface bounded only by the global rate limit, not a per-caller ownership check.',
+          '**RETIRED (#1984, epic #1440) — always answers 410 and spends no relayer gas.** The refusal is a route preHandler, so it precedes the relayer entirely. Kept as a compatibility tombstone; removed in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Historically the relayer sponsored the deployment and returned the deployed address plus the transaction hash, and owner_address was NOT checked against the caller — an unbounded-by-ownership relayer-gas surface that this retirement closes as a side effect.',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -2347,21 +2311,8 @@ export const openapiSpec = {
           },
         },
         responses: {
-          '201': {
-            description: 'Safe deployed; link it with POST /user/safes.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['safe_address', 'tx_hash'],
-                  properties: { safe_address: address, tx_hash: { type: 'string' } },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
           '401': errorResponse,
-          '500': { ...errorResponse, description: 'Relay deployment failed.' },
+          '410': { ...errorResponse, description: 'Always. The Safe rail is retired; the message names POST /accounts/hybrid.' },
         },
       },
     },
@@ -2433,181 +2384,12 @@ export const openapiSpec = {
         },
       },
     },
-    '/user/safes/known-approvers': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'listKnownApprovers',
-        summary: "The caller's approver registry across all their Safes.",
-        description:
-          'Distinct by address, carrying the most recent label/type and every safe_id the approver is known on — so a picker can offer reuse on another account while excluding the Safes it already approves (#417). Haven metadata only; it confers nothing on-chain.',
-        security: [{ DashboardJwt: [] }],
-        responses: {
-          '200': {
-            description: 'Known approvers, distinct by address.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['approvers'],
-                  properties: {
-                    approvers: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        required: ['address', 'type', 'label', 'safe_ids'],
-                        properties: {
-                          ...approver.properties,
-                          safe_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          '401': errorResponse,
-        },
-      },
-    },
-    '/user/safes/{safeId}/approvers': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'listSafeApprovers',
-        summary: "Read a Safe's on-chain owners, decorated with stored labels.",
-        description:
-          'The owner list and threshold are read live from the chain (`getOwners()`), not from Haven — an owner added outside Haven appears here with no label rather than being invisible.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
-        responses: {
-          '200': {
-            description: 'On-chain owners plus the Safe threshold.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['threshold', 'approvers'],
-                  properties: {
-                    threshold: { type: 'integer' },
-                    approvers: { type: 'array', items: approver },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-          '502': { ...errorResponse, description: 'Could not read owners from the network.' },
-        },
-      },
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'upsertSafeApproverMetadata',
-        summary: 'Record an approver\'s label and type after the on-chain change lands.',
-        description:
-          'Metadata only, and idempotent: this does not add an owner. Call it after relaying the transaction from /approvers/tx. Enrolling a passkey approver also binds it to the Safe as a signing fast-path — deliberately non-fatal, because /safe/exec re-derives the binding from the on-chain owner list when it is missing.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['address'],
-                properties: {
-                  address: address,
-                  type: { type: 'string', enum: ['eoa', 'passkey'], description: "Defaults to 'eoa'." },
-                  label: { type: 'string', description: 'Trimmed and capped at 120 characters; blank becomes null.' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'Metadata recorded.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-        },
-      },
-    },
-    '/user/safes/{safeId}/approvers/tx': {
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'buildSafeApproverTx',
-        summary: 'Build the UNSIGNED owner-change transaction for the user to sign.',
-        description:
-          "Haven constructs and guards; the user signs and relays through /safe/exec. Haven never signs an owner change. The guards run against the LIVE owner list, before any transaction is produced: removing the final owner is refused (409), as is adding an owner the Safe already has; removing an address that is not an owner is a 404.",
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['action', 'address'],
-                properties: {
-                  action: { type: 'string', enum: ['add', 'remove'] },
-                  address: address,
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'The unsigned Safe self-call.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['chain_id', 'safe_address', 'tx'],
-                  properties: {
-                    chain_id: { type: 'integer' },
-                    safe_address: address,
-                    tx: safeOwnerTx,
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': { ...errorResponse, description: 'Safe not found, or the address to remove is not an owner.' },
-          '409': { ...errorResponse, description: 'Would remove the last owner, or the owner already exists.' },
-          '502': { ...errorResponse, description: 'Could not read owners from the network.' },
-        },
-      },
-    },
-    '/user/safes/{safeId}/approvers/{address}': {
-      delete: {
-        tags: ['Dashboard'],
-        operationId: 'deleteSafeApproverMetadata',
-        summary: "Drop an approver's stored metadata after the on-chain removal.",
-        description:
-          'Cleans up the decoration row only — it removes no owner. The last-owner guard lives on /approvers/tx, where the actual removal is built.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [
-          { name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' },
-          { name: 'address', in: 'path', required: true, schema: address, description: 'Approver address.' },
-        ],
-        responses: {
-          '200': {
-            description: 'Metadata removed.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-        },
-      },
-    },
+    // The approver routes that lived here — GET /user/safes/known-approvers,
+    // GET|POST /user/safes/{safeId}/approvers, POST
+    // /user/safes/{safeId}/approvers/tx and DELETE
+    // /user/safes/{safeId}/approvers/{address} — are DELETED (#1988, epic
+    // #1440 slice 5), exactly as the caveat above said they would be. They are
+    // gone from the router too, so these are not tombstones: the paths 404.
     // ── Dashboard account + owner directory (#1446) ─────────────────────────
     // Profile/preference writes are the user's own record. The owner
     // directory reads Safe owners LIVE from every linked account, so it is
@@ -2672,9 +2454,9 @@ export const openapiSpec = {
       put: {
         tags: ['Dashboard'],
         operationId: 'updateUserSafe',
-        summary: "Set the caller's legacy safe_address and link it as the default Safe.",
+        summary: 'RETIRED — always answers 410. This link is an import.',
         description:
-          "Writes the legacy users.safe_address column AND links the Safe into user_safes as the default — the multi-Safe table is the real home, this column is history. The order matters and is deliberate: the legacy column write is attempted FIRST and a vanished account refuses before anything is linked, rather than leaving a link whose owner no longer exists. Returns the narrower identity projection.",
+          "**RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** This route wrote the legacy users.safe_address column AND linked the Safe into user_safes as the default, emitting the `safe_imported` funnel event: it is an IMPORT, so it retires with the rail. It is named here explicitly because no shipped client calls it, which is exactly what would have made it the hole left open. Kept as a compatibility tombstone; create a Haven account on the delegation rail instead (POST /accounts/hybrid).",
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -2692,10 +2474,8 @@ export const openapiSpec = {
           },
         },
         responses: {
-          '200': { description: 'The updated identity projection.', content: { 'application/json': { schema: userIdentity } } },
-          '400': errorResponse,
           '401': errorResponse,
-          '404': errorResponse,
+          '410': { ...errorResponse, description: 'Always. The Safe rail is retired; the message names POST /accounts/hybrid.' },
         },
       },
     },
@@ -3815,7 +3595,14 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': { ...errorResponse, description: "Not found, not the caller's, already actioned, or expired — deliberately one answer." },
-          '410': { ...errorResponse, description: 'The request belongs to a retired rail: readable and rejectable, never approvable.' },
+          '410': {
+            ...errorResponse,
+            description:
+              'ALWAYS, since #1986. Every approval request is an AllowanceModule-rail artifact ' +
+              '(the delegation rail has no approval queue), and that rail is retired — so a ' +
+              'queued approval is readable and rejectable, never approvable. The refusal runs ' +
+              'before the lookup, so a missing request gets this too rather than a 404.',
+          },
         },
       },
     },
@@ -3847,7 +3634,13 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
-          '410': { ...errorResponse, description: 'Retired rail.' },
+          '410': {
+            ...errorResponse,
+            description:
+              'ALWAYS, since #1986 — same unconditional refusal as /approve. Closing /approve ' +
+              'alone would leave a row that was already approved before the retirement able to ' +
+              'advance to co-signing.',
+          },
         },
       },
     },
@@ -4866,6 +4659,7 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '403': errorResponse,
+          '410': { ...errorResponse, description: 'A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid.' },
           '502': errorResponse,
         },
       },
@@ -4932,7 +4726,13 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '409': errorResponse,
-          '410': errorResponse,
+          '410': {
+            ...errorResponse,
+            description:
+              'The intent is pinned to a retired rail — the AllowanceModule rail (#1986) or the ' +
+              'session rail (#834) — or it has expired. A retired-rail intent is refused before ' +
+              'the expiry flip, so nothing is written.',
+          },
           '502': errorResponse,
         },
       },
@@ -5038,7 +4838,7 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '409': errorResponse,
-          '410': errorResponse,
+          '410': { ...errorResponse, description: 'A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid.' },
           '429': errorResponse,
           '502': errorResponse,
         },
@@ -5191,7 +4991,12 @@ export const openapiSpec = {
           '403': agentAuthForbidden,
           '410': {
             ...errorResponse,
-            description: 'The account is on the retired session rail — no state is read (#993 fail-closed contract).',
+            description:
+              'The account is on the retired SESSION rail — no state is read (#993 fail-closed ' +
+              'contract). Deliberately NOT extended to the Safe / AllowanceModule rail by #1986: ' +
+              'this endpoint REPORTS spend authority rather than exercising any, and the ' +
+              'retirement keeps accounts and history readable. The refusal belongs on the spend ' +
+              'paths, and that is where it is.',
           },
           '502': errorResponse,
         },
@@ -5371,7 +5176,10 @@ export const openapiSpec = {
             },
           },
           '410': {
-            description: 'Idempotent replay of a request whose payment has expired.',
+            description:
+              'Either the account is on a retired rail — the Safe / AllowanceModule rail (#1986) ' +
+              'or the session rail (#834), refused before any intent or approval row is written — ' +
+              'or this is an idempotent replay of a request whose payment has expired.',
             content: {
               'application/json': {
                 schema: { type: 'object', additionalProperties: true },

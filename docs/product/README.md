@@ -12,13 +12,11 @@ covers:
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/components/ui/**
   - packages/frontend/src/components/haven/**
-  - packages/frontend/src/components/SendModal.tsx
   - packages/frontend/src/components/ReceiveFundsModal.tsx
   - packages/frontend/src/components/AddFundsModal.tsx
   - packages/frontend/src/components/ConnectAgentModal.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
-  - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/hooks/useEscapeToClose.ts
 last-verified: "2026-08-23" # #1702: indexed the new `agent-key-rotation.md` beside `account-recovery.md`, which is the doc it is most often confused with. Index entry only; no other row re-verified. Prior: #1726: the §8 "Known implementation gap" note on 36/40px Button sizes was stale once the hit area reached 44px — rewritten to point at the tap-target rule and to scope the manual check to non-Button controls. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected

@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/middleware/agentAuth.ts
   - packages/connect/src/runtime.ts
   - packages/backend/src/modules/fee/fee-module.ts
-last-verified: "2026-08-24" # #1714 (epic #1717): index re-read against the three architecture docs updated by the catalogue-ingestion lifecycle slice — 00-overview (covers + note), 05-openapi (SI4 ships no contract change) and 10-module-boundaries (catalog module grew lifecycle.ts); every row below still describes its doc. No structural change. Prior: #1699: doc 11's one-line summary gains re-anchoring, since that doc now carries a section on it; the index was otherwise re-read row by row against the files it points at and every other summary still describes its doc. No structural change. Prior: #1615: re-verified after SDK module-ownership coverage updates; architecture index unchanged. Prior: #1199 signer-removal recovery clarification
+last-verified: "2026-08-24" # #1714 (epic #1717): index re-read against the three architecture docs updated by the catalogue-ingestion lifecycle slice — 00-overview (covers + note), 05-openapi (SI4 ships no contract change) and 10-module-boundaries (catalog module grew lifecycle.ts); every row below still describes its doc. No structural change Prior: last-verified: "2026-08-24" # #1984: "import-only" corrected in the index summary. Every other row re-read against the doc it points at; no summary moved. Prior: #1699: doc 11's one-line summary gains re-anchoring, since that doc now carries a section on it; the index was otherwise re-read row by row against the files it points at and every other summary still describes its doc. No structural change. Prior: #1615: re-verified after SDK module-ownership coverage updates; architecture index unchanged. Prior: #1199 signer-removal recovery clarification
 ---
 
 # Haven — Architecture
@@ -83,7 +83,8 @@ done
 - **API-key agents only.** (An earlier self-sign / EIP-191 agent path was
   removed — it is no longer part of the codebase.)
 - **Two policy rails coexist.** Docs 1–5 primarily describe the
-  **legacy AllowanceModule rail** (import-only, existing accounts). The Smart
+  **legacy AllowanceModule rail** (RETIRING under #1440 — closed to new accounts
+  entirely since #1984; existing accounts only). The Smart
   Sessions **session rail is retired** (#834): `session_key` accounts get
   HTTP 410 from the payment paths. New accounts run on the
   **delegation rail** (epic #821, `account_type='delegator_hybrid'`,

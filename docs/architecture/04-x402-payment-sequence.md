@@ -30,7 +30,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-24" # #1987: the "the code that implements it is still present" banner was future-tense and is now false (legacy-authorize.ts is deleted) — rewritten past-tense; the dead `domain/payment-coverage.ts` link removed from Source of truth (the file is deleted, the link 404'd); and the shared-writers paragraph no longer names legacy-authorize.ts as a live caller. Prior: #1986: the legacy AllowanceModule two-leg no longer RUNS — every x402 and payment entry point answers 410 for an allowance_module account. The sequence is kept as history (its code is deleted by #1987) and the rail banner now says so; the delegation-rail ERC-7710 sequence re-read against the diff and unchanged. Prior: #1984: "import-only" corrected. The two-leg funding model and both rails' x402 sequences re-read against the diff and unchanged — this slice closes account provisioning only, not payment. Prior: #1640 re-verify: authMiddleware now refuses purpose-claim tokens and catalog.ts routes through it instead of a hand-rolled jwtVerify. Agent API-key auth (agentAuth.ts) is a separate credential type and untouched, so every x402 sequence claim here re-read against the diff stands. # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-25" # #2041: the hosted GENERIC plain-HTTP x402 path (`haven_pay_x402_quote` -> `haven_submit`) now applies the shared #1450/#1453 settlement-scheme selector instead of hard-routing to the EIP-3009 bridge, so two claims here were corrected rather than appended to. The "Hosted Generic Split Flow" diagram was the ONLY shape of that path and is now labelled as the EIP-3009 shape, with the erc7710 shape recorded beside it (two steps SHORTER -- no funding relay, no `haven_x402_sign_header`). And the #1456/#1547 roll-call paragraph enumerated by name every tool wired to the selector, with the generic entry point conspicuously absent -- which read as "only the MCP-merchant tools can reach erc7710"; it now names `haven_pay_x402_quote`/`haven_submit`. Nothing about the backend dispatch contract, the payTo-shape table or the delegation-rail sequence moved: no new scheme, no new wire enum, no new authority. Scope: those two sections plus the surrounding erc7710 prose; the legacy-rail and MPP sections were not re-read. Prior: #1987: the "the code that implements it is still present" banner was future-tense and is now false (legacy-authorize.ts is deleted) — rewritten past-tense; the dead `domain/payment-coverage.ts` link removed from Source of truth (the file is deleted, the link 404'd); and the shared-writers paragraph no longer names legacy-authorize.ts as a live caller. Prior: #1986: the legacy AllowanceModule two-leg no longer RUNS — every x402 and payment entry point answers 410 for an allowance_module account. The sequence is kept as history (its code is deleted by #1987) and the rail banner now says so; the delegation-rail ERC-7710 sequence re-read against the diff and unchanged. Prior: #1984: "import-only" corrected. The two-leg funding model and both rails' x402 sequences re-read against the diff and unchanged — this slice closes account provisioning only, not payment. Prior: #1640 re-verify: authMiddleware now refuses purpose-claim tokens and catalog.ts routes through it instead of a hand-rolled jwtVerify. Agent API-key auth (agentAuth.ts) is a separate credential type and untouched, so every x402 sequence claim here re-read against the diff stands. # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -236,7 +236,12 @@ delegate key.
 ## Hosted Generic Split Flow
 
 Hosted MCP is keyless, so the funding signature and merchant header signature
-are local edge-signing steps. The generic decomposed path is:
+are local edge-signing steps. The diagram below is the **EIP-3009 shape** of
+the generic decomposed path — since
+[#2041](https://github.com/d-hinders/Haven-AI/issues/2041) it is one of two: a
+delegation-rail account at a merchant advertising
+`extra.assetTransferMethod: "erc7710"` takes the erc7710 shape recorded
+immediately after it instead.
 
 ```mermaid
 sequenceDiagram
@@ -268,6 +273,27 @@ sequenceDiagram
     MCP-->>Agent: Stop, notify user, poll status
   end
 ```
+
+**The erc7710 shape of the same tools (#2041).** When the shared #1450/#1453
+selector picks erc7710, `haven_pay_x402_quote` prepares a settlement child
+instead of a funding intent and reports `settlement_scheme: "erc7710"` with
+`settlement.funding_leg: false`. The sequence then loses two steps rather than
+gaining any:
+
+```text
+haven_pay_x402_quote  → settlement child + settlement_scheme: "erc7710"
+haven_sign            → { payment_id } only; the signer fetches the child
+haven_submit          → { payment_id, signature, settlement_scheme: "erc7710" }
+                        POST /x402/:id/settle → payment_header, tx_hash null
+agent retry           → X-PAYMENT: <payment_header>
+```
+
+There is no `haven_submit` funding relay to confirm and **no
+`haven_x402_sign_header` step at all** — Haven assembles the header, the
+merchant redeems the `[child, budget]` chain, and the delegate EOA never holds
+the money. The scheme is stated explicitly at both hops (reported at quote,
+echoed at submit) rather than inferred, which is #1360's property applied to a
+second entry point.
 
 Before signing the funding hash, the edge signer checks payload-hash equality,
 reconstructs the canonical payment/resource/merchant/amount/asset/network/expiry
@@ -504,16 +530,23 @@ Sequence:
    promotion-gating QA scenario's pass detail.
 4. A spending cap is **required** on this tool, as on `haven_pay_mcp_tool` —
    this IS the guided path, so there is no `cap_warning`
-   softness. Enforced against the LIVE quote via the SAME
-   `assertWithinMaxAmount` guard, before any funding intent exists
-   (`PRICE_EXCEEDS_MAX`).
+   softness. Enforced against the amount actually authorized — the option
+   `selectX402SettlementScheme` selected, via the shared `priceSelectedOption`
+   guard — never the unselected standard entry (#2051: the two selectors are
+   mutually exclusive by #1453, so "the live quote" and "the amount authorized"
+   are DIFFERENT `accepts[]` entries on the erc7710 branch, and a
+   merchant-controlled 402 could steer the cap onto the cheap one while the
+   expensive one was sent). Asserted before any intent exists, funding or
+   settlement child (`PRICE_EXCEEDS_MAX`).
 
    **Two spellings, one cap (#1351).** `max_amount` is atomic units;
    `max_amount_human` is the same cap in whole tokens, so `"1"` means 1 USDC
    rather than 0.000001 USDC. Exactly one may be sent. The human form is
-   converted using the decimals of the **live quote's** asset (`X402Quote.decimals`,
-   resolved from the same address→token binding that produces `token`) — never a
-   caller-supplied token name, never an assumed 6. Three refusals, all before any
+   converted using the decimals of the **selected option's own** asset
+   (`resolveTokenFromAddress(option.asset, option.network)` inside
+   `priceSelectedOption` — the same address→token binding that produces
+   `token`) — never the unselected standard entry's, never a caller-supplied
+   token name, never an assumed 6. Three refusals, all before any
    merchant probe, funding intent, or signature, and none of which can widen the
    on-chain budget:
 
@@ -568,9 +601,11 @@ Sequence:
    `payment_id`.
 8. The catalog's `price_atomic`/`price_display` are surfaced as
    `catalog_price_atomic`/`catalog_price_display` with
-   `catalog_price_is_indicative: true` — NEVER authoritative. The live quote
-   (`amount`/`amount_atomic`/`token`) is authoritative; a
-   `CATALOG_PRICE_DIFFERS` warning fires when the two disagree.
+   `catalog_price_is_indicative: true` — NEVER authoritative. The amount actually
+   being authorized (`amount`/`amount_atomic`/`token`, from the selected
+   option — the quote's own price only on the EIP-3009 branch, #2051) is
+   authoritative; a `CATALOG_PRICE_DIFFERS` warning fires when the two
+   disagree.
 
 No new backend endpoint was needed: `GET /catalog/:id`, `GET
 /machine-payments/agent`, `GET /machine-payments/allowances`, and `POST
@@ -866,7 +901,14 @@ account, capability from the merchant's `accepts[]`) and reports it, and
 `haven_settle_mcp_tool` exchanges the signed child for the header. As of
 [#1547](https://github.com/d-hinders/Haven-AI/issues/1547) the guided catalog
 preflight (`haven_prepare_catalog_purchase`) runs the same selector — see the
-Guided Catalog Purchase section above. Note the
+Guided Catalog Purchase section above. As of
+[#2041](https://github.com/d-hinders/Haven-AI/issues/2041) the roll-call is
+complete: the **generic plain-HTTP** entry point runs it too, so
+`haven_pay_x402_quote` selects the scheme and `haven_submit` gained an explicit
+`settlement_scheme` for the settle leg. That closes the coupling where the
+merchant TRANSPORT an agent used decided the settlement SCHEME it could reach —
+which mattered most on plain HTTP, since that is where the catalog's real
+merchants are. Note the
 sequence inversion, because it is the whole substance of that wiring: on the
 3009 path the agent's signature FUNDS the delegate and the header is built by
 the local signer; on erc7710 the signature IS the settlement child and the

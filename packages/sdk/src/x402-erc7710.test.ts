@@ -163,6 +163,25 @@ describe('settleX402Erc7710 (#1454)', () => {
       expect(without.posts[0].body).not.toHaveProperty('mcpCallContext')
     })
 
+    it('forwards idempotencyKey so a retried authorize REPLAYS instead of minting a second child (#2041)', async () => {
+      // The backend has supported replay dedup on this branch all along — the
+      // lookup runs before the funding-shape branch and the insert carries
+      // conflictTarget 'x402_idempotency_key'. It was simply never invoked,
+      // because this options bag had no way to say the key. On this scheme the
+      // signed artifact IS spend authority, so a second signable child for one
+      // purchase is a double-authorize hazard, not a duplicate record.
+      const withKey = harness()
+      await withKey.client.prepareX402Erc7710(paymentRequired([erc7710Option()]), {
+        idempotencyKey: 'x402:erc7710:abc',
+      })
+      expect(withKey.posts[0].body.idempotencyKey).toBe('x402:erc7710:abc')
+
+      // Omitted, the request body is byte-identical to the pre-#2041 shape.
+      const without = harness()
+      await without.client.prepareX402Erc7710(paymentRequired([erc7710Option()]))
+      expect(without.posts[0].body).not.toHaveProperty('idempotencyKey')
+    })
+
     it('never posts anything when the account is on the legacy rail', async () => {
       const { client, posts } = harness({ rail: 'legacy' })
       await expect(

@@ -374,7 +374,7 @@ export default function Sidebar() {
                     ref={popoverRef}
                     role="menu"
                     aria-label="User menu"
-                    className="absolute bottom-full right-0 mb-2 w-44 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-lg shadow-popover py-1 z-[var(--v2-z-chrome-popover)]"
+                    className="absolute bottom-full right-0 mb-2 w-44 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-lg shadow-popover px-1 py-1 z-[var(--v2-z-chrome-popover)]"
                   >
                     <Link
                       href="/profile"

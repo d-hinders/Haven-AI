@@ -44,11 +44,22 @@ import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
  * over-budget/wrong-recipient/expired redemption.** That is on-chain Solidity
  * behaviour, exercised by the bundler during real gas estimation — outside a
  * backend unit test's reach by construction, since `prepareDelegationPayment`
- * is mocked here as the network seam. Proving the enforcer itself needs an
- * on-chain/integration proof (a forked-chain or testnet call against the
- * deployed DelegationManager+enforcers) — this is a BLOCKING FINDING reported
- * to the captain, for #1991 (the CASP rewrite) to pick up; do not treat this
- * file's green as closing that gap.
+ * is mocked here as the network seam.
+ *
+ * ✅ **#2004 CLOSED THAT GAP — the proof now exists, in a sibling file:**
+ * `non-custody-onchain-enforcer.contract.test.ts`. It compiles a delegation
+ * with Haven's real caveat compiler and `eth_call`s each DEPLOYED enforcer's
+ * `beforeHook` at Haven's pinned Base Sepolia address, asserting the exact
+ * on-chain revert for an over-budget, wrong-recipient and expired redemption,
+ * each against an in-policy positive control on the same enforcer. Read the
+ * two files together: THIS one proves Haven does no arithmetic of its own and
+ * forwards the chain's verdict; THAT one proves the verdict refuses what it
+ * claims to refuse. Neither is sufficient alone.
+ *
+ * One remainder is still open and is deliberately not claimed by either file:
+ * a full `redeemDelegations` round trip proving the manager runs the whole
+ * caveat stack in order needs a funded testnet delegator and a signature, i.e.
+ * operator-held keys. See that file's header and the #2004 CASP shard.
  *
  * The legacy-rail cases are kept as an ADDITIONAL, STRICTLY STRONGER
  * assertion (#1986): the retired rail now refuses BEFORE any on-chain
@@ -56,36 +67,55 @@ import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
  * into one parametrized case rather than the original three, since all three
  * inputs now produce the identical early refusal.
  *
- * ⚠️ **#1987 AMENDMENT — the not-called spies stopped being evidence, and
- * saying so is the point of this block.** #1986 proved "the delegation branch
- * performs no off-chain coverage arithmetic" with `not.toHaveBeenCalled()`
- * spies on `computeEffectiveAllowance` / `getTokenAllowance` /
- * `generateTransferHash`. That was a real behavioural claim while
- * `routes/payments.ts` still imported those functions and chose a branch at
- * runtime. Slice #1987 deleted the legacy branch, `generateTransferHash`,
- * `executeAllowanceTransfer` and `domain/payment-coverage.ts`'s
- * `decideCoverage` outright — so the route no longer imports any of them and
- * the spies became **guaranteed true by construction**: a guard whose glob
- * matches the empty set, which this repo has on record as its own defect
- * class. They would pass just as happily if the whole route were deleted.
+ * ⚠️ **#1987 / #2044 — what the not-called spies do and do NOT prove.**
+ * #1986 proved "the delegation branch performs no off-chain coverage
+ * arithmetic" with `not.toHaveBeenCalled()` spies on six names from
+ * `rails/allowance-module.js`. #1987 then deleted the rail's execution half,
+ * and three of those six — `generateTransferHash`, `recoverSigner`,
+ * `executeAllowanceTransfer` — stopped existing as exports of the real module.
+ * `vi.mock(..., () => allowanceMocks)` replaces the module wholesale, so the
+ * factory simply invented three functions production does not have and the
+ * suite asserted they were never called: **unfalsifiable, not merely quiet** —
+ * no edit to production code could turn them red, because you cannot re-add a
+ * call to a function that is gone. An empty-set guard inside a regulatory
+ * proof. #2044 removed all three, and the `executeAllowanceTransfer`
+ * assertion with them.
  *
- * They are kept (a re-added call would still trip them) but they are no
- * longer what carries the red line. The claim is now STRUCTURAL — the
- * arithmetic is not reachable from the payment path because it is not
- * imported there at all — and it is asserted structurally below, over the
- * route's real import bindings, with a positive control proving the extractor
- * can say yes. That assertion CAN fail: re-add the import and it goes red.
+ * **The three that remain are mutation-proven falsifiable** (#2044), and it is
+ * worth being exact about the mechanism, because #2004's inventory read it too
+ * pessimistically. `routes/payments.ts` imports nothing from
+ * `rails/allowance-module.js` directly — but the module IS on the route's
+ * transitive graph (`routes/payments.ts` → `modules/mpp/index.ts` →
+ * `modules/mpp/allowances.ts`), so the `vi.mock` is live, and re-adding a call
+ * on the payment path DOES trip the spy. Measured, per name:
+ *   - `computeEffectiveAllowance` — a call added after the retirement gate
+ *     reddens all three delegation cases by name;
+ *   - `getTokenAllowance` — a call added BEFORE the retirement gate reddens
+ *     the two #1986 RETIREMENT cases too, which is what makes their claim
+ *     ("refused before ANY on-chain allowance read") a real ordering
+ *     assertion rather than a restatement of the 410;
+ *   - `getLatestBlockTimeSec` — the block-time read that fed the legacy
+ *     arithmetic; promoted into the helper by #2044 to replace the dead
+ *     `generateTransferHash` slot, and reddened by the same shape of edit.
+ * These three survive on the live READ path behind
+ * `GET /machine-payments/allowances`, which is exactly why a re-added call is
+ * a real risk and a real assertion.
+ *
+ * The three deleted names are still guarded — by the STRUCTURAL assertion
+ * below, over the route's real import bindings, which is falsifiable by a
+ * single edit (re-add the import and it goes red) and carries its own positive
+ * control proving the extractor can say yes. That, not the spies, is what
+ * carries the red line.
  */
 
 const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
+  // Only names the real module still EXPORTS (#2044). A factory entry for a
+  // deleted export is a spy nothing can ever call — see the header.
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
     getLatestBlockTimeSec: vi.fn(),
     computeEffectiveAllowance: vi.fn(),
-    generateTransferHash: vi.fn(),
-    recoverSigner: vi.fn(),
-    executeAllowanceTransfer: vi.fn(),
   },
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
@@ -97,14 +127,12 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() 
   },
 }))
 
-// #1196 wired the allowance-nonce coordinator into this path, so it now reads
-// the shared watermark alongside its chain reads. Stub the watermark
-// repository instead of adding it to the content-dispatch table: it is
-// fail-open and orthogonal to what these tests assert.
-vi.mock('../../infra/repositories/allowance-nonce-watermarks.js', () => ({
-  findAllowanceNonceWatermark: async () => null,
-  raiseAllowanceNonceWatermark: async () => {},
-}))
+// #2044: the `allowance-nonce-watermarks` stub that stood here mocked a module
+// #1987 DELETED, so it resolved to nothing and stubbed nothing. Removed rather
+// than left reading as coverage of a path that no longer exists. (The same
+// stale stub survives in six sibling suites — `payments`, `machine-payments`,
+// `x402`, `x402-consolidation.characterization`, `payments-session-rail` and
+// `allowance-rail-retired` — tracked as #2048, not widened into this diff.)
 vi.mock('../../db.js', () => ({ default: { query: (...args: unknown[]) => mockQuery(...args) } }))
 vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
@@ -158,16 +186,20 @@ function intentRow(overrides: Record<string, unknown> = {}) {
 
 /**
  * Every off-chain "how much is left" computation this suite must never see run
- * on the delegation rail.
+ * on the delegation rail — and every name here is one the real module still
+ * exports, so each can be reached again by a future edit and each has been
+ * mutation-proven to go red by name (#2044). `generateTransferHash` used to
+ * occupy the third slot; it was deleted with the rail by #1987 and could never
+ * fire again, so it is gone and `getLatestBlockTimeSec` — the block-time read
+ * that fed the legacy arithmetic — takes its place.
  *
- * #1987: retained, but see the header — post-deletion these are true by
- * construction, not by branch discipline. The load-bearing proof is
- * `PAYMENT_PATH_IMPORTS` below.
+ * These are a supporting guard, not the red line's proof. The load-bearing
+ * assertion is the structural import-binding check below.
  */
 function expectNoOffChainCoverageArithmetic() {
   expect(allowanceMocks.computeEffectiveAllowance).not.toHaveBeenCalled()
   expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
-  expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+  expect(allowanceMocks.getLatestBlockTimeSec).not.toHaveBeenCalled()
 }
 
 /**
@@ -179,6 +211,13 @@ function expectNoOffChainCoverageArithmetic() {
  * A grep that confirms a line exists does not say which block owns it — so
  * this parses the `import { ... } from '...'` clauses and collects only what
  * is actually bound into the module scope.
+ *
+ * ⚠️ **What this does NOT cover, named so it cannot be over-read** (#2049,
+ * pre-existing since #1987): NAMED import clauses only. A namespace import
+ * (`import * as AM from '../rails/allowance-module.js'`) or a dynamic
+ * `await import(...)` would reintroduce the arithmetic with this assertion
+ * still green. The retained spies above would still fire on such a CALL, but
+ * not on an unused binding. Widening it is filed as #2049.
  */
 function paymentPathImportBindings(): Set<string> {
   const src = readFileSync(
@@ -212,7 +251,6 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
       token: '0x0000000000000000000000000000000000000000',
       amount: 0n, spent: 0n, resetTimeMin: 0, lastResetMin: 0, nonce: 7,
     })
-    allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
   })
 
   // ── #1986 retirement: kept as one additional, strictly stronger case ─────
@@ -235,7 +273,10 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
       expect(res.statusCode).toBe(410)
       expect(res.json().error).toBe(allowanceModuleRailRetired('account').body.error)
       expectNoOffChainCoverageArithmetic()
-      expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
+      // #2044: the `executeAllowanceTransfer` spy that stood here asserted on a
+      // function #1987 deleted. That the retired rail cannot execute a transfer
+      // is now carried by the structural import assertion below, which names
+      // it and CAN fail.
     },
   )
 
@@ -339,6 +380,5 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
     // The chain's simulation was consulted — nothing else was:
     expect(delegationMocks.prepareDelegationPayment).toHaveBeenCalledOnce()
     expectNoOffChainCoverageArithmetic()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 })

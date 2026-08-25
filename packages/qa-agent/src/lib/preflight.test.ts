@@ -28,8 +28,6 @@ function health(settlement: unknown): typeof fetch {
 
 const baseCfg: QaConfig = {
   apiUrl: 'https://haven.example',
-  agentApiKey: 'sk_agent_test',
-  delegateKey: KEY,
   paymentTo: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
 }
 
@@ -139,7 +137,7 @@ describe('runPreflight', () => {
       { ...baseCfg, delegationDelegateKey: `0x${'02'.repeat(32)}` },
       { provider: providerWithUsdc(0n) },
     )
-    expect(result.checks.filter((c) => c.name.includes('delegate residual'))).toHaveLength(2)
+    expect(result.checks.filter((c) => c.name.includes('delegate residual'))).toHaveLength(1)
   })
 })
 

@@ -83,8 +83,6 @@ jobs:
       - name: Run money-flow QA (bounded flake-retry)
         env:
           QA_HAVEN_API_URL: ${{ github.event.inputs.haven_api_url || secrets.QA_HAVEN_API_URL }}
-          QA_AGENT_API_KEY: ${{ secrets.QA_AGENT_API_KEY }}
-          QA_DELEGATE_PRIVATE_KEY: ${{ secrets.QA_DELEGATE_PRIVATE_KEY }}
           QA_PAYMENT_TO: ${{ secrets.QA_PAYMENT_TO }}
           # Delegation-rail QA identity (#1063): open-budget Hybrid treasury on
           # Base Sepolia. Without BOTH of these the two delegation legs skip.

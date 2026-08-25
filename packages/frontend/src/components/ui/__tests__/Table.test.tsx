@@ -95,32 +95,48 @@ describe('Table (#857)', () => {
     expect(tableHideFromClass('xl')).toContain('xl:[@supports_not_(container-type:inline-size)]:hidden')
   })
 
-  it('Table establishes the named inline-size container, and `scrollable` suppresses it', () => {
-    const { container, rerender } = render(
+  it('EVERY table gets the named inline-size container — a revealAt column can never be orphaned', () => {
+    // The footgun this closes: a table rendered WITHOUT the container, holding
+    // a `revealAt` header, emits `@container v2table (...)` with no
+    // container-named ancestor. Per spec that query never matches, so the base
+    // `hidden` wins permanently, at every viewport, in every browser — silent
+    // and total, and strictly worse than the unsupporting-browser case the
+    // `@supports` fallback handles. It used to be reachable through a
+    // `scrollable` prop; the prop is gone, because measurement showed the
+    // containment it avoided does not actually defeat an `overflow-x-auto`
+    // scroll. This asserts the state is now unrepresentable.
+    const { container } = render(
       <Table>
+        <Table.Head>
+          <tr>
+            <Table.HeaderCell revealAt="md">Initiator</Table.HeaderCell>
+          </tr>
+        </Table.Head>
         <Table.Body>
           <tr>
-            <td>row</td>
+            <td className={tableColumnClass('md')}>row</td>
           </tr>
         </Table.Body>
       </Table>,
     )
-    const wrapper = container.querySelector('div')
-    expect(wrapper).not.toBeNull()
-    expect(wrapper!.className).toContain('[container-type:inline-size]')
-    expect(wrapper!.className).toContain('[container-name:v2table]')
+    const table = container.querySelector('table')!
+    const wrapper = table.parentElement!
+    expect(wrapper.className).toContain('[container-type:inline-size]')
+    expect(wrapper.className).toContain('[container-name:v2table]')
 
-    rerender(
-      <Table scrollable>
-        <Table.Body>
-          <tr>
-            <td>row</td>
-          </tr>
-        </Table.Body>
-      </Table>,
+    // Every element carrying a `v2table` query must have that wrapper above
+    // it. Walking the DOM is what makes this an assertion about REACHABILITY
+    // rather than about two strings matching.
+    const queriers = Array.from(container.querySelectorAll('*')).filter((el) =>
+      el.className && String(el.className).includes('@container_v2table_'),
     )
-    expect(container.querySelector('div')).toBeNull()
-    expect(container.querySelector('table')).not.toBeNull()
+    expect(queriers.length, 'the fixture must actually contain container-keyed cells').toBeGreaterThan(0)
+    for (const el of queriers) {
+      expect(
+        el.closest('[class*="container-name:v2table"]'),
+        `${el.tagName} carries a v2table query with no v2table ancestor`,
+      ).not.toBeNull()
+    }
   })
 
   it('Head collapses on the md container stage by default and stays visible with collapseWhenNarrow={false}', () => {

@@ -582,20 +582,21 @@ export default function DesignSystemPage() {
         title="Layering — the z-index scale"
         description="Every stacking layer has a named token in globals.css. Reach for a token, never a fresh number: two independently chosen values (a z-[100] top bar over a z-[60] navigation toggle) left the mobile sidebar toggle painted and hit-tested under the top bar on every authenticated route, and a third ad-hoc number is how that recurs. Tiers are spaced by 10 so a genuinely new layer lands between two without renumbering."
       >
-        {/* `scrollable` + `collapseWhenNarrow={false}` + `overflow-x-auto`:
-            Table.Head hides the header while the container is narrow on the
-            assumption that those rows carry their own labels. These rows are a bare token, a bare integer and a
+        {/* `collapseWhenNarrow={false}` + `overflow-x-auto`: Table.Head hides
+            the header while the container is narrow on the assumption that
+            those rows carry their own labels. These rows are a bare token, a bare integer and a
             description — nothing self-labelling — so at 390px the table would
             otherwise open on "--v2-z-content / 10 / …" with no way to tell
             which column is which. This is exactly the case the primitive's own
             docstring names, and it is paired with the horizontal scroll that
-            docstring asks for. `scrollable` keeps the primitive from putting
-            an inline-size container between the scroll wrapper and a table
-            that is deliberately `min-w-[560px]` — containment would size the
-            container from the wrapper and defeat the scroll (#1999). */}
+            docstring asks for. The primitive's inline-size container sits
+            between the wrapper and this deliberately `min-w-[560px]` table
+            and does NOT defeat the scroll — measured at 390px: the table
+            still lays out at 560px, the wrapper still reports scrollWidth
+            560 / clientWidth 340, and scrollLeft reaches 220 (#1999). */}
         <Card hover={false} className="overflow-hidden">
           <div className="overflow-x-auto">
-          <Table className="min-w-[560px]" scrollable>
+          <Table className="min-w-[560px]">
             <Table.Head collapseWhenNarrow={false}>
               <tr>
                 <Table.HeaderCell align="left">Token</Table.HeaderCell>

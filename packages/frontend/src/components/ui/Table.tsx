@@ -63,6 +63,19 @@
  * sizing, and the result measures byte-identical to a fix. Use
  * `tableColumnClass(stage)` on the `<td>`, never a hand-written variant.
  *
+ * ⚠️ CONTAINER-KEYING MAKES DOM MOUNT ORDER A LAYOUT INPUT, which viewport
+ * keying never did. `Sidebar` is `dynamic(ssr:false)`, so before its chunk
+ * mounts the shell hands the table ~256px it is about to take back, and a
+ * container query answers against the WIDER box for those frames. Measured
+ * deterministically (stage with the sidebar in layout vs `display:none`, at a
+ * fixed viewport): `/transactions` is SAME-STAGE at 768/1024/1100/1279/1280,
+ * so no mount transition can change its column set. The `/design-system`
+ * showcase DIFFERS between roughly 1040 and 1279 — pre-mount container 1034
+ * shows seven columns where the settled 794 shows five. Accepted there: it is
+ * an internal showcase route, and the whole page shifts 240px in the same
+ * frame anyway. Worth knowing before keying a NEW surface on the container,
+ * because the mechanism generalises even though this instance is benign.
+ *
  * What is deliberately NOT container-keyed, so the next reader does not
  * "finish the job" wrongly:
  *   - `STICKY_HEAD`/`STICKY_CELL`'s `-top-6 lg:-top-8`. That compensates
@@ -106,6 +119,13 @@ const TABLE_CONTAINER = '[container-type:inline-size] [container-name:v2table]'
 
 /** The two container stages. See the docstring above for the measurements. */
 export type ColumnStage = 'md' | 'xl'
+
+// ⚠️ DO NOT TEMPLATE THESE. Tailwind finds classes by scanning source text,
+// so both records must stay LITERAL strings sitting inside the `content`
+// glob. Building one from the runtime `stage` (`\`[@container_v2table_(min-width:${px}px)]:table-cell\``)
+// compiles fine, type-checks fine, and emits a class name that exists in no
+// stylesheet — the column then never reveals, silently. That is the only way
+// the safety here is lost.
 
 /**
  * ⚠️ The trailing `@supports not` variant is the fallback, and it is not
@@ -151,27 +171,33 @@ export function tableHideFromClass(stage: ColumnStage): string {
   return STAGE_HIDE[stage]
 }
 
-export function Table({
-  children,
-  className = '',
-  scrollable = false,
-}: {
-  children: ReactNode
-  className?: string
-  /**
-   * This table is paired with an `overflow-x-auto` wrapper and is meant to
-   * SCROLL rather than fit (the dense-admin shape `Table.Head`'s
-   * `collapseWhenNarrow={false}` goes with). Suppresses the inline-size
-   * container: containment sizes the wrapper from its own containing block
-   * and ignores its contents, so a table that must be allowed to grow past
-   * the wrapper should not get one. Such tables have no collapsing columns to
-   * key anyway.
-   */
-  scrollable?: boolean
-}) {
-  const table = <table className={`w-full border-separate border-spacing-0 ${className}`.trim()}>{children}</table>
-  if (scrollable) return table
-  return <div className={TABLE_CONTAINER}>{table}</div>
+export function Table({ children, className = '' }: { children: ReactNode; className?: string }) {
+  // The container is UNCONDITIONAL, and that is a correctness property rather
+  // than a simplification.
+  //
+  // This first shipped with a `scrollable` prop that suppressed the container
+  // for the dense tables paired with an `overflow-x-auto` wrapper, on the
+  // reasoning that inline-size containment sizes the wrapper from its own
+  // containing block and would therefore defeat the scroll. MEASURED on the
+  // `/design-system` z-index table (`min-w-[560px]` inside the wrapper, at a
+  // 390px viewport) that reasoning is simply WRONG — with the container in
+  // place the table still lays out at 560px and the wrapper still scrolls:
+  // scrollWidth 560, clientWidth 340, scrollLeft reaches 220, identical to
+  // the reading without it. Scrollable overflow propagates from the table
+  // through the contained wrapper to the scroller.
+  //
+  // Keeping the opt-out would have been actively dangerous. A caller pairing
+  // it with `revealAt` gets a `@container v2table` condition with no
+  // container-named ancestor to evaluate against; per spec such a query never
+  // matches, so the base `hidden` wins PERMANENTLY, at every viewport, in
+  // every browser — strictly worse than the unsupporting-browser case the
+  // `@supports` fallback above exists to handle, and silent. Removing the
+  // prop makes that state unrepresentable instead of documented.
+  return (
+    <div className={TABLE_CONTAINER}>
+      <table className={`w-full border-separate border-spacing-0 ${className}`.trim()}>{children}</table>
+    </div>
+  )
 }
 
 function Head({
@@ -187,7 +213,8 @@ function Head({
    * The header row collapses while the table's CONTAINER is below the `md`
    * stage (718px) by default — narrow rows carry their own labels. Pass
    * `false` for dense admin tables whose rows don't (pair the table with an
-   * `overflow-x-auto` wrapper AND `<Table scrollable>` so it scrolls).
+   * `overflow-x-auto` wrapper so it scrolls horizontally — the inline-size
+   * container does not interfere with that, measured).
    *
    * ⚠️ The `overflow-x-auto` wrapper and `sticky` are MUTUALLY EXCLUSIVE
    * (#1772). `overflow-x: auto` forces the computed `overflow-y` to `auto`

@@ -137,14 +137,14 @@ function SafeControlCard({ safe, agents }: { safe: UserSafe; agents: Agent[] }) 
           <p className="text-sm text-[var(--v2-ink-3)]">No on-chain agent allowances on this Safe.</p>
         ) : (
           <div className="overflow-x-auto rounded-lg border border-[var(--v2-border)]">
-            {/* `scrollable` + `collapseWhenNarrow={false}`: this is the dense
-                admin shape that SCROLLS inside its `overflow-x-auto` wrapper
-                rather than collapsing columns to fit. `scrollable` suppresses
-                the primitive's inline-size container, which would otherwise
-                size itself from the wrapper and ignore the table it is meant
-                to let overflow (#1999). It has no `revealAt` columns, so it
-                queries nothing. */}
-            <Table className="text-sm" scrollable>
+            {/* `collapseWhenNarrow={false}`: the dense admin shape that
+                SCROLLS inside its `overflow-x-auto` wrapper rather than
+                collapsing columns to fit — these rows carry no self-labelling
+                content. The primitive's inline-size container is present here
+                as everywhere and does not interfere with that scroll
+                (measured, #1999). No `revealAt` columns, so it queries
+                nothing. */}
+            <Table className="text-sm">
               <Table.Head collapseWhenNarrow={false}>
                 <tr>
                   <Table.HeaderCell align="left">Agent / delegate</Table.HeaderCell>

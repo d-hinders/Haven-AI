@@ -150,14 +150,12 @@ export interface AgentAllowancesResponse {
 
 export class HavenApi {
   /**
-   * @param apiKey overrides `cfg.agentApiKey`. The delegation-rail 3009
-   *   scenario (#946) drives a DIFFERENT agent than the seeded legacy-rail one,
-   *   because the execution rail is a property of the account and cannot be
-   *   selected per request.
+   * @param apiKey delegation-agent identity; API identity is never inferred
+   *   from the QA config because every scenario chooses its own rail identity.
    */
   constructor(
     private readonly cfg: QaConfig,
-    private readonly apiKey: string = cfg.agentApiKey,
+    private readonly apiKey: string,
   ) {}
 
   private async call<T>(

@@ -5,14 +5,9 @@
  */
 
 import type { QaConfig } from '../config.js'
-import type { HavenApi } from '../lib/haven-api.js'
 
 export interface ScenarioContext {
   cfg: QaConfig
-  api: HavenApi
-  /** Delegate EOA private key (signs payments locally). */
-  delegateKey: string
-  delegateAddress: string
 }
 
 export interface ScenarioResult {

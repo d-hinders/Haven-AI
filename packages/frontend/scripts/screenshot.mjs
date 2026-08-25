@@ -10,7 +10,18 @@
  *   npm run screenshot -w packages/frontend                 # /design-system only
  *   npm run screenshot -w packages/frontend -- /dashboard,/agents
  *   npm run screenshot -w packages/frontend -- --scenario=connect-agent
+ *   npm run screenshot -w packages/frontend -- --viewport=320x568 /dashboard
  *   npm run screenshot -w packages/frontend -- --keep=5   # retain 5 old runs
+ *
+ * ── Looking at a width outside the committed set (#2006) ─────────────────────
+ * `--viewport=<W>[xH]` (repeatable/comma-separated, or `SCREENSHOT_VIEWPORTS`)
+ * shoots the requested widths INSTEAD OF the committed pair, for that run only.
+ * Nothing a gate compares changes: the four gate consumers import `VIEWPORTS`
+ * from `evidence-viewports.mjs` and never the override. Overridden viewports
+ * are named after their dimensions, so the PNG filenames and the manifest's
+ * `viewports` / `viewport_source` state the widths the run actually used.
+ * The reasoning — and why 320 is deliberately NOT in the committed set — is in
+ * `evidence-viewports.mjs`.
  *
  * ── The previous run survives this one (#1888) ───────────────────────────────
  * This run writes FLAT into `.screenshots/`, exactly as before, so every literal
@@ -115,7 +126,7 @@ import { rm, stat, writeFile } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { VIEWPORTS } from './evidence-viewports.mjs'
+import { resolveCaptureViewports } from './evidence-viewports.mjs'
 import { SHELL_MODE, captureFullPage } from './full-page-capture.mjs'
 import { CLIP_TOLERANCE_PX, measureHiddenBelowFold } from './clip-guard.mjs'
 import { ARCHIVE_DIR_NAME, resolveKeepRuns, retainPreviousRun } from './capture-retention.mjs'
@@ -216,6 +227,34 @@ export function describeDeletedCapture(err, { route, viewport, file, written = t
     // (painted ratio, offending box, wait duration) survives.
     text: message.slice(0, 600),
   }
+}
+
+/**
+ * Every PNG this run wrote must be named after a viewport this run RESOLVED
+ * (#2006).
+ *
+ * The failure it exists to catch is the one a viewport override is most likely
+ * to have: the widths are parsed, printed and stamped into the manifest, and
+ * the capture loop quietly iterates something else. Nothing about that is
+ * visible in a PNG — a 390px render is a perfectly good-looking image — so the
+ * manifest would claim 320 over a set of files that are not 320. Filenames
+ * carry `vp.name`, so a disagreement between the resolved set and the written
+ * names is exactly that defect.
+ *
+ * What it does NOT cover, stated because the obvious reading is wider than the
+ * truth: a run that captured NOTHING has no filenames to disagree, so this
+ * returns empty. That case is already fatal through `gotoFailures` /
+ * `deletedCaptures`, which is why this guard is scoped to the wrong-width one.
+ *
+ * Pure and exported so it can be tested without booting a browser.
+ */
+export function findViewportMismatches(files, viewports) {
+  const names = viewports.map((vp) => vp.name)
+  // `<slug>-<vp.name>.png`, and the taller re-shoot `<base>-<vp.name>-full.png`.
+  const suffixes = names.flatMap((name) => [`-${name}.png`, `-${name}-full.png`])
+  return files
+    .filter((file) => !suffixes.some((suffix) => file.endsWith(suffix)))
+    .map((file) => ({ file, expected: names }))
 }
 
 /**
@@ -2443,6 +2482,16 @@ async function main() {
   // leaks both (the try/finally that cleans them up starts further down).
   const scenarios = resolveScenarios(SCENARIO_ARGS)
 
+  // The widths THIS run shoots (#2006). Same stance as the scenario check
+  // above: a malformed `--viewport=` throws before a server or a browser is
+  // acquired. With no override this is the committed set, unchanged — see
+  // `evidence-viewports.mjs` for why the gates must keep importing VIEWPORTS
+  // directly and never this.
+  const { viewports: captureViewports, source: viewportSource } = resolveCaptureViewports(
+    ARGS,
+    process.env,
+  )
+
   // Provenance, printed before anything is captured and stamped into the
   // manifest afterwards: a PNG on its own cannot say which branch it shows.
   // Resolved BEFORE retention runs, because the archived run's manifest records
@@ -2451,6 +2500,16 @@ async function main() {
   console.log(`screenshot: worktree ${identity.worktree}`)
   console.log(
     `screenshot: branch ${identity.branch} @ ${identity.commit.slice(0, 12)}${identity.dirty ? ' (dirty working tree)' : ''}`,
+  )
+  // Printed for both cases on purpose. "Which widths did this run shoot" is a
+  // question a reviewer reading a PNG in a thread has to be able to answer, and
+  // an override that announces itself only when something goes wrong is one
+  // more silent capture path.
+  console.log(
+    `screenshot: viewports ${captureViewports.map((vp) => `${vp.name} (${vp.width}x${vp.height})`).join(', ')}` +
+      (viewportSource === 'committed'
+        ? ' — the committed evidence set'
+        : ` — OVERRIDE via ${viewportSource}, this run only; no baseline is affected`),
   )
 
   // This used to be `rm -rf OUT_DIR`, which destroyed the previous run
@@ -2586,7 +2645,7 @@ async function main() {
   // ProtectedRoute race, made visible instead of intermittent (#1936).
   const raced = []
   try {
-    for (const vp of VIEWPORTS) {
+    for (const vp of captureViewports) {
       const context = await newFixtureContext(browser, vp, null)
       const page = await context.newPage()
       beginChainWatch(`routes · ${vp.name}`, vp.name)
@@ -2757,6 +2816,11 @@ async function main() {
     teardown()
   }
 
+  // Did the run shoot the widths it resolved? Computed BEFORE the manifest is
+  // written, and recorded in it, so a contradiction between the claim and the
+  // files is on the record rather than only on a console someone scrolled past.
+  const viewportMismatches = findViewportMismatches(captured, captureViewports)
+
   // Provenance an artifact can be traced by after the fact — which branch and
   // commit these PNGs actually show, and that the server was proven to be this
   // worktree's before they were taken.
@@ -2774,6 +2838,14 @@ async function main() {
         own_server: OWN_SERVER,
         identity_verified: identity.identity_verified === true,
         routes: ROUTES,
+        // The widths these PNGs were ACTUALLY shot at, and where that came
+        // from (#2006). Without this a 320px capture is indistinguishable from
+        // a 390px one once the PNG is attached to a review thread.
+        viewports: captureViewports.map(({ name, width, height }) => ({ name, width, height })),
+        viewport_source: viewportSource,
+        // Empty on every honest run. Non-empty means the files and the
+        // `viewports` claim above disagree — see `findViewportMismatches`.
+        viewport_mismatches: viewportMismatches,
         scenarios: scenarios.map((s) => s.name),
         files: captured,
         // The absences, on the record. A capture that was written and then
@@ -2957,7 +3029,16 @@ async function main() {
   // Broken evidence must not exit 0 — a failed navigation means missing PNGs,
   // and a blank capture means the run produced something that LOOKS like
   // evidence (#1738).
+  if (viewportMismatches.length > 0) {
+    console.error(
+      `\n✗ ${viewportMismatches.length} PNG(s) are NOT named after any viewport this run resolved ` +
+        `(${captureViewports.map((vp) => vp.name).join(', ')}) — the run captured something other than ` +
+        'what it was asked for, and the manifest would have claimed otherwise:',
+    )
+    for (const m of viewportMismatches) console.error(`  ${m.file}`)
+  }
   if (
+    viewportMismatches.length > 0 ||
     gotoFailures.length > 0 ||
     deletedCaptures.length > 0 ||
     CHAIN_READ_GAPS.length > 0 ||

@@ -185,8 +185,78 @@ describe('useActiveSigner', () => {
     expect(isSafeCapableSigner(result.current)).toBe(false)
   })
 
-  it('does NOT resolve the hybrid signer when the device marker is missing', () => {
+  // ── #1969 (owner decision 2026-08-26): marker-less resolution ────────────
+  //
+  // A NON-EMPTY hydrated set resolves even without a device marker, mirroring
+  // `pickSigningPath`'s precedence exactly: marker-matched passkey → connected
+  // EOA (only when the set names an owner) → any passkey. The pre-#1969
+  // refusal ("does NOT resolve the hybrid signer when the device marker is
+  // missing") is retired by that recorded decision — see
+  // docs/security/delegation-rail-security-model.md §6.
+
+  it('resolves the hybrid signer for a non-empty set when the device marker is missing (#1969)', () => {
     setStoredHybridSigners(HYBRID_SIGNERS)
+    mockUseAccount.mockReturnValue({ address: undefined })
+    mockUseWalletClient.mockReturnValue({ data: undefined })
+
+    const { result } = renderHook(() =>
+      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current).toEqual({
+      type: 'delegator_passkey',
+      accountAddress: HYBRID_ADDRESS,
+      chainId: 84532,
+      signers: HYBRID_SIGNERS,
+    })
+  })
+
+  it('marker-less pure-passkey set still beats a connected wallet (#1969 — the account has no EOA signer)', () => {
+    // owner_address is null: the connected wallet is NOT a signer for this
+    // account, so it must not be offered as one.
+    setStoredHybridSigners(HYBRID_SIGNERS)
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
+    mockUseWalletClient.mockReturnValue({ data: { transport: {} } })
+
+    const { result } = renderHook(() =>
+      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current?.type).toBe('delegator_passkey')
+  })
+
+  it('mixed account: a connected EOA still wins when no device marker matches (#1969 precedence mirror)', () => {
+    // The exact `pickSigningPath` precedence: no marker + owner named + wallet
+    // connected → 'eoa'. Without this mirror, the budget/send/re-key hooks
+    // (which feed `signer?.type === 'eoa'` into `pickSigningPath`) would flip
+    // mixed accounts from the connected EOA to a cross-device ceremony.
+    const walletClient = { transport: {} }
+    setStoredHybridSigners({ ...HYBRID_SIGNERS, owner_address: EOA_ADDRESS })
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
+    mockUseWalletClient.mockReturnValue({ data: walletClient })
+
+    const { result } = renderHook(() =>
+      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current).toEqual({ type: 'eoa', address: EOA_ADDRESS, walletClient })
+  })
+
+  it('mixed account: a marker-matched passkey beats the connected EOA (#1969 — device marker first, as before)', () => {
+    setStoredHybridSigners({ ...HYBRID_SIGNERS, owner_address: EOA_ADDRESS })
+    rememberPasskeyCredentialOnDevice(credentialIdFromKeyId(HYBRID_KEY_ID))
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
+    mockUseWalletClient.mockReturnValue({ data: { transport: {} } })
+
+    const { result } = renderHook(() =>
+      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current?.type).toBe('delegator_passkey')
+  })
+
+  it('an EMPTY hybrid signer set never resolves a passkey signer (#1969 — nothing can sign)', () => {
+    setStoredHybridSigners({ ...HYBRID_SIGNERS, passkeys: [] })
     mockUseAccount.mockReturnValue({ address: undefined })
     mockUseWalletClient.mockReturnValue({ data: undefined })
 

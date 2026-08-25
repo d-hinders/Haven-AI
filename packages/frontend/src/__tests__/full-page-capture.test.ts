@@ -17,10 +17,14 @@ import { describe, expect, it } from 'vitest'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs, shared by the screenshot script and both e2e specs
 import {
+  MIN_CONTENT_CHARS,
+  MIN_CONTENT_ELEMENTS,
   PAINTED_SLACK,
   TALL_FACTOR,
   assertCaptureNotBlank,
   inspectCapture,
+  judgeContentSettled,
+  resolveContentSettled,
   resolveScrollShell,
   scanPng,
 } from '../../scripts/full-page-capture.mjs'
@@ -542,5 +546,225 @@ describe('resolveScrollShell', () => {
     expect(error.shellCause).toBe('missing-scroll-root')
     expect(error.message).toMatch(/hold a screen or more of content/)
     expect(error.message).toMatch(/main#content-main/)
+  })
+})
+
+/**
+ * ── Is this a picture of the route, or of its spinner? (#2036) ──────────────
+ *
+ * The measured defect: `/dashboard` captured on both viewports showing the app
+ * shell and a body reading only `Loading...`, reported as a SUCCESS. Both
+ * neighbouring guards are correct to pass it — a loading state is short so
+ * `blank-below-fold` is out of scope, and `#main-content` really did mount so
+ * the shell guards really did their job. The gap is that nothing asked whether
+ * the region the PNG claims to show contains anything.
+ *
+ * These tests are deliberately written in BOTH directions. A guard for hollow
+ * evidence that can only say "fine" is the joke telling itself; one that can
+ * only say "no" is an alarm nobody keeps.
+ */
+type ContentProbe = {
+  found: boolean
+  docScrollHeight: number
+  viewportHeight: number
+  renderedChars: number
+  contentChars: number | null
+  contentElements: number | null
+}
+
+/**
+ * The REAL loading fallback, transcribed from
+ * `app/(authenticated)/dashboard/page.tsx`: a pulse dot and a `<span>` reading
+ * `Loading...` inside a flex wrapper. Three elements, ten characters — and
+ * `renderedChars` is in the THOUSANDS, because the shell around it (sidebar
+ * nav, TopBar, account chip) rendered perfectly. That gap between the two
+ * numbers is the whole defect.
+ */
+const DASHBOARD_LOADING: ContentProbe = {
+  found: true,
+  docScrollHeight: 800,
+  viewportHeight: 800,
+  renderedChars: 2_400,
+  contentChars: 10,
+  contentElements: 3,
+}
+
+/** A `/dashboard` that actually resolved — measured on the populated fixture. */
+const DASHBOARD_RENDERED: ContentProbe = {
+  found: true,
+  docScrollHeight: 3_600,
+  viewportHeight: 800,
+  renderedChars: 4_800,
+  contentChars: 2_100,
+  contentElements: 460,
+}
+
+function fakeContentPage(probes: ContentProbe[]) {
+  let index = 0
+  const waits: number[] = []
+  return {
+    waits,
+    async waitForTimeout(ms: number) {
+      waits.push(ms)
+    },
+    async evaluate() {
+      const probe = probes[Math.min(index, probes.length - 1)]
+      index += 1
+      return probe
+    },
+  }
+}
+
+describe('judgeContentSettled', () => {
+  it('says NO to the real dashboard loading fallback — the capture #2036 was filed about', () => {
+    const verdict = judgeContentSettled(DASHBOARD_LOADING)
+
+    expect(verdict.settled).toBe(false)
+    expect(verdict.reason).toBe('still-loading')
+    // Both numbers survive into the verdict, because the error message quotes
+    // them and a reader has to be able to see how far below the floor it was.
+    expect(verdict.chars).toBe(10)
+    expect(verdict.elements).toBe(3)
+  })
+
+  it('says YES to a route that genuinely rendered — the positive control', () => {
+    // Without this the guard could be `() => ({ settled: false })` and every
+    // other test here would still pass while the harness captured nothing ever
+    // again.
+    const verdict = judgeContentSettled(DASHBOARD_RENDERED)
+
+    expect(verdict.settled).toBe(true)
+    expect(verdict.reason).toBe('settled')
+  })
+
+  it('refuses a skeleton: many elements, almost no text', () => {
+    // A shimmer placeholder is the loading state that is NOT short on DOM. It
+    // has to fail on the text floor, or the guard only ever catches spinners.
+    const verdict = judgeContentSettled({
+      ...DASHBOARD_RENDERED,
+      contentChars: 4,
+      contentElements: 120,
+    })
+
+    expect(verdict.settled).toBe(false)
+    expect(verdict.reason).toBe('still-loading')
+  })
+
+  it('refuses a bare sentence: enough text, almost no structure', () => {
+    const verdict = judgeContentSettled({
+      ...DASHBOARD_RENDERED,
+      contentChars: 400,
+      contentElements: 2,
+    })
+
+    expect(verdict.settled).toBe(false)
+    expect(verdict.reason).toBe('still-loading')
+  })
+
+  it('separates "no content root" from "the content root is empty"', () => {
+    // Two different facts, and the module whose entire subject is precise
+    // causal reporting must not blur them: a marketing page has no
+    // `#main-content` at all and is captured on purpose (#1939).
+    const verdict = judgeContentSettled({ ...DASHBOARD_RENDERED, contentChars: null, contentElements: null })
+
+    expect(verdict.settled).toBe(false)
+    expect(verdict.reason).toBe('no-content-root')
+  })
+
+  it('is judged PER PAGE — a healthy route cannot excuse a still-loading one', () => {
+    // The #1996 trap, restated: `unanswered_chain_reads` first aggregated per
+    // CONTEXT, so a healthy `/dashboard` in the same sweep would have excused a
+    // silent `/agents` — the guard rebuilding the bug it exists to catch. This
+    // verdict holds no cross-page state at all, and that is asserted rather
+    // than assumed.
+    const sweep = [
+      { route: '/dashboard', probe: DASHBOARD_RENDERED },
+      { route: '/agents', probe: DASHBOARD_LOADING },
+      { route: '/transactions', probe: DASHBOARD_RENDERED },
+    ]
+
+    const refused = sweep
+      .filter(({ probe }) => !judgeContentSettled(probe).settled)
+      .map(({ route }) => route)
+
+    expect(refused).toEqual(['/agents'])
+  })
+
+  it('pins the floors against the markup they were measured from', () => {
+    // If someone raises these to a number a real empty state cannot clear, this
+    // is the test that should have to be edited deliberately.
+    expect(MIN_CONTENT_CHARS).toBe(80)
+    expect(MIN_CONTENT_ELEMENTS).toBe(8)
+    // The floors must sit strictly above the real loading fallback and strictly
+    // below the real rendered route, or they discriminate nothing.
+    expect(DASHBOARD_LOADING.contentChars).toBeLessThan(MIN_CONTENT_CHARS)
+    expect(DASHBOARD_RENDERED.contentChars).toBeGreaterThan(MIN_CONTENT_CHARS)
+    expect(DASHBOARD_LOADING.contentElements).toBeLessThan(MIN_CONTENT_ELEMENTS)
+    expect(DASHBOARD_RENDERED.contentElements).toBeGreaterThan(MIN_CONTENT_ELEMENTS)
+  })
+})
+
+describe('resolveContentSettled', () => {
+  it('waits out a late chunk and reports it as a wait, not a failure', async () => {
+    // A cold `next dev` compiles the route chunk AFTER the shell is already on
+    // screen. That is a slow machine, not a broken route, and refusing it would
+    // make the guard an alarm that is always on.
+    const page = fakeContentPage([DASHBOARD_LOADING, DASHBOARD_LOADING, DASHBOARD_RENDERED])
+
+    const result = await resolveContentSettled(page, { timeoutMs: 5_000, pollMs: 1 })
+
+    expect(result.settled).toBe(true)
+    expect(result.raced).toBe(true)
+    expect(result.polls).toBe(2)
+    expect(result.chars).toBe(DASHBOARD_RENDERED.contentChars)
+  })
+
+  it('does not claim a race on a route that was ready on the first probe', async () => {
+    const page = fakeContentPage([DASHBOARD_RENDERED])
+
+    const result = await resolveContentSettled(page, { timeoutMs: 5_000, pollMs: 1 })
+
+    expect(result.raced).toBe(false)
+    expect(result.polls).toBe(0)
+    expect(page.waits).toEqual([])
+  })
+
+  it('throws still-loading when the content never arrives, and names both numbers', async () => {
+    const page = fakeContentPage([DASHBOARD_LOADING])
+
+    const error = await resolveContentSettled(page, {
+      timeoutMs: 20,
+      pollMs: 1,
+      label: '/dashboard · mobile',
+    }).catch((e) => e)
+
+    // `captureCause` is what `describeDeletedCapture` reads, so the manifest
+    // records a cause of its own rather than folding this into 'unknown'.
+    expect(error.name).toBe('ContentNotSettledError')
+    expect(error.captureCause).toBe('still-loading')
+    expect(error.message).toContain('/dashboard · mobile')
+    expect(error.message).toContain('10 character(s)')
+    expect(error.message).toContain('3 element(s)')
+    // The floor is quoted, so the reader can judge the margin without opening
+    // the source.
+    expect(error.message).toContain(`${MIN_CONTENT_CHARS} characters`)
+  })
+
+  it('accepts a probe the caller already took instead of re-probing', async () => {
+    // `captureFullPage` has just probed the page to resolve the shell; making
+    // it pay for a second round-trip before the first poll would be waste.
+    const page = fakeContentPage([DASHBOARD_LOADING])
+
+    const result = await resolveContentSettled(page, {
+      timeoutMs: 20,
+      pollMs: 1,
+      // The default is `null`, so TS infers the option as `null | undefined`
+      // from the plain-JS signature. The cast says "a probe object", nothing
+      // more — the runtime contract is the one the module documents.
+      probe: DASHBOARD_RENDERED as unknown as null,
+    })
+
+    expect(result.settled).toBe(true)
+    expect(result.polls).toBe(0)
   })
 })

@@ -67,6 +67,20 @@
  * capture for real, with `captured_without_unclip` saying so; and a shell that
  * arrived late is reported under `shell_waits` rather than failing at random.
  *
+ * ── And the route has to have actually RENDERED (#2036) ─────────────────────
+ * A capture that succeeds while showing nothing is worse than one that fails.
+ * `/dashboard` was captured twice on both viewports showing the app shell and a
+ * body containing only `Loading...`, and the run exited 0 — the PNGs are
+ * well-formed, plausible, and filed under a name claiming they show the route.
+ * Neither neighbouring guard could see it: `blank-below-fold` needs a capture
+ * taller than a viewport and a loading state is short, and the shell guards ask
+ * whether `#main-content` mounted — it did; the `next/dynamic` chunk inside it
+ * did not. So `captureFullPage` now also demands POSITIVE evidence that the
+ * route's own content region filled (`resolveContentSettled`), waits for it,
+ * and on failure removes the PNG with cause `still-loading` exactly like a
+ * blank one. The margin it cleared is recorded per capture in the manifest
+ * under `content_settle`, so a green run says what it measured.
+ *
  * ── Scenarios (#1409) ────────────────────────────────────────────────────────
  * Some surfaces no URL can reach: the connect-agent modal lives behind a
  * four-step dialog AND a connection state machine that only advances on a
@@ -127,7 +141,13 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveCaptureViewports } from './evidence-viewports.mjs'
-import { SHELL_MODE, captureFullPage } from './full-page-capture.mjs'
+import {
+  MIN_CONTENT_CHARS,
+  MIN_CONTENT_ELEMENTS,
+  SCROLL_SHELL_ROOT,
+  SHELL_MODE,
+  captureFullPage,
+} from './full-page-capture.mjs'
 import { CLIP_TOLERANCE_PX, measureHiddenBelowFold } from './clip-guard.mjs'
 import { ARCHIVE_DIR_NAME, resolveKeepRuns, retainPreviousRun } from './capture-retention.mjs'
 import {
@@ -200,6 +220,8 @@ const KEEP_RUNS = resolveKeepRuns(ARGS, process.env)
  *   'missing-scroll-root'  the shell is there and no longer matches — real
  *   'not-rendered'         cold `next dev` / failed hydration — not a selector
  *   'blank-below-fold'     the PNG came back empty below the first viewport
+ *   'still-loading'        the shell mounted, the ROUTE never did (#2036) — the
+ *                          one cause whose PNG looks entirely healthy
  *   'unknown'              anything else, never silently folded into the above
  */
 export function describeDeletedCapture(err, { route, viewport, file, written = true }) {
@@ -2723,6 +2745,16 @@ async function main() {
   // Captures that only succeeded after waiting for the shell to mount — the
   // ProtectedRoute race, made visible instead of intermittent (#1936).
   const raced = []
+  // POSITIVE evidence, per capture, that the route resolved rather than being
+  // photographed mid-load (#2036): how much the route's own content region was
+  // actually holding when the shutter fired. Recorded even on a clean run,
+  // because "the guard passed" and "the guard ran and here is the margin" are
+  // different claims, and only the second one survives being read later.
+  const contentSettles = []
+  // Captures whose CONTENT (not shell) arrived only after a wait. The
+  // still-loading refusals live in `deletedCaptures` under cause
+  // 'still-loading'; these are the ones the wait rescued.
+  const contentRaced = []
   try {
     for (const vp of captureViewports) {
       const context = await newFixtureContext(browser, vp, null)
@@ -2763,12 +2795,24 @@ async function main() {
         // Un-clips the h-screen/overflow-hidden shell so `fullPage` paints the
         // whole route, then reads the PNG back and refuses a blank one (#1738).
         try {
-          const { shell } = await captureFullPage(page, {
+          const { shell, content } = await captureFullPage(page, {
             path: file,
             label: `${routePath} · ${vp.name}`,
             viewportDevicePx: vp.height * DEVICE_SCALE_FACTOR,
           })
           captured.push(path.relative(ROOT, file))
+          if (content) {
+            contentSettles.push({
+              route: routePath,
+              viewport: vp.name,
+              chars: content.chars,
+              elements: content.elements,
+              waited_ms: content.waitedMs,
+            })
+            if (content.raced) {
+              contentRaced.push({ route: routePath, viewport: vp.name, waitedMs: content.waitedMs })
+            }
+          }
           if (shell.mode === SHELL_MODE.NO_SCROLL_SHELL) {
             shellless.push({ route: routePath, viewport: vp.name, height: shell.height })
           } else if (shell.raced) {
@@ -2942,6 +2986,13 @@ async function main() {
         silent_chain_fed_captures: CHAIN_SILENT_CAPTURES,
         captured_without_unclip: shellless,
         shell_waits: raced,
+        // What each route's OWN content region was holding at capture time
+        // (#2036). A reader can check the margin between these numbers and the
+        // floor instead of taking "the run was green" on trust — and a route
+        // that quietly slid towards the floor is visible here before it starts
+        // failing runs.
+        content_settle: contentSettles,
+        content_waits: contentRaced,
         // Retention, recorded so the live manifest can be read as "this is the
         // current run, and here is where the one before it went" (#1888). A
         // reader who finds PNGs under `previous/` can tell from HERE that they
@@ -2987,6 +3038,23 @@ async function main() {
       `\nℹ ${raced.length} capture(s) had to WAIT for the app shell to mount (ProtectedRoute race, #1936):`,
     )
     for (const e of raced) console.log(`  [${e.route} · ${e.viewport}] shell appeared after ${e.waitedMs}ms`)
+  }
+  if (contentRaced.length > 0) {
+    console.log(
+      `\nℹ ${contentRaced.length} capture(s) had to WAIT for the ROUTE'S CONTENT to resolve, not just the shell (#2036):`,
+    )
+    for (const e of contentRaced) {
+      console.log(`  [${e.route} · ${e.viewport}] content region filled after ${e.waitedMs}ms`)
+    }
+  }
+  if (contentSettles.length > 0) {
+    console.log(
+      `\nℹ route content confirmed present at capture time (#2036) — floor is ` +
+        `${MIN_CONTENT_CHARS} chars / ${MIN_CONTENT_ELEMENTS} elements in "${SCROLL_SHELL_ROOT}":`,
+    )
+    for (const e of contentSettles) {
+      console.log(`  [${e.route} · ${e.viewport}] ${e.chars} chars, ${e.elements} elements`)
+    }
   }
   for (const line of formatDeletionReport(deletedCaptures)) console.error(line)
   if (clipped.length > 0) {

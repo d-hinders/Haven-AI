@@ -80,8 +80,17 @@ import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
  * matches the empty set, which this repo has on record as its own defect
  * class. They would pass just as happily if the whole route were deleted.
  *
- * They are kept (a re-added call would still trip them) but they are no
- * longer what carries the red line. The claim is now STRUCTURAL — the
+ * They are kept, but #2004 measured how much is left of them and the answer
+ * is less than "a re-added call would still trip them" claimed. `payments.ts`
+ * imports NOTHING from `rails/allowance-module.js` at all, so this file's
+ * `vi.mock` of that module cannot influence the code under test; and of the
+ * six names in `allowanceMocks`, three — `generateTransferHash`,
+ * `recoverSigner`, `executeAllowanceTransfer` — no longer EXIST as exports of
+ * the real module, deleted with the rail by #1987. You cannot re-add a call to
+ * a function that is gone, so those three spies are unfalsifiable, not merely
+ * quiet. The two that could still fire (`computeEffectiveAllowance`,
+ * `getTokenAllowance`) survive on the live READ path, so for those the original
+ * claim does hold. Either way they are no longer what carries the red line. The claim is now STRUCTURAL — the
  * arithmetic is not reachable from the payment path because it is not
  * imported there at all — and it is asserted structurally below, over the
  * route's real import bindings, with a positive control proving the extractor

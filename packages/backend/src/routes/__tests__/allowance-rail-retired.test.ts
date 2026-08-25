@@ -73,11 +73,19 @@ import fastifyJwt from '@fastify/jwt'
  *     by deleting the payment code, and the suite would be a guard that can
  *     only say no.
  *
- * And the reads: an existing legacy account is NOT cut off from its own data.
- * The epic is explicit — "Accounts/history stay READABLE" — so the read cases
- * at the bottom pin that `GET /payments` and `GET /machine-payments/allowances`
- * still serve a legacy account. They are deliberately shallow: they assert the
- * routes still SERVE, and their semantics stay pinned where they already are.
+ * And the reads: an existing legacy account is NOT cut off from its own
+ * PAYMENT HISTORY. The epic is explicit — "Accounts/history stay READABLE" —
+ * so the read case at the bottom pins that `GET /payments` still serves a
+ * legacy account, deliberately shallow: it asserts the route still SERVES,
+ * and its semantics stay pinned where they already are.
+ *
+ * `GET /machine-payments/allowances` does NOT belong in that "reads stay
+ * open" set any more (#2020, epic #1440, reversing this file's own #1986
+ * decision recorded 2026-08-25 on the issue): it REPORTS spend authority
+ * rather than serving history, and #1986's read-regression argument for
+ * leaving it open stopped holding once the population it protected was
+ * emptied and unsupported. It now 410s alongside the spend paths above,
+ * pinned in "an existing legacy account is not cut off from its own data".
  */
 
 // db-mock-exempt: the contract under test is "the database is never reached",
@@ -524,43 +532,24 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
       expect(res.json().payments).toHaveLength(1)
     })
 
-    it('GET /machine-payments/allowances still reports a legacy accounts on-chain state', async () => {
-      // Deliberately NOT a 410. The epic keeps accounts and history readable;
-      // this endpoint REPORTS spend authority rather than exercising any, and
-      // turning a state read into a refusal would be a read regression for
-      // exactly the population being retired.
-      primeDb(authRoute('allowance_module'), railRoute('allowance_module'), [
-        /FROM agent_allowances|agent_allowances/,
-        () => ({
-          rows: [
-            {
-              id: 'alw-1',
-              token_address: USDC,
-              token_symbol: 'USDC',
-              allowance_amount: '5.000000',
-              reset_period_min: 1440,
-            },
-          ],
-        }),
-      ])
-      allowanceMocks.getTokenAllowance.mockResolvedValue({
-        amount: 5_000_000n,
-        spent: 0n,
-        resetTimeMin: 1440,
-        lastResetMin: 0,
-        nonce: 1,
-      })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_800_000_000)
-      allowanceMocks.computeEffectiveAllowance.mockReturnValue({
-        remaining: 5_000_000n,
-        effectiveSpent: 0n,
-        isResetPending: false,
-      })
+    // #2020 (epic #1440), reversing this file's own #1986 decision (owner
+    // call recorded 2026-08-25 on the issue): this endpoint REPORTS spend
+    // authority, and #1986 deliberately left it readable on the retired
+    // rail on that basis. #2020 finds the read-regression argument no longer
+    // holds — the accounts are emptied and unsupported, and this read was the
+    // last thing pinning `agent_allowances` and the legacy on-chain allowance
+    // reader into the codebase — so it now gets the SAME 410 as the spend
+    // paths above, and reads nothing to build it.
+    it('GET /machine-payments/allowances now 410s a legacy account too — the last read closes with the rest of the rail', async () => {
+      primeDb(authRoute('allowance_module'), railRoute('allowance_module'))
 
       const res = await app.inject({ method: 'GET', url: '/machine-payments/allowances', headers })
 
-      expect(res.statusCode).toBe(200)
-      expect(res.json().allowances).toBeTruthy()
+      expect(res.statusCode).toBe(410)
+      expect(res.json().error).toBe(RETIRED_ACCOUNT)
+      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+      expect(allowanceMocks.getLatestBlockTimeSec).not.toHaveBeenCalled()
+      expect(sqlCalls().some((sql) => /agent_allowances/.test(sql))).toBe(false)
     })
   })
 })

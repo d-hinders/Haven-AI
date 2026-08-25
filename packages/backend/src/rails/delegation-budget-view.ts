@@ -1,21 +1,20 @@
 /**
  * Budget view for delegation-rail agents (#1090).
  *
- * On the delegation rail the authority IS the active `agent_delegations` row;
- * `agent_allowances` is written once at connection setup and never updated —
- * a frozen onboarding mirror. Every summary surface (agents list, agent
- * detail, dashboard) must therefore derive its `allowances` array from the
- * ACTIVE delegations, or it renders the budget the user granted at onboarding
- * forever, whatever they changed it to since.
+ * On the delegation rail the authority IS the active `agent_delegations` row.
+ * Every summary surface (agents list, agent detail, dashboard) derives its
+ * `allowances` array from the ACTIVE delegations — and since #2020 this is
+ * the ONLY source: the `agent_allowances` onboarding mirror this view was
+ * built to bypass is retired outright (no reader, no writer; the table drop
+ * lands with #1990's follow-through).
  *
- * The derived rows keep the exact `agent_allowances` element shape so no
+ * The derived rows keep the historical `allowances` element shape so no
  * consumer changes: `token_symbol`/decimals come from the chain registry
  * (graceful fallback for unknown tokens — the budget must never disappear
  * because a token is unlisted), `allowance_amount` is the human-formatted
  * budget, `reset_period_min` is the period in minutes.
  *
- * Read/reporting path ONLY: enforcement stays the on-chain delegation
- * (`routes/payments.ts` never consults `agent_allowances` on this rail).
+ * Read/reporting path ONLY: enforcement stays the on-chain delegation.
  */
 
 import { getChainData } from '@haven_ai/core'

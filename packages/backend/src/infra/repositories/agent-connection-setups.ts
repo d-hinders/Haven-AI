@@ -413,20 +413,10 @@ export async function insertPendingAgent(
   return result.rows[0].id
 }
 
-export const COPY_SETUP_ALLOWANCES_SQL = `INSERT INTO agent_allowances (
-           agent_id, token_address, token_symbol, allowance_amount, reset_period_min
-         )
-         SELECT $1, token_address, token_symbol, allowance_amount, reset_period_min
-         FROM agent_connection_setup_allowances
-         WHERE setup_id = $2`
-
-export async function copySetupAllowancesToAgent(
-  agentId: string,
-  setupId: string,
-  tx: Executor,
-): Promise<void> {
-  await tx.query(COPY_SETUP_ALLOWANCES_SQL, [agentId, setupId])
-}
+// #2020: `COPY_SETUP_ALLOWANCES_SQL` / `copySetupAllowancesToAgent` are gone —
+// the last writer of `agent_allowances`. Requested budgets live on
+// `agent_connection_setup_allowances`; the approved authority is the
+// delegation grant built from them, never a mirror row.
 
 export const MARK_SETUP_REGISTERED_SQL = `UPDATE agent_connection_setups
          SET agent_id = $2,

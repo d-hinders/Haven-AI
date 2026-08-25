@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
   - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
-last-verified: "2026-08-25" # #1992: "legacy/import-only agents" -> "legacy-rail agents". Import is not a live path on that rail (#1984 410s it), so "import-only" names a mode that no longer exists. Scope: that one sentence. Prior: #1699: new section "Re-anchoring after a re-key" — an EAS attestation is immutable and its first field is the delegate EOA, so a re-key leaves the live attestation naming a RETIRED key (#1847) and re-key now retires and reissues it. Three claims in the body were stale and are corrected against the code, not merely appended to: the `anchor` enumeration was missing `re_anchoring`; "runs retryPendingPassports(), then reconcilePendingRevocations(), then logs listStuckRevocations()" now omitted two phases; and "each of the three phases" was already wrong at three and is now five. Re-read the revocation and sweep sections in full against `modules/passport/**` and `index.ts` — every other claim stands, including the no-terminal-failed-state rule, which the re-anchor path inherits by sharing `retireAttestationOnChain`. Scope: revocation/sweep/anchor-state sections; the schema, binding, assurance-ladder and receipt sections were not re-tested. Prior: #1758: "no terminal failed revocation state" needed something able to observe agreement, and the only observer was unreachable — a revoke that mines after its bounded wait leaves `revocation_status` permanently `pending`. A new section records what CLOSES a revocation: the attestation's revoked bit read at a settled block, its evidence pointer from the durable outbound record, and the #1743 time question left open. Prior: #1745: the SECOND limit on "recovered, never re-minted" is closed — a null receipt no longer presumes dropped; a re-mint needs positive evidence the prior tx can never mine (its nonce consumed by something else). The bounded-stall argument and the still-open time question (#1743) are recorded rather than implied. The first limit (hash-keyed recovery) stands. Prior: #1742: the sweep's phase isolation protects against a THROW, not a hang — `revokeOnChain`'s bare `tx.wait()` could park the revocation phase and the stuck-revoke alarm downstream of it indefinitely. The wait is now bounded; the retry/backoff model, the no-terminal-failed-state rule and the verifier precedence are unchanged. Prior: #1735: the "recovered, never re-minted" claim is qualified — recovery is keyed off the persisted tx hash (hence the bump-worker exclusion) and presumes a null receipt means dropped, so a fee-stuck anchor can still re-mint (#1745). Anchor wait disposition on expiry recorded. Rest of the anchoring/revocation prose re-read against the code and unchanged.
+last-verified: "2026-08-26" # #1847: recovered anchors are now attributed from the mined transaction's own calldata, never the fresh claim — the one path where `agent_eoa` could lie and blind the stale-anchor invariant permanently (recovery crossing a completed re-key). New prose in the re-anchoring section: the attribution rule, and why an abandoned/in-flight re-key is deliberately NOT a re-anchor case. Scope: the retry-discipline and re-anchoring sections re-read against `issuance.ts`/`attestation.ts`/`reanchor.ts` as changed; schema/binding/receipt sections untouched. Prior: #1992: "legacy/import-only agents" -> "legacy-rail agents". Import is not a live path on that rail (#1984 410s it), so "import-only" names a mode that no longer exists. Scope: that one sentence. Prior: #1699: new section "Re-anchoring after a re-key" — an EAS attestation is immutable and its first field is the delegate EOA, so a re-key leaves the live attestation naming a RETIRED key (#1847) and re-key now retires and reissues it. Three claims in the body were stale and are corrected against the code, not merely appended to: the `anchor` enumeration was missing `re_anchoring`; "runs retryPendingPassports(), then reconcilePendingRevocations(), then logs listStuckRevocations()" now omitted two phases; and "each of the three phases" was already wrong at three and is now five. Re-read the revocation and sweep sections in full against `modules/passport/**` and `index.ts` — every other claim stands, including the no-terminal-failed-state rule, which the re-anchor path inherits by sharing `retireAttestationOnChain`. Scope: revocation/sweep/anchor-state sections; the schema, binding, assurance-ladder and receipt sections were not re-tested. Prior: #1758: "no terminal failed revocation state" needed something able to observe agreement, and the only observer was unreachable — a revoke that mines after its bounded wait leaves `revocation_status` permanently `pending`. A new section records what CLOSES a revocation: the attestation's revoked bit read at a settled block, its evidence pointer from the durable outbound record, and the #1743 time question left open. Prior: #1745: the SECOND limit on "recovered, never re-minted" is closed — a null receipt no longer presumes dropped; a re-mint needs positive evidence the prior tx can never mine (its nonce consumed by something else). The bounded-stall argument and the still-open time question (#1743) are recorded rather than implied. The first limit (hash-keyed recovery) stands. Prior: #1742: the sweep's phase isolation protects against a THROW, not a hang — `revokeOnChain`'s bare `tx.wait()` could park the revocation phase and the stuck-revoke alarm downstream of it indefinitely. The wait is now bounded; the retry/backoff model, the no-terminal-failed-state rule and the verifier precedence are unchanged. Prior: #1735: the "recovered, never re-minted" claim is qualified — recovery is keyed off the persisted tx hash (hence the bump-worker exclusion) and presumes a null receipt means dropped, so a fee-stuck anchor can still re-mint (#1745). Anchor wait disposition on expiry recorded. Rest of the anchoring/revocation prose re-read against the code and unchanged.
 ---
 
 # L0 Agent Passport — EAS schema
@@ -338,6 +338,42 @@ unconditional caller, so it was left intact and a second gate written beside it
 keyed on `<> 'revoked'` plus the stale-anchor predicate. The two are mutually
 exclusive by construction, so an agent revoked mid-re-anchor moves between the
 queues rather than racing inside one.
+
+**A recovered anchor is attributed from the transaction's own bytes, never
+from fresh facts ([#1847](https://github.com/d-hinders/Haven-AI/issues/1847)).**
+The invariant above compares two database columns, so it is only as honest as
+what `markAnchored` writes into `agent_eoa`. The mint path writes the claim it
+just attested — trivially the truth. The #1043 recovery path is the one place
+they can diverge: the recovered transaction was built from the facts of its
+day, and a re-key can complete between its broadcast and its receipt being
+read (exactly the "attest lands late" race #1743's lane cancel documents).
+Writing the *fresh* claim there would set `agent_eoa = delegate_address` for an
+attestation that names the retired key — the stale-anchor predicate false
+forever, the sweep and its alarm both blind, and every verifier receipt built
+from the row describing bytes that are not on-chain. So
+`recoverAnchorFromReceipt` decodes `agentEoa`/`smartAccount` out of the mined
+calldata (a fee bump re-broadcasts the same bytes, so the decode holds for a
+bumped hash too) and issuance records those; when they disagree with the
+current key, the row simply enters the re-anchor queue above and heals on the
+next tick. If the transaction body cannot be fetched, recovery throws — a
+retryable failure — rather than attribute the anchor from facts the chain does
+not hold.
+
+**An abandoned (or merely in-flight) re-key is NOT a re-anchor case, on
+purpose.** `agents.delegate_address` rotates only inside `completeRekey`'s
+transaction, so until a re-key completes, the anchored attestation still names
+the agent's canonical current key — the invariant is false and nothing here
+touches the row. That is correct, not a gap: past the revoke the agent's spend
+authority is empty (the abandon response says so:
+`agent_has_no_authority: true`), but the passport attests governance, never
+spend authority, and re-anchoring onto a replacement key that never activated
+would bind a credential to authority that does not exist. The state resolves
+the way the re-key itself resolves: completion (direct, or a successor
+adopting the abandoned carry, #1868) rotates the column and the invariant
+fires; an owner revoke moves the row to the revocation queue. An agent left
+abandoned indefinitely keeps an accurate attestation for a key with nothing
+granted to it — the same shape as a passported agent that was never granted a
+budget.
 
 A stale anchor left unreconciled past the threshold is its own operational
 incident, distinct from a stuck revoke — see

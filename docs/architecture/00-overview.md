@@ -65,7 +65,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-24" # #1984: the rail line said the legacy AllowanceModule rail was "import-only" — #1984 closes IMPORT too, so nothing enters it by any route; corrected to closed-to-new-accounts. The rest of the overview re-read against the diff: the delegation rail is still where new accounts are provisioned, and the custody boundary is unchanged. Prior: #1199: signer-removal recovery change re-verified; delegation authority overview unchanged
+last-verified: "2026-08-25" # #1992: the "Haven runs two on-chain policy rails" line was false - the AllowanceModule rail is retired (#1986 410s, #1987/#1988/#1989 deletions), so there is ONE live rail. Corrected, and the backend component one-liner no longer advertises allowances/approvals as live surfaces. Scope: the rail paragraph and the components table row. Prior: #1984: the rail line said the legacy AllowanceModule rail was "import-only" — #1984 closes IMPORT too, so nothing enters it by any route; corrected to closed-to-new-accounts. The rest of the overview re-read against the diff: the delegation rail is still where new accounts are provisioned, and the custody boundary is unchanged. Prior: #1199: signer-removal recovery change re-verified; delegation authority overview unchanged
 ---
 
 # Haven — Architecture Overview
@@ -80,11 +80,13 @@ line holds the security model:
 **API auth = identity, signature = authority, on-chain AllowanceModule state =
 enforcement for automatic Safe funding.**
 
-That line describes the **legacy AllowanceModule rail** (RETIRING under #1440 — closed to new accounts entirely since #1984; existing
-accounts). Haven runs **two on-chain policy rails** — the Smart Sessions
-**session rail is retired** (#834; accounts still marked
-`execution_rail='session_key'` get HTTP 410 from the payment paths).
-New accounts are provisioned on the
+That line describes the **legacy AllowanceModule rail**, which is **RETIRED**
+(#1440) — closed to new accounts (#1984), fail-closed for spending with HTTP 410
+on every payment and x402 entry point (#1986), and its execution machinery
+deleted (#1987/#1988/#1989). Existing Safe accounts stay readable; they cannot
+spend. The Smart Sessions **session rail is retired** too (#834; accounts still
+marked `execution_rail='session_key'` get HTTP 410 from the payment paths).
+**Haven runs one live on-chain policy rail**, the
 **delegation rail** (epic #821, `account_type='delegator_hybrid'`,
 `execution_rail='delegation'`), where the same identity/authority split holds but
 enforcement is a signed MetaMask delegation with audited caveat enforcers (period
@@ -97,7 +99,7 @@ with no funding leg and no approval queue. Deep dive:
 
 | Package | One-liner |
 |---|---|
-| `@haven/backend` | Fastify API: auth, Haven wallets/Safes, agents, allowances, approvals, payments, x402/MPP, receipts, catalog, reporting (incl. the live Fortnox feed adapter, `modules/reporting/`), and [OpenAPI](05-agent-api-openapi.md). |
+| `@haven/backend` | Fastify API: auth, Haven wallets, agents, budgets, payments, x402/MPP, receipts, catalog, reporting (incl. the live Fortnox feed adapter, `modules/reporting/`), and [OpenAPI](05-agent-api-openapi.md). The retired rail's approval queue is readable and rejectable only (#1440). |
 | `@haven/frontend` | Next.js dashboard: onboarding, wallets, agent rules, approvals, activity, custody/recovery, catalog, and guarded reporting. |
 | `@haven_ai/sdk` | TypeScript agent client plus shared signing, x402, sweep, and payment-state primitives used by direct integrations and the MCP/signer packages. |
 | `@haven_ai/connect` | Connector CLI: generates the delegate key and API key locally, registers the public signing address/proof and API-key hash, stores local credentials, writes runtime config, and returns the user to Haven to approve the agent's authority (wallet approval on the legacy rail; budget-delegation signature on the delegation rail). |

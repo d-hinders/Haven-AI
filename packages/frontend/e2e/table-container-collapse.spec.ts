@@ -235,6 +235,11 @@ test('/transactions: the sticky header still pins through the container wrapper 
   await page.setViewportSize({ width: 1280, height: 300 })
   await page.goto('/transactions')
   await page.waitForSelector('tbody tr', { timeout: 60_000 })
+  // `thead` explicitly: every reading below is relative to it, and a null one
+  // reports as NaN, which fails the non-vacuity guard with an arithmetic
+  // complaint instead of "the page never rendered". Observed once under heavy
+  // contention. Make the instrument say what it means.
+  await page.waitForSelector('thead', { timeout: 60_000 })
   // Make the table genuinely long. The mock serves one transaction; sticky
   // cannot be observed on a table shorter than its own scrollport.
   await page.evaluate(() => {
@@ -257,6 +262,10 @@ test('/transactions: the sticky header still pins through the container wrapper 
     })
 
   const before = await state()
+  expect(
+    Number.isFinite(before.theadTop),
+    'no thead was laid out — the page did not render, which is not a verdict about pinning',
+  ).toBe(true)
   // NON-VACUITY: without this the pinning bound below is satisfiable by a page
   // that never scrolled, which is exactly how the first draft passed a
   // mutation. Assert the instrument can say "no" before trusting it saying

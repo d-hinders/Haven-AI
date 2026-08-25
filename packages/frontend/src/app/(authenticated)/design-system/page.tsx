@@ -1418,7 +1418,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Transaction history"
-        description="Tables render through the Table primitive: Table.Head (collapses while the table's CONTAINER is narrow, optional sticky), Table.HeaderCell (srLabel for icon columns, revealAt='md'|'xl' for the responsive-collapse pattern — CONTAINER widths of 718px and 974px, not viewport), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td> and carries tableColumnClass(stage) so header and body cannot drift apart. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
+        description="Tables render through the Table primitive: Table.Head (collapses when narrow, optional sticky), Table.HeaderCell (srLabel for icon columns, revealAt for container-keyed collapse), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
       >
         <Card hover={false} className="overflow-hidden">
           <Table>

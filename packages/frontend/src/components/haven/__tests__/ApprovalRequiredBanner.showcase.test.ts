@@ -98,3 +98,66 @@ describe('/design-system catalogues the ApprovalRequiredBanner tone ladder (#188
     }
   })
 })
+
+/**
+ * Rail-truth guard (#1947).
+ *
+ * `/design-system` taught the queue-and-approve model unscoped — "requests
+ * above the budget wait for your approval" — which is false on the delegation
+ * rail, the only live rail (`rails/execution-rail.ts`): budget, recipient and
+ * expiry are enforced on-chain by caveat enforcers during prepare, so an
+ * out-of-policy payment is DECLINED before any state is written
+ * (`routes/payments.ts`), and #1989 deleted the approve/reject screen itself.
+ * The showcase is where new surfaces copy their voice from, so a queue claim
+ * regressing here propagates. This pins the two halves of the fix:
+ *
+ *   1. no queue-and-approve phrasing on the showcase page;
+ *   2. `ApprovalRequiredBanner` never regrows a default `title` — the old
+ *      default ("Payments above budget need approval") was the sharpest
+ *      instance: wrong for the default rail, and silently inherited by any
+ *      call site that forgot to think.
+ *
+ * Source-text checks, with the usual honesty: they prove the words are absent
+ * from this file, not that a rendered surface elsewhere tells the truth —
+ * product copy outside the showcase is tracked separately (see #1947's
+ * grep-level census on the issue).
+ */
+
+const QUEUE_CLAIMS = [
+  'wait for your approval',
+  'waits for your approval',
+  'wait for approval',
+  'waits for approval',
+  'asks for approval',
+  'queued for',
+  'need approval',
+  'needs approval',
+  'need your manual approval',
+] as const
+
+describe('/design-system makes no queue-and-approve claim (#1947)', () => {
+  it('contains none of the legacy queue phrases', () => {
+    const lower = showcaseSource.toLowerCase()
+    for (const phrase of QUEUE_CLAIMS) {
+      const at = lower.indexOf(phrase)
+      expect(
+        at,
+        `queue-and-approve phrasing "${phrase}" is back on /design-system (index ${at}) — ` +
+          'the delegation rail declines out-of-policy payments on-chain; nothing queues (#1947)',
+      ).toBe(-1)
+    }
+  })
+
+  it('ApprovalRequiredBanner keeps title required, with no default', () => {
+    // The prop signature is the guard TypeScript enforces at call sites; this
+    // pins the component side so a convenience default cannot quietly return.
+    expect(
+      /title\s*=\s*['"`]/.test(componentSource),
+      'ApprovalRequiredBanner has a default title again — the last one asserted queue-and-approve, false on the delegation rail (#1947)',
+    ).toBe(false)
+    expect(
+      /title\?\s*:/.test(componentSource),
+      'ApprovalRequiredBanner declares title optional — every call site must name its own fact (#1947)',
+    ).toBe(false)
+  })
+})

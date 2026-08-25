@@ -428,7 +428,7 @@ export default function DesignSystemPage() {
             </p>
             <div className="mt-5 flex flex-wrap items-center gap-2">
               <StatusBadge tone="success">Received</StatusBadge>
-              <StatusBadge tone="warning">Needs approval</StatusBadge>
+              <StatusBadge tone="warning">Needs attention</StatusBadge>
               <StatusBadge tone="danger">Failed</StatusBadge>
               <StatusBadge tone="brand">Connected</StatusBadge>
               <StatusBadge>Draft</StatusBadge>
@@ -493,7 +493,7 @@ export default function DesignSystemPage() {
             <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-brand)]">Anchor</p>
             <p className="mt-2 text-sm font-semibold text-[var(--v2-ink)]">Secondary focal point</p>
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-              Use for the second-most-important surface on a page (pending approvals, agent status). Cooler off-white background, brand-tinted hairline.
+              Use for the second-most-important surface on a page (recoverable funds, agent status). Cooler off-white background, brand-tinted hairline.
             </p>
           </Card>
 
@@ -737,8 +737,8 @@ export default function DesignSystemPage() {
             </dl>
           </Card.Section>
           <Card.Section className="mt-5 pt-5">
-            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Approvers</p>
-            <p className="mt-2 text-sm text-[var(--v2-ink-2)]">2 of 3 approvers required</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Approval methods</p>
+            <p className="mt-2 text-sm text-[var(--v2-ink-2)]">2 passkeys can approve actions</p>
           </Card.Section>
         </Card>
         <p className="text-xs text-[var(--v2-ink-3)]">
@@ -771,7 +771,7 @@ export default function DesignSystemPage() {
             leading={<DotIcon />}
             leadingTone="warning"
             title="Research assistant"
-            subtitle="Needs approval · 2 pending"
+            subtitle="No budget left · resets tomorrow"
             trailing={<StatusBadge tone="warning">Review</StatusBadge>}
             accent
             href="#"
@@ -983,21 +983,21 @@ export default function DesignSystemPage() {
             icon={<DotIcon />}
             tone="brand"
             title="No agents yet"
-            body="Create an agent to give it a budget and rules. Haven asks for approval when it tries to spend more."
+            body="Create an agent to give it a budget and rules. The budget is enforced on-chain, so the agent cannot spend past it."
             action={<Button size="sm">Create agent</Button>}
           />
           <EmptyState
             icon={<DotIcon />}
             tone="warning"
             title="One agent needs attention"
-            body="A scheduled payment is above its remaining budget. Approve or reject it before it expires."
-            action={<Button size="sm" variant="ghost">Open approvals</Button>}
+            body="This agent has spent its whole budget. Raise the budget, or its requests stay declined until the period resets."
+            action={<Button size="sm" variant="ghost">Open agent</Button>}
           />
           <EmptyState
             icon={<DotIcon />}
             tone="success"
             title="You're all caught up"
-            body="No pending approvals. Agents will keep working within their budgets."
+            body="Nothing needs your attention. Agents keep working within their budgets."
           />
         </div>
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
@@ -1063,7 +1063,7 @@ export default function DesignSystemPage() {
             status="Ready to review"
           >
             <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
-              Requests above the remaining daily budget will wait for your approval.
+              Requests above the remaining daily budget are declined before any money moves.
             </p>
           </AgentBudgetCard>
 
@@ -1095,21 +1095,22 @@ export default function DesignSystemPage() {
               {
                 label: 'Budget',
                 value: '250 USDC per day',
-                helper: 'Haven asks for approval when a request is above the remaining budget.',
+                helper: 'Requests above the remaining budget are declined on-chain.',
               },
             ]}
           />
         </div>
 
         <div className="grid gap-5 lg:grid-cols-2">
-          <ApprovalRequiredBanner tone="neutral">
-            Agents can still initiate payments above the remaining budget, but you approve them manually before any money moves.
+          <ApprovalRequiredBanner title="The budget is the rule" tone="neutral">
+            Payments above the remaining budget are declined before any money moves. Raise the
+            budget if the agent needs more room.
           </ApprovalRequiredBanner>
           <RiskExplainer
             items={[
               'The agent can make payments automatically while it stays within the budget.',
               'You can pause or revoke the agent from its detail page.',
-              'Haven asks for approval before requests above the remaining budget are paid.',
+              'Requests above the remaining budget are declined — nothing is paid past the rules you set.',
             ]}
           />
         </div>
@@ -1138,67 +1139,17 @@ export default function DesignSystemPage() {
         </div>
       </Section>
 
-      <Section
-        title="Approvals and pending actions"
-        description="Approval requests lead with the money, show who asked, and make the wallet-to-recipient path readable before the user approves or rejects."
-      >
-        <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
-          <Card hover={false} className="overflow-hidden border-warning/25">
-            <Card.Header>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <StatusBadge tone="warning">Needs approval</StatusBadge>
-                  <StatusBadge>x402 payment</StatusBadge>
-                </div>
-                <span className="text-xs text-[var(--v2-ink-3)]">Expires in 1 hour</span>
-              </div>
-            </Card.Header>
-            <div className="space-y-5 p-5">
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.9fr)]">
-                <div>
-                  <p className="text-xs font-medium text-[var(--v2-ink-3)]">Payment request</p>
-                  <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
-                    48.00 USDC
-                  </p>
-                  <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-                    Research assistant asked to send this payment. Nothing moves until you approve it.
-                  </p>
-                </div>
-                <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
-                  <TransactionMovement from="Operating wallet" to="api.vendor.com" />
-                  <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Agent</dt>
-                      <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Research assistant</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
-                      <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Base</dd>
-                    </div>
-                  </dl>
-                </div>
-              </div>
-              <ApprovalRequiredBanner title="Approval required" tone="neutral" density="compact">
-                This payment is above the remaining agent budget.
-              </ApprovalRequiredBanner>
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button variant="ghost" size="sm">Reject</Button>
-                <Button size="sm">Approve payment</Button>
-              </div>
-            </div>
-          </Card>
-
-          <div className="space-y-4">
-            <ApprovalRequiredBanner title="Approved, not sent yet" tone="neutral" density="compact">
-              This request was approved but still needs to be completed before the payment is sent.
-            </ApprovalRequiredBanner>
-            <EmptyState
-              title="No payments need approval"
-              body="When an agent asks to spend above its budget, the request will appear here before any money moves."
-            />
-          </div>
-        </div>
-      </Section>
+      {/*
+        There is deliberately NO "Approvals and pending actions" section here
+        (#1947). It showcased the approve/reject queue screen that #1989
+        deleted from the product: on the delegation rail — the only live rail
+        (rails/execution-rail.ts) — budget, recipient and expiry are enforced
+        on-chain by caveat enforcers during prepare, so an out-of-policy
+        payment is declined before any state is written (routes/payments.ts).
+        Nothing queues, so there is nothing to approve. The retired screen's
+        money-first structure survives as prior art in
+        docs/product/screen-recipes.md ("Approve Payment — RETIRED").
+      */}
 
       <Section
         title="ApprovalRequiredBanner — the tone ladder"
@@ -1207,7 +1158,8 @@ export default function DesignSystemPage() {
         <div className="max-w-2xl space-y-5">
           <div>
             <ApprovalRequiredBanner title="You stay in control" tone="neutral">
-              Anything above the remaining budget waits for your approval before it is paid.
+              Anything above the remaining budget is declined before it is paid. Nothing waits on
+              you.
             </ApprovalRequiredBanner>
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
               <span className="font-semibold text-[var(--v2-ink-2)]">neutral</span> — states a fact the
@@ -1217,8 +1169,7 @@ export default function DesignSystemPage() {
 
           <div>
             <ApprovalRequiredBanner title="This agent has no budget left" tone="warning">
-              Its next request will wait for your approval until you raise the budget or the period
-              resets.
+              Its next request will be declined until you raise the budget or the period resets.
             </ApprovalRequiredBanner>
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
               <span className="font-semibold text-[var(--v2-ink-2)]">warning</span> — the default. Something
@@ -1249,7 +1200,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Manual payment review"
-        description="Manual sends use the same money-first review structure as approvals: amount first, then the wallet-to-recipient path and approval context."
+        description="Manual sends lead with the money: amount first, then the wallet-to-recipient path and how you approve the send."
       >
         <Card hover={false} className="max-w-xl p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1395,11 +1346,11 @@ export default function DesignSystemPage() {
             />
             <TransactionActivityRow
               direction="out"
-              title="Approval request"
+              title="x402 payment"
               description={<MovementExample from="Research assistant" to="Cloud vendor" />}
               value="320.00"
               asset="USDC"
-              status="Needs approval"
+              status="Needs attention"
               statusTone="warning"
             />
             <TransactionActivityRow
@@ -1646,7 +1597,7 @@ export default function DesignSystemPage() {
             {
               label: 'Budget',
               value: '250 USDC per day',
-              helper: 'Payments within budget can run automatically. Larger payments need your manual approval.',
+              helper: 'Payments within budget run automatically. Larger payments are declined by the agent rules.',
             },
           ]}
           footer={
@@ -1851,7 +1802,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Mobile density"
-        description="Cards should stack cleanly and keep the money and approval boundary visible on narrow screens."
+        description="Cards should stack cleanly and keep the money and budget boundary visible on narrow screens."
       >
         <div className="max-w-sm rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
           <div className="space-y-3">
@@ -1863,7 +1814,8 @@ export default function DesignSystemPage() {
               statusTone="success"
             />
             <ApprovalRequiredBanner title="You stay in control" tone="neutral">
-              Anything above 75 USDC waits for your manual approval before it is paid.
+              Anything above 75 USDC is declined before it is paid, and you can pause or revoke
+              this agent at any time.
             </ApprovalRequiredBanner>
           </div>
         </div>
@@ -1999,7 +1951,7 @@ export default function DesignSystemPage() {
         <div className="space-y-3">
           <p>
             Confirm the agent budget before connecting your agent. Requests above the remaining
-            budget will wait for approval.
+            budget are declined automatically.
           </p>
           <p>
             The agent can spend up to the budget you set here, from this Haven wallet only. It
@@ -2018,8 +1970,8 @@ export default function DesignSystemPage() {
             amount, and the rule that allowed it.
           </p>
           <p>
-            Requests above the remaining budget are not refused outright — they wait for you to
-            approve or reject them, and nothing moves until you decide.
+            Requests above the remaining budget are declined outright — the budget you approve
+            here is enforced on-chain, and nothing above it can be paid.
           </p>
         </div>
       </Modal>

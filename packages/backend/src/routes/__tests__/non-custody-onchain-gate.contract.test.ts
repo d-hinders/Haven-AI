@@ -321,12 +321,27 @@ type PaymentPathImports = {
  *    guard can see that; the spies cannot either.
  * 4. **`eval` / `new Function` string indirection.** Rule (5) below catches a
  *    computed `import()`, but not a module name assembled and eval'd.
+ * 5. **A directory-index specifier.** `bannedModuleRefs()` normalizes an
+ *    extension and a query/hash suffix, not a trailing `/index` — so
+ *    `…/allowance-module/index.js` would slip rule (3)/(4). Not currently
+ *    expressible: every banned module is a FILE, so that path resolves to
+ *    nothing — but if one is ever re-created as a directory, this line is
+ *    the reminder that the normalization must learn `/index` first.
  */
 function paymentPathImports(): PaymentPathImports {
-  const src = readFileSync(
-    fileURLToPath(new URL('../payments.ts', import.meta.url)),
-    'utf8',
+  return parseImportFacts(
+    readFileSync(fileURLToPath(new URL('../payments.ts', import.meta.url)), 'utf8'),
   )
+}
+
+/**
+ * The parser itself, taking source text so the extractor-control test below
+ * can prove EVERY fact bucket is populatable from a fixture. Without that,
+ * rules (2) and (5) rest on buckets no real input has ever filled — the same
+ * "guard that cannot fail" defect this file exists to prevent, relocated into
+ * its own instrument.
+ */
+function parseImportFacts(src: string): PaymentPathImports {
   const sourceFile = ts.createSourceFile(
     'payments.ts',
     src,
@@ -427,6 +442,46 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
   )
 
   // ── STRUCTURAL: the arithmetic is not merely unused, it is UNREACHABLE ──
+
+  it('RED LINE #4 — extractor control (#2049): every fact bucket the five rules read is populatable from a fixture', () => {
+    // Rules (2) and (5) below read `reexports` and `unresolvableDynamicImports`
+    // — buckets the REAL `payments.ts` never fills, so the in-place positive
+    // control cannot prove them. Without this fixture, a refactor that silently
+    // stopped collecting either bucket would leave both rules green forever:
+    // the exact "guard that cannot fail" defect this suite exists to prevent,
+    // relocated into its own instrument (raised by haven-reviewer on #2049).
+    const facts = parseImportFacts([
+      `import def from './a.js'`,
+      `import * as ns from "./b.js"`, // double quotes, deliberately
+      `import { orig as alias } from './c.js'`,
+      `import './side-effect.js'`,
+      `export { reexported } from './d.js'`,
+      `export * from './e.js'`,
+      `const lit = await import('./f.js?bust=1')`,
+      `const computed = await import('./g/' + lit)`,
+      `// commented('./not-code.js') never lands in codeStringLiterals`,
+    ].join('\n'))
+
+    expect(facts.bindings.has('def')).toBe(true)
+    expect(facts.bindings.has('ns')).toBe(true)
+    expect(facts.bindings.has('orig')).toBe(true)
+    expect(facts.bindings.has('alias')).toBe(true)
+    expect(facts.reexports.has('reexported')).toBe(true) // rule (2)'s bucket
+    expect(facts.staticModuleRefs).toEqual(
+      new Set(['./a.js', './b.js', './c.js', './side-effect.js', './d.js', './e.js']),
+    )
+    expect(facts.codeStringLiterals.has('./f.js?bust=1')).toBe(true)
+    expect(facts.codeStringLiterals.has('./not-code.js')).toBe(false) // comments are not nodes
+    expect(facts.unresolvableDynamicImports).toBe(1) // rule (5)'s bucket
+
+    // And the normalization the module rules share: extension-, prefix-, and
+    // query/hash-agnostic, on the module list the real rules use.
+    expect(bannedModuleRefs(['../rails/allowance-module.js?bust=1'])).toEqual([
+      '../rails/allowance-module.js?bust=1',
+    ])
+    expect(bannedModuleRefs(['../rails/allowance-module'])).toEqual(['../rails/allowance-module'])
+    expect(bannedModuleRefs(['./unrelated.js', '../modules/mpp/index.js'])).toEqual([])
+  })
 
   it('RED LINE #4 (structural, #1987/#2049): the payment path imports NO off-chain coverage arithmetic, in ANY import shape', () => {
     const imports = paymentPathImports()

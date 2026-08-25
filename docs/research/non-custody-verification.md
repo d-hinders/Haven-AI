@@ -178,13 +178,17 @@ forwards a rejection verbatim with nothing written.
 > any runtime `import()`/`require()`, and no computed dynamic specifier on this
 > route at all. Each of the nine shapes was mutation-proven to redden **its own
 > named line** — ten in all, confirmed landed by diff before each colour was read; an
-> unrelated edit on the payment path SURVIVED, 6/6 green. Parsing keeps the
+> unrelated edit on the payment path SURVIVED, 6/6 green. The instrument is
+> proven too: the parser is split from the file read and a fixture control
+> exercises every fact bucket — including the two (`reexports`, computed
+> `import()`) the real route never fills — with each bucket's collection
+> mutation-proven able to redden that control. Parsing keeps the
 > property the regex existed for: comments are not AST nodes, so prose naming a
 > retired symbol still cannot make it red. **Still not seen, and named in the
 > assertion's own comment:** transitive reach through an allowed module (the
 > `modules/mpp/allowances.ts` path above — the retained spies carry a
 > transitive *call*), other payment surfaces, arithmetic re-implemented inline
-> with no import at all, and `eval`/`new Function` indirection. See
+> with no import at all, `eval`/`new Function` indirection, and a directory-index specifier (not currently expressible — every banned module is a file). See
 > [`casp-changelog/2026-08-25-2049.md`](../regulatory/casp-changelog/2026-08-25-2049.md).
 
 > ✅ **#2004 — the enforcer half is now proven too, and Row 5 is no longer

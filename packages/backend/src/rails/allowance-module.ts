@@ -20,13 +20,15 @@
  * not belong in a money-path deletion slice. It is residue for #1993 once the
  * remaining read consumers go with #1989/#1992.
  *
- * The four remaining CONTRACT reads are live on purpose, not oversight:
- * `getTokenAllowance`, `getLatestBlockTimeSec`, `computeEffectiveAllowance`
- * and `getTokensForDelegate` back two surfaces #1986 deliberately left open —
- * `GET /machine-payments/allowances` (the epic's "accounts and history stay
- * READABLE" boundary; a report of spend authority, which grants and exercises
- * none) and `routes/agent-connection-setups.ts`'s legacy wallet-approval
- * authority check. Both are reads. Neither can spend.
+ * The two remaining CONTRACT reads are live on purpose, not oversight:
+ * `getTokenAllowance` and `getTokensForDelegate` back the one surface still
+ * standing — `routes/agent-connection-setups.ts`'s legacy wallet-approval
+ * authority check. Reads only; neither can spend. #2020 deleted the other
+ * pair (`getLatestBlockTimeSec`, `computeEffectiveAllowance`) with their last
+ * consumer: `GET /machine-payments/allowances` now answers 410 on this rail
+ * (the recorded owner reversal of #1986's left-readable decision), so the
+ * off-chain reset-arithmetic mirror — and the LP-1 differential loop that
+ * guarded it — retired together.
  *
  * All functions accept a chainId to select the correct RPC and contract addresses.
  */
@@ -62,11 +64,6 @@ export interface AllowanceInfo {
   nonce: number
 }
 
-export interface EffectiveAllowance {
-  remaining: bigint
-  effectiveSpent: bigint
-  isResetPending: boolean
-}
 
 // ── Provider / Relayer Setup — DELEGATED, deliberately (#1533) ────
 //
@@ -149,23 +146,6 @@ export async function getTokenBalance(
 }
 
 /**
- * Read the latest block timestamp (seconds) for a chain.
- *
- * This is the clock source for allowance reset decisions: it mirrors the
- * `block.timestamp` the AllowanceModule will see when it applies its reset
- * branch, unlike the relayer's wall clock (`Date.now()`) which can drift from
- * chain time and flip the routing decision near a reset boundary.
- */
-export async function getLatestBlockTimeSec(chainId: number): Promise<number> {
-  const provider = getProvider(chainId)
-  const block = await provider.getBlock('latest')
-  if (!block) {
-    throw new Error('Failed to read latest block for allowance reset timing')
-  }
-  return Number(block.timestamp)
-}
-
-/**
  * Read every token slot configured for a delegate on a Safe.
  */
 export async function getTokensForDelegate(
@@ -176,35 +156,4 @@ export async function getTokensForDelegate(
   const contract = getContract(chainId)
   const result: string[] = await contract.getTokens(safe, delegate)
   return result
-}
-
-/**
- * Compute effective remaining allowance accounting for the AllowanceModule's
- * reset logic.
- *
- * `nowSec` MUST be chain time — a block `timestamp` in seconds, e.g. from
- * `getLatestBlockTimeSec` — NOT the relayer's wall clock. The on-chain reset
- * branch keys off `block.timestamp`; deciding auto-execute-vs-queue against
- * `Date.now()` lets server clock skew flip the decision near a reset boundary
- * (skew ahead → false auto-execute → on-chain revert; skew behind → a valid
- * in-budget payment is needlessly queued).
- */
-export function computeEffectiveAllowance(
-  info: AllowanceInfo,
-  nowSec: number,
-): EffectiveAllowance {
-  if (info.resetTimeMin === 0) {
-    const remaining = info.amount > info.spent ? info.amount - info.spent : 0n
-    return { remaining, effectiveSpent: info.spent, isResetPending: false }
-  }
-
-  const lastResetSec = info.lastResetMin * 60
-  const resetPeriodSec = info.resetTimeMin * 60
-
-  if (nowSec >= lastResetSec + resetPeriodSec) {
-    return { remaining: info.amount, effectiveSpent: 0n, isResetPending: true }
-  }
-
-  const remaining = info.amount > info.spent ? info.amount - info.spent : 0n
-  return { remaining, effectiveSpent: info.spent, isResetPending: false }
 }

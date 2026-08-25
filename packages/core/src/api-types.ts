@@ -57,7 +57,7 @@ export type paths = {
         put?: never;
         /**
          * Create a Haven agent identity and API key.
-         * @description Creates the API identity for an agent. Payment authority still comes from the user-controlled Safe, the agent-held delegate key, and on-chain allowance state.
+         * @description Creates the API identity for an agent — identity and credential only. Payment authority arrives separately as an owner-signed budget delegation, enforced on-chain (#1440/#2020: the per-token allowance mirror is retired; the response’s `allowances` is always empty at creation).
          */
         post: operations["createAgent"];
         delete?: never;
@@ -1628,8 +1628,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Set a per-token allowance on the legacy AllowanceModule rail.
-         * @description Records the allowance Haven will execute against. **The authority itself is the on-chain AllowanceModule grant, not this row** — writing it here does not grant anything the chain has not been told about. `schedule_warning` is always null: session schedules are retired (#834) and the field survives only so existing clients keep parsing. Retiring rail (#1440).
+         * RETIRED (410): per-token allowances died with the Safe rail.
+         * @description Retired with the Safe rail (#1440/#2020). Always answers 410 and writes nothing — spend authority on the delegation rail is a signed budget delegation (`POST /agents/{id}/delegations/prepare` → activate), never a per-token allowance row. The typed operation stays as a tombstone so older clients get a stable, explicit answer rather than a 404.
          */
         post: operations["setAgentAllowance"];
         delete?: never;
@@ -1649,8 +1649,8 @@ export type paths = {
         put?: never;
         post?: never;
         /**
-         * Remove an allowance row for one token.
-         * @description Removes Haven's record. **It does NOT revoke the on-chain grant** — the AllowanceModule allowance survives until the owner changes it on-chain, so deleting this row stops Haven executing against it but is not itself a revocation. Retiring rail (#1440).
+         * RETIRED (410): per-token allowances died with the Safe rail.
+         * @description Retired with the Safe rail (#1440/#2020). Always answers 410 and deletes nothing (a malformed token address still gets its 400). Revoke or change the agent’s budget delegation instead.
          */
         delete: operations["deleteAgentAllowance"];
         options?: never;
@@ -2059,7 +2059,7 @@ export type paths = {
         };
         /**
          * Fetch live spend-authority state for the authenticated agent.
-         * @description Rail-aware (#1135): on the legacy rail this reads the on-chain AllowanceModule per configured token; on the delegation rail the same response shape carries the ACTIVE budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). A retired session-rail account gets 410. Reporting only — enforcement stays on-chain on every rail.
+         * @description Rail-aware (#1135): on the delegation rail the response carries the ACTIVE budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). BOTH retired rails answer 410 — the session rail (#993) and, since #2020 reversed #1986’s left-readable decision, the Safe/AllowanceModule rail too. Reporting only — enforcement stays on-chain.
          */
         get: operations["getMachinePaymentAllowances"];
         put?: never;
@@ -2933,13 +2933,9 @@ export type components = {
             delegate_address: string;
             /** Format: uuid */
             safe_id?: string;
+            /** @description RETIRED (#1440/#2020): per-token allowances died with the Safe rail. A non-empty array is refused with 400 — grant the agent a budget delegation after creation instead. The field survives (empty-only) so older clients sending `allowances: []` keep working. */
             allowances?: {
-                /** @example 0x1111111111111111111111111111111111111111 */
-                token_address: string;
-                token_symbol: string;
-                /** @description Decimal atomic token amount. Leading zeroes are accepted and canonicalized; effective amount must be positive and capped at uint96 for Safe AllowanceModule compatibility. */
-                allowance_amount: string;
-                reset_period_min: number;
+                [key: string]: unknown;
             }[];
         };
         DelegateBalance: {
@@ -11534,49 +11530,14 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "application/json": {
-                    /** @example 0x1111111111111111111111111111111111111111 */
-                    token_address: string;
-                    token_symbol: string;
-                    /** @description Human-denominated amount. */
-                    allowance_amount: string;
-                    /** @description Refill period in minutes; 0 means one-time. */
-                    reset_period_min: number;
+                    [key: string]: unknown;
                 };
             };
         };
         responses: {
-            /** @description The stored allowance. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @description Always null — retained for client compatibility (#834). */
-                        schedule_warning: null;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             /** @description Error response */
             401: {
                 headers: {
@@ -11592,23 +11553,8 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description The agent is revoked, or its Connect setup is still awaiting wallet approval — either way the allowance is refused before anything is written. */
-            409: {
+            /** @description Always. The Safe rail is retired; grant a budget delegation instead. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11636,15 +11582,6 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Row removed. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
             /** @description Error response */
             400: {
                 headers: {
@@ -11675,23 +11612,8 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description The agent is revoked, or its Connect setup is still awaiting wallet approval. */
-            409: {
+            /** @description Always, for a well-formed token address. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13604,7 +13526,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The account is on the retired SESSION rail — no state is read (#993 fail-closed contract). Deliberately NOT extended to the Safe / AllowanceModule rail by #1986: this endpoint REPORTS spend authority rather than exercising any, and the retirement keeps accounts and history readable. The refusal belongs on the spend paths, and that is where it is. */
+            /** @description The account is on a RETIRED rail — session (#993) or Safe/AllowanceModule (#2020, reversing #1986’s left-readable decision on the recorded owner call: the accounts are emptied and unsupported, so no state is read). Fail-closed; nothing is read or written. */
             410: {
                 headers: {
                     [name: string]: unknown;

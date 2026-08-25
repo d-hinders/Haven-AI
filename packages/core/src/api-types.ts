@@ -299,7 +299,7 @@ export type paths = {
         put?: never;
         /**
          * Re-key step 1a: prepare the batched revoke of every live delegation (#1698).
-         * @description Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage with an empty carry.
+         * @description Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage — inheriting an abandoned predecessor’s frozen carry when one qualifies (#1868), otherwise with an empty carry.
          */
         post: operations["prepareRekeyRevocation"];
         delete?: never;
@@ -3770,12 +3770,22 @@ export type components = {
         } | {
             /** @enum {boolean} */
             revoked: true;
+            /** @description Null on the empty walk; the ABANDONED predecessor’s revoke transaction when its carry was inherited. */
             tx_hash?: string | null;
             delegation_hashes?: string[];
             stage: string;
+            /** @description Empty on the plain short-circuit; the inherited frozen measurement when an abandoned predecessor’s carry was adopted (#1868). */
             carry?: {
-                [key: string]: unknown;
+                /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+                delegation_hash: string;
+                remaining_atomic: string;
+                from_chain: boolean;
             }[];
+            /**
+             * Format: uuid
+             * @description Present only when the carry was inherited: the abandoned re-key whose frozen measurement this re-key adopted (#1868).
+             */
+            carry_inherited_from_rekey_id?: string;
             agent_has_no_authority: boolean;
             next_step: string;
         };
@@ -5170,7 +5180,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Not on the delegation rail, a re-key already in flight, a colliding delegate address, or an undispositioned residual balance. */
+            /** @description Not on the delegation rail, a re-key already in flight (the body names its rekey_id, stage and the new_delegate_address it is bound to, #1868), a colliding delegate address, or an undispositioned residual balance. */
             409: {
                 headers: {
                     [name: string]: unknown;

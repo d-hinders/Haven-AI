@@ -106,6 +106,10 @@ settlement schemes:
 | EIP-3009 bridge | `eip712_userop` — the funding UserOp | `haven_settle_mcp_tool` **with** `payment_header` | `x402-hosted-mcp-signer.ts` (#1154) |
 | erc7710 direct | `eip712_delegation` — the settlement child | `haven_settle_mcp_tool` **without** `payment_header` (#1456) | `x402-erc7710-hosted.ts` (#1457) |
 
+Both scenarios run in the `qa-dev` cadence that `qa-freshness` reads for
+promotion gating; they self-skip when `QA_HOSTED_MCP_URL` /
+`QA_DEMO_MERCHANT_URL` are unset, and `.github/workflows/qa-dev.yml` sets both.
+
 The absence of `payment_header` is what selects erc7710: on that scheme the
 signature IS the settlement child, so it goes to `POST /x402/:id/settle` and
 Haven assembles the merchant header — there is no funding leg to relay and no

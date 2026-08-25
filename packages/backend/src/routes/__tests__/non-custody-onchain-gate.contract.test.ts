@@ -130,8 +130,9 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() 
 // #2044: the `allowance-nonce-watermarks` stub that stood here mocked a module
 // #1987 DELETED, so it resolved to nothing and stubbed nothing. Removed rather
 // than left reading as coverage of a path that no longer exists. (The same
-// stale stub survives in five sibling suites — tracked separately, not widened
-// into this diff.)
+// stale stub survives in six sibling suites — `payments`, `machine-payments`,
+// `x402`, `x402-consolidation.characterization`, `payments-session-rail` and
+// `allowance-rail-retired` — tracked as #2048, not widened into this diff.)
 vi.mock('../../db.js', () => ({ default: { query: (...args: unknown[]) => mockQuery(...args) } }))
 vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)

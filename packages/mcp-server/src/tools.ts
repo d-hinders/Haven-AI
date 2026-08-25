@@ -126,6 +126,13 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     signature: z
       .string()
       .regex(/^0x[0-9a-fA-F]+$/, 'signature must be a 0x-prefixed hex string'),
+    // #2041: which scheme this signature belongs to, stated EXPLICITLY rather
+    // than inferred — the same #1360 property the authorize leg has. On
+    // erc7710 there is no funding leg: the signature IS the settlement child,
+    // so it goes to POST /x402/:id/settle and Haven returns the assembled
+    // merchant header. Omitted (or 'eip3009') relays the funding signature
+    // exactly as before, so every existing caller is untouched.
+    settlement_scheme: z.enum(['erc7710', 'eip3009']).optional(),
   },
   haven_pay_mcp_tool: {
     // #1271: the exact MCP endpoint OR a base merchant URL — a non-402 probe
@@ -382,6 +389,9 @@ const SUBMIT_DESCRIPTION = [
   'Pass payment_id (from haven_pay, haven_pay_x402_quote, or a resume tool) and the signature over its',
   'payload_hash. Returns { status, tx_hash }. In decomposed x402 flows, follow with',
   'haven_x402_sign_header on the signer once funding confirms.',
+  'When the quote reported settlement_scheme "erc7710", pass settlement_scheme: "erc7710" here:',
+  'the signature is the settlement child, not a funding authorization, and the response returns',
+  'payment_header for you to retry the merchant with — no funding tx, no header to build locally.',
 ].join(' ')
 
 const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -465,6 +475,9 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'older signer. Over-budget returns status "pending_approval" with payload_hash null.',
   'After signing and haven_submit confirms funding, build the header with haven_x402_sign_header and',
   'retry the merchant YOURSELF — Haven never talks to this merchant and never holds the key.',
+  'When the merchant advertises extra.assetTransferMethod "erc7710" and the account is on the',
+  'delegation rail, this returns settlement_scheme "erc7710" instead: sign, then haven_submit with',
+  'settlement_scheme "erc7710" returns the payment_header directly. No funding leg on that path.',
 ].join(' ')
 
 const RESUME_X402_DESCRIPTION = [
@@ -745,6 +758,41 @@ export function createToolHandlers(
     haven_submit: async (input) =>
       runTool(async () => {
         const args = parse('haven_submit', input)
+        // #2041: the erc7710 branch, for the GENERIC plain-HTTP flow. The MCP
+        // flow's equivalent lives in haven_settle_mcp_tool, which also CALLS
+        // the merchant; a plain-HTTP merchant is retried by the agent itself,
+        // so this surface stops at handing back the header.
+        //
+        // The sequence is inverted relative to 3009, which is why it branches
+        // here rather than inside submitSignatureWithExpiryMapping: there the
+        // signature funds the delegate EOA and a funding transaction has to
+        // confirm; here it is the settlement child and there is no funding
+        // transaction to relay, wait for, or later sweep.
+        if (args.settlement_scheme === 'erc7710') {
+          const paymentHeader = await haven.submitX402Erc7710(args.payment_id, args.signature)
+          return {
+            payment_id: args.payment_id,
+            settlement_scheme: 'erc7710',
+            // 'submitted' is the EXPECTED end state on this scheme, not a
+            // transient one (#1508): the merchant redeems the [child, budget]
+            // chain afterwards, so Haven never broadcasts a transaction of its
+            // own and there is no tx_hash to report.
+            status: 'submitted',
+            tx_hash: null,
+            funding_tx_hash: null,
+            payment_header: paymentHeader,
+            ...buildAgentGuidance({
+              nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
+              safeToContinue: true,
+              reason:
+                'Retry the ORIGINAL merchant request yourself with this payment_header as the ' +
+                'X-PAYMENT header. Do NOT call haven_x402_sign_header: on this scheme Haven ' +
+                'assembled the header, there is nothing to build locally, and there is no funding ' +
+                'transaction to wait for or sweep — the merchant pulls from the treasury directly.',
+              summary: { payment_id: args.payment_id, status: 'submitted' },
+            }),
+          }
+        }
         const result = await submitSignatureWithExpiryMapping(
           haven,
           args.payment_id,
@@ -1590,8 +1638,89 @@ export function createToolHandlers(
               suggestedTool: 'haven_quote_x402',
             })
           }
+          // ── #2041: the #1450 preference rule reaches the GENERIC path ──
+          // #1456 plumbed scheme selection through haven_pay_mcp_tool and
+          // haven_prepare_catalog_purchase and said so in its own scope. This
+          // third entry point — plain-HTTP merchants, where the catalog's real
+          // merchants actually are — was never covered and hard-routed to the
+          // EIP-3009 bridge. That made the merchant TRANSPORT decide the
+          // settlement SCHEME, which are independent concerns, and it did so
+          // invisibly to the agent.
+          //
+          // Both halves of the rule come from #1453's SINGLE selector — the
+          // preference lives in one place and is not re-derived here: the
+          // merchant must advertise extra.assetTransferMethod: 'erc7710' AND
+          // the account must be on the delegation rail.
+          //
+          // A prefetch FAILURE deliberately yields the 3009 path. Guessing
+          // 'delegation' would build a request the backend refuses, and 3009
+          // is this tool's pre-#2041 behaviour anyway. The prefetch doubles as
+          // createX402Intent's delegateAddress hint (#1348), so the 3009 branch
+          // still makes exactly ONE agent round-trip rather than two.
+          const prefetchedAgent = await haven.getAgent().then(
+            (a) => a,
+            () => undefined,
+          )
+          const selection = selectX402SettlementScheme(payReq.accepts, {
+            delegationRail: prefetchedAgent?.executionRail === 'delegation',
+          })
+
+          if (selection?.scheme === 'erc7710') {
+            const prepared = await haven.prepareX402Erc7710(payReq, { delegationRail: true })
+            return {
+              payment_id: prepared.paymentId,
+              status: 'pending_signature',
+              // Same vocabulary haven_pay_mcp_tool already returns (#1456), not
+              // a parallel one — an agent reads one shape across both entry
+              // points.
+              settlement_scheme: 'erc7710',
+              settlement: {
+                scheme: 'erc7710',
+                funding_leg: false,
+                merchant_pay_to: prepared.settlement.merchantPayTo,
+                facilitator_addresses: prepared.settlement.facilitatorAddresses,
+              },
+              amount_atomic: prepared.settlement.amountAtomic,
+              asset: prepared.settlement.asset,
+              network: prepared.settlement.network,
+              resource_url: payReq.resource?.url,
+              // #1275/#1351: the optional-cap nudge applies on both schemes.
+              ...(cap.kind === 'none' ? { cap_warning: CAP_WARNING_TEXT } : {}),
+              ...buildAgentGuidance({
+                nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+                nextTool: 'mcp__haven-signer__haven_sign',
+                nextArguments: { payment_id: prepared.paymentId },
+                safeToContinue: true,
+                reason:
+                  'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer ' +
+                  "fetches the settlement child itself and verifies its caveats against Haven's " +
+                  'signed context (#1455) before signing. Then call haven_submit with ' +
+                  "settlement_scheme: 'erc7710' to receive the merchant payment_header, and retry " +
+                  'the original merchant request yourself with it as X-PAYMENT. Do NOT call ' +
+                  'haven_x402_sign_header: on this scheme Haven assembles the header and there is ' +
+                  'no funding transaction to wait for.',
+                summary: {
+                  payment_id: prepared.paymentId,
+                  status: 'pending_signature',
+                  amount_atomic: prepared.settlement.amountAtomic,
+                  network: prepared.settlement.network,
+                  // The child's own short expiry is the binding window on this
+                  // scheme, not the intent's — no quote-expiry warning applies.
+                  expires_at: undefined,
+                },
+                warnings: quoteWarnings({
+                  capped: cap.kind !== 'none',
+                  expiresAt: undefined,
+                }),
+              }),
+            }
+          }
+
           const intent = await haven.createX402Intent(payReq, {
             idempotencyKey: args.idempotency_key,
+            ...(prefetchedAgent?.delegateAddress
+              ? { delegateAddress: prefetchedAgent.delegateAddress }
+              : {}),
           })
           return {
             ...buildX402SigningContext(intent, args.include_signing_payload === true),

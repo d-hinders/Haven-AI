@@ -4598,3 +4598,266 @@ describe('haven_submit_catalog_entry (#1716)', () => {
     expect(call?.body).toEqual({ resource_url: 'https://merchant.example/mcp' })
   })
 })
+
+/**
+ * #2041 — the #1450 preference rule reaches the GENERIC plain-HTTP entry point.
+ *
+ * #1456 covered `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` and
+ * scoped itself to exactly those two. `haven_quote_x402` → `haven_pay_x402_quote`
+ * — the transport most real merchants are actually on — hard-routed to the
+ * EIP-3009 bridge, so the merchant TRANSPORT was silently deciding the
+ * settlement SCHEME.
+ *
+ * The NEGATIVES carry this suite, the same way they carry the #1456 one: a
+ * selector that always answered "erc7710" would pass a happy-path-only file.
+ * Every positive here is paired with a control on the other branch.
+ */
+describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
+  const FACILITATOR = '0x4444444444444444444444444444444444444444'
+  /** The load-bearing fixture: a plain-HTTP merchant that ADVERTISES erc7710. */
+  const ERC7710_PAYMENT_REQUIRED = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      ...PAYMENT_REQUIRED.accepts,
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR] },
+      },
+    ],
+  }
+  const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+  const LEGACY_AGENT = { ...AGENT_RESPONSE, execution_rail: 'legacy' }
+  const CHILD = {
+    payment_id: 'pay_generic_7710',
+    status: 'pending_signature',
+    sign_data: {
+      hash: '0x' + '11'.repeat(32),
+      signature_scheme: 'eip712_delegation',
+      typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+    },
+  }
+
+  /**
+   * The /x402 fixture is chosen by the EXPECTED scheme, not by the challenge —
+   * a legacy account meeting a 7710-advertising merchant must still get the
+   * 3009 intent back, which is the case a careless helper gets wrong.
+   */
+  async function quotePay(
+    paymentRequired: unknown,
+    agent: Record<string, unknown>,
+    expectErc7710 = false,
+  ) {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: agent },
+      'POST /x402': { status: 201, body: expectErc7710 ? CHILD : X402_INTENT_RESPONSE },
+    })
+    return ok(
+      await handlers().haven_pay_x402_quote({ payment_required: paymentRequired }),
+    ) as { data: Record<string, any> }
+  }
+
+  function authorizeBody() {
+    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    return (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, unknown>
+  }
+
+  it('delegation rail + erc7710 merchant: selects erc7710 and shapes the request for DIRECT settlement', async () => {
+    const res = await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
+
+    expect(res.data.payment_id).toBe('pay_generic_7710')
+    expect(res.data.settlement_scheme).toBe('erc7710')
+    expect(res.data.settlement.scheme).toBe('erc7710')
+    // The defining property of the preferred scheme is this ABSENCE.
+    expect(res.data.settlement.funding_leg).toBe(false)
+    expect(res.data.settlement.merchant_pay_to).toBe(PAYMENT_REQUIRED.accepts[0].payTo)
+    expect(res.data.settlement.facilitator_addresses).toEqual([FACILITATOR])
+
+    const body = authorizeBody()
+    // payTo = the MERCHANT is what selects direct settlement server-side, and
+    // the explicit scheme must AGREE with that shape (#1360).
+    expect(body.payTo).toBe(PAYMENT_REQUIRED.accepts[0].payTo)
+    expect(body.settlementScheme).toBe('erc7710')
+    // No funding target, so no separate merchant field and no funding leg.
+    expect(body).not.toHaveProperty('merchantPayTo')
+    expect(body.facilitatorAddresses).toEqual([FACILITATOR])
+  })
+
+  it('POSITIVE CONTROL — a merchant that does NOT advertise erc7710 still takes the 3009 bridge', async () => {
+    const res = await quotePay(PAYMENT_REQUIRED, DELEGATION_AGENT)
+
+    expect(res.data.settlement_scheme).toBeUndefined()
+    expect(res.data.settlement).toBeUndefined()
+    const body = authorizeBody()
+    // Byte-identical to the pre-#2041 generic path: fund the delegate EOA,
+    // record the real merchant separately, and SAY 'eip3009' out loud (#1360).
+    expect(body.settlementScheme).toBe('eip3009')
+    expect(body.payTo).toBe('0xDelegate')
+    expect(body.merchantPayTo).toBe(PAYMENT_REQUIRED.accepts[0].payTo)
+  })
+
+  it('a LEGACY-rail account never takes the branch, even when the merchant offers it', async () => {
+    const res = await quotePay(ERC7710_PAYMENT_REQUIRED, LEGACY_AGENT)
+
+    expect(res.data.settlement_scheme).toBeUndefined()
+    expect(authorizeBody().settlementScheme).toBe('eip3009')
+  })
+
+  it('an agent record with NO execution_rail is not treated as delegation', async () => {
+    // AGENT_RESPONSE carries no execution_rail at all. Guessing 'delegation'
+    // here would build a request the backend refuses; the pre-#2041 behaviour
+    // of this tool was 3009, and an unknown rail keeps it.
+    const res = await quotePay(ERC7710_PAYMENT_REQUIRED, AGENT_RESPONSE)
+
+    expect(res.data.settlement_scheme).toBeUndefined()
+    expect(authorizeBody().settlementScheme).toBe('eip3009')
+  })
+
+  it('keeps the #1348 round-trip budget on BOTH branches: exactly ONE agent fetch', async () => {
+    await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
+    const onErc7710 = calls.filter((c) =>
+      new URL(c.url).pathname.endsWith('/machine-payments/agent'),
+    ).length
+    calls = []
+    await quotePay(PAYMENT_REQUIRED, DELEGATION_AGENT)
+    const on3009 = calls.filter((c) =>
+      new URL(c.url).pathname.endsWith('/machine-payments/agent'),
+    ).length
+    expect([onErc7710, on3009]).toEqual([1, 1])
+  })
+
+  it('points the agent at the erc7710 continuation, not the 3009 header-building one', async () => {
+    const res = await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
+
+    expect(res.data.next_action).toBe(AgentPaymentNextAction.SignAndSubmitPayment)
+    expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign')
+    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_generic_7710' })
+    // The agent must be told to say the scheme back on submit — the header is
+    // assembled by Haven on this path, never by haven_x402_sign_header.
+    expect(res.data.reason).toContain("settlement_scheme: 'erc7710'")
+    expect(res.data.reason).toContain('Do NOT call haven_x402_sign_header')
+  })
+
+  it('the optional-cap nudge still fires on the erc7710 branch', async () => {
+    const res = await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
+    expect(res.data.cap_warning).toBeTruthy()
+  })
+
+  /**
+   * A recipient-PINNED budget cannot fund the delegate EOA, so 3009-mode is
+   * structurally impossible for it (owner decision 2026-07-15) and the backend
+   * answers 403. Before #2041 that was the ONLY answer a pinned agent could get
+   * from this tool — for EVERY merchant, including one advertising erc7710 —
+   * because the generic path never asked for anything else.
+   */
+  describe('recipient-pinned budgets', () => {
+    const PINNED_403 = {
+      status: 403,
+      body: {
+        error:
+          'Agent has no delegation able to fund EIP-3009 settlement for USDC. ' +
+          '3009-mode needs an open (unpinned) budget delegation — merchant-pinned budgets settle via erc7710 only.',
+      },
+    }
+
+    it('still refuses with the existing 403 at a 3009-only merchant', async () => {
+      stubFetch({
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': PINNED_403,
+      })
+      const payload = await handlers().haven_pay_x402_quote({
+        payment_required: PAYMENT_REQUIRED,
+      })
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.message).toContain('erc7710 only')
+      expect(authorizeBody().settlementScheme).toBe('eip3009')
+    })
+
+    it('reaches the scheme it CAN settle at an erc7710 merchant, instead of that 403', async () => {
+      // The severity correction this issue understated: a pinned agent could
+      // not pay ANY merchant through this tool, not merely pay them
+      // sub-optimally.
+      const res = await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(authorizeBody().settlementScheme).toBe('erc7710')
+    })
+  })
+})
+
+/**
+ * #2041 — haven_submit's erc7710 branch: the generic path's settle leg.
+ *
+ * On 3009 the signature funds the delegate EOA and a funding transaction has
+ * to confirm. Here the signature IS the settlement child: it goes to
+ * POST /x402/:id/settle and Haven hands back the assembled merchant header.
+ */
+describe('haven_submit — erc7710 settle (#2041)', () => {
+  const SIG = '0x' + '44'.repeat(65)
+
+  it('exchanges the signed child for the merchant header, with NO funding relay', async () => {
+    stubFetch({
+      'POST /x402/pay_generic_7710/settle': {
+        status: 200,
+        body: { payment_header: 'HEADER_FROM_HAVEN' },
+      },
+    })
+    const res = ok(
+      await handlers().haven_submit({
+        payment_id: 'pay_generic_7710',
+        signature: SIG,
+        settlement_scheme: 'erc7710',
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.settlement_scheme).toBe('erc7710')
+    expect(res.data.payment_header).toBe('HEADER_FROM_HAVEN')
+    expect(res.data.funding_tx_hash).toBeNull()
+    // erc7710 has no Haven-submitted transaction, so there is no hash to fake.
+    expect(res.data.tx_hash).toBeNull()
+    expect(res.data.next_action).toBe(AgentPaymentNextAction.RetryOriginalX402Request)
+
+    // The signature went to settle, NOT to the funding relay.
+    expect(calls.find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG })
+    expect(calls.find((c) => c.url.includes('/sign'))).toBeUndefined()
+  })
+
+  it('POSITIVE CONTROL — omitting settlement_scheme still relays a FUNDING signature, unchanged', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': {
+        status: 200,
+        body: { status: 'confirmed', tx_hash: '0xfunding_tx' },
+      },
+    })
+    const res = ok(
+      await handlers().haven_submit({ payment_id: 'pay_x402', signature: SIG }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.status).toBe('confirmed')
+    expect(res.data.tx_hash).toBe('0xfunding_tx')
+    // The pre-#2041 shape exactly: no scheme marker, no header.
+    expect(res.data.settlement_scheme).toBeUndefined()
+    expect(res.data.payment_header).toBeUndefined()
+    expect(calls.find((c) => c.url.includes('/settle'))).toBeUndefined()
+    expect(calls.find((c) => c.url.includes('/sign'))).toBeDefined()
+  })
+
+  it("an explicit 'eip3009' behaves identically to omitting it", async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': {
+        status: 200,
+        body: { status: 'confirmed', tx_hash: '0xfunding_tx' },
+      },
+    })
+    const res = ok(
+      await handlers().haven_submit({
+        payment_id: 'pay_x402',
+        signature: SIG,
+        settlement_scheme: 'eip3009',
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.status).toBe('confirmed')
+    expect(res.data.settlement_scheme).toBeUndefined()
+    expect(calls.find((c) => c.url.includes('/settle'))).toBeUndefined()
+  })
+})

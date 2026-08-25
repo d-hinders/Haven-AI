@@ -326,6 +326,11 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
     const { default: AgentPanelFresh } = await import('../AgentPanel')
     render(<AgentPanelFresh />)
     expect(screen.getByText('Unmanaged Delegate')).toBeInTheDocument()
+    // #1980: the panel wires the revoke affordance — /custody's "revoke from
+    // Agents" promise lands on a control, not a copy button.
+    expect(
+      screen.getByRole('button', { name: `Revoke delegate ${NEW_DELEGATE.slice(0, 6)}…${NEW_DELEGATE.slice(-4)}` }),
+    ).toBeInTheDocument()
   })
 
   it('relabels a Haven-set-up delegate as "Finishing agent setup", not unmanaged', async () => {
@@ -360,6 +365,11 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
     expect(screen.getByText('Finishing agent setup')).toBeInTheDocument()
     expect(screen.queryByText('Unmanaged Delegate')).not.toBeInTheDocument()
     expect(screen.queryByText('This delegate was set up outside Haven')).not.toBeInTheDocument()
+    // #1980: mid-setup delegates get no revoke control — the setup flow is
+    // about to adopt this delegate, and a teardown here would fight it.
+    expect(
+      screen.queryByRole('button', { name: `Revoke delegate ${NEW_DELEGATE.slice(0, 6)}…${NEW_DELEGATE.slice(-4)}` }),
+    ).not.toBeInTheDocument()
   })
 
   it('keeps polling /agents after approval until the new agent lands', async () => {

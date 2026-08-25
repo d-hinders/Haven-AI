@@ -179,7 +179,7 @@ function SafeControlCard({ safe, agents }: { safe: UserSafe; agents: Agent[] }) 
         )}
         <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
           Token, limit and reset are <OnChainBadge /> enforced. Recipient is <AdvisoryBadge /> constrained today.{' '}
-          Revoke an agent on-chain from <Link href="/agents" className="text-[var(--v2-brand)] hover:underline">Agents</Link>.
+          Revoke an agent — or an unmanaged delegate — on-chain from <Link href="/agents" className="text-[var(--v2-brand)] hover:underline">Agents</Link>.
         </p>
       </div>
     </Card>

@@ -8,7 +8,7 @@ import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
+import { isUserRejectedError, revokeAgentOnChain, revokeDelegateOnChain } from '@/lib/revoke-agent'
 import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 
 export type AgentBusyAction = 'pause' | 'resume' | 'revoke' | 'archive' | 'restore' | null
@@ -351,6 +351,51 @@ export function useAgentPanelState() {
     }
   }
 
+  /**
+   * On-chain teardown for a delegate Haven does NOT manage (#1980).
+   *
+   * Same Safe transaction as `handleRevoke`'s on-chain leg — the
+   * AllowanceModule keys authority on the delegate address alone, so
+   * `removeDelegate` neither knows nor cares whether Haven has an agent row
+   * for it. What differs is everything around it: there is no credential to
+   * revoke and no agent row to update, so the on-chain teardown IS the whole
+   * action, followed by a refetch that makes the card disappear.
+   *
+   * `busyAgentId` carries the delegate address here — it is an opaque
+   * busy-key, and unmanaged delegates have no agent id to use instead.
+   */
+  async function handleRevokeUnmanaged(delegateAddress: string) {
+    if (!publicClient || !signer || !safeAddress || !safeDetails) {
+      // Unlike handleRevoke's silent return, say WHY nothing happened: this
+      // card's whole reason to exist is telling the user how to stop an
+      // authority they didn't set up through Haven.
+      setToastMessage('Connect a wallet that controls this Haven account to revoke this delegate.')
+      return
+    }
+
+    setBusyAgentId(delegateAddress)
+    setBusyAction('revoke')
+    try {
+      await revokeDelegateOnChain({
+        delegateAddress: delegateAddress as Address,
+        publicClient,
+        signer,
+        safeAddress: safeAddress as Address,
+        safeDetails,
+        chainId,
+      })
+      await refetchOnChain()
+    } catch (err) {
+      if (!isUserRejectedError(err)) {
+        console.error('Revoke failed:', err)
+        setToastMessage(err instanceof Error ? err.message : 'Revoke failed')
+      }
+    } finally {
+      setBusyAgentId(null)
+      setBusyAction(null)
+    }
+  }
+
   async function handlePause(agent: Agent) {
     setBusyAgentId(agent.id)
     setBusyAction('pause')
@@ -478,6 +523,7 @@ export function useAgentPanelState() {
     handlePause,
     handleResume,
     handleRevoke,
+    handleRevokeUnmanaged,
     handleArchive,
     handleRestore,
     // #1402: raw credential revoke (POST /agents/:id/revoke, throws on

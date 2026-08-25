@@ -88,6 +88,20 @@ export interface ExecSafeBody {
 export interface ExecSafeResponse {
   tx_hash: string
   chain_id: number
+  /**
+   * How the relay's own confirmation wait ended (#1754).
+   *
+   * `'confirmed'` — mined and successful, the 201 this route has always
+   * answered. `'pending'` — a 202: the transaction was broadcast, the relay
+   * stopped waiting after 120 s, and it may still confirm. That case used to
+   * be reported as `502 "Safe execution reverted on-chain"`, which invited a
+   * retry of an operation that may already have succeeded.
+   *
+   * Optional because a frontend deployed against an older backend will not
+   * receive it; absence means the same thing `'confirmed'` does, since the
+   * only pre-#1754 non-error response was the mined one.
+   */
+  status?: 'confirmed' | 'pending'
 }
 
 /**

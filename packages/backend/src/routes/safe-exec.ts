@@ -17,6 +17,7 @@ import {
   ensurePasskeySignerDeployed,
   getSafeExecContract,
 } from '../infra/chain/safe-exec-contract.js'
+import { PasskeySignerDeployUnconfirmedError } from '../infra/chain/safe-proxy-deployer.js'
 
 const HEX_RE = /^0x([0-9a-fA-F]{2})*$/
 const DECIMAL_RE = /^\d+$/
@@ -35,6 +36,35 @@ const RELAY_EXEC_GAS_BUFFER = 150_000n
 const RELAY_EXEC_GAS_LIMIT_FALLBACK = 5_000_000n
 // Upper bound to avoid accidentally submitting an unbounded relayer tx.
 const RELAY_EXEC_GAS_LIMIT_MAX = 8_000_000n
+
+/**
+ * How long to wait for the relayed Safe execution to confirm before answering
+ * the caller (#1754).
+ *
+ * Bracketed, not round:
+ *
+ * - **Floor** — one confirmation of a single `execTransaction` on 2 s Base /
+ *   Gnosis blocks is a handful of blocks. 120 s is ~60 blocks of slack, so a
+ *   healthy exec never reaches the deadline and no ordinary caller sees a
+ *   behaviour change.
+ * - **Ceiling** — `STALE_BROADCAST_SECONDS` (180 s,
+ *   `infra/outbound-bump-worker.ts`). This path has NO outbound record, so
+ *   the bump worker is not the hand-off owner here and never was; the
+ *   inequality is kept (and asserted) so the constant is already inside the
+ *   window if this path ever earns a record, not because a hand-off works
+ *   today. Today's hand-off is to the CALLER, who receives the tx hash.
+ *
+ * It matches the 120 s the frontend's DIRECT-signing path already waits
+ * (`packages/frontend/src/lib/safe-tx.ts`) before raising
+ * `SafeTxReceiptTimeoutError`. The relayed and direct legs of the same user
+ * action must not disagree about how long "not yet confirmed" takes.
+ */
+export const SAFE_EXEC_CONFIRM_TIMEOUT_MS = 120_000
+
+/** ethers v6 rejects a timed-out `wait()` with `code: 'TIMEOUT'`. */
+function isWaitTimeout(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === 'TIMEOUT'
+}
 
 interface ExecSafeBody {
   chain_id: number
@@ -340,8 +370,17 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
       )
       type GasReceipt = { gasUsed?: { toString(): string }; gasPrice?: { toString(): string } }
       let execReceipt: GasReceipt | null = null
+      // Bounded (#1754). Before this, `tx.wait()` was called with NO timeout
+      // argument: ethers v6 then sets `timeout = 0` and never creates the
+      // rejection timer, so the wait could not produce a TIMEOUT — it simply
+      // never returned, and whatever error eventually surfaced fell into the
+      // outer catch below and was reported as a revert. Passing the deadline
+      // is what CREATES the timeout case; the branch below is what maps it.
+      let waitError: unknown
       try {
-        execReceipt = (await tx.wait()) as unknown as GasReceipt | null
+        execReceipt = (await tx.wait(1, SAFE_EXEC_CONFIRM_TIMEOUT_MS)) as unknown as GasReceipt | null
+      } catch (err) {
+        waitError = err
       } finally {
         await finishRelayerSpend(spendId, {
           txHash: tx.hash,
@@ -350,9 +389,62 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
         })
       }
 
+      // NO RECEIPT IS NOT A REVERT (#1754). A wait timeout cancels nothing —
+      // the transaction is in the mempool and may still mine — and #690
+      // records that a lagging RPC can hand back a null receipt for a
+      // transaction that confirmed. Telling this user "reverted" is the worst
+      // available answer: on an owner-authority path it reads as "it did not
+      // happen, do it again", and a Safe exec is not free and not idempotent.
+      //
+      // So say the true thing and hand the hash over. The client owns the
+      // reconciliation, because nothing else can: this path has no durable
+      // outbound record, so there is no worker that could adopt the
+      // submission (see the follow-up issue linked from #1754).
+      //
+      // Narrow on purpose: ONLY a TIMEOUT (or a null receipt) takes this
+      // branch. A revert rejects with `CALL_EXCEPTION` and a same-nonce
+      // replacement with `TRANSACTION_REPLACED`; both are rethrown into the
+      // outer catch and still answer 502, exactly as before.
+      //
+      // The `execReceipt == null && waitError == null` half is BELT-AND-BRACES
+      // and is unreachable in ethers 6.16.0 for `confirms = 1`: with a null
+      // receipt the implementation waits rather than returning. It is here for
+      // #690's observation that a lagging RPC can report null for a
+      // transaction that confirmed. Recorded so that a future mutation of it
+      // PASSING is read as "deliberately unreachable", not as dead weight to
+      // delete — and note the direction is conservative either way: it can
+      // only ever turn a confirmed-but-unread transaction into "not confirmed
+      // yet", never into a false revert.
+      if (execReceipt == null && (waitError == null || isWaitTimeout(waitError))) {
+        request.log.warn(
+          {
+            userId: sub,
+            chainId: body.chain_id,
+            safeAddress: body.safe_address,
+            txHash: tx.hash,
+            timeoutMs: SAFE_EXEC_CONFIRM_TIMEOUT_MS,
+          },
+          'Safe execution broadcast but not confirmed within the wait deadline — NOT a revert',
+        )
+        return reply.code(202).send({
+          tx_hash: tx.hash,
+          chain_id: body.chain_id,
+          status: 'pending',
+          error:
+            'Safe execution was submitted but has not confirmed yet. Haven stopped waiting after ' +
+            `${SAFE_EXEC_CONFIRM_TIMEOUT_MS / 1000} seconds — this is not a failure, and the transaction may still ` +
+            'confirm. Check the transaction hash on a block explorer before retrying; ' +
+            'retrying could execute it a second time.',
+        })
+      }
+      if (waitError != null) {
+        throw waitError
+      }
+
       return reply.code(201).send({
         tx_hash: tx.hash,
         chain_id: body.chain_id,
+        status: 'confirmed',
       })
     } catch (error) {
       if (error instanceof RelayerBudgetExceededError) {
@@ -360,6 +452,32 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
       }
       if (isInsufficientFundsError(error)) {
         return reply.code(503).send({ error: 'Relayer is temporarily unfunded; please try again later' })
+      }
+      // #1755: the passkey signer deploy is a PREREQUISITE, so an unconfirmed
+      // one is asymmetric with the case above — the Safe transaction was
+      // never broadcast at all. Say that, rather than either "reverted" (it
+      // did not) or "pending" (there is nothing of the user's in flight).
+      // Matched by type, not by message.
+      if (error instanceof PasskeySignerDeployUnconfirmedError) {
+        request.log.warn(
+          {
+            userId: sub,
+            chainId: body.chain_id,
+            safeAddress: body.safe_address,
+            signerDeployTxHash: error.txHash,
+            timeoutMs: error.timeoutMs,
+          },
+          'Passkey signer deploy broadcast but not confirmed — Safe execution was NOT submitted',
+        )
+        return reply.code(504).send({
+          error:
+            'A one-off passkey signer deployment had to run first and has not confirmed yet. ' +
+            'Your Safe transaction was NOT submitted and nothing has changed on-chain — ' +
+            'try again in a minute.',
+          status: 'signer_deploy_pending',
+          signer_deploy_tx_hash: error.txHash,
+          chain_id: body.chain_id,
+        })
       }
 
       request.log.error(

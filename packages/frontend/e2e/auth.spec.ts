@@ -40,7 +40,12 @@ test.describe('authentication flows', () => {
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
     await expect(page.getByText('$1,250.00')).toBeVisible()
     await expect(page.getByRole('link', { name: /Research agent Connected/ })).toBeVisible()
-    await expect(page.getByRole('link', { name: 'Open approvals' })).toBeVisible()
+    // #1989: the "Open approvals" alert link is DELETED with the Safe rail.
+    // Asserted as an absence rather than dropped, and it is not a vacuous one:
+    // the fixture still serves `actionableApprovals: 1`, which is exactly what
+    // used to render this link. The three assertions above are the positive
+    // control that the dashboard really loaded.
+    await expect(page.getByRole('link', { name: 'Open approvals' })).toHaveCount(0)
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({
       hasOverflow: false,
       contentRegionFound: true,
@@ -58,7 +63,11 @@ test.describe('authentication flows', () => {
 
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
     await expect(page.getByText('Total balance')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
+    // #1989: the dashboard hero's Send button is gone — it opened `SendModal`,
+    // deleted with the Safe rail. `canSend` is now constantly false, so the
+    // affordance is HIDDEN rather than disabled (#1079's pattern). Receive is
+    // the positive control: the hero still renders its action row.
+    await expect(page.getByRole('button', { name: 'Send' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Receive' })).toBeVisible()
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({
       hasOverflow: false,

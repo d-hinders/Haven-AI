@@ -287,6 +287,13 @@ export const FIXTURE_SAFE = {
   is_default: true,
   created_at: '2026-05-01T10:00:00.000Z',
 }
+// #2017 approver-badge fixture addresses. Three owners, one per branch of
+// `classifyApprover`: an enrolled passkey, the user's own wallet, and an
+// address Haven holds no record of.
+export const APPROVER_PASSKEY = '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2'
+export const APPROVER_WALLET = '0x5B1869D9A4C187F2Eaa108F3062412ECf0526B24'
+export const APPROVER_UNKNOWN = '0x9A7f6E2b1c4D8e05F3a2B9c6D1e8F40b3C5a7D91'
+
 export const FIXTURE_USER = {
   id: 'user-fixture',
   name: 'Screenshot Fixture',
@@ -1568,6 +1575,78 @@ export const SCENARIOS = {
       // the same trap the Backup & recovery scenario documents above.
       await card.getByText('Updating on-chain').waitFor({ timeout: 15_000 })
       await card.getByText(/signing key was replaced/).waitFor({ timeout: 15_000 })
+
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'card')
+    },
+  },
+  'approver-type-badges': {
+    description:
+      'Approvers list on a legacy Safe — all three badge states in one PNG: Passkey, Wallet, and the Unknown that #2017 replaced an absence-inferred "Wallet" with',
+    // No route capture can show this. The SHARED fixture's account is
+    // `delegator_hybrid`, so `useSafeDetails` is deliberately passed null
+    // (#1107) and the Approvers section never renders at all. This scenario
+    // serves a LEGACY Safe with three owners chosen so each one lands in a
+    // different branch of `classifyApprover`, which is the whole point: a
+    // capture that could only ever show one badge state cannot evidence a
+    // change about the other two.
+    api(apiPath) {
+      const LEGACY_SAFE = { ...FIXTURE_SAFE, account_type: 'safe' }
+      const user = {
+        ...FIXTURE_USER,
+        wallet_address: APPROVER_WALLET,
+        safes: [LEGACY_SAFE],
+      }
+      if (apiPath === '/auth/me') return user
+      if (apiPath === '/user/safes') return { safes: [LEGACY_SAFE] }
+      // Keyed, not left to the empty fallback: the fallback serves
+      // `passkeys: []`, under which EVERY owner would render Unknown and the
+      // PNG would evidence nothing about the Passkey branch.
+      if (apiPath === '/passkeys') {
+        return {
+          passkeys: [
+            {
+              id: 'passkey-fixture',
+              credential_id: 'approver-badge-credential',
+              signer_address: APPROVER_PASSKEY,
+              chain_id: FIXTURE_SAFE.chain_id,
+              safe_address: FIXTURE_SAFE.safe_address,
+              created_at: '2026-03-03T12:00:00.000Z',
+            },
+          ],
+        }
+      }
+      if (apiPath === `/safe/${FIXTURE_SAFE.safe_address}/details`) {
+        return {
+          address: FIXTURE_SAFE.safe_address,
+          // Order is the render order, and it is deliberate: Passkey (known),
+          // Wallet (the user's own, positively matched), Unknown (an owner
+          // Haven holds no record for — a rotated passkey, one enrolled
+          // outside Haven, or a wallet; the badge no longer guesses which).
+          owners: [APPROVER_PASSKEY, APPROVER_WALLET, APPROVER_UNKNOWN],
+          threshold: 2,
+          nonce: 7,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      const heading = page.getByText('Approvers', { exact: true })
+      await heading.waitFor({ timeout: 15_000 })
+
+      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
+
+      // Wait on the BADGES, not the heading. The section renders as soon as
+      // `details.owners` is non-empty, so waiting on the heading alone would
+      // happily capture a half-settled list. All three are waited for
+      // explicitly, so a capture missing any state fails the run instead of
+      // becoming the evidence.
+      await card.getByText('Passkey', { exact: true }).waitFor({ timeout: 15_000 })
+      await card.getByText('Wallet', { exact: true }).waitFor({ timeout: 15_000 })
+      await card.getByText('Unknown', { exact: true }).waitFor({ timeout: 15_000 })
 
       await card.scrollIntoViewIfNeeded()
       await shoot(card, 'card')

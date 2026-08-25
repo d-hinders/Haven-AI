@@ -89,6 +89,7 @@ import {
 } from '../infra/repositories/delegation-budgets.js'
 import {
   abandonRekey,
+  adoptAbandonedCarry,
   completeRekey,
   findDelegationTerms,
   findInFlightRekey,
@@ -268,10 +269,17 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
         error: 'rekey_already_in_flight',
         rekey_id: existing.id,
         stage: existing.stage,
+        // The key the in-flight re-key is BOUND to (#1868, the #1701 resume
+        // footgun): the caller had to type a candidate address to reach this
+        // 409, and without this field a client resuming after an interruption
+        // completes the re-key against a key the screen never showed.
+        new_delegate_address: existing.new_delegate_address,
         detail:
-          'A re-key is already in progress for this agent. Finish it or abandon it before ' +
-          'starting another — two concurrent re-keys would race to revoke and issue against ' +
-          "each other's meter reading.",
+          'A re-key is already in progress for this agent, bound to the new_delegate_address ' +
+          'in this response. Finish it or abandon it before starting another — two concurrent ' +
+          "re-keys would race to revoke and issue against each other's meter reading. " +
+          'Abandoning after the revoke does not forfeit the budget: a fresh re-key inherits ' +
+          'the abandoned one\'s frozen carry (#1868).',
       })
     }
 
@@ -398,9 +406,44 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       const targets = await listNonRevokedDelegationsForAgent(request.params.id)
       if (targets.length === 0) {
         // Nothing to revoke on-chain — an agent connected but never granted a
-        // budget, or one whose grants were revoked earlier. A normal state,
-        // and the exact population re-key most needs to serve: a lost key
-        // with little history.
+        // budget, one whose grants were revoked earlier, or one whose
+        // PREVIOUS re-key was abandoned after its revoke landed (#1868).
+        //
+        // That last population is why adoption comes first. The abandoned
+        // re-key already retired the delegations on-chain and froze the meter
+        // AFTER doing so (the #1694 ordering); a revoked delegation cannot
+        // spend, so its frozen remainder is still exactly true. Handing it to
+        // this fresh re-key is what makes "abandon, start again with a new
+        // key" restore the agent's authority with the period boundary intact
+        // — before this, the branch below walked to `metered` with an empty
+        // snapshot and the issue step built nothing, leaving recovery to a
+        // manual owner re-grant that could not preserve the period.
+        //
+        // Adoption keys on the owner's explicit abandon (`stage='abandoned'`),
+        // never on elapsed time, and is refused outright when any grant was
+        // made since the abandoned revoke — both proven in the repository
+        // suite. On refusal we fall through to the empty walk: fail closed.
+        const adopted = await adoptAbandonedCarry(rekey.id, request.params.id)
+        if (adopted) {
+          const snapshot = adopted.carry_snapshot ?? []
+          return {
+            revoked: true,
+            // The revoke that retired this agent's authority was the
+            // predecessor's — report ITS tx hash, because "nothing was
+            // revoked" is not what happened to this agent.
+            tx_hash: adopted.revoke_tx_hash,
+            delegation_hashes: snapshot.map((s) => s.delegation_hash),
+            stage: adopted.stage,
+            carry: snapshot.map((s) => ({
+              delegation_hash: s.delegation_hash,
+              remaining_atomic: s.remaining_atomic,
+              from_chain: s.from_chain,
+            })),
+            carry_inherited_from_rekey_id: adopted.inherited_from_rekey_id,
+            agent_has_no_authority: true,
+            next_step: `POST /agents/${request.params.id}/rekey/${rekey.id}/issue`,
+          }
+        }
         //
         // This branch must walk BOTH stages, not just `revoked`. Found by the
         // #1698 review: stopping at `revoked` wedged the re-key permanently,

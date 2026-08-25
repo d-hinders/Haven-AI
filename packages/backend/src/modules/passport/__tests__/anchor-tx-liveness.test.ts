@@ -42,11 +42,16 @@ vi.mock('../../../infra/relayer.js', async () => {
 })
 
 const findOutboundTxByHash = vi.fn()
+const findOutboundTxById = vi.fn()
 vi.mock('../../../infra/repositories/outbound-txs.js', async () => {
   const actual = await vi.importActual<
     typeof import('../../../infra/repositories/outbound-txs.js')
   >('../../../infra/repositories/outbound-txs.js')
-  return { ...actual, findOutboundTxByHash: (...a: unknown[]) => findOutboundTxByHash(...a) }
+  return {
+    ...actual,
+    findOutboundTxByHash: (...a: unknown[]) => findOutboundTxByHash(...a),
+    findOutboundTxById: (...a: unknown[]) => findOutboundTxById(...a),
+  }
 })
 
 const { classifyAnchorTxLiveness, SETTLED_CHAIN_READ_DEPTH_BLOCKS } = await import(
@@ -54,8 +59,9 @@ const { classifyAnchorTxLiveness, SETTLED_CHAIN_READ_DEPTH_BLOCKS } = await impo
 )
 
 /** A durable record stamped at broadcast: nonce 7, still open. */
+const ATTEST_DATA = '0x' + 'ab'.repeat(80)
 function record(overrides: Record<string, unknown> = {}) {
-  return { chain_id: 84532, nonce: '7', status: 'broadcast', tx_hash: TX, ...overrides }
+  return { chain_id: 84532, nonce: '7', status: 'broadcast', tx_hash: TX, data: ATTEST_DATA, ...overrides }
 }
 
 /**
@@ -81,6 +87,7 @@ beforeEach(() => {
   getBlockNumber.mockReset().mockResolvedValue(HEAD)
   getBlock.mockReset().mockResolvedValue({ number: FINALIZED })
   findOutboundTxByHash.mockReset().mockResolvedValue(record())
+  findOutboundTxById.mockReset().mockResolvedValue(null)
 })
 
 describe('what earns a `dead` verdict (#1745)', () => {
@@ -207,9 +214,20 @@ describe('everything that withholds it', () => {
     expect(await classifyAnchorTxLiveness(84532, TX)).toBe('live')
   })
 
-  it('a REPLACED record is live — the replacement carries this payload at the same nonce', async () => {
-    findOutboundTxByHash.mockResolvedValue(record({ status: 'replaced' }))
+  it('a REPLACED record whose replacement carries the SAME payload is live — a fee bump moved this attest forward at the same nonce', async () => {
+    findOutboundTxByHash.mockResolvedValue(record({ status: 'replaced', replaced_by: 'bump-row' }))
+    findOutboundTxById.mockResolvedValue(record({ id: 'bump-row', data: ATTEST_DATA }))
     getTransactionCount.mockResolvedValue(8)
+    expect(await classifyAnchorTxLiveness(84532, TX)).toBe('live')
+    expect(findOutboundTxById).toHaveBeenCalledWith('bump-row')
+  })
+
+  it('a REPLACED record with an unwalkable link is live — no evidence what the replacement was, and guessing death is forbidden', async () => {
+    findOutboundTxByHash.mockResolvedValue(record({ status: 'replaced', replaced_by: null }))
+    getTransactionCount.mockResolvedValue(8)
+    expect(await classifyAnchorTxLiveness(84532, TX)).toBe('live')
+    findOutboundTxByHash.mockResolvedValue(record({ status: 'replaced', replaced_by: 'gone' }))
+    findOutboundTxById.mockResolvedValue(null)
     expect(await classifyAnchorTxLiveness(84532, TX)).toBe('live')
   })
 
@@ -227,5 +245,49 @@ describe('everything that withholds it', () => {
   it('the record is read CHAIN-SCOPED — a hash is only unique within a chain', async () => {
     await classifyAnchorTxLiveness(84532, TX)
     expect(findOutboundTxByHash).toHaveBeenCalledWith(84532, TX)
+  })
+})
+
+/**
+ * #1743 Option A — how the probe arbitrates the two race outcomes after an
+ * operator lane cancel. The cancel replaces the attest row with a 0-value
+ * self-send that does NOT carry the payload, so `replaced` alone must not
+ * read as "carried forward": the probe walks the link, sees the differing
+ * calldata, and falls back to the one evidence it trusts — the nonce.
+ */
+describe('operator lane cancel (#1743): a replacement that does NOT carry the payload', () => {
+  const cancelReplaced = () =>
+    findOutboundTxByHash.mockResolvedValue(record({ status: 'replaced', replaced_by: 'cancel-row' }))
+  const cancelRow = () =>
+    findOutboundTxById.mockResolvedValue(record({ id: 'cancel-row', data: '0x' }))
+
+  it('CANCEL WINS: nonce burned by the cancel, receipt absent — dead, and the sweep may re-mint exactly once', async () => {
+    cancelReplaced()
+    cancelRow()
+    getTransactionCount.mockResolvedValue(8) // slot 7 consumed (by the cancel)
+    expect(await classifyAnchorTxLiveness(84532, TX)).toBe('dead')
+  })
+
+  it('ATTEST LANDS LATE: the nonce reads consumed but OUR receipt exists — live; #1043 closes on the original anchor, no re-mint', async () => {
+    cancelReplaced()
+    cancelRow()
+    getTransactionCount.mockResolvedValue(8)
+    getTransactionReceipt.mockResolvedValue({ status: 1 })
+    expect(await classifyAnchorTxLiveness(84532, TX)).toBe('live')
+  })
+
+  it('NEITHER MINED YET: cancel broadcast but slot 7 still open — live, the fail-closed hold continues', async () => {
+    cancelReplaced()
+    cancelRow()
+    getTransactionCount.mockResolvedValue(7)
+    expect(await classifyAnchorTxLiveness(84532, TX)).toBe('live')
+  })
+
+  it('the mempool still knowing the attest settles it as live before any link walk', async () => {
+    cancelReplaced()
+    cancelRow()
+    getTransaction.mockResolvedValue({ hash: TX })
+    expect(await classifyAnchorTxLiveness(84532, TX)).toBe('live')
+    expect(findOutboundTxById).not.toHaveBeenCalled()
   })
 })

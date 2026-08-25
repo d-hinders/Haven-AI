@@ -94,10 +94,14 @@ The GitHub workflow performs the SDK build automatically.
 
 ## Seed — provision the QA identity (#574)
 
-`npm run seed -w packages/qa-agent` idempotently creates, on **Base Sepolia**: a
-QA user → a **Hybrid DeleGator** account (`POST /accounts/hybrid`, counterfactual
-and zero transactions) → a `QA Agent` → an owner-signed **budget delegation**. It
-then prints the `QA_*` block to set as secrets.
+`npm run seed -w packages/qa-agent` idempotently provisions, on **Base Sepolia**:
+a QA user → a **Hybrid DeleGator** account (`POST /accounts/hybrid`,
+counterfactual and zero transactions) → a `QA Agent` → an owner-signed **budget
+delegation**. It reuses only an active or `pending_approval` agent with the
+configured delegate address. If that address belongs to a paused, revoked, or
+unknown-status agent, it stops before creating or reusing an agent or granting a
+budget delegation; rotate `SEED_DELEGATE_ADDRESS` or deliberately restore the
+named agent before retrying. It then prints the `QA_*` block to set as secrets.
 
 **It seeds no Safe (#2007, epic #1440).** `POST /user/safes` has answered HTTP
 410 since #1984 and an `allowance_module` account cannot pay since #1986, so the

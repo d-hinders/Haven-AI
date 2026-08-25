@@ -323,6 +323,30 @@ Preferred pattern:
 - Safe-originated funding must still be constrained by Safe modules, Safe guards, user-approved Safe transactions, or equivalent on-chain controls. A delegate-to-merchant x402 transfer must be externally signed and bound to the exact authenticated payment context rather than authorised by Haven policy alone.
 - If a policy cannot be enforced on-chain, treat it as advisory and require manual user approval for execution.
 
+**Executable proof (#2004).** This red line is asserted on every pull request by two
+complementary suites, and the split between them is the point — neither is sufficient
+alone:
+
+| suite | what it proves |
+|---|---|
+| `packages/backend/src/routes/__tests__/non-custody-onchain-gate.contract.test.ts` | Haven performs **no** off-chain spend arithmetic on the delegation rail — the legacy coverage functions are not even *bound* into `routes/payments.ts` — and a refusal from the chain is forwarded verbatim with nothing written |
+| `packages/backend/src/routes/__tests__/non-custody-onchain-enforcer.contract.test.ts` | the **deployed** caveat enforcers at Haven's pinned addresses actually refuse: an over-budget redemption, a wrong-recipient redemption against a pinned delegation, and an expired delegation each revert on-chain on terms produced by Haven's own caveat compiler, each paired with an in-policy positive control on the same enforcer |
+
+The second suite is testnet-only and key-less: it `eth_call`s each enforcer's
+`beforeHook`, so nothing is signed, funded or broadcast, and it refuses any chain id
+but Base Sepolia. Until #2004 it did not exist, and the first suite's own header said
+so — the delegation rail moved the final gate into Solidity, which removed the
+arithmetic a unit test could check without replacing it with anything a unit test
+could reach.
+
+**Still not proven in-repo, and stated rather than implied:** that the
+DelegationManager executes the full caveat stack, in order, during a real
+`redeemDelegations`. That needs a funded testnet delegator account and a signature —
+operator-held keys, outside an automated suite. The evidence for it today is #1450's
+mainnet canary, which settled real value through this exact stack, and the #820 Base
+Sepolia matrix. Treat "we rely on audited MetaMask contracts, exercised live" as the
+standing claim for that remainder, not "we prove it on every PR".
+
 ### 5. Discretionary Transfer Authority
 
 Never implement logic where Haven decides:

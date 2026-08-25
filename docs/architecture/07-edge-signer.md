@@ -28,7 +28,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-24" # #1987: §"AllowanceModule-hash tools" claimed the legacy signing surface's backend code "is still present (deleted by #1987/#1988)" — #1987 has landed and it is deleted, so the claim is corrected to past tense. The signer-side tool descriptions and the delegation-rail EIP-712 path are unchanged and were re-read. Prior: #1986: the scope note "the edge-signer surface serves the legacy AllowanceModule rail" is now a statement about an unreachable surface — the backend refuses before producing a hash to sign. Corrected; the signing-scheme dispatch and key-confinement claims re-read and unchanged. Prior: #1882: front-matter only — the `last-verified` chain had DROPPED `#1309` and `#1263`. This is the #1843 shape: the note at `356e11ec` (PR #1634, #1615, 2026-08-20) DID chain, but SUMMARISED each prior entry down to a clause, and both refs lived inside the prose of the notes it compressed — `#1309` inside #1547's, `#1263` inside #1355's. The two originals are restored verbatim from `356e11ec^` at the chain tail rather than reconstructed as standalone entries, because at the moment of this drop neither ref was one. (Both HAD been standalone entries earlier — `#1309` at `a746535d` and `#1263` at `9a6198db`, 2026-08-10/11 — each replaced away in its own pre-convention drop, before this doc's window; reviewer finding, corrected here rather than left as an absolute claim.) Nothing in the body was re-verified in this pass. #1615: re-verified after internal SDK transport/state/mapping extraction; signer, authority, and hosted/local flow claims unchanged. Prior: #1547 hosted-tool prose correction; #1355 payment_id-only signing; #1352 Node floor and agent-prompt refresh Prior: #1547: the hosted tool prose stops asking agents to compare against the signer's initialize handshake (unperformable in most harnesses) — the documented default is now the structured signing-time refusal this doc already describes (#1309); the handshake surface itself is unchanged and stays advertised. Prior: #1355: the #1263 fetch also carries payment_required (persisted at authorize); haven_sign_x402 is { payment_id }-only with verbatim fallback for older backends; verification unchanged.
+last-verified: "2026-08-25" # #2041: the "Decomposed x402 flow" block described only the EIP-3009 bridge; it is now labelled as such and paired with the erc7710 block (`haven_sign` signs the settlement CHILD, `haven_submit { settlement_scheme: "erc7710" }` returns the header, no `haven_x402_sign_header` step). Corrected a custody-invariants claim the diff makes definitively false as a blanket statement: "Haven never builds the payment header on the hosted server" -- true on the bridge, false on erc7710, where Haven assembles the MetaMask payload server-side (`assembleSettlementPayload`, reached by `haven_settle_mcp_tool` since #1456 and by `haven_submit` since #2041). Recorded as a pre-existing gap this change widens onto a second tool, with the argument for why custody is unaffected stated rather than implied: an assembled header is a single-use, amount/merchant/nonce-bound authorization derived from a locally produced signature, not spend authority. The key-never-crosses invariant and the sweep/secret-handling sections re-read against the diff: unchanged. Prior: #1987: §"AllowanceModule-hash tools" claimed the legacy signing surface's backend code "is still present (deleted by #1987/#1988)" — #1987 has landed and it is deleted, so the claim is corrected to past tense. The signer-side tool descriptions and the delegation-rail EIP-712 path are unchanged and were re-read. Prior: #1986: the scope note "the edge-signer surface serves the legacy AllowanceModule rail" is now a statement about an unreachable surface — the backend refuses before producing a hash to sign. Corrected; the signing-scheme dispatch and key-confinement claims re-read and unchanged. Prior: #1882: front-matter only — the `last-verified` chain had DROPPED `#1309` and `#1263`. This is the #1843 shape: the note at `356e11ec` (PR #1634, #1615, 2026-08-20) DID chain, but SUMMARISED each prior entry down to a clause, and both refs lived inside the prose of the notes it compressed — `#1309` inside #1547's, `#1263` inside #1355's. The two originals are restored verbatim from `356e11ec^` at the chain tail rather than reconstructed as standalone entries, because at the moment of this drop neither ref was one. (Both HAD been standalone entries earlier — `#1309` at `a746535d` and `#1263` at `9a6198db`, 2026-08-10/11 — each replaced away in its own pre-convention drop, before this doc's window; reviewer finding, corrected here rather than left as an absolute claim.) Nothing in the body was re-verified in this pass. #1615: re-verified after internal SDK transport/state/mapping extraction; signer, authority, and hosted/local flow claims unchanged. Prior: #1547 hosted-tool prose correction; #1355 payment_id-only signing; #1352 Node floor and agent-prompt refresh Prior: #1547: the hosted tool prose stops asking agents to compare against the signer's initialize handshake (unperformable in most harnesses) — the documented default is now the structured signing-time refusal this doc already describes (#1309); the handshake surface itself is unchanged and stays advertised. Prior: #1355: the #1263 fetch also carries payment_required (persisted at authorize); haven_sign_x402 is { payment_id }-only with verbatim fallback for older backends; verification unchanged.
 ---
 
 # Haven — Edge Signer
@@ -243,7 +243,7 @@ local:   haven_sign_x402        -> funding signature + merchant-bound X-PAYMENT
 hosted:  haven_settle_mcp_tool  -> relay funding, confirm, call merchant tool
 ```
 
-**Decomposed x402 flow:**
+**Decomposed x402 flow — EIP-3009 bridge:**
 
 ```
 hosted:  haven_pay_x402_quote     -> { payment_id, payload_hash, x402.expected }
@@ -252,6 +252,23 @@ hosted:  haven_submit             -> fund Safe -> delegate EOA
 local:   haven_x402_sign_header   -> EIP-3009 X-PAYMENT if binding matches
 agent:   retry merchant with X-PAYMENT
 ```
+
+**Decomposed x402 flow — erc7710 direct settlement**
+([#2041](https://github.com/d-hinders/Haven-AI/issues/2041)), taken when the
+account is on the delegation rail and the merchant advertises
+`extra.assetTransferMethod: "erc7710"`:
+
+```
+hosted:  haven_pay_x402_quote     -> settlement child + settlement_scheme: erc7710
+local:   haven_sign { payment_id } -> child signature (caveats verified locally)
+hosted:  haven_submit { settlement_scheme: "erc7710" } -> payment_header
+agent:   retry merchant with X-PAYMENT
+```
+
+The signer's step is the same tool, but what it signs is not: on the bridge the
+signature funds the delegate EOA, here it IS the settlement child. There is no
+funding transaction and therefore no `haven_x402_sign_header` step — see the
+custody note below on who assembles the header on this scheme.
 
 `haven_sign_x402` creates the short-lived merchant authorization before funding
 confirms, so call `haven_settle_mcp_tool` promptly. If the payment window
@@ -278,10 +295,22 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
   `{ payment_id, signature }` via
   `haven_submit`; paid MCP-tool completion can receive a signed, merchant-bound
   `payment_header` with the funding `payment_id` for settlement/evidence.
+  On the **erc7710** scheme the relayed artifact is not a funding signature at
+  all — it is the settlement child — and the header travels the other way, from
+  Haven back to the agent. Still only a signature crosses the boundary, and
+  still never the key.
 - The merchant receives the standard signed EIP-3009 payment header, never the
   delegate key. Hosted paid-MCP completion also sends the requested MCP call and
   required session/handshake traffic. Haven never builds the payment header on
-  the hosted server.
+  the hosted server **on the EIP-3009 bridge** — that blanket claim does not
+  hold for erc7710, where the signed artifact is the settlement child and Haven
+  assembles the MetaMask `X-PAYMENT` payload server-side from it
+  (`assembleSettlementPayload`, reached by `haven_settle_mcp_tool` since #1456
+  and by `haven_submit` on the generic path since
+  [#2041](https://github.com/d-hinders/Haven-AI/issues/2041)). The custody
+  argument is unaffected: an assembled header is a single-use,
+  amount/merchant/nonce-bound authorization derived from a signature the local
+  signer produced, not spend authority Haven holds.
 - The edge signer refuses to build the merchant header unless the caller first
   signed the funding hash with a Haven-authenticated `x402.expected`; the
   resulting binding is process-local and is consumed after one successful

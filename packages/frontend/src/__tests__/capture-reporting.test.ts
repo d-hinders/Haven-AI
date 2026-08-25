@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
 import { describeDeletedCapture, formatDeletionReport } from '../../scripts/screenshot.mjs'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs
-import { ScrollShellError } from '../../scripts/full-page-capture.mjs'
+import { ContentNotSettledError, ScrollShellError } from '../../scripts/full-page-capture.mjs'
 
 const at = { route: '/investor-briefing', viewport: 'desktop', file: '.screenshots/x-desktop.png' }
 
@@ -91,6 +91,25 @@ describe('describeDeletedCapture', () => {
     expect(record.cause, 'a timeout is a machine-load symptom, not an empty PNG').toBe(
       'capture-timeout',
     )
+  })
+
+  it('gives a still-loading capture a cause of its own (#2036)', () => {
+    // The cause that most needs its own name: a `still-loading` capture is the
+    // only one in this list whose PNG comes out looking entirely healthy, so
+    // folding it into 'unknown' would leave the reader with a well-formed image
+    // and a shrug. The error carries `captureCause` rather than `shellCause`
+    // because the shell was fine — that is precisely the point.
+    const record = describeDeletedCapture(
+      new ContentNotSettledError('the shell mounted but "#main-content" never filled with content', {
+        waitedMs: 30_000,
+      }),
+      { ...at, route: '/dashboard', written: false },
+    )
+
+    expect(record.cause).toBe('still-loading')
+    expect(record.disposition, 'the throw precedes page.screenshot').toBe('never written')
+    expect(record.waited_ms).toBe(30_000)
+    expect(record.text).toMatch(/never filled with content/)
   })
 
   it('records an unrecognised failure as unknown instead of guessing', () => {

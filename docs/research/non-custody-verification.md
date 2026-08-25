@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/rails/execution-rail.ts
   - packages/backend/src/__tests__/non-custody.invariants.test.ts
   - packages/frontend/src/lib/revoke-agent.ts
-last-verified: "2026-08-24" # #1988: the "control surface already exposed" bullet cited `/user/safes/:id/approvers` in the present tense; that route is deleted with the Safe rail, so the example is repointed. ⚠️ My first repoint invented `GET /user/safes/:safeId`, which does not exist — `routes/user-safes.ts` registers `GET /` and nothing per-id — and `haven-reviewer` caught it: a doc pass fixing a false claim introduced a different one, which is the failure mode the pass exists to prevent. Corrected to the routes that actually serve, and the owner list is now attributed to `/safe/:addr/details`, which is where the approver route read it from anyway. Scope: that bullet. Prior: #1987: the Row 5 addendum named `decideCoverage` as a live symbol the delegation branch merely "never calls" — it is now DELETED, and the spy-based proof it describes went vacuous by construction, so the addendum records the replacement structural assertion and its positive control. Also #1987: re-read after the AllowanceModule EXECUTION half was deleted — the `allowance-module.ts:232` mechanism claim and the References line both named code that no longer exists; both corrected in place with the live delegation-rail equivalent named. The invariants table itself was NOT re-verified in this pass and is left as #1986 wrote it. Prior: #1986: the invariants table rows 4 and 5 re-read against the AllowanceModule retirement — row 5's mechanism ("queued for approval") is legacy-rail-only and gone, and Red Line #4 is now only PARTIALLY proven on the live rail; addendum added naming the gap (#2004, Depends-on into #1991). Rows 1-3 and 6+ unaffected. Part 2/Phasing left alone — its "design proposal" framing is pre-existing drift, not this diff's. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-25" # #2044: the #1987 addendum said the `not.toHaveBeenCalled()` spies were true by construction; measured, that holds for the three names #1987 DELETED (unfalsifiable — removed) and not for the three the module still exports, which are reachable through the route's transitive import graph and are now mutation-proven red by name. Addendum added. Scope: the Row 5 spy paragraph only; the invariants table, Part 2/Phasing and the #2004 paragraph were NOT re-verified in this pass. Prior: #2004: the Row 5 addendum described the enforcer-correctness gap as OPEN and assigned to #2004 — it is now closed by `non-custody-onchain-enforcer.contract.test.ts`, which probes the deployed enforcers on Base Sepolia; the paragraph is repointed to name both suites, and the narrower `redeemDelegations`-composition gap that genuinely remains is stated in its place. The `covers:` list does not name either contract suite, so the coupling gate could not have caught this. Scope: the Row 5 gap paragraph only; the invariants table and Part 2/Phasing were NOT re-verified in this pass. Prior: #1988: the "control surface already exposed" bullet cited `/user/safes/:id/approvers` in the present tense; that route is deleted with the Safe rail, so the example is repointed. ⚠️ My first repoint invented `GET /user/safes/:safeId`, which does not exist — `routes/user-safes.ts` registers `GET /` and nothing per-id — and `haven-reviewer` caught it: a doc pass fixing a false claim introduced a different one, which is the failure mode the pass exists to prevent. Corrected to the routes that actually serve, and the owner list is now attributed to `/safe/:addr/details`, which is where the approver route read it from anyway. Scope: that bullet. Prior: #1987: the Row 5 addendum named `decideCoverage` as a live symbol the delegation branch merely "never calls" — it is now DELETED, and the spy-based proof it describes went vacuous by construction, so the addendum records the replacement structural assertion and its positive control. Also #1987: re-read after the AllowanceModule EXECUTION half was deleted — the `allowance-module.ts:232` mechanism claim and the References line both named code that no longer exists; both corrected in place with the live delegation-rail equivalent named. The invariants table itself was NOT re-verified in this pass and is left as #1986 wrote it. Prior: #1986: the invariants table rows 4 and 5 re-read against the AllowanceModule retirement — row 5's mechanism ("queued for approval") is legacy-rail-only and gone, and Red Line #4 is now only PARTIALLY proven on the live rail; addendum added naming the gap (#2004, Depends-on into #1991). Rows 1-3 and 6+ unaffected. Part 2/Phasing left alone — its "design proposal" framing is pre-existing drift, not this diff's. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Design — make non-custody provable (CI invariants + "verify your control")
@@ -144,13 +144,56 @@ forwards a rejection verbatim with nothing written.
 > "no" is allowed to count. See
 > [`casp-changelog/2026-08-24-1987.md`](../regulatory/casp-changelog/2026-08-24-1987.md).
 
-What it does **not** prove, and structurally cannot from a backend unit
-test, is that the enforcers revert correctly. That gap is tracked as
-[#2004](https://github.com/d-hinders/Haven-AI/issues/2004) and is a hard
-`Depends on` for [#1991](https://github.com/d-hinders/Haven-AI/issues/1991), the
-CASP rewrite — so the guardrails cannot be re-based onto the delegation rail
-while claiming a control is proven on every PR that nothing proves. It needs a
-forked-chain or testnet integration proof, with a positive control.
+> 🔎 **#2044 — the "true by construction" verdict was right about three of
+> those spies and too strong about the rest, and the difference is measurable.**
+> The suite mocked six names from `rails/allowance-module.js`. Three of them —
+> `generateTransferHash`, `recoverSigner`, `executeAllowanceTransfer` — had been
+> deleted by #1987, so the mock factory invented functions production does not
+> have and the suite asserted nobody called them: **unfalsifiable**, since no
+> production edit can re-add a call to a function that is gone. Those three are
+> removed, along with the `executeAllowanceTransfer` assertion; their capability
+> is carried by the structural import check above, which names all three and was
+> mutation-proven to go red on a rail-resurrection edit. The three that remain
+> (`computeEffectiveAllowance`, `getTokenAllowance`, `getLatestBlockTimeSec`)
+> are **not** vacuous: `routes/payments.ts` imports nothing from that module
+> directly, but the module is on the route's transitive graph via
+> `modules/mpp/index.ts` → `modules/mpp/allowances.ts`, so the mock is live and
+> each spy was mutation-proven to redden its own named assertion. They are a
+> supporting guard, not the proof. See
+> [`casp-changelog/2026-08-25-2044.md`](../regulatory/casp-changelog/2026-08-25-2044.md).
+
+> ✅ **#2004 — the enforcer half is now proven too, and Row 5 is no longer
+> only partial.** What the suite above still does not prove, and structurally
+> cannot from a backend unit test, is that the enforcers revert correctly:
+> `prepareDelegationPayment` is the mocked network seam, so it can only show
+> Haven *forwards* the chain's verdict, never that the verdict is right. That
+> gap — filed as #2004 and wired as a `Depends on` into
+> [#1991](https://github.com/d-hinders/Haven-AI/issues/1991) — is closed by a
+> second suite, and the two must be read together:
+> [`non-custody-onchain-gate.contract.test.ts`](../../packages/backend/src/routes/__tests__/non-custody-onchain-gate.contract.test.ts)
+> proves Haven does no arithmetic of its own, and
+> [`non-custody-onchain-enforcer.contract.test.ts`](../../packages/backend/src/routes/__tests__/non-custody-onchain-enforcer.contract.test.ts)
+> proves the verdict refuses what it claims to. The second compiles a
+> delegation with Haven's real caveat compiler and `eth_call`s each **deployed**
+> enforcer at Haven's pinned Base Sepolia address: over-budget reverts
+> `ERC20PeriodTransferEnforcer:transfer-amount-exceeded`, wrong-recipient
+> reverts `AllowedCalldataEnforcer:invalid-calldata`, and expired reverts
+> `TimestampEnforcer:expired-delegation` — each paired with an in-policy
+> positive control on the same enforcer, because three refusals alone would
+> pass against an enforcer that refuses everything. Key-less and testnet-only:
+> `beforeHook` is reachable by an unsigned, unmined `eth_call`, nothing is
+> broadcast or funded, and every chain id but Base Sepolia is refused. See
+> [`casp-changelog/2026-08-25-2004.md`](../regulatory/casp-changelog/2026-08-25-2004.md).
+
+**Still not proven in-repo, and it is a narrower claim than the one #2004
+closed:** that the DelegationManager executes the full caveat stack, *in
+order*, during a real `redeemDelegations`. Each enforcer's own verdict on
+Haven's own terms is now proven; their composition is not. Closing it needs a
+deployed and funded testnet delegator plus a signature — operator-held keys,
+outside an automated suite. The honest standing claim for that remainder is the
+live evidence ([#1450](https://github.com/d-hinders/Haven-AI/issues/1450)'s
+mainnet canary, which settled real value through this exact stack, and the #820
+Base Sepolia matrix), **not** "we prove it on every PR".
 
 ### Session-key rail extension (#736, ADR #719 Stage 2)
 

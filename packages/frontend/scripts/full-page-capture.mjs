@@ -138,6 +138,199 @@ export const MIN_RENDERED_CHARS = 40
  */
 export const SETTLED_TALL_FACTOR = 1.25
 
+/**
+ * ── Did the ROUTE resolve, or is this a picture of its spinner? (#2036) ──────
+ *
+ * The two guards on either side of this one both pass a `/dashboard` capture
+ * that renders nothing but `Loading...`, and they pass it for reasons that are
+ * individually correct:
+ *
+ *   `blank-below-fold` (#1738) needs an image TALLER than one viewport before
+ *     there is a below-the-fold to be blank. A loading fallback is short — the
+ *     observed captures were one viewport — so the guard is out of scope by its
+ *     own definition and returns "fine";
+ *   the shell guards (#1936/#1939) ask whether `#main-content` MOUNTED. It did.
+ *     `ProtectedRoute` resolved, the layout rendered, TopBar and sidebar are on
+ *     screen. It is the `next/dynamic` chunk INSIDE `<main>` that never arrived;
+ *   `MIN_RENDERED_CHARS` looks like it should cover the gap and does not,
+ *     because it is measured on `document.body` — which on an authenticated
+ *     route is thousands of characters of SHELL before the route contributes a
+ *     single one.
+ *
+ * So the PNG is neither empty nor broken. It is well-formed, plausible, filed
+ * under a name that claims it shows `/dashboard`, and reported as a success.
+ * That is strictly worse than a failed capture: a failure announces itself.
+ *
+ * ── Why this is a floor on CONTENT and not a list of loading states ──────────
+ *
+ * The obvious construction — look for `Loading...`, `[aria-busy]`, the shared
+ * skeleton — is the weaker one twice over. It expires the moment a loading
+ * state changes its markup, and it can only ever recognise the loading states
+ * somebody remembered to enumerate; a route that resolves into a *different*
+ * kind of nothing walks straight past it. What is asked for here instead is
+ * POSITIVE evidence that the route resolved: the content region has to carry a
+ * real screen's worth of text and elements. That claim is true of every
+ * rendered route including its empty states, and false of every loading state,
+ * whatever the loading state happens to look like.
+ *
+ * MEASURED, not guessed — and the measurement had to be taken THREE times,
+ * because the first two readings of it were wrong in different instructive
+ * ways. The floor sits between two live populations and must hug neither.
+ *
+ * Populated fixture, warm (`content_settle` in the manifest):
+ *
+ *   `/dashboard`      466 chars, 112 elements
+ *   `/agents`         851 chars, 138 elements
+ *   `/design-system`  30,720 chars, 1,624 elements
+ *
+ * `SCREENSHOT_FIXTURE=empty`, warm — the population that actually constrains
+ * this floor, and the one both earlier readings failed to measure:
+ *
+ *   `/dashboard`  mobile   298 chars, 109 elements
+ *   `/contacts`   mobile   116 chars,  23 elements
+ *   `/accounts`   desktop  129 chars,  15 elements
+ *   `/accounts`   mobile    87 chars,  33 elements  ← the LEANEST real screen
+ *
+ * Against a `/dashboard` loading fallback of 10 chars in 3 elements.
+ *
+ * Two corrections are recorded here rather than only in the pull request,
+ * because the next person to re-tune these will make the same two mistakes:
+ *
+ *   1. A run at load average ~490 produced `/agents` at 105 chars / 30
+ *      elements. That was briefly taken for "the leanest real route" and used
+ *      to LOWER this floor. It is `/agents` caught PARTIALLY rendered — warm it
+ *      is 851/138 — and re-centring on it would have weakened the guard against
+ *      exactly the population it refuses. Read a floor against a WARM run; a
+ *      lean reading under load is a fact about the machine.
+ *   2. The floor then stood at 80 chars, reasoned — not measured — to be safely
+ *      under every real empty state. Independent design review refused that
+ *      reasoning precisely because it was inference wearing a measured voice,
+ *      and the measurement it asked for found `/accounts` empty at 87 chars:
+ *      a margin of 1.09x. One word shorter and a legitimate empty state would
+ *      have been silently refused — the guard's own defect, pointed at the
+ *      screens that most need photographing.
+ *
+ * So the floors are set from the empty-state population, near the geometric
+ * middle of the two: 3.0x above the loading fallback and 2.9x below the leanest
+ * real screen on characters, 2.0x and 2.5x on elements. Every one of those
+ * margins is asserted in `full-page-capture.test.ts`, against the measurements
+ * above, so a re-tune fails a named test rather than a capture run.
+ *
+ * KNOWN LIMIT, and it is the honest boundary of the claim: a route caught
+ * PARTIALLY rendered — `/agents` at 105/30 — clears these floors and is
+ * captured. This guard asserts that the route rendered SOMETHING, not that it
+ * rendered everything; the second question needs per-route named content and is
+ * a separate piece of work. What it removes is the case #2036 was filed about,
+ * where the region holds nothing at all.
+ */
+export const MIN_CONTENT_CHARS = 30
+export const MIN_CONTENT_ELEMENTS = 6
+
+/**
+ * How long the content region gets to resolve, and how often it is re-probed.
+ *
+ * Longer than `SCROLL_SHELL_WAIT_MS`, because the two waits are for different
+ * things: the shell is a mounted layout, the content is a lazily-imported chunk
+ * that a cold `next dev` may still be compiling (315s and 448s first compiles
+ * are on the record for this box under agent contention).
+ *
+ * Waiting is deliberately the SECOND half of this fix and not the whole of it.
+ * A longer wait alone makes the bad capture rarer and no less silent, which is
+ * the property #2036 was filed about; the refusal is what makes the run honest,
+ * and the wait only keeps the refusal from firing on a slow machine.
+ */
+export const CONTENT_SETTLE_WAIT_MS = 30_000
+export const CONTENT_SETTLE_POLL_MS = 250
+
+/** The route content never resolved. `captureCause` is machine-readable. */
+export class ContentNotSettledError extends Error {
+  constructor(message, { probe, waitedMs, verdict } = {}) {
+    super(message)
+    this.name = 'ContentNotSettledError'
+    /** 'still-loading' */
+    this.captureCause = 'still-loading'
+    this.probe = probe
+    this.waitedMs = waitedMs
+    this.verdict = verdict
+  }
+}
+
+/**
+ * Pure verdict on one probe: has this route's content region resolved?
+ *
+ * Pure and exported so the discrimination can be tested without a browser —
+ * and so both directions can be tested. A guard for hollow evidence that
+ * cannot itself say no would be the joke telling itself, and one that cannot
+ * say yes is an alarm that is always on.
+ */
+export function judgeContentSettled(
+  probe,
+  { minChars = MIN_CONTENT_CHARS, minElements = MIN_CONTENT_ELEMENTS } = {},
+) {
+  const chars = probe?.contentChars
+  const elements = probe?.contentElements
+  if (typeof chars !== 'number' || typeof elements !== 'number') {
+    return { settled: false, reason: 'no-content-root', chars: null, elements: null }
+  }
+  if (chars < minChars || elements < minElements) {
+    return { settled: false, reason: 'still-loading', chars, elements }
+  }
+  return { settled: true, reason: 'settled', chars, elements }
+}
+
+/**
+ * Wait for the route's content region to resolve, and THROW when it does not.
+ *
+ * Judged PER PAGE, by construction: this runs inline for the one capture about
+ * to be shot and throws for that capture. It holds no cross-page tally, so a
+ * healthy `/dashboard` cannot excuse a still-loading `/agents` — the failure
+ * `unanswered_chain_reads` had to have designed out of it in review (#1996),
+ * which is the same guard rebuilding the bug it exists to catch. Pinned by a
+ * test that judges a mixed sweep and expects exactly one refusal.
+ */
+export async function resolveContentSettled(
+  page,
+  {
+    selector = SCROLL_SHELL_ROOT,
+    timeoutMs = CONTENT_SETTLE_WAIT_MS,
+    pollMs = CONTENT_SETTLE_POLL_MS,
+    probe: initialProbe = null,
+    label = 'capture',
+  } = {},
+) {
+  const start = Date.now()
+  let probe = initialProbe ?? (await probeShell(page, selector))
+  let verdict = judgeContentSettled(probe)
+
+  // Counted, not timed — same reasoning as `resolveScrollShell`: `raced` must
+  // mean we actually had to poll, not that the wall clock happened to move.
+  let polls = 0
+  while (!verdict.settled && Date.now() - start < timeoutMs) {
+    await page.waitForTimeout(pollMs)
+    probe = await probeShell(page, selector)
+    verdict = judgeContentSettled(probe)
+    polls += 1
+  }
+  const waitedMs = Date.now() - start
+
+  if (!verdict.settled) {
+    throw new ContentNotSettledError(
+      `full-page capture: ${label} — the shell mounted but "${selector}" never filled with content. ` +
+        `After waiting ${waitedMs}ms it holds ${verdict.chars ?? 'no'} character(s) of text in ` +
+        `${verdict.elements ?? 'no'} element(s), below the floor of ${MIN_CONTENT_CHARS} characters / ` +
+        `${MIN_CONTENT_ELEMENTS} elements that every rendered route clears. This is a picture of a ` +
+        `LOADING STATE or of an equally empty failure, not of the route: the app shell renders around ` +
+        `it either way, so the PNG looks like evidence and is not. Usually a cold "next dev" chunk ` +
+        `compile under load — re-run against a warm server. If it persists, the route is not ` +
+        `resolving at all: a chunk that never arrives and a render that threw into <ErrorBoundary> ` +
+        `both land here, and both are refusals rather than captures.`,
+      { probe, waitedMs, verdict },
+    )
+  }
+
+  return { ...verdict, waitedMs, polls, raced: polls > 0, probe }
+}
+
 /** What `resolveScrollShell` concluded about the page it looked at. */
 export const SHELL_MODE = {
   /** The shell was found and un-clipped. The normal authenticated path. */
@@ -167,12 +360,22 @@ async function probeShell(page, selector) {
   return page.evaluate((sel) => {
     const doc = document.documentElement
     const text = (document.body?.innerText ?? '').trim()
+    // The ROUTE'S OWN content region, measured separately from the document.
+    // `renderedChars` above counts the whole body, which on an authenticated
+    // page is dominated by the shell — sidebar nav, TopBar, account chip. That
+    // is why a route stuck on its loading fallback clears every existing floor
+    // (#2036): the shell alone is thousands of characters, and the region the
+    // capture actually claims to show holds ten.
+    const root = document.querySelector(sel)
+    const contentText = root ? ((root.innerText ?? '').trim()) : ''
 
     return {
-      found: Boolean(document.querySelector(sel)),
+      found: Boolean(root),
       docScrollHeight: doc.scrollHeight,
       viewportHeight: window.innerHeight,
       renderedChars: text.length,
+      contentChars: root ? contentText.length : null,
+      contentElements: root ? root.querySelectorAll('*').length : null,
     }
   }, selector)
 }
@@ -374,11 +577,49 @@ async function unclipFrom(page, selector) {
  * against a CSS height would put the fold in the wrong place (at `dsf: 2` it
  * would sit at half the real fold and the guard would never fire).
  */
-export async function captureFullPage(page, { path, label, viewportDevicePx, selector, timeoutMs } = {}) {
+export async function captureFullPage(page, { path, label, viewportDevicePx, selector, timeoutMs, contentTimeoutMs } = {}) {
+  const root = selector ?? SCROLL_SHELL_ROOT
   const shell = await resolveScrollShell(page, {
     ...(selector ? { selector } : {}),
     ...(Number.isFinite(timeoutMs) ? { timeoutMs } : {}),
   })
+
+  // The shell mounting is not the route rendering (#2036). Only an UNCLIPPED
+  // page has a route content region to judge: a `no-scroll-shell` marketing
+  // page IS its own content, and is already covered by `MIN_RENDERED_CHARS`
+  // and by the blank-below-fold read-back — asking for `#main-content` there
+  // would refuse every marketing capture.
+  let content = null
+  if (shell.mode === SHELL_MODE.UNCLIPPED) {
+    try {
+      content = await resolveContentSettled(page, {
+        selector: root,
+        label,
+        // The shell resolution just probed this page; re-probing before the
+        // first poll would buy nothing. `contentChars`/`contentElements` are
+        // unaffected by the un-clip walk, which only rewrites heights.
+        probe: shell.probe,
+        ...(Number.isFinite(contentTimeoutMs) ? { timeoutMs: contentTimeoutMs } : {}),
+      })
+    } catch (err) {
+      err.shell = shell
+      throw err
+    }
+    // Content that arrived DURING the wait grew the region after the un-clip
+    // walk had already run. What this re-walk buys is the REFLOW PAUSE inside
+    // `unclipFrom`, not the un-clipping — review checked, and the obvious
+    // reading is wrong: the first walk already set `height: auto` /
+    // `overflow: visible` `!important` up to `<html>`, so late content reflows
+    // the un-clipped tree live and `fullPage` re-measures at capture time
+    // anyway. The recomputed `shell.height` is genuinely surplus for an
+    // UNCLIPPED capture (only the `no-scroll-shell` branch reads it); it is
+    // refreshed rather than dropped so the field never describes the page as
+    // it was while it was still a spinner. Written down because the next
+    // reader would otherwise delete this line as dead weight and take the
+    // settle pause with it.
+    if (content.raced) shell.height = await unclipFrom(page, root)
+  }
+
   const buffer = await page.screenshot({ path, fullPage: true })
   try {
     await assertCaptureNotBlank(buffer, { label, viewportDevicePx })
@@ -389,7 +630,7 @@ export async function captureFullPage(page, { path, label, viewportDevicePx, sel
     err.shell = shell
     throw err
   }
-  return { buffer, shell }
+  return { buffer, shell, content }
 }
 
 /** Structured verdict for one capture. `blankBelowFold` is the failure. */

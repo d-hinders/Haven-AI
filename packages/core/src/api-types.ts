@@ -4666,7 +4666,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -4775,7 +4775,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409. */
             409: {
                 headers: {
                     [name: string]: unknown;

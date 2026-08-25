@@ -16,9 +16,11 @@
  * proven against real Postgres in the repository test, not asserted on a
  * mock, because the guarantee IS Postgres row-locking.
  *
- * Unlike the watermark repository this one is FAIL-CLOSED: these rows are the
- * authority for "what did we broadcast", not an optimisation, so an error
- * propagates to the caller rather than degrading.
+ * Unlike the fail-open repositories in this directory (the pattern the
+ * since-deleted allowance-nonce watermark repository set, #718/#1987) this
+ * one is FAIL-CLOSED: these rows are the authority for "what did we
+ * broadcast", not an optimisation, so an error propagates to the caller
+ * rather than degrading.
  */
 
 import pool from '../../db.js'

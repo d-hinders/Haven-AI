@@ -289,6 +289,129 @@ describe('AccountDetailClient', () => {
    * Send from every account; asserting only the delegation presence would be
    * satisfied by leaving the legacy path in place.
    */
+  describe('approver type badge (#2017)', () => {
+    const PASSKEY_SIGNER = '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2'
+    const WALLET_OWNER = '0x5555555555555555555555555555555555555555'
+    const STRANGER = '0x9999999999999999999999999999999999999999'
+
+    const withOwners = (owners: string[]) =>
+      mockUseSafeDetails.mockReturnValue({
+        details: { address: SAFE.safe_address, owners, threshold: owners.length, nonce: 1 },
+        loading: false,
+        error: null,
+      })
+
+    const asUser = (walletAddress: string | null, enrolledPasskeys: string[]) =>
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: walletAddress,
+          safes: [SAFE],
+        },
+        activeSafe: SAFE,
+        setActiveSafe: vi.fn(),
+        loading: false,
+        passkeys: enrolledPasskeys.map((signer, i) => ({
+          id: `passkey-${i}`,
+          credential_id: `cred-${i}`,
+          signer_address: signer,
+          chain_id: SAFE.chain_id,
+          safe_address: SAFE.safe_address,
+          created_at: '2026-05-12T00:00:00Z',
+        })),
+      })
+
+    /**
+     * The badge used to read `passkeyAddresses.has(owner) ? 'Passkey' :
+     * 'Wallet'` — a positive claim inferred from an ABSENCE. `passkeyAddresses`
+     * is Haven's live enrolment record for this Safe on this chain, not ground
+     * truth about the on-chain owner set, so an owner missing from it proves
+     * nothing. This is the case that predicate got wrong, and it is asserted
+     * first because it is the only one that distinguishes the two versions:
+     * both label a known passkey 'Passkey' and both label the user's own wallet
+     * 'Wallet'.
+     */
+    it('labels an approver Haven cannot identify Unknown, never Wallet', () => {
+      asUser(WALLET_OWNER, [PASSKEY_SIGNER])
+      withOwners([STRANGER])
+
+      render(<AccountDetailClient />)
+
+      // Positive control: the Approvers section rendered at all, so the
+      // absence asserted below is a real absence and not a blank card.
+      expect(screen.getByText('Approvers')).toBeInTheDocument()
+
+      expect(screen.getByText('Unknown')).toBeInTheDocument()
+      expect(screen.queryByText('Wallet')).toBeNull()
+      expect(screen.queryByText('Passkey')).toBeNull()
+    })
+
+    it('still labels a known passkey Passkey and the user own wallet Wallet', () => {
+      asUser(WALLET_OWNER, [PASSKEY_SIGNER])
+      withOwners([PASSKEY_SIGNER, WALLET_OWNER])
+
+      render(<AccountDetailClient />)
+
+      expect(screen.getByText('Passkey')).toBeInTheDocument()
+      expect(screen.getByText('Wallet')).toBeInTheDocument()
+      expect(screen.queryByText('Unknown')).toBeNull()
+    })
+
+    /**
+     * A user with no connected wallet at all. Under the old predicate EVERY
+     * owner outside the passkey record read 'Wallet', including for an account
+     * where Haven knows of no wallet whatsoever.
+     */
+    it('does not invent a Wallet for a user who has no wallet address', () => {
+      asUser(null, [PASSKEY_SIGNER])
+      withOwners([PASSKEY_SIGNER, STRANGER])
+
+      render(<AccountDetailClient />)
+
+      expect(screen.getByText('Passkey')).toBeInTheDocument()
+      expect(screen.getByText('Unknown')).toBeInTheDocument()
+      expect(screen.queryByText('Wallet')).toBeNull()
+    })
+
+    /**
+     * The passkey record is chain- and Safe-scoped. A passkey enrolled on a
+     * DIFFERENT chain is exactly the "stale or incomplete record" case, and it
+     * must not silently become a Wallet.
+     */
+    it('does not call an owner a Wallet because their passkey is recorded on another chain', () => {
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: null,
+          safes: [SAFE],
+        },
+        activeSafe: SAFE,
+        setActiveSafe: vi.fn(),
+        loading: false,
+        passkeys: [
+          {
+            id: 'passkey-other-chain',
+            credential_id: 'cred-other-chain',
+            signer_address: PASSKEY_SIGNER,
+            chain_id: SAFE.chain_id + 1,
+            safe_address: SAFE.safe_address,
+            created_at: '2026-05-12T00:00:00Z',
+          },
+        ],
+      })
+      withOwners([PASSKEY_SIGNER])
+
+      render(<AccountDetailClient />)
+
+      expect(screen.getByText('Unknown')).toBeInTheDocument()
+      expect(screen.queryByText('Wallet')).toBeNull()
+    })
+  })
+
   describe('owner send after the Safe-rail retirement (#1989)', () => {
     it('offers no Send affordance on a legacy Safe account, and says why', () => {
       render(<AccountDetailClient />)

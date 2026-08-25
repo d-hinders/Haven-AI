@@ -110,6 +110,48 @@ function agentAccessSummary(agent: Agent, chainId: number | null): string {
   return `${agentBudgetSummary(agent, chainId)} · ${formatAgentLastActivity(agent.mcp_last_seen_at)}`
 }
 
+type ApproverType = 'passkey' | 'wallet' | 'unknown'
+
+const APPROVER_TYPE_LABEL: Record<ApproverType, string> = {
+  passkey: 'Passkey',
+  wallet: 'Wallet',
+  unknown: 'Unknown',
+}
+
+const UNKNOWN_APPROVER_TOOLTIP =
+  'Haven holds no record identifying this approver. It could be a passkey enrolled outside Haven, a rotated or revoked one, or a wallet — the label says what Haven knows, not what the approver is.'
+
+/**
+ * #2017: classify one on-chain Safe owner for the Approvers badge, from
+ * POSITIVE evidence only.
+ *
+ * The predicate this replaced was `passkeyAddresses.has(owner) ? 'Passkey' :
+ * 'Wallet'`, which reasons from ABSENCE. `passkeyAddresses` is Haven's current
+ * live record of enrolled passkeys for THIS Safe on THIS chain — it is not
+ * ground truth about the on-chain owner set. An owner is missing from it when
+ * enrolment was revoked or rotated, when the passkey list is stale or still
+ * loading, or when the owner was added outside Haven. `POST /safe/exec`
+ * deliberately authorises a backup passkey Haven holds no binding row for
+ * against the Safe's live owner list, so "no passkey row" means the fast-path
+ * binding is absent, not that the owner is a wallet.
+ *
+ * The only positive evidence Haven has for 'wallet' is the user's OWN
+ * `wallet_address` — the owner directory (`useOwnerDirectory`) carries aliases
+ * and account membership, not an owner TYPE, so it cannot supply one.
+ * Everything else is 'unknown', and the badge then says so rather than
+ * guessing. This mirrors `retiredRailOwnerAccess` below, so the file has one
+ * rule about owner identity instead of two.
+ */
+function classifyApprover(
+  normalizedOwner: string,
+  passkeyAddresses: ReadonlySet<string>,
+  knownWalletOwner: string | null | undefined,
+): ApproverType {
+  if (passkeyAddresses.has(normalizedOwner)) return 'passkey'
+  if (knownWalletOwner && normalizedOwner === knownWalletOwner) return 'wallet'
+  return 'unknown'
+}
+
 export default function AccountDetailClient() {
   const params = useParams()
   const router = useRouter()
@@ -575,16 +617,12 @@ export default function AccountDetailClient() {
                 const normalizedOwner = owner.toLowerCase()
                 const isYou =
                   user?.wallet_address?.toLowerCase() === normalizedOwner || passkeyAddresses.has(normalizedOwner)
-                // ⚠️ This reasons from ABSENCE — "not a passkey we hold a row
-                // for, therefore a Wallet" — and that inference is unsound for
-                // the reason #2017 records: `POST /safe/exec` authorises backup
-                // passkeys Haven holds no binding row for. Pre-dates #1989 and
-                // is left alone here because it is COSMETIC (no action depends
-                // on the label), unlike `retiredRailOwnerAccess` above, which
-                // is the same reasoning applied to an actionable funds-access
-                // claim and was corrected to require positive evidence.
-                // Do not copy this pattern; see #2017.
-                const approverType = passkeyAddresses.has(normalizedOwner) ? 'Passkey' : 'Wallet'
+                // #2017: positive evidence only — see `classifyApprover`.
+                const approverType = classifyApprover(
+                  normalizedOwner,
+                  passkeyAddresses,
+                  knownWalletOwner,
+                )
                 const ownerAlias = getOwnerAlias(owner)
                 return (
                   <div
@@ -611,7 +649,13 @@ export default function AccountDetailClient() {
                     )}
                     <CopyButton text={owner} />
                     <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', owner)} label="Open approver externally" />
-                    <StatusBadge>{approverType}</StatusBadge>
+                    {approverType === 'unknown' ? (
+                      <Tooltip label={UNKNOWN_APPROVER_TOOLTIP}>
+                        <StatusBadge>{APPROVER_TYPE_LABEL.unknown}</StatusBadge>
+                      </Tooltip>
+                    ) : (
+                      <StatusBadge>{APPROVER_TYPE_LABEL[approverType]}</StatusBadge>
+                    )}
                     {isYou && (
                       <StatusBadge tone="brand">You</StatusBadge>
                     )}

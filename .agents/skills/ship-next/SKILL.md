@@ -245,17 +245,28 @@ you need the reasoning. Never edit one without the other — CI will not let you
   the two even share an alert channel);
 - `routes/safe-exec.ts`, `routes/approvals.ts`, or `routes/hybrid-accounts.ts`
   (user-signed execution, the approval queue, account provisioning);
-- `packages/sdk/src/signer.ts` (signing schemes are spend authority);
+- `packages/sdk/src/signer.ts` and `packages/signer/` (signing schemes are spend
+  authority — the SDK entry point was listed; the edge-signer package that
+  actually holds the delegate key material was on no list at all, and is the
+  stronger case of the two — #1896);
+- `packages/core/src/machine-payment-lifecycle.ts` (the machine-payment domain
+  actually lives here since #987 — the `domain/machine-payment-lifecycle.ts` line
+  above guards the backend re-export shim, not the code — #1905);
 - `middleware/agentAuth.ts`;
 - `db/migrations/`;
 - the safeguard's own control surface — `scripts/release-bump.mjs`,
   `scripts/ci/qa-freshness.mjs`, `scripts/ci/money-path.test.mjs`,
   `scripts/ci/money-path-restatement-scan.mjs`, `.github/CODEOWNERS`,
   `.github/money-path-globs.json`, `.github/workflows/publish.yml`,
-  `.github/workflows/dev-gate.yml`, `.github/workflows/qa-dev.yml`. These are
+  `.github/workflows/dev-gate.yml`, `.github/workflows/qa-dev.yml`,
+  `packages/frontend/src/lib/signer.ts`, `packages/frontend/src/hooks/useAgentRekey.ts`. These are
   `controlGlobs` in the JSON: labelled money-path so a PR weakening the gate gets
   this playbook and a human, but excluded from the freshness re-run, because
-  re-running the money-flow harness proves nothing about a CI config change.
+  re-running the money-flow harness proves nothing about a CI config change —
+  and the two frontend paths are the same call: the harness exercises the
+  deployed backend, not the client, so a QA re-run would prove nothing about a
+  change to which signer signs a spend-authority action, but a human should read
+  it — #1903.
 
 The label matters because money-sensitive changes do not always touch listed files
 (a new signing scheme, a new rail); the file list matters because a diff can be

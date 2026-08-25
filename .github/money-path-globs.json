@@ -104,7 +104,8 @@
     "reading money.md -- the control surface would be guarded at the front door",
     "and open at the side. Listed for the same reason #1892 listed",
     "infra/delegate-*.ts: which file the enforcement happens to live in is an",
-    "accident, and the perimeter should not depend on it."
+    "accident, and the perimeter should not depend on it.",
+    "2026-08-25 (#1905/#1896/#1903): packages/signer/** and packages/core/src/machine-payment-lifecycle.ts joined `globs` \u2014 the edge-signer package that actually holds the delegate key (the SDK-side signer was already listed on 'signing schemes are spend authority', the package was not \u2014 #1896), and the machine-payment domain logic relocated verbatim to @haven_ai/core by #987 (the backend listing guarded a 12-line re-export shim, not the code \u2014 #1905). packages/frontend/src/lib/signer.ts and packages/frontend/src/hooks/useAgentRekey.ts joined `controlGlobs`: the client that picks which signer signs a spend-authority action is invisible to this list today (#1903), but the money-flow harness exercises the deployed backend, not the client \u2014 so it gets the label and a human, without a QA re-run that proves nothing. A frontend file that MOVES money has not been found; these are decision surfaces, and if one appears it belongs in `globs`."
   ],
   "globs": [
     "packages/backend/src/db/migrations/**",
@@ -137,7 +138,9 @@
     "packages/backend/src/routes/safe-exec.ts",
     "packages/backend/src/routes/x402-resources.ts",
     "packages/backend/src/routes/x402.ts",
-    "packages/sdk/src/signer.ts"
+    "packages/core/src/machine-payment-lifecycle.ts",
+    "packages/sdk/src/signer.ts",
+    "packages/signer/**"
   ],
   "controlGlobs": [
     ".github/CODEOWNERS",
@@ -145,6 +148,8 @@
     ".github/workflows/dev-gate.yml",
     ".github/workflows/publish.yml",
     ".github/workflows/qa-dev.yml",
+    "packages/frontend/src/hooks/useAgentRekey.ts",
+    "packages/frontend/src/lib/signer.ts",
     "scripts/ci/money-path-restatement-scan.mjs",
     "scripts/ci/money-path.test.mjs",
     "scripts/ci/qa-freshness.mjs",

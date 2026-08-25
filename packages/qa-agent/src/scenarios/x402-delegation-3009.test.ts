@@ -85,17 +85,12 @@ function ctx(over: Partial<ScenarioContext['cfg']> = {}): ScenarioContext {
   return {
     cfg: {
       apiUrl: 'https://dev-backend.example',
-      agentApiKey: 'sk_agent_legacy',
-      delegateKey: '0x' + '22'.repeat(32),
       paymentTo: '0x' + 'dd'.repeat(20),
       demoMerchantUrl: MERCHANT_URL,
       delegationAgentApiKey: 'sk_agent_delegation',
       delegationDelegateKey: DELEGATE_KEY,
       ...over,
     },
-    api: {} as ScenarioContext['api'],
-    delegateKey: '0x' + '22'.repeat(32),
-    delegateAddress: '0x' + 'ee'.repeat(20),
   }
 }
 

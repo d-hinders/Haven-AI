@@ -409,11 +409,9 @@ export async function main(): Promise<void> {
     )
   }
   console.log(
-    '\n⚠ QA_AGENT_API_KEY / QA_DELEGATE_PRIVATE_KEY are NOT produced any more.\n' +
-      '  They named a legacy AllowanceModule identity, and that rail is retired:\n' +
-      '  no new Safe can be created (#1984) and an existing one cannot pay (#1986).\n' +
-      '  `loadQaConfig` still requires them — removing that, and the three legacy\n' +
-      '  legs in run.ts they feed, is tracked separately (see #2007).',
+    '\nThe QA harness uses the delegation identity above. It does not require\n' +
+      'legacy AllowanceModule credentials (`QA_AGENT_API_KEY` or\n' +
+      '`QA_DELEGATE_PRIVATE_KEY`).',
   )
   console.log('\nAccount (fund with Base Sepolia USDC): ' + account.safe_address)
   console.log('Done.')

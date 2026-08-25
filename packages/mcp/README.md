@@ -95,6 +95,8 @@ Environment variable form:
 - `haven_get_resume_state`
 - `haven_get_agent`
 - `haven_get_allowances`
+- `haven_discover_tools`
+- `haven_submit_catalog_entry`
 - `haven_list_receipts`
 
 ## First-launch consent

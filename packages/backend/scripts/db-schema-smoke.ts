@@ -266,6 +266,17 @@ import {
   COUNT_PENDING_CATALOG_SUBMISSIONS_SQL,
   FIND_PENDING_CATALOG_SUBMISSION_BY_HOST_SQL,
   INSERT_CATALOG_SUBMISSION_SQL,
+  LIST_SUBMITTED_CATALOG_SUBMISSIONS_SQL,
+  LIST_OWNERSHIP_VERIFIED_CATALOG_SUBMISSIONS_SQL,
+  LIST_VERIFIED_CATALOG_SUBMISSIONS_DUE_SQL,
+  MARK_CATALOG_SUBMISSION_OWNERSHIP_VERIFIED_SQL,
+  MARK_CATALOG_SUBMISSION_VERIFIED_PAYABLE_SQL,
+  INCREMENT_CATALOG_SUBMISSION_FAILURES_SQL,
+  MARK_CATALOG_SUBMISSION_FAILED_SQL,
+  COUNT_STUCK_CATALOG_SUBMISSIONS_SQL,
+  DELETE_TERMINAL_CATALOG_SUBMISSIONS_BEFORE_SQL,
+  GET_CATALOG_SUBMISSION_SQL,
+  LIST_VERIFIED_CATALOG_SUBMISSIONS_SQL,
 } from '../src/infra/repositories/catalog-submissions.js'
 import {
   FIND_CURRENCY_PREFERENCE_SQL,
@@ -759,6 +770,17 @@ const QUERIES: SmokeQuery[] = [
   { name: 'catalog-submissions: insert with pending-host dedupe', sql: INSERT_CATALOG_SUBMISSION_SQL },
   { name: 'catalog-submissions: pending row by host (no-op path)', sql: FIND_PENDING_CATALOG_SUBMISSION_BY_HOST_SQL },
   { name: 'catalog-submissions: pending queue count (429 cap)', sql: COUNT_PENDING_CATALOG_SUBMISSIONS_SQL },
+  { name: 'catalog-lifecycle: submitted rows for ownership stage', sql: LIST_SUBMITTED_CATALOG_SUBMISSIONS_SQL },
+  { name: 'catalog-lifecycle: ownership-verified rows for probe', sql: LIST_OWNERSHIP_VERIFIED_CATALOG_SUBMISSIONS_SQL },
+  { name: 'catalog-lifecycle: verified rows due for recheck', sql: LIST_VERIFIED_CATALOG_SUBMISSIONS_DUE_SQL },
+  { name: 'catalog-lifecycle: submitted -> ownership_verified', sql: MARK_CATALOG_SUBMISSION_OWNERSHIP_VERIFIED_SQL },
+  { name: 'catalog-lifecycle: -> verified_payable with metadata', sql: MARK_CATALOG_SUBMISSION_VERIFIED_PAYABLE_SQL },
+  { name: 'catalog-lifecycle: increment consecutive failures', sql: INCREMENT_CATALOG_SUBMISSION_FAILURES_SQL },
+  { name: 'catalog-lifecycle: -> failed', sql: MARK_CATALOG_SUBMISSION_FAILED_SQL },
+  { name: 'catalog-lifecycle: stuck submitted count', sql: COUNT_STUCK_CATALOG_SUBMISSIONS_SQL },
+  { name: 'catalog-lifecycle: purge terminal rows past TTL', sql: DELETE_TERMINAL_CATALOG_SUBMISSIONS_BEFORE_SQL },
+  { name: 'catalog-status: submission by id', sql: GET_CATALOG_SUBMISSION_SQL },
+  { name: 'catalog-listing: verified ingestion rows', sql: LIST_VERIFIED_CATALOG_SUBMISSIONS_SQL },
 ]
 
 async function main(): Promise<void> {

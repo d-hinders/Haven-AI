@@ -80,6 +80,7 @@ const HASH = `0x${'ab'.repeat(32)}`
 function agentRow(overrides: Record<string, unknown> = {}) {
   return {
     agent_id: AGENT_ID,
+    status: 'active',
     delegate_address: DELEGATE_KEY,
     chain_id: 84532,
     treasury_address: TREASURY,
@@ -186,6 +187,18 @@ describe('delegation lifecycle API (#828)', () => {
       expect(res.statusCode).toBe(201)
       const insert = mockQuery.mock.calls.find((c) => /INSERT INTO agent_delegations/.test(String(c[0])))!
       expect(insert[1][3]).toBeNull() // recipient_address
+    })
+
+    it('refuses a revoked agent before constructing or storing a fresh budget (#2025)', async () => {
+      mockDb({ agent: agentRow({ status: 'revoked' }) })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`,
+        payload: { token_address: USDC, budget_atomic: '5000000', period_seconds: 86400 },
+      })
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toEqual({ error: 'Revoked agents cannot receive new budget delegations' })
+      expect(mockCompute).not.toHaveBeenCalled()
+      expect(mockQuery.mock.calls.some((c) => /INSERT INTO agent_delegations/.test(String(c[0])))).toBe(false)
     })
 
     it('a replacement gets a FRESH identity (version bump, #813)', async () => {
@@ -407,6 +420,18 @@ describe('delegation lifecycle API (#828)', () => {
   })
 
   describe('POST /:id/delegations/:hash/activate — grant step 2', () => {
+    it('refuses a revoked agent before parsing a signature or deploying (#2025)', async () => {
+      mockDb({ agent: agentRow({ status: 'revoked' }) })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: 'not-even-a-signature' },
+      })
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toEqual({ error: 'Revoked agents cannot receive new budget delegations' })
+      expect(mockEnsureDeployed).not.toHaveBeenCalled()
+      expect(mockQuery.mock.calls.some((c) => /UPDATE agent_delegations/.test(String(c[0])))).toBe(false)
+    })
+
     it('activating the first grant ALSO activates a pending_approval agent — the rail\'s approval (#1069)', async () => {
       // On the delegation rail there is no wallet-approval step; the owner's
       // grant signature IS the approval. Without this flip a modal-created

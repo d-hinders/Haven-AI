@@ -4489,3 +4489,112 @@ describe('next_tool emission literals (#1588 review)', () => {
     expect(prefixed).toEqual([])
   })
 })
+
+// ── haven_discover_tools: verified-directory badges + filter (#1716) ────────
+
+describe('haven_discover_tools verified directory (#1716)', () => {
+  const directoryFixture = {
+    entries: [
+      {
+        id: 'cat_dir_1',
+        name: 'Directory Summarizer',
+        description: 'Self-submitted service',
+        category: 'api',
+        resource_url: 'https://directory.example.com/mcp',
+        rail: 'x402',
+        protocol: 'mcp',
+        tool_name: 'summarize',
+        tool_arguments: null,
+        price_display: null,
+        price_atomic: null,
+        asset: null,
+        network: null,
+        status: 'active',
+        verified_at: '2026-08-23T10:00:00.000Z',
+        source: 'ingestion',
+        domain_verified: true,
+        verified_payable: true,
+      },
+      {
+        id: 'cat_cur_1',
+        name: 'Curated API',
+        description: 'Operator-curated',
+        category: 'ai',
+        resource_url: 'https://api.example.com/paid',
+        rail: 'x402',
+        protocol: 'http',
+        tool_name: null,
+        tool_arguments: null,
+        price_display: '$0.01 USDC',
+        price_atomic: '10000',
+        asset: 'USDC',
+        network: 'eip155:8453',
+        status: 'active',
+        verified_at: '2026-08-01T00:00:00.000Z',
+        source: 'operator',
+        domain_verified: false,
+        verified_payable: false,
+      },
+    ],
+  }
+
+  it('surfaces the badge fields on discovered entries', async () => {
+    stubFetch({ 'GET /catalog': { status: 200, body: directoryFixture } })
+    const result = ok<Array<Record<string, unknown>>>(await handlers().haven_discover_tools({}))
+    expect(result.data).toHaveLength(2)
+    expect(result.data[0]).toMatchObject({
+      source: 'ingestion',
+      domain_verified: true,
+      verified_payable: true,
+    })
+    expect(result.data[1]).toMatchObject({
+      source: 'operator',
+      domain_verified: false,
+      verified_payable: false,
+    })
+  })
+
+  it('filters client-side on verified=verified and verified=operator', async () => {
+    stubFetch({ 'GET /catalog': { status: 200, body: directoryFixture } })
+
+    const verified = ok<Array<Record<string, unknown>>>(
+      await handlers().haven_discover_tools({ verified: 'verified' }),
+    )
+    expect(verified.data.map((e) => e.id)).toEqual(['cat_dir_1'])
+
+    const operator = ok<Array<Record<string, unknown>>>(
+      await handlers().haven_discover_tools({ verified: 'operator' }),
+    )
+    expect(operator.data.map((e) => e.id)).toEqual(['cat_cur_1'])
+  })
+})
+
+// ── haven_submit_catalog_entry (#1716) ──────────────────────────────────────
+
+describe('haven_submit_catalog_entry (#1716)', () => {
+  it('posts the resource_url to the queue-only endpoint and returns token + status', async () => {
+    stubFetch({
+      'POST /catalog/submit': {
+        status: 201,
+        body: {
+          id: '00000000-0000-4000-8000-000000000001',
+          verify_token: 'ab'.repeat(24),
+          status: 'submitted',
+        },
+      },
+    })
+
+    const result = ok<{ id: string; verify_token: string; status: string }>(
+      await handlers().haven_submit_catalog_entry({
+        resource_url: 'https://merchant.example/mcp',
+      }),
+    )
+    expect(result.data).toMatchObject({
+      id: '00000000-0000-4000-8000-000000000001',
+      verify_token: 'ab'.repeat(24),
+      status: 'submitted',
+    })
+    const call = calls.find((c) => c.method === 'POST' && c.url.includes('/catalog/submit'))
+    expect(call?.body).toEqual({ resource_url: 'https://merchant.example/mcp' })
+  })
+})

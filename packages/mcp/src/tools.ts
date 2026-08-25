@@ -43,6 +43,7 @@ export type HavenMcpToolName =
   | 'haven_verify_receipt'
   | 'haven_sweep_delegate'
   | 'haven_discover_tools'
+  | 'haven_submit_catalog_entry'
 
 export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
   haven_send: {
@@ -92,6 +93,11 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
     category: z.string().optional(),
     search: z.string().optional(),
     rail: z.enum(['x402', 'mpp']).optional(),
+    verified: z.enum(['any', 'verified', 'operator']).optional(),
+  },
+  haven_submit_catalog_entry: {
+    resource_url: z.string().min(1),
+    website: z.string().optional(),
   },
   haven_list_receipts: {
     limit: z.number().int().min(1).max(100).optional(),
@@ -120,6 +126,7 @@ export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
   haven_sweep_delegate: composeDescription(sharedDescriptions.sweep_delegate),
   haven_discover_tools: composeDescription(sharedDescriptions.discoverTools),
+  haven_submit_catalog_entry: composeDescription(sharedDescriptions.submitCatalogEntry),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
   haven_verify_receipt: composeDescription(sharedDescriptions.verifyReceipt),
 }
@@ -319,6 +326,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           category: typeof args.category === 'string' ? args.category : undefined,
           search: typeof args.search === 'string' ? args.search : undefined,
           rail: args.rail === 'x402' || args.rail === 'mpp' ? args.rail : undefined,
+          verified: args.verified === 'verified' || args.verified === 'operator' ? args.verified : undefined,
         })
         return entries.map((entry) => ({
           id: entry.id,
@@ -336,6 +344,9 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           network: entry.network,
           status: entry.status,
           verified_at: entry.verifiedAt,
+          source: entry.source,
+          domain_verified: entry.domainVerified,
+          verified_payable: entry.verifiedPayable,
           // Which Haven pay tool reaches this entry from the local MCP surface.
           // #1328: the 'mpp' rail's only-ever catalog row (the Haven MPP demo
           // resource) is delisted with the mpp_demo retirement, so this
@@ -345,6 +356,20 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
             entry.protocol === 'mcp' ? 'haven_pay_mcp_tool'
             : 'haven_pay_x402',
         }))
+      })
+    },
+    haven_submit_catalog_entry: async (input) => {
+      const args = objectInput('haven_submit_catalog_entry', input)
+      return runTool(async () => {
+        const submission = await haven.submitCatalogEntry(
+          String(args.resource_url),
+          typeof args.website === 'string' ? { website: args.website } : undefined,
+        )
+        return {
+          id: submission.id,
+          verify_token: submission.verifyToken,
+          status: submission.status,
+        }
       })
     },
     haven_list_receipts: async (input) => {

@@ -155,17 +155,32 @@ export const toolDescriptions = {
       'Step 1 of a purchase: discover payable services from Haven\'s curated merchant catalog — names, prices, and which pay tool to use next.',
     selectionGuidance:
       'Use this when the user asks what the agent can buy, pay for, or which paid services exist — or when you need a resource URL for a service the user described. ' +
+      'Use verified=verified to show only self-submitted directory entries that passed domain-ownership proof and a live quote probe — never treat those badges as proof of merchant honesty, quality, or reliability. ' +
       'Do NOT use for balance, budget, or spend-limit questions — use haven_get_allowances. ' +
       'Do NOT use to pay — each returned entry names the pay tool to use next.',
     behavior:
       'Use each entry\'s suggested_tool field first — it names the exact next call. ' +
       'Read-only lookup against Haven\'s curated catalog; entries are periodically re-verified against the live merchant and degraded entries are flagged. ' +
       'Use category for a case-insensitive category filter (for example, VPN or vpn), or search for a product name, category, or description term. ' +
-      'Returns name, description, price, rail, resource URL, tool_name, tool_arguments, and suggested_tool. ' +
+      'Returns name, description, price, rail, resource URL, tool_name, tool_arguments, suggested_tool, and the provenance badges source/domain_verified/verified_payable. ' +
       'The catalog price (price_display/price_atomic, marked price_is_indicative) is a last-verified hint, NOT authoritative — the real price comes from the merchant\'s live 402 at pay time. ' +
       'Never creates a payment, signature, or approval.',
     nextActionGuidance:
       'Pick an entry and pay it with the tool named in suggested_tool, passing the entry\'s resource_url, tool_name, and tool_arguments for MCP merchants. Confirm the price from the live pay-tool result (not the catalog), and pass the user\'s cap as max_amount_human in whole tokens ("no more than 1 USDC" → max_amount_human: "1") — never convert it to atomic units by hand.',
+  },
+  submitCatalogEntry: {
+    summary:
+      'Submit a merchant\'s payable (x402/MCP) endpoint to Haven\'s Verified Payable Directory for verification and listing.',
+    selectionGuidance:
+      'Use this when a merchant or seller asks to be listed in the directory, or when you have discovered a payable endpoint and want it registered. ' +
+      'The submission is queue-only: it books a spot and returns a verify_token. The seller must then prove control of the domain (a well-known line or DNS TXT record); only after that plus a live quote probe does the entry become listed. ' +
+      'Do NOT use to pay — check the returned status with getCatalogSubmissionStatus instead.',
+    behavior:
+      'Sends the https resource_url to Haven\'s public submission endpoint. The request path makes no outbound request to the merchant. ' +
+      'Returns id + verify_token + status; the verify_token is shown exactly once. Ownership proof is always required later and cannot be skipped from the agent side. ' +
+      'The website field is a honeypot for bots — leave it unset.',
+    nextActionGuidance:
+      'Give the verify_token and the well-known instructions (from getCatalogSubmissionStatus) to the merchant so they can publish the proof line, then poll the submission status until it reaches verified_payable or failed.',
   },
   sweep_delegate: {
     summary:

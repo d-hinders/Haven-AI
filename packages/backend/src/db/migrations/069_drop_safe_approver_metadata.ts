@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg'
 
-export const version = '068_drop_safe_approver_metadata'
+export const version = '069_drop_safe_approver_metadata'
 
 /**
  * Drop `safe_approver_metadata` — the retired Safe rail's approver-label

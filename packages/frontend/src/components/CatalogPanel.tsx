@@ -1,15 +1,55 @@
 'use client'
 
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, type ReactNode } from 'react'
 import { useCatalog, type CatalogEntry } from '@/hooks/useCatalog'
 import { useAgents } from '@/hooks/useAgents'
 import { useChainScope } from '@/hooks/useActiveChain'
 import { ALL_CHAINS, getChainConfig } from '@/lib/chains'
+import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { Select } from './ui/Select'
 import { Skeleton } from './ui/Skeleton'
+import { StatusBadge } from './ui/StatusBadge'
+import CatalogSubmitModal from './CatalogSubmitModal'
 
 // ── Helpers ────────────────────────────────────────────────────────
+
+export type SourceFilter = 'all' | 'ingestion' | 'operator'
+
+/**
+ * The epic trust claim, verbatim: "verified" only ever means domain
+ * controlled AND verified payable — never merchant honesty, quality or
+ * settlement reliability. The badge appears exactly when the row is a
+ * self-submitted ingestion entry that passed both proofs.
+ */
+export function isVerified(entry: Pick<CatalogEntry, 'source'>): boolean {
+  return entry.source === 'ingestion'
+}
+
+/** Segment pill shared by the category and source filters. */
+function FilterPill({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+        active
+          ? 'bg-[var(--v2-brand)] text-white'
+          : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)] hover:bg-[var(--v2-border)]'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
 
 /**
  * Resolve a catalog entry's `network` to a chain id. The field is heterogeneous
@@ -113,6 +153,13 @@ function CatalogCard({
           <span className="rounded-full bg-[var(--v2-surface-2)] px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-2)]">
             {entry.rail}
           </span>
+          {isVerified(entry) && (
+            <span title="Domain controlled and verified payable">
+              <StatusBadge tone="success" className="uppercase tracking-wide">
+                Verified
+              </StatusBadge>
+            </span>
+          )}
           {degraded ? (
             <span className="rounded-full bg-[var(--v2-warning-soft)] px-2 py-0.5 text-xs font-medium text-[var(--v2-warning)]">
               Limited availability
@@ -165,9 +212,11 @@ function CatalogCard({
 // ── Panel ──────────────────────────────────────────────────────────
 
 export default function CatalogPanel() {
-  const { entries, loading, error } = useCatalog()
+  const { entries, loading, error, refetch } = useCatalog()
   const { agents } = useAgents()
   const [category, setCategory] = useState<string | null>(null)
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
+  const [submitOpen, setSubmitOpen] = useState(false)
   // Catalog follows the active chain by default and re-defaults when it switches;
   // the network dropdown is the manual override (#633, epic #625).
   const { scope, setScope } = useChainScope('follow-active')
@@ -192,10 +241,12 @@ export default function CatalogPanel() {
     () =>
       entries.filter((e) => {
         if (category && e.category !== category) return false
+        if (sourceFilter === 'ingestion' && !isVerified(e)) return false
+        if (sourceFilter === 'operator' && e.source !== 'operator') return false
         if (scope === 'all') return true
         return networkToChainId(e.network) === scope
       }),
-    [entries, category, scope],
+    [entries, category, sourceFilter, scope],
   )
   // Show the network filter when there's a real choice: multiple chains, or the
   // active chain has no catalog entries (so the user has an escape hatch to "all").
@@ -221,18 +272,39 @@ export default function CatalogPanel() {
     )
   }
 
-  if (entries.length === 0) {
-    return (
-      <EmptyState
-        title="No services listed yet"
-        body="The catalog is curated — new payable services appear here as they are verified."
-      />
-    )
-  }
+  const emptyCatalog = entries.length === 0
 
   return (
     <div>
-      {showNetworkFilter && (
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div role="group" aria-label="Filter by verification" className="flex flex-wrap gap-2">
+          <FilterPill active={sourceFilter === 'all'} onClick={() => setSourceFilter('all')}>
+            All
+          </FilterPill>
+          <FilterPill
+            active={sourceFilter === 'ingestion'}
+            onClick={() => setSourceFilter('ingestion')}
+          >
+            Verified
+          </FilterPill>
+          <FilterPill
+            active={sourceFilter === 'operator'}
+            onClick={() => setSourceFilter('operator')}
+          >
+            Operator-curated
+          </FilterPill>
+        </div>
+        <Button variant="ghost" size="sm" onClick={() => setSubmitOpen(true)}>
+          List your payable service
+        </Button>
+      </div>
+
+      <p className="mb-4 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+        Verified listings have proven domain control and a confirmed payable endpoint.
+        Operator-curated listings are added by the Haven team.
+      </p>
+
+      {!emptyCatalog && showNetworkFilter && (
         <div className="mb-4 flex items-center gap-2">
           <label htmlFor="catalog-network" className="text-xs font-medium text-[var(--v2-ink-3)]">
             Network
@@ -258,46 +330,53 @@ export default function CatalogPanel() {
 
       {categories.length > 1 && (
         <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filter by category">
-          <button
-            onClick={() => setCategory(null)}
-            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-              category === null
-                ? 'bg-[var(--v2-brand)] text-white'
-                : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)] hover:bg-[var(--v2-border)]'
-            }`}
-          >
+          <FilterPill active={category === null} onClick={() => setCategory(null)}>
             All
-          </button>
+          </FilterPill>
           {categories.map((c) => (
-            <button
-              key={c}
-              onClick={() => setCategory(c)}
-              className={`rounded-full px-3 py-1 text-xs font-medium capitalize transition-colors ${
-                category === c
-                  ? 'bg-[var(--v2-brand)] text-white'
-                  : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)] hover:bg-[var(--v2-border)]'
-              }`}
-            >
-              {c}
-            </button>
+            <FilterPill key={c} active={category === c} onClick={() => setCategory(c)}>
+              <span className="capitalize">{c}</span>
+            </FilterPill>
           ))}
         </div>
       )}
 
-      {visible.length === 0 ? (
+      {emptyCatalog ? (
+        <EmptyState
+          title="No services listed yet"
+          body="The catalog is curated — new payable services appear here as they are verified."
+        />
+      ) : visible.length === 0 ? (
         <div className="rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-6 text-center">
-          <p className="text-sm font-medium text-[var(--v2-ink-2)]">
-            {typeof scope === 'number'
-              ? `No services on ${chainName(scope)} yet`
-              : 'No services match this filter'}
-          </p>
-          {typeof scope === 'number' && (
-            <button
-              onClick={() => setScope('all')}
-              className="mt-2 text-xs font-medium text-[var(--v2-brand)] hover:underline"
-            >
-              View all networks
-            </button>
+          {sourceFilter === 'ingestion' ? (
+            <>
+              <p className="text-sm font-medium text-[var(--v2-ink-2)]">
+                No verified listings yet
+              </p>
+              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+                List your payable service and it will appear here once verified.
+              </p>
+            </>
+          ) : sourceFilter === 'operator' ? (
+            <p className="text-sm font-medium text-[var(--v2-ink-2)]">
+              No operator-curated services yet
+            </p>
+          ) : (
+            <>
+              <p className="text-sm font-medium text-[var(--v2-ink-2)]">
+                {typeof scope === 'number'
+                  ? `No services on ${chainName(scope)} yet`
+                  : 'No services match this filter'}
+              </p>
+              {typeof scope === 'number' && (
+                <button
+                  onClick={() => setScope('all')}
+                  className="mt-2 text-xs font-medium text-[var(--v2-brand)] hover:underline"
+                >
+                  View all networks
+                </button>
+              )}
+            </>
           )}
         </div>
       ) : (
@@ -307,6 +386,12 @@ export default function CatalogPanel() {
           ))}
         </div>
       )}
+
+      <CatalogSubmitModal
+        open={submitOpen}
+        onClose={() => setSubmitOpen(false)}
+        onVerifiedPayable={() => void refetch()}
+      />
     </div>
   )
 }

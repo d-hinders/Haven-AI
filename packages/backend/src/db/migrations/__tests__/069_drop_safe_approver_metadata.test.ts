@@ -1,10 +1,10 @@
 /**
- * Real-Postgres proof for the `safe_approver_metadata` drop (migration 068,
+ * Real-Postgres proof for the `safe_approver_metadata` drop (migration 069,
  * #1990, epic #1440 slice 7). No mocks — #1219's rule: assertions about what
  * the database does belong on the real-DB harness.
  *
  * Note the ordering the harness imposes and what it buys. `initDbHarness()`
- * runs the FULL migration set, so by the time a test body runs, 068 has
+ * runs the FULL migration set, so by the time a test body runs, 069 has
  * already been applied and the table is already gone. That makes the
  * post-migration state — not a hand-driven `up()` — the thing under test,
  * which is the state production will actually be in. Where a test needs the
@@ -20,7 +20,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
-import { up, down, version } from '../068_drop_safe_approver_metadata.js'
+import { up, down, version } from '../069_drop_safe_approver_metadata.js'
 
 async function tableExists(name: string): Promise<boolean> {
   const { rows } = await db.query<{ exists: boolean }>(
@@ -54,7 +54,7 @@ async function seedUserSafe(n: number): Promise<{ userId: string; safeId: string
   return { userId, safeId: safe.rows[0].id }
 }
 
-describeDb('migration 068: drop safe_approver_metadata (#1990)', () => {
+describeDb('migration 069: drop safe_approver_metadata (#1990)', () => {
   beforeAll(async () => {
     await initDbHarness()
   })
@@ -274,10 +274,10 @@ describeDb('migration 068: drop safe_approver_metadata (#1990)', () => {
   })
 })
 
-describe('migration 068 registration', () => {
+describe('migration 069 registration', () => {
   it('exports up, down and a version matching its filename', () => {
     expect(typeof up).toBe('function')
     expect(typeof down).toBe('function')
-    expect(version).toBe('068_drop_safe_approver_metadata')
+    expect(version).toBe('069_drop_safe_approver_metadata')
   })
 })

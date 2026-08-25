@@ -1124,7 +1124,7 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
-          '409': errorResponse,
+          '409': { ...errorResponse, description: 'Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409.' },
           '502': errorResponse,
         },
       },
@@ -1171,7 +1171,7 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
-          '409': errorResponse,
+          '409': { ...errorResponse, description: 'Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409.' },
           '429': { ...errorResponse, description: 'Relayer gas budget exhausted — retry later.' },
           '500': { ...errorResponse, description: 'Stored owner config no longer derives the stored account address.' },
           '502': { ...errorResponse, description: 'Account deploy failed; the grant stays pending and activate can be retried.' },
@@ -5792,6 +5792,30 @@ export const openapiSpec = {
         },
       },
     },
+    '/catalog/submit/{id}': {
+      get: {
+        tags: ['Catalog'],
+        operationId: 'getCatalogSubmissionStatus',
+        summary: 'Public status of a catalogue submission (#1715).',
+        description:
+          'Coarse current state plus, while the domain-ownership proof is still valid, the exact well-known / DNS-TXT proof instructions. Deliberately minimal: the `verify_token` is never returned (it is a credential minted once at creation), and failures surface only as the coarse `failed` status — the granular SSRF/ownership reasons stay in server logs so this cannot become an internal-DNS oracle. 404 for an unknown id.',
+        security: [],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Submission status.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CatalogSubmissionStatus' },
+              },
+            },
+          },
+          '404': errorResponse,
+        },
+      },
+    },
     '/catalog/{id}': {
       get: {
         tags: ['Catalog'],
@@ -5947,7 +5971,7 @@ export const openapiSpec = {
         required: [
           'id', 'name', 'description', 'category', 'resource_url', 'rail', 'protocol', 'status',
           'tool_name', 'tool_arguments', 'price_display', 'price_atomic', 'asset', 'network',
-          'asset_transfer_methods', 'verified_at',
+          'asset_transfer_methods', 'verified_at', 'source', 'domain_verified', 'verified_payable',
         ],
         properties: {
           id: { type: 'string', format: 'uuid' },
@@ -5977,6 +6001,22 @@ export const openapiSpec = {
           },
           status: { type: 'string', enum: ['active', 'degraded', 'delisted'] },
           verified_at: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          source: {
+            type: 'string',
+            enum: ['operator', 'ingestion'],
+            description:
+              'Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches; no verification badges). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe.',
+          },
+          domain_verified: {
+            type: 'boolean',
+            description:
+              'True only for `ingestion` entries whose seller proved control of the endpoint domain. Always false for operator-curated rows, which have a different (operator) trust story.',
+          },
+          verified_payable: {
+            type: 'boolean',
+            description:
+              'True only for `ingestion` entries that a leader-locked, SSRF-hardened, read-only probe watched answer a real x402 quote. The badge claims domain-control AND verified-payable — never merchant honesty, quality, or settlement reliability.',
+          },
         },
       },
       CatalogSubmitRequest: {
@@ -6011,6 +6051,57 @@ export const openapiSpec = {
             // The de-duplicating response echoes the EXISTING row's state, which
             // by then may be further along than `submitted`.
             enum: ['submitted', 'ownership_verified', 'verified_payable'],
+          },
+        },
+        additionalProperties: false,
+      },
+      CatalogOwnershipInstructions: {
+        type: 'object',
+        required: ['expires_at', 'well_known', 'dns_txt'],
+        properties: {
+          expires_at: { type: 'string', format: 'date-time' },
+          well_known: {
+            type: 'object',
+            required: ['url', 'content', 'instruction'],
+            properties: {
+              url: { type: 'string' },
+              content: { type: 'string' },
+              instruction: { type: 'string' },
+            },
+            additionalProperties: false,
+          },
+          dns_txt: {
+            type: 'object',
+            required: ['name', 'value', 'instruction'],
+            properties: {
+              name: { type: 'string' },
+              value: { type: 'string' },
+              instruction: { type: 'string' },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      CatalogSubmissionStatus: {
+        type: 'object',
+        required: ['id', 'status', 'created_at', 'updated_at', 'last_verified_at', 'name', 'description', 'entrypoint'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          status: {
+            type: 'string',
+            enum: ['submitted', 'ownership_verified', 'verified_payable', 'failed', 'delisted'],
+          },
+          created_at: { type: 'string', format: 'date-time' },
+          updated_at: { type: 'string', format: 'date-time' },
+          last_verified_at: { anyOf: [{ type: 'string', format: 'date-time' }, { type: 'null' }] },
+          name: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          description: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          entrypoint: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          instructions: {
+            anyOf: [{ $ref: '#/components/schemas/CatalogOwnershipInstructions' }, { type: 'null' }],
+            description:
+              'Present while the submission can still prove ownership (submitted / ownership_verified) and the deployment has CATALOG_OWNERSHIP_SECRET set. Absent once verified_payable, failed or delisted — the proof is no longer actionable.',
           },
         },
         additionalProperties: false,

@@ -7,6 +7,7 @@ covers:
   - packages/backend/src/domain/chains.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
   - packages/backend/src/modules/catalog/catalog-discovery.ts
+  - packages/backend/src/modules/catalog/lifecycle.ts
   - packages/backend/src/modules/reporting/**
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
@@ -65,7 +66,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-25" # #1992: the "Haven runs two on-chain policy rails" line was false - the AllowanceModule rail is retired (#1986 410s, #1987/#1988/#1989 deletions), so there is ONE live rail. Corrected, and the backend component one-liner no longer advertises allowances/approvals as live surfaces. Scope: the rail paragraph and the components table row. Prior: #1984: the rail line said the legacy AllowanceModule rail was "import-only" — #1984 closes IMPORT too, so nothing enters it by any route; corrected to closed-to-new-accounts. The rest of the overview re-read against the diff: the delegation rail is still where new accounts are provisioned, and the custody boundary is unchanged. Prior: #1199: signer-removal recovery change re-verified; delegation authority overview unchanged
+last-verified: "2026-08-25"  #1992: the "Haven runs two on-chain policy rails" line was false - the AllowanceModule rail is retired (#1986 410s, #1987/#1988/#1989 deletions), so there is ONE live rail. Corrected, and the backend component one-liner no longer advertises allowances/approvals as live surfaces. Scope: the rail paragraph and the components table row. Prior: #1714 (epic #1717): catalogue ingestion lifecycle added to the catalog module — modules/catalog/lifecycle.ts drives the self-service submission queue (ownership proof → SSRF-hardened probe → re-verification → retention) on the new leader-locked catalogIngest monitor in index.ts; the operator-curated refresh and discovery are unchanged. Prior: #1984: the rail line said the legacy AllowanceModule rail was "import-only" — #1984 closes IMPORT too, so nothing enters it by any route; corrected to closed-to-new-accounts. The rest of the overview re-read against the diff: the delegation rail is still where new accounts are provisioned, and the custody boundary is unchanged. Prior: #1199: signer-removal recovery change re-verified; delegation authority overview unchanged
 ---
 
 # Haven — Architecture Overview

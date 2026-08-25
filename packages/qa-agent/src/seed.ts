@@ -55,6 +55,8 @@
  */
 
 import { ethers } from 'ethers'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // ── Base Sepolia (84532) constants ───────────────────────────────────────────
 // Source of truth: `@haven_ai/core`'s chain registry. Mirrored here to keep this
@@ -69,7 +71,7 @@ const USDC_DECIMALS = 6
 const HYBRID_ACCOUNT_TYPE = 'delegator_hybrid'
 
 // ── Config ───────────────────────────────────────────────────────────────────
-interface SeedConfig {
+export interface SeedConfig {
   apiUrl: string
   ownerKey: string
   delegateAddress: string
@@ -218,6 +220,35 @@ interface Agent {
   id: string
   name: string
   delegate_address: string | null
+  status: string | null
+}
+
+const REUSABLE_AGENT_STATUSES = new Set(['active', 'pending_approval'])
+
+/**
+ * Reuse only an agent whose current status is explicitly safe for the QA seed.
+ * A delegate address is spending authority, so a revoked (or unknown-status)
+ * row must never be silently bypassed by creating a new agent with that key.
+ */
+export async function findReusableAgent(
+  cfg: SeedConfig,
+  token: string,
+): Promise<Agent | undefined> {
+  const { agents } = await api<{ agents: Agent[] }>(cfg, 'GET', '/agents', { token })
+  const matchingDelegate = agents.filter(
+    (a) => a.delegate_address?.toLowerCase() === cfg.delegateAddress.toLowerCase(),
+  )
+  const disallowed = matchingDelegate.find((a) => !REUSABLE_AGENT_STATUSES.has(a.status ?? ''))
+  if (disallowed) {
+    const status = disallowed.status ?? 'missing'
+    throw new Error(
+      `QA agent ${disallowed.id} for SEED_DELEGATE_ADDRESS ${cfg.delegateAddress} has status ${JSON.stringify(status)}. ` +
+        'Refusing to reuse or create an agent with this delegate address. Rotate SEED_DELEGATE_ADDRESS, ' +
+        `or deliberately un-revoke (or otherwise restore) agent ${disallowed.id} before re-running the seed.`,
+    )
+  }
+
+  return matchingDelegate[0]
 }
 
 async function ensureAgent(
@@ -225,11 +256,8 @@ async function ensureAgent(
   token: string,
   account: SessionSafe,
   budgetAtomic: string,
+  existing: Agent | undefined,
 ): Promise<{ agentId: string; apiKey: string | null }> {
-  const { agents } = await api<{ agents: Agent[] }>(cfg, 'GET', '/agents', { token })
-  const existing = agents.find(
-    (a) => a.delegate_address?.toLowerCase() === cfg.delegateAddress.toLowerCase(),
-  )
   if (existing) {
     console.log(`  ✓ QA agent already exists (${existing.id}) — api key not re-shown`)
     return { agentId: existing.id, apiKey: null }
@@ -346,7 +374,7 @@ async function ensureBudget(
 }
 
 // ── Orchestration ────────────────────────────────────────────────────────────
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const cfg = loadSeedConfig()
   const owner = new ethers.Wallet(cfg.ownerKey)
   const budgetAtomic = ethers.parseUnits(cfg.budgetUsdc, USDC_DECIMALS).toString()
@@ -356,10 +384,14 @@ async function main(): Promise<void> {
 
   console.log('\n[1/4] QA user')
   const token = await ensureUser(cfg)
+  // Check the all-status agent list before provisioning a Hybrid account. A
+  // revoked or otherwise non-usable delegate must not trigger any account,
+  // agent, or delegation write while the seed is refusing to restore authority.
+  const existingAgent = await findReusableAgent(cfg, token)
   console.log('\n[2/4] QA account (Hybrid DeleGator, delegation rail)')
   const account = await ensureAccount(cfg, token, owner)
   console.log('\n[3/4] QA agent')
-  const { agentId, apiKey } = await ensureAgent(cfg, token, account, budgetAtomic)
+  const { agentId, apiKey } = await ensureAgent(cfg, token, account, budgetAtomic, existingAgent)
   console.log('\n[4/4] Budget delegation')
   await ensureBudget(cfg, token, agentId, budgetAtomic)
 
@@ -377,17 +409,17 @@ async function main(): Promise<void> {
     )
   }
   console.log(
-    '\n⚠ QA_AGENT_API_KEY / QA_DELEGATE_PRIVATE_KEY are NOT produced any more.\n' +
-      '  They named a legacy AllowanceModule identity, and that rail is retired:\n' +
-      '  no new Safe can be created (#1984) and an existing one cannot pay (#1986).\n' +
-      '  `loadQaConfig` still requires them — removing that, and the three legacy\n' +
-      '  legs in run.ts they feed, is tracked separately (see #2007).',
+    '\nThe QA harness uses the delegation identity above. It does not require\n' +
+      'legacy AllowanceModule credentials (`QA_AGENT_API_KEY` or\n' +
+      '`QA_DELEGATE_PRIVATE_KEY`).',
   )
   console.log('\nAccount (fund with Base Sepolia USDC): ' + account.safe_address)
   console.log('Done.')
 }
 
-main().catch((e) => {
-  console.error('\n✗ seed failed:', e instanceof Error ? e.message : e)
-  process.exitCode = 1
-})
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((e) => {
+    console.error('\n✗ seed failed:', e instanceof Error ? e.message : e)
+    process.exitCode = 1
+  })
+}

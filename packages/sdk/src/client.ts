@@ -42,7 +42,9 @@ import type {
   HavenAllowanceSummary,
   PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
+  CatalogSubmissionAccepted,
   HavenCatalogEntry,
+  HavenCatalogSubmission,
   RawCatalogEntry,
   AgentPaymentWarning,
 } from './types.js'
@@ -152,6 +154,9 @@ function mapCatalogEntry(entry: RawCatalogEntry): HavenCatalogEntry {
     network: entry.network,
     status: entry.status,
     verifiedAt: entry.verified_at,
+    source: entry.source,
+    domainVerified: entry.domain_verified,
+    verifiedPayable: entry.verified_payable,
   }
 }
 
@@ -687,14 +692,25 @@ export class HavenClient {
   }
 
   /**
-   * Discover payable services from Haven's curated merchant catalog.
+   * Discover payable services from Haven's merchant catalog (epic #1717).
    *
    * Read-only: returns catalog entries (price, rail, protocol) so an agent
    * can choose a service and pay it with the regular payment tools in the
    * same session. Never creates payments or signatures.
    */
   async discoverTools(
-    options: { category?: string; search?: string; rail?: 'x402' | 'mpp' } = {},
+    options: {
+      category?: string
+      search?: string
+      rail?: 'x402' | 'mpp'
+      /**
+       * Filter on the entry's provenance (epic #1717): `'verified'` returns
+       * only self-submitted, domain-verified, probe-verified directory
+       * entries; `'operator'` only the operator-curated ones; `'any'` (the
+       * default) returns the merged listing.
+       */
+      verified?: 'any' | 'verified' | 'operator'
+    } = {},
   ): Promise<HavenCatalogEntry[]> {
     const params = new URLSearchParams()
     if (options.category) params.set('category', options.category)
@@ -702,7 +718,54 @@ export class HavenClient {
     if (options.rail) params.set('rail', options.rail)
     const query = params.size > 0 ? `?${params.toString()}` : ''
     const raw = await this.get<{ entries: RawCatalogEntry[] }>(`/catalog${query}`)
-    return raw.entries.map(mapCatalogEntry)
+    let entries = raw.entries.map(mapCatalogEntry)
+    if (options.verified === 'verified') entries = entries.filter((e) => e.source === 'ingestion')
+    if (options.verified === 'operator') entries = entries.filter((e) => e.source === 'operator')
+    return entries
+  }
+
+  /**
+   * Submit a merchant's payable (x402/MCP) endpoint to the Verified Payable
+   * Directory (epic #1717, #1716). Queue-only: writes a submission row and
+   * returns the id + verify_token. The request path makes no outbound
+   * request; domain-ownership proof and the read-only quote probe run later
+   * on the leader-locked monitor. Ownership proof is ALWAYS required before
+   * any listing — this method cannot skip it. `website` is a honeypot field
+   * that bots fill; leave it unset.
+   */
+  async submitCatalogEntry(
+    resourceUrl: string,
+    options: { website?: string } = {},
+  ): Promise<HavenCatalogSubmission> {
+    const accepted = await this.post<CatalogSubmissionAccepted>('/catalog/submit', {
+      resource_url: resourceUrl,
+      ...(options.website ? { website: options.website } : {}),
+    })
+    return {
+      id: accepted.id,
+      verifyToken: accepted.verify_token,
+      status: accepted.status,
+    }
+  }
+
+  /**
+   * Fetch one submission's coarse status by id (epic #1717, #1716). Public
+   * and read-only. While the submission can still prove ownership the
+   * response carries the exact well-known / DNS-TXT `instructions`; the
+   * verify token is never returned here.
+   */
+  async getCatalogSubmissionStatus(
+    id: string,
+  ): Promise<{
+    id: string
+    status: 'submitted' | 'ownership_verified' | 'verified_payable' | 'failed' | 'delisted'
+    instructions?: {
+      expires_at: string
+      well_known: { url: string; content: string; instruction: string }
+      dns_txt: { name: string; value: string; instruction: string }
+    } | null
+  }> {
+    return this.get(`/catalog/submit/${encodeURIComponent(id)}`)
   }
 
   /**

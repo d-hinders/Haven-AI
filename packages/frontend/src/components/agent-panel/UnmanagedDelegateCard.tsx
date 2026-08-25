@@ -1,10 +1,12 @@
 'use client'
 
-import { Clock, Copy, TriangleAlert } from 'lucide-react'
+import { useState } from 'react'
+import { Clock, TriangleAlert } from 'lucide-react'
+import ConfirmDialog from '../ConfirmDialog'
+import { Address } from '@/components/haven/Address'
 import { Icon } from '@/components/ui/Icon'
 import { type AllowanceInfo } from '@/lib/allowance-module'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { truncate } from '@/lib/format'
 import { AllowanceBar } from './AllowanceBar'
 
 export function UnmanagedDelegateCard({
@@ -13,6 +15,8 @@ export function UnmanagedDelegateCard({
   chainTimeSec,
   chainId = DEFAULT_CHAIN_ID,
   pendingHavenSetup = false,
+  onRevoke,
+  revoking = false,
 }: {
   delegate: string
   allowances: AllowanceInfo[]
@@ -25,7 +29,17 @@ export function UnmanagedDelegateCard({
    * than implying it was created outside Haven.
    */
   pendingHavenSetup?: boolean
+  /**
+   * On-chain teardown of this delegate's spending authority (#1980). Same
+   * Safe transaction as a managed agent's revoke — the AllowanceModule keys
+   * authority on the address alone. Hidden on the pendingHavenSetup branch:
+   * that delegate is mid-setup through Haven, and tearing it down here would
+   * fight the setup flow that is about to adopt it.
+   */
+  onRevoke?: () => void
+  revoking?: boolean
 }) {
+  const [revokeOpen, setRevokeOpen] = useState(false)
   // Neutral tone while a Haven setup is still confirming; warning tone for a
   // genuinely external delegate that needs the user's attention.
   const accentText = pendingHavenSetup ? 'text-[var(--v2-ink-2)]' : 'text-[var(--v2-warning)]'
@@ -33,6 +47,7 @@ export function UnmanagedDelegateCard({
     ? 'border-[var(--v2-border)] bg-[var(--v2-surface)]'
     : 'border-warning/25 bg-[var(--v2-warning-soft)]'
   return (
+    <>
     <div className={`rounded-[10px] border border-dashed p-5 ${containerCls}`}>
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
@@ -62,16 +77,7 @@ export function UnmanagedDelegateCard({
         <p className={`mb-1 text-xs font-medium ${accentText}`}>
           Signing address
         </p>
-        <p className="text-xs font-mono text-[var(--v2-ink-2)]">
-          {truncate(delegate)}
-          <button
-            onClick={() => navigator.clipboard.writeText(delegate)}
-            className={`ml-2 transition-colors hover:text-[var(--v2-ink)] ${accentText}`}
-            title="Copy address"
-          >
-            <Icon icon={Copy} className="h-3 w-3" />
-          </button>
-        </p>
+        <Address value={delegate} copy className="text-xs text-[var(--v2-ink-2)]" />
       </div>
 
       {/* On-chain allowances */}
@@ -83,6 +89,48 @@ export function UnmanagedDelegateCard({
           ))}
         </div>
       )}
+
+      {/* #1980: a surface showing live spending authority must answer "how do
+          I stop it" — this card is the destination /custody's "Revoke an agent
+          on-chain from Agents" copy points at. Same footer idiom as AgentCard. */}
+      {!pendingHavenSetup && onRevoke && (
+        <div className="flex items-center gap-2 mt-4 pt-3 pb-1 border-t border-warning/25">
+          <button
+            onClick={() => setRevokeOpen(true)}
+            disabled={revoking}
+            aria-label={`Revoke delegate ${delegate}`}
+            className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80"
+          >
+            {revoking ? 'Revoking...' : 'Revoke'}
+          </button>
+        </div>
+      )}
     </div>
+
+    <ConfirmDialog
+      open={revokeOpen}
+      onCancel={() => setRevokeOpen(false)}
+      onConfirm={() => {
+        setRevokeOpen(false)
+        onRevoke?.()
+      }}
+      title="Revoke this delegate?"
+      body={
+        <div className="space-y-3">
+          <p>
+            This delegate was set up outside Haven, but it can spend from this Haven account within the budget shown. Revoking removes its network spending authority.
+          </p>
+          <div className="rounded-lg border border-danger/15 bg-[var(--v2-danger-soft)] px-3 py-3 text-[var(--v2-ink-2)]">
+            <p className="text-xs font-medium text-[var(--v2-danger)] mb-1">What happens next</p>
+            <p className="text-xs leading-relaxed">
+              You&apos;ll be asked to approve the update that removes this delegate&apos;s spending access. Its budget ends on the network itself, so nothing set up outside Haven can restore it without your approval.
+            </p>
+          </div>
+        </div>
+      }
+      confirmLabel="Revoke delegate"
+      loading={revoking}
+    />
+    </>
   )
 }

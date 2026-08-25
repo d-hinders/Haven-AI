@@ -1094,6 +1094,16 @@ test.describe('agent panel empty states and card banners', () => {
         `capture would show the bar's container and never the fill colour it ` +
         `exists to prove. Check UNMANAGED_LAST_RESET_MIN.`,
     ).toBeGreaterThan(0)
+
+    // #1980: the card answers "how do I stop this authority" with a control,
+    // not a copy button. /custody's "Revoke an agent — or an unmanaged
+    // delegate — on-chain from Agents" copy points HERE, so a card without
+    // this control makes that copy a lie again.
+    await expect(
+      card.getByRole('button', { name: `Revoke delegate ${UNMANAGED_DELEGATE}` }),
+      `${label}: the revoke affordance is missing — this card shows live ` +
+        `spending authority and must answer how the user stops it (#1980).`,
+    ).toBeVisible()
   }
 
   test('agent panel unmanaged delegate — set up outside Haven', async ({ page }) => {
@@ -1122,6 +1132,31 @@ test.describe('agent panel empty states and card banners', () => {
 
     await expectNoSkeletons(card, 'UnmanagedDelegateCard · network only')
     await expect(card).toHaveScreenshot('unmanaged-delegate-card-desktop.png', SNAPSHOT_OPTIONS)
+  })
+
+  test('unmanaged delegate revoke goes through the confirm pattern (#1980)', async ({ page }) => {
+    await seedPanel(page, { agents: [] })
+    const chain = await seedChain(page, answerUnmanagedChainRead)
+    await gotoDesktop(page, '/agents')
+    await expectChainServed(chain, 'UnmanagedDelegateCard · revoke confirm')
+
+    const card = unmanagedCard(page)
+    await expect(card).toHaveCount(1)
+
+    // The affordance, then the established destructive-confirm pattern: the
+    // button alone commits NOTHING — the dialog stands between the click and
+    // the Safe transaction, exactly as AgentCard's revoke does.
+    await card.getByRole('button', { name: `Revoke delegate ${UNMANAGED_DELEGATE}` }).click()
+    await expect(page.getByText('Revoke this delegate?')).toBeVisible()
+    // Money copy, not decoration: the dialog names the authority being
+    // removed and that the user approves the update.
+    await expect(page.getByText(/Revoking removes its network spending authority/)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Revoke delegate', exact: true })).toBeVisible()
+
+    // Cancel: the card is still there, no state changed, no tx was attempted.
+    await page.getByRole('button', { name: 'Cancel' }).click()
+    await expect(page.getByText('Revoke this delegate?')).toHaveCount(0)
+    await expect(card).toHaveCount(1)
   })
 
   // ── 390px — GEOMETRY ONLY, deliberately no capture ────────────────────────

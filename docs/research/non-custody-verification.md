@@ -170,12 +170,14 @@ forwards a rejection verbatim with nothing written.
 > missed eight: namespace import, dynamic `import()` (destructured or whole),
 > a computed dynamic specifier, `createRequire(…)('…')`, `export { … } from`,
 > `export * from`, side-effect `import '…'`, and a named clause in **double**
-> quotes. It now parses `routes/payments.ts` with the TypeScript parser and
+> quotes — plus, orthogonal to clause form, a query-suffixed specifier
+> (`…/allowance-module.js?bust=1`), which Node's ESM loader resolves to the
+> same module. It now parses `routes/payments.ts` with the TypeScript parser and
 > asserts five ordered rules — no banned name bound, none re-exported, no
 > static reference to a retired-rail module in any clause form, none named in
 > any runtime `import()`/`require()`, and no computed dynamic specifier on this
 > route at all. Each of the nine shapes was mutation-proven to redden **its own
-> named line**, confirmed landed by diff before its colour was read; an
+> named line** — ten in all, confirmed landed by diff before each colour was read; an
 > unrelated edit on the payment path SURVIVED, 6/6 green. Parsing keeps the
 > property the regex existed for: comments are not AST nodes, so prose naming a
 > retired symbol still cannot make it red. **Still not seen, and named in the

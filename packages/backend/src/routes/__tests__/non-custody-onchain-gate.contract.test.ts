@@ -236,10 +236,19 @@ const BANNED_MODULES = [
   'infra/repositories/allowance-nonce-watermarks',
 ] as const
 
-/** Which of `specs` name a retired-rail module, extension- and prefix-agnostic. */
+/**
+ * Which of `specs` name a retired-rail module — agnostic to extension, to how
+ * deep the relative prefix is, and to a URL query/hash suffix.
+ *
+ * The suffix strip is not decoration: Node's ESM loader treats
+ * `import('../rails/allowance-module.js?bust=1')` as a real load of that module
+ * (the standard cache-busting idiom), so a specifier that ends in a query would
+ * otherwise re-import the arithmetic past a rule that only knew about `.js`.
+ * Mutation-proven, not reasoned about (#2049).
+ */
 function bannedModuleRefs(specs: Iterable<string>): string[] {
   return [...specs].filter((s) => {
-    const normalized = s.replace(/\.(m?[jt]s)$/, '')
+    const normalized = s.split(/[?#]/)[0].replace(/\.(m?[jt]s)$/, '')
     return BANNED_MODULES.some((b) => normalized === b || normalized.endsWith(`/${b}`))
   })
 }
@@ -295,7 +304,9 @@ type PaymentPathImports = {
  * whole-namespace), a computed dynamic specifier, `createRequire`-style
  * `require('…')`, `export { … } from`, `export * from`, side-effect `import '…'`,
  * and — not in the ticket, found while measuring — a perfectly ordinary named
- * clause written with DOUBLE quotes. A regex grown to cover eight cases is
+ * clause written with DOUBLE quotes. Orthogonal to all eight, a specifier can
+ * also carry a URL query suffix (`…/allowance-module.js?bust=1`), which Node's
+ * ESM loader resolves to the same module. A regex grown to cover eight cases is
  * itself hard to falsify, and it stops matching silently when a ninth appears.
  *
  * ⚠️ **What this still does NOT see, named here so it cannot be over-read.**

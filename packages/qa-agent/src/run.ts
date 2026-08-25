@@ -9,9 +9,7 @@
  * Config: the QA_* env (see packages/qa-agent/README.md + docs/operations/agent-qa.md).
  */
 
-import { ethers } from 'ethers'
 import { loadQaConfig, QaConfigError } from './config.js'
-import { HavenApi } from './lib/haven-api.js'
 import type { Scenario, ScenarioContext, ScenarioResult } from './scenarios/types.js'
 import { withinBudgetSettle } from './scenarios/within-budget-settle.js'
 import { overBudgetRefused } from './scenarios/over-budget-refused.js'
@@ -124,25 +122,14 @@ async function main(): Promise<void> {
     throw e
   }
 
-  // #2016 left `api`, `delegateKey` and `delegateAddress` here UNUSED: every
+  // #2011 removes the retired legacy identity from the harness: every
   // leg now builds its own `HavenApi` on the delegation identity, and no
   // scenario reads the legacy fields. One consumer survives outside the
-  // scenarios — `preflight.ts` reads `cfg.delegateKey` for the legacy
-  // delegate-residual line — so #2011 has two call sites to remove, not one. They are deliberately not removed in
-  // this change — `QA_AGENT_API_KEY` / `QA_DELEGATE_PRIVATE_KEY` are still
-  // `required` in `loadQaConfig`, and dropping that requirement is #2011's
-  // coverage decision, not this one's. Removing the fields without the config
-  // change would leave the harness demanding two credentials nothing reads at
-  // all, which is a worse resting state than one that at least says why.
-  const ctx: ScenarioContext = {
-    cfg,
-    api: new HavenApi(cfg),
-    delegateKey: cfg.delegateKey,
-    delegateAddress: new ethers.Wallet(cfg.delegateKey).address,
-  }
+  // scenarios — the only legacy preflight residual check is removed with the
+  // dead config fields. Every scenario builds its own delegation identity.
+  const ctx: ScenarioContext = { cfg }
 
   console.log(`Haven money-flow QA → ${cfg.apiUrl}`)
-  console.log(`  delegate ${ctx.delegateAddress}\n`)
 
   // #1530: state the preconditions BEFORE the first leg. The harness used to
   // assert only what happened during a run, so an exhausted merchant

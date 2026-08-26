@@ -63,7 +63,7 @@ const HOW_IT_WORKS = [
 const POLICY_METRICS = [
   { value: '$500', label: 'Daily budget' },
   { value: 'USDC', label: 'Allowed currencies' },
-  { value: 'On-chain', label: 'Budget enforcement' },
+  { value: '0', label: 'Approval queues' },
   { value: '100%', label: 'Audited payments' },
 ]
 

@@ -1,7 +1,7 @@
 ---
 owner: "@d-hinders"
 status: archived
-covers: []
+covers: []  # archived investigation record — the code it described has moved on; kept as history, not as a description of current behaviour
 last-verified: "2026-07-01"
 ---
 

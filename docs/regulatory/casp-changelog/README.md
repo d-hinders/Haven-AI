@@ -1,7 +1,7 @@
 ---
 owner: "@AntonioSaaranen"
 status: current
-covers: []
+covers: []  # index and naming convention for the shard directory — it describes how shards are written, not any code path
 last-verified: "2026-08-22" # #1789: release shards are named for the VERSION, not the PR number — the PR-number convention was unsatisfiable in principle (the gate blocks the PR until the shard exists, so the number cannot be known when the name is needed) and cost the 0.1.29-alpha.0 cut a wrong guess plus a correcting commit. Issue shards are unchanged; existing shards keep their names; the release/SKILL.md and scripts/README.md copies now say the same thing. Body re-read against the gate: the satisfied-by claim and the no-front-matter exemption still hold. Prior: created for #1366 — the sharded CASP verification log
 ---
 

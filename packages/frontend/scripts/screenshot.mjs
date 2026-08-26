@@ -415,18 +415,6 @@ export const FIXTURE_AGENTS = [
   },
 ]
 
-export const FIXTURE_APPROVALS = [{
-  id: 'appr-1', agent_id: 'agent-ops', agent_name: 'Ops agent',
-  safe_address: FIXTURE_SAFE.safe_address, chain_id: FIXTURE_SAFE.chain_id,
-  token_symbol: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-  to_address: ADDR.recipient, amount_raw: '750000000', amount_human: '750.00',
-  reason: 'Quarterly vendor invoice exceeds the daily budget',
-  source: 'api', x402_resource_url: null, merchant_address: null,
-  payment_rail: null, payment_resource_url: null,
-  status: 'pending', created_at: '2026-07-10T07:45:00.000Z',
-  expires_at: '2026-07-11T07:45:00.000Z', tx_hash: null, reviewed_at: null,
-}]
-
 const FIXTURE_PORTFOLIO = {
   totalUsd: 12_640.55, totalEur: 11_690.21,
   breakdown: [
@@ -537,13 +525,10 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname.startsWith('/portfolio/')) return FIXTURE_PORTFOLIO
   if (pathname.startsWith('/balances/')) return FIXTURE_BALANCES
   if (pathname === '/agents') return { agents: FIXTURE_AGENTS }
-  // `/approvals` still answers here even though the route is deleted (#1989):
-  // the fixture is keyed by API path, and `GET /approvals` remains a live,
-  // READABLE backend endpoint under the epic's accounts-and-history boundary.
-  // No capture navigates to it any more.
-  if (pathname === '/approvals') {
-    return { approvals: FIXTURE_APPROVALS, actionable_count: 1, pending_count: 1 }
-  }
+  // `/approvals` is NOT keyed here. #1989 deleted the route and #2055
+  // deregistered the backend endpoint outright — the "still a live, READABLE
+  // endpoint" this fixture used to claim stopped being true with the table
+  // drop. Unkeyed paths fall through to FIXTURE_EMPTY_FALLBACK (#1993).
   if (pathname === '/contacts') return { contacts: FIXTURE_CONTACTS }
   if (pathname === '/agent-activity/feed') {
     return { activity: FIXTURE_AGENT_ACTIVITY, pending_approvals: FIXTURE_AGENT_STATS.pending_approvals }
@@ -1096,8 +1081,8 @@ async function newFixtureContext(browser, vp, scenario) {
     const populated = fixtureFor(api + search)
     if (populated !== null) return json(populated)
     // Anything unkeyed → a benign empty shape carrying every collection
-    // key the hooks read, so a missing key never throws (e.g. useApprovals
-    // reads `.approvals`, which it then `.filter`s).
+    // key the hooks read, so a missing key never throws (e.g. a hook that
+    // reads `.contacts`, which it then `.filter`s).
     return json(FIXTURE_EMPTY_FALLBACK)
   })
 

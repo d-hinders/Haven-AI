@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/middleware/agentAuth.ts
   - packages/connect/src/runtime.ts
   - packages/backend/src/modules/fee/fee-module.ts
-last-verified: "2026-08-23" # #1699: doc 11's one-line summary gains re-anchoring, since that doc now carries a section on it; the index was otherwise re-read row by row against the files it points at and every other summary still describes its doc. No structural change. Prior: #1615: re-verified after SDK module-ownership coverage updates; architecture index unchanged. Prior: #1199 signer-removal recovery clarification
+last-verified: "2026-08-24" # #1714 (epic #1717): index re-read against the three architecture docs updated by the catalogue-ingestion lifecycle slice — 00-overview (covers + note), 05-openapi (SI4 ships no contract change) and 10-module-boundaries (catalog module grew lifecycle.ts); every row below still describes its doc. No structural change Prior: last-verified: "2026-08-24" # Prior: last-verified: "2026-08-25" # #1992: "Two policy rails coexist" was false — the AllowanceModule rail is retired, not merely closed to new accounts (#1986 410s, #1987/#1988/#1989 deletions), so the index now says ONE live rail and frames docs 1-5 as a historical baseline. Flagged by the coupling gate as implicated by this slice's edits to docs 1, 2, 3 and 11. Scope: that bullet; the per-doc summary rows were re-read against the docs they point at and none moved. Prior: #1984: "import-only" corrected in the index summary. Every other row re-read against the doc it points at; no summary moved. Prior: #1699: doc 11's one-line summary gains re-anchoring, since that doc now carries a section on it; the index was otherwise re-read row by row against the files it points at and every other summary still describes its doc. No structural change. Prior: #1615: re-verified after SDK module-ownership coverage updates; architecture index unchanged. Prior: #1199 signer-removal recovery clarification
 ---
 
 # Haven — Architecture
@@ -82,10 +82,13 @@ done
   x402 supports Base and Base Sepolia.
 - **API-key agents only.** (An earlier self-sign / EIP-191 agent path was
   removed — it is no longer part of the codebase.)
-- **Two policy rails coexist.** Docs 1–5 primarily describe the
-  **legacy AllowanceModule rail** (import-only, existing accounts). The Smart
-  Sessions **session rail is retired** (#834): `session_key` accounts get
-  HTTP 410 from the payment paths. New accounts run on the
+- **One live policy rail.** Docs 1–5 primarily describe the
+  **legacy AllowanceModule rail**, which is **RETIRED** (#1440): closed to new
+  accounts (#1984), HTTP 410 on every payment and x402 entry point (#1986), and
+  its machinery deleted (#1987/#1988/#1989). Existing Safe accounts stay
+  READABLE but cannot spend, so read those docs as a historical baseline. The
+  Smart Sessions **session rail is retired** too (#834): `session_key` accounts
+  get HTTP 410 from the payment paths. Every account that can spend runs on the
   **delegation rail** (epic #821, `account_type='delegator_hybrid'`,
   `execution_rail='delegation'`): a MetaMask Hybrid DeleGator smart account whose
   budget is a signed delegation with audited caveat enforcers, redeemed via the

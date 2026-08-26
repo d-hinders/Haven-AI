@@ -1,7 +1,7 @@
 /**
  * Data access for the transaction-history read model (#992, epic #980 M4):
  * the Safe list and agent list that drive aggregation, the machine-payment
- * agent-attribution lookups (`payment_intents` / `approval_requests` /
+ * agent-attribution lookups (`payment_intents` / delegate sweeps /
  * `delegate_sweeps`), the confirmed x402 funding lookups, the Safe-ownership
  * check behind `/transactions/:safeAddress`, and the single-evidence-row
  * lookup behind `/transactions/payment-intents/:paymentId/evidence`.
@@ -299,49 +299,9 @@ export async function findPaymentIntentAgentMatches(
   return result.rows
 }
 
-export const FIND_APPROVAL_REQUEST_AGENT_MATCHES_SQL = `SELECT ar.id,
-              LOWER(ar.tx_hash) AS tx_hash,
-              us.id AS safe_id,
-              us.chain_id AS chain_id,
-              ar.agent_id,
-              a.name AS agent_name,
-              COALESCE(ar.payment_rail, ar.source, 'direct') AS source,
-              COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS payment_resource_url,
-              ar.merchant_address,
-              mpe.proof_status AS payment_proof_status,
-              mpe.amount_sek AS amount_sek,
-              mpre.event_type AS payment_reconciliation_event_type
-       FROM approval_requests ar
-       JOIN agents a ON a.id = ar.agent_id
-       LEFT JOIN machine_payment_evidence mpe ON mpe.approval_request_id = ar.id
-       LEFT JOIN machine_payment_reconciliation_events mpre
-         ON mpre.approval_request_id = ar.id
-        AND mpre.status = 'open'
-        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
-       JOIN user_safes us
-         ON us.user_id = ar.user_id
-        AND us.id = ANY($3)
-        AND LOWER(us.safe_address) = LOWER(ar.safe_address)
-        AND ar.chain_id IS NOT NULL
-        AND us.chain_id = ar.chain_id
-       WHERE LOWER(ar.tx_hash) = ANY($1)
-         AND ar.user_id = $2
-         AND COALESCE(ar.payment_rail, ar.source) = 'x402'
-         AND ar.status = 'executed'`
-
-/** Same tenant-scoping contract as `findPaymentIntentAgentMatches`. */
-export async function findApprovalRequestAgentMatches(
-  txHashes: string[],
-  userId: string,
-  safeIds: string[],
-  db: Executor = pool,
-): Promise<ApprovalRequestAgentRow[]> {
-  const result = await db.query<ApprovalRequestAgentRow>(
-    FIND_APPROVAL_REQUEST_AGENT_MATCHES_SQL,
-    [txHashes, userId, safeIds],
-  )
-  return result.rows
-}
+// #2055: `FIND_APPROVAL_REQUEST_AGENT_MATCHES_SQL` /
+// `findApprovalRequestAgentMatches` are gone with `approval_requests` — the
+// enrichment attribution pass runs on payment intents and sweeps alone.
 
 export const FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL = `SELECT ds.id,
               LOWER(ds.tx_hash) AS tx_hash,
@@ -433,58 +393,9 @@ export async function findConfirmedX402PaymentIntents(
   return result.rows
 }
 
-export const FIND_CONFIRMED_X402_APPROVAL_REQUESTS_SQL = `SELECT ar.id,
-            ar.tx_hash,
-            ar.agent_id,
-            a.name AS agent_name,
-            us.id AS safe_id,
-            us.safe_address,
-            us.name AS safe_name,
-            COALESCE(ar.chain_id, us.chain_id) AS chain_id,
-            ar.token_symbol,
-            ar.token_address,
-            ar.to_address,
-            ar.amount_raw,
-            ar.amount_human,
-            ar.merchant_address,
-            COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS payment_resource_url,
-            mpe.proof_status AS payment_proof_status,
-            mpe.amount_sek AS amount_sek,
-            ar.machine_metadata->>'settlement_scheme' AS settlement_scheme,
-            mpre.event_type AS payment_reconciliation_event_type,
-            ar.executed_at,
-            ar.created_at
-     FROM approval_requests ar
-     JOIN agents a ON a.id = ar.agent_id
-     LEFT JOIN machine_payment_evidence mpe ON mpe.approval_request_id = ar.id
-     LEFT JOIN machine_payment_reconciliation_events mpre
-       ON mpre.approval_request_id = ar.id
-      AND mpre.status = 'open'
-      AND mpre.event_type = 'merchant_retry_rejected_after_payment'
-     JOIN user_safes us
-       ON us.user_id = ar.user_id
-      AND us.id = ANY($2)
-      AND LOWER(us.safe_address) = LOWER(ar.safe_address)
-      AND ar.chain_id IS NOT NULL
-      AND us.chain_id = ar.chain_id
-     WHERE ar.user_id = $1
-       AND COALESCE(ar.payment_rail, ar.source) = 'x402'
-       AND ar.status = 'executed'
-       AND ar.tx_hash IS NOT NULL
-     ORDER BY COALESCE(ar.executed_at, ar.created_at) DESC`
-
-/** Same tenant-scoping contract as `findConfirmedX402PaymentIntents`. */
-export async function findConfirmedX402ApprovalRequests(
-  userId: string,
-  safeIds: string[],
-  db: Executor = pool,
-): Promise<X402ApprovalRequestRow[]> {
-  const result = await db.query<X402ApprovalRequestRow>(
-    FIND_CONFIRMED_X402_APPROVAL_REQUESTS_SQL,
-    [userId, safeIds],
-  )
-  return result.rows
-}
+// #2055: `FIND_CONFIRMED_X402_APPROVAL_REQUESTS_SQL` /
+// `findConfirmedX402ApprovalRequests` are gone with `approval_requests` —
+// confirmed x402 history is payment_intents alone.
 
 // ── Machine-payment evidence detail ─────────────────────────────────────────
 
@@ -517,16 +428,17 @@ export const FIND_MACHINE_PAYMENT_EVIDENCE_DETAIL_SQL = `SELECT mpe.id,
                 mpe.created_at,
                 mpe.updated_at
          FROM machine_payment_evidence mpe
-         LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
-         LEFT JOIN approval_requests ar ON ar.id = mpe.approval_request_id
-         WHERE (mpe.payment_intent_id = $1 OR mpe.approval_request_id = $1)
-           AND COALESCE(pi.user_id, ar.user_id) = $2
+         JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
+         WHERE mpe.payment_intent_id = $1
+           AND pi.user_id = $2
          LIMIT 1`
 
 /**
- * `userId` is REQUIRED — the evidence row belongs to whichever of
- * `payment_intents` / `approval_requests` it's anchored on, and that row's
- * `user_id` is the tenant scope.
+ * `userId` is REQUIRED — the anchoring payment intent's `user_id` is the
+ * tenant scope. #2055: the `approval_requests` anchor half is gone with the
+ * table; historical approval-anchored evidence rows keep their
+ * `approval_request_id` column value but are no longer reachable through
+ * this route (queue-history readability waived, owner decision on #2021).
  */
 export async function findMachinePaymentEvidenceDetail(
   paymentId: string,

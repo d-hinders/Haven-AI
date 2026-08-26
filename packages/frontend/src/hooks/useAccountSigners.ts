@@ -68,7 +68,7 @@ export function useAccountSigners(safeAddress: string, chainId: number, userEmai
   // Device decision, not account-shape decision (the multi-signer fix): an
   // account with both an owner and passkeys signs with whichever is reachable
   // from here — enrolling a backup wallet must never strand the passkey.
-  const signingPath = pickSigningPath(signers, signer?.type === 'eoa')
+  const signingPath = pickSigningPath(signers, signer?.type === 'eoa' ? signer.address : null)
 
   /** Sign the prepared op with the account's kind of signer (never Haven). */
   const signPrepared = useCallback(

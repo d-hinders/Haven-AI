@@ -356,6 +356,98 @@ export async function markCompleted(
   return result.rows[0] ?? null
 }
 
+/**
+ * Adopt an abandoned predecessor's frozen carry into a fresh re-key (#1868).
+ *
+ * The wedge this exists for: a re-key abandoned AFTER the revoke has already
+ * retired the agent's delegations on-chain, so a fresh re-key finds nothing
+ * to revoke and — before this — walked to `metered` with an EMPTY snapshot.
+ * The abandoned row's measurement was taken after that on-chain revoke, per
+ * the #1694 ordering, and the chain cannot have moved for a revoked
+ * delegation since: the frozen remainder is still exactly true. Adopting it
+ * is what lets "abandon, then start again with a fresh key" restore the
+ * agent's authority with the period boundary intact, instead of forfeiting
+ * the remainder and requiring a manual owner re-grant.
+ *
+ * ## The abandonment signal
+ *
+ * `p.stage = 'abandoned'` — the owner's explicit abandon call, never elapsed
+ * time. A merely slow re-key is still in flight, still holds the
+ * `idx_agent_rekeys_one_in_flight` slot, and is therefore structurally
+ * unreachable here: a fresh re-key cannot even open while it lives, so
+ * nothing can adopt out from under it. There is deliberately no
+ * `NOW() - metered_at` anywhere in this predicate — a timeout that guessed
+ * wrong on a live re-key would fail OPEN on a money path, where the wedge at
+ * least failed closed.
+ *
+ * ## The timestamps are INHERITED, not re-stamped
+ *
+ * `metered_at` anchors every piece of the carry arithmetic to the period the
+ * remainder was measured in (#1849). Stamping adoption time over it would
+ * attribute the remainder to whatever period the owner's SECOND attempt fell
+ * in — the exact defect #1849 closed, re-created through a side door. So the
+ * row inherits the predecessor's `revoked_at`, `metered_at` and
+ * `revoke_tx_hash` wholesale: they describe the one revoke that actually
+ * happened on-chain, which this fresh row is the continuation of. The
+ * inherited pair satisfies `agent_rekeys_meter_after_revoke_check` because
+ * the predecessor's did.
+ *
+ * ## The over-grant guard
+ *
+ * Adoption is REFUSED when any delegation was granted to the agent after the
+ * predecessor's revoke, other than the inert `pending` rows an abandoned
+ * re-key's own issue step left behind (those can never activate — completion
+ * requires stage `issued`, and `abandoned` is terminal). Without this, the
+ * sequence "abandon at metered → owner manually re-grants → agent spends →
+ * owner revokes → re-key again" would hand the agent the OLD remainder on
+ * top of a full budget already spent in the same period. A refusal here
+ * falls back to today's empty walk: authority stays lost until the owner
+ * re-grants, which is the fail-closed direction.
+ *
+ * `stage = 'abandoned'` is also what keeps a COMPLETED re-key's snapshot out:
+ * its carry was already issued and possibly spent, so adopting it would be
+ * the same over-grant. And requiring `r.stage = 'preflight'` on the row being
+ * advanced makes the whole thing idempotent — a second call finds `metered`
+ * and matches nothing.
+ */
+export const ADOPT_ABANDONED_CARRY_SQL = `UPDATE agent_rekeys r
+       SET stage = 'metered',
+           carry_snapshot = p.carry_snapshot,
+           metered_at = p.metered_at,
+           revoked_at = p.revoked_at,
+           revoke_tx_hash = p.revoke_tx_hash,
+           updated_at = NOW()
+      FROM (
+        SELECT a.id, a.carry_snapshot, a.metered_at, a.revoked_at, a.revoke_tx_hash
+          FROM agent_rekeys a
+         WHERE a.agent_id = $2
+           AND a.stage = 'abandoned'
+           AND a.carry_snapshot IS NOT NULL
+           AND jsonb_array_length(a.carry_snapshot) > 0
+           AND NOT EXISTS (
+             SELECT 1 FROM agent_delegations d
+              WHERE d.agent_id = $2
+                AND d.created_at > a.revoked_at
+                AND NOT (d.status = 'pending' AND d.rekey_id IS NOT NULL)
+           )
+         ORDER BY a.metered_at DESC, a.created_at DESC
+         LIMIT 1
+      ) p
+     WHERE r.id = $1 AND r.agent_id = $2 AND r.stage = 'preflight'
+     RETURNING r.*, p.id AS inherited_from_rekey_id`
+
+export async function adoptAbandonedCarry(
+  rekeyId: string,
+  agentId: string,
+  db: Executor = pool,
+): Promise<(AgentRekeyRow & { inherited_from_rekey_id: string }) | null> {
+  const result = await db.query<AgentRekeyRow & { inherited_from_rekey_id: string }>(
+    ADOPT_ABANDONED_CARRY_SQL,
+    [rekeyId, agentId],
+  )
+  return result.rows[0] ?? null
+}
+
 export const ABANDON_REKEY_SQL = `UPDATE agent_rekeys
        SET stage = 'abandoned', abandoned_reason = $1, updated_at = NOW()
      WHERE id = $2 AND agent_id = $3

@@ -359,39 +359,6 @@ const userSafe = {
   },
 } as const
 
-/** An approver (Safe owner) decorated with Haven-stored metadata. */
-const approver = {
-  type: 'object',
-  required: ['address', 'type', 'label'],
-  properties: {
-    address: {
-      ...address,
-      description: 'Checksummed, as the chain returns it — membership comes from getOwners(), not from Haven.',
-    },
-    type: {
-      type: 'string',
-      enum: ['eoa', 'passkey'],
-      description: "Decoration only; defaults to 'eoa' for an owner Haven has no metadata row for.",
-    },
-    label: { type: ['string', 'null'], description: 'Trimmed and capped at 120 characters.' },
-  },
-} as const
-
-/**
- * An unsigned Safe self-call for an owner change. Haven CONSTRUCTS and guards
- * it; the user signs and relays it through /safe/exec. Haven never signs.
- */
-const safeOwnerTx = {
-  type: 'object',
-  required: ['to', 'value', 'data', 'operation'],
-  properties: {
-    to: { ...address, description: 'The Safe itself — owner changes are self-calls.' },
-    value: { type: 'string', enum: ['0'] },
-    data: { type: 'string', pattern: '^0x[0-9a-fA-F]*$' },
-    operation: { type: 'integer', enum: [0], description: 'CALL, never DELEGATECALL.' },
-  },
-} as const
-
 
 // ── Dashboard account building blocks (#1446) ────────────────────────────────
 
@@ -850,7 +817,7 @@ export const openapiSpec = {
         operationId: 'createAgent',
         summary: 'Create a Haven agent identity and API key.',
         description:
-          'Creates the API identity for an agent. Payment authority still comes from the user-controlled Safe, the agent-held delegate key, and on-chain allowance state.',
+          'Creates the API identity for an agent — identity and credential only. Payment authority arrives separately as an owner-signed budget delegation, enforced on-chain (#1440/#2020: the per-token allowance mirror is retired; the response’s `allowances` is always empty at creation).',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -1157,7 +1124,7 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
-          '409': errorResponse,
+          '409': { ...errorResponse, description: 'Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409.' },
           '502': errorResponse,
         },
       },
@@ -1204,7 +1171,7 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
-          '409': errorResponse,
+          '409': { ...errorResponse, description: 'Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409.' },
           '429': { ...errorResponse, description: 'Relayer gas budget exhausted — retry later.' },
           '500': { ...errorResponse, description: 'Stored owner config no longer derives the stored account address.' },
           '502': { ...errorResponse, description: 'Account deploy failed; the grant stays pending and activate can be retried.' },
@@ -1338,7 +1305,7 @@ export const openapiSpec = {
           '409': {
             ...errorResponse,
             description:
-              'Not on the delegation rail, a re-key already in flight, a colliding delegate address, or an undispositioned residual balance.',
+              'Not on the delegation rail, a re-key already in flight (the body names its rekey_id, stage and the new_delegate_address it is bound to, #1868), a colliding delegate address, or an undispositioned residual balance.',
           },
           '503': {
             ...errorResponse,
@@ -1354,7 +1321,7 @@ export const openapiSpec = {
         operationId: 'prepareRekeyRevocation',
         summary: 'Re-key step 1a: prepare the batched revoke of every live delegation (#1698).',
         description:
-          'Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage with an empty carry.',
+          'Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage — inheriting an abandoned predecessor’s frozen carry when one qualifies (#1868), otherwise with an empty carry.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }, rekeyIdParam],
         requestBody: {
@@ -2254,19 +2221,21 @@ export const openapiSpec = {
       },
     },
     // ── Safe (account) management (#1446) ───────────────────────────────────
-    // CUSTODY BOUNDARY: Haven links, labels and CONSTRUCTS owner-change
-    // transactions, but never signs one. Membership truth is on-chain
-    // (getOwners()); the approver rows here only decorate it with a label and
-    // a type. A user who deletes a Safe from Haven still owns it on-chain.
+    // CUSTODY BOUNDARY: Haven labels a linked Safe and nothing more. It never
+    // signed an owner change and, since #1988, no longer constructs one
+    // either. Membership truth was always on-chain (getOwners()). A user who
+    // deletes a Safe from Haven still owns it on-chain, and manages its owners
+    // with their own key wherever they like — which is the property that makes
+    // removing Haven's owner-change builder a narrowing rather than a loss.
     //
-    // RETIRING SURFACE (#1440, owner decision 2026-08-14: the Safe rail goes
-    // away entirely). Of the operations below, only the four plain-CRUD ones
-    // (list, rename, set-default, unlink) are expected to survive — user_safes
-    // is shared with the delegation rail. `deploy`, the import POST and every
-    // approver route are on that epic's removal list, and their entries here
-    // come out with them. Documented anyway, deliberately: the spec describes
-    // the API that exists TODAY, and an undocumented live route is the failure
-    // #1442 was opened on. Do not build new callers against the retiring half.
+    // RETIRED SURFACE (#1440, owner decision 2026-08-14: the Safe rail goes
+    // away entirely). Four plain-CRUD operations survive — list, rename,
+    // set-default, unlink — because `user_safes` is shared with the delegation
+    // rail. `deploy` and the import POST are TOMBSTONES: registered, answering
+    // 410, with no implementation behind them since #1988. Every approver
+    // route is deleted outright. Documented anyway, deliberately: the spec
+    // describes the API that exists TODAY, and a 410 a client can still reach
+    // is part of that API.
     '/user/safes': {
       get: {
         tags: ['Dashboard'],
@@ -2292,9 +2261,9 @@ export const openapiSpec = {
       post: {
         tags: ['Dashboard'],
         operationId: 'addUserSafe',
-        summary: 'Link (import) an existing Safe to the caller\'s account.',
+        summary: 'RETIRED — always answers 410. Importing a Safe is closed.',
         description:
-          'Registration only — this moves nothing on-chain and grants Haven no authority over the Safe. The same address on the same chain cannot be linked twice (409). The first Safe a user links becomes their default.',
+          '**RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** The Safe rail is being retired outright, and importing is one of the four ways a Safe could enter Haven; all four are closed. The refusal is a route preHandler, so it precedes every read and write. The route is kept as a compatibility tombstone rather than removed — a 410 tells an old client the flow is permanently gone, where a 404 reads as a transient routing error and invites retries (the #834 session-rail / #1328 mpp_demo pattern); the route itself goes in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Existing linked Safes are unaffected: GET /user/safes, rename, re-default, unlink and every read path behave exactly as before. Historically this was registration only — it moved nothing on-chain and granted Haven no authority over the Safe.',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -2313,13 +2282,8 @@ export const openapiSpec = {
           },
         },
         responses: {
-          '201': {
-            description: 'Safe linked.',
-            content: { 'application/json': { schema: userSafe } },
-          },
-          '400': errorResponse,
           '401': errorResponse,
-          '409': { ...errorResponse, description: 'This Safe is already linked to the account.' },
+          '410': { ...errorResponse, description: 'Always. The Safe rail is retired; the message names POST /accounts/hybrid.' },
         },
       },
     },
@@ -2327,9 +2291,9 @@ export const openapiSpec = {
       post: {
         tags: ['Dashboard'],
         operationId: 'deployUserSafe',
-        summary: 'Deploy a new Safe with the relayer paying gas.',
+        summary: 'RETIRED — always answers 410. Haven no longer deploys Safes.',
         description:
-          'The relayer sponsors the deployment and returns the deployed address plus the transaction hash. Deployment does NOT link the Safe: registration is a separate POST /user/safes call, so onboarding and add-account take the identical path. The deployed Safe is owned by owner_address (single owner, threshold 1) and never by Haven. Note that owner_address is NOT checked against the caller: any authenticated user can have a Safe deployed for any address, so this is a relayer-gas surface bounded only by the global rate limit, not a per-caller ownership check.',
+          '**RETIRED (#1984, epic #1440) — always answers 410 and spends no relayer gas.** The refusal is a route preHandler, so it precedes the relayer entirely. Kept as a compatibility tombstone; removed in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Historically the relayer sponsored the deployment and returned the deployed address plus the transaction hash, and owner_address was NOT checked against the caller — an unbounded-by-ownership relayer-gas surface that this retirement closes as a side effect.',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -2347,21 +2311,8 @@ export const openapiSpec = {
           },
         },
         responses: {
-          '201': {
-            description: 'Safe deployed; link it with POST /user/safes.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['safe_address', 'tx_hash'],
-                  properties: { safe_address: address, tx_hash: { type: 'string' } },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
           '401': errorResponse,
-          '500': { ...errorResponse, description: 'Relay deployment failed.' },
+          '410': { ...errorResponse, description: 'Always. The Safe rail is retired; the message names POST /accounts/hybrid.' },
         },
       },
     },
@@ -2433,181 +2384,12 @@ export const openapiSpec = {
         },
       },
     },
-    '/user/safes/known-approvers': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'listKnownApprovers',
-        summary: "The caller's approver registry across all their Safes.",
-        description:
-          'Distinct by address, carrying the most recent label/type and every safe_id the approver is known on — so a picker can offer reuse on another account while excluding the Safes it already approves (#417). Haven metadata only; it confers nothing on-chain.',
-        security: [{ DashboardJwt: [] }],
-        responses: {
-          '200': {
-            description: 'Known approvers, distinct by address.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['approvers'],
-                  properties: {
-                    approvers: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        required: ['address', 'type', 'label', 'safe_ids'],
-                        properties: {
-                          ...approver.properties,
-                          safe_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          '401': errorResponse,
-        },
-      },
-    },
-    '/user/safes/{safeId}/approvers': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'listSafeApprovers',
-        summary: "Read a Safe's on-chain owners, decorated with stored labels.",
-        description:
-          'The owner list and threshold are read live from the chain (`getOwners()`), not from Haven — an owner added outside Haven appears here with no label rather than being invisible.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
-        responses: {
-          '200': {
-            description: 'On-chain owners plus the Safe threshold.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['threshold', 'approvers'],
-                  properties: {
-                    threshold: { type: 'integer' },
-                    approvers: { type: 'array', items: approver },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-          '502': { ...errorResponse, description: 'Could not read owners from the network.' },
-        },
-      },
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'upsertSafeApproverMetadata',
-        summary: 'Record an approver\'s label and type after the on-chain change lands.',
-        description:
-          'Metadata only, and idempotent: this does not add an owner. Call it after relaying the transaction from /approvers/tx. Enrolling a passkey approver also binds it to the Safe as a signing fast-path — deliberately non-fatal, because /safe/exec re-derives the binding from the on-chain owner list when it is missing.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['address'],
-                properties: {
-                  address: address,
-                  type: { type: 'string', enum: ['eoa', 'passkey'], description: "Defaults to 'eoa'." },
-                  label: { type: 'string', description: 'Trimmed and capped at 120 characters; blank becomes null.' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'Metadata recorded.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-        },
-      },
-    },
-    '/user/safes/{safeId}/approvers/tx': {
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'buildSafeApproverTx',
-        summary: 'Build the UNSIGNED owner-change transaction for the user to sign.',
-        description:
-          "Haven constructs and guards; the user signs and relays through /safe/exec. Haven never signs an owner change. The guards run against the LIVE owner list, before any transaction is produced: removing the final owner is refused (409), as is adding an owner the Safe already has; removing an address that is not an owner is a 404.",
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['action', 'address'],
-                properties: {
-                  action: { type: 'string', enum: ['add', 'remove'] },
-                  address: address,
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'The unsigned Safe self-call.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['chain_id', 'safe_address', 'tx'],
-                  properties: {
-                    chain_id: { type: 'integer' },
-                    safe_address: address,
-                    tx: safeOwnerTx,
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': { ...errorResponse, description: 'Safe not found, or the address to remove is not an owner.' },
-          '409': { ...errorResponse, description: 'Would remove the last owner, or the owner already exists.' },
-          '502': { ...errorResponse, description: 'Could not read owners from the network.' },
-        },
-      },
-    },
-    '/user/safes/{safeId}/approvers/{address}': {
-      delete: {
-        tags: ['Dashboard'],
-        operationId: 'deleteSafeApproverMetadata',
-        summary: "Drop an approver's stored metadata after the on-chain removal.",
-        description:
-          'Cleans up the decoration row only — it removes no owner. The last-owner guard lives on /approvers/tx, where the actual removal is built.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [
-          { name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' },
-          { name: 'address', in: 'path', required: true, schema: address, description: 'Approver address.' },
-        ],
-        responses: {
-          '200': {
-            description: 'Metadata removed.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-        },
-      },
-    },
+    // The approver routes that lived here — GET /user/safes/known-approvers,
+    // GET|POST /user/safes/{safeId}/approvers, POST
+    // /user/safes/{safeId}/approvers/tx and DELETE
+    // /user/safes/{safeId}/approvers/{address} — are DELETED (#1988, epic
+    // #1440 slice 5), exactly as the caveat above said they would be. They are
+    // gone from the router too, so these are not tombstones: the paths 404.
     // ── Dashboard account + owner directory (#1446) ─────────────────────────
     // Profile/preference writes are the user's own record. The owner
     // directory reads Safe owners LIVE from every linked account, so it is
@@ -2672,9 +2454,9 @@ export const openapiSpec = {
       put: {
         tags: ['Dashboard'],
         operationId: 'updateUserSafe',
-        summary: "Set the caller's legacy safe_address and link it as the default Safe.",
+        summary: 'RETIRED — always answers 410. This link is an import.',
         description:
-          "Writes the legacy users.safe_address column AND links the Safe into user_safes as the default — the multi-Safe table is the real home, this column is history. The order matters and is deliberate: the legacy column write is attempted FIRST and a vanished account refuses before anything is linked, rather than leaving a link whose owner no longer exists. Returns the narrower identity projection.",
+          "**RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** This route wrote the legacy users.safe_address column AND linked the Safe into user_safes as the default, emitting the `safe_imported` funnel event: it is an IMPORT, so it retires with the rail. It is named here explicitly because no shipped client calls it, which is exactly what would have made it the hole left open. Kept as a compatibility tombstone; create a Haven account on the delegation rail instead (POST /accounts/hybrid).",
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -2692,10 +2474,8 @@ export const openapiSpec = {
           },
         },
         responses: {
-          '200': { description: 'The updated identity projection.', content: { 'application/json': { schema: userIdentity } } },
-          '400': errorResponse,
           '401': errorResponse,
-          '404': errorResponse,
+          '410': { ...errorResponse, description: 'Always. The Safe rail is retired; the message names POST /accounts/hybrid.' },
         },
       },
     },
@@ -3692,241 +3472,16 @@ export const openapiSpec = {
     // Second, approving executes NOTHING. It records consent and hands back
     // the payment details; the user's own wallet executes the Safe
     // transaction and reports the hash to /executed. Haven never signs it.
-    //
-    // RETIRING SURFACE (#1440): this queue belongs to the Safe rail, which the
-    // owner decided to retire. Documented because it is live today; do not
-    // build new callers against it.
-    '/approvals': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'listApprovalRequests',
-        summary: "List the caller's approval requests, actionable ones first.",
-        description:
-          "**This read has a write side effect, deliberately**: it first expires every stale pending/approved request of the caller's, so the list can never show an actionable item that time has already killed. Ordering puts pending and approved ahead of everything else, then newest first. `source` and `x402_resource_url` are derived (payment_rail preferred over the legacy source column, payment_resource_url over the legacy x402 column) so this list and the approve response always agree. `actionable_count` and `pending_count` carry the SAME number — the second is a legacy alias kept for existing clients, not a different count.",
-        security: [{ DashboardJwt: [] }],
-        parameters: [
-          { name: 'status', in: 'query', schema: { type: 'string' }, description: "Filter by status, or 'all'. Defaults to 'pending'." },
-          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 }, description: 'Capped at 100.' },
-          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
-        ],
-        responses: {
-          '200': {
-            description: 'Approval requests plus the actionable count.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['approvals', 'actionable_count', 'pending_count'],
-                  properties: {
-                    approvals: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        required: [
-                          'id', 'agent_id', 'agent_name', 'safe_address', 'chain_id',
-                          'token_symbol', 'token_address', 'to_address', 'amount_raw',
-                          'amount_human', 'reason', 'source', 'x402_resource_url',
-                          'merchant_address', 'payment_rail', 'payment_resource_url',
-                          'status', 'tx_hash', 'reviewed_at', 'created_at', 'expires_at',
-                        ],
-                        properties: {
-                          id: { type: 'string', format: 'uuid' },
-                          agent_id: { type: 'string', format: 'uuid' },
-                          agent_name: { type: 'string', description: "'Unknown Agent' when the agent row is gone — the request stays readable." },
-                          safe_address: address,
-                          chain_id: { type: 'integer' },
-                          token_symbol: { type: 'string' },
-                          token_address: { type: 'string' },
-                          to_address: { type: 'string' },
-                          amount_raw: { type: 'string', description: 'Atomic units.' },
-                          amount_human: { type: 'string' },
-                          reason: { type: ['string', 'null'] },
-                          source: { type: 'string', description: "Derived: payment_rail, else the legacy source column, else 'direct'." },
-                          x402_resource_url: { type: ['string', 'null'], description: 'Derived: payment_resource_url, else the legacy x402 column.' },
-                          merchant_address: { type: ['string', 'null'] },
-                          payment_rail: { type: ['string', 'null'] },
-                          payment_resource_url: { type: ['string', 'null'] },
-                          status: { type: 'string' },
-                          tx_hash: { type: ['string', 'null'] },
-                          reviewed_at: { type: ['string', 'null'], format: 'date-time' },
-                          created_at: { type: 'string', format: 'date-time' },
-                          expires_at: { type: 'string', format: 'date-time' },
-                        },
-                      },
-                    },
-                    actionable_count: { type: 'integer', description: 'Pending plus approved.' },
-                    pending_count: { type: 'integer', description: 'Legacy alias — identical to actionable_count.' },
-                  },
-                },
-              },
-            },
-          },
-          '401': errorResponse,
-        },
-      },
-    },
-    '/approvals/{id}/approve': {
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'approveApprovalRequest',
-        summary: 'Record consent and hand back the payment to execute.',
-        description:
-          "**Approving executes nothing.** It flips the request to approved and returns the payment details; the user's own wallet then executes the Safe transaction and reports the hash to /executed. Ownership, pending status and a live expiry are all conditions of the UPDATE itself, so an expired, foreign or already-actioned request writes nothing — the 404 covers all of those without distinguishing them, because to a caller who does not own it they are the same answer. A retired-rail request is the one exception that IS distinguished (410 via a diagnostic read on the failure path): it stays readable and rejectable but can never be approved, because approving it would hand the frontend an executable funding transaction for a rail that no longer exists. The response repeats the resolved resource URL in BOTH x402_resource_url and payment_resource_url so callers never have to coalesce client-side.",
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Approval-request id.' }],
-        responses: {
-          '200': {
-            description: 'Consent recorded; execute the payment yourself.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['id', 'status', 'message', 'payment'],
-                  properties: {
-                    id: { type: 'string', format: 'uuid' },
-                    status: { type: 'string', enum: ['approved'] },
-                    message: { type: 'string' },
-                    payment: {
-                      type: 'object',
-                      required: [
-                        'token_symbol', 'token_address', 'to_address', 'amount_raw',
-                        'amount_human', 'safe_address', 'source', 'x402_resource_url',
-                        'merchant_address', 'payment_rail', 'payment_resource_url',
-                      ],
-                      properties: {
-                        token_symbol: { type: 'string' },
-                        token_address: { type: 'string' },
-                        to_address: { type: 'string' },
-                        amount_raw: { type: 'string' },
-                        amount_human: { type: 'string' },
-                        safe_address: address,
-                        source: { type: 'string' },
-                        x402_resource_url: { type: ['string', 'null'] },
-                        merchant_address: { type: ['string', 'null'] },
-                        payment_rail: { type: ['string', 'null'] },
-                        payment_resource_url: { type: ['string', 'null'] },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': { ...errorResponse, description: "Not found, not the caller's, already actioned, or expired — deliberately one answer." },
-          '410': { ...errorResponse, description: 'The request belongs to a retired rail: readable and rejectable, never approvable.' },
-        },
-      },
-    },
-    '/approvals/{id}/proposed': {
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'markApprovalProposed',
-        summary: 'Record that a multi-signature payment was submitted for co-signing.',
-        description:
-          'For a Safe that needs more than one signature: the transaction is proposed, not yet executed, and this records that intermediate state so the queue does not show it as still awaiting the user. Same WHERE-clause guards as approve, and the same retired-rail refusal.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Approval-request id.' }],
-        responses: {
-          '200': {
-            description: 'Marked as proposed.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['id', 'status'],
-                  properties: {
-                    id: { type: 'string', format: 'uuid' },
-                    status: { type: 'string', enum: ['proposed'] },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-          '410': { ...errorResponse, description: 'Retired rail.' },
-        },
-      },
-    },
-    '/approvals/{id}/reject': {
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'rejectApprovalRequest',
-        summary: 'Reject a pending or approved request.',
-        description:
-          "Deliberately broader than approve in three ways. It accepts an already-APPROVED request, because consent given is consent that can be withdrawn while nothing has executed; it carries NO retired-rail guard; and it does not require a live expiry, so a request that has aged out but has not yet been lazily marked expired can still be rejected. All three follow from the same rule: never trap a request in a user queue. Rejecting executes nothing and un-does nothing on-chain — if the payment was already sent, rejecting the record does not recall it.",
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Approval-request id.' }],
-        responses: {
-          '200': {
-            description: 'Rejected.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['id', 'status'],
-                  properties: {
-                    id: { type: 'string', format: 'uuid' },
-                    status: { type: 'string', enum: ['rejected'] },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-        },
-      },
-    },
-    '/approvals/{id}/executed': {
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'recordApprovalExecution',
-        summary: 'Report the transaction hash after executing the approved payment.',
-        description:
-          "Closes the loop: the user's wallet executed the Safe transaction, and this records the hash and snapshots the fiat value at execution time. The state is checked TWICE on purpose — once to load the request and once again inside the UPDATE — so a request that stopped being approved while the fiat lookup was in flight answers **409 rather than being overwritten**. That 409 is distinct from the 404: 404 means it was never approvable for this caller, 409 means it was and no longer is. The hash is recorded, never verified here; Haven does not confirm the transaction on-chain at this point.",
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Approval-request id.' }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['tx_hash'],
-                properties: { tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' } },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'Execution recorded.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['id', 'status', 'tx_hash'],
-                  properties: {
-                    id: { type: 'string', format: 'uuid' },
-                    status: { type: 'string', enum: ['executed'] },
-                    tx_hash: { type: 'string' },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': { ...errorResponse, description: "Not found, not the caller's, or not in an approved state." },
-          '409': { ...errorResponse, description: 'It stopped being approved between the read and the write.' },
-        },
-      },
-    },
+    // #2055 (epic #1440): the /approvals surface is REMOVED, not tombstoned.
+    // The queue belonged to the Safe rail; #1986 closed its actionable
+    // transitions, the owner decision on #2021 waived queue-history
+    // readability, and the `approval_requests` table is dropped (migration
+    // 070) — so the five operations that stood here (list / approve /
+    // proposed / reject / executed) are deregistered and now answer 404.
+    // Unlike the payment-path tombstones (which stayed as 410s because a
+    // retired SPEND flow must not read as retryable), a deleted dashboard
+    // queue has no such ambiguity: #1989 removed its only UI, and nothing
+    // programmatic ever called it.
     // ── Session + passkeys (#1446) ──────────────────────────────────────────
     // CREDENTIAL BOUNDARY: no response here returns a password, a hash, or a
     // passkey's private material. The passkey routes echo an id, the derived
@@ -4186,7 +3741,7 @@ export const openapiSpec = {
                     all_time: spendTotals,
                     today: spendTotals,
                     this_week: spendTotals,
-                    pending_approvals: { type: 'integer' },
+                    pending_approvals: { type: 'integer', description: 'Always 0 since #2055 — the approval queue died with the Safe rail; kept for wire compatibility.' },
                   },
                 },
               },
@@ -4203,7 +3758,7 @@ export const openapiSpec = {
         operationId: 'getActivityFeed',
         summary: 'Combined activity across every agent the caller owns.',
         description:
-          "The same three entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` counts everything actionable across the account, not just what appears in this page.",
+          "The same three entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` is always 0 since #2055 (the approval queue died with the Safe rail); the field survives for wire compatibility.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
@@ -4219,7 +3774,7 @@ export const openapiSpec = {
                   required: ['activity', 'pending_approvals'],
                   properties: {
                     activity: { type: 'array', items: activityEntry },
-                    pending_approvals: { type: 'integer' },
+                    pending_approvals: { type: 'integer', description: 'Always 0 since #2055 — the approval queue died with the Safe rail; kept for wire compatibility.' },
                   },
                 },
               },
@@ -4429,48 +3984,26 @@ export const openapiSpec = {
       post: {
         tags: ['Agents'],
         operationId: 'setAgentAllowance',
-        summary: 'Set a per-token allowance on the legacy AllowanceModule rail.',
+        summary: 'RETIRED (410): per-token allowances died with the Safe rail.',
         description:
-          "Records the allowance Haven will execute against. **The authority itself is the on-chain AllowanceModule grant, not this row** — writing it here does not grant anything the chain has not been told about. `schedule_warning` is always null: session schedules are retired (#834) and the field survives only so existing clients keep parsing. Retiring rail (#1440).",
+          'Retired with the Safe rail (#1440/#2020). Always answers 410 and writes nothing — spend authority on the delegation rail is a signed budget delegation (`POST /agents/{id}/delegations/prepare` → activate), never a per-token allowance row. The typed operation stays as a tombstone so older clients get a stable, explicit answer rather than a 404.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         requestBody: {
-          required: true,
+          required: false,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
-                properties: {
-                  token_address: address,
-                  token_symbol: { type: 'string' },
-                  allowance_amount: { type: 'string', description: 'Human-denominated amount.' },
-                  reset_period_min: { type: 'integer', description: 'Refill period in minutes; 0 means one-time.' },
-                },
+                additionalProperties: true,
+                description: 'Ignored — the endpoint refuses before reading the body.',
               },
             },
           },
         },
         responses: {
-          '200': {
-            description: 'The stored allowance.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  additionalProperties: true,
-                  required: ['schedule_warning'],
-                  properties: {
-                    schedule_warning: { type: 'null', description: 'Always null — retained for client compatibility (#834).' },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
+          '410': { ...errorResponse, description: 'Always. The Safe rail is retired; grant a budget delegation instead.' },
           '401': errorResponse,
-          '404': errorResponse,
-          '409': { ...errorResponse, description: 'The agent is revoked, or its Connect setup is still awaiting wallet approval — either way the allowance is refused before anything is written.' },
         },
       },
     },
@@ -4478,17 +4011,15 @@ export const openapiSpec = {
       delete: {
         tags: ['Agents'],
         operationId: 'deleteAgentAllowance',
-        summary: "Remove an allowance row for one token.",
+        summary: 'RETIRED (410): per-token allowances died with the Safe rail.',
         description:
-          "Removes Haven's record. **It does NOT revoke the on-chain grant** — the AllowanceModule allowance survives until the owner changes it on-chain, so deleting this row stops Haven executing against it but is not itself a revocation. Retiring rail (#1440).",
+          'Retired with the Safe rail (#1440/#2020). Always answers 410 and deletes nothing (a malformed token address still gets its 400). Revoke or change the agent’s budget delegation instead.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }, { name: 'tokenAddress', in: 'path', required: true, schema: address }],
         responses: {
-          '200': { description: 'Row removed.', content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } } },
+          '410': { ...errorResponse, description: 'Always, for a well-formed token address.' },
           '400': errorResponse,
           '401': errorResponse,
-          '404': errorResponse,
-          '409': { ...errorResponse, description: 'The agent is revoked, or its Connect setup is still awaiting wallet approval.' },
         },
       },
     },
@@ -4866,6 +4397,7 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '403': errorResponse,
+          '410': { ...errorResponse, description: 'A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid.' },
           '502': errorResponse,
         },
       },
@@ -4932,7 +4464,13 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '409': errorResponse,
-          '410': errorResponse,
+          '410': {
+            ...errorResponse,
+            description:
+              'The intent is pinned to a retired rail — the AllowanceModule rail (#1986) or the ' +
+              'session rail (#834) — or it has expired. A retired-rail intent is refused before ' +
+              'the expiry flip, so nothing is written.',
+          },
           '502': errorResponse,
         },
       },
@@ -5038,7 +4576,7 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '409': errorResponse,
-          '410': errorResponse,
+          '410': { ...errorResponse, description: 'A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid.' },
           '429': errorResponse,
           '502': errorResponse,
         },
@@ -5176,7 +4714,7 @@ export const openapiSpec = {
         operationId: 'getMachinePaymentAllowances',
         summary: 'Fetch live spend-authority state for the authenticated agent.',
         description:
-          'Rail-aware (#1135): on the legacy rail this reads the on-chain AllowanceModule per configured token; on the delegation rail the same response shape carries the ACTIVE budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). A retired session-rail account gets 410. Reporting only — enforcement stays on-chain on every rail.',
+          'Rail-aware (#1135): on the delegation rail the response carries the ACTIVE budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). BOTH retired rails answer 410 — the session rail (#993) and, since #2020 reversed #1986’s left-readable decision, the Safe/AllowanceModule rail too. Reporting only — enforcement stays on-chain.',
         security: [{ AgentApiKey: [] }],
         responses: {
           '200': {
@@ -5191,7 +4729,11 @@ export const openapiSpec = {
           '403': agentAuthForbidden,
           '410': {
             ...errorResponse,
-            description: 'The account is on the retired session rail — no state is read (#993 fail-closed contract).',
+            description:
+              'The account is on a RETIRED rail — session (#993) or Safe/AllowanceModule ' +
+              '(#2020, reversing #1986’s left-readable decision on the recorded owner call: ' +
+              'the accounts are emptied and unsupported, so no state is read). Fail-closed; ' +
+              'nothing is read or written.',
           },
           '502': errorResponse,
         },
@@ -5371,7 +4913,10 @@ export const openapiSpec = {
             },
           },
           '410': {
-            description: 'Idempotent replay of a request whose payment has expired.',
+            description:
+              'Either the account is on a retired rail — the Safe / AllowanceModule rail (#1986) ' +
+              'or the session rail (#834), refused before any intent or approval row is written — ' +
+              'or this is an idempotent replay of a request whose payment has expired.',
             content: {
               'application/json': {
                 schema: { type: 'object', additionalProperties: true },
@@ -5984,6 +5529,30 @@ export const openapiSpec = {
         },
       },
     },
+    '/catalog/submit/{id}': {
+      get: {
+        tags: ['Catalog'],
+        operationId: 'getCatalogSubmissionStatus',
+        summary: 'Public status of a catalogue submission (#1715).',
+        description:
+          'Coarse current state plus, while the domain-ownership proof is still valid, the exact well-known / DNS-TXT proof instructions. Deliberately minimal: the `verify_token` is never returned (it is a credential minted once at creation), and failures surface only as the coarse `failed` status — the granular SSRF/ownership reasons stay in server logs so this cannot become an internal-DNS oracle. 404 for an unknown id.',
+        security: [],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Submission status.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CatalogSubmissionStatus' },
+              },
+            },
+          },
+          '404': errorResponse,
+        },
+      },
+    },
     '/catalog/{id}': {
       get: {
         tags: ['Catalog'],
@@ -6139,7 +5708,7 @@ export const openapiSpec = {
         required: [
           'id', 'name', 'description', 'category', 'resource_url', 'rail', 'protocol', 'status',
           'tool_name', 'tool_arguments', 'price_display', 'price_atomic', 'asset', 'network',
-          'asset_transfer_methods', 'verified_at',
+          'asset_transfer_methods', 'verified_at', 'source', 'domain_verified', 'verified_payable',
         ],
         properties: {
           id: { type: 'string', format: 'uuid' },
@@ -6169,6 +5738,22 @@ export const openapiSpec = {
           },
           status: { type: 'string', enum: ['active', 'degraded', 'delisted'] },
           verified_at: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          source: {
+            type: 'string',
+            enum: ['operator', 'ingestion'],
+            description:
+              'Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches; no verification badges). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe.',
+          },
+          domain_verified: {
+            type: 'boolean',
+            description:
+              'True only for `ingestion` entries whose seller proved control of the endpoint domain. Always false for operator-curated rows, which have a different (operator) trust story.',
+          },
+          verified_payable: {
+            type: 'boolean',
+            description:
+              'True only for `ingestion` entries that a leader-locked, SSRF-hardened, read-only probe watched answer a real x402 quote. The badge claims domain-control AND verified-payable — never merchant honesty, quality, or settlement reliability.',
+          },
         },
       },
       CatalogSubmitRequest: {
@@ -6203,6 +5788,57 @@ export const openapiSpec = {
             // The de-duplicating response echoes the EXISTING row's state, which
             // by then may be further along than `submitted`.
             enum: ['submitted', 'ownership_verified', 'verified_payable'],
+          },
+        },
+        additionalProperties: false,
+      },
+      CatalogOwnershipInstructions: {
+        type: 'object',
+        required: ['expires_at', 'well_known', 'dns_txt'],
+        properties: {
+          expires_at: { type: 'string', format: 'date-time' },
+          well_known: {
+            type: 'object',
+            required: ['url', 'content', 'instruction'],
+            properties: {
+              url: { type: 'string' },
+              content: { type: 'string' },
+              instruction: { type: 'string' },
+            },
+            additionalProperties: false,
+          },
+          dns_txt: {
+            type: 'object',
+            required: ['name', 'value', 'instruction'],
+            properties: {
+              name: { type: 'string' },
+              value: { type: 'string' },
+              instruction: { type: 'string' },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      CatalogSubmissionStatus: {
+        type: 'object',
+        required: ['id', 'status', 'created_at', 'updated_at', 'last_verified_at', 'name', 'description', 'entrypoint'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          status: {
+            type: 'string',
+            enum: ['submitted', 'ownership_verified', 'verified_payable', 'failed', 'delisted'],
+          },
+          created_at: { type: 'string', format: 'date-time' },
+          updated_at: { type: 'string', format: 'date-time' },
+          last_verified_at: { anyOf: [{ type: 'string', format: 'date-time' }, { type: 'null' }] },
+          name: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          description: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          entrypoint: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          instructions: {
+            anyOf: [{ $ref: '#/components/schemas/CatalogOwnershipInstructions' }, { type: 'null' }],
+            description:
+              'Present while the submission can still prove ownership (submitted / ownership_verified) and the deployment has CATALOG_OWNERSHIP_SECRET set. Absent once verified_payable, failed or delisted — the proof is no longer actionable.',
           },
         },
         additionalProperties: false,
@@ -6732,16 +6368,12 @@ export const openapiSpec = {
           safe_id: uuid,
           allowances: {
             type: 'array',
+            maxItems: 0,
+            description:
+              'RETIRED (#1440/#2020): per-token allowances died with the Safe rail. A non-empty array is refused with 400 — grant the agent a budget delegation after creation instead. The field survives (empty-only) so older clients sending `allowances: []` keep working.',
             items: {
               type: 'object',
-              required: ['token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
-              properties: {
-                token_address: address,
-                token_symbol: tokenSymbol,
-                allowance_amount: allowanceAtomicAmount,
-                reset_period_min: allowanceResetPeriodMin,
-              },
-              additionalProperties: false,
+              additionalProperties: true,
             },
           },
         },
@@ -7707,8 +7339,8 @@ export const openapiSpec = {
             },
             additionalProperties: false,
           },
-          actionableApprovals: { type: 'integer' },
-          pendingApprovals: { type: 'integer', description: 'Duplicate of actionableApprovals (same query), kept for compatibility.' },
+          actionableApprovals: { type: 'integer', description: 'Always 0 since #2055 — the approval queue died with the Safe rail and its table is dropped; the field survives for wire compatibility.' },
+          pendingApprovals: { type: 'integer', description: 'Duplicate of actionableApprovals; always 0 since #2055, kept for compatibility.' },
           onboardingProgress: {
             type: 'object',
             required: ['hasFirstAgentPayment'],
@@ -7780,14 +7412,39 @@ export const openapiSpec = {
           {
             type: 'object',
             description:
-              'Nothing to revoke on-chain — an agent that never held a budget, or one already revoked. No signature is needed and the re-key is advanced straight to the metered stage with an empty carry.',
+              'Nothing to revoke on-chain — an agent that never held a budget, one already revoked, or one whose previous re-key was abandoned after its revoke landed (#1868). No signature is needed and the re-key advances straight to the metered stage. When an abandoned predecessor froze a carry after its own on-chain revoke and no grant has been made since, that measurement is INHERITED rather than forfeited: carry holds the frozen entries, tx_hash is the predecessor’s revoke transaction, and carry_inherited_from_rekey_id names the abandoned re-key. Otherwise the carry is empty.',
             required: ['revoked', 'stage', 'agent_has_no_authority', 'next_step'],
             properties: {
               revoked: { type: 'boolean', enum: [true] },
-              tx_hash: { type: 'string', nullable: true },
-              delegation_hashes: delegationHashList,
+              tx_hash: {
+                type: 'string',
+                nullable: true,
+                description:
+                  'Null on the empty walk; the ABANDONED predecessor’s revoke transaction when its carry was inherited.',
+              },
+              // May be empty — the short-circuit revokes nothing on-chain.
+              delegation_hashes: { type: 'array', items: delegationHash },
               stage: { type: 'string' },
-              carry: { type: 'array', items: { type: 'object', additionalProperties: true } },
+              carry: {
+                type: 'array',
+                description:
+                  'Empty on the plain short-circuit; the inherited frozen measurement when an abandoned predecessor’s carry was adopted (#1868).',
+                items: {
+                  type: 'object',
+                  required: ['delegation_hash', 'remaining_atomic', 'from_chain'],
+                  properties: {
+                    delegation_hash: delegationHash,
+                    remaining_atomic: { type: 'string' },
+                    from_chain: { type: 'boolean' },
+                  },
+                },
+              },
+              carry_inherited_from_rekey_id: {
+                type: 'string',
+                format: 'uuid',
+                description:
+                  'Present only when the carry was inherited: the abandoned re-key whose frozen measurement this re-key adopted (#1868).',
+              },
               agent_has_no_authority: { type: 'boolean' },
               next_step: { type: 'string' },
             },

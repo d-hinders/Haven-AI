@@ -7,7 +7,6 @@ covers:
   - packages/backend/src/modules/x402/**
   - packages/backend/src/routes/x402-resources.ts
   - packages/backend/src/modules/payments/agent-payment-status.ts
-  - packages/backend/src/domain/payment-coverage.ts
   - packages/backend/src/modules/x402/x402-delegation.ts
   - packages/backend/src/rails/delegation-rail.ts
   - packages/backend/src/routes/catalog.ts
@@ -25,14 +24,13 @@ covers:
   - packages/mcp-server/src/tools.ts
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
-  - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
 # #1496: a casp-changelog shard satisfies this doc too — every money-path PR
 # already writes one, and mandatory note-prepends to last-verified caused three
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-20" # #1640 re-verify: authMiddleware now refuses purpose-claim tokens and catalog.ts routes through it instead of a hand-rolled jwtVerify. Agent API-key auth (agentAuth.ts) is a separate credential type and untouched, so every x402 sequence claim here re-read against the diff stands. # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-26" # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -50,12 +48,25 @@ Standard merchant x402 has two legs:
 2. Merchant leg: the agent signs the standard EIP-3009 `X-PAYMENT` header from
    the delegate wallet and retries the merchant/resource request.
 
-> **This doc describes the legacy AllowanceModule rail** (import-only, existing
-> accounts) with its two-leg funding model. New accounts
+> ⚠️ **The legacy AllowanceModule two-leg described below NO LONGER RUNS.**
+> Under epic #1440 the Safe rail was closed to new accounts by #1984 and then
+> **fail-closed for spending by #1986**: `POST /x402/authorize`, `POST /x402`,
+> `POST /payments`, `POST /payments/:id/sign` and `POST /machine-payments/send`
+> all answer **HTTP 410** for an `allowance_module` account — nothing written,
+> no Safe→delegate funding transfer, no delegate hot balance. The sequence
+> below is kept as the record of what the rail DID. The code that implemented
+> it **has now been deleted** by #1987 — `modules/x402/legacy-authorize.ts` in
+> full, along with the AllowanceModule transfer, transfer-hash generation and
+> the allowance-nonce coordinator it drove. Read it as history: not behaviour
+> you can invoke, and no longer behaviour in the tree. Accounts, balances and
+> history stay readable.
+>
+> The live rail is the delegation rail: new accounts
 > (`account_type='delegator_hybrid'`) settle x402 in a **single direct leg** via
 > ERC-7710 — see [Delegation rail x402](#delegation-rail-x402-new-accounts)
-> below. The Smart Sessions **session rail is retired** (#834): the machine-payment
-> path answers HTTP 410 for `session_key` accounts, fail-closed.
+> below. The Smart Sessions **session rail is retired** (#834) and answers its
+> own, distinct HTTP 410 for `session_key` accounts; both tombstones coexist on
+> the rail seam (`rails/execution-rail.ts`).
 
 In SDK, local MCP, and generic hosted split flows, the agent retries the merchant
 request. For paid MCP tools, hosted MCP can proxy the HTTP/MCP request and
@@ -102,7 +113,6 @@ Source of truth:
   in by #998 — its only production consumers were already inside it) — it is
   the settlement *compiler* (typed-data / header assembly primitives), not
   route orchestration.
-- [`packages/backend/src/domain/payment-coverage.ts`](../../packages/backend/src/domain/payment-coverage.ts)
 - [`packages/mcp/src/tools.ts`](../../packages/mcp/src/tools.ts)
 - [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts)
 - [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
@@ -226,7 +236,12 @@ delegate key.
 ## Hosted Generic Split Flow
 
 Hosted MCP is keyless, so the funding signature and merchant header signature
-are local edge-signing steps. The generic decomposed path is:
+are local edge-signing steps. The diagram below is the **EIP-3009 shape** of
+the generic decomposed path — since
+[#2041](https://github.com/d-hinders/Haven-AI/issues/2041) it is one of two: a
+delegation-rail account at a merchant advertising
+`extra.assetTransferMethod: "erc7710"` takes the erc7710 shape recorded
+immediately after it instead.
 
 ```mermaid
 sequenceDiagram
@@ -258,6 +273,27 @@ sequenceDiagram
     MCP-->>Agent: Stop, notify user, poll status
   end
 ```
+
+**The erc7710 shape of the same tools (#2041).** When the shared #1450/#1453
+selector picks erc7710, `haven_pay_x402_quote` prepares a settlement child
+instead of a funding intent and reports `settlement_scheme: "erc7710"` with
+`settlement.funding_leg: false`. The sequence then loses two steps rather than
+gaining any:
+
+```text
+haven_pay_x402_quote  → settlement child + settlement_scheme: "erc7710"
+haven_sign            → { payment_id } only; the signer fetches the child
+haven_submit          → { payment_id, signature, settlement_scheme: "erc7710" }
+                        POST /x402/:id/settle → payment_header, tx_hash null
+agent retry           → X-PAYMENT: <payment_header>
+```
+
+There is no `haven_submit` funding relay to confirm and **no
+`haven_x402_sign_header` step at all** — Haven assembles the header, the
+merchant redeems the `[child, budget]` chain, and the delegate EOA never holds
+the money. The scheme is stated explicitly at both hops (reported at quote,
+echoed at submit) rather than inferred, which is #1360's property applied to a
+second entry point.
 
 Before signing the funding hash, the edge signer checks payload-hash equality,
 reconstructs the canonical payment/resource/merchant/amount/asset/network/expiry
@@ -494,16 +530,23 @@ Sequence:
    promotion-gating QA scenario's pass detail.
 4. A spending cap is **required** on this tool, as on `haven_pay_mcp_tool` —
    this IS the guided path, so there is no `cap_warning`
-   softness. Enforced against the LIVE quote via the SAME
-   `assertWithinMaxAmount` guard, before any funding intent exists
-   (`PRICE_EXCEEDS_MAX`).
+   softness. Enforced against the amount actually authorized — the option
+   `selectX402SettlementScheme` selected, via the shared `priceSelectedOption`
+   guard — never the unselected standard entry (#2051: the two selectors are
+   mutually exclusive by #1453, so "the live quote" and "the amount authorized"
+   are DIFFERENT `accepts[]` entries on the erc7710 branch, and a
+   merchant-controlled 402 could steer the cap onto the cheap one while the
+   expensive one was sent). Asserted before any intent exists, funding or
+   settlement child (`PRICE_EXCEEDS_MAX`).
 
    **Two spellings, one cap (#1351).** `max_amount` is atomic units;
    `max_amount_human` is the same cap in whole tokens, so `"1"` means 1 USDC
    rather than 0.000001 USDC. Exactly one may be sent. The human form is
-   converted using the decimals of the **live quote's** asset (`X402Quote.decimals`,
-   resolved from the same address→token binding that produces `token`) — never a
-   caller-supplied token name, never an assumed 6. Three refusals, all before any
+   converted using the decimals of the **selected option's own** asset
+   (`resolveTokenFromAddress(option.asset, option.network)` inside
+   `priceSelectedOption` — the same address→token binding that produces
+   `token`) — never the unselected standard entry's, never a caller-supplied
+   token name, never an assumed 6. Three refusals, all before any
    merchant probe, funding intent, or signature, and none of which can widen the
    on-chain budget:
 
@@ -558,9 +601,11 @@ Sequence:
    `payment_id`.
 8. The catalog's `price_atomic`/`price_display` are surfaced as
    `catalog_price_atomic`/`catalog_price_display` with
-   `catalog_price_is_indicative: true` — NEVER authoritative. The live quote
-   (`amount`/`amount_atomic`/`token`) is authoritative; a
-   `CATALOG_PRICE_DIFFERS` warning fires when the two disagree.
+   `catalog_price_is_indicative: true` — NEVER authoritative. The amount actually
+   being authorized (`amount`/`amount_atomic`/`token`, from the selected
+   option — the quote's own price only on the EIP-3009 branch, #2051) is
+   authoritative; a `CATALOG_PRICE_DIFFERS` warning fires when the two
+   disagree.
 
 No new backend endpoint was needed: `GET /catalog/:id`, `GET
 /machine-payments/agent`, `GET /machine-payments/allowances`, and `POST
@@ -688,8 +733,8 @@ print — which is exactly why the API-side mapping exists.
 
 The legacy rail's `payment_intents`/`approval_requests` INSERTs are the SAME
 rail-agnostic `infra/repositories/` writers the mpp module uses for its own
-rails (`modules/mpp/`, #997) — `modules/x402/legacy-authorize.ts` and
-`modules/x402/delegation-authorize.ts` call them directly rather than through
+rails (`modules/mpp/`, #997) — `modules/x402/delegation-authorize.ts` calls
+them directly rather than through
 a `lib/machine-payments.ts` pass-through (removed by #997: it added no logic
 over the repository call and kept x402 coupled to a private mpp file once
 mpp's own orchestration moved into its module). Token resolution
@@ -856,7 +901,14 @@ account, capability from the merchant's `accepts[]`) and reports it, and
 `haven_settle_mcp_tool` exchanges the signed child for the header. As of
 [#1547](https://github.com/d-hinders/Haven-AI/issues/1547) the guided catalog
 preflight (`haven_prepare_catalog_purchase`) runs the same selector — see the
-Guided Catalog Purchase section above. Note the
+Guided Catalog Purchase section above. As of
+[#2041](https://github.com/d-hinders/Haven-AI/issues/2041) the roll-call is
+complete: the **generic plain-HTTP** entry point runs it too, so
+`haven_pay_x402_quote` selects the scheme and `haven_submit` gained an explicit
+`settlement_scheme` for the settle leg. That closes the coupling where the
+merchant TRANSPORT an agent used decided the settlement SCHEME it could reach —
+which mattered most on plain HTTP, since that is where the catalog's real
+merchants are. Note the
 sequence inversion, because it is the whole substance of that wiring: on the
 3009 path the agent's signature FUNDS the delegate and the header is built by
 the local signer; on erc7710 the signature IS the settlement child and the
@@ -864,6 +916,28 @@ header comes back from Haven. So the settle tool branches before the funding
 relay, not after it. Note what the SDK does NOT do
 on this path: it builds no header locally and touches no funds, because the
 backend assembles the MetaMask payload in `assembleSettlementPayload`.
+
+As of [#2054](https://github.com/d-hinders/Haven-AI/issues/2054) the **quote
+path itself is selection-aware**, which is what makes an **erc7710-ONLY**
+merchant (no untagged `accepts[]` entry at all) reachable through the two MCP
+purchase tools: `buildX402Quote` — the helper behind `haven_quote_mcp_tool`,
+`haven_quote_catalog_purchase`, `haven_pay_mcp_tool` and
+`haven_prepare_catalog_purchase` — no longer throws when
+`selectStandardPaymentOption` finds nothing; it falls back to DESCRIBING the
+erc7710 entry and labels which selector produced it (`acceptedScheme` on the
+quote, surfaced as `accepted_scheme` / `erc7710_only` on the quote tools). The
+selector's #1453 skip is untouched, and the 3009 settlement paths keep
+re-selecting through it, so an erc7710-described quote can never leak into an
+EIP-3009 authorization. The two purchase tools then refuse a **null scheme
+selection** with `ERC7710_RAIL_REQUIRED` — the account's rail cannot settle
+the merchant's only compatible entry, or (pay tool only) the rail could not be
+read — before any pricing or intent, instead of falling through to a
+"no compatible payment option" that blames the merchant. A merchant with
+nothing payable of EITHER kind still gets exactly that pre-existing refusal,
+where it is accurate. Cap coherence is preserved by construction: the
+guaranteed-non-null selection removed the `?? quote.accepted` display
+fallbacks, so the quote shown, the cap checked (`priceSelectedOption`), and
+the amount authorized all read the SAME selected option (#2051's invariant).
 
 **Still unproven end to end, and worth stating rather than assuming.** The
 nightly `x402-erc7710-settle` QA leg exercises the RAW API and deliberately
@@ -1028,7 +1102,8 @@ error instead of quietly routing a payment at the wrong chain's bundler.
 ## Guardrails
 
 - Data access for this flow lives in `packages/backend/src/infra/repositories/`
-  (`x402-authorizations.ts`, `payment-intents.ts`, `approval-requests.ts`, #995) —
+  (`x402-authorizations.ts`, `payment-intents.ts`, #995; `approval-requests.ts`
+  was deleted with its table by #2055) —
   routes hold the control flow only, and every statement (idempotency lookups,
   the #961 stale-replay refresh, the settle flip) is PREPARE-checked against the
   real schema in CI via `db-schema-smoke`.

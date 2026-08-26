@@ -5,7 +5,7 @@ covers:
   - packages/mcp/**
   - packages/mcp-server/**
   - packages/signer/**
-last-verified: "2026-08-23" # #1702: the delegate-key-loss answer here was the PRE-#1694 one — "pause or revoke the agent and create a new key path". Epic #1694 made a delegation-rail agent's key REPLACEABLE (re-key: same agent, new key, budget remainder and period boundary carried), so the guidance is now split by rail rather than stated as one blanket answer. Found by the cross-epic doc sweep #1702's acceptance criteria asked for, not by the coupling gate — no `covers:` glob connects this file to `routes/agent-rekey.ts`. This doc names both rails a few lines above, so a single answer was actively wrong here rather than merely incomplete. Scope: the delegate-key paragraph only. Prior: #1813: dropped two `covers:` entries for libs deleted as unreachable (`hosted-connect.ts`, `agent-runtime-snippets.ts`). The body's only related line — NEXT_PUBLIC_HAVEN_MCP_URL rendered in connect-agent snippets — is still accurate; those snippets come from the live ConnectAgentModal path. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
+last-verified: "2026-08-25" # #2041: the custody bullet list enumerated the two directions signed material crosses the local/hosted boundary and missed the third this change adds -- on the erc7710 scheme `haven_submit` RETURNS an assembled `payment_header` rather than relaying a funding signature. One bullet added; the migration, setup and direct-payment walkthroughs make no claim about per-tool argument shapes and are untouched. Scope: that bullet only. Prior: #1992: three claims corrected against the retirement - the spend-gate bullet still listed "the Safe AllowanceModule on imported legacy Safes" as a live gate, "(the base for new accounts)" implied a second rail still took payments, and the `haven_sign` step still documented a legacy-rail bare-payload-hash variant that is unreachable because the rail never returns a signable intent. Scope: those three places. Prior: #1984: "the legacy import-only rail" corrected — the rail is closed to new accounts entirely. The hosted-MCP trust claims around it re-read and unchanged: on-chain policy still constrains every automatic payment on both rails. Prior: #1702: the delegate-key-loss answer here was the PRE-#1694 one — "pause or revoke the agent and create a new key path". Epic #1694 made a delegation-rail agent's key REPLACEABLE (re-key: same agent, new key, budget remainder and period boundary carried), so the guidance is now split by rail rather than stated as one blanket answer. Found by the cross-epic doc sweep #1702's acceptance criteria asked for, not by the coupling gate — no `covers:` glob connects this file to `routes/agent-rekey.ts`. This doc names both rails a few lines above, so a single answer was actively wrong here rather than merely incomplete. Scope: the delegate-key paragraph only. Prior: #1813: dropped two `covers:` entries for libs deleted as unreachable (`hosted-connect.ts`, `agent-runtime-snippets.ts`). The body's only related line — NEXT_PUBLIC_HAVEN_MCP_URL rendered in connect-agent snippets — is still accurate; those snippets come from the live ConnectAgentModal path. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Migration - Local MCP To Hosted MCP
@@ -60,9 +60,17 @@ The split is deliberate:
 - Paid MCP-tool completion can also send a signed, merchant-bound
   `payment_header` with the funding `payment_id` so hosted MCP can settle the
   merchant call and attach evidence.
-- On-chain policy state remains the spend gate: the Safe AllowanceModule on
-  imported legacy Safes, the signed delegation's caveat enforcers on
-  delegation-rail accounts (the base for new accounts).
+- On the delegation rail's **erc7710** scheme
+  ([#2041](https://github.com/d-hinders/Haven-AI/issues/2041)) the header
+  travels the other way: there is no funding signature to relay, so
+  `haven_submit { settlement_scheme: "erc7710" }` relays the settlement child
+  and RETURNS an already-assembled `payment_header` for the agent to retry the
+  merchant with. Still only signatures and headers cross the boundary, never the
+  key.
+- On-chain policy state remains the spend gate: the signed delegation's caveat
+  enforcers on delegation-rail accounts. The Safe AllowanceModule is **retired**
+  (#1440) — a legacy Safe account cannot pay at all, and every hosted-MCP payment
+  tool bottoms out in a route that answers HTTP 410 for it (#1986).
 
 API auth is identity. Signature is authority. On-chain module state is
 enforcement.
@@ -226,13 +234,14 @@ Then test a tiny in-budget payment. The expected direct payment sequence is:
 
 1. Agent calls hosted `haven_pay`.
 2. Hosted MCP returns `{ payment_id, payload_hash, expires_at }` — and on a
-   **delegation-rail** account (the base for new accounts) also
+   **delegation-rail** account (the only rail that can pay) also
    `signature_scheme`, `typed_data` and `typed_data_b64`: the Hybrid account
    validates the EIP-712 typed data, and a bare-hash signature is rejected
    on-chain (AA24, #1254).
-3. Agent calls local `haven_sign` — legacy rail: with the payload hash;
-   delegation rail: pass `typed_data_b64` UNCHANGED (or, for x402 intents,
-   just `payment_id` and let the signer fetch the payload, #1263).
+3. Agent calls local `haven_sign` — pass `typed_data_b64` UNCHANGED (or, for
+   x402 intents, just `payment_id` and let the signer fetch the payload, #1263).
+   The legacy rail's bare-payload-hash variant is unreachable: that rail is
+   retired (#1440) and never returns a signable intent.
 4. Agent calls hosted `haven_submit` with `{ payment_id, signature }`.
 5. Haven relays the independently valid signed transaction.
 
@@ -269,7 +278,8 @@ creating duplicate payments.
   injected.
 - API keys identify agents only. They do not authorize payment execution.
 - On-chain policy state constrains every automatic payment — the Safe
-  AllowanceModule on the legacy import-only rail, the delegation's caveat
+  AllowanceModule on the legacy rail (retiring under #1440; closed to new
+  accounts since #1984), the delegation's caveat
   enforcers (budget/recipient/expiry) on the delegation rail.
 - Haven can relay independently valid signed transactions, but it cannot move
   funds with the API key alone.

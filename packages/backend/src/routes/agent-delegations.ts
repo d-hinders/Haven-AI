@@ -37,6 +37,11 @@ import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../rails/hybrid-provisioning.js'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
 import { listAccountPasskeys, passkeyEnrollmentDates } from '../infra/repositories/hybrid-signers.js'
+import {
+  loadOwnedDelegationAgent,
+  insertPendingDelegationForOwnedNonRevokedAgent,
+  lockOwnedNonRevokedDelegationAgent,
+} from '../infra/repositories/agents.js'
 import type { HybridOwnerConfig } from '../rails/hybrid-provisioning.js'
 import {
   buildBudgetDelegation,
@@ -82,30 +87,6 @@ const MAX_REVOKE_ALL_BATCH = 25
 // on the reconciliation reads. Sits well above the batch cap so healed
 // orphans can never push a legitimately-sized batch into this refusal.
 const RECONCILE_READ_CEILING = 100
-
-interface AgentAccountRow {
-  agent_id: string
-  delegate_address: string | null
-  chain_id: number
-  treasury_address: string | null
-  account_type: string | null
-}
-
-/** The agent joined to its delegation-rail account — owner-scoped. */
-async function loadOwnedDelegationAgent(
-  agentId: string,
-  userId: string,
-): Promise<AgentAccountRow | null> {
-  const result = await pool.query<AgentAccountRow>(
-    `SELECT a.id AS agent_id, a.delegate_address, us.chain_id,
-            us.safe_address AS treasury_address, us.account_type
-     FROM agents a
-     LEFT JOIN user_safes us ON us.id = a.safe_id
-     WHERE a.id = $1 AND a.user_id = $2`,
-    [agentId, userId],
-  )
-  return result.rows[0] ?? null
-}
 
 export default async function agentDelegationRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
@@ -243,6 +224,9 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     const { sub } = request.user as { sub: string }
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
+    if (agent.status === 'revoked') {
+      return reply.code(409).send({ error: 'Revoked agents cannot receive new budget delegations' })
+    }
     if (agent.account_type !== 'delegator_hybrid') {
       return reply.code(409).send({ error: 'Agent account is not on the delegation rail' })
     }
@@ -309,21 +293,23 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     }
 
     const hash = delegationIdentity(delegation)
-    await pool.query(
-      `INSERT INTO agent_delegations (
-         agent_id, chain_id, token_address, recipient_address, delegation_hash,
-         delegation_json, version, status, budget_atomic, period_seconds,
-         start_date, expires_at
-       ) VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, 'pending', $8, $9, $10, $11)
-       ON CONFLICT (delegation_hash) DO NOTHING`,
-      [
-        request.params.id, agent.chain_id, token_address,
-        recipient_address ? recipient_address.toLowerCase() : null,
-        hash, JSON.stringify(delegation), version,
-        budget_atomic, period_seconds, nowSec - 60, expiry,
-      ],
-    )
-
+    const inserted = await insertPendingDelegationForOwnedNonRevokedAgent({
+      agentId: request.params.id,
+      userId: sub,
+      chainId: agent.chain_id,
+      tokenAddress: token_address,
+      recipientAddress: recipient_address ? recipient_address.toLowerCase() : null,
+      delegationHash: hash,
+      delegationJson: JSON.stringify(delegation),
+      version,
+      budgetAtomic: budget_atomic,
+      periodSeconds: period_seconds,
+      startDate: nowSec - 60,
+      expiresAt: expiry,
+    })
+    if (!inserted) {
+      return reply.code(409).send({ error: 'Revoked agents cannot receive new budget delegations' })
+    }
     return reply.code(201).send({
       delegation_hash: hash,
       version,
@@ -340,6 +326,9 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const { sub } = request.user as { sub: string }
       const agent = await loadOwnedDelegationAgent(request.params.id, sub)
       if (!agent) return reply.code(404).send({ error: 'Agent not found' })
+      if (agent.status === 'revoked') {
+        return reply.code(409).send({ error: 'Revoked agents cannot receive new budget delegations' })
+      }
       const { signature } = request.body ?? {}
       // EOA signatures are 65 bytes (130 hex); a passkey account's delegation
       // signature is an ABI-encoded WebAuthn assertion — longer (#887). The
@@ -419,6 +408,13 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const client = await pool.connect()
       try {
         await client.query('BEGIN')
+        // Lock the lifecycle row before changing delegation state. If a revoke
+        // committed first, refuse; if it races us, it serializes after this
+        // atomic activation and can still revoke the resulting authority.
+        if (!(await lockOwnedNonRevokedDelegationAgent(request.params.id, sub, client))) {
+          await client.query('ROLLBACK')
+          return reply.code(409).send({ error: 'Revoked agents cannot receive new budget delegations' })
+        }
         await client.query(
           `UPDATE agent_delegations SET status = 'replaced', updated_at = NOW()
            WHERE agent_id = $1 AND token_address = $2

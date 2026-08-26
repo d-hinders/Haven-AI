@@ -7,6 +7,7 @@ import {
   runtimeProfile,
   runtimeVerificationInstruction,
   RUNTIME_FLAG_VALUES,
+  RUNTIME_FLAG_VALUE_LIST,
 } from './runtime-registry.js'
 
 describe('Hermes runtime registry', () => {
@@ -116,6 +117,16 @@ describe('the runtime resolution ladder (#1719)', () => {
     expect((error as ConnectError).message).toContain('not-a-harness')
     expect((error as ConnectError).message).toContain(RUNTIME_FLAG_VALUES)
     expect((error as ConnectError).message).toContain('--runtime other')
+    // #2091: the valid values ride structurally so --json can list them.
+    expect((error as ConnectError).details.allowedRuntimes).toEqual(RUNTIME_FLAG_VALUE_LIST)
+  })
+
+  it('resolves the codex alias to codex-cli with no detection to help (#2091)', async () => {
+    // The Codex field flow: nothing detected (npx runs network-escalated,
+    // outside the sandbox that sets CODEX_*), so the agent retries with the
+    // alias the refusal names. That retry must land on the codex-cli profile.
+    const selection = await resolveRuntimeSelection('codex', undefined, { env: {} })
+    expect(selection).toEqual({ runtime: 'codex-cli', source: 'explicit' })
   })
 
   it('never prompts after refusing an unrecognised hint', async () => {
@@ -143,6 +154,7 @@ describe('the runtime resolution ladder (#1719)', () => {
     expect(error).toBeInstanceOf(ConnectError)
     expect((error as ConnectError).code).toBe('runtime_force_unrecognized')
     expect((error as ConnectError).message).toContain(RUNTIME_FLAG_VALUES)
+    expect((error as ConnectError).details.allowedRuntimes).toEqual(RUNTIME_FLAG_VALUE_LIST)
   })
 
   it('reaches the prompt rung only when nothing else answered', async () => {

@@ -10,7 +10,6 @@ const mockUseDashboardOverview = vi.fn()
 const mockUseBalances = vi.fn()
 const mockUseSafeDetails = vi.fn()
 const mockUseSafeOperationGate = vi.fn()
-const mockUseSafeApprovers = vi.fn()
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
@@ -48,9 +47,6 @@ vi.mock('@/hooks/useSafeOperationGate', () => ({
   useSafeOperationGate: () => mockUseSafeOperationGate(),
 }))
 
-vi.mock('@/hooks/useSafeApprovers', () => ({
-  useSafeApprovers: (...args: unknown[]) => mockUseSafeApprovers(...args),
-}))
 
 vi.mock('@/components/DashboardOnboardingGuide', () => ({
   default: ({ hasFirstAgentPayment }: { hasFirstAgentPayment: boolean }) => (
@@ -62,10 +58,6 @@ vi.mock('@/components/DashboardOnboardingGuide', () => ({
 }))
 
 vi.mock('@/components/ConnectAgentModal', () => ({
-  default: () => null,
-}))
-
-vi.mock('@/components/SendModal', () => ({
   default: () => null,
 }))
 
@@ -186,15 +178,6 @@ function mockBaseState() {
     error: null,
   })
   mockUseSafeOperationGate.mockReturnValue({ kind: 'ready' })
-  // Default: nothing to ask about (no passkey Safe), which is what the real
-  // hook does with a null id — it never stops loading, so the nudge stays off.
-  mockUseSafeApprovers.mockReturnValue({
-    approvers: [],
-    threshold: 1,
-    loading: true,
-    error: null,
-    refetch: vi.fn(),
-  })
 }
 
 describe('DashboardClient', () => {
@@ -210,11 +193,11 @@ describe('DashboardClient', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument()
     expect(screen.getByText('$1,234.56')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+    // Send and the approvals attention row are DELETED (#1989) — asserted as
+    // absences in their own dedicated test below, where the fixture is set up
+    // to make a regression visible rather than merely unasserted.
     expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
-    expect(screen.getByText('Needs attention')).toBeInTheDocument()
-    expect(screen.getByText('2 agent payments need your action')).toBeInTheDocument()
     expect(screen.getByText('Agents connected')).toBeInTheDocument()
     expect(screen.getByText('Monthly agent spend')).toBeInTheDocument()
     expect(screen.getByText('$42.00')).toBeInTheDocument()
@@ -222,7 +205,24 @@ describe('DashboardClient', () => {
     expect(screen.getByText('Active accounts')).toBeInTheDocument()
   })
 
-  it('uses singular copy for one agent payment that needs action', () => {
+  /**
+   * #1989 (epic #1440): the dashboard's two legacy-Safe spend/approval
+   * affordances are GONE — the hero's Send button (it opened `SendModal`, which
+   * is deleted with the rail) and the "Needs attention" approvals row with its
+   * "Open approvals" link (`/approvals` no longer routes and
+   * `POST /approvals/:id/approve` answers 410 since #1986).
+   *
+   * This replaces `uses singular copy for one agent payment that needs action`,
+   * whose entire subject was the deleted row.
+   *
+   * The fixture is deliberately the WORST case for these absences rather than
+   * the easiest: a legacy (non-`delegator_hybrid`) Safe account — the exact
+   * account type both affordances used to render for — with a non-zero
+   * `actionableApprovals`. On `dev` before this change every one of these
+   * assertions fails. That is what stops it being a guard over the empty set:
+   * put either affordance back and it goes red here.
+   */
+  it('offers neither a Send affordance nor an approvals route, even for a funded legacy Safe with pending approvals', () => {
     mockUseDashboardOverview.mockReturnValue({
       data: {
         totals: { usd: 1234.56, eur: 1100 },
@@ -243,7 +243,7 @@ describe('DashboardClient', () => {
         actionableApprovals: 1,
         pendingApprovals: 1,
         onboardingProgress: {
-          hasFirstAgentPayment: false,
+          hasFirstAgentPayment: true,
         },
         agents: [],
         transactions: [],
@@ -255,7 +255,18 @@ describe('DashboardClient', () => {
 
     render(<DashboardClient />)
 
-    expect(screen.getByText('1 agent payment needs your action')).toBeInTheDocument()
+    // Positive control FIRST: the dashboard really rendered its funded hero.
+    // Without this the four absences below would all be satisfied by a blank
+    // screen — the failure mode #1987 paid for.
+    expect(screen.getByText('$1,234.56')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+    expect(screen.queryByText('1 agent payment needs your action')).toBeNull()
+    expect(screen.queryByRole('link', { name: /Open approvals/i })).toBeNull()
+    expect(
+      Array.from(document.querySelectorAll('a')).map((a) => a.getAttribute('href')),
+    ).not.toContain('/approvals')
   })
 
   it('does not show empty preview states while overview is loading', () => {
@@ -342,7 +353,6 @@ describe('DashboardClient', () => {
 
     render(<DashboardClient />)
 
-    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Receive funds' })).not.toBeInTheDocument()
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
@@ -358,7 +368,6 @@ describe('DashboardClient', () => {
 
     render(<DashboardClient />)
 
-    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Receive funds' })).not.toBeInTheDocument()
@@ -486,160 +495,63 @@ describe('DashboardClient', () => {
     })
 
     /**
-     * #1229: the same exposure on the legacy rail — a Safe whose sole owner
-     * (threshold 1) is a passkey signer. It never got this prompt because
-     * there was nothing to prompt FOR: enrolling a backup passkey 409'd on the
-     * one-per-chain constraint that migration 056 removes.
+     * #1989 (epic #1440) removed the LEGACY-rail arm of this nudge, and this
+     * test is the inversion of the four #1229/#1205 tests that used to live
+     * here.
+     *
+     * Those four are deleted rather than kept, and the distinction matters:
+     * three of them ('stays silent once the passkey Safe has a second
+     * approver', 'keeps the safe-rail nudge off testnet chains', 'leaves an
+     * imported wallet-owned Safe alone') all asserted that NO nudge renders
+     * for some legacy configuration. Every one of them is now true by
+     * CONSTRUCTION — no legacy configuration can produce a nudge at all — so
+     * keeping them would have left three green tests guarding the empty set,
+     * which is exactly the #1987 defect. They were removed and replaced by the
+     * single assertion that actually still has content: the arm is gone for
+     * the configuration it used to FIRE on.
+     *
+     * The positive control is in the same test on purpose. Without it, "no
+     * nudge for a legacy Safe" is satisfied by breaking the nudge outright.
      */
-    const asPasskeySafeUser = (approverCount: number) => {
-      mockUseAuth.mockReturnValue({
-        user: {
-          id: 'user-1',
-          name: 'Ada',
-          email: 'ada@example.com',
-          wallet_address: null,
-          safes: [SAFE],
-        },
-        activeSafe: SAFE,
-        passkeys: [
-          {
-            id: 'passkey-1',
-            credential_id: 'cred-primary',
-            signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
-            chain_id: SAFE.chain_id,
-            safe_address: SAFE.safe_address,
-            created_at: '2026-05-12T00:00:00Z',
+    it('shows no backup nudge for a funded single-owner passkey Safe, while the delegation nudge still fires', () => {
+      const asPasskeySafeUser = () => {
+        mockUseAuth.mockReturnValue({
+          user: {
+            id: 'user-1',
+            name: 'Ada',
+            email: 'ada@example.com',
+            wallet_address: null,
+            safes: [SAFE],
           },
-        ],
-      })
-      mockUseSafeApprovers.mockReturnValue({
-        approvers: Array.from({ length: approverCount }, (_, i) => ({
-          address: `0x${String(i).repeat(40)}`,
-          type: 'passkey' as const,
-          label: null,
-        })),
-        threshold: 1,
-        loading: false,
-        error: null,
-        refetch: vi.fn(),
-      })
-    }
+          activeSafe: SAFE,
+          passkeys: [
+            {
+              id: 'passkey-1',
+              credential_id: 'cred-primary',
+              signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
+              chain_id: SAFE.chain_id,
+              safe_address: SAFE.safe_address,
+              created_at: '2026-05-12T00:00:00Z',
+            },
+          ],
+        })
+      }
 
-    it('shows the nudge for a funded single-owner passkey Safe (#1229)', () => {
-      asPasskeySafeUser(1)
+      // The exact fixture that used to render the nudge: funded, legacy
+      // passkey-owned Safe, sole owner.
+      asPasskeySafeUser()
+      const { unmount } = render(<DashboardClient />)
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+      // And it no longer points anywhere: 'Approvers' was the destination.
+      expect(screen.queryByText('Approvers')).not.toBeInTheDocument()
+      unmount()
 
+      // POSITIVE CONTROL — the nudge itself is alive on the delegation rail.
+      asDelegationUser()
+      storeSigners(1, null)
       render(<DashboardClient />)
-
       expect(screen.getByText('Add a backup soon')).toBeInTheDocument()
-      // Legacy rail has no "Backup & recovery" screen — it must point at
-      // Approvers instead.
-      expect(screen.getByText('Approvers')).toBeInTheDocument()
-    })
-
-    it('stays silent once the passkey Safe has a second approver (#1229)', () => {
-      asPasskeySafeUser(2)
-
-      render(<DashboardClient />)
-
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
-    })
-
-    // #1205: the recommendation's production origin is now the SERVER —
-    // needsBackupSignerRecommendation computed next to the chain
-    // classification and delivered on the session safes payload. The
-    // device-local read survives only as the older-backend fallback (which is
-    // what every test above exercises, since their fixtures omit the field).
-    it('trusts a server true — no device-local signer read required (#1205)', () => {
-      mockUseAuth.mockReturnValue({
-        user: {
-          id: 'user-1',
-          name: 'Ada',
-          email: 'ada@example.com',
-          wallet_address: '0x5555555555555555555555555555555555555555',
-          safes: [{ ...DELEGATOR_SAFE, needs_backup_recommendation: true }],
-        },
-        activeSafe: DELEGATOR_SAFE,
-      })
-      // Nothing in localStorage — the server answer must carry alone.
-
-      render(<DashboardClient />)
-
-      expect(screen.getByText('Add a backup soon')).toBeInTheDocument()
-    })
-
-    it('trusts a server false even when the stale local read says otherwise (#1205)', () => {
-      mockUseAuth.mockReturnValue({
-        user: {
-          id: 'user-1',
-          name: 'Ada',
-          email: 'ada@example.com',
-          wallet_address: '0x5555555555555555555555555555555555555555',
-          safes: [{ ...DELEGATOR_SAFE, needs_backup_recommendation: false }],
-        },
-        activeSafe: DELEGATOR_SAFE,
-      })
-      storeSigners(1, null) // stale local state claims a missing backup
-
-      render(<DashboardClient />)
-
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
-    })
-
-    it('keeps the safe-rail nudge off testnet chains via the server classification (#1205)', () => {
-      // asPasskeySafeUser(1) is used for its approver-count side effect; the
-      // auth mock is then overridden with the testnet-classified safe.
-      asPasskeySafeUser(1)
-      mockUseAuth.mockReturnValue({
-        user: {
-          id: 'user-1',
-          name: 'Ada',
-          email: 'ada@example.com',
-          wallet_address: null,
-          safes: [{ ...SAFE, value_bearing_chain: false }],
-        },
-        activeSafe: SAFE,
-        passkeys: [
-          {
-            id: 'passkey-1',
-            credential_id: 'cred-primary',
-            signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
-            chain_id: SAFE.chain_id,
-            safe_address: SAFE.safe_address,
-            created_at: '2026-05-12T00:00:00Z',
-          },
-        ],
-      })
-
-      render(<DashboardClient />)
-
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
-    })
-
-    it('leaves an imported wallet-owned Safe alone (#1229)', () => {
-      // No passkey row points at this Safe, so its owner holds their own key
-      // and needs no advice from us.
-      mockUseAuth.mockReturnValue({
-        user: {
-          id: 'user-1',
-          name: 'Ada',
-          email: 'ada@example.com',
-          wallet_address: '0x5555555555555555555555555555555555555555',
-          safes: [SAFE],
-        },
-        activeSafe: SAFE,
-        passkeys: [],
-      })
-      mockUseSafeApprovers.mockReturnValue({
-        approvers: [{ address: '0x5555', type: 'eoa' as const, label: null }],
-        threshold: 1,
-        loading: false,
-        error: null,
-        refetch: vi.fn(),
-      })
-
-      render(<DashboardClient />)
-
-      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+      expect(screen.getByText('Backup & recovery')).toBeInTheDocument()
     })
 
     it('stays silent when the signer set is unknown — a failed read must not nag', () => {

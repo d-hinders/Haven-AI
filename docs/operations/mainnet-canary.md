@@ -5,7 +5,7 @@ covers:
   - packages/backend/scripts/check-mainnet-reconciliation.ts
   - packages/backend/scripts/check-bundler.ts
   - packages/backend/scripts/check-delegation-contracts.ts
-last-verified: "2026-08-15" # #1458: §4.2 added — the erc7710 merchant canary, prepared but NOT run; prod baseline measured (eip3009 only, chain 8453) and the pinned Base DelegationManager verified against the kit. The variable change and the mainnet payment are owner steps. Prior: §4.1 run log added — canary completed on the 0.1.20 train; §§1-3 re-read, probe guidance unchanged
+last-verified: "2026-08-24" # #1984: step 3.1 told the operator to flip NEXT_PUBLIC_DELEGATION_ONBOARDING=1 on the prod Vercel scope as the launch switch. That flag is REMOVED — onboarding provisions Hybrid unconditionally — so the step is rewritten to name the backend DELEGATION_RAIL_CHAIN_IDS as the only remaining authority on where the rail serves. The rest of the runbook re-read; no other step referenced the flag. Prior: #1458: §4.2 added — the erc7710 merchant canary, prepared but NOT run; prod baseline measured (eip3009 only, chain 8453) and the pinned Base DelegationManager verified against the kit. The variable change and the mainnet payment are owner steps. Prior: §4.1 run log added — canary completed on the 0.1.20 train; §§1-3 re-read, probe guidance unchanged
 ---
 
 # Mainnet (8453) canary & reconciliation runbook (#1067)
@@ -112,13 +112,14 @@ is NOT the posture for external users.
 One agent, one small open budget, one erc7710 payment, end to end. Mirror of
 the `x402-erc7710-settle` QA leg's assertions, executed by hand on 8453.
 
-1. **Flip the launch switch, then provision.** Since the #908 prep, the CODE
-   serves delegation onboarding on Base mainnet (`DELEGATION_ONBOARDING_CHAIN_IDS`
-   in the frontend, mirroring the backend's `DELEGATION_RAIL_CHAIN_IDS`) — the
-   remaining gate is `NEXT_PUBLIC_DELEGATION_ONBOARDING=1` on the **prod**
-   Vercel scope, which is deliberately the operator's last move (it needs a
-   redeploy to inline). Set it, then **provision** a fresh account on
-   **Base mainnet** through the production app (passkey onboarding — this now
+1. **Provision.** There is no launch switch left to flip. Under #908 this
+   step was `NEXT_PUBLIC_DELEGATION_ONBOARDING=1` on the **prod** Vercel
+   scope, ANDed with a frontend chain set; #1984 retires the Safe rail, so
+   onboarding provisions a Hybrid delegation-rail account unconditionally on
+   every supported chain and both the flag and the set are gone. Where the
+   rail actually serves is the backend's `DELEGATION_RAIL_CHAIN_IDS`
+   (`rails/delegation-contracts.ts`). **Provision** a fresh account on
+   **Base mainnet** through the production app (passkey onboarding — this
    creates a Hybrid, zero tx), enrol the second signer, and note the treasury
    address. Fund it with a small amount of Base USDC (≤ 5 USDC).
 2. **Create one agent** with an **open** USDC budget of ≤ 1 USDC/day and

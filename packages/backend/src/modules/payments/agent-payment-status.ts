@@ -11,11 +11,6 @@ import {
   findIntentStatusRow,
   type PaymentIntentStatusRow,
 } from '../../infra/repositories/payment-intents.js'
-import {
-  expireOverdueApproval,
-  findApprovalStatusRow,
-  type ApprovalStatusRow,
-} from '../../infra/repositories/approval-requests.js'
 import { type AgentContext } from '../../middleware/agentAuth.js'
 import { quoteFee } from '../fee/index.js'
 
@@ -384,60 +379,8 @@ function paymentIntentState(status: string): {
   }
 }
 
-function approvalState(status: string): {
-  phase: AgentPaymentPhaseValue
-  nextAction: AgentPaymentNextActionValue
-  message: string
-} {
-  if (status === 'pending') {
-    return {
-      phase: AgentPaymentPhase.UserApprovalRequired,
-      nextAction: AgentPaymentNextAction.WaitForUserApproval,
-      message: 'This payment is above the remaining agent budget and is waiting for user approval in Haven.',
-    }
-  }
-  if (status === 'approved') {
-    return {
-      phase: AgentPaymentPhase.UserExecutionRequired,
-      nextAction: AgentPaymentNextAction.WaitForUserToCompletePayment,
-      message: 'The user approved this request, but the funding payment has not been sent yet.',
-    }
-  }
-  if (status === 'proposed') {
-    return {
-      phase: AgentPaymentPhase.WaitingForAdditionalApprovals,
-      nextAction: AgentPaymentNextAction.WaitForUserApproval,
-      message: 'The funding payment was submitted and is waiting for the remaining account approvals.',
-    }
-  }
-  if (status === 'executed') {
-    return {
-      phase: AgentPaymentPhase.FundingSent,
-      nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
-      message: 'The user completed the funding payment. Retry the original x402 request so the agent can send the merchant payment header.',
-    }
-  }
-  if (status === 'rejected') {
-    return {
-      phase: AgentPaymentPhase.Rejected,
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
-      message: 'The user rejected this payment request.',
-    }
-  }
-  if (status === 'expired') {
-    return {
-      phase: AgentPaymentPhase.Expired,
-      nextAction: AgentPaymentNextAction.RequestAgainIfUserStillWantsIt,
-      message: 'The approval request expired before it was completed.',
-    }
-  }
-
-  return {
-    phase: AgentPaymentPhase.UserApprovalRequired,
-    nextAction: AgentPaymentNextAction.CheckStatusLater,
-    message: `The approval request is ${status}.`,
-  }
-}
+// #2055: `approvalState` died with the approval_requests fallback — every
+// status this module reports is a payment intent now.
 
 export function agentPaymentStatusHttpCode(status: AgentPaymentStatus): number {
   if (status.kind === 'approval_request') {
@@ -687,39 +630,8 @@ export async function getAgentPaymentStatus(
     }
   }
 
-  await expireOverdueApproval(paymentId, agent.id)
-
-  const approval: ApprovalStatusRow | null = await findApprovalStatusRow(paymentId, agent.id)
-  if (!approval) return null
-
-  const state = approvalState(approval.status)
-  const rail = railFor(approval)
-  const resourceUrl = approval.payment_resource_url ?? approval.x402_resource_url
-  return {
-    payment_id: approval.id,
-    kind: 'approval_request',
-    rail,
-    status: approval.status,
-    phase: state.phase,
-    next_action: state.nextAction,
-    amount: approval.amount_human,
-    token: approval.token_symbol,
-    resource_url: resourceUrl,
-    merchant_address: approval.merchant_address,
-    tx_hash: approval.tx_hash,
-    expires_at: approval.expires_at,
-    chain_id: approval.chain_id,
-    message: messageForRail(rail, approval.status, state.message),
-    fee: statusFee({ paymentId: approval.id, rail, amountRaw: approval.amount_raw, token: approval.token_symbol, userId: agent.user_id }),
-    ...railContext({
-      rail,
-      amountRaw: approval.amount_raw,
-      tokenAddress: approval.token_address,
-      resourceUrl,
-      merchantAddress: approval.merchant_address,
-      idempotencyKey: approval.machine_idempotency_key,
-      challengeId: approval.machine_challenge_id,
-      machineMetadata: approval.machine_metadata,
-    }),
-  }
+  // #2055: the approval_requests fallback that stood here is gone — the table
+  // is dropped and queue history is waived (owner decision on #2021). An id
+  // that is not a payment intent is now simply unknown.
+  return null
 }

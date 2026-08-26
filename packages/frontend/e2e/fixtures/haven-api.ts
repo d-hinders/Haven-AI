@@ -127,27 +127,6 @@ export const dashboardOverview = {
   transactions: [dashboardTransaction],
 }
 
-export const testApproval = {
-  id: 'approval-e2e',
-  agent_id: testAgent.id,
-  agent_name: testAgent.name,
-  safe_address: testSafeAddress,
-  chain_id: 8453,
-  token_symbol: 'USDC',
-  token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
-  to_address: testRecipientAddress,
-  amount_raw: '12500000',
-  amount_human: '12.50',
-  reason: 'Buy the requested research report.',
-  source: 'x402',
-  x402_resource_url: 'https://research.example/report',
-  status: 'pending',
-  tx_hash: null,
-  reviewed_at: null,
-  created_at: '2026-05-03T12:00:00.000Z',
-  expires_at: '2026-05-04T12:00:00.000Z',
-}
-
 type JsonValue = Record<string, unknown> | unknown[]
 
 async function fulfillJson(route: Route, json: JsonValue, status = 200) {
@@ -381,16 +360,9 @@ export async function mockHavenApi(page: Page) {
       return
     }
 
-    if (method === 'GET' && path === '/approvals') {
-      await fulfillJson(route, {
-        approvals: [testApproval],
-        // Dashboard reads actionable_count first, while older callers may
-        // still fall back to pending_count.
-        actionable_count: 1,
-        pending_count: 1,
-      })
-      return
-    }
+    // No `/approvals` handler: #1989 deleted the route and #2055 deregistered
+    // the backend endpoint. A mock for a dead endpoint intercepts nothing and
+    // reads as coverage of a flow that cannot happen (#1993).
 
     if (method === 'GET' && path === '/user/owners') {
       await fulfillJson(route, {

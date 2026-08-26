@@ -558,8 +558,8 @@ async function openUserMenuByKeyboard(page: Page) {
  * Playwright matches handlers in REVERSE registration order, so this one is
  * consulted first. Everything except `GET /agents` is handed straight back with
  * `route.fallback()`, which defers to the next matching handler rather than
- * fulfilling; the shared fixture therefore still serves auth, balances,
- * approvals and the rest, unmodified and unaware.
+ * fulfilling; the shared fixture therefore still serves auth, balances
+ * and the rest, unmodified and unaware.
  *
  * The point of the layering is blast radius: `haven-api.ts` is shared with
  * eleven other specs, and a paused or archived agent added there would change

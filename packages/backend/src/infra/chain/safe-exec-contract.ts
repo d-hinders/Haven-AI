@@ -66,7 +66,7 @@ export interface SafeContract {
       overrides?: { gasLimit?: bigint },
     ): Promise<{
       hash: string
-      wait(): Promise<unknown>
+      wait(confirms?: number, timeout?: number): Promise<unknown>
     }>
     staticCall(
       to: string,

@@ -1,11 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import crypto from 'crypto'
 import { authMiddleware } from '../middleware/auth.js'
-import {
-  normalizeAgentAllowance,
-  normalizeAgentAllowances,
-  normalizeAgentAllowanceTokenAddress,
-} from '../modules/agents/index.js'
+import { normalizeAgentAllowanceTokenAddress } from '../modules/agents/index.js'
 import { getTokenBalance } from '../rails/allowance-module.js'
 import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
@@ -23,8 +19,7 @@ import { formatTokenValue } from '../domain/tokens.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
 import {
   agentExistsForUser,
-  createAgentWithAllowances,
-  deleteAgentAllowance,
+  createAgent,
   agentHasLiveDelegations,
   archiveAgent,
   unarchiveAgent,
@@ -35,16 +30,11 @@ import {
   findNonRevokedAgentIdByDelegate,
   findUserSafeIdForUser,
   listAgentsForUserAllStatuses,
-  listAllowancesForAgent,
-  listAllowancesForAgentUnordered,
-  listAllowancesForAgents,
   pauseAgent,
   resumeAgent,
   revokeAgent,
   rotateAgentApiKey,
   updateAgentProfile,
-  upsertAgentAllowance,
-  type AgentAllowanceRow,
 } from '../infra/repositories/agents.js'
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -90,19 +80,10 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       return { agents: [] }
     }
 
-    const agentIds = agentRows.map((a) => a.id)
-
-    const allowanceRows = await listAllowancesForAgents(agentIds)
-
-    const allowancesByAgent = new Map<string, AgentAllowanceRow[]>()
-    for (const row of allowanceRows) {
-      const existing = allowancesByAgent.get(row.agent_id) ?? []
-      existing.push(row)
-      allowancesByAgent.set(row.agent_id, existing)
-    }
-
-    // Delegation-rail agents derive their budget from ACTIVE delegations —
-    // agent_allowances is a frozen onboarding mirror on that rail (#1090).
+    // Delegation-rail agents derive their budget from ACTIVE delegations
+    // (#1090). Legacy-rail agents get an empty list: the Safe rail is retired
+    // (#1440/#2020) and `agent_allowances` is no longer read anywhere — this
+    // handler must work with the table gone.
     const delegationAgentIds = agentRows
       .filter((a) => a.account_type === 'delegator_hybrid')
       .map((a) => a.id)
@@ -113,7 +94,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       allowances:
         agent.account_type === 'delegator_hybrid'
           ? (derivedByAgent.get(agent.id) ?? [])
-          : (allowancesByAgent.get(agent.id) ?? []),
+          : [],
     }))
 
     return { agents }
@@ -131,16 +112,15 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     }
 
     if (agent.account_type === 'delegator_hybrid') {
-      // Live budget = the active delegations, not the onboarding mirror (#1090).
+      // Live budget = the active delegations, not an onboarding mirror (#1090).
       const derived = await deriveDelegationAllowances([id])
       return { ...agent, allowances: derived.get(id) ?? [] }
     }
 
-    const allowances = await listAllowancesForAgent(id)
-
+    // Legacy rail retired (#1440/#2020): no allowance config to show.
     return {
       ...agent,
-      allowances,
+      allowances: [],
     }
   })
 
@@ -187,7 +167,8 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     }
   })
 
-  // POST /agents — create agent with delegate address and on-chain allowance config
+  // POST /agents — create agent with a delegate address; spend authority is
+  // granted separately as a delegation (#1440/#2020)
   app.post<{ Body: CreateAgentBody }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { name, description, delegate_address, safe_id, allowances, issue_passport } = request.body
@@ -198,9 +179,14 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     if (!delegate_address || !isValidAddress(delegate_address)) {
       return reply.code(400).send({ error: 'Valid delegate address is required' })
     }
-    const normalizedAllowances = normalizeAgentAllowances(allowances)
-    if (!normalizedAllowances.ok) {
-      return reply.code(400).send({ error: normalizedAllowances.error })
+    // #2020: the allowance mirror is retired with the Safe rail. Refuse rather
+    // than silently drop — a caller passing allowances believes it is granting
+    // authority, and nothing here grants anything any more.
+    if (Array.isArray(allowances) && allowances.length > 0) {
+      return reply.code(400).send({
+        error:
+          'Per-token allowances are retired with the Safe rail (#1440). Grant the agent a budget delegation instead.',
+      })
     }
 
     // Validate safe_id belongs to the user (if provided)
@@ -230,23 +216,17 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const apiKeyPrefix = apiKey.slice(0, 12)
 
     try {
-      const { agent, safeInfo, savedAllowances } = await createAgentWithAllowances(
-        {
-          userId: sub,
-          name: name.trim(),
-          description: description?.trim() ?? null,
-          delegateAddress: delegate_address.toLowerCase(),
-          apiKeyHash,
-          apiKeyPrefix,
-          safeId: resolvedSafeId,
-        },
-        normalizedAllowances.value,
-      )
+      const { agent, safeInfo } = await createAgent({
+        userId: sub,
+        name: name.trim(),
+        description: description?.trim() ?? null,
+        delegateAddress: delegate_address.toLowerCase(),
+        apiKeyHash,
+        apiKeyPrefix,
+        safeId: resolvedSafeId,
+      })
 
       emitFunnelEvent(sub, 'agent_created', { agent_id: agent.id })
-      if (savedAllowances.length > 0) {
-        emitFunnelEvent(sub, 'allowance_granted', { agent_id: agent.id })
-      }
       // Opt-in passport (#972). Deliberately AFTER the transaction commits and
       // outside any try that could turn a passport problem into a failed agent:
       // requestPassport records the intent, then the EAS write is fire-and-forget.
@@ -287,7 +267,9 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         ...agent,
         ...safeInfo,
         api_key: apiKey,
-        allowances: savedAllowances,
+        // Always empty since #2020 — kept for response-shape compatibility;
+        // budgets arrive later as delegation grants.
+        allowances: [],
         passport_requested: passportChainId != null,
       })
     } catch (err) {
@@ -319,7 +301,13 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'Agent not found' })
       }
 
-      const allowances = await listAllowancesForAgentUnordered(id)
+      // #2020: the response's allowances mirror the GET contract — derived
+      // from active delegations on the delegation rail, empty on the retired
+      // legacy rail. `agent_allowances` is never read.
+      const allowances =
+        updated.account_type === 'delegator_hybrid'
+          ? ((await deriveDelegationAllowances([id])).get(id) ?? [])
+          : []
 
       return {
         ...updated,
@@ -495,82 +483,32 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
-  // POST /agents/:id/allowances — add/update an allowance record (mirrors on-chain)
-  app.post<{
-    Params: { id: string }
-    Body: {
-      token_address: string
-      token_symbol: string
-      allowance_amount: string
-      reset_period_min: number
-    }
-  }>('/:id/allowances', async (request, reply) => {
-    const { sub } = request.user as { sub: string }
-    const { id } = request.params
-    const normalizedAllowance = normalizeAgentAllowance(request.body)
-    if (!normalizedAllowance.ok) {
-      return reply.code(400).send({ error: normalizedAllowance.error })
-    }
-
-    const agentCheck = await findAgentIdStatusForUser(id, sub)
-    if (!agentCheck) {
-      return reply.code(404).send({ error: 'Agent not found' })
-    }
-    if (agentCheck.status === 'pending_approval') {
-      return reply
-        .code(409)
-        .send({ error: 'Agent rules are pending wallet approval and cannot be changed here' })
-    }
-    if (agentCheck.status === 'revoked') {
-      return reply
-        .code(409)
-        .send({ error: 'Revoked agent rules cannot be changed' })
-    }
-
-    const saved = await upsertAgentAllowance(id, normalizedAllowance.value)
-
-    return {
-      ...saved,
-      // #802: with an enabled budget schedule, this edit takes effect on-chain
-      // Session schedules are retired (#834); the warning slot stays null for
-      // response-shape compatibility until clients drop it.
-      schedule_warning: null,
-    }
+  // POST /agents/:id/allowances — RETIRED (#1440/#2020). The allowance mirror
+  // was legacy-rail spend-authority configuration; on the delegation rail a
+  // budget is a signed delegation grant, never a row. Typed 410 tombstone in
+  // the same spirit as DELETE /agents/:id (#1401) and the session rail (#834).
+  // Nothing is written on this path any more.
+  app.post<{ Params: { id: string } }>('/:id/allowances', async (_request, reply) => {
+    return reply.code(410).send({
+      error:
+        'Per-token allowances are retired with the Safe rail (#1440). Grant the agent a budget delegation instead.',
+    })
   })
 
-  // DELETE /agents/:id/allowances/:tokenAddress
+  // DELETE /agents/:id/allowances/:tokenAddress — RETIRED (#1440/#2020), same
+  // tombstone contract as the POST above. The token-address parse stays so a
+  // malformed call still gets its 400 rather than a misleading 410.
   app.delete<{ Params: { id: string; tokenAddress: string } }>(
     '/:id/allowances/:tokenAddress',
     async (request, reply) => {
-      const { sub } = request.user as { sub: string }
-      const { id, tokenAddress } = request.params
-      const normalizedTokenAddress = normalizeAgentAllowanceTokenAddress(tokenAddress)
+      const normalizedTokenAddress = normalizeAgentAllowanceTokenAddress(request.params.tokenAddress)
       if (!normalizedTokenAddress.ok) {
         return reply.code(400).send({ error: normalizedTokenAddress.error })
       }
-
-      const agentCheck = await findAgentIdStatusForUser(id, sub)
-      if (!agentCheck) {
-        return reply.code(404).send({ error: 'Agent not found' })
-      }
-      if (agentCheck.status === 'pending_approval') {
-        return reply
-          .code(409)
-          .send({ error: 'Agent rules are pending wallet approval and cannot be changed here' })
-      }
-      if (agentCheck.status === 'revoked') {
-        return reply
-          .code(409)
-          .send({ error: 'Revoked agent rules cannot be changed' })
-      }
-
-      const deleted = await deleteAgentAllowance(id, normalizedTokenAddress.value)
-
-      if (!deleted) {
-        return reply.code(404).send({ error: 'Allowance not found' })
-      }
-
-      return { success: true }
+      return reply.code(410).send({
+        error:
+          'Per-token allowances are retired with the Safe rail (#1440). Revoke or change the agent’s budget delegation instead.',
+      })
     },
   )
 }

@@ -376,8 +376,10 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
           tx,
         )
 
-        await setups.copySetupAllowancesToAgent(agentId, setupId, tx)
-
+        // #2020: the allowance-mirror copy that stood here is gone — the
+        // requested budgets stay on `agent_connection_setup_allowances`, and
+        // the authority the user approves is the delegation grant built from
+        // them. `agent_allowances` is never written any more.
         await setups.markSetupRegistered(
           {
             setupId,

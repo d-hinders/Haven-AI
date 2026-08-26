@@ -1,14 +1,11 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import { countActionableApprovalsForUser } from '../infra/repositories/approval-requests.js'
 import {
   findPortfolioSnapshots,
   hasFirstAgentPayment,
   insertPortfolioSnapshot,
   listDashboardAgents,
-  listDashboardAllowances,
   listDashboardSafes,
-  sumMonthlyApprovalSpend,
   sumMonthlyPaymentSpend,
   type DashboardAllowanceRow,
   type MonthlySpendRow,
@@ -76,29 +73,22 @@ export default async function dashboardRoutes(
     const [
       safes,
       agents,
-      actionableApprovals,
       firstAgentPayment,
     ] = await Promise.all([
       listDashboardSafes(sub),
       listDashboardAgents(sub),
-      countActionableApprovalsForUser(sub),
       hasFirstAgentPayment(sub),
     ])
+    // #2055: structurally zero — the approval queue died with the
+    // AllowanceModule rail; both wire fields survive for compatibility.
+    const actionableApprovals = 0
 
     const activeAgents = agents.filter((agent) => agent.status === 'active')
 
-    const agentIds = agents.map((agent) => agent.id)
-    const allowanceRows = await listDashboardAllowances(agentIds)
-
+    // Delegation-rail agents: the live budget is the active delegation set
+    // (#1090). Legacy-rail agents get no allowance entries — the Safe rail is
+    // retired (#1440/#2020) and `agent_allowances` is no longer read.
     const allowancesByAgent = new Map<string, DashboardAllowanceRow[]>()
-    for (const row of allowanceRows) {
-      const existing = allowancesByAgent.get(row.agent_id) ?? []
-      existing.push(row)
-      allowancesByAgent.set(row.agent_id, existing)
-    }
-
-    // Delegation-rail agents: the live budget is the active delegation set,
-    // not the frozen agent_allowances onboarding mirror (#1090).
     const delegationAgentIds = agents
       .filter((agent) => agent.account_type === 'delegator_hybrid')
       .map((agent) => agent.id)
@@ -132,18 +122,14 @@ export default async function dashboardRoutes(
     const previousEur = Number(yesterdaySnapshot?.total_eur ?? '0')
     const changeAvailable = Boolean(yesterdaySnapshot)
 
-    const [paymentSpendRows, approvalSpendRows] = await Promise.all([
-      sumMonthlyPaymentSpend(sub),
-      sumMonthlyApprovalSpend(sub),
-    ])
+    // #2055: the approval-spend bucket is gone with approval_requests —
+    // monthly spend is payment_intents alone now (historical executed-approval
+    // spend disappears with the table, per the #2021 readability waiver).
+    const paymentSpendRows = await sumMonthlyPaymentSpend(sub)
+    const paymentSpend = await accumulateMonthlySpend(paymentSpendRows)
 
-    const [paymentSpend, approvalSpend] = await Promise.all([
-      accumulateMonthlySpend(paymentSpendRows),
-      accumulateMonthlySpend(approvalSpendRows),
-    ])
-
-    const monthlySpendUsd = paymentSpend.usd + approvalSpend.usd
-    const monthlySpendEur = paymentSpend.eur + approvalSpend.eur
+    const monthlySpendUsd = paymentSpend.usd
+    const monthlySpendEur = paymentSpend.eur
 
     const mergedTransactions: EnrichedTransaction[] = []
     const transactionResults = await Promise.allSettled(

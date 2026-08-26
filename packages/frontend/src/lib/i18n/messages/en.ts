@@ -29,10 +29,6 @@ export const en = {
       english: 'English',
       swedish: 'Svenska',
     },
-    approvalAlerts: {
-      label: 'Approval alerts',
-      detail: 'Get notified when a transaction needs approval.',
-    },
     agentSpendAlerts: {
       label: 'Agent spend alerts',
       detail: 'Receive updates when agents use their budget.',
@@ -55,20 +51,14 @@ export const en = {
       detail: 'Password changes are not available yet.',
     },
 
-    approvers: {
-      title: 'Approvers',
-      description:
-        'Wallets and passkeys that can approve actions, managed per account. Threshold stays at 1.',
-    },
-
     recovery: {
       title: 'Recovery and safety',
       description: 'Know what Haven can and cannot recover.',
       limitationsLabel: 'Recovery limitations',
       limitationsDetail:
         'Haven can help you find account details, but it cannot bypass your wallets or passkeys or recover funds sent on the wrong network.',
-      backupLabel: 'Backup approver',
-      backupDetail: 'Adding backup approvers is not available yet.',
+      backupLabel: 'Backup and recovery',
+      backupDetail: 'Backups are managed per account, under Backup and recovery on any of its agents.',
       sessionsLabel: 'Active sessions',
       sessionsDetail: 'Review signed-in devices and revoke sessions.',
       exitPathLabel: 'Your exit path',

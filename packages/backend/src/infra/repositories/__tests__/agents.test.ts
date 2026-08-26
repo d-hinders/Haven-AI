@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import db from '../../../db.js'
+import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
   FIND_AGENT_FOR_USER_ALL_STATUSES_SQL,
   FIND_AGENT_ID_FOR_USER_SQL,
@@ -20,6 +22,8 @@ import {
   findNonRevokedAgentIdByDelegate,
   findUserSafeIdForUser,
   listAgentsForUserAllStatuses,
+  loadOwnedDelegationAgent,
+  insertPendingDelegationForOwnedNonRevokedAgent,
   pauseAgent,
   resumeAgent,
   revokeAgent,
@@ -30,6 +34,59 @@ import {
 
 const OWNER = 'user-owner'
 const ATTACKER = 'user-attacker'
+
+describeDb('delegation lifecycle owner read (#2025)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  it('keeps a revoked owner agent visible to recovery routes while exposing its terminal status', async () => {
+    const user = await db.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`revoked-delegation-${Date.now()}@test.example`],
+    )
+    const agent = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, name, status) VALUES ($1, 'Revoked delegation', 'revoked') RETURNING id`,
+      [user.rows[0].id],
+    )
+
+    const row = await loadOwnedDelegationAgent(agent.rows[0].id, user.rows[0].id)
+    const otherUser = await db.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`other-revoked-delegation-${Date.now()}@test.example`],
+    )
+    expect(row).toMatchObject({ agent_id: agent.rows[0].id, status: 'revoked' })
+    expect(await loadOwnedDelegationAgent(agent.rows[0].id, otherUser.rows[0].id)).toBeNull()
+  })
+
+  it('cannot insert a fresh pending delegation for a revoked agent, while an active agent remains eligible', async () => {
+    const user = await db.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`grant-eligibility-${Date.now()}@test.example`],
+    )
+    const [revoked, active] = await Promise.all(['revoked', 'active'].map(async (status) => {
+      const result = await db.query<{ id: string }>(
+        `INSERT INTO agents (user_id, name, status) VALUES ($1, $2, $3) RETURNING id`,
+        [user.rows[0].id, `${status} grant`, status],
+      )
+      return result.rows[0].id
+    }))
+    const input = (agentId: string, hash: string) => ({
+      agentId, userId: user.rows[0].id, chainId: 84532,
+      tokenAddress: '0x036cbd53842c5426634e7929541ec2318f3dcf7e', recipientAddress: null,
+      delegationHash: hash, delegationJson: '{}', version: 1, budgetAtomic: '1',
+      periodSeconds: 60, startDate: 0, expiresAt: 9999999999,
+    })
+    expect(await insertPendingDelegationForOwnedNonRevokedAgent(input(revoked, `0x${'1'.repeat(64)}`))).toBe(false)
+    expect(await insertPendingDelegationForOwnedNonRevokedAgent(input(active, `0x${'2'.repeat(64)}`))).toBe(true)
+    const rows = await db.query<{ agent_id: string }>('SELECT agent_id FROM agent_delegations')
+    expect(rows.rows).toEqual([{ agent_id: active }])
+  })
+})
 
 /**
  * An executor that behaves like a tenant-scoped table: it returns `row` only
@@ -169,10 +226,6 @@ describe('tenant scoping is required and effective — cross-tenant access retur
  * leaving status untouched, and the whole point: dependent audit rows
  * SURVIVE archiving (the old DELETE cascaded seven tables away).
  */
-import db from '../../../db.js'
-import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
-import { beforeAll, beforeEach } from 'vitest'
-
 describeDb('agents archive (#1401, real DB)', () => {
   beforeAll(async () => {
     await initDbHarness()
@@ -276,6 +329,11 @@ describeDb('agents archive (#1401, real DB)', () => {
     expect(await unarchiveAgent(agentId, userId)).toBe(false)
   })
 
+  // #2055 (epic #1440, #2021 readability waiver): was seeded with a
+  // `payment_intents` row AND an `approval_requests` row, asserting both
+  // survive archiving — `approval_requests` is dropped (migration 070), so
+  // there is nothing left to seed or assert there. The point survives on
+  // `payment_intents` alone.
   it('THE POINT: payment history and audit rows survive archiving', async () => {
     const { userId, agentId } = await seedAgent('revoked')
     await db.query(
@@ -289,23 +347,11 @@ describeDb('agents archive (#1401, real DB)', () => {
                0, '0x' || repeat('11', 32), 'confirmed', NOW() + interval '1 hour')`,
       [agentId, userId],
     )
-    await db.query(
-      `INSERT INTO approval_requests
-         (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
-          amount_raw, amount_human, status, expires_at)
-       VALUES ($1, $2, '0x00000000000000000000000000000000000000s1', 'USDC',
-               '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
-               '0x00000000000000000000000000000000000000aa',
-               '1000', '0.001', 'pending', NOW() + interval '1 hour')`,
-      [agentId, userId],
-    )
 
     expect(await archiveAgent(agentId, userId)).not.toBeNull()
 
     const intents = await db.query(`SELECT id FROM payment_intents WHERE agent_id = $1`, [agentId])
-    const approvals = await db.query(`SELECT id FROM approval_requests WHERE agent_id = $1`, [agentId])
     expect(intents.rows).toHaveLength(1)
-    expect(approvals.rows).toHaveLength(1)
     // And the agent row itself still exists, archived — not deleted.
     const agent = await db.query<{ archived_at: Date | null }>(
       `SELECT archived_at FROM agents WHERE id = $1`,

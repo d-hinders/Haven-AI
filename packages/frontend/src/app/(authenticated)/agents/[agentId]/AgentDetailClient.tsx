@@ -322,7 +322,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   })
   const revokeBlockedByOtherDevice = operationGate.kind === 'passkey_on_other_device'
   const revokeApprovalBlocked = isOnchainActionBlocked(operationGate)
-  const revokeNoSignerMessage = 'Connect a wallet to revoke this agent budget.'
+  const revokeNoSignerMessage = "Connect the account's owner wallet to revoke this agent budget."
 
   const [editOpen, setEditOpen] = useState(false)
   const [editMode, setEditMode] = useState<EditAgentModalMode>('all')
@@ -426,7 +426,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   const approvalCopy =
     budgetLines.length === 0
       ? 'No automatic spending is configured for this agent.'
-      : 'Payments within budget can run automatically. Larger payments need your manual approval.'
+      : 'Payments within budget can run automatically. Payments above it are declined before any money moves.'
   const agentStatus = agentStatusPresentation(currentAgent.status)
 
   async function handlePause() {

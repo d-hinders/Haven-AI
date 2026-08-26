@@ -13,15 +13,10 @@ covers:
   - packages/frontend/e2e/hosted-mcp.spec.ts
   - packages/frontend/e2e/transactions-detail.spec.ts
   - packages/connect/src/**
-  - packages/frontend/src/components/settings/ManageApprovers.tsx
-  - packages/frontend/src/components/settings/__tests__/ManageApprovers.test.tsx
-  - packages/backend/src/modules/accounts/safe-owner-tx.ts
-  - packages/backend/src/modules/accounts/__tests__/safe-owner-tx.test.ts
-  - packages/backend/src/routes/__tests__/user-safes-approvers.test.ts
   - packages/frontend/src/lib/transaction-csv.ts
   - packages/frontend/src/lib/__tests__/transaction-csv.test.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-08-22" # #1813: removed the "Hosted connect copy, commands, and deep-link behavior" row from "Already automated" and the two `covers:` entries feeding it. Both named tests were deleted with the component they covered — HostedConnectCard lost its only call site when #345 retired CreateAgentModal and has been unreachable since. The row is DELETED rather than repointed because the behaviour it claimed coverage of no longer exists in the product; repointing would have re-created exactly the #1771 defect in the same table — a row crediting coverage that is not there. Scope: this row and the covers list only; the hand-test steps were NOT re-run. Prior: #1720: the per-environment run list is no longer a picker-row list — there is no picker, so per-environment coverage now checks that the CONNECTOR resolves each environment from an identical command, and a deliberately-undetectable environment becomes a case worth running rather than an unreachable one. Step 1 rewritten (nothing to pick; commands must match across environments) and a new step 2 added for confirming which resolution rung fired, renumbering the rest. Other steps and the "Already automated" table NOT re-run. Prior: #1771: corrected the "Already automated" row that credited `hosted-mcp.spec.ts` with mobile-overflow coverage — that test asserted a helper which could not fail inside the app shell and was removed; mobile overflow is covered by `navigation.mobile.spec.ts` under Pixel 5 emulation. Scope of this re-verification: the "Already automated" table only; the hand-test steps were NOT re-run. Prior: #1682: the per-environment run list notes the name-first picker (a row per environment again); steps themselves unchanged. Prior: #1672: noted the collapsed AI-agent picker entry in the per-environment run list; steps themselves unchanged. Prior: #1346 runtime-specific activation + read-only Connect verification re-checked; #1330 Hermes .env credential-reference verification
+last-verified: "2026-08-25" # #1992: two hand-test steps told the tester an over-budget payment "queues for approval". The approval queue died with the Safe rail (#1986/#1987) — over-budget REVERTS on-chain during gas estimation on the delegation rail, so the old instruction would have had a tester record a failure as a pass. Caught by haven-doc-reviewer. Scope: steps 6 and the #420 edge-case note; the rest of the runbook was NOT re-verified, and its QA-harness prerequisites remain subject to #2011. Prior: #1988: the "Approver add/remove/reuse/passkey logic, last-owner guard" row is DELETED, along with its three backend `covers:` entries. Same reasoning as #1813 below and the #1771 defect it names: the backend half of that flow no longer exists — `safe-owner-tx.ts`, the approver routes and their tests are deleted with the Safe rail — so the row credited coverage of a flow that cannot run. `ManageApprovers.tsx` and its unit tests survive until #1989 removes them, and their `covers:` entries are left for that slice; a passing component test over a 404ing endpoint is not coverage of the behaviour the row claimed. Scope: that row and those three covers entries only; the hand-test steps were NOT re-run. Prior: #1813: removed the "Hosted connect copy, commands, and deep-link behavior" row from "Already automated" and the two `covers:` entries feeding it. Both named tests were deleted with the component they covered — HostedConnectCard lost its only call site when #345 retired CreateAgentModal and has been unreachable since. The row is DELETED rather than repointed because the behaviour it claimed coverage of no longer exists in the product; repointing would have re-created exactly the #1771 defect in the same table — a row crediting coverage that is not there. Scope: this row and the covers list only; the hand-test steps were NOT re-run. Prior: #1720: the per-environment run list is no longer a picker-row list — there is no picker, so per-environment coverage now checks that the CONNECTOR resolves each environment from an identical command, and a deliberately-undetectable environment becomes a case worth running rather than an unreachable one. Step 1 rewritten (nothing to pick; commands must match across environments) and a new step 2 added for confirming which resolution rung fired, renumbering the rest. Other steps and the "Already automated" table NOT re-run. Prior: #1771: corrected the "Already automated" row that credited `hosted-mcp.spec.ts` with mobile-overflow coverage — that test asserted a helper which could not fail inside the app shell and was removed; mobile overflow is covered by `navigation.mobile.spec.ts` under Pixel 5 emulation. Scope of this re-verification: the "Already automated" table only; the hand-test steps were NOT re-run. Prior: #1682: the per-environment run list notes the name-first picker (a row per environment again); steps themselves unchanged. Prior: #1672: noted the collapsed AI-agent picker entry in the per-environment run list; steps themselves unchanged. Prior: #1346 runtime-specific activation + read-only Connect verification re-checked; #1330 Hermes .env credential-reference verification
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)
@@ -52,7 +47,6 @@ document for the remaining exploratory checklist.
 | Mobile-viewport layout overflow on the primary authenticated routes | `e2e/navigation.mobile.spec.ts` (Pixel 5 emulation, gates every PR since #1770) |
 | Dialog/overlay layout overflow **at a mobile viewport** | `e2e/receive-modal.mobile.spec.ts` (Pixel 5, #1797). The three desktop callers of `measureDialogOverflow` run only at 1280px, where a dialog is least likely to overflow |
 | **x402 tx displays in history + opens the per-type detail panel** (#420 UI half) | `e2e/transactions-detail.spec.ts` |
-| Approver add/remove/reuse/passkey logic, last-owner guard | unit tests (`ManageApprovers`, `safe-owner-tx`, route tests) |
 | CSV export shape + injection guard | unit tests (`transaction-csv`) |
 
 Run the regular mocked frontend suite with:
@@ -110,7 +104,9 @@ deliberately, not an unreachable one.
    verify setup.
 6. **Confirm a basic action** — approve the budget on-chain (wallet/passkey), then
    have the agent do a small allowed action (e.g. a direct `haven_pay` within budget
-   or an x402 call). Expect it to settle, or to queue for approval if over budget.
+   or an x402 call). Expect it to settle. An over-budget payment **reverts on-chain**
+   during gas estimation — the delegation rail has no approval queue (#1440), so a
+   queued approval is a FAILURE here, not an expected outcome.
 
 Record per environment: did each of steps 1–6 pass, and any friction.
 
@@ -131,10 +127,10 @@ merchants** found.
 3. **Receipt is logged** — payment evidence is recorded (smart account/delegate,
    merchant, token, amount, chain, x402 resource, tx hash).
 
-Note edge cases worth forcing: over-budget with available total coverage
-(queues for approval), above total coverage (rejects as insufficient),
-`PRICE_EXCEEDS_MAX`, and a merchant that verifies but doesn't settle
-(delegate sweep recovery).
+Note edge cases worth forcing: over-budget (**reverts on-chain** — the approval
+queue died with the Safe rail, #1440), `PRICE_EXCEEDS_MAX`, and a merchant that
+verifies but doesn't settle (delegate sweep recovery, still live via the #946
+EIP-3009 bridge).
 
 ## Reporting
 

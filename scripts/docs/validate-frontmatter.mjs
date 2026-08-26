@@ -94,6 +94,31 @@ export function globToRegExp(glob) {
 }
 
 /**
+ * The inline `# reason` on a literal `covers: []` line, or null.
+ *
+ * Read from the RAW front-matter rather than from `parseFrontMatter`, which
+ * strips trailing comments by design (globs never contain `#`, so stripping is
+ * correct for the glob list itself). The reason is metadata ABOUT the empty
+ * list, not an item in it.
+ *
+ * ⚠️ Recognizes only the literal single-line `covers: []` form. Two other
+ * spellings also parse to an EMPTY list — a `covers:` block header with no
+ * `- ` items under it, and `covers: [ ]` — and this returns null for both even
+ * if a reason is written there, so the caller blocks. That is fail-CLOSED
+ * (never a silent pass) and the caller's message names the canonical syntax, so
+ * the contributor's fix is to write the canonical form. Named here because a
+ * reader would otherwise assume the coverage is total.
+ */
+export function emptyCoversNote(raw) {
+  const block = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  if (!block) return null
+  const line = block[1].split(/\r?\n/).find((l) => /^covers:\s*\[\]/.test(l))
+  if (!line) return null
+  const note = line.replace(/^covers:\s*\[\]\s*/, '').replace(/^#\s*/, '').trim()
+  return note.length > 0 ? note : null
+}
+
+/**
  * Parse the leading `---` front-matter block. Returns { ok, data, error }.
  * Deliberately minimal: handles scalar keys and a `covers` block-list or
  * inline `[]`, with `# comments` stripped from scalar lines.
@@ -211,6 +236,35 @@ async function main() {
     if (covers === undefined) {
       errors.push(`${rel}: missing required key \`covers\` (use \`covers: []\` for narrative docs)`)
       continue
+    }
+    // An EMPTY `covers:` must say why (#1993).
+    //
+    // A doc with front-matter and `covers: []` looks governed — it is in the
+    // inventory, it has an owner and a `last-verified` — while no coupling gate
+    // can ever implicate it, because an empty glob list matches nothing. That is
+    // strictly more dangerous than a doc with no front-matter at all, which is
+    // at least VISIBLY outside the system. It bit for real: ABOUT_HAVEN.md, the
+    // designated first-read mental-model doc, contradicted five merged
+    // retirement slices and nothing mechanical could have said so (#1992).
+    //
+    // The fix is not to forbid `covers: []` — narrative docs and process
+    // playbooks genuinely have no code mirror. It is to make the DECISION
+    // explicit, so an audit can tell "deliberately uncoupled, here is why" from
+    // "nobody ever decided". The convention already existed by hand on 20 of the
+    // 22 empty-covers docs; this makes it mechanical.
+    //
+    // Scope, stated so the green is not over-read: this only reaches the files
+    // `docFiles` enumerates — `docs/**` plus the four root gravity files. A
+    // Markdown file under `packages/**` has no front-matter at all and is
+    // outside the docs-quality system entirely; that is a separate, visible gap
+    // (#2078), not one this rule closes.
+    if (covers.length === 0 && !emptyCoversNote(raw)) {
+      errors.push(
+        `${rel}: \`covers: []\` needs an inline reason — write ` +
+          '`covers: []  # <why this doc has no code mirror>`. An empty `covers` ' +
+          'can never be implicated by the coupling gate, so an unexplained one is ' +
+          'indistinguishable from a doc nobody decided about (#1993).',
+      )
     }
     for (const glob of covers) {
       const re = globToRegExp(glob)

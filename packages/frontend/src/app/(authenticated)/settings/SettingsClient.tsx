@@ -10,7 +10,6 @@ import { useLocale, useT } from '@/context/LocaleContext'
 import type { Locale } from '@/lib/i18n'
 import { Button } from '@/components/ui/Button'
 import { PageHeader } from '@/components/ui/PageHeader'
-import ManageApprovers from '@/components/settings/ManageApprovers'
 
 
 function Section({
@@ -206,11 +205,14 @@ export default function SettingsClient() {
               />
             )}
           />
-          <SettingRow
-            label={t.settings.approvalAlerts.label}
-            detail={t.settings.approvalAlerts.detail}
-            action={<ComingSoonToggle label={t.settings.approvalAlerts.label} comingSoonText={t.common.comingSoon} />}
-          />
+          {/*
+            "Approval alerts" (notify me when a transaction needs approval) is
+            removed with the approval queue itself (#1989, epic #1440). It was a
+            legacy Safe / AllowanceModule concept; the delegation rail enforces
+            budgets on-chain and never queues a payment, so there is nothing
+            left to be notified about. A "coming soon" toggle for a flow the
+            product has just deleted promises the wrong future.
+          */}
           <SettingRow
             label={t.settings.agentSpendAlerts.label}
             detail={t.settings.agentSpendAlerts.detail}
@@ -234,12 +236,17 @@ export default function SettingsClient() {
           />
         </Section>
 
-        <Section
-          title={t.settings.approvers.title}
-          description={t.settings.approvers.description}
-        >
-          <ManageApprovers />
-        </Section>
+        {/*
+          The Approvers section is DELETED (#1989, epic #1440). It hosted
+          `ManageApprovers`, which built and relayed Safe owner-change
+          transactions through `POST /user/safes/:safeId/approvers/tx` — one of
+          five approver routes #1988 removed with the Safe rail. Left in place
+          it would render a section whose every action 404s.
+
+          Its i18n keys (`t.settings.approvers.*`) went with it in #1993's
+          residue sweep — an orphaned locale key is invisible to every gate
+          (no import, no type, no route), so only a sweep finds one.
+        */}
 
         <Section
           title={t.settings.recovery.title}

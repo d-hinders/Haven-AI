@@ -80,9 +80,11 @@ export const UPDATE_USER_WALLET_ADDRESS_SQL = `UPDATE users SET wallet_address =
        WHERE id = $2
        RETURNING id, name, email, wallet_address, safe_address`
 
-export const UPDATE_USER_SAFE_ADDRESS_SQL = `UPDATE users SET safe_address = $1, updated_at = NOW()
-       WHERE id = $2
-       RETURNING id, name, email, wallet_address, safe_address`
+// `UPDATE_USER_SAFE_ADDRESS_SQL` and `updateUserSafeAddress` are DELETED
+// (#1988). `PUT /user/safe` was their only caller and it is a 410 tombstone.
+// The legacy `users.safe_address` mirror is still written — by re-default and
+// unlink — through `SET_LEGACY_USER_SAFE_ADDRESS_SQL` in `user-safes.ts`,
+// which issues the identical UPDATE and is still exercised by the schema smoke.
 
 /** `userId` is REQUIRED — it is the row scope of the UPDATE. */
 export async function updateUserWalletAddress(
@@ -92,22 +94,6 @@ export async function updateUserWalletAddress(
 ): Promise<UserIdentityRow | null> {
   const result = await db.query<UserIdentityRow>(UPDATE_USER_WALLET_ADDRESS_SQL, [
     walletAddress,
-    userId,
-  ])
-  return result.rows[0] ?? null
-}
-
-/**
- * Write the legacy `users.safe_address` mirror from `PUT /user/safe`.
- * `userId` is REQUIRED — it is the row scope of the UPDATE.
- */
-export async function updateUserSafeAddress(
-  safeAddress: string,
-  userId: string,
-  db: Executor = pool,
-): Promise<UserIdentityRow | null> {
-  const result = await db.query<UserIdentityRow>(UPDATE_USER_SAFE_ADDRESS_SQL, [
-    safeAddress,
     userId,
   ])
   return result.rows[0] ?? null

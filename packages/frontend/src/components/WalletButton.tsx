@@ -23,6 +23,7 @@ import {
   credentialIdFromKeyId,
 } from '@/lib/signer'
 import { passkeyRowLabel } from '@/lib/passkeyLabels'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { truncateAddress } from '@/components/haven'
 
@@ -177,36 +178,91 @@ interface PopoverProps {
    * a credential chosen by array position and never verified as the user's.
    * Those differ in kind, which is why this state gets a marker they do not.
    *
-   * **`onThisDevice: false` is not reachable in the product today, and that is
-   * recorded here rather than left for the next reader to rediscover.**
-   * `useActiveSigner` (`lib/signer.ts`) only returns a `delegator_passkey` at
-   * all when `hybridPasskeyOnDevice` already matched, pinned by
-   * `signer.test.ts` > "does NOT resolve the hybrid signer when the device
-   * marker is missing". So the marker-less user reaches no Hybrid branch here
-   * — the dashboard gives them no passkey-based signing path at all. That is a
-   * bigger gap than the one #1952 describes, and it is filed as #1969 rather
-   * than changed from this component. This rendering becomes user-visible the moment #1969
-   * closes, with NO guaranteed review checkpoint at that time — which is the
-   * reason it is built correct now rather than later. Do not read it as
-   * shipped, user-visible behaviour.
+   * **`onThisDevice: false` is LIVE, user-visible behaviour since #1969**
+   * (owner decision 2026-08-26). `useActiveSigner` now resolves a
+   * `delegator_passkey` for any non-empty hydrated signer set, mirroring
+   * `pickSigningPath`'s precedence, so the marker-less user reaches this
+   * rendering for real — the state this block was built ahead of. Rendered
+   * evidence lives in `e2e/wallet-signer-offering.spec.ts`, which drives the
+   * app into the marker-less state through the real hydration path rather
+   * than forced props.
    */
   signingWith?: { label: string; keyId: string; onThisDevice: boolean }
   unavailablePasskey?: boolean
   /**
+   * #2073: the connected wallet is not this account's named owner. When set
+   * (the owner's truncated address), the popover explains the mismatch in the
+   * same quiet slot `unavailablePasskey` uses — the popover is the "Wrong
+   * wallet" pill's landing surface, and without this line it rendered
+   * pixel-identical to the healthy connected state (the design-review
+   * finding on this issue): a red pill whose menu gave no reason.
+   */
+  wrongWalletOwner?: string
+  /**
    * Render as a static ILLUSTRATION rather than a live overlay (#1952).
    *
    * `/design-system` shows this popover's two signing-credential states side by
-   * side, permanently open. A showcase copy is not a dialog: exposing three
-   * `role="dialog"` nodes at once is wrong for a screen reader, and it also
-   * broke `e2e/modal-scroll-cue.spec.ts`, which reaches for
-   * `document.querySelector('[role="dialog"]')` and would otherwise find a demo
-   * instead of the Modal under test — a raw DOM query no `aria-hidden` or
-   * `inert` wrapper can redirect. Measured, not predicted: without this the
-   * suite reports "strict mode violation: getByRole('dialog') resolved to 3
-   * elements".
+   * side, permanently open. A showcase copy is not a dialog.
+   *
+   * ## What the role swap actually buys — corrected and measured (#1982)
+   *
+   * This block is the SINGLE account of the two-mechanism story. The showcase's
+   * wrapper comments in `app/(authenticated)/design-system/page.tsx` and the
+   * guard test's header point here rather than restating it: #1982 was a stale
+   * comment, and four synchronised copies of the correction would rebuild the
+   * same rot surface it removed. Correct it here; leave the pointers alone.
+   *
+   * NOT screen-reader exposure, which is what this comment used to claim. Both
+   * demos sit inside a `<div inert aria-hidden="true">` wrapper, and
+   * `aria-hidden` on an ancestor drops the entire subtree from the
+   * accessibility tree regardless of any descendant's role. Measured, not
+   * reasoned: with this swap reverted to a bare `role="dialog"` the page held
+   * three dialog nodes, and Playwright's accessibility-tree-mediated
+   * `getByRole('dialog')` still resolved to exactly one — no strict-mode
+   * violation in any of the four tests. The WRAPPER is what keeps these
+   * illustrations out of the accessibility tree; `inert` additionally keeps
+   * their Copy/Switch buttons out of the tab order.
+   *
+   * The one currently-live effect is narrower, and worth naming exactly.
+   * `e2e/modal-scroll-cue.spec.ts` (#1893) asks DOCUMENT-WIDE for the Modal
+   * under test with a raw `document.querySelector('[role="dialog"]')`. That
+   * query is not accessibility-tree-mediated, so no `aria-hidden` or `inert`
+   * wrapper can redirect it, and the showcase sits ABOVE the Modal demo in DOM
+   * order — it would be the node returned. On the same revert exactly one named
+   * assertion went red: `expect(geometry.wrapperContainsBody).toBe(true)`, in the
+   * test named `the scroll box is the body, not the role="dialog" wrapper`.
+   * That one, and no other.
+   *
+   * ## Why `group` specifically, and why it stays
+   *
+   * `group` describes what this node IS — a labelled cluster of address text
+   * and buttons — so it is the honest role for something that must not read as
+   * a dialog. Do not "simplify" it to `presentation`/`none`, which would
+   * additionally suppress the grouping semantics of the nested content, nor to
+   * `img`, which would misdescribe structured content as a flat image.
+   *
+   * Do NOT read it as a safety net that would let the `inert`/`aria-hidden`
+   * wrapper be dropped. An earlier revision of this comment called it "defense
+   * in depth"; the design pass on #1982 was right that this overclaims, so it
+   * is stated the other way round. Remove that wrapper and this subtree
+   * re-enters the accessibility tree as a labelled "Wallet menu" whose
+   * Copy/Switch handlers are `NOOP` — a silently broken control group, and a
+   * WORSE trap than three dialogs, because three simultaneous dialogs is a
+   * detectable anomaly and a plausible-looking dead menu is not. The wrapper is
+   * load-bearing on its own terms; this role is not a substitute for it.
    *
    * Product call sites never pass it, so the real popover keeps full dialog
-   * semantics.
+   * semantics — and that is ENFORCED, not merely requested (#1975).
+   * `__tests__/wallet-popover-presentational-guard.test.ts` fails if any call
+   * site outside `app/(authenticated)/design-system/` passes this prop, if one
+   * of `WalletButton`'s own popovers passes it, or if the default below is
+   * flipped to `true`. Do not silence an accessibility complaint on a real
+   * surface by reaching for it: the guard will refuse, which is the point.
+   *
+   * It refuses the CARELESS route, not every route — a `{...spread}` or a
+   * renamed import is invisible to a text scan. That limit is enumerated in
+   * the guard file's own "What this guard cannot see" section; read it there
+   * before concluding the confinement is airtight.
    */
   presentational?: boolean
   open: boolean
@@ -240,6 +296,7 @@ export function WalletPopover({
   secondary,
   signingWith,
   unavailablePasskey = false,
+  wrongWalletOwner,
   presentational = false,
   open,
   onClose,
@@ -340,6 +397,17 @@ export function WalletPopover({
         {unavailablePasskey && (
           <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
             This account uses a passkey that is not available here.
+          </p>
+        )}
+        {wrongWalletOwner && (
+          // #2073: same quiet slot as the passkey note above. The mismatch is
+          // named HERE because this popover is where the "Wrong wallet" pill
+          // lands — the action-area caption is scoped to a gated action, and
+          // a page without one would otherwise offer a red pill whose menu
+          // looks exactly like the healthy state.
+          <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
+            This is not the wallet that controls this account. Switch to the
+            account&apos;s wallet {wrongWalletOwner} to approve actions.
           </p>
         )}
         {renderAddressSection(primary)}
@@ -448,6 +516,15 @@ export default function WalletButton() {
   const { getOwnerAlias } = useOwnerDirectory()
   const activeSafeAddress = activeSafe?.safe_address as Address | undefined
   const activeSigner = useActiveSigner({
+    safeAddress: activeSafeAddress,
+    chainId: activeSafe?.chain_id,
+  })
+  // #2073: the same gate the action areas consult, so the header pill and the
+  // disabled action below it agree about whether a USEFUL wallet is connected.
+  // Before this, a hybrid account with the wrong wallet connected rendered a
+  // normal connected pill up here while the action area said to connect the
+  // owner wallet — the two surfaces silently disagreed.
+  const operationGate = useSafeOperationGate({
     safeAddress: activeSafeAddress,
     chainId: activeSafe?.chain_id,
   })
@@ -713,6 +790,18 @@ export default function WalletButton() {
         // so the two cannot drift once the label stops rendering below `sm`.
         const walletLabel = accountAlias ?? account.ensName ?? truncateAddress(account.address)
 
+        // #2073: a connected wallet that is not the hybrid account's named
+        // owner gets the "Wrong network" treatment — same danger-soft pill,
+        // same icon — because it is the same class of state: connected, but
+        // not usable for this account. Unlike Wrong network the click opens
+        // the normal popover rather than a modal, because the fix (Switch
+        // wallet) already lives there.
+        const wrongWallet = operationGate.kind === 'wrong_wallet'
+        // One expression for the visible label AND the accessible name, per
+        // the #1803 rule above — the wrong-wallet pill must SAY so, not just
+        // tint, or the state is invisible to a screen reader.
+        const pillLabel = wrongWallet ? 'Wrong wallet' : walletLabel
+
         return (
           <div className="relative">
             <button
@@ -721,11 +810,17 @@ export default function WalletButton() {
               onClick={() => setPopoverOpen((v) => !v)}
               aria-haspopup="dialog"
               aria-expanded={popoverOpen}
-              aria-label={walletLabel}
-              title={walletLabel}
-              className={`flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
+              aria-label={pillLabel}
+              title={pillLabel}
+              className={
+                wrongWallet
+                  ? `flex items-center gap-2 text-sm font-medium bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] border border-danger/25 hover:border-danger/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`
+                  : `flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`
+              }
             >
-              {account.ensAvatar ? (
+              {wrongWallet ? (
+                <Icon icon={TriangleAlert} className="h-4 w-4 shrink-0" />
+              ) : account.ensAvatar ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={account.ensAvatar}
@@ -735,8 +830,8 @@ export default function WalletButton() {
               ) : (
                 <AddressAvatar address={account.address} />
               )}
-              <span className={`${LABEL_BELOW_SM} ${accountAlias ? '' : 'font-mono'}`}>
-                {walletLabel}
+              <span className={`${LABEL_BELOW_SM} ${accountAlias || wrongWallet ? '' : 'font-mono'}`}>
+                {pillLabel}
               </span>
             </button>
 
@@ -748,6 +843,11 @@ export default function WalletButton() {
                 displayName: accountAlias ?? account.ensName,
               }}
               unavailablePasskey={passkeyUnavailableOnDevice}
+              wrongWalletOwner={
+                wrongWallet && operationGate.kind === 'wrong_wallet'
+                  ? truncateAddress(operationGate.ownerAddress)
+                  : undefined
+              }
               open={popoverOpen}
               onClose={() => setPopoverOpen(false)}
               onSwitchWallet={handleSwitchWallet}

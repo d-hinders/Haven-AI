@@ -215,9 +215,14 @@ you need the reasoning. Never edit one without the other — CI will not let you
   both are registered in `index.ts` today. A parenthetical that reads as an
   exclusion is worse than an omission, because nobody re-checks it — #1892.);
 - `modules/x402/`, `modules/mpp/`, `domain/payment-token.ts`,
-  `domain/payment-coverage.ts`, `domain/machine-payment-lifecycle.ts`, or
-  `rails/allowance-module.ts`;
-- `rails/execution-rail.ts` (the rail seam) and `rails/allowance-nonce-coordinator.ts`;
+  `domain/machine-payment-lifecycle.ts`, or `rails/allowance-module.ts`
+  (#1987 deleted the off-chain coverage-arithmetic module and the
+  allowance-nonce coordinator with the AllowanceModule rail, so both are gone
+  from this list — a glob naming a file that no longer exists guards nothing,
+  and the "no phantom globs" assertion in `scripts/ci/money-path.test.mjs`
+  fails CI on it. `rails/allowance-module.ts` STAYS: that file survives as
+  reads-only);
+- `rails/execution-rail.ts` (the rail seam);
 - `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`,
   `rails/hybrid-account-config.ts`, `rails/hybrid-signer-actions.ts`,
   `rails/hybrid-transfers.ts`, `routes/agent-delegations.ts`, or
@@ -238,19 +243,32 @@ you need the reasoning. Never edit one without the other — CI will not let you
   review, which found the delegate balance monitor unlisted while its equally
   read-only sibling `infra/relayer-balance-monitor.ts` was matched by prefix accident —
   the two even share an alert channel);
-- `routes/safe-exec.ts`, `routes/approvals.ts`, or `routes/hybrid-accounts.ts`
-  (user-signed execution, the approval queue, account provisioning);
-- `packages/sdk/src/signer.ts` (signing schemes are spend authority);
+- `routes/safe-exec.ts` or `routes/hybrid-accounts.ts`
+  (user-signed execution and account provisioning; the approval queue's route
+  file was deleted with its table by #2055, so its glob left the perimeter
+  rather than being repointed — the code is dead, not moved);
+- `packages/sdk/src/signer.ts` and `packages/signer/` (signing schemes are spend
+  authority — the SDK entry point was listed; the edge-signer package that
+  actually holds the delegate key material was on no list at all, and is the
+  stronger case of the two — #1896);
+- `packages/core/src/machine-payment-lifecycle.ts` (the machine-payment domain
+  actually lives here since #987 — the `domain/machine-payment-lifecycle.ts` line
+  above guards the backend re-export shim, not the code — #1905);
 - `middleware/agentAuth.ts`;
 - `db/migrations/`;
 - the safeguard's own control surface — `scripts/release-bump.mjs`,
   `scripts/ci/qa-freshness.mjs`, `scripts/ci/money-path.test.mjs`,
   `scripts/ci/money-path-restatement-scan.mjs`, `.github/CODEOWNERS`,
   `.github/money-path-globs.json`, `.github/workflows/publish.yml`,
-  `.github/workflows/dev-gate.yml`, `.github/workflows/qa-dev.yml`. These are
+  `.github/workflows/dev-gate.yml`, `.github/workflows/qa-dev.yml`,
+  `packages/frontend/src/lib/signer.ts`, `packages/frontend/src/hooks/useAgentRekey.ts`. These are
   `controlGlobs` in the JSON: labelled money-path so a PR weakening the gate gets
   this playbook and a human, but excluded from the freshness re-run, because
-  re-running the money-flow harness proves nothing about a CI config change.
+  re-running the money-flow harness proves nothing about a CI config change —
+  and the two frontend paths are the same call: the harness exercises the
+  deployed backend, not the client, so a QA re-run would prove nothing about a
+  change to which signer signs a spend-authority action, but a human should read
+  it — #1903.
 
 The label matters because money-sensitive changes do not always touch listed files
 (a new signing scheme, a new rail); the file list matters because a diff can be

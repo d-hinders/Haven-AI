@@ -1,8 +1,41 @@
+/**
+ * Safe transaction construction and signing.
+ *
+ * ⚠️ **This file SURVIVED the Safe-rail retirement (#1989, epic #1440) on
+ * purpose — do not delete it as "the safe-tx libs".** Same shape as the
+ * backend's `rails/allowance-module.ts`, which #1987 likewise trimmed to its
+ * shared half rather than deleting: the file's execution half died with the
+ * rail, its shared half has consumers that must live.
+ *
+ * DELETED here with their callers: `buildSafeTx`, the `SendParams` type, the
+ * ERC-20 transfer ABI and the Gnosis `TOKENS` map. Their only consumers were
+ * `SendModal` / `useSendTransaction` / `ApprovalQueue`.
+ *
+ * KEPT, with the consumer that requires each:
+ *
+ *  - `getChainTokens` — a generic per-chain token list, and the one export a
+ *    DELEGATION-rail surface reads: `DelegationSendModal`,
+ *    `useAgentConnectionSetup`, `agent-panel/agent-display` (and
+ *    `EditAgentModal`). Nothing about it is AllowanceModule code.
+ *  - `getSafeNonce` / `getSafeTxHash` / `signSafeTx` / `executeSafeTx` /
+ *    `proposeSafeTx` / `SafeTxParams` / `SafeTxReceiptTimeoutError` — the
+ *    OWNER-signed Safe execution path, still used by the agent lifecycle
+ *    (`lib/agent-setup.ts`, `lib/revoke-agent.ts`, `EditAgentModal`,
+ *    `lib/allowance-module.ts`, and `signSafeTx` from `lib/signer.ts`). Those
+ *    surfaces are out of this slice's scope; the epic's residue sweep (#1993)
+ *    owns whatever of them the retirement eventually reaches.
+ *
+ * The #1229 approver-recovery consumer (`lib/approver-tx.ts`) is NOT in that
+ * list any more: #1988 deleted all five `/user/safes/:id/approvers*` routes,
+ * so the builder had no backend left and this slice deleted it. That removed
+ * Haven's only offered way to add a backup owner to a legacy Safe. It is a
+ * deliberate, owner-approved narrowing with a stated residual limit — see
+ * #1988's PR (#2009) boundary section — not something to reverse from here.
+ */
 import type { SafeCapableSigner } from './signer'
 import {
   encodeFunctionData,
   hashTypedData,
-  parseUnits,
   WaitForTransactionReceiptTimeoutError,
   ContractFunctionRevertedError,
   ContractFunctionExecutionError,
@@ -38,19 +71,6 @@ export class SafeTxReceiptTimeoutError extends Error {
 }
 
 // ERC-20 transfer ABI
-const ERC20_TRANSFER_ABI = [
-  {
-    name: 'transfer',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'to', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-] as const
-
 // Safe v1.3.0 execTransaction ABI
 const SAFE_EXEC_ABI = [
   {
@@ -114,21 +134,6 @@ export interface SafeTxParams {
   nonce: bigint
 }
 
-export interface SendParams {
-  token: string
-  tokenAddress: Address | null  // null = native
-  decimals: number
-  amount: string               // human-readable (e.g. "10.5")
-  recipient: Address
-}
-
-// ── Token config (Gnosis Chain — kept for backwards compat) ──────────
-export const TOKENS: Record<string, { address: Address | null; decimals: number }> = {
-  'xDAI': { address: null, decimals: 18 },
-  'EURe': { address: '0xcB444e90D8198415266c6a2724b7900fb12FC56E' as Address, decimals: 18 },
-  'USDC.e': { address: '0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0' as Address, decimals: 6 },
-}
-
 /** Get token config map for a specific chain (address -> symbol, decimals). */
 export function getChainTokens(chainId: number): Record<string, { address: Address | null; decimals: number }> {
   const tokens = getChainConfig(chainId).tokens
@@ -151,49 +156,6 @@ export async function getSafeNonce(
     abi: SAFE_NONCE_ABI,
     functionName: 'nonce',
   }) as Promise<bigint>
-}
-
-/** Build Safe transaction params for a token transfer */
-export function buildSafeTx(
-  send: SendParams,
-  nonce: bigint,
-): SafeTxParams {
-  const rawAmount = parseUnits(send.amount, send.decimals)
-
-  if (send.tokenAddress) {
-    // ERC-20 transfer: call the token contract
-    const data = encodeFunctionData({
-      abi: ERC20_TRANSFER_ABI,
-      functionName: 'transfer',
-      args: [send.recipient, rawAmount],
-    })
-    return {
-      to: send.tokenAddress,
-      value: 0n,
-      data,
-      operation: 0,
-      safeTxGas: 0n,
-      baseGas: 0n,
-      gasPrice: 0n,
-      gasToken: ZERO_ADDRESS,
-      refundReceiver: ZERO_ADDRESS,
-      nonce,
-    }
-  }
-
-  // Native xDAI transfer
-  return {
-    to: send.recipient,
-    value: rawAmount,
-    data: '0x',
-    operation: 0,
-    safeTxGas: 0n,
-    baseGas: 0n,
-    gasPrice: 0n,
-    gasToken: ZERO_ADDRESS,
-    refundReceiver: ZERO_ADDRESS,
-    nonce,
-  }
 }
 
 /** Sign the Safe transaction using EIP-712 typed data */
@@ -405,6 +367,16 @@ export async function executeSafeTx(
     // the relay resolves the signer contract from it.
     credential_id: signer.credentialId,
   })
+
+  // #1754: the relay answers 202 + `status: 'pending'` when it broadcast the
+  // transaction but stopped waiting for the receipt. Same fact as the
+  // direct-signing path's 120 s timeout above, so raise the same typed error
+  // — callers already route it to "finish saving" instead of re-running the
+  // batch. Before #1754 this arrived as a 502 "reverted on-chain" and surfaced
+  // to the user as a definite failure of a transaction that may have landed.
+  if (result.status === 'pending') {
+    throw new SafeTxReceiptTimeoutError(result.tx_hash as Hash)
+  }
 
   return { txHash: result.tx_hash as Hash }
 }

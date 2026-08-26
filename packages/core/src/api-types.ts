@@ -57,7 +57,7 @@ export type paths = {
         put?: never;
         /**
          * Create a Haven agent identity and API key.
-         * @description Creates the API identity for an agent. Payment authority still comes from the user-controlled Safe, the agent-held delegate key, and on-chain allowance state.
+         * @description Creates the API identity for an agent — identity and credential only. Payment authority arrives separately as an owner-signed budget delegation, enforced on-chain (#1440/#2020: the per-token allowance mirror is retired; the response’s `allowances` is always empty at creation).
          */
         post: operations["createAgent"];
         delete?: never;
@@ -299,7 +299,7 @@ export type paths = {
         put?: never;
         /**
          * Re-key step 1a: prepare the batched revoke of every live delegation (#1698).
-         * @description Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage with an empty carry.
+         * @description Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage — inheriting an abandoned predecessor’s frozen carry when one qualifies (#1868), otherwise with an empty carry.
          */
         post: operations["prepareRekeyRevocation"];
         delete?: never;
@@ -667,8 +667,8 @@ export type paths = {
         get: operations["listUserSafes"];
         put?: never;
         /**
-         * Link (import) an existing Safe to the caller's account.
-         * @description Registration only — this moves nothing on-chain and grants Haven no authority over the Safe. The same address on the same chain cannot be linked twice (409). The first Safe a user links becomes their default.
+         * RETIRED — always answers 410. Importing a Safe is closed.
+         * @description **RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** The Safe rail is being retired outright, and importing is one of the four ways a Safe could enter Haven; all four are closed. The refusal is a route preHandler, so it precedes every read and write. The route is kept as a compatibility tombstone rather than removed — a 410 tells an old client the flow is permanently gone, where a 404 reads as a transient routing error and invites retries (the #834 session-rail / #1328 mpp_demo pattern); the route itself goes in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Existing linked Safes are unaffected: GET /user/safes, rename, re-default, unlink and every read path behave exactly as before. Historically this was registration only — it moved nothing on-chain and granted Haven no authority over the Safe.
          */
         post: operations["addUserSafe"];
         delete?: never;
@@ -687,8 +687,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Deploy a new Safe with the relayer paying gas.
-         * @description The relayer sponsors the deployment and returns the deployed address plus the transaction hash. Deployment does NOT link the Safe: registration is a separate POST /user/safes call, so onboarding and add-account take the identical path. The deployed Safe is owned by owner_address (single owner, threshold 1) and never by Haven. Note that owner_address is NOT checked against the caller: any authenticated user can have a Safe deployed for any address, so this is a relayer-gas surface bounded only by the global rate limit, not a per-caller ownership check.
+         * RETIRED — always answers 410. Haven no longer deploys Safes.
+         * @description **RETIRED (#1984, epic #1440) — always answers 410 and spends no relayer gas.** The refusal is a route preHandler, so it precedes the relayer entirely. Kept as a compatibility tombstone; removed in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Historically the relayer sponsored the deployment and returned the deployed address plus the transaction hash, and owner_address was NOT checked against the caller — an unbounded-by-ownership relayer-gas surface that this retirement closes as a side effect.
          */
         post: operations["deployUserSafe"];
         delete?: never;
@@ -736,90 +736,6 @@ export type paths = {
         put: operations["setDefaultUserSafe"];
         post?: never;
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/user/safes/known-approvers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * The caller's approver registry across all their Safes.
-         * @description Distinct by address, carrying the most recent label/type and every safe_id the approver is known on — so a picker can offer reuse on another account while excluding the Safes it already approves (#417). Haven metadata only; it confers nothing on-chain.
-         */
-        get: operations["listKnownApprovers"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/user/safes/{safeId}/approvers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Read a Safe's on-chain owners, decorated with stored labels.
-         * @description The owner list and threshold are read live from the chain (`getOwners()`), not from Haven — an owner added outside Haven appears here with no label rather than being invisible.
-         */
-        get: operations["listSafeApprovers"];
-        put?: never;
-        /**
-         * Record an approver's label and type after the on-chain change lands.
-         * @description Metadata only, and idempotent: this does not add an owner. Call it after relaying the transaction from /approvers/tx. Enrolling a passkey approver also binds it to the Safe as a signing fast-path — deliberately non-fatal, because /safe/exec re-derives the binding from the on-chain owner list when it is missing.
-         */
-        post: operations["upsertSafeApproverMetadata"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/user/safes/{safeId}/approvers/tx": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Build the UNSIGNED owner-change transaction for the user to sign.
-         * @description Haven constructs and guards; the user signs and relays through /safe/exec. Haven never signs an owner change. The guards run against the LIVE owner list, before any transaction is produced: removing the final owner is refused (409), as is adding an owner the Safe already has; removing an address that is not an owner is a 404.
-         */
-        post: operations["buildSafeApproverTx"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/user/safes/{safeId}/approvers/{address}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Drop an approver's stored metadata after the on-chain removal.
-         * @description Cleans up the decoration row only — it removes no owner. The last-owner guard lives on /approvers/tx, where the actual removal is built.
-         */
-        delete: operations["deleteSafeApproverMetadata"];
         options?: never;
         head?: never;
         patch?: never;
@@ -874,8 +790,8 @@ export type paths = {
         };
         get?: never;
         /**
-         * Set the caller's legacy safe_address and link it as the default Safe.
-         * @description Writes the legacy users.safe_address column AND links the Safe into user_safes as the default — the multi-Safe table is the real home, this column is history. The order matters and is deliberate: the legacy column write is attempted FIRST and a vanished account refuses before anything is linked, rather than leaving a link whose owner no longer exists. Returns the narrower identity projection.
+         * RETIRED — always answers 410. This link is an import.
+         * @description **RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** This route wrote the legacy users.safe_address column AND linked the Safe into user_safes as the default, emitting the `safe_imported` funnel event: it is an IMPORT, so it retires with the rail. It is named here explicitly because no shipped client calls it, which is exactly what would have made it the hole left open. Kept as a compatibility tombstone; create a Haven account on the delegation rail instead (POST /accounts/hybrid).
          */
         put: operations["updateUserSafe"];
         post?: never;
@@ -1341,106 +1257,6 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/approvals": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the caller's approval requests, actionable ones first.
-         * @description **This read has a write side effect, deliberately**: it first expires every stale pending/approved request of the caller's, so the list can never show an actionable item that time has already killed. Ordering puts pending and approved ahead of everything else, then newest first. `source` and `x402_resource_url` are derived (payment_rail preferred over the legacy source column, payment_resource_url over the legacy x402 column) so this list and the approve response always agree. `actionable_count` and `pending_count` carry the SAME number — the second is a legacy alias kept for existing clients, not a different count.
-         */
-        get: operations["listApprovalRequests"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/approvals/{id}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Record consent and hand back the payment to execute.
-         * @description **Approving executes nothing.** It flips the request to approved and returns the payment details; the user's own wallet then executes the Safe transaction and reports the hash to /executed. Ownership, pending status and a live expiry are all conditions of the UPDATE itself, so an expired, foreign or already-actioned request writes nothing — the 404 covers all of those without distinguishing them, because to a caller who does not own it they are the same answer. A retired-rail request is the one exception that IS distinguished (410 via a diagnostic read on the failure path): it stays readable and rejectable but can never be approved, because approving it would hand the frontend an executable funding transaction for a rail that no longer exists. The response repeats the resolved resource URL in BOTH x402_resource_url and payment_resource_url so callers never have to coalesce client-side.
-         */
-        post: operations["approveApprovalRequest"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/approvals/{id}/proposed": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Record that a multi-signature payment was submitted for co-signing.
-         * @description For a Safe that needs more than one signature: the transaction is proposed, not yet executed, and this records that intermediate state so the queue does not show it as still awaiting the user. Same WHERE-clause guards as approve, and the same retired-rail refusal.
-         */
-        post: operations["markApprovalProposed"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/approvals/{id}/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reject a pending or approved request.
-         * @description Deliberately broader than approve in three ways. It accepts an already-APPROVED request, because consent given is consent that can be withdrawn while nothing has executed; it carries NO retired-rail guard; and it does not require a live expiry, so a request that has aged out but has not yet been lazily marked expired can still be rejected. All three follow from the same rule: never trap a request in a user queue. Rejecting executes nothing and un-does nothing on-chain — if the payment was already sent, rejecting the record does not recall it.
-         */
-        post: operations["rejectApprovalRequest"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/approvals/{id}/executed": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Report the transaction hash after executing the approved payment.
-         * @description Closes the loop: the user's wallet executed the Safe transaction, and this records the hash and snapshots the fiat value at execution time. The state is checked TWICE on purpose — once to load the request and once again inside the UPDATE — so a request that stopped being approved while the fiat lookup was in flight answers **409 rather than being overwritten**. That 409 is distinct from the 404: 404 means it was never approvable for this caller, 409 means it was and no longer is. The hash is recorded, never verified here; Haven does not confirm the transaction on-chain at this point.
-         */
-        post: operations["recordApprovalExecution"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/auth/signup": {
         parameters: {
             query?: never;
@@ -1574,7 +1390,7 @@ export type paths = {
         };
         /**
          * Combined activity across every agent the caller owns.
-         * @description The same three entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` counts everything actionable across the account, not just what appears in this page.
+         * @description The same three entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` is always 0 since #2055 (the approval queue died with the Safe rail); the field survives for wire compatibility.
          */
         get: operations["getActivityFeed"];
         put?: never;
@@ -1712,8 +1528,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Set a per-token allowance on the legacy AllowanceModule rail.
-         * @description Records the allowance Haven will execute against. **The authority itself is the on-chain AllowanceModule grant, not this row** — writing it here does not grant anything the chain has not been told about. `schedule_warning` is always null: session schedules are retired (#834) and the field survives only so existing clients keep parsing. Retiring rail (#1440).
+         * RETIRED (410): per-token allowances died with the Safe rail.
+         * @description Retired with the Safe rail (#1440/#2020). Always answers 410 and writes nothing — spend authority on the delegation rail is a signed budget delegation (`POST /agents/{id}/delegations/prepare` → activate), never a per-token allowance row. The typed operation stays as a tombstone so older clients get a stable, explicit answer rather than a 404.
          */
         post: operations["setAgentAllowance"];
         delete?: never;
@@ -1733,8 +1549,8 @@ export type paths = {
         put?: never;
         post?: never;
         /**
-         * Remove an allowance row for one token.
-         * @description Removes Haven's record. **It does NOT revoke the on-chain grant** — the AllowanceModule allowance survives until the owner changes it on-chain, so deleting this row stops Haven executing against it but is not itself a revocation. Retiring rail (#1440).
+         * RETIRED (410): per-token allowances died with the Safe rail.
+         * @description Retired with the Safe rail (#1440/#2020). Always answers 410 and deletes nothing (a malformed token address still gets its 400). Revoke or change the agent’s budget delegation instead.
          */
         delete: operations["deleteAgentAllowance"];
         options?: never;
@@ -2143,7 +1959,7 @@ export type paths = {
         };
         /**
          * Fetch live spend-authority state for the authenticated agent.
-         * @description Rail-aware (#1135): on the legacy rail this reads the on-chain AllowanceModule per configured token; on the delegation rail the same response shape carries the ACTIVE budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). A retired session-rail account gets 410. Reporting only — enforcement stays on-chain on every rail.
+         * @description Rail-aware (#1135): on the delegation rail the response carries the ACTIVE budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). BOTH retired rails answer 410 — the session rail (#993) and, since #2020 reversed #1986’s left-readable decision, the Safe/AllowanceModule rail too. Reporting only — enforcement stays on-chain.
          */
         get: operations["getMachinePaymentAllowances"];
         put?: never;
@@ -2535,6 +2351,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/catalog/submit/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public status of a catalogue submission (#1715).
+         * @description Coarse current state plus, while the domain-ownership proof is still valid, the exact well-known / DNS-TXT proof instructions. Deliberately minimal: the `verify_token` is never returned (it is a credential minted once at creation), and failures surface only as the coarse `failed` status — the granular SSRF/ownership reasons stay in server logs so this cannot become an internal-DNS oracle. 404 for an unknown id.
+         */
+        get: operations["getCatalogSubmissionStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/catalog/{id}": {
         parameters: {
             query?: never;
@@ -2631,6 +2467,15 @@ export type components = {
             /** @enum {string} */
             status: "active" | "degraded" | "delisted";
             verified_at: string | null;
+            /**
+             * @description Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches; no verification badges). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe.
+             * @enum {string}
+             */
+            source: "operator" | "ingestion";
+            /** @description True only for `ingestion` entries whose seller proved control of the endpoint domain. Always false for operator-curated rows, which have a different (operator) trust story. */
+            domain_verified: boolean;
+            /** @description True only for `ingestion` entries that a leader-locked, SSRF-hardened, read-only probe watched answer a real x402 quote. The badge claims domain-control AND verified-payable — never merchant honesty, quality, or settlement reliability. */
+            verified_payable: boolean;
         };
         CatalogSubmitRequest: {
             /** @description https URL of the payable x402/MCP endpoint the seller wants verified and listed. This endpoint makes no request to it: the submission is queue-only, and ownership proof plus the verification probe run later, asynchronously under the leader-locked catalog monitor. */
@@ -2645,6 +2490,36 @@ export type components = {
             verify_token?: string;
             /** @enum {string} */
             status: "submitted" | "ownership_verified" | "verified_payable";
+        };
+        CatalogOwnershipInstructions: {
+            /** Format: date-time */
+            expires_at: string;
+            well_known: {
+                url: string;
+                content: string;
+                instruction: string;
+            };
+            dns_txt: {
+                name: string;
+                value: string;
+                instruction: string;
+            };
+        };
+        CatalogSubmissionStatus: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            status: "submitted" | "ownership_verified" | "verified_payable" | "failed" | "delisted";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            last_verified_at: string | null;
+            name: string | null;
+            description: string | null;
+            entrypoint: string | null;
+            /** @description Present while the submission can still prove ownership (submitted / ownership_verified) and the deployment has CATALOG_OWNERSHIP_SECRET set. Absent once verified_payable, failed or delisted — the proof is no longer actionable. */
+            instructions?: components["schemas"]["CatalogOwnershipInstructions"] | null;
         };
         /**
          * @description Stable Haven agent payment state phase.
@@ -2958,13 +2833,9 @@ export type components = {
             delegate_address: string;
             /** Format: uuid */
             safe_id?: string;
+            /** @description RETIRED (#1440/#2020): per-token allowances died with the Safe rail. A non-empty array is refused with 400 — grant the agent a budget delegation after creation instead. The field survives (empty-only) so older clients sending `allowances: []` keep working. */
             allowances?: {
-                /** @example 0x1111111111111111111111111111111111111111 */
-                token_address: string;
-                token_symbol: string;
-                /** @description Decimal atomic token amount. Leading zeroes are accepted and canonicalized; effective amount must be positive and capped at uint96 for Safe AllowanceModule compatibility. */
-                allowance_amount: string;
-                reset_period_min: number;
+                [key: string]: unknown;
             }[];
         };
         DelegateBalance: {
@@ -3753,8 +3624,9 @@ export type components = {
                 /** @description All linked Safes, regardless of activity. */
                 activeAccounts: number;
             };
+            /** @description Always 0 since #2055 — the approval queue died with the Safe rail and its table is dropped; the field survives for wire compatibility. */
             actionableApprovals: number;
-            /** @description Duplicate of actionableApprovals (same query), kept for compatibility. */
+            /** @description Duplicate of actionableApprovals; always 0 since #2055, kept for compatibility. */
             pendingApprovals: number;
             onboardingProgress: {
                 hasFirstAgentPayment: boolean;
@@ -3799,12 +3671,22 @@ export type components = {
         } | {
             /** @enum {boolean} */
             revoked: true;
+            /** @description Null on the empty walk; the ABANDONED predecessor’s revoke transaction when its carry was inherited. */
             tx_hash?: string | null;
             delegation_hashes?: string[];
             stage: string;
+            /** @description Empty on the plain short-circuit; the inherited frozen measurement when an abandoned predecessor’s carry was adopted (#1868). */
             carry?: {
-                [key: string]: unknown;
+                /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+                delegation_hash: string;
+                remaining_atomic: string;
+                from_chain: boolean;
             }[];
+            /**
+             * Format: uuid
+             * @description Present only when the carry was inherited: the abandoned re-key whose frozen measurement this re-key adopted (#1868).
+             */
+            carry_inherited_from_rekey_id?: string;
             agent_has_no_authority: boolean;
             next_step: string;
         };
@@ -4691,7 +4573,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -4800,7 +4682,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5199,7 +5081,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Not on the delegation rail, a re-key already in flight, a colliding delegate address, or an undispositioned residual balance. */
+            /** @description Not on the delegation rail, a re-key already in flight (the body names its rekey_id, stage and the new_delegate_address it is bound to, #1868), a colliding delegate address, or an undispositioned residual balance. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7464,42 +7346,6 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Safe linked. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        id: string;
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        safe_address: string;
-                        chain_id: number;
-                        /** @description Display label; defaults to 'My account' when none is given. */
-                        name: string;
-                        /** @description The first Safe a user links becomes the default. */
-                        is_default: boolean;
-                        /** Format: date-time */
-                        created_at: string;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             /** @description Error response */
             401: {
                 headers: {
@@ -7515,8 +7361,8 @@ export interface operations {
                     };
                 };
             };
-            /** @description This Safe is already linked to the account. */
-            409: {
+            /** @description Always. The Safe rail is retired; the message names POST /accounts/hybrid. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7550,34 +7396,6 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Safe deployed; link it with POST /user/safes. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        safe_address: string;
-                        tx_hash: string;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             /** @description Error response */
             401: {
                 headers: {
@@ -7593,8 +7411,8 @@ export interface operations {
                     };
                 };
             };
-            /** @description Relay deployment failed. */
-            500: {
+            /** @description Always. The Safe rail is retired; the message names POST /accounts/hybrid. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7833,434 +7651,6 @@ export interface operations {
             };
         };
     };
-    listKnownApprovers: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Known approvers, distinct by address. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        approvers: {
-                            /**
-                             * @description Checksummed, as the chain returns it — membership comes from getOwners(), not from Haven.
-                             * @example 0x1111111111111111111111111111111111111111
-                             */
-                            address: string;
-                            /**
-                             * @description Decoration only; defaults to 'eoa' for an owner Haven has no metadata row for.
-                             * @enum {string}
-                             */
-                            type: "eoa" | "passkey";
-                            /** @description Trimmed and capped at 120 characters. */
-                            label: string | null;
-                            safe_ids: string[];
-                        }[];
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    listSafeApprovers: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Linked-Safe id. */
-                safeId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description On-chain owners plus the Safe threshold. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        threshold: number;
-                        approvers: {
-                            /**
-                             * @description Checksummed, as the chain returns it — membership comes from getOwners(), not from Haven.
-                             * @example 0x1111111111111111111111111111111111111111
-                             */
-                            address: string;
-                            /**
-                             * @description Decoration only; defaults to 'eoa' for an owner Haven has no metadata row for.
-                             * @enum {string}
-                             */
-                            type: "eoa" | "passkey";
-                            /** @description Trimmed and capped at 120 characters. */
-                            label: string | null;
-                        }[];
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Could not read owners from the network. */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    upsertSafeApproverMetadata: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Linked-Safe id. */
-                safeId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @example 0x1111111111111111111111111111111111111111 */
-                    address: string;
-                    /**
-                     * @description Defaults to 'eoa'.
-                     * @enum {string}
-                     */
-                    type?: "eoa" | "passkey";
-                    /** @description Trimmed and capped at 120 characters; blank becomes null. */
-                    label?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Metadata recorded. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    buildSafeApproverTx: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Linked-Safe id. */
-                safeId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @enum {string} */
-                    action: "add" | "remove";
-                    /** @example 0x1111111111111111111111111111111111111111 */
-                    address: string;
-                };
-            };
-        };
-        responses: {
-            /** @description The unsigned Safe self-call. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        chain_id: number;
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        safe_address: string;
-                        tx: {
-                            /**
-                             * @description The Safe itself — owner changes are self-calls.
-                             * @example 0x1111111111111111111111111111111111111111
-                             */
-                            to: string;
-                            /** @enum {string} */
-                            value: "0";
-                            data: string;
-                            /**
-                             * @description CALL, never DELEGATECALL.
-                             * @enum {integer}
-                             */
-                            operation: 0;
-                        };
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Safe not found, or the address to remove is not an owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Would remove the last owner, or the owner already exists. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Could not read owners from the network. */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    deleteSafeApproverMetadata: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Linked-Safe id. */
-                safeId: string;
-                /** @description Approver address. */
-                address: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Metadata removed. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
     updateUserProfile: {
         parameters: {
             query?: never;
@@ -8440,37 +7830,6 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The updated identity projection. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        id: string;
-                        name: string | null;
-                        email: string;
-                        wallet_address: string | null;
-                        safe_address: string | null;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             /** @description Error response */
             401: {
                 headers: {
@@ -8486,8 +7845,8 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
-            404: {
+            /** @description Always. The Safe rail is retired; the message names POST /accounts/hybrid. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10432,444 +9791,6 @@ export interface operations {
             };
         };
     };
-    listApprovalRequests: {
-        parameters: {
-            query?: {
-                /** @description Filter by status, or 'all'. Defaults to 'pending'. */
-                status?: string;
-                /** @description Capped at 100. */
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Approval requests plus the actionable count. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        approvals: {
-                            /** Format: uuid */
-                            id: string;
-                            /** Format: uuid */
-                            agent_id: string;
-                            /** @description 'Unknown Agent' when the agent row is gone — the request stays readable. */
-                            agent_name: string;
-                            /** @example 0x1111111111111111111111111111111111111111 */
-                            safe_address: string;
-                            chain_id: number;
-                            token_symbol: string;
-                            token_address: string;
-                            to_address: string;
-                            /** @description Atomic units. */
-                            amount_raw: string;
-                            amount_human: string;
-                            reason: string | null;
-                            /** @description Derived: payment_rail, else the legacy source column, else 'direct'. */
-                            source: string;
-                            /** @description Derived: payment_resource_url, else the legacy x402 column. */
-                            x402_resource_url: string | null;
-                            merchant_address: string | null;
-                            payment_rail: string | null;
-                            payment_resource_url: string | null;
-                            status: string;
-                            tx_hash: string | null;
-                            /** Format: date-time */
-                            reviewed_at: string | null;
-                            /** Format: date-time */
-                            created_at: string;
-                            /** Format: date-time */
-                            expires_at: string;
-                        }[];
-                        /** @description Pending plus approved. */
-                        actionable_count: number;
-                        /** @description Legacy alias — identical to actionable_count. */
-                        pending_count: number;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    approveApprovalRequest: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Approval-request id. */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Consent recorded; execute the payment yourself. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        id: string;
-                        /** @enum {string} */
-                        status: "approved";
-                        message: string;
-                        payment: {
-                            token_symbol: string;
-                            token_address: string;
-                            to_address: string;
-                            amount_raw: string;
-                            amount_human: string;
-                            /** @example 0x1111111111111111111111111111111111111111 */
-                            safe_address: string;
-                            source: string;
-                            x402_resource_url: string | null;
-                            merchant_address: string | null;
-                            payment_rail: string | null;
-                            payment_resource_url: string | null;
-                        };
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Not found, not the caller's, already actioned, or expired — deliberately one answer. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description The request belongs to a retired rail: readable and rejectable, never approvable. */
-            410: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    markApprovalProposed: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Approval-request id. */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Marked as proposed. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        id: string;
-                        /** @enum {string} */
-                        status: "proposed";
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Retired rail. */
-            410: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    rejectApprovalRequest: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Approval-request id. */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Rejected. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        id: string;
-                        /** @enum {string} */
-                        status: "rejected";
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    recordApprovalExecution: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Approval-request id. */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    tx_hash: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Execution recorded. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        id: string;
-                        /** @enum {string} */
-                        status: "executed";
-                        tx_hash: string;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Not found, not the caller's, or not in an approved state. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description It stopped being approved between the read and the write. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
     signup: {
         parameters: {
             query?: never;
@@ -11453,6 +10374,7 @@ export interface operations {
                             total_spent: string | null;
                             tx_count: number;
                         }[];
+                        /** @description Always 0 since #2055 — the approval queue died with the Safe rail; kept for wire compatibility. */
                         pending_approvals: number;
                     };
                 };
@@ -11591,6 +10513,7 @@ export interface operations {
                             /** @description Feed only. */
                             agent_name?: string;
                         })[];
+                        /** @description Always 0 since #2055 — the approval queue died with the Safe rail; kept for wire compatibility. */
                         pending_approvals: number;
                     };
                 };
@@ -12072,49 +10995,14 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "application/json": {
-                    /** @example 0x1111111111111111111111111111111111111111 */
-                    token_address: string;
-                    token_symbol: string;
-                    /** @description Human-denominated amount. */
-                    allowance_amount: string;
-                    /** @description Refill period in minutes; 0 means one-time. */
-                    reset_period_min: number;
+                    [key: string]: unknown;
                 };
             };
         };
         responses: {
-            /** @description The stored allowance. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @description Always null — retained for client compatibility (#834). */
-                        schedule_warning: null;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             /** @description Error response */
             401: {
                 headers: {
@@ -12130,23 +11018,8 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description The agent is revoked, or its Connect setup is still awaiting wallet approval — either way the allowance is refused before anything is written. */
-            409: {
+            /** @description Always. The Safe rail is retired; grant a budget delegation instead. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12174,15 +11047,6 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Row removed. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
             /** @description Error response */
             400: {
                 headers: {
@@ -12213,23 +11077,8 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description The agent is revoked, or its Connect setup is still awaiting wallet approval. */
-            409: {
+            /** @description Always, for a well-formed token address. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13160,6 +12009,21 @@ export interface operations {
                     };
                 };
             };
+            /** @description A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
             /** @description Error response */
             502: {
                 headers: {
@@ -13342,7 +12206,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The intent is pinned to a retired rail — the AllowanceModule rail (#1986) or the session rail (#834) — or it has expired. A retired-rail intent is refused before the expiry flip, so nothing is written. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -13669,7 +12533,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -14127,7 +12991,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The account is on the retired session rail — no state is read (#993 fail-closed contract). */
+            /** @description The account is on a RETIRED rail — session (#993) or Safe/AllowanceModule (#2020, reversing #1986’s left-readable decision on the recorded owner call: the accounts are emptied and unsupported, so no state is read). Fail-closed; nothing is read or written. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -14436,7 +13300,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Idempotent replay of a request whose payment has expired. */
+            /** @description Either the account is on a retired rail — the Safe / AllowanceModule rail (#1986) or the session rail (#834), refused before any intent or approval row is written — or this is an idempotent replay of a request whose payment has expired. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -15838,6 +14702,43 @@ export interface operations {
             };
             /** @description Error response */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getCatalogSubmissionStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Submission status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogSubmissionStatus"];
+                };
+            };
+            /** @description Error response */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

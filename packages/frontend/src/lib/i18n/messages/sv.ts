@@ -27,10 +27,6 @@ export const sv: Messages = {
       english: 'English',
       swedish: 'Svenska',
     },
-    approvalAlerts: {
-      label: 'Godkännandeaviseringar',
-      detail: 'Få en notis när en transaktion behöver godkännas.',
-    },
     agentSpendAlerts: {
       label: 'Aviseringar om agentutgifter',
       detail: 'Få uppdateringar när agenter använder sin budget.',
@@ -53,20 +49,14 @@ export const sv: Messages = {
       detail: 'Lösenordsbyte är inte tillgängligt ännu.',
     },
 
-    approvers: {
-      title: 'Godkännare',
-      description:
-        'Plånböcker och passkeys som kan godkänna åtgärder, hanteras per konto. Tröskeln är kvar på 1.',
-    },
-
     recovery: {
       title: 'Återställning och säkerhet',
       description: 'Få klart för dig vad Haven kan och inte kan återställa.',
       limitationsLabel: 'Begränsningar för återställning',
       limitationsDetail:
         'Haven kan hjälpa dig hitta kontouppgifter, men kan inte kringgå dina plånböcker eller passkeys, eller återställa medel som skickats på fel nätverk.',
-      backupLabel: 'Reservgodkännare',
-      backupDetail: 'Att lägga till reservgodkännare är inte tillgängligt ännu.',
+      backupLabel: 'Säkerhetskopiering och återställning',
+      backupDetail: 'Säkerhetskopior hanteras per konto, under Säkerhetskopiering och återställning på någon av dess agenter.',
       sessionsLabel: 'Aktiva sessioner',
       sessionsDetail: 'Granska inloggade enheter och återkalla sessioner.',
       exitPathLabel: 'Din exit-väg',

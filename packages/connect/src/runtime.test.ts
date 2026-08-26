@@ -7,6 +7,7 @@ import type { ConnectApiClient, ConnectorStatusResponse, RegisterSetupInput, Upd
 import { delegateKeyFromPrivateKey } from './key.js'
 import { completionHandoffLines, failedConnectOutcome, runConnect, waitForBudgetApproval } from './runtime.js'
 import { ConnectError } from './connect-error.js'
+import { RUNTIME_FLAG_VALUE_LIST } from './runtime-registry.js'
 import type { RuntimeInstallResult } from './runtime-install.js'
 
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
@@ -606,6 +607,13 @@ describe('runConnect', () => {
         expect(error.message).toContain('Do not guess')
         expect(error.message).toContain('--runtime other')
         expect(error.message).toContain('setup token is still unused')
+        // #2091: the values ride structurally too — the --json contract
+        // discards prose, and the backend's setup prompt only permits a retry
+        // drawn from "the values that refusal lists".
+        expect((error as ConnectError).details.allowedRuntimes).toEqual([
+          'claude-code', 'codex-cli', 'codex-desktop', 'cursor', 'vscode',
+          'vscode-insiders', 'claude-desktop', 'hermes', 'other',
+        ])
       })
 
       it('accepts an agent self-report at hint precedence', async () => {
@@ -677,6 +685,7 @@ describe('runConnect', () => {
       expect(outcome.error).toEqual({
         code: 'runtime_no_installed_clients',
         next_action: 'rerun_connect_with_explicit_runtime',
+        message: 'nothing installed',
       })
       expect(outcome.next_action).toBe('rerun_connect_with_explicit_runtime')
     })
@@ -684,6 +693,161 @@ describe('runConnect', () => {
     it('still classifies the older plain-Error refusals it always did', () => {
       const outcome = failedConnectOutcome(undefined, new Error('Haven Connect requires Node.js >= 22.0.0'))
       expect(outcome.error?.code).toBe('unsupported_node_version')
+      // A plain Error's message stays OUT of the JSON record — only the
+      // connector-authored ConnectError vocabulary is safe to serialize.
+      expect(outcome.error?.message).toBeUndefined()
+    })
+
+    // #2091, the Codex field deadlock: a --json run in an undetected runtime
+    // got { code, next_action } and nothing else, while the backend's setup
+    // prompt only permits a retry "using one of the values that refusal
+    // lists". The record must carry the values and the prose.
+    it('carries allowed_runtimes and the redacted message on a runtime refusal', () => {
+      const outcome = failedConnectOutcome(
+        undefined,
+        new ConnectError(
+          'runtime_undetermined',
+          'Could not determine the agent runtime. Nothing was written and the Haven setup token is still unused.',
+          'rerun_connect_with_explicit_runtime',
+          { allowedRuntimes: RUNTIME_FLAG_VALUE_LIST },
+        ),
+      )
+
+      expect(outcome.error).toEqual({
+        code: 'runtime_undetermined',
+        next_action: 'rerun_connect_with_explicit_runtime',
+        message: 'Could not determine the agent runtime. Nothing was written and the Haven setup token is still unused.',
+        allowed_runtimes: [
+          'claude-code', 'codex-cli', 'codex-desktop', 'cursor', 'vscode',
+          'vscode-insiders', 'claude-desktop', 'hermes', 'other',
+        ],
+      })
+    })
+
+    it('redacts secrets and credential paths from a serialized ConnectError message', () => {
+      const outcome = failedConnectOutcome(
+        undefined,
+        new ConnectError(
+          'runtime_undetermined',
+          'refused; saw sk_agent_supersecret near /Users/x/.haven/agents/a/signer.json',
+          'rerun_connect_with_explicit_runtime',
+        ),
+      )
+      const serialized = JSON.stringify(outcome)
+      expect(serialized).not.toContain('sk_agent_supersecret')
+      expect(serialized).not.toContain('signer.json')
+      expect(outcome.error?.message).toContain('[credential-file-redacted]')
+    })
+  })
+
+  // #2091 field follow-up: the sanctioned --runtime codex retry then failed at
+  // resolveSetup on a 30-minute-expired token, and the backend's "Setup token
+  // expired" wording matched neither branch of the legacy expiry regex — the
+  // agent got generic connect_failed with nothing to act on. The failure mode
+  // joins the ConnectError vocabulary (#1719) instead of that ladder.
+  describe('dead setup token at resolveSetup (#2091)', () => {
+    it.each([410, 401] as const)('classifies a %d from resolveSetup as an expired/invalid setup token', async (status) => {
+      const spies = {
+        api: {
+          resolveSetup: vi.fn().mockRejectedValue(
+            new ConnectRequestError(`Haven setup request failed: ${status === 410 ? 'Setup token expired' : 'Invalid setup token'}`, status),
+          ),
+          registerSetup: vi.fn(),
+          updateInstallStatus: vi.fn(),
+          getConnectorStatus: vi.fn(),
+          getAgentIdentity: vi.fn(),
+        } as unknown as ConnectApiClient,
+        preflightStorage: vi.fn(),
+        writeCredentials: vi.fn(),
+        installRuntime: vi.fn(),
+        generateKey: vi.fn(),
+      }
+      const error = await expectRejection(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtime: 'codex-cli',
+      }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} }))
+
+      expect((error as ConnectError).code).toBe('setup_challenge_expired_or_invalid')
+      expect((error as ConnectError).nextAction).toBe('return_to_haven_for_fresh_setup')
+      expect(error.message).toContain('Return to Haven')
+      expect(spies.api.registerSetup).not.toHaveBeenCalled()
+      expect(spies.writeCredentials).not.toHaveBeenCalled()
+
+      const outcome = failedConnectOutcome('codex-cli', error)
+      expect(outcome.error?.code).toBe('setup_challenge_expired_or_invalid')
+      expect(outcome.next_action).toBe('return_to_haven_for_fresh_setup')
+    })
+
+    it('does not swallow an unrelated request failure into the expiry verdict', async () => {
+      const spies = {
+        api: {
+          resolveSetup: vi.fn().mockRejectedValue(
+            new ConnectRequestError('Haven setup request failed: 502 Bad Gateway', 502),
+          ),
+          registerSetup: vi.fn(),
+          updateInstallStatus: vi.fn(),
+          getConnectorStatus: vi.fn(),
+          getAgentIdentity: vi.fn(),
+        } as unknown as ConnectApiClient,
+        preflightStorage: vi.fn(),
+        writeCredentials: vi.fn(),
+        installRuntime: vi.fn(),
+        generateKey: vi.fn(),
+      }
+      const error = await expectRejection(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtime: 'codex-cli',
+      }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} }))
+
+      expect(error).toBeInstanceOf(ConnectRequestError)
+      expect(failedConnectOutcome('codex-cli', error).error?.code).toBe('connect_failed')
+    })
+
+    // Review finding on this PR: the token can also die in the gap between
+    // resolve and register (register runs after detection, key generation and
+    // any prompt — well inside the 30-minute TTL race), and the backend's 410
+    // wording carries no "challenge" for the legacy register-side regex.
+    it('classifies a 410 from registerSetup the same way, before any local write', async () => {
+      const writeCredentials = vi.fn()
+      const installRuntime = vi.fn()
+      const error = await expectRejection(runConnect({
+        setupToken: 'hv_setup_register_expiry',
+        apiBaseUrl: 'https://api.haven.example',
+        runtime: 'codex-cli',
+        credentialsDir: '/tmp/haven-connect-test-register-expiry',
+      }, {
+        api: {
+          resolveSetup: vi.fn(async () => ({
+            setup_id: 'setup-8',
+            status: 'awaiting_connection',
+            agent: { name: 'Expiry Agent' },
+            haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 8453, network: 'Base' },
+            agent_budget: [],
+            hosted_mcp_url: 'https://mcp.haven.example/v1',
+            challenge: { id: 'challenge-8', message: 'Haven Connect Agent 2\nsetup_id: setup-8\nchallenge: vwx', expires_at: '2099-01-01T00:00:00.000Z' },
+          })),
+          registerSetup: vi.fn(async () => {
+            throw new ConnectRequestError('Haven setup request failed: Setup token expired', 410)
+          }),
+          updateInstallStatus: vi.fn(),
+          getConnectorStatus: vi.fn(),
+          getAgentIdentity: vi.fn(),
+        } as unknown as ConnectApiClient,
+        nodeVersion: SUPPORTED_NODE,
+        generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+        generateApiKey: () => 'sk_agent_expirykey',
+        preflightStorage: vi.fn(),
+        writeCredentials,
+        installRuntime,
+        log: () => undefined,
+      }))
+
+      expect((error as ConnectError).code).toBe('setup_challenge_expired_or_invalid')
+      expect((error as ConnectError).nextAction).toBe('return_to_haven_for_fresh_setup')
+      expect(writeCredentials).not.toHaveBeenCalled()
+      expect(installRuntime).not.toHaveBeenCalled()
     })
   })
 

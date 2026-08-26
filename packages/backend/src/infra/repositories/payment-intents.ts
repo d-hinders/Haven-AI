@@ -432,21 +432,6 @@ export const FIND_MACHINE_INTENT_BY_KEY_OR_CHALLENGE_SQL = `SELECT *
      ORDER BY created_at DESC
      LIMIT 1`
 
-export async function findMachineIntentByKeyOrChallenge(
-  agentId: string,
-  idempotencyKey: string | null,
-  challengeId: string | null,
-  rail: string,
-  db: Executor = pool,
-): Promise<PaymentIntentRow | null> {
-  const result = await db.query<PaymentIntentRow>(FIND_MACHINE_INTENT_BY_KEY_OR_CHALLENGE_SQL, [
-    agentId,
-    idempotencyKey,
-    challengeId,
-    rail,
-  ])
-  return result.rows[0] ?? null
-}
 
 // ── Status transitions (each carries its guard in its WHERE clause) ─────────
 
@@ -656,26 +641,6 @@ export const RECORD_MACHINE_INTENT_SIGNATURE_SQL = `UPDATE payment_intents
        AND tx_hash IS NULL
      RETURNING id`
 
-/**
- * One-shot mode records the signature WITHOUT claiming to 'submitted' — the
- * intent stays 'pending_signature' until execution succeeds, so a crash
- * between here and the RPC call cannot strand it (see the caller's comment).
- */
-export async function recordMachineIntentSignature(
-  signature: string,
-  intentId: string,
-  agentId: string,
-  rail: string,
-  db: Executor = pool,
-): Promise<boolean> {
-  const result = await db.query<{ id: string }>(RECORD_MACHINE_INTENT_SIGNATURE_SQL, [
-    signature,
-    intentId,
-    agentId,
-    rail,
-  ])
-  return result.rows.length > 0
-}
 
 export const CONFIRM_MACHINE_INTENT_SQL = `UPDATE payment_intents
        SET status = 'confirmed',
@@ -691,28 +656,6 @@ export const CONFIRM_MACHINE_INTENT_SQL = `UPDATE payment_intents
          AND tx_hash IS NULL
        RETURNING id`
 
-/** One-shot confirm: 'pending_signature' → 'confirmed' in one guarded write. */
-export async function confirmMachineIntent(
-  input: {
-    txHash: string
-    intentId: string
-    usdValue: number | string | null
-    eurValue: number | string | null
-    agentId: string
-    rail: string
-  },
-  db: Executor = pool,
-): Promise<boolean> {
-  const result = await db.query<{ id: string }>(CONFIRM_MACHINE_INTENT_SQL, [
-    input.txHash,
-    input.intentId,
-    input.usdValue,
-    input.eurValue,
-    input.agentId,
-    input.rail,
-  ])
-  return result.rows.length > 0
-}
 
 export const FAIL_MACHINE_INTENT_SQL = `UPDATE payment_intents
        SET status = 'failed', error_message = $1
@@ -722,15 +665,6 @@ export const FAIL_MACHINE_INTENT_SQL = `UPDATE payment_intents
          AND status = 'pending_signature'
          AND tx_hash IS NULL`
 
-export async function failMachineIntent(
-  errorMessage: string,
-  intentId: string,
-  agentId: string,
-  rail: string,
-  db: Executor = pool,
-): Promise<void> {
-  await db.query(FAIL_MACHINE_INTENT_SQL, [errorMessage, intentId, agentId, rail])
-}
 
 // ── Status projection (lib/agent-payment-status.ts) ──────────────────────────
 
@@ -824,3 +758,51 @@ export async function findSettledPaymentReceiptRow(
   ])
   return result.rows[0] ?? null
 }
+
+/**
+ * Read back a machine intent by idempotency key or challenge id.
+ *
+ * #1987 kept this while deleting its siblings, and the distinction is the
+ * point: `modules/mpp/authorize.ts` was its only PRODUCTION caller and is gone,
+ * but it is the READ half of `insertMachineIntent`'s ON CONFLICT DO NOTHING
+ * replay contract — and `insertMachineIntent` is LIVE, used by
+ * `modules/x402/delegation-authorize.ts`. `__tests__/payment-intents.test.ts`
+ * proves that contract on the real-Postgres harness (epic #1219): the replay
+ * returns null and the caller reloads the winner, which cannot be asserted
+ * without this reader. Deleting it would have forced weakening a live money-path
+ * test to make a deletion look tidier.
+ */
+export async function findMachineIntentByKeyOrChallenge(
+  agentId: string,
+  idempotencyKey: string | null,
+  challengeId: string | null,
+  rail: string,
+  db: Executor = pool,
+): Promise<PaymentIntentRow | null> {
+  const result = await db.query<PaymentIntentRow>(FIND_MACHINE_INTENT_BY_KEY_OR_CHALLENGE_SQL, [
+    agentId,
+    idempotencyKey,
+    challengeId,
+    rail,
+  ])
+  return result.rows[0] ?? null
+}
+
+// #1987 (epic #1440): `recordMachineIntentSignature`, `confirmMachineIntent`
+// and `failMachineIntent` are DELETED. All three were called only from
+// `modules/mpp/authorize.ts`, which this slice removed with the legacy MPP
+// AllowanceModule orchestration — verified against `origin/dev`, where it was
+// the sole caller of each. `haven-reviewer` raised them as under-deletion and
+// was right: "the repository layer is shared" is not a reason to keep a
+// function with no callers at all. It also listed
+// `findMachineIntentByKeyOrChallenge` — that one is KEPT, for the reason given
+// on it above; enumerating consumers rather than trusting the list is what
+// separated the two.
+//
+// Deliberately NOT removed here, and handed to #1990 as one unit: the three
+// (`insertPaymentApproval`, `insertSendApproval`, `insertMachineApproval`). They
+// are equally uncalled now, but they are a cluster #1990 retires together with
+// the table itself, and `rails/execution-rail.ts` names all three by hand in the
+// prose that justifies #1986's approval 410 — removing one of three named
+// siblings would require editing the rail seam, which this diff keeps
+// byte-identical to `dev` on purpose.

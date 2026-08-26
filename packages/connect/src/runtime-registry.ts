@@ -149,9 +149,26 @@ export function normalizeRuntime(runtime: string | undefined, env: NodeJS.Proces
   return detectRuntime(env) ?? 'other'
 }
 
-/** The flag values a refusal message should offer. Mirrors RuntimeId. */
-export const RUNTIME_FLAG_VALUES =
-  'claude-code, codex-cli, codex-desktop, cursor, vscode, vscode-insiders, claude-desktop, hermes, other' as const
+/**
+ * The flag values a refusal should offer, as data (#2091): they ride on the
+ * refusal's `ConnectError.details.allowedRuntimes` so the `--json` contract
+ * can list them machine-readably, not only in prose an automation run never
+ * sees. Mirrors RuntimeId.
+ */
+export const RUNTIME_FLAG_VALUE_LIST = [
+  'claude-code',
+  'codex-cli',
+  'codex-desktop',
+  'cursor',
+  'vscode',
+  'vscode-insiders',
+  'claude-desktop',
+  'hermes',
+  'other',
+] as const satisfies readonly RuntimeId[]
+
+/** The same values as refusal-message prose. */
+export const RUNTIME_FLAG_VALUES = RUNTIME_FLAG_VALUE_LIST.join(', ')
 
 export interface RuntimeSelection {
   runtime: RuntimeId | null
@@ -228,6 +245,7 @@ export async function resolveRuntimeSelection(
         'runtime_force_unrecognized',
         `Unknown --runtime-force value "${force}". Valid values: ${RUNTIME_FLAG_VALUES}.`,
         'rerun_connect_with_a_valid_runtime_name',
+        { allowedRuntimes: RUNTIME_FLAG_VALUE_LIST },
       )
     }
     return { runtime: forced, source: 'force' }
@@ -244,6 +262,7 @@ export async function resolveRuntimeSelection(
           'Re-run with one of those, or --runtime other to store credentials and finish the MCP setup by hand. ' +
           'Nothing was written and the Haven setup token is still unused.',
         'rerun_connect_with_a_valid_runtime_name',
+        { allowedRuntimes: RUNTIME_FLAG_VALUE_LIST },
       )
     }
     return { runtime: detected, source: 'detected', discardedHint: supplied }

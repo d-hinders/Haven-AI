@@ -38,8 +38,13 @@ const mocks = vi.hoisted(() => ({
   openConnectModalHook: vi.fn(),
   useOwnerDirectory: vi.fn(),
   useActiveSigner: vi.fn(),
+  useSafeOperationGate: vi.fn(),
   useAuth: vi.fn(),
   writeText: vi.fn(),
+}))
+
+vi.mock('@/hooks/useSafeOperationGate', () => ({
+  useSafeOperationGate: (args: unknown) => mocks.useSafeOperationGate(args),
 }))
 
 vi.mock('@rainbow-me/rainbowkit', () => ({
@@ -117,6 +122,7 @@ describe('WalletButton', () => {
       getOwnerAlias: vi.fn(() => null),
     })
     mocks.useActiveSigner.mockReturnValue(null)
+    mocks.useSafeOperationGate.mockReturnValue({ kind: 'no_signer' })
 
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -245,6 +251,60 @@ describe('WalletButton', () => {
     expect(screen.getByText('Connected wallet')).toBeInTheDocument()
     expect(screen.getAllByText('0x5555…5555')).toHaveLength(2)
     expect(screen.getByRole('button', { name: 'Switch wallet' })).toBeInTheDocument()
+  })
+
+  it('renders the WRONG WALLET pill when the gate says the connected wallet is not the account owner (#2073)', () => {
+    setConnectedWallet()
+    mocks.useSafeOperationGate.mockReturnValue({
+      kind: 'wrong_wallet',
+      connectedAddress: EOA_ADDRESS,
+      ownerAddress: '0x2222222222222222222222222222222222222222',
+    })
+
+    render(<WalletButton />)
+
+    // The pill NAMES the state — visible label and accessible name are the
+    // same expression, so both are asserted through the role query. The
+    // normal connected-address pill must not render: that silent "everything
+    // is fine" pill beside a blocked action area is the #2073 defect.
+    const pill = screen.getByRole('button', { name: 'Wrong wallet' })
+    expect(pill).toBeInTheDocument()
+    expect(pill).toHaveTextContent('Wrong wallet')
+    expect(screen.queryByRole('button', { name: '0x5555…5555' })).not.toBeInTheDocument()
+
+    // The fix lives one click away: the popover with Switch wallet — and the
+    // popover NAMES the mismatch (design-review finding on #2073: without
+    // this line it rendered pixel-identical to the healthy connected state).
+    fireEvent.click(pill)
+    expect(screen.getByRole('dialog', { name: 'Wallet menu' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Switch wallet' })).toBeInTheDocument()
+    expect(
+      screen.getByText(/This is not the wallet that controls this account/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/0x2222…2222/)).toBeInTheDocument()
+  })
+
+  it('positive control: the healthy connected popover never renders the wrong-wallet note (#2073)', () => {
+    setConnectedWallet()
+    mocks.useSafeOperationGate.mockReturnValue({ kind: 'ready' })
+
+    render(<WalletButton />)
+
+    fireEvent.click(screen.getByRole('button', { name: '0x5555…5555' }))
+    expect(screen.getByRole('dialog', { name: 'Wallet menu' })).toBeInTheDocument()
+    expect(
+      screen.queryByText(/This is not the wallet that controls this account/),
+    ).not.toBeInTheDocument()
+  })
+
+  it('positive control: a connected wallet with a non-wrong-wallet gate keeps the normal address pill (#2073)', () => {
+    setConnectedWallet()
+    mocks.useSafeOperationGate.mockReturnValue({ kind: 'ready' })
+
+    render(<WalletButton />)
+
+    expect(screen.getByRole('button', { name: '0x5555…5555' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Wrong wallet' })).not.toBeInTheDocument()
   })
 
   it('uses an owner alias for the connected wallet label and dropdown', () => {
@@ -482,15 +542,14 @@ describe('WalletButton', () => {
    * ── What these tests do and do not prove ────────────────────────────────
    *
    * They prove the COMPONENT's contract, because they hand `WalletButton` a
-   * `delegator_passkey` through the mocked `useActiveSigner` directly. They do
-   * NOT prove a reachable production state, and that distinction is stated
-   * rather than glossed: the real `useActiveSigner` refuses to return a
-   * `delegator_passkey` at all unless `hybridPasskeyOnDevice` already matched
-   * (`lib/signer.ts`, pinned by `signer.test.ts` > "does NOT resolve the hybrid
-   * signer when the device marker is missing"). So there is no fixture — and no
-   * `npm run screenshot` scenario — that can drive a real browser into this
-   * render, and none is faked here to make the acceptance criterion look met.
-   * The upstream gate is filed separately.
+   * `delegator_passkey` through the mocked `useActiveSigner` directly. Since
+   * #1969 (owner decision 2026-08-26) this is ALSO a reachable production
+   * state: the real `useActiveSigner` resolves a `delegator_passkey` for any
+   * non-empty hydrated signer set, so a marker-less user reaches this render
+   * through the ordinary hydration path. The reachable-state proof lives in
+   * `e2e/wallet-signer-offering.spec.ts`, which drives a real browser into
+   * both states without mocking the hook; these unit tests keep pinning the
+   * component's rendering contract in isolation.
    */
   it('Hybrid dropdown: names the passkeys[0] fallback and says it IS a fallback (#1952)', () => {
     const KEY_A = '0x' + '11'.repeat(32)

@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/rails/allowance-module.ts
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/modules/mpp/**
-last-verified: "2026-08-15" # #1451: §1's "keep EIP-3009 as the production default" is superseded on the delegation rail by the #1450 owner decision (prefer erc7710 when the merchant advertises it); marked in the Outcome block rather than rewriting the historical investigation. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
+last-verified: "2026-08-25" # #1992: the Outcome block said EIP-3009 "remains the default on the legacy AllowanceModule rail (import-only)" and the body called that rail "now import-only" — both present-tense false. The rail is RETIRED (#1440): #1984 410s import too, #1986 fail-closes spending, #1987 deleted the executor. Marked in place per the #1451 precedent for this doc (mark supersession in the Outcome block, do not rewrite a dated investigation). Scope: those two sentences; the 2026-07 investigation itself is unchanged and was NOT re-verified. Prior: #1451: §1's "keep EIP-3009 as the production default" is superseded on the delegation rail by the #1450 owner decision (prefer erc7710 when the merchant advertises it); marked in the Outcome block rather than rewriting the historical investigation. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Research — Smart-account-native x402 settlement (removing the funding leg)
@@ -25,7 +25,8 @@ last-verified: "2026-08-15" # #1451: §1's "keep EIP-3009 as the production defa
 > `packages/backend/src/routes/x402.ts`), built on the MetaMask Hybrid
 > DeleGator (epic #821) rather than Safe-via-module. The Permit2 track was not
 > pursued. EIP-3009/delegate-EOA remains the default on the legacy
-> AllowanceModule rail (import-only); a delegation-metered **EIP-3009 fallback
+> AllowanceModule rail (RETIRED since #1440 — see the note below); a
+> delegation-metered **EIP-3009 fallback
 > on the delegation rail** (for merchant reach) is **built** (per-payment scheme
 > selection; pinned budgets stay erc7710-only) —
 > RFC #791 §18 / [#946](https://github.com/d-hinders/Haven-AI/issues/946).
@@ -84,7 +85,21 @@ type X402Rail =
 
 ## 2. Current baseline (grounded in code)
 
-Standard merchant x402 on the legacy AllowanceModule rail (now import-only) is
+> **Superseded (2026-08-24, #1986):** this section is written in the present
+> tense and claims to be grounded in code, so it needs the same treatment the
+> blocks above got rather than being left to read as current. The
+> `Safe → delegate EOA → merchant` baseline described below **no longer
+> executes**: epic #1440 retired the legacy AllowanceModule rail, and
+> `POST /x402/authorize` answers HTTP 410 above the funding leg, so step 3's
+> AllowanceModule funding transfer never runs and the delegate never takes a
+> hot balance for this rail. Steps 1–5 are kept as the record of the baseline
+> this investigation reasoned from; the live path is the delegation rail's
+> ERC-7710 direct settlement (no funding leg), with the #946 EIP-3009 bridge
+> as its fallback. Nothing else in this document is restated or corrected —
+> it is a dated 2026-07 investigation record.
+
+Standard merchant x402 on the legacy AllowanceModule rail (RETIRED, #1440 — the
+sequence below no longer runs; kept as the investigation's record) is
 `Safe → delegate EOA → merchant`:
 
 1. Agent hits a paid resource → HTTP 402; the SDK parses x402 requirements

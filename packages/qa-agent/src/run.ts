@@ -9,12 +9,10 @@
  * Config: the QA_* env (see packages/qa-agent/README.md + docs/operations/agent-qa.md).
  */
 
-import { ethers } from 'ethers'
 import { loadQaConfig, QaConfigError } from './config.js'
-import { HavenApi } from './lib/haven-api.js'
 import type { Scenario, ScenarioContext, ScenarioResult } from './scenarios/types.js'
 import { withinBudgetSettle } from './scenarios/within-budget-settle.js'
-import { overBudgetQueue } from './scenarios/over-budget-queue.js'
+import { overBudgetRefused } from './scenarios/over-budget-refused.js'
 import { x402OverBudgetRejected } from './scenarios/x402-over-budget-rejected.js'
 import { x402Delegation3009 } from './scenarios/x402-delegation-3009.js'
 import { x402Delegation3009Sweep } from './scenarios/x402-delegation-3009-sweep.js'
@@ -30,44 +28,50 @@ import { runPreflight, formatPreflight } from './lib/preflight.js'
 
 // Deterministic, no-LLM scenarios run in order.
 //
-// The first three run the seeded LEGACY-rail identity and are the only legs
-// that still do. They are kept because their invariants have no delegation-rail
-// counterpart: the approval QUEUE does not exist on the delegation rail at all
-// (over-budget reverts on-chain during gas estimation, and there is nothing to
-// queue), and the pre-intent rejection path differs per rail.
+// EVERY leg now runs on the DELEGATION rail (#2016). The first three used to
+// drive the seeded LEGACY AllowanceModule identity; since #1986 that account
+// answers HTTP 410 from `POST /payments` and the x402 path, so two of them
+// were guaranteed red and the third was passing on the retirement's refusal
+// rather than on the check it existed to prove. All three were re-based rather
+// than retired — the invariants outlived the rail, only the instruments changed:
+//
+//   within-budget-settle    /payments, eip712_userop typed data instead of the
+//                           legacy raw-hash scheme. Also the suite's positive
+//                           control: the leg that proves the money path can
+//                           still say YES, which is what makes the two
+//                           refusals below mean anything.
+//   over-budget-refused     renamed from `over-budget-queue`. The approval
+//                           QUEUE it asserted does not exist on this rail and
+//                           no longer exists anywhere (#1986/#1989); the
+//                           circuit breaker is the caveat enforcer reverting
+//                           during gas estimation. Same invariant, different
+//                           shape — so a different name.
+//   x402-over-budget-rejected  driven on the EIP-3009 funding shape, where the
+//                           budget really is enforced at authorize.
+//
+// STATE THE TRADE HONESTLY — a coverage gap remains, and it is NOT the one the
+// re-base closes. On **erc7710** direct settlement, x402 authorize returns 201
+// with a signable child delegation for ANY amount: the budget is enforced when
+// the merchant redeems the chain, not by Haven. So "an over-budget x402 call is
+// never turned into a signable intent" is FALSE on the preferred scheme, and
+// nothing here covers the redemption-side revert — that needs a merchant that
+// actually attempts it. Verified live against dev on 2026-08-25 and handed to
+// #1993 rather than asserted around.
 //
 // x402 coverage is DELEGATION-RAIL ONLY. The legacy `x402-settle` and
-// `x402-sweep-recovery` legs were removed by owner decision: the delegation
-// rail is the base for every new account, and the legacy AllowanceModule rail
-// is import-only for existing dev-pilot Safes.
+// `x402-sweep-recovery` legs were removed by owner decision (#1535): the
+// delegation rail is the base for every new account, and the legacy
+// AllowanceModule rail is now retired outright (epic #1440). With that
+// retirement, `legacy-authorize.ts` and the AllowanceModule rail modules are
+// DELETED (#1987), so the execute-branch coverage that removal cost
+// (`recordX402Signature` → `executeAllowanceTransfer` → `confirmX402Intent`,
+// and the #692/#684 stale-nonce retry class) no longer has a subject. The
+// note is kept as history, not as an outstanding debt.
 //
-// STATE THE TRADE HONESTLY — this is a COVERAGE LOSS, not a deduplication.
-// `x402-delegation-3009` and `x402-delegation-3009-sweep` cover the same
-// merchant-facing INVARIANTS, but they do not execute the same code:
-// `modules/x402/authorize.ts` dispatches on the rail, so they drive
-// `runDelegationAuthorize` while the removed legs drove `runLegacyAuthorize`.
-// After this removal NO live leg reaches `legacy-authorize.ts`'s execute
-// branch — `recordX402Signature` → `executeAllowanceTransfer` (the x402
-// funding call, distinct from the direct-payment one in `routes/payments.ts`)
-// → `confirmX402Intent`. The kept legacy legs do not close that:
-// `within-budget-settle` drives `/payments`, and `x402-over-budget-rejected`
-// sends no signature and so never enters the execute branch at all. The
-// removed sweep leg also carried retry logic for a real shipped bug class on
-// that funding leg (#692 stale allowance nonce, #684 cross-RPC lag), which now
-// has live coverage nowhere. That path keeps only mocked unit-test coverage
-// (`routes/__tests__/x402.test.ts`) — which is precisely what this harness
-// exists to not rely on.
-//
-// Accepted because no new account can be created on that rail and the legs
-// were the only x402 legs submitting through the relayer's shared nonce lane —
-// a live infrastructure defect (#1533), not something the money-flow
-// invariants were written to catch. Revisit if dev-pilot legacy Safes start
-// carrying meaningful x402 volume.
-//
-// The delegation-rail legs run a SECOND identity: the rail is a property of the
-// account, so the seeded legacy-rail agent cannot exercise it. They are ordered
-// settle-then-sweep so a settle failure is diagnosed against a clean delegate
-// rather than one the sweep case has already left money on.
+// The delegation-rail legs run the standing delegation identity
+// (`QA_DELEGATION_*`). They are ordered settle-then-sweep so a settle failure
+// is diagnosed against a clean delegate rather than one the sweep case has
+// already left money on.
 //
 // `x402-hosted-mcp-signer` (#1154) is the DEFAULT user topology — hosted MCP
 // plus a local edge signer — and shares that delegation-rail identity. It runs
@@ -84,7 +88,7 @@ import { runPreflight, formatPreflight } from './lib/preflight.js'
 // already shown to be healthy.
 const SCENARIOS: Scenario[] = [
   withinBudgetSettle,
-  overBudgetQueue,
+  overBudgetRefused,
   x402OverBudgetRejected,
   x402Delegation3009,
   x402Delegation3009Sweep,
@@ -118,15 +122,14 @@ async function main(): Promise<void> {
     throw e
   }
 
-  const ctx: ScenarioContext = {
-    cfg,
-    api: new HavenApi(cfg),
-    delegateKey: cfg.delegateKey,
-    delegateAddress: new ethers.Wallet(cfg.delegateKey).address,
-  }
+  // #2011 removes the retired legacy identity from the harness: every
+  // leg now builds its own `HavenApi` on the delegation identity, and no
+  // scenario reads the legacy fields. One consumer survives outside the
+  // scenarios — the only legacy preflight residual check is removed with the
+  // dead config fields. Every scenario builds its own delegation identity.
+  const ctx: ScenarioContext = { cfg }
 
   console.log(`Haven money-flow QA → ${cfg.apiUrl}`)
-  console.log(`  delegate ${ctx.delegateAddress}\n`)
 
   // #1530: state the preconditions BEFORE the first leg. The harness used to
   // assert only what happened during a run, so an exhausted merchant

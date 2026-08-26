@@ -82,6 +82,32 @@ function refuse(reason: SsrfRefusalReason, detail: string): SsrfRefusal {
 }
 
 /**
+ * Is this hostname an IP LITERAL, and if so which range does it fall in?
+ *
+ * Returns the stable range name (`'public-unicast'`, `'loopback'`, …) when the
+ * host is a bare address, and `null` when it is a name. Brackets are stripped
+ * first, so the IPv6 URL form `[::1]` classifies the same as `::1`.
+ *
+ * Exported because the refusal it powers is NOT a URL-level rule — it is a
+ * claim-level one, and #1959 is what that distinction cost. `assertSafeUrl`
+ * could only apply it to paths that build a URL, so the DNS-TXT half of the
+ * ownership proof (`modules/catalog/ownership.ts`) had no equivalent refusal:
+ * a canonical dotted-decimal IPv4 host survives that module's URL round-trip
+ * byte-identically and reached `resolveTxt` unchallenged. The fix is one
+ * predicate consulted by both, not a second copy of the range logic — so this
+ * function, and `ip-classification.ts` behind it, stay the single source of
+ * truth for "that is an address, not a domain".
+ *
+ * Callers outside this file want the boolean; the range is here so the guard's
+ * own refusal detail stays specific.
+ */
+export function ipLiteralRange(hostname: string): string | null {
+  const bare = hostname.replace(/^\[|\]$/g, '')
+  const verdict = isPublicUnicastAddress(bare)
+  return verdict.range === 'unparseable' ? null : verdict.range
+}
+
+/**
  * Policy check on a URL, before any I/O. Pure — this is where most of the
  * guard's security logic lives, and it is directly unit-testable.
  */
@@ -107,11 +133,12 @@ export function assertSafeUrl(raw: string): { ok: true; url: URL } | SsrfRefusal
     return refuse('non_default_port', `port ${url.port} is not the default https port`)
   }
   const hostname = url.hostname.replace(/^\[|\]$/g, '')
-  const literal = isPublicUnicastAddress(hostname)
-  if (literal.range !== 'unparseable') {
+  const literalRange = ipLiteralRange(hostname)
+  if (literalRange !== null) {
     // The hostname IS an IP literal. Refuse regardless of range: ownership of
-    // a domain is the claim, and a bare address cannot make it.
-    return refuse('host_not_public', `host is an IP literal (${literal.range})`)
+    // a domain is the claim, and a bare address cannot make it. Same predicate
+    // the DNS-TXT path now consults (#1959), so the two cannot drift apart.
+    return refuse('host_not_public', `host is an IP literal (${literalRange})`)
   }
   if (isLocallyBoundHostname(hostname)) {
     return refuse('host_not_public', 'host is a locally-bound name')

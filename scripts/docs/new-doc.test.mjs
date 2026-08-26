@@ -13,7 +13,7 @@ import {
   createDoc,
   parseArgs,
 } from './new-doc.mjs'
-import { parseFrontMatter } from './validate-frontmatter.mjs'
+import { parseFrontMatter, emptyCoversNote } from './validate-frontmatter.mjs'
 
 test('inferStatus derives status from the path', () => {
   assert.equal(inferStatus('docs/archive/old.md'), 'archived')
@@ -119,4 +119,17 @@ test('parseArgs reads the path and flags in any order', () => {
     owner: '@y',
     inputPath: 'docs/b.md',
   })
+})
+
+// The scaffold and the empty-`covers` reason rule must not desync (#1993, from
+// doc review). `docs:new` emits `covers: []` with an inline hint, and that hint
+// is exactly what satisfies `emptyCoversNote` — so an edit to either file could
+// leave the scaffolder generating a doc that `docs:check` rejects on creation.
+test("buildDoc's `covers: []` line satisfies the empty-covers reason rule", () => {
+  const doc = buildDoc({ relPath: 'docs/operations/new-thing.md', today: '2026-08-26' })
+  assert.deepEqual(parseFrontMatter(doc).data.covers, []) // it IS the empty form…
+  assert.ok(
+    emptyCoversNote(doc),
+    'docs:new scaffolds a `covers: []` with no readable reason — docs:check would reject its own scaffold',
+  )
 })

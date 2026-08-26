@@ -2,19 +2,27 @@
  * Characterization tests for the agent-activity statements `agent-activity.
  * test.ts` never reaches (#1167).
  *
- * The existing suite covers the two activity feeds' payment/approval joins.
- * Untouched before this file, and all of it about to move into
+ * The existing suite covers the two activity feeds' payment joins. Untouched
+ * before this file, and all of it about to move into
  * `infra/repositories/agent-activity.ts`:
  *
- *  - the whole `GET /:id/stats` route — its ownership check plus four
- *    aggregates (all-time, today, this week, pending approvals);
+ *  - the whole `GET /:id/stats` route — its ownership check plus the three
+ *    spend aggregates (all-time, today, this week);
  *  - the 404 branch both `/:id/*` routes take when the ownership check finds
  *    no row, and the fact that it short-circuits before any further read;
  *  - the `agent_tool_invocations` audit rows, answered empty everywhere else;
  *  - `GET /feed`'s early return when the user owns no agents, which must skip
- *    every downstream read including the pending-approval count.
+ *    every downstream read.
  *
  * Written against the UNCHANGED routes and passing before the extraction.
+ *
+ * #2055 (epic #1440, #2021 readability waiver): `approval_requests` is
+ * dropped — `countPendingApprovalsForAgent` / `countActionableApprovalsForUser`
+ * are gone, `pending_approvals` is hardcoded 0 in both the stats and feed
+ * responses (the wire field survives for compatibility), and neither route
+ * queries `approval_requests` at all any more. The `isUserApprovalCount` /
+ * `isAgentApprovalCount` SQL-shape matchers this file used to pin those
+ * counts are gone with the queries they matched.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
@@ -28,21 +36,6 @@ vi.mock('../../db.js', () => ({
 }))
 
 import agentActivityRoutes from '../agent-activity.js'
-
-/**
- * Match the user-scoped approval COUNT without pinning its casing or layout.
- * The literal `'SELECT COUNT(*) as count FROM approval_requests'` broke the
- * moment #1179 converged the two copies into one constant with the other
- * copy's spelling — the query was semantically identical, the string was not.
- * Match the shape instead.
- */
-const isUserApprovalCount = (sql: string) =>
-  /COUNT\(\*\)/i.test(sql) && /FROM\s+approval_requests\s+WHERE\s+user_id/is.test(sql)
-
-/** The per-AGENT variant of the same count — a different question, same table. */
-const isAgentApprovalCount = (sql: string) =>
-  /COUNT\(\*\)/i.test(sql) && /FROM\s+approval_requests\s+WHERE\s+agent_id/is.test(sql)
-
 
 function invocationRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -61,11 +54,6 @@ function invocationRow(overrides: Record<string, unknown> = {}) {
 
 function callsMatching(pattern: string) {
   return mockQuery.mock.calls.filter(([sql]) => String(sql).includes(pattern))
-}
-
-/** `callsMatching` for a predicate rather than a literal fragment. */
-function callsMatchingFn(predicate: (sql: string) => boolean) {
-  return mockQuery.mock.calls.filter(([sql]) => predicate(String(sql)))
 }
 
 describe('agent activity stats + guards (characterization, #1167)', () => {
@@ -92,20 +80,16 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
   }
 
   describe('GET /:id/stats', () => {
-    /** Dispatches the four stats aggregates apart by their time predicate. */
+    /** Dispatches the three spend aggregates apart by their time predicate. */
     function installStatsMock(rows: {
       allTime?: unknown[]
       today?: unknown[]
       week?: unknown[]
-      pending?: string
       agentFound?: boolean
     } = {}) {
       mockQuery.mockImplementation(async (sql: string) => {
         if (sql.includes('SELECT id FROM agents')) {
           return { rows: rows.agentFound === false ? [] : [{ id: 'agent-1' }] }
-        }
-        if (isAgentApprovalCount(sql)) {
-          return { rows: [{ count: rows.pending ?? '0' }] }
         }
         if (sql.includes("created_at >= CURRENT_DATE - interval '7 days'")) {
           return { rows: rows.week ?? [] }
@@ -120,12 +104,15 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
       })
     }
 
-    it('reports all-time, today and this-week totals plus the pending count', async () => {
+    // #2055: was "...plus the pending count", pinning a mocked non-zero
+    // pending count — `countPendingApprovalsForAgent` is gone, so
+    // `pending_approvals` is hardcoded 0 regardless of what the (now
+    // nonexistent) query would have returned.
+    it('reports all-time, today and this-week totals, pending_approvals hardcoded 0', async () => {
       installStatsMock({
         allTime: [{ token_symbol: 'USDC', total_spent: '12.50', tx_count: '5' }],
         today: [{ token_symbol: 'USDC', total_spent: '2.50', tx_count: '1' }],
         week: [{ token_symbol: 'USDC', total_spent: '7.00', tx_count: '3' }],
-        pending: '4',
       })
 
       const response = await app.inject({
@@ -139,9 +126,10 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
         all_time: [{ token: 'USDC', total_spent: '12.50', tx_count: 5 }],
         today: [{ token: 'USDC', total_spent: '2.50', tx_count: 1 }],
         this_week: [{ token: 'USDC', total_spent: '7.00', tx_count: 3 }],
-        pending_approvals: 4,
+        pending_approvals: 0,
       })
       expectMatchesSpec('GET', '/agent-activity/{id}/stats', response.json())
+      expect(mockQuery.mock.calls.some(([sql]) => /approval_requests/i.test(String(sql)))).toBe(false)
     })
 
     it('returns empty buckets and a zero count when the agent has no history', async () => {
@@ -195,9 +183,6 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
       for (const call of callsMatching('FROM payment_intents')) {
         expect(call[1]).toEqual(['agent-1'])
       }
-      expect(
-        callsMatchingFn(isAgentApprovalCount)[0][1],
-      ).toEqual(['agent-1'])
     })
 
     it("404s without reading any aggregate when the agent is not the caller's", async () => {
@@ -229,7 +214,6 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
       mockQuery.mockImplementation(async (sql: string) => {
         if (sql.includes('SELECT id FROM agents')) return { rows: [{ id: 'agent-1' }] }
         if (sql.includes('FROM payment_intents pi')) return { rows: [] }
-        if (sql.includes('FROM approval_requests ar')) return { rows: [] }
         if (sql.includes('FROM agent_tool_invocations')) {
           return { rows: [invocationRow({ next_action: 'retry', status_code: 402 })] }
         }
@@ -288,9 +272,10 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
         headers: auth(),
       })
 
+      // #2055: no more `FROM approval_requests ar` read — payments + tool
+      // invocations only.
       for (const pattern of [
         'FROM payment_intents pi',
-        'FROM approval_requests ar',
         'FROM agent_tool_invocations',
       ]) {
         expect(callsMatching(pattern)[0][1], pattern).toEqual(['agent-1', 100, 20])
@@ -317,17 +302,16 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
       expect(mockQuery.mock.calls[0][1]).toEqual(['user-1'])
     })
 
-    it('labels tool invocations with their agent name and counts pending approvals for the user', async () => {
+    // #2055: was "...and counts pending approvals for the user" — pinning a
+    // mocked non-zero count. `countActionableApprovalsForUser` is gone, so
+    // `pending_approvals` is hardcoded 0.
+    it('labels tool invocations with their agent name, pending_approvals hardcoded 0', async () => {
       mockQuery.mockImplementation(async (sql: string) => {
         if (sql.includes('SELECT id, name FROM agents')) {
           return { rows: [{ id: 'agent-1', name: 'Research agent' }] }
         }
         if (sql.includes('FROM payment_intents pi')) return { rows: [] }
-        if (sql.includes('FROM approval_requests ar')) return { rows: [] }
         if (sql.includes('FROM agent_tool_invocations')) return { rows: [invocationRow()] }
-        if (isUserApprovalCount(sql)) {
-          return { rows: [{ count: '3' }] }
-        }
         throw new Error(`Unexpected query: ${sql}`)
       })
 
@@ -337,7 +321,7 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
         headers: auth(),
       })).json()
 
-      expect(body.pending_approvals).toBe(3)
+      expect(body.pending_approvals).toBe(0)
       expect(body.activity).toHaveLength(1)
       expect(body.activity[0]).toMatchObject({
         type: 'mcp_tool_call',
@@ -345,9 +329,7 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
         agent_name: 'Research agent',
         tool_name: 'haven_pay',
       })
-      expect(
-        callsMatchingFn(isUserApprovalCount)[0][1],
-      ).toEqual(['user-1'])
+      expect(mockQuery.mock.calls.some(([sql]) => /approval_requests/i.test(String(sql)))).toBe(false)
     })
 
     it('falls back to "Unknown" for a row whose agent is not in the name map', async () => {
@@ -356,12 +338,8 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
           return { rows: [{ id: 'agent-1', name: 'Research agent' }] }
         }
         if (sql.includes('FROM payment_intents pi')) return { rows: [] }
-        if (sql.includes('FROM approval_requests ar')) return { rows: [] }
         if (sql.includes('FROM agent_tool_invocations')) {
           return { rows: [invocationRow({ agent_id: 'agent-gone' })] }
-        }
-        if (isUserApprovalCount(sql)) {
-          return { rows: [{ count: '0' }] }
         }
         throw new Error(`Unexpected query: ${sql}`)
       })
@@ -380,9 +358,6 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
         if (sql.includes('SELECT id, name FROM agents')) {
           return { rows: [{ id: 'agent-1', name: 'A' }, { id: 'agent-2', name: 'B' }] }
         }
-        if (isUserApprovalCount(sql)) {
-          return { rows: [{ count: '0' }] }
-        }
         return { rows: [] }
       })
 
@@ -392,9 +367,10 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
         headers: auth(),
       })
 
+      // #2055: no more `FROM approval_requests ar` read — payments + tool
+      // invocations only.
       for (const pattern of [
         'FROM payment_intents pi',
-        'FROM approval_requests ar',
         'FROM agent_tool_invocations',
       ]) {
         expect(callsMatching(pattern)[0][1], pattern).toEqual([['agent-1', 'agent-2'], 10, 5])

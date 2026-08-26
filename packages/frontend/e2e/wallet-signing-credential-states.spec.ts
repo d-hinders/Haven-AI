@@ -25,14 +25,13 @@
  *
  * ── Why the showcase renders these with props forced ─────────────────────────
  *
- * Because no app-state fixture can reach the fallback. `useActiveSigner`
- * returns a `delegator_passkey` only when the device marker already matched
- * (`lib/signer.ts`, pinned by `signer.test.ts` > "does NOT resolve the hybrid
- * signer when the device marker is missing"), so the marker-less user reaches
- * no Hybrid branch at all — that upstream gap is #1969. Forcing the props in
- * the primitive gallery is the same thing the gallery already does for every
- * state a user flow does not reach; it is not a shortcut around a reachable
- * fixture.
+ * Because the gallery's job is photographing states side by side with props
+ * forced, whatever the app does. Since #1969 (owner decision 2026-08-26) the
+ * fallback IS reachable in the app — `useActiveSigner` resolves any non-empty
+ * hydrated signer set — and the app-state proof lives in
+ * `e2e/wallet-signer-offering.spec.ts`, which reaches both states through the
+ * real hydration path. This spec keeps asserting the SHOWCASE discriminates
+ * the two states structurally, which no app fixture guarantees.
  *
  * NOT a `.visual.spec.ts`: it takes no screenshot and needs no baseline, so it
  * runs on every platform in the ordinary e2e suite rather than only under

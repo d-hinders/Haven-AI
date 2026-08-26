@@ -5,7 +5,6 @@
  */
 import { machinePaymentLifecycle } from '../../domain/machine-payment-lifecycle.js'
 import {
-  findApprovalRequestAgentMatches,
   findDelegateSweepAgentMatches,
   findPaymentIntentAgentMatches,
 } from '../../infra/repositories/transaction-history.js'
@@ -67,34 +66,7 @@ export async function enrichTransactionsWithAgents(
       )
     }
 
-    const approvalRows = await findApprovalRequestAgentMatches(txHashes, userId, safeIds)
-
-    for (const row of approvalRows) {
-      const identityKey = paymentAgentIdentityKey(
-        row.tx_hash,
-        row.safe_id,
-        row.chain_id,
-      )
-      if (agentByTransactionIdentity.has(identityKey)) continue
-      const proofStatus = row.payment_proof_status ?? 'payment_confirmed'
-      const lifecycle = machinePaymentLifecycle({
-        rail: row.source,
-        paymentProofStatus: proofStatus,
-        reconciliationEventType: row.payment_reconciliation_event_type,
-      })
-      agentByTransactionIdentity.set(identityKey, {
-        id: row.agent_id,
-        name: row.agent_name,
-        source: row.source,
-        resourceUrl: row.payment_resource_url,
-        merchantAddress: row.merchant_address,
-        paymentId: row.id,
-        paymentProofStatus: proofStatus,
-        paymentFlowStatus: lifecycle.paymentFlowStatus,
-        paymentAttentionReason: lifecycle.paymentAttentionReason,
-        amountSek: row.amount_sek,
-      })
-    }
+    // #2055: the approval_requests attribution pass is gone with the table.
 
     const sweepRows = await findDelegateSweepAgentMatches(txHashes, userId, safeIds)
 

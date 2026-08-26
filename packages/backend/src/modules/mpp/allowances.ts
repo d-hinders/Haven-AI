@@ -1,34 +1,24 @@
 /**
  * `GET /allowances` orchestration (#1135/#1144, moved by #997). The
- * agent-facing spend-authority report, rail-aware: on the legacy
- * AllowanceModule rail it reads the live on-chain state; on the delegation
- * rail it derives remaining budget from the agent's own active, owner-signed
- * delegations (#1090); a retired session-rail account gets the #993
- * fail-closed 410 rather than a state read. Behavior is pinned by
+ * agent-facing spend-authority report, rail-aware: on the delegation rail it
+ * derives remaining budget from the agent's own active, owner-signed
+ * delegations (#1090); both retired rails — session (#834/#993) and the
+ * AllowanceModule rail (#2020, reversing #1986's left-readable decision) —
+ * get the fail-closed 410 rather than a state read. Behavior is pinned by
  * `routes/__tests__/machine-payments.test.ts`'s "GET /allowances — rail-aware
- * (#1135)" and "— legacy-rail characterization" suites — a delegation-rail
- * `onchain` row additionally carries `remaining_is_from_chain` (#1319).
+ * (#1135)" suite — a delegation-rail `onchain` row additionally carries
+ * `remaining_is_from_chain` (#1319).
  */
-import { resolveExecutionRail, sessionRailRetired } from '../../rails/execution-rail.js'
-import { listAllowanceConfigForAgent } from '../../infra/repositories/agents.js'
+import {
+  resolveExecutionRail,
+  sessionRailRetired,
+  allowanceModuleRailRetired,
+} from '../../rails/execution-rail.js'
 import { deriveDelegationBudgets } from '../../rails/delegation-budget-view.js'
 import { listDelegationJsonByIds } from '../../infra/repositories/delegation-budgets.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
-import {
-  getTokenAllowance,
-  getLatestBlockTimeSec,
-  computeEffectiveAllowance,
-} from '../../rails/allowance-module.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { MppHandlerResult } from './types.js'
-
-interface AgentAllowanceRow {
-  id: string
-  token_address: string
-  token_symbol: string
-  allowance_amount: string
-  reset_period_min: number
-}
 
 export async function handleGetAllowances(agent: AgentContext): Promise<MppHandlerResult> {
   // #1135: this endpoint was rail-blind — it read the on-chain
@@ -46,12 +36,24 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
     return { statusCode: retired.statusCode, body: retired.body }
   }
 
+  // #2020, reversing #1986's leave-it-readable decision (owner call recorded
+  // 2026-08-25 on the issue): a `retired_allowance` account now gets the same
+  // fail-closed 410 as the spend paths. The read-regression argument #1986
+  // weighed no longer holds — the accounts are emptied and unsupported (the
+  // #2021 readability waiver), and this read was the last thing pinning
+  // `agent_allowances` and the legacy on-chain allowance reader into the
+  // codebase. It also ends the accepted-misleading state #1986 documented,
+  // where an agent could read a live allowance it could never spend.
+  if (railDecision.rail === 'retired_allowance') {
+    const retired = allowanceModuleRailRetired('account')
+    return { statusCode: retired.statusCode, body: retired.body }
+  }
+
   if (agent.execution_rail === 'delegation') {
     // Delegation rail: the authority IS the active agent_delegations set,
-    // derived through the #1090 shared view (agent_allowances is a frozen
-    // onboarding mirror on this rail — reading it would report the
-    // onboarding budget forever). No active delegation → empty array, so
-    // derived readiness stays needs_approval.
+    // derived through the #1090 shared view (since #2020 the only source —
+    // the agent_allowances onboarding mirror is retired). No active
+    // delegation → empty array, so derived readiness stays needs_approval.
     //
     // `remaining` comes from the ERC20PeriodTransferEnforcer's own storage
     // (#1145). That contract is what reverts an over-budget redemption and
@@ -140,60 +142,11 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
     }
   }
 
-  // Legacy AllowanceModule rail — unchanged (characterization-pinned).
-  const rows: AgentAllowanceRow[] = await listAllowanceConfigForAgent(agent.id)
-
-  const allowances = []
-  for (const row of rows) {
-    try {
-      const [onchain, chainTimeSec] = await Promise.all([
-        getTokenAllowance(
-          agent.chain_id,
-          agent.safe_address,
-          agent.delegate_address,
-          row.token_address,
-        ),
-        getLatestBlockTimeSec(agent.chain_id),
-      ])
-      const effective = computeEffectiveAllowance(onchain, chainTimeSec)
-
-      allowances.push({
-        id: row.id,
-        token_address: row.token_address,
-        token_symbol: row.token_symbol,
-        configured_amount: row.allowance_amount,
-        reset_period_min: row.reset_period_min,
-        onchain: {
-          amount: onchain.amount.toString(),
-          spent: onchain.spent.toString(),
-          remaining: effective.remaining.toString(),
-          effective_spent: effective.effectiveSpent.toString(),
-          reset_time_min: onchain.resetTimeMin,
-          last_reset_min: onchain.lastResetMin,
-          nonce: onchain.nonce,
-          is_reset_pending: effective.isResetPending,
-        },
-      })
-    } catch (err) {
-      return {
-        statusCode: 502,
-        body: {
-          error: 'Failed to read on-chain allowance',
-          token_address: row.token_address,
-          details: err instanceof Error ? err.message : String(err),
-        },
-      }
-    }
-  }
-
-  return {
-    statusCode: 200,
-    body: {
-      agent_id: agent.id,
-      safe_address: agent.safe_address,
-      delegate_address: agent.delegate_address,
-      chain_id: agent.chain_id,
-      allowances,
-    },
-  }
+  // Unreachable: `resolveExecutionRail` returns exactly three rails and the
+  // two retired ones returned above, so only 'delegation' reaches here — and
+  // its `execution_rail` matches the branch above. Fail closed anyway rather
+  // than fall through to a read that no longer exists (#2020 deleted the
+  // legacy AllowanceModule on-chain report that stood here).
+  const retired = allowanceModuleRailRetired('account')
+  return { statusCode: retired.statusCode, body: retired.body }
 }

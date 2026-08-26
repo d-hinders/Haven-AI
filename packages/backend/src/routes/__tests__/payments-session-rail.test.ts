@@ -35,15 +35,6 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() 
   },
 }))
 
-// #1196 wired the allowance-nonce coordinator into this path, so it now reads
-// the shared watermark alongside its chain reads. Stub the watermark
-// repository instead of adding it to the content-dispatch table below: it is
-// fail-open and orthogonal to what these tests assert, so silencing it
-// changes nothing they measure.
-vi.mock('../../infra/repositories/allowance-nonce-watermarks.js', () => ({
-  findAllowanceNonceWatermark: async () => null,
-  raiseAllowanceNonceWatermark: async () => {},
-}))
 vi.mock('../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
@@ -53,7 +44,9 @@ vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 vi.mock('../../rails/delegation-authorization.js', () => delegationMocks)
 
 const paymentRoutes = (await import('../payments.js')).default
-const { serializeUserOp } = await import('../../rails/execution-rail.js')
+const { serializeUserOp, allowanceModuleRailRetired, sessionRailRetired } = await import(
+  '../../rails/execution-rail.js'
+)
 
 // The session (delegate) key — a throwaway test key, never a real one.
 const sessionWallet = new Wallet('0x' + '22'.repeat(32))
@@ -219,6 +212,11 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     for (const mock of Object.values(delegationMocks)) mock.mockReset()
   })
 
+  // #1986 (epic #1440 slice 3): `intentRow()` is the legacy shape this case's
+  // name describes — `execution_rail: null` — and that shape is now itself
+  // retired, on the SAME seam as the session-rail tombstone below but with
+  // its own message. `rails/allowance-module.ts` and this case are scheduled
+  // for deletion in #1987.
   it('CHARACTERIZATION: legacy intents never touch the session rail', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
     allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
@@ -233,14 +231,15 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
       payload: { signature: `0x${'ab'.repeat(65)}` },
     })
 
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({ status: 'confirmed', tx_hash: TX_HASH })
-    // The legacy rail, exactly as before the session rail existed:
-    expect(allowanceMocks.recoverSigner).toHaveBeenCalledWith(
-      USER_OP_HASH,
-      `0x${'ab'.repeat(65)}`,
-    )
-    expect(allowanceMocks.executeAllowanceTransfer).toHaveBeenCalledOnce()
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('intent').body.error)
+    // Still never touches the session rail — and the two tombstones produce
+    // DISTINCT bodies, so a caller can tell which retirement it hit:
+    expect(response.json().error).not.toBe(sessionRailRetired('intent').body.error)
+    // Nothing verified, claimed, or executed:
+    expect(allowanceMocks.recoverSigner).not.toHaveBeenCalled()
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
+    expect(mockQuery.mock.calls.some((c) => /SET signature/.test(String(c[0])))).toBe(false)
   })
 
   it('POST /:id/sign REFUSES a session intent — the rail is retired (#834)', async () => {
@@ -390,6 +389,12 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(delegationMocks.submitDelegationPayment).not.toHaveBeenCalled()
   })
 
+  // #1986 (epic #1440 slice 3): `railState(null)` is the "no Safe row / no
+  // rail marking" shape this case's name calls "NON-delegation" — that shape
+  // now resolves to `retired_allowance`, and the account gate refuses BEFORE
+  // the token-config guard (`allowanceConfigured`) this case named ever
+  // runs. `rails/allowance-module.ts` and this case are scheduled for
+  // deletion in #1987.
   it('POST /payments still 403s a NON-delegation agent with no allowance row (guard preserved, #835)', async () => {
     // The #835 fix scopes the token-config guard OUT of the delegation rail —
     // it must remain in force everywhere else. A legacy agent (no rail state)
@@ -403,19 +408,25 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
       payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
     })
 
-    expect(response.statusCode).toBe(403)
-    expect(response.json().error).toMatch(/not configured for USDC/)
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    // The token-config guard never ran — the account gate refused first:
+    expect(mockQuery.mock.calls.some((c) => /LOWER\(token_address\) = LOWER\(\$2\)/.test(String(c[0])))).toBe(false)
     // Nothing was written:
     expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
   })
 
+  // #1986: this case's name IS the retired rail — "the account is not
+  // migrated" (no rail state) used to mean "fall through to legacy", and now
+  // fail-closes instead. `rails/allowance-module.ts` and this case are
+  // scheduled for deletion in #1987.
   it('POST /payments stays on the legacy flow when the account is not migrated', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
     allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
     allowanceMocks.generateTransferHash.mockResolvedValue(USER_OP_HASH)
 
-    // No rail state → legacy (fail-closed).
+    // No rail state → retired (fail-closed).
     primeDb(AUTH, railState(null), allowanceConfigured(true), insertIntent(intentRow()))
 
     const response = await app.inject({
@@ -425,9 +436,10 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
       payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
     })
 
-    expect(response.statusCode).toBe(201)
-    expect(response.json().sign_data.signature_scheme).toBeUndefined()
-    expect(allowanceMocks.generateTransferHash).toHaveBeenCalledOnce()
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
   })
 
   it('a session intent with missing stored state is refused the same way (410, #834)', async () => {

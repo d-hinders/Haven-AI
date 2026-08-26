@@ -186,9 +186,6 @@ export default function InvestorBriefingPage() {
               </p>
 
               <div className="flex flex-wrap items-center gap-3 mb-10">
-                <InvestorButton href={CONTACT_TEAM_HREF} variant="primary">
-                  Contact the team
-                </InvestorButton>
                 <InvestorButton href="#product" variant="ghost">
                   View product thesis
                 </InvestorButton>

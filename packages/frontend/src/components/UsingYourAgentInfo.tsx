@@ -36,7 +36,8 @@ const PAGES: InfoPage[] = [
           <InfoStep number={3} title="Watch the payment land here">
             The transaction appears in{' '}
             <span className="font-medium text-[var(--v2-ink)]">Recent transactions</span> on the dashboard.
-            Anything over the agent&apos;s remaining allowance waits for your approval before any money moves.
+            Anything over the agent&apos;s remaining allowance is declined before any money moves — raise the
+            budget, or wait for its reset period, if the agent needs more.
           </InfoStep>
         </div>
 

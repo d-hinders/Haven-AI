@@ -152,6 +152,7 @@ export const FIND_INTENT_EVIDENCE_SOURCE_SQL = `SELECT 'payment_intent'::TEXT AS
             x402_resource_url, x402_merchant_address, x402_idempotency_key,
             payment_rail, payment_resource_url, merchant_address,
             machine_challenge_id, machine_idempotency_key, machine_metadata,
+            execution_rail,
             confirmed_at
      FROM payment_intents
      WHERE id = $1
@@ -182,6 +183,8 @@ export interface EvidenceSourceRow {
   machine_challenge_id: string | null
   machine_idempotency_key: string | null
   machine_metadata: Record<string, unknown> | string | null
+  /** #2092: the rail the intent was authorized on — the erc7710 completion seam's guard. */
+  execution_rail: string | null
   confirmed_at: string | null
 }
 
@@ -208,6 +211,7 @@ export const FIND_INTENT_FOR_EVIDENCE_SQL = `SELECT 'payment_intent'::TEXT AS ki
             x402_resource_url, x402_merchant_address, x402_idempotency_key,
             payment_rail, payment_resource_url, merchant_address,
             machine_challenge_id, machine_idempotency_key, machine_metadata,
+            execution_rail,
             confirmed_at
      FROM payment_intents
      WHERE id = $1 AND agent_id = $2

@@ -5002,6 +5002,10 @@ export const openapiSpec = {
           '403': agentAuthForbidden,
           '404': errorResponse,
           '409': errorResponse,
+          // #2092: the erc7710 completion seam could not READ the chain (or the
+          // reported settlement is not mined yet). Nothing was confirmed and
+          // nothing was written — retry once the transaction is mined.
+          '503': errorResponse,
         },
       },
     },

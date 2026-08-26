@@ -30,6 +30,7 @@ import { getTokenBalance } from '../../rails/allowance-module.js'
 import { quoteFee, recordSettledFee } from '../fee/index.js'
 import { feedSettledPaymentBestEffort } from '../reporting/index.js'
 import { isProtocolPaymentRail } from './rail-dispatch.js'
+import { observeErc7710Settlement } from '../x402/settlement-observed.js'
 import type { EvidenceBody, MppHandlerResult } from './types.js'
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
@@ -57,6 +58,8 @@ export interface MachinePaymentEvidenceSource {
   status: string
   source?: string | null
   payment_rail?: string | null
+  /** #2092: the authorizing rail — the erc7710 completion seam guards on it. */
+  execution_rail?: string | null
   payment_resource_url?: string | null
   x402_resource_url?: string | null
   merchant_address?: string | null
@@ -327,8 +330,38 @@ export async function attachMachinePaymentEvidence(
     throw new Error('merchant_status_invalid')
   }
 
-  const payment = await findProtocolPaymentForEvidence(input.agentId, input.paymentId)
+  let payment = await findProtocolPaymentForEvidence(input.agentId, input.paymentId)
   if (!payment) return null
+
+  // #2092: the scheme-agnostic completion seam. On erc7710 direct settlement
+  // the MERCHANT redeems the delegation chain, so Haven never learns the
+  // settlement hash on its own and the intent sits at `submitted` — which the
+  // gate below would reject, leaving the whole scheme without evidence, and so
+  // invisible to the Fortnox feed, `GET /receipts`, merchant-receipt capture
+  // and transaction history.
+  //
+  // Rather than teaching each consumer about schemes, complete the intent HERE
+  // from the hash the agent just reported — after verifying it on-chain — so
+  // that from the next line onwards an erc7710 payment is indistinguishable
+  // from a 3009 one and the pipeline below runs unchanged.
+  //
+  // `observeErc7710Settlement` is a no-op for every other shape, so eip3009
+  // and the legacy rail reach the gate below exactly as before.
+  const observation = await observeErc7710Settlement(payment, input.txHash)
+  if (observation.outcome === 'unverified') {
+    // Fail closed: the intent is still `submitted` and no evidence exists.
+    throw new Error(
+      observation.retryable ? 'settlement_unobservable' : 'settlement_unverified',
+    )
+  }
+  if (observation.outcome === 'confirmed') {
+    // Re-read rather than patch the in-memory row: `confirmed_at` is the
+    // database's NOW(), and it is copied onto the evidence row below.
+    const reloaded = await findProtocolPaymentForEvidence(input.agentId, input.paymentId)
+    if (!reloaded) return null
+    payment = reloaded
+  }
+
   if (payment.status !== expectedStatusForPayment(payment) || !payment.tx_hash) {
     throw new Error('payment_not_confirmed')
   }
@@ -526,6 +559,31 @@ export async function attachEvidenceHandler(
     const marker = err instanceof Error ? err.message : String(err)
     if (marker === 'payment_not_confirmed') {
       return { statusCode: 409, body: { error: 'Evidence requires a confirmed payment' } }
+    }
+    // #2092: the erc7710 completion seam refused. Distinct statuses because
+    // the remedies differ — 503 says "the chain could not be read, or the
+    // transaction is not mined yet; report it again", while 409 says "that
+    // transaction does not settle this payment, and reporting it again will
+    // not change that". Neither confirmed anything.
+    if (marker === 'settlement_unobservable') {
+      return {
+        statusCode: 503,
+        body: {
+          error:
+            'The reported settlement transaction could not be verified on-chain yet — ' +
+            'the payment is unchanged; retry once it is mined',
+        },
+      }
+    }
+    if (marker === 'settlement_unverified') {
+      return {
+        statusCode: 409,
+        body: {
+          error:
+            'The reported settlement transaction does not match this payment on-chain — ' +
+            'the payment was not confirmed',
+        },
+      }
     }
     if (marker === 'tx_hash_mismatch') {
       return { statusCode: 409, body: { error: 'txHash does not match payment intent' } }

@@ -21,7 +21,7 @@
  */
 
 import pool from '../../db.js'
-import { type Executor } from '../transaction.js'
+import { type Executor, withTransaction } from '../transaction.js'
 import { type PaymentIntentRow } from './payment-intents.js'
 
 export type { Executor }
@@ -286,4 +286,100 @@ export async function markIntentSubmittedForSettlement(
   db: Executor = pool,
 ): Promise<void> {
   await db.query(MARK_INTENT_SUBMITTED_FOR_SETTLEMENT_SQL, [signature, intentId, agentId])
+}
+
+// ── erc7710 settlement-observed confirm (#2092) ──────────────────────────────
+
+export const CONFIRM_SETTLEMENT_OBSERVED_SQL = `UPDATE payment_intents
+           SET status = 'confirmed',
+               tx_hash = $1,
+               confirmed_at = NOW(),
+               usd_value = $4,
+               eur_value = $5
+           WHERE id = $2
+             AND agent_id = $3
+             AND COALESCE(payment_rail, source) = 'x402'
+             AND execution_rail = 'delegation'
+             AND machine_metadata->>'settlement_scheme' = 'erc7710'
+             AND status = 'submitted'
+             AND tx_hash IS NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM payment_intents other
+                WHERE other.tx_hash IS NOT NULL
+                  AND LOWER(other.tx_hash) = LOWER($1)
+                  AND other.id <> $2
+             )
+           RETURNING id`
+
+/**
+ * The erc7710 completion transition: `submitted` → `confirmed` with the
+ * merchant's settlement tx hash (#2092).
+ *
+ * Every conjunct in the WHERE clause is load-bearing:
+ *
+ * - `payment_rail/source = 'x402'` + `execution_rail = 'delegation'` +
+ *   `settlement_scheme = 'erc7710'` scope this transition to the ONE lifecycle
+ *   that legitimately sits at `submitted` with no hash. A 3009 or legacy-rail
+ *   intent can never be confirmed through this door, so those rails keep
+ *   exactly the transitions they had.
+ * - `status = 'submitted' AND tx_hash IS NULL` is the CAS: concurrent reports
+ *   race it and exactly one wins, and a confirmed intent can never be
+ *   re-pointed at a different hash.
+ * - `NOT EXISTS (… same tx_hash …)` is the REPLAY guard: one settlement
+ *   transaction may confirm at most one payment intent. Without it an agent
+ *   holding one genuine hash could confirm every same-shaped intent it owns
+ *   and multiply a single real payment into many book entries.
+ *
+ * Callers MUST run this under {@link confirmObservedSettlement}, which takes a
+ * transaction-scoped advisory lock on the hash — the `NOT EXISTS` alone leaves
+ * a window in which two concurrent statements each see no prior row.
+ *
+ * Returns false when the guard matched nothing; the caller reports "not
+ * confirmed" and the intent stays `submitted`. There is no path here that
+ * confirms without a hash.
+ */
+export async function confirmObservedSettlementRow(
+  input: {
+    txHash: string
+    intentId: string
+    agentId: string
+    usdValue: number | string | null
+    eurValue: number | string | null
+  },
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query<{ id: string }>(CONFIRM_SETTLEMENT_OBSERVED_SQL, [
+    input.txHash,
+    input.intentId,
+    input.agentId,
+    input.usdValue,
+    input.eurValue,
+  ])
+  return result.rows.length > 0
+}
+
+/**
+ * {@link confirmObservedSettlementRow} serialized per settlement hash.
+ *
+ * `pg_advisory_xact_lock` keyed on the lowercased hash closes the read-write
+ * race the `NOT EXISTS` subquery cannot: two concurrent confirms naming the
+ * same real transaction would otherwise both observe "no other row holds it"
+ * and both commit. The lock is transaction-scoped, so it is released by the
+ * COMMIT/ROLLBACK and never leaks. Chosen over a unique index because this
+ * needs no migration and must not retroactively constrain historical rows.
+ */
+export async function confirmObservedSettlement(
+  input: {
+    txHash: string
+    intentId: string
+    agentId: string
+    usdValue: number | string | null
+    eurValue: number | string | null
+  },
+  db: Executor = pool,
+): Promise<boolean> {
+  return withTransaction(db, async (tx) => {
+    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [input.txHash.toLowerCase()])
+    return confirmObservedSettlementRow(input, tx)
+  })
 }

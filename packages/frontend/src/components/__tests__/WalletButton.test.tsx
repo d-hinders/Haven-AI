@@ -272,10 +272,29 @@ describe('WalletButton', () => {
     expect(pill).toHaveTextContent('Wrong wallet')
     expect(screen.queryByRole('button', { name: '0x5555…5555' })).not.toBeInTheDocument()
 
-    // The fix lives one click away: the popover with Switch wallet.
+    // The fix lives one click away: the popover with Switch wallet — and the
+    // popover NAMES the mismatch (design-review finding on #2073: without
+    // this line it rendered pixel-identical to the healthy connected state).
     fireEvent.click(pill)
     expect(screen.getByRole('dialog', { name: 'Wallet menu' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Switch wallet' })).toBeInTheDocument()
+    expect(
+      screen.getByText(/This is not the wallet that controls this account/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/0x2222…2222/)).toBeInTheDocument()
+  })
+
+  it('positive control: the healthy connected popover never renders the wrong-wallet note (#2073)', () => {
+    setConnectedWallet()
+    mocks.useSafeOperationGate.mockReturnValue({ kind: 'ready' })
+
+    render(<WalletButton />)
+
+    fireEvent.click(screen.getByRole('button', { name: '0x5555…5555' }))
+    expect(screen.getByRole('dialog', { name: 'Wallet menu' })).toBeInTheDocument()
+    expect(
+      screen.queryByText(/This is not the wallet that controls this account/),
+    ).not.toBeInTheDocument()
   })
 
   it('positive control: a connected wallet with a non-wrong-wallet gate keeps the normal address pill (#2073)', () => {

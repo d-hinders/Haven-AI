@@ -190,6 +190,15 @@ interface PopoverProps {
   signingWith?: { label: string; keyId: string; onThisDevice: boolean }
   unavailablePasskey?: boolean
   /**
+   * #2073: the connected wallet is not this account's named owner. When set
+   * (the owner's truncated address), the popover explains the mismatch in the
+   * same quiet slot `unavailablePasskey` uses — the popover is the "Wrong
+   * wallet" pill's landing surface, and without this line it rendered
+   * pixel-identical to the healthy connected state (the design-review
+   * finding on this issue): a red pill whose menu gave no reason.
+   */
+  wrongWalletOwner?: string
+  /**
    * Render as a static ILLUSTRATION rather than a live overlay (#1952).
    *
    * `/design-system` shows this popover's two signing-credential states side by
@@ -287,6 +296,7 @@ export function WalletPopover({
   secondary,
   signingWith,
   unavailablePasskey = false,
+  wrongWalletOwner,
   presentational = false,
   open,
   onClose,
@@ -387,6 +397,17 @@ export function WalletPopover({
         {unavailablePasskey && (
           <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
             This account uses a passkey that is not available here.
+          </p>
+        )}
+        {wrongWalletOwner && (
+          // #2073: same quiet slot as the passkey note above. The mismatch is
+          // named HERE because this popover is where the "Wrong wallet" pill
+          // lands — the action-area caption is scoped to a gated action, and
+          // a page without one would otherwise offer a red pill whose menu
+          // looks exactly like the healthy state.
+          <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
+            This is not the wallet that controls this account. Switch to the
+            account&apos;s wallet {wrongWalletOwner} to approve actions.
           </p>
         )}
         {renderAddressSection(primary)}
@@ -822,6 +843,11 @@ export default function WalletButton() {
                 displayName: accountAlias ?? account.ensName,
               }}
               unavailablePasskey={passkeyUnavailableOnDevice}
+              wrongWalletOwner={
+                wrongWallet && operationGate.kind === 'wrong_wallet'
+                  ? truncateAddress(operationGate.ownerAddress)
+                  : undefined
+              }
               open={popoverOpen}
               onClose={() => setPopoverOpen(false)}
               onSwitchWallet={handleSwitchWallet}

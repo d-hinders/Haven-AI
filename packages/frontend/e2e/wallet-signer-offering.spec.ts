@@ -205,6 +205,10 @@ test('an UNRELATED connected wallet on an owner-only hybrid account renders the 
   await pill.click()
   await expect(page.getByRole('dialog', { name: 'Wallet menu' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Switch wallet' })).toBeVisible()
+  // The popover NAMES the mismatch (design-review finding on #2073) — it must
+  // not render pixel-identical to the healthy connected state.
+  await expect(page.getByText(/This is not the wallet that controls this account/)).toBeVisible()
+  await expect(page.getByText('0x2222…2222')).toBeVisible()
   await shoot(page, '2073-wrong-wallet-popover')
 
   expect(pageErrors).toEqual([])

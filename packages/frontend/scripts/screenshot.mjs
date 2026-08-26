@@ -2469,6 +2469,11 @@ export const SCENARIOS = {
       const popover = page.getByRole('dialog', { name: 'Wallet menu' })
       await popover.waitFor({ timeout: 15_000 })
       await popover.getByRole('button', { name: 'Switch wallet' }).waitFor({ timeout: 15_000 })
+      // The mismatch note (design-review finding on #2073): the popover must
+      // not photograph identical to the healthy connected state.
+      await popover
+        .getByText('This is not the wallet that controls this account', { exact: false })
+        .waitFor({ timeout: 15_000 })
       await shoot(popover, 'popover')
     },
   },

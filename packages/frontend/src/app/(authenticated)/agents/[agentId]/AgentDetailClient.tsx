@@ -322,7 +322,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   })
   const revokeBlockedByOtherDevice = operationGate.kind === 'passkey_on_other_device'
   const revokeApprovalBlocked = isOnchainActionBlocked(operationGate)
-  const revokeNoSignerMessage = 'Connect a wallet to revoke this agent budget.'
+  const revokeNoSignerMessage = "Connect the account's owner wallet to revoke this agent budget."
 
   const [editOpen, setEditOpen] = useState(false)
   const [editMode, setEditMode] = useState<EditAgentModalMode>('all')

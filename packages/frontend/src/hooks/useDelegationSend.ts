@@ -57,7 +57,7 @@ export function useDelegationSend(accountAddress: string, chainId: number) {
     void reload()
   }, [reload])
 
-  const signingPath = pickSigningPath(signers, signer?.type === 'eoa')
+  const signingPath = pickSigningPath(signers, signer?.type === 'eoa' ? signer.address : null)
 
   const send = useCallback(
     async (input: SendInput): Promise<SendResult> => {

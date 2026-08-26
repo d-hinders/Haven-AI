@@ -14,6 +14,15 @@ import {
 export type SafeOperationGate =
   | { kind: 'ready' }
   | { kind: 'no_signer' }
+  // #2073: a wallet IS connected, but it is not the hybrid account's named
+  // owner. Distinct from `no_signer` so consumers can say "the wallet you
+  // connected is the wrong one" instead of "connect a wallet" — the header
+  // pill and the action area used to silently disagree about whether a
+  // useful wallet was connected. Carries both addresses so a consumer can
+  // name the mismatch. Only the hybrid branch produces it: on the legacy
+  // rail any connected wallet may propose (ownership is enforced by the
+  // Safe itself), so "wrong wallet" is not a knowable client-side fact there.
+  | { kind: 'wrong_wallet'; connectedAddress: Address; ownerAddress: Address }
   | { kind: 'passkey_on_other_device' }
 
 function subscribe(onStoreChange: () => void): () => void {
@@ -136,10 +145,27 @@ export function useSafeOperationGate(args: {
     ) {
       return { kind: 'ready' }
     }
-    // No signer set known (hydration failed or none enrolled), or the set
-    // names an owner this connected wallet is not. Deliberately NOT falling
-    // through to the connected-EOA branch: a random connected wallet cannot
-    // sign for a Hybrid account.
+    // #2073: the set names an owner and a DIFFERENT wallet is connected —
+    // that is a fact worth naming, not a generic "no signer". Deliberately
+    // keyed on the connected ADDRESS alone (no walletClient requirement):
+    // the mismatch is true whatever chain the wallet sits on, and switching
+    // networks would not make a non-owner wallet the owner.
+    if (
+      hybridSigners?.owner_address &&
+      address &&
+      address.toLowerCase() !== hybridSigners.owner_address.toLowerCase()
+    ) {
+      return {
+        kind: 'wrong_wallet',
+        connectedAddress: address,
+        ownerAddress: hybridSigners.owner_address as Address,
+      }
+    }
+    // No signer set known (hydration failed or none enrolled), no wallet
+    // connected at all, or the owner IS connected but its walletClient is not
+    // ready yet (e.g. wrong network). Deliberately NOT falling through to the
+    // connected-EOA branch: a random connected wallet cannot sign for a
+    // Hybrid account.
     return { kind: 'no_signer' }
   }
 

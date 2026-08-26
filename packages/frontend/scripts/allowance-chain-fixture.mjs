@@ -126,6 +126,18 @@ export function makeAllowanceChainFixture({ chainId, safeAddress, delegates, row
       returns: () =>
         encodeAbiParameters(parseAbiParameters('address[]'), [rows.map((r) => r.token)]),
     },
+    // Native-balance read on Multicall3 itself (#2073). A scenario with a
+    // `connectedWallet` mounts RainbowKit against a live wagmi connection,
+    // and RainbowKit batch-reads the connected address's native balance
+    // through `getEthBalance` — four aggregate3 members per dashboard mount.
+    // Unseeded, those throw the loud "unseeded call" error below and fail the
+    // run even though no capture renders the number. Zero, deterministically,
+    // for ANY queried address: the fixture wallet holds nothing.
+    getEthBalance: {
+      signature: 'function getEthBalance(address) view returns (uint256)',
+      to: MULTICALL3_ADDRESS,
+      returns: () => encodeAbiParameters(parseAbiParameters('uint256'), [0n]),
+    },
     getTokenAllowance: {
       signature: 'function getTokenAllowance(address,address,address) view returns (uint256[5])',
       to: allowanceModule,

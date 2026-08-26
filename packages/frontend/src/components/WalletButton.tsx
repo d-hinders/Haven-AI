@@ -23,6 +23,7 @@ import {
   credentialIdFromKeyId,
 } from '@/lib/signer'
 import { passkeyRowLabel } from '@/lib/passkeyLabels'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { truncateAddress } from '@/components/haven'
 
@@ -497,6 +498,15 @@ export default function WalletButton() {
     safeAddress: activeSafeAddress,
     chainId: activeSafe?.chain_id,
   })
+  // #2073: the same gate the action areas consult, so the header pill and the
+  // disabled action below it agree about whether a USEFUL wallet is connected.
+  // Before this, a hybrid account with the wrong wallet connected rendered a
+  // normal connected pill up here while the action area said to connect the
+  // owner wallet — the two surfaces silently disagreed.
+  const operationGate = useSafeOperationGate({
+    safeAddress: activeSafeAddress,
+    chainId: activeSafe?.chain_id,
+  })
   const passkeySigner = activeSigner?.type === 'passkey' ? activeSigner : null
   // #1079: a Hybrid DeleGator account whose passkey is on this device gets the
   // same "Passkey ready" pill — the reported symptom was this header reading
@@ -759,6 +769,18 @@ export default function WalletButton() {
         // so the two cannot drift once the label stops rendering below `sm`.
         const walletLabel = accountAlias ?? account.ensName ?? truncateAddress(account.address)
 
+        // #2073: a connected wallet that is not the hybrid account's named
+        // owner gets the "Wrong network" treatment — same danger-soft pill,
+        // same icon — because it is the same class of state: connected, but
+        // not usable for this account. Unlike Wrong network the click opens
+        // the normal popover rather than a modal, because the fix (Switch
+        // wallet) already lives there.
+        const wrongWallet = operationGate.kind === 'wrong_wallet'
+        // One expression for the visible label AND the accessible name, per
+        // the #1803 rule above — the wrong-wallet pill must SAY so, not just
+        // tint, or the state is invisible to a screen reader.
+        const pillLabel = wrongWallet ? 'Wrong wallet' : walletLabel
+
         return (
           <div className="relative">
             <button
@@ -767,11 +789,17 @@ export default function WalletButton() {
               onClick={() => setPopoverOpen((v) => !v)}
               aria-haspopup="dialog"
               aria-expanded={popoverOpen}
-              aria-label={walletLabel}
-              title={walletLabel}
-              className={`flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
+              aria-label={pillLabel}
+              title={pillLabel}
+              className={
+                wrongWallet
+                  ? `flex items-center gap-2 text-sm font-medium bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] border border-danger/25 hover:border-danger/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`
+                  : `flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`
+              }
             >
-              {account.ensAvatar ? (
+              {wrongWallet ? (
+                <Icon icon={TriangleAlert} className="h-4 w-4 shrink-0" />
+              ) : account.ensAvatar ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={account.ensAvatar}
@@ -781,8 +809,8 @@ export default function WalletButton() {
               ) : (
                 <AddressAvatar address={account.address} />
               )}
-              <span className={`${LABEL_BELOW_SM} ${accountAlias ? '' : 'font-mono'}`}>
-                {walletLabel}
+              <span className={`${LABEL_BELOW_SM} ${accountAlias || wrongWallet ? '' : 'font-mono'}`}>
+                {pillLabel}
               </span>
             </button>
 

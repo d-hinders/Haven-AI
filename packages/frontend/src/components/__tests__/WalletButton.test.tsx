@@ -38,8 +38,13 @@ const mocks = vi.hoisted(() => ({
   openConnectModalHook: vi.fn(),
   useOwnerDirectory: vi.fn(),
   useActiveSigner: vi.fn(),
+  useSafeOperationGate: vi.fn(),
   useAuth: vi.fn(),
   writeText: vi.fn(),
+}))
+
+vi.mock('@/hooks/useSafeOperationGate', () => ({
+  useSafeOperationGate: (args: unknown) => mocks.useSafeOperationGate(args),
 }))
 
 vi.mock('@rainbow-me/rainbowkit', () => ({
@@ -117,6 +122,7 @@ describe('WalletButton', () => {
       getOwnerAlias: vi.fn(() => null),
     })
     mocks.useActiveSigner.mockReturnValue(null)
+    mocks.useSafeOperationGate.mockReturnValue({ kind: 'no_signer' })
 
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -245,6 +251,41 @@ describe('WalletButton', () => {
     expect(screen.getByText('Connected wallet')).toBeInTheDocument()
     expect(screen.getAllByText('0x5555…5555')).toHaveLength(2)
     expect(screen.getByRole('button', { name: 'Switch wallet' })).toBeInTheDocument()
+  })
+
+  it('renders the WRONG WALLET pill when the gate says the connected wallet is not the account owner (#2073)', () => {
+    setConnectedWallet()
+    mocks.useSafeOperationGate.mockReturnValue({
+      kind: 'wrong_wallet',
+      connectedAddress: EOA_ADDRESS,
+      ownerAddress: '0x2222222222222222222222222222222222222222',
+    })
+
+    render(<WalletButton />)
+
+    // The pill NAMES the state — visible label and accessible name are the
+    // same expression, so both are asserted through the role query. The
+    // normal connected-address pill must not render: that silent "everything
+    // is fine" pill beside a blocked action area is the #2073 defect.
+    const pill = screen.getByRole('button', { name: 'Wrong wallet' })
+    expect(pill).toBeInTheDocument()
+    expect(pill).toHaveTextContent('Wrong wallet')
+    expect(screen.queryByRole('button', { name: '0x5555…5555' })).not.toBeInTheDocument()
+
+    // The fix lives one click away: the popover with Switch wallet.
+    fireEvent.click(pill)
+    expect(screen.getByRole('dialog', { name: 'Wallet menu' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Switch wallet' })).toBeInTheDocument()
+  })
+
+  it('positive control: a connected wallet with a non-wrong-wallet gate keeps the normal address pill (#2073)', () => {
+    setConnectedWallet()
+    mocks.useSafeOperationGate.mockReturnValue({ kind: 'ready' })
+
+    render(<WalletButton />)
+
+    expect(screen.getByRole('button', { name: '0x5555…5555' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Wrong wallet' })).not.toBeInTheDocument()
   })
 
   it('uses an owner alias for the connected wallet label and dropdown', () => {

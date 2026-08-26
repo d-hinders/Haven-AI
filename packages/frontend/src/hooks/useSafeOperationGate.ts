@@ -7,7 +7,6 @@ import { useAuth } from '@/context/AuthContext'
 import {
   getStoredHybridSigners,
   getStoredPasskeySigner,
-  hybridPasskeyOnDevice,
   hybridSignersStorageKey,
   passkeyStorageKey,
 } from '@/lib/signer'
@@ -109,9 +108,18 @@ export function useSafeOperationGate(args: {
 
   if (isHybridAccount) {
     if (hybridSigners && hybridSigners.passkeys.length > 0) {
-      return hybridPasskeyOnDevice(hybridSigners)
-        ? { kind: 'ready' }
-        : { kind: 'passkey_on_other_device' }
+      // #1969 (owner decision 2026-08-26): a non-empty hydrated set is READY,
+      // marker or not. The set is the account's on-chain-enrolled signers, and
+      // the ceremony works without a local marker (cross-device WebAuthn — the
+      // same shipped posture as `pickSigningPath`). Returning
+      // `passkey_on_other_device` here made this gate a false blocker (#1097):
+      // it stripped Send/Receive from the dashboard hero for a user whose
+      // send modal works, while the availability hint already lives next to
+      // the working actions (DelegationSendModal, AccountSignersCard, the
+      // #1952 wallet-menu disclosure). `passkey_on_other_device` remains the
+      // LEGACY-Safe answer below, where the block is real: the stored signer
+      // metadata a Safe passkey needs is physically absent on this device.
+      return { kind: 'ready' }
     }
     // No signer set known (hydration failed or none enrolled). Deliberately
     // NOT falling through to the connected-EOA branch: a random connected

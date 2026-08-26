@@ -16,9 +16,6 @@ import {
   releaseSubmittedClaim,
   type SendIntentReplayRow,
 } from '../infra/repositories/payment-intents.js'
-import {
-  findSendApprovalByIdempotencyKey,
-} from '../infra/repositories/approval-requests.js'
 import { userOpTypedData } from '../rails/delegation-rail.js'
 import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import {
@@ -214,37 +211,9 @@ async function findPaymentReplay(
     return { code: 201, body: await replayIntentBody(agent, pi) }
   }
 
-  const ar = await findSendApprovalByIdempotencyKey(agent.id, idempotencyKey)
-  if (ar) {
-    const field = mismatch(ar)
-    if (field) {
-      return {
-        code: 409,
-        body: {
-          payment_id: ar.id,
-          status: ar.status,
-          error: `idempotency_key already belongs to a payment with a different ${field}`,
-        },
-      }
-    }
-    if (ar.status !== 'pending') return statusReplay(ar.id)
-    return {
-      code: 202,
-      body: {
-        payment_id: ar.id,
-        kind: 'approval_request',
-        status: 'pending_approval',
-        phase: AgentPaymentPhase.UserApprovalRequired,
-        next_action: AgentPaymentNextAction.WaitForUserApproval,
-        message: `Payment of ${ar.amount_human} ${ar.token_symbol} is queued for owner approval.`,
-        requested: ar.amount_human,
-        token: ar.token_symbol,
-        expires_at: ar.expires_at,
-        idempotent_replay: true,
-      },
-    }
-  }
-
+  // #2055: the approval_requests idempotency-replay fallback that stood here
+  // is gone with the table — a legacy queued approval can no longer be
+  // replayed; only payment_intents carry the key now.
   return null
 }
 

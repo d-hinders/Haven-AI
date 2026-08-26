@@ -186,7 +186,8 @@ export function sessionRailRetired(kind: 'account' | 'intent'): { statusCode: 41
  * permanently-gone flow must not read as a policy failure the caller can
  * retry out of, nor as a transient routing error.
  *
- * `'approval'` is the queued-approval case. Every `approval_requests` row is
+ * `'approval'` is the queued-approval case (historical: #2055 dropped the
+ * `approval_requests` table outright). Every such row was
  * a legacy-rail artifact — the delegation rail has no approval queue at all
  * (its budget is enforced on-chain by the caveat enforcers), and all three
  * inserts (`insertPaymentApproval` / `insertSendApproval` /

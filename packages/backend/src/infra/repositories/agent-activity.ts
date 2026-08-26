@@ -70,32 +70,8 @@ export interface ActivityPaymentRow {
   confirmed_at: string | null
 }
 
-export interface ActivityApprovalRow {
-  id: string
-  safe_id: string | null
-  safe_address: string | null
-  safe_name: string | null
-  chain_id: number
-  token_symbol: string
-  token_address: string
-  amount_human: string
-  to_address: string
-  reason: string | null
-  source: string | null
-  x402_resource_url: string | null
-  payment_rail: string | null
-  payment_resource_url: string | null
-  merchant_address: string | null
-  payment_proof_status: string | null
-  payment_reconciliation_event_type: string | null
-  status: string
-  tx_hash: string | null
-  created_at: string
-}
-
 /** The feed variants carry the owning agent so the caller can label each row. */
 export type FeedPaymentRow = ActivityPaymentRow & { agent_id: string }
-export type FeedApprovalRow = ActivityApprovalRow & { agent_id: string }
 
 export interface AgentSpendStatsRow {
   token_symbol: string
@@ -145,38 +121,8 @@ export const LIST_AGENT_PAYMENTS_SQL = `SELECT pi.id,
        ORDER BY pi.created_at DESC
        LIMIT $2 OFFSET $3`
 
-export const LIST_AGENT_APPROVALS_SQL = `SELECT ar.id,
-              us.id AS safe_id,
-              COALESCE(us.safe_address, ar.safe_address) AS safe_address,
-              us.name AS safe_name,
-              COALESCE(ar.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
-              ar.token_symbol,
-              ar.token_address,
-              ar.amount_human,
-              ar.to_address,
-              ar.reason,
-              COALESCE(ar.payment_rail, ar.source, 'direct') AS source,
-              COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS x402_resource_url,
-              ar.payment_rail,
-              ar.payment_resource_url,
-              ar.merchant_address,
-              ar.status, ar.tx_hash, ar.created_at,
-              mpe.proof_status AS payment_proof_status,
-              mpre.event_type AS payment_reconciliation_event_type
-       FROM approval_requests ar
-       LEFT JOIN user_safes us
-         ON us.user_id = ar.user_id
-        AND LOWER(us.safe_address) = LOWER(ar.safe_address)
-        AND ar.chain_id IS NOT NULL
-        AND us.chain_id = ar.chain_id
-       LEFT JOIN machine_payment_evidence mpe ON mpe.approval_request_id = ar.id
-       LEFT JOIN machine_payment_reconciliation_events mpre
-         ON mpre.approval_request_id = ar.id
-        AND mpre.status = 'open'
-        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
-       WHERE ar.agent_id = $1
-       ORDER BY ar.created_at DESC
-       LIMIT $2 OFFSET $3`
+// #2055: `LIST_AGENT_APPROVALS_SQL` / `listAgentApprovals` are gone with
+// `approval_requests` — the activity feed is payments + tool invocations.
 
 /**
  * NOT tenant-scoped — see the file header. The caller must have confirmed the
@@ -196,20 +142,6 @@ export async function listAgentPayments(
   return result.rows
 }
 
-/** Same gating contract as `listAgentPayments`. */
-export async function listAgentApprovals(
-  agentId: string,
-  limit: number,
-  offset: number,
-  db: Executor = pool,
-): Promise<ActivityApprovalRow[]> {
-  const result = await db.query<ActivityApprovalRow>(LIST_AGENT_APPROVALS_SQL, [
-    agentId,
-    limit,
-    offset,
-  ])
-  return result.rows
-}
 
 // ── All-agent feed ───────────────────────────────────────────────────────────
 
@@ -254,39 +186,8 @@ export const LIST_FEED_PAYMENTS_SQL = `SELECT pi.id,
        ORDER BY pi.created_at DESC
        LIMIT $2 OFFSET $3`
 
-export const LIST_FEED_APPROVALS_SQL = `SELECT ar.id,
-              ar.agent_id,
-              us.id AS safe_id,
-              COALESCE(us.safe_address, ar.safe_address) AS safe_address,
-              us.name AS safe_name,
-              COALESCE(ar.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
-              ar.token_symbol,
-              ar.token_address,
-              ar.amount_human,
-              ar.to_address,
-              ar.reason,
-              COALESCE(ar.payment_rail, ar.source, 'direct') AS source,
-              COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS x402_resource_url,
-              ar.payment_rail,
-              ar.payment_resource_url,
-              ar.merchant_address,
-              ar.status, ar.tx_hash, ar.created_at,
-              mpe.proof_status AS payment_proof_status,
-              mpre.event_type AS payment_reconciliation_event_type
-       FROM approval_requests ar
-       LEFT JOIN user_safes us
-         ON us.user_id = ar.user_id
-        AND LOWER(us.safe_address) = LOWER(ar.safe_address)
-        AND ar.chain_id IS NOT NULL
-        AND us.chain_id = ar.chain_id
-       LEFT JOIN machine_payment_evidence mpe ON mpe.approval_request_id = ar.id
-       LEFT JOIN machine_payment_reconciliation_events mpre
-         ON mpre.approval_request_id = ar.id
-        AND mpre.status = 'open'
-        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
-       WHERE ar.agent_id = ANY($1)
-       ORDER BY ar.created_at DESC
-       LIMIT $2 OFFSET $3`
+// #2055: `LIST_FEED_APPROVALS_SQL` / `listFeedApprovals` are gone with
+// `approval_requests` (see the per-agent note above).
 
 /**
  * NOT tenant-scoped — `agentIds` must come from a `user_id`-filtered agent
@@ -302,16 +203,6 @@ export async function listFeedPayments(
   return result.rows
 }
 
-/** Same gating contract as `listFeedPayments`. */
-export async function listFeedApprovals(
-  agentIds: string[],
-  limit: number,
-  offset: number,
-  db: Executor = pool,
-): Promise<FeedApprovalRow[]> {
-  const result = await db.query<FeedApprovalRow>(LIST_FEED_APPROVALS_SQL, [agentIds, limit, offset])
-  return result.rows
-}
 
 // ── Spend stats ──────────────────────────────────────────────────────────────
 
@@ -374,25 +265,9 @@ export async function sumAgentSpendThisWeek(
   return result.rows
 }
 
-// ── Approval counters ────────────────────────────────────────────────────────
-
-/**
- * The per-AGENT approval counter — "what is this agent waiting on". Its
- * per-user twin ("what is waiting on me") lived here too until #1179 found
- * `dashboard.ts` asking the identical question with its own constant; the
- * shared one now lives with the aggregate, in `approval-requests.ts`, and both
- * surfaces call it.
- */
-export const COUNT_PENDING_APPROVALS_FOR_AGENT_SQL = `SELECT COUNT(*) as count FROM approval_requests
-         WHERE agent_id = $1 AND status IN ('pending', 'approved')`
-
-/** Same gating contract as `listAgentPayments`. */
-export async function countPendingApprovalsForAgent(
-  agentId: string,
-  db: Executor = pool,
-): Promise<number> {
-  const result = await db.query<{ count: string }>(COUNT_PENDING_APPROVALS_FOR_AGENT_SQL, [agentId])
-  return Number(result.rows[0].count)
-}
+// ── Approval counters — RETIRED (#2055) ─────────────────────────────────────
+// `COUNT_PENDING_APPROVALS_FOR_AGENT_SQL` / `countPendingApprovalsForAgent`
+// are gone with `approval_requests`; the pending count is structurally zero
+// and hardcoded at the route.
 
 /** `userId` is REQUIRED — this one IS tenant-scoped. */

@@ -154,6 +154,18 @@ const insertIntent = (row: Record<string, unknown> | null): DbRoute => [
   /INSERT INTO payment_intents/,
   () => ({ rows: row ? [row] : [] }),
 ]
+// #2055 (epic #1440, #2021 readability waiver): `insertApproval`,
+// `sendApprovalLookup` and `approvalById` below route SQL shapes that no code
+// in `src` can issue any more — `approval_requests` is dropped, and every
+// function that queried it (`findSendApprovalByIdempotencyKey`,
+// `findApprovalStatusRow`, `findReconciliationApproval`,
+// `findApprovalForEvidenceScoped`) is deleted. They were ALREADY unreachable
+// on the mocked-out legacy rail before this slice (#1986 fail-closes the
+// account gate first); #2055 makes them doubly so. Kept, not deleted: the
+// few call sites still using them prime a route that can never fire either
+// way, and rewriting every one of those sites was judged higher-risk than
+// leaving a no-op prime that documents its own history. New tests should not
+// add more.
 /** INSERT INTO approval_requests (send's plain insert, or authorize's ON CONFLICT machine insert). */
 const insertApproval = (row: Record<string, unknown> | null): DbRoute => [
   /INSERT INTO approval_requests/,
@@ -164,7 +176,7 @@ const sendIntentLookup = (rows: unknown[]): DbRoute => [
   /send_idempotency_key = \$2[\s\S]*FROM payment_intents|FROM payment_intents[\s\S]*send_idempotency_key = \$2/,
   () => ({ rows }),
 ]
-/** findSendApprovalByIdempotencyKey (POST /send idempotency lookup). */
+/** findSendApprovalByIdempotencyKey (POST /send idempotency lookup) — gone, see above. */
 const sendApprovalLookup = (rows: unknown[]): DbRoute => [
   /send_idempotency_key = \$2[\s\S]*FROM approval_requests|FROM approval_requests[\s\S]*send_idempotency_key = \$2/,
   () => ({ rows }),
@@ -180,8 +192,8 @@ const intentStatusRow = (row: Record<string, unknown> | null): DbRoute => [
 ]
 /**
  * findApprovalStatusRow / findReconciliationApproval / findApprovalForEvidenceScoped
- * — all three share the same `id = $1 AND agent_id = $2` shape against
- * approval_requests; never more than one runs in a single test.
+ * — all three are gone (see above); this matched the shared
+ * `id = $1 AND agent_id = $2` shape they queried against approval_requests.
  */
 const approvalById = (row: Record<string, unknown> | null): DbRoute => [
   /FROM approval_requests\s+WHERE id = \$1 AND agent_id = \$2/,
@@ -770,64 +782,26 @@ describe('machine payment routes', () => {
     expect(response.json().message).toMatch(/stranded|merchant rejected|sweep/i)
   })
 
-  it('returns unified status for approval request IDs', async () => {
-    primeDb(
-      AUTH,
-      intentStatusRow(null),
-      approvalById({
-        id: 'approval-123',
-        chain_id: 8453,
-        token_symbol: 'USDC',
-        token_address: USDC,
-        amount_human: '0.01',
-        amount_raw: '10000',
-        status: 'pending',
-        tx_hash: null,
-        expires_at: '2099-01-02T00:00:00.000Z',
-        source: 'mpp_demo',
-        payment_rail: 'mpp_demo',
-        payment_resource_url: challenge.resource,
-        x402_resource_url: null,
-        merchant_address: RECIPIENT.toLowerCase(),
-        machine_challenge_id: challenge.challengeId,
-        machine_idempotency_key: 'mpp_demo:test',
-        machine_metadata: JSON.stringify({
-          protocol: 'mpp',
-          network: challenge.network.name,
-          description: challenge.description,
-        }),
-      }),
-    )
+  // #2055 (epic #1440, #2021 readability waiver): was "returns unified status
+  // for approval request IDs", pinning `phase: 'user_approval_required'` /
+  // `next_action: 'wait_for_user_approval'` for a queued (`status: 'pending'`)
+  // approval row. `approvalState()` — the only producer of that phase/action
+  // pair — is deleted along with `findApprovalStatusRow`; `payment_intents`
+  // has no equivalent status (its own "not yet signed" state is
+  // `pending_signature`, which maps to `agent_signature_required` /
+  // `sign_and_submit_payment` instead, already pinned in the sign-path
+  // suite). There is nothing left to re-anchor: this exact status is
+  // unreachable now, not just re-sourced, so the test is deleted rather than
+  // converted. The `payment_intent`-sourced unified-status contract stays
+  // proven above by "returns unified status for confirmed payment intents"
+  // and "returns funded_but_unsettled phase...".
 
-    const response = await app.inject({
-      method: 'GET',
-      url: '/machine-payments/approval-123/status',
-      headers: { authorization: 'Bearer sk_agent_test' },
-    })
-
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({
-      payment_id: 'approval-123',
-      kind: 'approval_request',
-      rail: 'mpp_demo',
-      status: 'pending',
-      phase: 'user_approval_required',
-      next_action: 'wait_for_user_approval',
-      amount: '0.01',
-      token: 'USDC',
-      amount_atomic: '10000',
-      asset: USDC,
-      network: challenge.network.name,
-      description: challenge.description,
-      idempotency_key: 'mpp_demo:test',
-      mpp: {
-        challenge_id: challenge.challengeId,
-      },
-    })
-  })
-
+  // #2055: was primed with `approvalById(null)` alongside `intentStatusRow
+  // (null)` — `findApprovalStatusRow` is gone, so there is no approval
+  // fallback left to prime a route for; an id that resolves neither is 404
+  // on the intent lookup alone.
   it('does not return status for another agent payment or approval', async () => {
-    primeDb(AUTH, intentStatusRow(null), approvalById(null))
+    primeDb(AUTH, intentStatusRow(null))
 
     const response = await app.inject({
       method: 'GET',
@@ -837,6 +811,7 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(404)
     expect(response.json()).toEqual({ error: 'Payment or approval request not found' })
+    expect(sqlCalls().some((c) => /approval_requests/i.test(c.sql))).toBe(false)
   })
 
   it('records a reconciliation event for confirmed payments rejected by the merchant retry', async () => {
@@ -885,15 +860,17 @@ describe('machine payment routes', () => {
     expect(insert!.params).toContain('mpp_demo:test')
   })
 
-  it('records a reconciliation event for executed approval requests rejected by the merchant retry', async () => {
-    primeDb(
-      AUTH,
-      intentById(null),
-      approvalById(executedApproval()),
-      [/INSERT INTO machine_payment_reconciliation_events/, () => ({
-        rows: [{ id: 'event-approval', status: 'open', created_at: '2026-05-15T12:00:00.000Z' }],
-      })],
-    )
+  // #2055 (epic #1440, #2021 readability waiver): was "records a
+  // reconciliation event for executed approval requests rejected by the
+  // merchant retry" — `findReconciliationApproval` is gone with
+  // `approval_requests`, so `handleReconciliationEvent` has no approval
+  // fallback left: a payment id that isn't a `payment_intents` row (which an
+  // executed approval always was) is simply unknown now. There was no
+  // existing 404 pin for this route (unlike `POST /evidence`'s "does not
+  // attach evidence to another agent payment"), so this fills that gap
+  // rather than being deleted outright.
+  it('404s a reconciliation event for a payment id that is not a payment intent', async () => {
+    primeDb(AUTH, intentById(null))
 
     const response = await app.inject({
       method: 'POST',
@@ -904,25 +881,14 @@ describe('machine payment routes', () => {
         rail: 'mpp_demo',
         eventType: 'merchant_retry_rejected_after_payment',
         txHash: TX_HASH,
-        reason: 'Merchant returned HTTP 402 after approval-funded payment',
-        details: { retryStatus: 402, resourceUrl: challenge.resource },
+        reason: 'Merchant returned HTTP 402',
       },
     })
 
-    expect(response.statusCode).toBe(202)
-    expect(response.json()).toMatchObject({
-      event_id: 'event-approval',
-      payment_id: PAYMENT_ID,
-      event_type: 'merchant_retry_rejected_after_payment',
-    })
-
-    const insert = findCall(/INSERT INTO machine_payment_reconciliation_events/)
-    expect(insert).toBeDefined()
-    expect(insert!.sql).toContain('approval_request_id')
-    expect(insert!.sql).toContain('ON CONFLICT (approval_request_id, event_type)')
-    expect(insert!.sql).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
-    expect(insert!.params).toContain(PAYMENT_ID)
-    expect(insert!.params).toContain('merchant_retry_rejected_after_payment')
+    expect(response.statusCode).toBe(404)
+    expect(response.json().error).toBe('Payment not found')
+    expect(sqlCalls().some((c) => /approval_requests/i.test(c.sql))).toBe(false)
+    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
   it('does not reopen resolved reconciliation events for confirmed payments', async () => {
@@ -963,43 +929,13 @@ describe('machine payment routes', () => {
     expect(reload!.params).toEqual([PAYMENT_ID, AGENT.id, 'merchant_retry_rejected_after_payment'])
   })
 
-  it('does not reopen resolved reconciliation events for executed approval requests', async () => {
-    primeDb(
-      AUTH,
-      intentById(null),
-      approvalById(executedApproval()),
-      [/INSERT INTO machine_payment_reconciliation_events/, () => ({ rows: [] })],
-      [/FROM machine_payment_reconciliation_events/, () => ({
-        rows: [{ id: 'event-approval-resolved', status: 'resolved', created_at: '2026-05-15T12:00:00.000Z' }],
-      })],
-    )
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/reconciliation-events',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: {
-        paymentId: PAYMENT_ID,
-        rail: 'mpp_demo',
-        eventType: 'merchant_retry_rejected_after_payment',
-        txHash: TX_HASH,
-        reason: 'Merchant returned HTTP 402 after a resolved approval event',
-      },
-    })
-
-    expect(response.statusCode).toBe(202)
-    expect(response.json()).toMatchObject({
-      event_id: 'event-approval-resolved',
-      status: 'resolved',
-      payment_id: PAYMENT_ID,
-    })
-    const upsert = findCall(/INSERT INTO machine_payment_reconciliation_events/)
-    expect(upsert!.sql).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
-    const reload = findCall(/FROM machine_payment_reconciliation_events/)
-    expect(reload).toBeDefined()
-    expect(reload!.sql).toContain('WHERE approval_request_id = $1')
-    expect(reload!.params).toEqual([PAYMENT_ID, AGENT.id, 'merchant_retry_rejected_after_payment'])
-  })
+  // #2055: was "does not reopen resolved reconciliation events for executed
+  // approval requests" — same retirement as its sibling above
+  // (`findReconciliationApproval` gone), and now fully redundant with the
+  // 404 test that replaced it: there is no longer a way to reach the
+  // approval-anchored reload query (`WHERE approval_request_id = $1`) at
+  // all, resolved or not, so there is nothing left here to distinguish from
+  // "payment not found". Deleted rather than converted.
 
   it('attaches SDK-reported merchant evidence for confirmed machine payments', async () => {
     primeDb(
@@ -1081,83 +1017,16 @@ describe('machine payment routes', () => {
     expect(resolve!.sql).toContain('WHERE payment_intent_id = $1')
   })
 
-  it('attaches SDK-reported merchant evidence for executed approval requests', async () => {
-    primeDb(
-      AUTH,
-      intentById(null),
-      approvalById(executedApproval()),
-      [/UPDATE machine_payment_evidence/, () => ({
-        rows: [{
-          id: 'evidence-approval',
-          payment_intent_id: null,
-          approval_request_id: PAYMENT_ID,
-          agent_id: AGENT.id,
-          user_id: AGENT.user_id,
-          rail: 'mpp_demo',
-          proof_status: 'protocol_receipt_attached',
-          tx_hash: TX_HASH,
-          chain_id: 8453,
-          resource_url: challenge.resource,
-          merchant_address: RECIPIENT.toLowerCase(),
-          payer_address: AGENT.safe_address.toLowerCase(),
-          settlement_address: RECIPIENT.toLowerCase(),
-          token_symbol: 'USDC',
-          token_address: USDC.toLowerCase(),
-          amount_raw: '10000',
-          amount_human: '0.01',
-          challenge_id: challenge.challengeId,
-          idempotency_key: 'mpp_demo:test',
-          challenge_payload: challenge,
-          selected_payment: null,
-          payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
-          payment_proof_header: 'proof-header',
-          protocol_receipt_header_name: 'Payment-Receipt',
-          protocol_receipt_header: 'receipt-header',
-          protocol_receipt_payload: { status: 'settled' },
-          merchant_status: 200,
-          confirmed_at: '2026-05-15T12:00:00.000Z',
-          created_at: '2026-05-15T12:00:00.000Z',
-          updated_at: '2026-05-15T12:00:01.000Z',
-        }],
-      })],
-    )
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/evidence',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: {
-        paymentId: PAYMENT_ID,
-        rail: 'mpp_demo',
-        txHash: TX_HASH,
-        resourceUrl: challenge.resource,
-        merchantStatus: 200,
-        paymentProofHeaderName: 'MACHINE-PAYMENT-PROOF',
-        paymentProofHeader: 'proof-header',
-        protocolReceiptHeaderName: 'Payment-Receipt',
-        protocolReceiptHeader: 'receipt-header',
-        protocolReceiptPayload: { status: 'settled' },
-      },
-    })
-
-    expect(response.statusCode).toBe(202)
-    expect(response.json()).toMatchObject({
-      evidence: {
-        payment_id: PAYMENT_ID,
-        payment_intent_id: null,
-        approval_request_id: PAYMENT_ID,
-        proof_status: 'protocol_receipt_attached',
-      },
-    })
-    const attach = findCall(/UPDATE machine_payment_evidence/)
-    expect(attach).toBeDefined()
-    expect(attach!.sql).toContain('approval_request_id')
-    expect(attach!.sql).toContain('WHERE approval_request_id = $1')
-    const resolve = findCall(/UPDATE machine_payment_reconciliation_events/)
-    expect(resolve).toBeDefined()
-    expect(resolve!.sql).toContain("status = 'resolved'")
-    expect(resolve!.sql).toContain('WHERE approval_request_id = $1')
-  })
+  // #2055 (epic #1440, #2021 readability waiver): was "attaches SDK-reported
+  // merchant evidence for executed approval requests" — `findApprovalForEvi
+  // denceScoped` is gone with `approval_requests`, so `POST /evidence` has no
+  // approval fallback left either: an approval-only id is unknown, same as
+  // any other id that is not a `payment_intents` row. That is already pinned
+  // below by "does not attach evidence to another agent payment", so this
+  // test is deleted rather than converted to a duplicate 404 pin. The WRITE
+  // side this test exercised (`UPDATE ... WHERE approval_request_id = $1`)
+  // still exists in `infra/repositories/machine-payments.ts` — unreachable
+  // through the route, on purpose, per #2055's instructions.
 
   it('rejects evidence reports whose tx hash does not match the payment', async () => {
     primeDb(AUTH, intentById(confirmedPayment()))
@@ -1200,7 +1069,9 @@ describe('machine payment routes', () => {
   })
 
   it('does not attach evidence to another agent payment', async () => {
-    primeDb(AUTH, intentById(null), approvalById(null))
+    // #2055: `approvalById(null)` dropped — `findApprovalForEvidenceScoped`
+    // is gone with `approval_requests`, so the intent lookup alone decides.
+    primeDb(AUTH, intentById(null))
 
     const response = await app.inject({
       method: 'POST',

@@ -35,9 +35,13 @@ describe('captureMerchantReceipt (#956)', () => {
       paymentId: 'pay-1', agentId: 'agent-1', inlineJson: { fakturanummer: 'FAK-1' },
     })
     expect(res).toEqual({ ok: true, stored: true, userId: 'user-1' })
-    // Agent scoping is in the SQL, not trust:
+    // Agent scoping is in the SQL, not trust. #2055: the evidence anchor is
+    // intent-join-only now — `approval_requests` (and its COALESCE fallback)
+    // is gone.
     const [lookupSql, lookupParams] = mockQuery.mock.calls[0] as [string, unknown[]]
-    expect(lookupSql).toMatch(/COALESCE\(pi\.agent_id, ar\.agent_id\) = \$2/)
+    expect(lookupSql).toMatch(/JOIN payment_intents pi ON pi\.id = mpe\.payment_intent_id/)
+    expect(lookupSql).toMatch(/pi\.agent_id = \$2/)
+    expect(lookupSql).not.toMatch(/approval_requests|ar\.agent_id/)
     expect(lookupParams).toEqual(['pay-1', 'agent-1'])
   })
 

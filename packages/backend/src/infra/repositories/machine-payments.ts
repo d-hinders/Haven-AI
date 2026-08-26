@@ -213,17 +213,6 @@ export const FIND_INTENT_FOR_EVIDENCE_SQL = `SELECT 'payment_intent'::TEXT AS ki
      WHERE id = $1 AND agent_id = $2
      LIMIT 1`
 
-export const FIND_APPROVAL_FOR_EVIDENCE_SQL = `SELECT 'approval_request'::TEXT AS kind,
-            id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-            to_address, amount_raw, amount_human, tx_hash, status, source,
-            x402_resource_url, NULL::TEXT AS x402_merchant_address, NULL::TEXT AS x402_idempotency_key,
-            payment_rail, payment_resource_url, merchant_address,
-            machine_challenge_id, machine_idempotency_key, machine_metadata,
-            executed_at AS confirmed_at
-     FROM approval_requests
-     WHERE id = $1 AND agent_id = $2
-     LIMIT 1`
-
 export async function findIntentForEvidenceScoped(
   paymentId: string,
   agentId: string,
@@ -236,17 +225,11 @@ export async function findIntentForEvidenceScoped(
   return result.rows[0] ?? null
 }
 
-export async function findApprovalForEvidenceScoped(
-  paymentId: string,
-  agentId: string,
-  db: Executor = pool,
-): Promise<EvidenceSourceRow | null> {
-  const result = await db.query<EvidenceSourceRow>(FIND_APPROVAL_FOR_EVIDENCE_SQL, [
-    paymentId,
-    agentId,
-  ])
-  return result.rows[0] ?? null
-}
+// #2055: `FIND_APPROVAL_FOR_EVIDENCE_SQL` / `findApprovalForEvidenceScoped`
+// are gone with `approval_requests`. The evidence WRITE variants that key on
+// `approval_request_id` below stay: that column lives on the evidence tables,
+// which survive the drop — the paths are merely unreachable now that no
+// payment can resolve to kind 'approval_request' (residue for #1993).
 
 // ── Evidence attach (proof upgrade, lib/machine-payment-evidence.ts) ─────────
 
@@ -379,15 +362,6 @@ export const FIND_RECONCILIATION_INTENT_SQL = `SELECT 'payment_intent'::TEXT AS 
        WHERE id = $1 AND agent_id = $2
        LIMIT 1`
 
-export const FIND_RECONCILIATION_APPROVAL_SQL = `SELECT 'approval_request'::TEXT AS kind,
-                id, user_id, tx_hash, status, payment_rail, source,
-                payment_resource_url, x402_resource_url,
-                merchant_address, NULL::TEXT AS x402_merchant_address,
-                machine_challenge_id, machine_idempotency_key, NULL::TEXT AS x402_idempotency_key
-         FROM approval_requests
-         WHERE id = $1 AND agent_id = $2
-         LIMIT 1`
-
 export async function findReconciliationIntent(
   paymentId: string,
   agentId: string,
@@ -400,17 +374,8 @@ export async function findReconciliationIntent(
   return result.rows[0] ?? null
 }
 
-export async function findReconciliationApproval(
-  paymentId: string,
-  agentId: string,
-  db: Executor = pool,
-): Promise<ReconciliationPaymentRow | null> {
-  const result = await db.query<ReconciliationPaymentRow>(FIND_RECONCILIATION_APPROVAL_SQL, [
-    paymentId,
-    agentId,
-  ])
-  return result.rows[0] ?? null
-}
+// #2055: `FIND_RECONCILIATION_APPROVAL_SQL` / `findReconciliationApproval`
+// are gone with `approval_requests` (see the evidence-read note above).
 
 function reconciliationEventUpsertSql(conflictColumn: EvidenceReferenceColumn): string {
   return `INSERT INTO machine_payment_reconciliation_events (
@@ -733,12 +698,14 @@ export async function markSweepSubmitted(
 
 // ── Merchant receipts (#956, lib/merchant-receipt.ts) ────────────────────────
 
+// #2055: the `approval_requests` join half is gone with the table —
+// approval-anchored evidence rows keep their column value but are no longer
+// reachable through this lookup (queue-history readability waived, #2021).
 export const FIND_EVIDENCE_ANCHOR_FOR_AGENT_SQL = `SELECT mpe.id, mpe.user_id
      FROM machine_payment_evidence mpe
-     LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
-     LEFT JOIN approval_requests ar ON ar.id = mpe.approval_request_id
-     WHERE COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT) = $1
-       AND COALESCE(pi.agent_id, ar.agent_id) = $2`
+     JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
+     WHERE mpe.payment_intent_id = $1
+       AND pi.agent_id = $2`
 
 export interface EvidenceAnchorRow {
   id: string
@@ -747,7 +714,7 @@ export interface EvidenceAnchorRow {
 
 /**
  * The evidence row is the anchor (#498's receiptRef) — agent-scoped via the
- * intent/approval join so an agent can only annotate its own payments.
+ * intent join so an agent can only annotate its own payments.
  */
 export async function findEvidenceAnchorForAgent(
   paymentId: string,

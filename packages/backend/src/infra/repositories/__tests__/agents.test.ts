@@ -329,6 +329,11 @@ describeDb('agents archive (#1401, real DB)', () => {
     expect(await unarchiveAgent(agentId, userId)).toBe(false)
   })
 
+  // #2055 (epic #1440, #2021 readability waiver): was seeded with a
+  // `payment_intents` row AND an `approval_requests` row, asserting both
+  // survive archiving — `approval_requests` is dropped (migration 070), so
+  // there is nothing left to seed or assert there. The point survives on
+  // `payment_intents` alone.
   it('THE POINT: payment history and audit rows survive archiving', async () => {
     const { userId, agentId } = await seedAgent('revoked')
     await db.query(
@@ -342,23 +347,11 @@ describeDb('agents archive (#1401, real DB)', () => {
                0, '0x' || repeat('11', 32), 'confirmed', NOW() + interval '1 hour')`,
       [agentId, userId],
     )
-    await db.query(
-      `INSERT INTO approval_requests
-         (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
-          amount_raw, amount_human, status, expires_at)
-       VALUES ($1, $2, '0x00000000000000000000000000000000000000s1', 'USDC',
-               '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
-               '0x00000000000000000000000000000000000000aa',
-               '1000', '0.001', 'pending', NOW() + interval '1 hour')`,
-      [agentId, userId],
-    )
 
     expect(await archiveAgent(agentId, userId)).not.toBeNull()
 
     const intents = await db.query(`SELECT id FROM payment_intents WHERE agent_id = $1`, [agentId])
-    const approvals = await db.query(`SELECT id FROM approval_requests WHERE agent_id = $1`, [agentId])
     expect(intents.rows).toHaveLength(1)
-    expect(approvals.rows).toHaveLength(1)
     // And the agent row itself still exists, archived — not deleted.
     const agent = await db.query<{ archived_at: Date | null }>(
       `SELECT archived_at FROM agents WHERE id = $1`,

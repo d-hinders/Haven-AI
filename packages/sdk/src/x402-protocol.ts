@@ -16,6 +16,7 @@ import type {
 import {
   buildX402IdempotencyKey,
   resolveTokenFromAddress,
+  selectErc7710PaymentOption,
   selectStandardPaymentOption,
   x402AuthorizationAmount,
 } from './x402.js'
@@ -162,7 +163,18 @@ export function buildX402Quote(
   idempotencyKey?: string,
   mcpTransport?: X402McpTransport,
 ): X402Quote {
-  const option = selectStandardPaymentOption(paymentRequired.accepts)
+  // #2054: this used to be standard-only, so a merchant advertising ONLY an
+  // erc7710-tagged entry — no untagged fallback — was refused as having "no
+  // compatible payment option" before scheme selection could ever see the
+  // entry Haven actually PREFERS on the delegation rail (#1450). The quote is
+  // informational and rail-agnostic, so when no standard entry exists it now
+  // DESCRIBES the erc7710 entry instead of throwing, and says which selector
+  // produced it via `acceptedScheme`. `selectStandardPaymentOption`'s own
+  // erc7710 skip is untouched — it is a #1453 correctness property, and the
+  // 3009 settlement paths keep re-selecting through it, so an erc7710
+  // described quote can never leak into an EIP-3009 authorization.
+  const standard = selectStandardPaymentOption(paymentRequired.accepts)
+  const option = standard ?? selectErc7710PaymentOption(paymentRequired.accepts)
   if (!option) {
     throw new HavenApiError(
       'No compatible payment option found in x402 requirements. ' +
@@ -177,6 +189,7 @@ export function buildX402Quote(
     idempotencyKey: idempotencyKey ?? buildX402IdempotencyKey(paymentRequired, option),
     paymentRequired,
     accepted: option,
+    acceptedScheme: standard ? 'standard' : 'erc7710',
     request,
     ...(mcpTransport ? { mcpTransport } : {}),
     resourceUrl: paymentRequired.resource.url,

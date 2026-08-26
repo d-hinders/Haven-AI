@@ -459,6 +459,17 @@ export interface X402Quote {
   idempotencyKey: string
   paymentRequired: X402PaymentRequired
   accepted: X402PaymentOption
+  /**
+   * #2054: which selector produced `accepted`, and therefore which entry every
+   * amount on this quote describes. `'standard'` is the untagged,
+   * EIP-3009-settleable entry; `'erc7710'` means the merchant advertises NO
+   * standard entry, so the quote describes its erc7710 one — settleable only
+   * from a delegation-rail account, a fact the quote layer cannot see (the
+   * rail is a property of the ACCOUNT, not of the 402). This field is
+   * descriptive: the actual settlement scheme is still chosen later, with the
+   * rail in hand, by `selectX402SettlementScheme`.
+   */
+  acceptedScheme: 'standard' | 'erc7710'
   request: X402RequestSnapshot
   mcpTransport?: X402McpTransport
   resourceUrl: string

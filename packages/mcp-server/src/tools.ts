@@ -861,10 +861,17 @@ export function createToolHandlers(
           // the single place that rule lives. A prefetch FAILURE deliberately
           // yields the 3009 path — guessing 'delegation' would build a request
           // the backend then refuses, and this tool's pre-#1456 behaviour was
-          // 3009 anyway.
-          const paySelection = selectX402SettlementScheme(
+          // 3009 anyway. (#2054: at an erc7710-ONLY merchant there is no 3009
+          // path to yield to, so a failed prefetch — or a legacy rail — gets
+          // the actionable refusal from `requireSettleableSelection` instead
+          // of a "no compatible payment option" that names the wrong cause.)
+          const paySelection = requireSettleableSelection(
+            selectX402SettlementScheme(
+              (quote.paymentRequired as X402PaymentRequired).accepts,
+              { delegationRail: prefetchedAgent?.executionRail === 'delegation' },
+            ),
             (quote.paymentRequired as X402PaymentRequired).accepts,
-            { delegationRail: prefetchedAgent?.executionRail === 'delegation' },
+            { known: prefetchedAgent !== undefined, value: prefetchedAgent?.executionRail },
           )
 
           // Enforce the required price cap against the LIVE merchant price,
@@ -875,16 +882,17 @@ export function createToolHandlers(
           // #2051: this now runs AFTER scheme selection and prices the option
           // that will ACTUALLY be authorized, not whichever entry
           // `selectStandardPaymentOption` happened to return. See
-          // `priceSelectedOption`. `quote.accepted` is the fallback only for
-          // completeness — `buildX402Quote` already threw if no standard
-          // option existed, so a non-null quote guarantees the selector found
-          // at least the 3009 one.
+          // `priceSelectedOption`. #2054 removed the `?? quote.accepted`
+          // fallback: `requireSettleableSelection` above guarantees a non-null
+          // selection, so quote, cap, and authorize all read ONE option — a
+          // fallback that could name a different entry than the one authorized
+          // is exactly the #2051 defect class.
           //
           // Moving it below the agent prefetch changes no error ordering: the
           // prefetch is `.then(a => a, () => undefined)`, so it cannot throw.
-          const priced = priceSelectedOption(cap, paySelection?.option ?? quote.accepted)
+          const priced = priceSelectedOption(cap, paySelection.option)
 
-          if (paySelection?.scheme === 'erc7710') {
+          if (paySelection.scheme === 'erc7710') {
             const prepared = await haven.prepareX402Erc7710(
               quote.paymentRequired as X402PaymentRequired,
               { resourceUrl: merchantUrl, delegationRail: true },
@@ -1134,9 +1142,15 @@ export function createToolHandlers(
           // reordering only means a failing agent read now surfaces ahead of a
           // cap violation, and that read was already a hard refusal one line
           // above.
-          const catalogSelection = selectX402SettlementScheme(
+          const catalogSelection = requireSettleableSelection(
+            selectX402SettlementScheme(
+              (quote.paymentRequired as X402PaymentRequired).accepts,
+              { delegationRail: rail === 'delegation' },
+            ),
             (quote.paymentRequired as X402PaymentRequired).accepts,
-            { delegationRail: rail === 'delegation' },
+            // Unlike the pay tool's prefetch, the agent read here is a hard
+            // pre-intent refusal (#1319) — the rail is always known.
+            { known: true, value: rail },
           )
 
           // 5. A cap is REQUIRED on this guided path (readMaxAmountCap above,
@@ -1147,8 +1161,11 @@ export function createToolHandlers(
           // asset/decimals, never the catalog's indicative price. #2051: and
           // against the SELECTED option's asset/decimals, never the
           // unselected standard entry's — see `priceSelectedOption`.
-          const priced = priceSelectedOption(cap, catalogSelection?.option ?? quote.accepted)
-          const authorizedAsset = (catalogSelection?.option ?? quote.accepted).asset
+          // #2054: no `?? quote.accepted` fallback — `requireSettleableSelection`
+          // above guarantees the selection, so the cap, the budget pre-check,
+          // and the authorize all read ONE option.
+          const priced = priceSelectedOption(cap, catalogSelection.option)
+          const authorizedAsset = catalogSelection.option.asset
 
           // 5b. Rail-aware allowance/budget report. A failed read NEVER fails
           // this preflight — sufficient degrades to null with a warning, and
@@ -1263,7 +1280,7 @@ export function createToolHandlers(
             ...(quote.mcpTransport ? { mcpTransport: quote.mcpTransport } : {}),
           }
 
-          if (catalogSelection?.scheme === 'erc7710') {
+          if (catalogSelection.scheme === 'erc7710') {
             const prepared = await haven.prepareX402Erc7710(
               quote.paymentRequired as X402PaymentRequired,
               {
@@ -1624,6 +1641,9 @@ export function createToolHandlers(
             idempotency_key: quote.idempotencyKey,
             payment_required: quote.paymentRequired,
             accepted: quote.accepted,
+            // #2054: see buildMcpToolQuoteResponse — same field, same meaning.
+            accepted_scheme: quote.acceptedScheme,
+            ...(quote.acceptedScheme === 'erc7710' ? { erc7710_only: true } : {}),
             resource_url: quote.resourceUrl,
             description: quote.description,
             mime_type: quote.mimeType,
@@ -2192,6 +2212,12 @@ function buildMcpToolQuoteResponse(input: {
     chain_id: quote.chainId,
     merchant_address: quote.merchantAddress,
     max_timeout_seconds: quote.maxTimeoutSeconds,
+    // #2054: which accepts[] entry the amounts above describe. 'erc7710'
+    // means the merchant advertises NO standard entry — the purchase tools
+    // can settle it only from a delegation-rail account, so an agent can
+    // tell the user BEFORE calling them.
+    accepted_scheme: quote.acceptedScheme,
+    ...(quote.acceptedScheme === 'erc7710' ? { erc7710_only: true } : {}),
     ...(quote.mcpTransport ? { mcp_transport: serializeMcpTransport(quote.mcpTransport) } : {}),
     ...(catalog
       ? {
@@ -2753,6 +2779,65 @@ function atomicToDisplay(atomic: string, decimals: number): string {
  * redemption, via the caveat enforcer — a different mechanism, and the reason
  * the blast radius is bounded rather than unbounded.
  */
+/**
+ * #2054 — a null scheme selection on the two MCP purchase tools is refused
+ * HERE, with the real reason, before any pricing or intent construction.
+ *
+ * `selectX402SettlementScheme` returns null in exactly two situations:
+ *
+ *   1. The merchant advertises ONLY an erc7710-tagged entry and the account's
+ *      rail did not qualify — it is legacy, or (pay tool only) the agent
+ *      prefetch failed so the rail could not be read. The old behaviour fell
+ *      through to a path that told the agent "no compatible payment option"
+ *      (or, worse, priced the erc7710 entry it was never going to authorize).
+ *      The option is there; the ACCOUNT cannot use it — say that.
+ *
+ *   2. Nothing payable of either kind exists. Unreachable from the two MCP
+ *      tools (`buildX402Quote` already refused the quote), but kept as the
+ *      byte-identical SDK refusal so this helper cannot mask a genuine
+ *      no-option 402 if a future caller reaches it first.
+ *
+ * Returning the non-null selection (rather than asserting) is what lets the
+ * call sites read `selection.option` with no `?? quote.accepted` fallback —
+ * any fallback that can name a DIFFERENT entry than the one authorized is the
+ * #2051 defect class again.
+ */
+function requireSettleableSelection(
+  selection: ReturnType<typeof selectX402SettlementScheme>,
+  accepts: X402PaymentOption[],
+  rail: { known: boolean; value: string | undefined },
+): NonNullable<ReturnType<typeof selectX402SettlementScheme>> {
+  if (selection) return selection
+
+  if (selectErc7710PaymentOption(accepts)) {
+    throw new HostedToolError({
+      code: 'ERC7710_RAIL_REQUIRED',
+      message:
+        'The only payment option Haven can settle at this merchant is tagged ' +
+        "extra.assetTransferMethod: 'erc7710' (direct settlement), which can only be redeemed " +
+        'from a delegation-rail account. ' +
+        (rail.known
+          ? `This agent's account is on the '${rail.value ?? 'legacy'}' rail, which cannot ` +
+            'settle erc7710. No payment intent was created and no funds moved. Tell the user: ' +
+            'paying this merchant needs the agent re-onboarded on the delegation rail.'
+          : "This agent's account rail could not be read from Haven, so Haven refuses rather " +
+            'than authorize on a guess. No payment intent was created and no funds moved. ' +
+            'Retry when haven_get_agent succeeds.'),
+      statusCode: 403,
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      suggestedTool: 'haven_get_agent',
+    })
+  }
+
+  // Unreachable when the caller holds a successful quote (see above); the
+  // refusal an unquoted caller gets is the SDK's own, unchanged.
+  throw new HavenApiError(
+    'No compatible payment option found in x402 requirements. ' +
+      'Haven supports standard x402 exact payments on Base USDC.',
+    400,
+  )
+}
+
 function priceSelectedOption(
   cap: MaxAmountCap,
   option: X402PaymentOption,

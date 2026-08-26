@@ -4969,9 +4969,9 @@ export const openapiSpec = {
       post: {
         tags: ['Machine payments'],
         operationId: 'attachMachinePaymentEvidence',
-        summary: 'Attach merchant proof evidence for a confirmed machine payment.',
+        summary: 'Attach merchant proof evidence for a settled machine payment.',
         description:
-          'Records proof-loop evidence after a confirmed x402 or MPP payment. This does not authorize or execute payment; it attaches merchant/protocol evidence to an already confirmed payment or approval request owned by the authenticated agent.',
+          'Records proof-loop evidence for a settled x402 or MPP payment owned by the authenticated agent. This does not authorize or execute payment. On most schemes the payment is already confirmed and this only attaches merchant/protocol evidence. On erc7710 direct settlement the merchant redeems the delegation chain and Haven submits nothing, so this call is also what COMPLETES the payment: it verifies the reported txHash on-chain against the intent (token, payer, merchant, exact amount, and the settlement window) and confirms the intent before recording evidence. It fails closed — 409 when the transaction does not settle this payment or cannot be attributed to it unambiguously, 503 when the chain could not be read or the transaction is not mined yet; neither confirms anything.',
         security: [{ AgentApiKey: [] }],
         requestBody: {
           required: true,

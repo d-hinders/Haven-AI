@@ -379,9 +379,12 @@ rejects at verification time. The rung now requires the connected address to
 equal the named owner (case-insensitive); a non-owner wallet falls through
 to the passkey rung, and for an **owner-only** set — where there is no
 passkey to fall to — the resolution is `null`: a signer offered but failing
-at signature time is worse than absent. A hydrated set never falls through
-to the generic connected-EOA branch, which serves only accounts without one
-(legacy Safes, pre-hydration renders).
+at signature time is worse than absent. A hydrated set with a NON-OWNER
+wallet connected never reaches the generic connected-EOA return (which
+otherwise serves accounts without a hydrated set — legacy Safes,
+pre-hydration renders); the owner-matched case deliberately re-uses that
+same shared return, and it is correct there because the address was just
+proven equal to `owner_address`.
 Refusing (the pre-#1969 status quo) was declined as incoherent with the
 #1097 rule above and with shipped signing behaviour; offering **silently**
 was declined per #1952's design record. `useSafeOperationGate`'s hybrid

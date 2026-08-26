@@ -2829,8 +2829,13 @@ function requireSettleableSelection(
     })
   }
 
-  // Unreachable when the caller holds a successful quote (see above); the
-  // refusal an unquoted caller gets is the SDK's own, unchanged.
+  // Unreachable when the caller holds a successful quote (see above) — a
+  // successful buildX402Quote proves at least one selector matches. Kept as
+  // the SDK's base refusal so a future caller that reaches it first gets the
+  // familiar message. (The SDK's tag-aware `noCompatiblePaymentOptionError`
+  // is deliberately NOT published from the package entrypoint — the #1618
+  // module boundary — and the erc7710 branch above already covers the only
+  // case where the tag would be the reason.)
   throw new HavenApiError(
     'No compatible payment option found in x402 requirements. ' +
       'Haven supports standard x402 exact payments on Base USDC.',

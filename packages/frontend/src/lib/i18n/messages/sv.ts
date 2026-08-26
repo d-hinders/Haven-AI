@@ -49,7 +49,6 @@ export const sv: Messages = {
       detail: 'Lösenordsbyte är inte tillgängligt ännu.',
     },
 
-
     recovery: {
       title: 'Återställning och säkerhet',
       description: 'Få klart för dig vad Haven kan och inte kan återställa.',

@@ -129,3 +129,16 @@ test('emptyCoversNote: CRLF front-matter is read the same way', () => {
   const raw = '---\r\ncovers: []  # process playbook\r\n---\r\n'
   assert.equal(emptyCoversNote(raw), 'process playbook')
 })
+
+test('emptyCoversNote: the non-canonical empty spellings fail CLOSED, not open', () => {
+  // Both parse to an empty `covers` list, so the caller blocks; neither can be
+  // rescued by a reason written on them. Pinned so the fail-closed direction is
+  // a decision on record rather than an accident (#1993, from review).
+  assert.equal(emptyCoversNote('---\ncovers: [ ]  # spaced inline\n---\n'), null)
+  assert.equal(emptyCoversNote('---\ncovers:  # block header, no items\n---\n'), null)
+})
+
+test('emptyCoversNote: a `#` inside the reason text survives', () => {
+  const raw = '---\ncovers: []  # narrative — see #1993 for why\n---\n'
+  assert.equal(emptyCoversNote(raw), 'narrative — see #1993 for why')
+})

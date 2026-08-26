@@ -70,7 +70,12 @@ import { bannedModuleRefs, parseImportFacts, type ImportFacts } from './helpers/
  * 7. **The database.** A row still marked `execution_rail='allowance_module'`
  *    is *expected* — the epic keeps `user_safes` rows readable. This guard says
  *    nothing about data, only about reachable code.
- * 8. **`/safe` stays mounted on purpose.** `safe-deploy.ts` is a 410 tombstone
+ * 8. **A non-literal route prefix.** Rule 4 sees `{ prefix: '/x' }` written
+ *    inline with a string literal — the only shape `index.ts` uses today.
+ *    `app.register(routes, someConfigObject)`, or a template-literal prefix,
+ *    binds no literal it can read. Named because it is invisible, not because
+ *    it is likely.
+ * 9. **`/safe` stays mounted on purpose.** `safe-deploy.ts` is a 410 tombstone
  *    and `safe-exec.ts` is deliberately LIVE (passkey approver management,
  *    #1229). Rule 4 therefore bans `/approvals` and not `/safe` — a prefix ban
  *    is a claim about a DELETED surface, not about the word "safe".
@@ -232,29 +237,48 @@ describe('safe-retirement (#1993): nothing routes to the retired AllowanceModule
 
   // ── RULE 1 ────────────────────────────────────────────────────────────────
 
-  it('RULE 1 — no backend source file statically references a DELETED retired-rail module', () => {
+  it('RULE 1 — no backend source file references a DELETED retired-rail module, statically OR at runtime', () => {
+    // Reads `codeStringLiterals`, not `staticModuleRefs`.
+    //
+    // The narrower version shipped first and haven-reviewer broke it with a
+    // measurement rather than an argument: adding
+    // `await import('../../domain/payment-coverage.js')` to
+    // `modules/accounts/mainnet-gate.ts` — a real backend file that is not one
+    // of the five pinned entry points — passed all twelve tests. Rule 3 would
+    // have caught the same edit on an entry point; nothing caught it anywhere
+    // else. `codeStringLiterals` is a superset of every static specifier, so
+    // widening loses no coverage and closes `import()`, `require()` and any
+    // other literal-specifier shape in one move.
     const offenders: string[] = []
     for (const { path, facts } of backendScan()) {
-      for (const hit of bannedModuleRefs(facts.staticModuleRefs, DELETED_RAIL_MODULES)) {
+      for (const hit of bannedModuleRefs(facts.codeStringLiterals, DELETED_RAIL_MODULES)) {
         offenders.push(`${rel(path)} → ${hit}`)
       }
     }
     expect(offenders, 'a module epic #1440 deleted has been referenced again').toEqual([])
   }, SCAN_TIMEOUT_MS)
 
-  it('RULE 1 — positive control: the detector reports a resurrected module import', () => {
+  it('RULE 1 — positive control: the detector reports a resurrected module in every literal shape', () => {
     const facts = parseImportFacts(
       [
         `import { decideCoverage } from '../domain/payment-coverage.js'`,
         `export * from '../../routes/approvals.js'`,
         `import '../infra/repositories/approval-requests.js?bust=1'`,
+        // the runtime shapes the narrower first version missed, backend-wide:
+        `const dyn = await import('../rails/allowance-nonce-coordinator.js')`,
+        `const cjs = createRequire(import.meta.url)('../modules/mpp/authorize.js')`,
       ].join('\n'),
     )
-    expect(bannedModuleRefs(facts.staticModuleRefs, DELETED_RAIL_MODULES).sort()).toEqual([
+    expect(bannedModuleRefs(facts.codeStringLiterals, DELETED_RAIL_MODULES).sort()).toEqual([
       '../../routes/approvals.js',
       '../domain/payment-coverage.js',
       '../infra/repositories/approval-requests.js?bust=1',
+      '../modules/mpp/authorize.js',
+      '../rails/allowance-nonce-coordinator.js',
     ])
+    // …and the static bucket alone would have seen only three of the five —
+    // the finding that widened this rule, pinned so it cannot silently narrow.
+    expect(bannedModuleRefs(facts.staticModuleRefs, DELETED_RAIL_MODULES)).toHaveLength(3)
   })
 
   // ── RULE 2 ────────────────────────────────────────────────────────────────
@@ -407,7 +431,7 @@ describe('safe-retirement (#1993): nothing routes to the retired AllowanceModule
       ].join('\n'),
     )
 
-    expect(bannedModuleRefs(facts.staticModuleRefs, DELETED_RAIL_MODULES)).toEqual([]) // rule 1
+    expect(bannedModuleRefs(facts.codeStringLiterals, DELETED_RAIL_MODULES)).toEqual([]) // rule 1
     for (const symbol of RETIRED_RAIL_SYMBOLS) {
       expect(facts.bindings.has(symbol), `rule 2 over-read on ${symbol}`).toBe(false)
       expect(facts.reexports.has(symbol), `rule 2 over-read on ${symbol}`).toBe(false)

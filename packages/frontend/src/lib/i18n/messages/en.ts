@@ -51,7 +51,6 @@ export const en = {
       detail: 'Password changes are not available yet.',
     },
 
-
     recovery: {
       title: 'Recovery and safety',
       description: 'Know what Haven can and cannot recover.',

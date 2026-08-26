@@ -100,6 +100,14 @@ export function globToRegExp(glob) {
  * strips trailing comments by design (globs never contain `#`, so stripping is
  * correct for the glob list itself). The reason is metadata ABOUT the empty
  * list, not an item in it.
+ *
+ * ⚠️ Recognizes only the literal single-line `covers: []` form. Two other
+ * spellings also parse to an EMPTY list — a `covers:` block header with no
+ * `- ` items under it, and `covers: [ ]` — and this returns null for both even
+ * if a reason is written there, so the caller blocks. That is fail-CLOSED
+ * (never a silent pass) and the caller's message names the canonical syntax, so
+ * the contributor's fix is to write the canonical form. Named here because a
+ * reader would otherwise assume the coverage is total.
  */
 export function emptyCoversNote(raw) {
   const block = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)

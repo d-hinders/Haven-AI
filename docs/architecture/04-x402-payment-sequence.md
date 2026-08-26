@@ -833,22 +833,40 @@ keep exactly the transitions they had.
 ends in the user's bookkeeping, so
 [`infra/chain/settlement-transfer-verifier.ts`](../../packages/backend/src/infra/chain/settlement-transfer-verifier.ts)
 requires ALL of: the tx is mined on the intent's own chain; its receipt status
-is success; and it carries an ERC-20 `Transfer` log emitted by the intent's
-token contract, `from` the payer smart account, `to` the merchant `payTo`, for
-**exactly** the authorized atomic amount. Deliberately NOT checked: the
-facilitator's DelegationManager calldata (facilitator-specific and opaque —
-the Transfer log is the settlement's universal EFFECT, and the caveat enforcers
-already bounded on-chain what could move), the submitter identity (redemption
-is permissionless; who paid the gas is not an integrity property), and reorg
-depth beyond one confirmation.
+is success; it carries an ERC-20 `Transfer` log emitted by the intent's token
+contract, `from` the payer smart account, `to` the merchant `payTo`, for
+**exactly** the authorized atomic amount; and the mined block's timestamp falls
+inside **this intent's own settlement window** (the settlement child's
+`timestamp` caveat is enforced on-chain, so a genuine settlement of this child
+cannot be mined outside `authorize .. authorize + 600s`). Deliberately NOT
+checked: the facilitator's DelegationManager calldata (facilitator-specific and
+opaque — the Transfer log is the settlement's universal EFFECT, and the caveat
+enforcers already bounded on-chain what could move), the submitter identity
+(redemption is permissionless; who paid the gas is not an integrity property),
+and reorg depth beyond one confirmation.
+
+**Ambiguity is refused, never guessed.** Checks 1–6 are about the transfer's
+SHAPE; only the window is about WHICH intent. That matters because
+`buildSettlementDelegation` builds a **byte-identical** settlement child for two
+authorizations that share merchant, token, amount and expiry second — `salt` is
+constant and the expiry is the only clock-derived field — so within one window
+there is genuinely nothing on-chain that tells two look-alike intents apart.
+Attaching a verified settlement to either would attribute a real payment to the
+wrong purchase and strand the one that caused it. The confirm therefore refuses
+outright when another `submitted` erc7710 intent of the same
+agent/chain/token/recipient/amount exists within the maximum settlement window:
+**both** stay `submitted`. A missing book entry is recoverable; a wrong one is
+not. Making the child intent-unique (a per-intent salt) would close this
+exactly and is tracked separately.
 
 **Fail closed, in every direction.** Anything short of a full match leaves the
 intent `submitted` with no evidence row, no fee row and no feed call. An
-unreachable RPC is reported as `503` (retryable — "not known yet"), never as a
-confirmation and never as a permanent rejection; a revert or a mismatch is
-`409`. **Replay:** one settlement transaction may confirm at most one intent —
-the guarded `UPDATE` refuses a hash already carried by another row, serialized
-by a per-hash `pg_advisory_xact_lock`.
+unreachable RPC — including a receipt that reads back but whose block does not —
+is reported as `503` (retryable — "not known yet"), never as a confirmation and
+never as a permanent rejection; a revert, a mismatch, or an ambiguous
+attribution is `409`. **Replay:** one settlement transaction may confirm at most
+one intent — the guarded `UPDATE` refuses a hash already carried by another row,
+serialized by a per-hash `pg_advisory_xact_lock`.
 
 **Accepted residual gap.** A merchant that returns no `PAYMENT-RESPONSE` (or one
 without a transaction) gives Haven no hash to verify, so that payment stays

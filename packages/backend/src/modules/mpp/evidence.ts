@@ -60,6 +60,8 @@ export interface MachinePaymentEvidenceSource {
   payment_rail?: string | null
   /** #2092: the authorizing rail — the erc7710 completion seam guards on it. */
   execution_rail?: string | null
+  /** #2092: authorize time — the origin of the erc7710 settlement window. */
+  created_at?: string | null
   payment_resource_url?: string | null
   x402_resource_url?: string | null
   merchant_address?: string | null

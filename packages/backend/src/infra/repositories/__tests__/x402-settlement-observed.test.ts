@@ -32,6 +32,8 @@ async function seedAgent(): Promise<{ agentId: string; userId: string }> {
   return { agentId: agent.rows[0].id, userId: user.rows[0].id }
 }
 
+const WINDOW_SECONDS = 720
+
 interface IntentSeed {
   agentId: string
   userId: string
@@ -40,6 +42,11 @@ interface IntentSeed {
   scheme?: string | null
   txHash?: string | null
   source?: string
+  /** Offset applied to created_at, in seconds — for the ambiguity window. */
+  createdOffsetSec?: number
+  /** Distinguishing shape fields, for look-alike vs. non-look-alike twins. */
+  toAddress?: string
+  amountRaw?: string
 }
 
 async function seedIntent(seed: IntentSeed): Promise<string> {
@@ -49,12 +56,14 @@ async function seedIntent(seed: IntentSeed): Promise<string> {
     `INSERT INTO payment_intents
        (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
-        status, expires_at, source, payment_rail, execution_rail, machine_metadata, tx_hash)
+        status, expires_at, source, payment_rail, execution_rail, machine_metadata, tx_hash,
+        created_at)
      VALUES ($1, $2, '0x00000000000000000000000000000000000000f1', 'USDC',
              '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
-             '0x00000000000000000000000000000000000000aa',
-             '100000', '0.10', '0x00000000000000000000000000000000000000d1',
-             0, $3, $4, NOW() + interval '10 minutes', $5, $5, $6, $7::jsonb, $8)
+             $9,
+             $10, '0.10', '0x00000000000000000000000000000000000000d1',
+             0, $3, $4, NOW() + interval '10 minutes', $5, $5, $6, $7::jsonb, $8,
+             NOW() + ($11 * interval '1 second'))
      RETURNING id`,
     [
       seed.agentId,
@@ -65,6 +74,9 @@ async function seedIntent(seed: IntentSeed): Promise<string> {
       seed.executionRail === undefined ? 'delegation' : seed.executionRail,
       metadata,
       seed.txHash ?? null,
+      seed.toAddress ?? '0x00000000000000000000000000000000000000aa',
+      seed.amountRaw ?? '100000',
+      seed.createdOffsetSec ?? 0,
     ],
   )
   return result.rows[0].id
@@ -76,7 +88,14 @@ async function readIntent(id: string) {
 }
 
 const confirm = (intentId: string, agentId: string, txHash = HASH_A) =>
-  confirmObservedSettlement({ txHash, intentId, agentId, usdValue: 0.1, eurValue: 0.09 })
+  confirmObservedSettlement({
+    txHash,
+    intentId,
+    agentId,
+    usdValue: 0.1,
+    eurValue: 0.09,
+    windowSeconds: WINDOW_SECONDS,
+  })
 
 describeDb('erc7710 settlement-observed transition (#2092)', () => {
   beforeAll(async () => {
@@ -181,7 +200,9 @@ describeDb('erc7710 settlement-observed transition (#2092)', () => {
   it('refuses to confirm a SECOND intent with a hash that already confirms another', async () => {
     const { agentId, userId } = await seedAgent()
     const first = await seedIntent({ agentId, userId })
-    const second = await seedIntent({ agentId, userId })
+    // Outside each other's settlement window, so this isolates the REPLAY
+    // guard from the ambiguity guard below.
+    const second = await seedIntent({ agentId, userId, createdOffsetSec: -5_000 })
 
     await expect(confirm(first, agentId, HASH_A)).resolves.toBe(true)
     await expect(confirm(second, agentId, HASH_A)).resolves.toBe(false)
@@ -205,7 +226,7 @@ describeDb('erc7710 settlement-observed transition (#2092)', () => {
   it('refuses a replay reported in different case — hashes compare case-insensitively', async () => {
     const { agentId, userId } = await seedAgent()
     const first = await seedIntent({ agentId, userId })
-    const second = await seedIntent({ agentId, userId })
+    const second = await seedIntent({ agentId, userId, createdOffsetSec: -5_000 })
 
     await expect(confirm(first, agentId, HASH_A)).resolves.toBe(true)
     await expect(confirm(second, agentId, HASH_A.toUpperCase().replace('0X', '0x'))).resolves.toBe(
@@ -216,8 +237,12 @@ describeDb('erc7710 settlement-observed transition (#2092)', () => {
 
   it('EXACTLY ONE of N concurrent intents can be confirmed by the same hash', async () => {
     const { agentId, userId } = await seedAgent()
+    // Spaced outside each other's windows so the ambiguity guard is not what
+    // makes this pass — the replay guard and the advisory lock are.
     const intentIds = await Promise.all(
-      Array.from({ length: 6 }, () => seedIntent({ agentId, userId })),
+      Array.from({ length: 6 }, (_, i) =>
+        seedIntent({ agentId, userId, createdOffsetSec: -5_000 * (i + 1) }),
+      ),
     )
 
     const outcomes = await Promise.all(intentIds.map((id) => confirm(id, agentId, HASH_A)))
@@ -232,9 +257,68 @@ describeDb('erc7710 settlement-observed transition (#2092)', () => {
   it('confirms two different intents with two different hashes', async () => {
     const { agentId, userId } = await seedAgent()
     const first = await seedIntent({ agentId, userId })
-    const second = await seedIntent({ agentId, userId })
+    const second = await seedIntent({ agentId, userId, createdOffsetSec: -5_000 })
 
     await expect(confirm(first, agentId, HASH_A)).resolves.toBe(true)
     await expect(confirm(second, agentId, HASH_B)).resolves.toBe(true)
+  })
+
+  // ── Ambiguity: never attribute a settlement Haven cannot place ──────────
+
+  it('refuses BOTH when a look-alike open intent means the settlement cannot be placed', async () => {
+    const { agentId, userId } = await seedAgent()
+    const first = await seedIntent({ agentId, userId })
+    const twin = await seedIntent({ agentId, userId, createdOffsetSec: 30 })
+
+    await expect(confirm(first, agentId, HASH_A)).resolves.toBe(false)
+    await expect(confirm(twin, agentId, HASH_A)).resolves.toBe(false)
+    expect((await readIntent(first)).status).toBe('submitted')
+    expect((await readIntent(twin)).status).toBe('submitted')
+  })
+
+  it('a look-alike OUTSIDE the settlement window does not block — the block timestamp separates them', async () => {
+    const { agentId, userId } = await seedAgent()
+    const first = await seedIntent({ agentId, userId })
+    await seedIntent({ agentId, userId, createdOffsetSec: -5_000 })
+
+    await expect(confirm(first, agentId, HASH_A)).resolves.toBe(true)
+  })
+
+  it('a same-window intent to a DIFFERENT merchant is not a look-alike', async () => {
+    const { agentId, userId } = await seedAgent()
+    const first = await seedIntent({ agentId, userId })
+    await seedIntent({
+      agentId,
+      userId,
+      createdOffsetSec: 30,
+      toAddress: '0x00000000000000000000000000000000000000bb',
+    })
+
+    await expect(confirm(first, agentId, HASH_A)).resolves.toBe(true)
+  })
+
+  it('a same-window intent for a DIFFERENT amount is not a look-alike', async () => {
+    const { agentId, userId } = await seedAgent()
+    const first = await seedIntent({ agentId, userId })
+    await seedIntent({ agentId, userId, createdOffsetSec: 30, amountRaw: '200000' })
+
+    await expect(confirm(first, agentId, HASH_A)).resolves.toBe(true)
+  })
+
+  it("another AGENT's same-shaped intent is not a look-alike", async () => {
+    const { agentId, userId } = await seedAgent()
+    const other = await seedAgent()
+    const first = await seedIntent({ agentId, userId })
+    await seedIntent({ agentId: other.agentId, userId: other.userId, createdOffsetSec: 30 })
+
+    await expect(confirm(first, agentId, HASH_A)).resolves.toBe(true)
+  })
+
+  it('an already-CONFIRMED look-alike does not block — only OPEN twins are ambiguous', async () => {
+    const { agentId, userId } = await seedAgent()
+    const first = await seedIntent({ agentId, userId })
+    await seedIntent({ agentId, userId, createdOffsetSec: 30, status: 'confirmed', txHash: HASH_B })
+
+    await expect(confirm(first, agentId, HASH_A)).resolves.toBe(true)
   })
 })

@@ -40,6 +40,16 @@ import {
 } from '../../infra/repositories/x402-authorizations.js'
 import { verifySettlementTransferTx } from '../../infra/chain/settlement-transfer-verifier.js'
 import { getFiatValuesForTokenAmount } from '../../infra/fiat-values.js'
+import { MAX_SETTLEMENT_WINDOW_SECONDS } from './x402-delegation.js'
+
+/**
+ * Clock-skew allowance between Postgres' `created_at` and the chain's block
+ * timestamps. Generous on purpose: this bound exists to EXCLUDE settlements
+ * from unrelated windows, so widening it costs a little precision, while
+ * narrowing it could reject a genuine payment — which on this path means
+ * silently dropping it out of the user's bookkeeping.
+ */
+const CLOCK_SKEW_SECONDS = 120
 
 /** The intent fields this seam needs; a structural subset of the evidence source row. */
 export interface ObservableSettlementIntent {
@@ -54,6 +64,8 @@ export interface ObservableSettlementIntent {
   amount_human: string
   status: string
   tx_hash: string | null
+  /** Authorize time — the origin of this intent's settlement window. */
+  created_at?: string | null
   source?: string | null
   payment_rail?: string | null
   execution_rail?: string | null
@@ -67,6 +79,8 @@ export type SettlementObservation =
   | { outcome: 'not_applicable' }
   /** Refused. `retryable` distinguishes "ask again later" from a settled no. */
   | { outcome: 'unverified'; retryable: boolean; reason: string }
+  /** Refused because more than one open intent could own this settlement. */
+  | { outcome: 'ambiguous'; reason: string }
 
 function settlementSchemeOf(intent: ObservableSettlementIntent): string | null {
   const raw = intent.machine_metadata
@@ -117,12 +131,22 @@ export async function observeErc7710Settlement(
 ): Promise<SettlementObservation> {
   if (!isPendingErc7710Settlement(intent)) return { outcome: 'not_applicable' }
 
+  // The settlement window: the child delegation's `timestamp` caveat is
+  // enforced on-chain and can never exceed `authorize + MAX_SETTLEMENT_WINDOW_SECONDS`,
+  // so a genuine settlement of THIS child is mined inside this span. Bounding
+  // by the maximum rather than by the intent's own `maxTimeoutSeconds` keeps
+  // the check derived from a construction invariant instead of from a value
+  // parsed back out of `prepared_user_op`, and can only ever be MORE permissive.
+  const authorizeSec = Math.floor(new Date(intent.created_at ?? Date.now()).getTime() / 1000)
+
   const verification = await verifySettlementTransferTx(txHash, {
     chainId: intent.chain_id,
     tokenAddress: intent.token_address,
     fromAddress: intent.safe_address,
     toAddress: intent.to_address,
     amountRaw: intent.amount_raw,
+    notBeforeSec: authorizeSec - CLOCK_SKEW_SECONDS,
+    notAfterSec: authorizeSec + MAX_SETTLEMENT_WINDOW_SECONDS + CLOCK_SKEW_SECONDS,
   })
 
   if (verification.outcome !== 'verified') {
@@ -151,21 +175,25 @@ export async function observeErc7710Settlement(
       agentId: intent.agent_id,
       usdValue: fiat.usd,
       eurValue: fiat.eur,
+      windowSeconds: MAX_SETTLEMENT_WINDOW_SECONDS + CLOCK_SKEW_SECONDS,
     },
     db,
   )
 
   if (!confirmed) {
-    // The guarded UPDATE matched nothing: either the row moved under us
-    // (another report won the CAS) or the replay guard refused because this
-    // transaction already confirms a different intent. Both leave this intent
-    // exactly as it was — refuse rather than guess which.
+    // The guarded UPDATE matched nothing. Three causes, all leaving this intent
+    // exactly as it was: the row moved under us (another report won the CAS),
+    // the replay guard refused because this transaction already confirms a
+    // different intent, or the ambiguity guard refused because a look-alike
+    // open intent means Haven cannot tell which purchase this settlement paid
+    // for. Refuse rather than guess which.
     return {
       outcome: 'unverified',
       retryable: false,
       reason:
-        'The settlement could not be recorded: the payment changed state, or this ' +
-        'transaction already confirms a different payment',
+        'The settlement could not be recorded: the payment changed state, this transaction ' +
+        'already confirms a different payment, or another open payment of the same shape ' +
+        'means this settlement cannot be attributed unambiguously',
     }
   }
 

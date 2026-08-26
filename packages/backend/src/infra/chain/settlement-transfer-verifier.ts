@@ -31,8 +31,15 @@
  * 6. **…whose `value` EXACTLY equals the authorized amount**
  *    (`intent.amount_raw`). Exact, not `>=`: the settlement child is built
  *    with an exact-amount caveat, so anything else is not this payment.
+ * 7. **The mined block's timestamp falls inside this intent's own settlement
+ *    window.** The settlement child carries a `timestamp` caveat that the
+ *    DelegationManager enforces on-chain, so a genuine settlement of THIS
+ *    child cannot be mined outside `authorize .. authorize + windowSec`. This
+ *    is the one check that is about WHICH intent rather than about the
+ *    transfer's shape, and it is why a settlement from an hour ago cannot be
+ *    replayed onto a fresh look-alike intent.
  *
- * All six must hold on ONE log. A transaction that moves the right amount
+ * All of 3–6 must hold on ONE log, and 7 on the block that carries it. A transaction that moves the right amount
  * from the right account to a different recipient, or the right pair for a
  * different amount, is a mismatch — not a partial pass.
  *
@@ -79,6 +86,14 @@ const ERC20_TRANSFER_IFACE = new ethers.Interface([
 
 export interface ExpectedSettlementTransfer {
   chainId: number
+  /**
+   * Unix-second bounds the settlement block must fall inside — this intent's
+   * own settlement-child validity window, widened by a clock-skew allowance.
+   * Derived from an invariant of `buildSettlementDelegation`, so it can never
+   * exclude a genuine settlement of this intent.
+   */
+  notBeforeSec: number
+  notAfterSec: number
   /** ERC-20 contract that must have emitted the Transfer log. */
   tokenAddress: string
   /** The payer smart account the funds must leave. */
@@ -112,8 +127,13 @@ export async function verifySettlementTransferTx(
   expected: ExpectedSettlementTransfer,
 ): Promise<SettlementVerification> {
   let receipt: ethers.TransactionReceipt | null
+  let blockTimestampSec: number | null
   try {
-    receipt = await getProvider(expected.chainId).getTransactionReceipt(txHash)
+    const provider = getProvider(expected.chainId)
+    receipt = await provider.getTransactionReceipt(txHash)
+    // Fetched inside the same try: a provider that can answer for the receipt
+    // but not for its block is still an RPC failure, not a verdict.
+    blockTimestampSec = receipt ? ((await provider.getBlock(receipt.blockNumber))?.timestamp ?? null) : null
   } catch (err) {
     // Transport/provider failure. Deliberately NOT folded into `not_found`:
     // "we could not ask" and "the chain says no" are different facts, and
@@ -132,6 +152,23 @@ export async function verifySettlementTransferTx(
   }
   if (receipt.status !== 1) {
     return { outcome: 'reverted', reason: `Transaction ${txHash} reverted on chain` }
+  }
+  if (blockTimestampSec == null) {
+    // The receipt exists but its block does not read back — treat it as "could
+    // not ask", never as a pass. Without the timestamp check 7 is missing, and
+    // check 7 is the only intent-specific one.
+    return {
+      outcome: 'rpc_unavailable',
+      reason: `Could not read the block carrying ${txHash} to check the settlement window`,
+    }
+  }
+  if (blockTimestampSec < expected.notBeforeSec || blockTimestampSec > expected.notAfterSec) {
+    return {
+      outcome: 'mismatch',
+      reason:
+        `Transaction ${txHash} was mined at ${blockTimestampSec}, outside this payment's ` +
+        `settlement window (${expected.notBeforeSec}..${expected.notAfterSec})`,
+    }
   }
 
   const token = expected.tokenAddress.toLowerCase()

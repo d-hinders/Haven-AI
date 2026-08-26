@@ -153,6 +153,7 @@ export const FIND_INTENT_EVIDENCE_SOURCE_SQL = `SELECT 'payment_intent'::TEXT AS
             payment_rail, payment_resource_url, merchant_address,
             machine_challenge_id, machine_idempotency_key, machine_metadata,
             execution_rail,
+            created_at,
             confirmed_at
      FROM payment_intents
      WHERE id = $1
@@ -185,6 +186,8 @@ export interface EvidenceSourceRow {
   machine_metadata: Record<string, unknown> | string | null
   /** #2092: the rail the intent was authorized on — the erc7710 completion seam's guard. */
   execution_rail: string | null
+  /** #2092: authorize time — the origin of the erc7710 settlement window. */
+  created_at: string | null
   confirmed_at: string | null
 }
 
@@ -212,6 +215,7 @@ export const FIND_INTENT_FOR_EVIDENCE_SQL = `SELECT 'payment_intent'::TEXT AS ki
             payment_rail, payment_resource_url, merchant_address,
             machine_challenge_id, machine_idempotency_key, machine_metadata,
             execution_rail,
+            created_at,
             confirmed_at
      FROM payment_intents
      WHERE id = $1 AND agent_id = $2

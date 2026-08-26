@@ -18,6 +18,7 @@ import { ethers } from 'ethers'
 
 const feedSettledPaymentBestEffort = vi.fn()
 const getTransactionReceipt = vi.fn()
+const getBlock = vi.fn()
 
 vi.mock('../../reporting/index.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../reporting/index.js')>()),
@@ -26,7 +27,7 @@ vi.mock('../../reporting/index.js', async (importOriginal) => ({
 
 vi.mock('../../../rails/allowance-module.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../rails/allowance-module.js')>()),
-  getProvider: () => ({ getTransactionReceipt }),
+  getProvider: () => ({ getTransactionReceipt, getBlock }),
 }))
 
 vi.mock('../../../infra/prices.js', async (importOriginal) => ({
@@ -65,8 +66,14 @@ function transferLog(
 
 /** A successful receipt carrying exactly the settlement transfer we expect. */
 function goodReceipt(overrides: Parameters<typeof transferLog>[0] = {}) {
-  return { status: 1, logs: [transferLog(overrides)] }
+  return { status: 1, blockNumber: 42, logs: [transferLog(overrides)] }
 }
+
+/** The block a settlement was mined in, at `offsetSec` from now. */
+const blockAt = (offsetSec = 0) => ({
+  number: 42,
+  timestamp: Math.floor(Date.now() / 1000) + offsetSec,
+})
 
 let seq = 0
 
@@ -87,17 +94,21 @@ async function seedIntent(seed: {
   userId: string
   scheme?: string
   executionRail?: string | null
+  createdOffsetSec?: number
+  amountRaw?: string
 }): Promise<string> {
   const result = await db.query<{ id: string }>(
     `INSERT INTO payment_intents
        (agent_id, user_id, safe_address, chain_id, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
         status, expires_at, source, payment_rail, execution_rail, machine_metadata,
-        x402_resource_url, payment_resource_url, merchant_address, x402_merchant_address)
+        x402_resource_url, payment_resource_url, merchant_address, x402_merchant_address,
+        created_at)
      VALUES ($1, $2, $3, 84532, 'USDC', $4, $5, $6, '0.10',
              '0x00000000000000000000000000000000000000d1', 0, $7,
              'submitted', NOW() + interval '10 minutes', 'x402', 'x402', $8, $9::jsonb,
-             $10, $10, $5, $5)
+             $10, $10, $5, $5,
+             NOW() + ($11 * interval '1 second'))
      RETURNING id`,
     [
       seed.agentId,
@@ -105,11 +116,12 @@ async function seedIntent(seed: {
       PAYER,
       TOKEN,
       MERCHANT,
-      AMOUNT_RAW,
+      seed.amountRaw ?? AMOUNT_RAW,
       `0x${String(++seq).padStart(64, 'c')}`.slice(0, 66),
       seed.executionRail === undefined ? 'delegation' : seed.executionRail,
       JSON.stringify({ settlement_scheme: seed.scheme ?? 'erc7710' }),
       RESOURCE,
+      seed.createdOffsetSec ?? 0,
     ],
   )
   return result.rows[0].id
@@ -148,6 +160,7 @@ describeDb('erc7710 settlement completion → evidence pipeline (#2092)', () => 
     await resetDb()
     feedSettledPaymentBestEffort.mockReset()
     getTransactionReceipt.mockReset()
+    getBlock.mockReset().mockResolvedValue(blockAt(30))
   })
 
   // ── The seam ────────────────────────────────────────────────────────────
@@ -247,6 +260,30 @@ describeDb('erc7710 settlement completion → evidence pipeline (#2092)', () => 
       await expectRefused('settlement_unverified', intentId, agentId)
     })
 
+    it('a settlement mined BEFORE this payment was authorized does not confirm', async () => {
+      getTransactionReceipt.mockResolvedValue(goodReceipt())
+      getBlock.mockResolvedValue(blockAt(-3_600))
+      const { agentId, userId } = await seedAgent()
+      const intentId = await seedIntent({ agentId, userId })
+      await expectRefused('settlement_unverified', intentId, agentId)
+    })
+
+    it('a settlement mined AFTER this payment\'s settlement window does not confirm', async () => {
+      getTransactionReceipt.mockResolvedValue(goodReceipt())
+      getBlock.mockResolvedValue(blockAt(3_600))
+      const { agentId, userId } = await seedAgent()
+      const intentId = await seedIntent({ agentId, userId })
+      await expectRefused('settlement_unverified', intentId, agentId)
+    })
+
+    it('a block that cannot be read is an RPC outage, never a pass', async () => {
+      getTransactionReceipt.mockResolvedValue(goodReceipt())
+      getBlock.mockResolvedValue(null)
+      const { agentId, userId } = await seedAgent()
+      const intentId = await seedIntent({ agentId, userId })
+      await expectRefused('settlement_unobservable', intentId, agentId)
+    })
+
     it('a transfer emitted by a DIFFERENT token contract does not confirm', async () => {
       getTransactionReceipt.mockResolvedValue(goodReceipt({ token: OTHER }))
       const { agentId, userId } = await seedAgent()
@@ -257,19 +294,58 @@ describeDb('erc7710 settlement completion → evidence pipeline (#2092)', () => 
 
   // ── Replay ──────────────────────────────────────────────────────────────
 
-  it('a settlement hash that already confirmed one intent cannot confirm a second', async () => {
+  it('a settlement already confirmed for one payment cannot be transplanted onto an older one', async () => {
+    // The older intent is outside this settlement's window, so it is not a
+    // look-alike (no ambiguity) — and it still cannot claim the settlement.
+    // The same-window case is the REVIEWER SCENARIO test below; the pure
+    // same-hash replay guard is proven in isolation in the repository test
+    // `x402-settlement-observed.test.ts`, where no window is involved.
     getTransactionReceipt.mockResolvedValue(goodReceipt())
     const { agentId, userId } = await seedAgent()
-    const first = await seedIntent({ agentId, userId })
-    const second = await seedIntent({ agentId, userId })
+    const older = await seedIntent({ agentId, userId, createdOffsetSec: -5_000 })
+    const real = await seedIntent({ agentId, userId })
 
-    await attach(agentId, first, HASH_A)
-    await expect(attach(agentId, second, HASH_A)).rejects.toThrow('settlement_unverified')
+    await attach(agentId, real, HASH_A)
+    expect((await readIntent(real)).status).toBe('confirmed')
 
-    const secondRow = await readIntent(second)
-    expect(secondRow.status).toBe('submitted')
-    expect(secondRow.tx_hash).toBeNull()
-    expect(await readEvidence(second)).toHaveLength(0)
+    await expect(attach(agentId, older, HASH_A)).rejects.toThrow('settlement_unverified')
+    const olderRow = await readIntent(older)
+    expect(olderRow.status).toBe('submitted')
+    expect(olderRow.tx_hash).toBeNull()
+    expect(await readEvidence(older)).toHaveLength(0)
+  })
+
+  // ── Misattribution: never place a settlement Haven cannot place ─────────
+
+  it('REVIEWER SCENARIO: a real settlement cannot be attached to a look-alike sibling intent', async () => {
+    // Two of the agent's OWN open erc7710 intents, same merchant, same token,
+    // same amount, same window — Haven builds a BYTE-IDENTICAL settlement child
+    // for both, so nothing on-chain distinguishes them. Attaching the real
+    // settlement to either would attribute a genuine payment to the wrong
+    // purchase and strand the one that actually caused it. Refuse both.
+    getTransactionReceipt.mockResolvedValue(goodReceipt())
+    const { agentId, userId } = await seedAgent()
+    const real = await seedIntent({ agentId, userId })
+    const lookAlike = await seedIntent({ agentId, userId, createdOffsetSec: 20 })
+
+    await expect(attach(agentId, lookAlike, HASH_A)).rejects.toThrow('settlement_unverified')
+    await expect(attach(agentId, real, HASH_A)).rejects.toThrow('settlement_unverified')
+
+    for (const id of [real, lookAlike]) {
+      expect((await readIntent(id)).status).toBe('submitted')
+      expect(await readEvidence(id)).toHaveLength(0)
+    }
+    expect(feedSettledPaymentBestEffort).not.toHaveBeenCalled()
+  })
+
+  it('a sibling intent for a DIFFERENT amount does not block the real one', async () => {
+    getTransactionReceipt.mockResolvedValue(goodReceipt())
+    const { agentId, userId } = await seedAgent()
+    const real = await seedIntent({ agentId, userId })
+    await seedIntent({ agentId, userId, createdOffsetSec: 20, amountRaw: '250000' })
+
+    await expect(attach(agentId, real, HASH_A)).resolves.not.toBeNull()
+    expect((await readIntent(real)).status).toBe('confirmed')
   })
 
   // ── Other schemes are untouched ─────────────────────────────────────────

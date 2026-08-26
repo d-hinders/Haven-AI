@@ -309,6 +309,25 @@ export const CONFIRM_SETTLEMENT_OBSERVED_SQL = `UPDATE payment_intents
                   AND LOWER(other.tx_hash) = LOWER($1)
                   AND other.id <> $2
              )
+             AND NOT EXISTS (
+               SELECT 1
+                 FROM payment_intents me
+                 JOIN payment_intents twin
+                   ON twin.id <> me.id
+                  AND twin.agent_id = me.agent_id
+                  AND twin.chain_id = me.chain_id
+                  AND twin.status = 'submitted'
+                  AND twin.tx_hash IS NULL
+                  AND LOWER(twin.token_address) = LOWER(me.token_address)
+                  AND LOWER(twin.to_address) = LOWER(me.to_address)
+                  AND twin.amount_raw = me.amount_raw
+                  AND twin.execution_rail = 'delegation'
+                  AND twin.machine_metadata->>'settlement_scheme' = 'erc7710'
+                  AND twin.created_at
+                        BETWEEN me.created_at - ($6 * interval '1 second')
+                            AND me.created_at + ($6 * interval '1 second')
+                WHERE me.id = $2
+             )
            RETURNING id`
 
 /**
@@ -325,10 +344,23 @@ export const CONFIRM_SETTLEMENT_OBSERVED_SQL = `UPDATE payment_intents
  * - `status = 'submitted' AND tx_hash IS NULL` is the CAS: concurrent reports
  *   race it and exactly one wins, and a confirmed intent can never be
  *   re-pointed at a different hash.
- * - `NOT EXISTS (… same tx_hash …)` is the REPLAY guard: one settlement
- *   transaction may confirm at most one payment intent. Without it an agent
- *   holding one genuine hash could confirm every same-shaped intent it owns
- *   and multiply a single real payment into many book entries.
+ * - The first `NOT EXISTS (… same tx_hash …)` is the REPLAY guard: one
+ *   settlement transaction may confirm at most one payment intent. Without it
+ *   an agent holding one genuine hash could confirm every same-shaped intent it
+ *   owns and multiply a single real payment into many book entries.
+ * - The second `NOT EXISTS (… twin …)` is the AMBIGUITY guard, and it exists
+ *   because of a property of the settlement child itself: two authorizations
+ *   for the same merchant, token and amount in the same second produce a
+ *   BYTE-IDENTICAL child delegation (`salt` is constant and the only varying
+ *   field is the clock-derived expiry). Nothing on-chain then distinguishes
+ *   them, so a verified transfer could be attached to either — silently
+ *   attributing a real payment to the wrong purchase, and stranding the one
+ *   that actually caused it. Haven refuses to GUESS: when a look-alike
+ *   `submitted` erc7710 intent of the same agent/chain/token/recipient/amount
+ *   exists within `$6` seconds (the maximum settlement window, so the only
+ *   span in which two windows can overlap), the confirm is refused and BOTH
+ *   intents stay `submitted`. Failing closed on an ambiguous settlement is the
+ *   whole point: a missing book entry is recoverable, a wrong one is not.
  *
  * Callers MUST run this under {@link confirmObservedSettlement}, which takes a
  * transaction-scoped advisory lock on the hash — the `NOT EXISTS` alone leaves
@@ -338,14 +370,18 @@ export const CONFIRM_SETTLEMENT_OBSERVED_SQL = `UPDATE payment_intents
  * confirmed" and the intent stays `submitted`. There is no path here that
  * confirms without a hash.
  */
+export interface ObservedSettlementConfirm {
+  txHash: string
+  intentId: string
+  agentId: string
+  usdValue: number | string | null
+  eurValue: number | string | null
+  /** Maximum settlement-window span, in seconds — the ambiguity guard's reach. */
+  windowSeconds: number
+}
+
 export async function confirmObservedSettlementRow(
-  input: {
-    txHash: string
-    intentId: string
-    agentId: string
-    usdValue: number | string | null
-    eurValue: number | string | null
-  },
+  input: ObservedSettlementConfirm,
   db: Executor = pool,
 ): Promise<boolean> {
   const result = await db.query<{ id: string }>(CONFIRM_SETTLEMENT_OBSERVED_SQL, [
@@ -354,6 +390,7 @@ export async function confirmObservedSettlementRow(
     input.agentId,
     input.usdValue,
     input.eurValue,
+    input.windowSeconds,
   ])
   return result.rows.length > 0
 }
@@ -369,13 +406,7 @@ export async function confirmObservedSettlementRow(
  * needs no migration and must not retroactively constrain historical rows.
  */
 export async function confirmObservedSettlement(
-  input: {
-    txHash: string
-    intentId: string
-    agentId: string
-    usdValue: number | string | null
-    eurValue: number | string | null
-  },
+  input: ObservedSettlementConfirm,
   db: Executor = pool,
 ): Promise<boolean> {
   return withTransaction(db, async (tx) => {

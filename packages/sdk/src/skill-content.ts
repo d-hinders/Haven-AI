@@ -27,8 +27,8 @@ description: Pay for things from the user's Haven wallet within their agent rule
 
 This skill lets the agent make payments from the user's Haven wallet through
 the Haven MCP tools. Every payment is checked against the agent's on-chain
-budget before money moves; payments above the remaining budget wait for the
-user's approval in Haven.
+budget before money moves; a payment above the remaining budget is declined —
+nothing is paid past the rules the user set.
 
 Hosted tools run in the \`mcp__haven__\` namespace. Local signing tools run in
 the \`mcp__haven-signer__\` namespace and keep the delegate key on this machine.
@@ -72,8 +72,8 @@ spending:
   (configured, spent, reset window) when you need more than the summary.
 
 Budgets reset on a period the user chose. If a payment exceeds the remaining
-budget it is queued for the user to approve in the Haven dashboard — this is
-normal, not an error.
+budget it is declined before any money moves — tell the user; they can raise
+the budget in the Haven dashboard, or wait for the period reset.
 
 ## Paying
 
@@ -115,8 +115,8 @@ context (\`merchant_url\`, \`tool_name\`, \`arguments\`, \`mcp_transport\`)
 server-side from \`payment_id\`. Pass those four fields explicitly only as a
 version-skew fallback when Haven has no stored context for the id — both or
 none together, never just one. If the settle result carries \`settled: false\`,
-funding is queued for the user's approval — tell them and check status later,
-do not re-pay.
+funding has not confirmed — follow the result's guidance fields and check
+status later, do not re-pay.
 
 Step-by-step alternative (also key-safe; for an older signer or backend, or
 when you already have a merchant URL and tool name instead of a
@@ -156,14 +156,14 @@ Haven authorizes for that call — a ceiling the merchant settles at or below �
 so present it as the most the user will pay.
 
 **Status:** \`mcp__haven__haven_get_payment_status\` with a \`payment_id\` to
-check on queued or in-flight payments. Do not poll in a tight loop.
+check on in-flight payments. Do not poll in a tight loop.
 
-## Approval semantics
+## Declines and stop signals
 
-- A result with \`pending_approval\` means the payment exceeded the remaining
-  budget and is waiting for the user in Haven. Tell the user, then check
-  status later.
-- \`safe_to_continue: false\` on a guidance block is the same signal in
+- A payment outside the agent's rules — above the remaining budget, wrong
+  recipient, or expired budget — is declined before any money moves. Nothing
+  is queued; tell the user, who can raise the budget in Haven.
+- \`safe_to_continue: false\` on a guidance block is a stop signal in
   machine-readable form: stop and involve the user before calling anything
   else for this payment.
 - Never ask the user for private keys. Signing happens only in the local Haven
@@ -177,7 +177,6 @@ Haven tool failures are shaped like \`{ success: false, code, message, ... }\`
 or older \`{ error, status, details? }\` responses. Branch on \`code\` when
 present and surface \`message\` or \`error\` verbatim. Common cases:
 
-- \`pending_approval\`: queued for the user's approval (see above).
 - \`insufficient_funds\`: the Haven wallet doesn't hold enough of that token.
   Suggest the user add funds in the Haven dashboard.
 - \`PRICE_EXCEEDS_MAX\`: the live merchant price exceeded your cap. No funds

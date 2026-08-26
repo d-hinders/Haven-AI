@@ -322,7 +322,7 @@ export default function SignupPage() {
               <TrustRow
                 delayMs={340}
                 title="Agents that ask, then act"
-                description="Set budgets and reset periods. Anything over that limit waits for your approval."
+                description="Set budgets and reset periods. Anything over that limit is declined before any money moves."
               />
               <TrustRow
                 delayMs={420}

@@ -15,7 +15,7 @@ covers:
   - packages/frontend/src/lib/chains.ts
   - packages/frontend/src/lib/passkey.ts
   - packages/frontend/src/lib/signer.ts
-last-verified: "2026-08-22" # #1813: dropped two `covers:` entries pointing at files this change deleted (`haven/HostedConnectCard.tsx`, `lib/hosted-connect.ts`) — both unreachable since #345 retired their call site. A covers entry naming a path that no longer exists silently stops mapping anything, so the doc looks better-covered than it is. No copy RULE here changes; the deleted component's user-facing strings simply no longer exist. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-26" # #2063: the agent-transparency rule presumed a two-state model ("automatic" vs "waiting for the user") — the second state does not exist for payments on the live rail; restated as declined-before-money-moves, with the one-time budget-grant/revoke signatures named as the only waiting states. ONLY that rule re-read. Prior: #1813: dropped two `covers:` entries pointing at files this change deleted (`haven/HostedConnectCard.tsx`, `lib/hosted-connect.ts`) — both unreachable since #345 retired their call site. A covers entry naming a path that no longer exists silently stops mapping anything, so the doc looks better-covered than it is. No copy RULE here changes; the deleted component's user-facing strings simply no longer exist. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Haven UX Copy Guidelines
@@ -452,9 +452,12 @@ relevant facts explicit:
 - What has already happened and what happens next.
 - How the user can reject, pause, revoke, stop, recover, or sweep funds.
 
-Do not imply that every agent payment requires user approval. Distinguish
-automatic requests within the Haven flow from actions that are waiting for the
-user. Likewise, do not say an agent “can only pay within your limits” without
+Do not imply that any agent payment waits for per-payment user approval:
+a payment outside the agent's rules (budget, recipient, expiry) is declined
+before any money moves — never describe it as pending, queued, or waiting,
+since nothing is held for later approval (#2063). The approvals that DO exist
+and may be described as waiting are the owner's one-time budget-grant and
+revoke/re-key signatures. Likewise, do not say an agent “can only pay within your limits” without
 scoping the claim: Safe-originated funding is constrained by the user's
 on-chain rules, while a private signing key can separately control funds already
 held in the agent wallet.

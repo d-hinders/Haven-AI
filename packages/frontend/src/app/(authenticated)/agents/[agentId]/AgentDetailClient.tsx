@@ -426,7 +426,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   const approvalCopy =
     budgetLines.length === 0
       ? 'No automatic spending is configured for this agent.'
-      : 'Payments within budget can run automatically. Larger payments need your manual approval.'
+      : 'Payments within budget can run automatically. Payments above it are declined before any money moves.'
   const agentStatus = agentStatusPresentation(currentAgent.status)
 
   async function handlePause() {

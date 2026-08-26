@@ -23,6 +23,7 @@ import {
   credentialIdFromKeyId,
 } from '@/lib/signer'
 import { passkeyRowLabel } from '@/lib/passkeyLabels'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { truncateAddress } from '@/components/haven'
 
@@ -189,6 +190,15 @@ interface PopoverProps {
   signingWith?: { label: string; keyId: string; onThisDevice: boolean }
   unavailablePasskey?: boolean
   /**
+   * #2073: the connected wallet is not this account's named owner. When set
+   * (the owner's truncated address), the popover explains the mismatch in the
+   * same quiet slot `unavailablePasskey` uses — the popover is the "Wrong
+   * wallet" pill's landing surface, and without this line it rendered
+   * pixel-identical to the healthy connected state (the design-review
+   * finding on this issue): a red pill whose menu gave no reason.
+   */
+  wrongWalletOwner?: string
+  /**
    * Render as a static ILLUSTRATION rather than a live overlay (#1952).
    *
    * `/design-system` shows this popover's two signing-credential states side by
@@ -286,6 +296,7 @@ export function WalletPopover({
   secondary,
   signingWith,
   unavailablePasskey = false,
+  wrongWalletOwner,
   presentational = false,
   open,
   onClose,
@@ -386,6 +397,17 @@ export function WalletPopover({
         {unavailablePasskey && (
           <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
             This account uses a passkey that is not available here.
+          </p>
+        )}
+        {wrongWalletOwner && (
+          // #2073: same quiet slot as the passkey note above. The mismatch is
+          // named HERE because this popover is where the "Wrong wallet" pill
+          // lands — the action-area caption is scoped to a gated action, and
+          // a page without one would otherwise offer a red pill whose menu
+          // looks exactly like the healthy state.
+          <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
+            This is not the wallet that controls this account. Switch to the
+            account&apos;s wallet {wrongWalletOwner} to approve actions.
           </p>
         )}
         {renderAddressSection(primary)}
@@ -494,6 +516,15 @@ export default function WalletButton() {
   const { getOwnerAlias } = useOwnerDirectory()
   const activeSafeAddress = activeSafe?.safe_address as Address | undefined
   const activeSigner = useActiveSigner({
+    safeAddress: activeSafeAddress,
+    chainId: activeSafe?.chain_id,
+  })
+  // #2073: the same gate the action areas consult, so the header pill and the
+  // disabled action below it agree about whether a USEFUL wallet is connected.
+  // Before this, a hybrid account with the wrong wallet connected rendered a
+  // normal connected pill up here while the action area said to connect the
+  // owner wallet — the two surfaces silently disagreed.
+  const operationGate = useSafeOperationGate({
     safeAddress: activeSafeAddress,
     chainId: activeSafe?.chain_id,
   })
@@ -759,6 +790,18 @@ export default function WalletButton() {
         // so the two cannot drift once the label stops rendering below `sm`.
         const walletLabel = accountAlias ?? account.ensName ?? truncateAddress(account.address)
 
+        // #2073: a connected wallet that is not the hybrid account's named
+        // owner gets the "Wrong network" treatment — same danger-soft pill,
+        // same icon — because it is the same class of state: connected, but
+        // not usable for this account. Unlike Wrong network the click opens
+        // the normal popover rather than a modal, because the fix (Switch
+        // wallet) already lives there.
+        const wrongWallet = operationGate.kind === 'wrong_wallet'
+        // One expression for the visible label AND the accessible name, per
+        // the #1803 rule above — the wrong-wallet pill must SAY so, not just
+        // tint, or the state is invisible to a screen reader.
+        const pillLabel = wrongWallet ? 'Wrong wallet' : walletLabel
+
         return (
           <div className="relative">
             <button
@@ -767,11 +810,17 @@ export default function WalletButton() {
               onClick={() => setPopoverOpen((v) => !v)}
               aria-haspopup="dialog"
               aria-expanded={popoverOpen}
-              aria-label={walletLabel}
-              title={walletLabel}
-              className={`flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
+              aria-label={pillLabel}
+              title={pillLabel}
+              className={
+                wrongWallet
+                  ? `flex items-center gap-2 text-sm font-medium bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] border border-danger/25 hover:border-danger/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`
+                  : `flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`
+              }
             >
-              {account.ensAvatar ? (
+              {wrongWallet ? (
+                <Icon icon={TriangleAlert} className="h-4 w-4 shrink-0" />
+              ) : account.ensAvatar ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={account.ensAvatar}
@@ -781,8 +830,8 @@ export default function WalletButton() {
               ) : (
                 <AddressAvatar address={account.address} />
               )}
-              <span className={`${LABEL_BELOW_SM} ${accountAlias ? '' : 'font-mono'}`}>
-                {walletLabel}
+              <span className={`${LABEL_BELOW_SM} ${accountAlias || wrongWallet ? '' : 'font-mono'}`}>
+                {pillLabel}
               </span>
             </button>
 
@@ -794,6 +843,11 @@ export default function WalletButton() {
                 displayName: accountAlias ?? account.ensName,
               }}
               unavailablePasskey={passkeyUnavailableOnDevice}
+              wrongWalletOwner={
+                wrongWallet && operationGate.kind === 'wrong_wallet'
+                  ? truncateAddress(operationGate.ownerAddress)
+                  : undefined
+              }
               open={popoverOpen}
               onClose={() => setPopoverOpen(false)}
               onSwitchWallet={handleSwitchWallet}

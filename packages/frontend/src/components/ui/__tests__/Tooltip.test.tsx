@@ -36,6 +36,31 @@ function tap(el: HTMLElement) {
   fireEvent.pointerDown(el, { pointerType: 'touch' })
 }
 
+/**
+ * Run `body` with ONLY the clock this primitive reads under our control.
+ *
+ * `toFake: ['performance']` is exact rather than tidy. `Tooltip` stamps and
+ * compares `performance.now()` and sets no timers at all, so faking the
+ * scheduler as well would fake something the component never touches — and
+ * `vi.setSystemTime`, which the pre-#2046 version of the expiry test used,
+ * moves `Date` WITHOUT moving `performance.now()`. That test would now pass
+ * for the wrong reason (an unadvanced monotonic clock cannot be inside a
+ * window seeded at `-Infinity`) if this file had not been moved to
+ * `advanceTimersByTime`.
+ *
+ * Fake time also matters for a duller reason: a real `sleep` here would make
+ * the boundary cases race the machine's load, and a flaky boundary test gets
+ * re-run until green rather than read.
+ */
+function withMonotonicClock(body: (advance: (ms: number) => void) => void) {
+  vi.useFakeTimers({ toFake: ['performance'] })
+  try {
+    body((ms) => vi.advanceTimersByTime(ms))
+  } finally {
+    vi.useRealTimers()
+  }
+}
+
 describe('Tooltip reachability (#2038)', () => {
   it('puts a non-interactive trigger in the tab order and opens on keyboard focus', async () => {
     const user = userEvent.setup({ delay: null })
@@ -187,13 +212,11 @@ describe('Tooltip reachability (#2038)', () => {
     // WINDOW and not a latch: on a touchscreen laptop, one incidental tap must
     // not kill hover on this trigger for the rest of its life.
     //
-    // NOTE what this does NOT prove. Five seconds is far past any plausible
-    // value of the constant, so this passes identically at 300ms or 4000ms.
-    // It pins that the window EXPIRES, never that 1000 is the right width —
-    // that needs a real-device trace (#2046).
-    vi.useFakeTimers()
-    try {
-      vi.setSystemTime(new Date('2026-08-25T12:00:00Z'))
+    // This one is deliberately far outside the window, so it stays true for
+    // any plausible constant — it pins that the window EXPIRES AT ALL. Where
+    // the edge actually sits is measured in the `#2046` block below; do not
+    // read this test as evidence about the width.
+    withMonotonicClock((advance) => {
       render(
         <Tooltip label={LONG_LABEL}>
           <span data-testid="child">not recorded</span>
@@ -205,12 +228,10 @@ describe('Tooltip reachability (#2038)', () => {
       tap(trigger)
       expect(screen.queryByRole('tooltip')).toBeNull()
 
-      vi.setSystemTime(new Date('2026-08-25T12:00:05Z'))
+      advance(5_000)
       fireEvent.mouseEnter(trigger)
       expect(screen.getByRole('tooltip')).toHaveTextContent(LONG_LABEL)
-    } finally {
-      vi.useRealTimers()
-    }
+    })
   })
 
   it('dismisses a tapped-open tooltip on Escape', () => {
@@ -260,5 +281,102 @@ describe('Tooltip reachability (#2038)', () => {
     expect(bubble.className).not.toContain('whitespace-nowrap')
     expect(bubble.className).toContain('max-w-[min(20rem,calc(100vw-1rem))]')
     expect(bubble.className).toContain('break-words')
+  })
+})
+
+/**
+ * The width of the touch-to-mouse suppression window (#2046).
+ *
+ * ## What the pre-#2046 suite proved, and what it claimed
+ *
+ * It claimed the window works. It proved the window *expires*: the expiry test
+ * advanced five seconds, which is outside 300 ms, 1000 ms and 4000 ms alike,
+ * so it passed identically at every one of them. Changing
+ * `MOUSE_AFTER_TOUCH_MS` left the whole suite green. That is an assertion
+ * wearing a test's clothes — the same defect class as a locator that resolves
+ * to the wrong element or a floor measured against the wrong node: the
+ * instrument runs, returns clean, and answers a different question.
+ *
+ * ## Why these tests hardcode 1000 instead of importing the constant
+ *
+ * Importing `MOUSE_AFTER_TOUCH_MS` and computing `WINDOW - 1` / `WINDOW` from
+ * it would read as the DRY choice and would rebuild exactly the defect being
+ * fixed: a test that derives its expectations from the constant it exists to
+ * pin moves with every mutation of that constant and can never fail. The
+ * literal is the point. If the value is deliberately changed, these two tests
+ * SHOULD go red and be updated in the same commit as the evidence for the new
+ * number.
+ *
+ * ## Boundary, both sides
+ *
+ * `echoingATouch()` is `elapsed < MOUSE_AFTER_TOUCH_MS`, so 999 ms is the last
+ * suppressed millisecond and 1000 ms is the first honoured one. Asserting both
+ * fixes the edge from either direction: shortening the window reddens the
+ * first test, lengthening it reddens the second.
+ */
+describe('Tooltip touch-to-mouse suppression window (#2046)', () => {
+  /** Deliberately a literal — see the block comment above. */
+  const WINDOW_MS = 1000
+
+  /** Tap twice (open, then close), then let `ms` of monotonic time pass. */
+  function tapThenWait(advance: (ms: number) => void, ms: number): HTMLElement {
+    render(
+      <Tooltip label={LONG_LABEL}>
+        <span data-testid="child">not recorded</span>
+      </Tooltip>,
+    )
+    const trigger = triggerOf(screen.getByTestId('child'))
+    tap(trigger)
+    tap(trigger)
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    advance(ms)
+    return trigger
+  }
+
+  it('still suppresses the mouse path 1ms before the window closes (999ms after a tap)', () => {
+    withMonotonicClock((advance) => {
+      const trigger = tapThenWait(advance, WINDOW_MS - 1)
+
+      fireEvent.mouseEnter(trigger)
+
+      // Goes red if the window is ever shortened — 400 ms, 300 ms, anything
+      // below 1000 ms honours this event instead of swallowing it.
+      expect(screen.queryByRole('tooltip')).toBeNull()
+    })
+  })
+
+  it('honours the mouse path the instant the window closes (1000ms after a tap)', () => {
+    withMonotonicClock((advance) => {
+      const trigger = tapThenWait(advance, WINDOW_MS)
+
+      fireEvent.mouseEnter(trigger)
+
+      // Goes red if the window is ever lengthened, and is the half that keeps
+      // a touchscreen laptop's hover alive.
+      expect(screen.getByRole('tooltip')).toHaveTextContent(LONG_LABEL)
+    })
+  })
+
+  it('hovers on a fresh page load, before any touch has happened', () => {
+    // `performance.now()` counts from the page's time origin, so early in a
+    // page's life it is a small number. With `lastTouchAt` seeded `0` — the
+    // seed the pre-#2046 `Date.now()` version used, where 0 means 1970 and is
+    // harmless — the swap would have read as "touched at page load" and killed
+    // every hover for the first second of every page. The seed is
+    // `-Infinity`; this pins it.
+    withMonotonicClock((advance) => {
+      render(
+        <Tooltip label={LONG_LABEL}>
+          <span data-testid="child">not recorded</span>
+        </Tooltip>,
+      )
+      const trigger = triggerOf(screen.getByTestId('child'))
+
+      // Well inside the window's width, measured from a zeroed monotonic clock.
+      advance(1)
+      fireEvent.mouseEnter(trigger)
+
+      expect(screen.getByRole('tooltip')).toHaveTextContent(LONG_LABEL)
+    })
   })
 })

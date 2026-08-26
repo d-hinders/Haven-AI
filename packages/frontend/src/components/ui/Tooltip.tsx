@@ -107,20 +107,42 @@ const VIEWPORT_MARGIN = 8
  * How long a touch suppresses the mouse path, in ms.
  *
  * A WINDOW rather than a sticky flag, and the difference is the hybrid device.
- * Chrome emits compatibility `mouseenter`/`mousemove` within a few hundred ms
- * of a tap (the legacy click delay), which is what reopened a bubble the tap
- * had just closed — and, on a trigger nested in a card link, opened one that
- * then survived the navigation. A latch fixes that and breaks something else:
- * on a touchscreen laptop, one incidental tap would kill hover on that trigger
- * for the rest of the component's life.
+ * Blink emits compatibility `mouseover`/`mouseenter`/`mousemove`/`mousedown`
+ * after a tap, which is what reopened a bubble the tap had just closed — and,
+ * on a trigger nested in a card link, opened one that then survived the
+ * navigation. A latch fixes that and breaks something else: on a touchscreen
+ * laptop, one incidental tap would kill hover on that trigger for the rest of
+ * the component's life.
  *
- * The window's EXISTENCE is proven by test; the specific `1000` is not. The
- * test advances five seconds, so it passes identically at 300 or 4000 — a
- * condition that holds says nothing about how close it is. "A second is far
- * past every synthetic event and far short of a user returning with a
- * trackpad" is reasoning, not a measurement. Settling it needs a real-device
- * trace of the `touchend` → synthetic `mouseenter` gap: #2046, which also
- * carries the `performance.now()` swap (this clock is non-monotonic).
+ * ## The gap this has to cover, measured (#2046)
+ *
+ * `touchend` → synthetic `mouseenter`, ten taps in Chromium under Pixel 5
+ * device emulation, 2026-08-26: **0.9 ms min, 14.5 ms max**, with and without
+ * a responsive `viewport` meta (no legacy click delay was observed in either
+ * configuration). The whole compatibility burst — `mouseover` through `click`
+ * — landed inside 22.5 ms of `touchend` in the worst trial.
+ *
+ * Reproduce: a Pixel 5 `browserContext`, a page whose only content is a span
+ * with listeners pushing `[type, performance.now()]` for the touch, pointer
+ * and mouse events, then `locator.tap()` and read the log.
+ *
+ * ## What that measurement does and does not settle
+ *
+ * It settles that 1000 covers the synthetic burst with roughly **69x** of
+ * headroom on this engine — the window cannot be too short. It does NOT settle
+ * that 1000 is the best value, and the honest reading is that it is generous:
+ * a shorter window would cover the same burst and return hover to a
+ * touchscreen-laptop user sooner. Shrinking it is a behaviour change with a
+ * real trade-off on slower main threads and on engines not measured here
+ * (no Android Chrome, no iOS Safari device trace — emulation is Blink, not a
+ * phone), so it stays a product decision rather than a silent edit. 1000 is
+ * kept, and it is kept with a number beside it instead of an argument.
+ *
+ * The width is now PINNED, not merely asserted: `Tooltip.test.tsx`'s `#2046`
+ * block drives 999 ms and 1000 ms after a tap on a faked monotonic clock, so
+ * changing this constant in either direction turns a named test red. That is
+ * the part the pre-#2046 suite could not do — its expiry test advanced five
+ * seconds and passed identically at 300, 1000 and 4000.
  */
 const MOUSE_AFTER_TOUCH_MS = 1000
 
@@ -138,9 +160,17 @@ export function Tooltip({
   const [coords, setCoords] = useState<Coords>(null)
   const [mounted, setMounted] = useState(false)
   const [standalone, setStandalone] = useState(false)
-  // When this trigger was last touched. The synthetic mouse events browsers
-  // emit after a tap must not re-open what the tap just closed.
-  const lastTouchAt = useRef(0)
+  // When this trigger was last touched, on the monotonic clock. The synthetic
+  // mouse events browsers emit after a tap must not re-open what the tap just
+  // closed.
+  //
+  // Seeded `-Infinity`, NOT `0`, and the difference is a real defect rather
+  // than a style point. `performance.now()` counts from the page's time
+  // origin, so a `0` seed reads as "touched at page load" and would suppress
+  // every hover for the first `MOUSE_AFTER_TOUCH_MS` of every page — a
+  // regression `Date.now()` could not have, since its zero is 1970. Pinned by
+  // `hovers on a fresh page load, before any touch has happened`.
+  const lastTouchAt = useRef(Number.NEGATIVE_INFINITY)
 
   useEffect(() => {
     setMounted(true)
@@ -216,8 +246,14 @@ export function Tooltip({
     }
   }, [open])
 
-  /** True only for the compatibility mouse events a tap just produced. */
-  const echoingATouch = () => Date.now() - lastTouchAt.current < MOUSE_AFTER_TOUCH_MS
+  /**
+   * True only for the compatibility mouse events a tap just produced.
+   *
+   * `performance.now()`, not `Date.now()`: wall-clock time is non-monotonic,
+   * so an NTP correction landing inside the window could widen it, shorten it
+   * or invert it. The monotonic clock cannot be stepped (#2046).
+   */
+  const echoingATouch = () => performance.now() - lastTouchAt.current < MOUSE_AFTER_TOUCH_MS
 
   const show = () => {
     if (echoingATouch()) return
@@ -236,7 +272,7 @@ export function Tooltip({
     // path — and then the card navigated, stranding it over the next page.
     // Suppress the mouse path after every touch; open only where the toggle
     // is ours to own.
-    lastTouchAt.current = Date.now()
+    lastTouchAt.current = performance.now()
     if (!standalone) return
     setOpen((wasOpen) => !wasOpen)
   }

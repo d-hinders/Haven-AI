@@ -607,8 +607,8 @@ export default function EditAgentModal({
 
               {showBudgetFields && (
                 <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                  Payments that exceed this agent budget are queued for your approval in
-                  the dashboard — no separate threshold to configure.
+                  Payments that exceed this agent budget are declined before any money
+                  moves — no separate threshold to configure.
                 </p>
               )}
 

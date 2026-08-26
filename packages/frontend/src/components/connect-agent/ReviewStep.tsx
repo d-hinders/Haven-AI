@@ -40,7 +40,7 @@ export function ReviewStep({ flow }: { flow: AgentConnectionSetupFlow }) {
                 ))}
               </div>
             ),
-            helper: 'Payments above this budget wait for your approval in Haven.',
+            helper: 'Payments above this budget are declined — the budget you approve here is enforced on-chain.',
           },
           { label: 'Agent Passport', value: flow.issuePassport ? 'Yes' : 'No' },
         ]}

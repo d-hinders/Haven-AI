@@ -82,7 +82,7 @@
  * registers per test, AFTER `mockHavenApi`, so Playwright matches it first, and
  * every other route is handed back with `route.fallback()` — which DEFERS to
  * the next matching handler rather than fulfilling, so the shared fixture still
- * serves auth, balances and approvals, unmodified and unaware.
+ * serves auth and balances, unmodified and unaware.
  *
  * ── Desktop captures, 390px geometry, no mobile baseline ─────────────────────
  *

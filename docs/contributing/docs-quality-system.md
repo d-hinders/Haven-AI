@@ -79,6 +79,32 @@ the per-change history lives in the shards and git log, not on that line.
   with no direct code mirror (indexes, research, archives, process prose). Keep
   it **tight** — list only the code whose change would actually invalidate the
   doc, so the Phase 2 coupling gate stays high-signal.
+- **An empty `covers` must say why, inline** (#1993):
+  `covers: []  # narrative — no direct code mirror`. Blocking in
+  `validate-frontmatter.mjs`.
+
+  The reason it is enforced rather than merely encouraged: a doc with
+  front-matter and `covers: []` *looks* governed — it has an owner, a
+  `last-verified`, a row in the inventory — while **no coupling gate can ever
+  implicate it**, because an empty glob list matches nothing. That is strictly
+  worse than a doc with no front-matter at all, which is at least *visibly*
+  outside the system; here the registration itself is the misleading signal. It
+  bit for real: `ABOUT_HAVEN.md`, the designated first-read mental-model doc,
+  came to flatly contradict five merged Safe-retirement slices, and nothing
+  mechanical would ever have said so (#1992).
+
+  The rule does not forbid an empty `covers` — plenty of docs genuinely have no
+  code mirror. It forces the DECISION to be written down, so an audit can tell
+  *deliberately uncoupled, here is why* from *nobody ever decided*. Twenty of
+  the twenty-two empty-covers docs already carried such a note by hand; #1993
+  made the convention mechanical and filled the two that did not.
+
+  **What it does not reach.** Only the files this validator enumerates —
+  `docs/**` plus the four root gravity files. A Markdown file under
+  `packages/**` (`packages/qa-agent/README.md`, the package READMEs) has no
+  front-matter at all and sits outside the docs-quality system entirely. That
+  is a separate, *visible* gap and is tracked on its own; this rule closes the
+  invisible one.
 - `status` must match location: `docs/archive/**` is `archived`,
   `docs/research/**` is `research`.
 

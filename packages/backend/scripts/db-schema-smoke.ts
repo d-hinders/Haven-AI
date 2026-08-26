@@ -657,7 +657,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'intents: machine one-shot fail', sql: FAIL_MACHINE_INTENT_SQL },
   { name: 'intents: status projection with funded-but-unsettled join', sql: FIND_INTENT_STATUS_ROW_SQL },
   { name: 'intents: settled receipt row (evidence join)', sql: FIND_SETTLED_PAYMENT_RECEIPT_SQL },
-  // approval_requests aggregate:
   // x402 authorization lifecycle:
   { name: 'x402: hourly cap config read (#961)', sql: GET_MAX_X402_PER_HOUR_SQL },
   { name: 'x402: hourly cap usage count (#961)', sql: COUNT_RECENT_X402_INTENTS_SQL },
@@ -703,8 +702,9 @@ const QUERIES: SmokeQuery[] = [
   { name: 'entitlements: grant upsert', sql: GRANT_ENTITLEMENT_SQL },
   { name: 'entitlements: revoke', sql: REVOKE_ENTITLEMENT_SQL },
   // ── Transaction-history read model (#992). All the joins here reach into
-  // money-path tables (payment_intents, approval_requests, delegate_sweeps,
+  // money-path tables (payment_intents, delegate_sweeps,
   // machine_payment_evidence) even though the route itself is read-only.
+  // `approval_requests` left this list with the table itself (#2055).
   { name: 'tx-history: basic safes list driving aggregation', sql: LIST_BASIC_SAFES_FOR_USER_SQL },
   { name: 'tx-history: agent picklist for /filters', sql: LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL },
   { name: 'tx-history: Safe ownership, any chain', sql: FIND_SAFE_OWNERSHIP_ANY_CHAIN_SQL },

@@ -51,11 +51,6 @@ export const en = {
       detail: 'Password changes are not available yet.',
     },
 
-    approvers: {
-      title: 'Approvers',
-      description:
-        'Wallets and passkeys that can approve actions, managed per account. Threshold stays at 1.',
-    },
 
     recovery: {
       title: 'Recovery and safety',

@@ -243,9 +243,9 @@ export default function SettingsClient() {
           five approver routes #1988 removed with the Safe rail. Left in place
           it would render a section whose every action 404s.
 
-          Its i18n keys (`t.settings.approvers.*`) stay in the locale files for
-          now rather than being removed in a frontend deletion slice; #1993's
-          residue sweep owns that.
+          Its i18n keys (`t.settings.approvers.*`) went with it in #1993's
+          residue sweep — an orphaned locale key is invisible to every gate
+          (no import, no type, no route), so only a sweep finds one.
         */}
 
         <Section

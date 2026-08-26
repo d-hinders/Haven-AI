@@ -559,7 +559,7 @@ async function openUserMenuByKeyboard(page: Page) {
  * consulted first. Everything except `GET /agents` is handed straight back with
  * `route.fallback()`, which defers to the next matching handler rather than
  * fulfilling; the shared fixture therefore still serves auth, balances,
- * approvals and the rest, unmodified and unaware.
+ * balances and the rest, unmodified and unaware.
  *
  * The point of the layering is blast radius: `haven-api.ts` is shared with
  * eleven other specs, and a paused or archived agent added there would change

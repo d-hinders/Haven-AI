@@ -56,8 +56,10 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
   })
 
   it('regression-locks the shapes that crashed routes (timeAgo/timeUntil inputs)', () => {
-    const approvals = fx('/approvals?status=all') as { approvals: { expires_at: string; created_at: string }[] }
-    expect(approvals.approvals[0].expires_at).toBeTruthy() // ApprovalCard: timeUntil(expires_at)
+    // The `ApprovalCard: timeUntil(expires_at)` lock that stood here went with
+    // its subject (#1993): #1989 deleted the card and the route, #2055
+    // deregistered the endpoint, and #1993 removed the fixture. A shape lock on
+    // a component nobody renders cannot regression-lock anything.
     // SafeCard: timeAgo(safe.created_at) — served via /auth/me + /user/safes in the
     // script itself; asserted here through the agents' safe linkage staying non-null.
     const agents = fx('/agents') as { agents: { safe_id: string }[] }

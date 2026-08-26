@@ -49,11 +49,6 @@ export const sv: Messages = {
       detail: 'Lösenordsbyte är inte tillgängligt ännu.',
     },
 
-    approvers: {
-      title: 'Godkännare',
-      description:
-        'Plånböcker och passkeys som kan godkänna åtgärder, hanteras per konto. Tröskeln är kvar på 1.',
-    },
 
     recovery: {
       title: 'Återställning och säkerhet',

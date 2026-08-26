@@ -95,3 +95,37 @@ test1366fm('satisfied-by parses as a separate list and covers survives (#1366)',
   assert1366fm.deepStrictEqual(parsed.data.covers, ['packages/signer/**'])
   assert1366fm.deepStrictEqual(parsed.data['satisfied-by'], ['docs/regulatory/casp-changelog/**'])
 })
+
+// ── `covers: []` must state a reason (#1993) ─────────────────────────────────
+//
+// Positive AND negative control for the rule, because the rule's own value is
+// that it can distinguish "deliberately uncoupled, here is why" from "nobody
+// decided". A detector that only ever answers "fine" would make that
+// distinction unmeasurable — which is the failure the rule exists to catch,
+// one layer up.
+import { emptyCoversNote } from './validate-frontmatter.mjs'
+
+test('emptyCoversNote: reads the inline reason on a literal `covers: []`', () => {
+  const raw = '---\nowner: "@x"\nstatus: current\ncovers: []  # narrative — no direct code mirror\nlast-verified: "2026-08-26"\n---\n'
+  assert.equal(emptyCoversNote(raw), 'narrative — no direct code mirror')
+})
+
+test('emptyCoversNote: an UNEXPLAINED `covers: []` returns null — the finding', () => {
+  const raw = '---\nowner: "@x"\nstatus: current\ncovers: []\nlast-verified: "2026-08-26"\n---\n'
+  assert.equal(emptyCoversNote(raw), null)
+})
+
+test('emptyCoversNote: a bare `#` with no text is not a reason', () => {
+  const raw = '---\ncovers: []  #\n---\n'
+  assert.equal(emptyCoversNote(raw), null)
+})
+
+test('emptyCoversNote: a NON-empty covers list is out of scope (returns null)', () => {
+  const raw = '---\ncovers:\n  - packages/backend/src/index.ts  # not a reason\n---\n'
+  assert.equal(emptyCoversNote(raw), null)
+})
+
+test('emptyCoversNote: CRLF front-matter is read the same way', () => {
+  const raw = '---\r\ncovers: []  # process playbook\r\n---\r\n'
+  assert.equal(emptyCoversNote(raw), 'process playbook')
+})

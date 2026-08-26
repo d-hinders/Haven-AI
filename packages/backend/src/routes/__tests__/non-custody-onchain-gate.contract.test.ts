@@ -1,10 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import ts from 'typescript'
 import Fastify, { type FastifyInstance } from 'fastify'
 import paymentRoutes from '../payments.js'
 import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
+import {
+  bannedModuleRefs as bannedRefsIn,
+  parseImportFacts,
+  type ImportFacts,
+} from './helpers/import-facts.js'
 
 /**
  * On-chain-is-the-final-gate contract test (design:
@@ -82,27 +86,41 @@ import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
  * proof. #2044 removed all three, and the `executeAllowanceTransfer`
  * assertion with them.
  *
- * **The three that remain are mutation-proven falsifiable** (#2044), and it is
+ * ⚠️ **#1993 — the same defect REGREW, and this is the re-measurement.** #2044
+ * left three spies, on the reasoning that all three were still live exports of
+ * `rails/allowance-module.ts`. A later slice deleted two of them:
+ * `computeEffectiveAllowance` and `getLatestBlockTimeSec` are no longer
+ * exported by that module (the file's own header now describes it as
+ * reads-only shared infrastructure — `getProvider`, `getRelayerWallet`,
+ * `getTokenAllowance`, `getTokenBalance`, `getTokensForDelegate`). Their
+ * `vi.mock` factory entries were therefore inventing functions production does
+ * not have, and asserting they were never called: unfalsifiable again, for the
+ * second time, by the same mechanism. Both are removed here.
+ *
+ * The lesson worth keeping is not "check the list once" but that **a spy set
+ * pinned to another module's export surface goes stale silently whenever that
+ * module shrinks**, and nothing red-flags it — the mock factory replaces the
+ * module wholesale, so a missing export is not an error. The names live on in
+ * `BANNED_ARITHMETIC` below, where the STRUCTURAL rule can still fail on them,
+ * and where the epic-#1440 guard
+ * (`retired-rail-routing.guard.test.ts`) scans for them backend-wide.
+ *
+ * **The one that remains is mutation-proven falsifiable** (#2044), and it is
  * worth being exact about the mechanism, because #2004's inventory read it too
  * pessimistically. `routes/payments.ts` imports nothing from
  * `rails/allowance-module.js` directly — but the module IS on the route's
  * transitive graph (`routes/payments.ts` → `modules/mpp/index.ts` →
  * `modules/mpp/allowances.ts`), so the `vi.mock` is live, and re-adding a call
  * on the payment path DOES trip the spy. Measured, per name:
- *   - `computeEffectiveAllowance` — a call added after the retirement gate
- *     reddens all three delegation cases by name;
  *   - `getTokenAllowance` — a call added BEFORE the retirement gate reddens
  *     the two #1986 RETIREMENT cases too, which is what makes their claim
  *     ("refused before ANY on-chain allowance read") a real ordering
- *     assertion rather than a restatement of the 410;
- *   - `getLatestBlockTimeSec` — the block-time read that fed the legacy
- *     arithmetic; promoted into the helper by #2044 to replace the dead
- *     `generateTransferHash` slot, and reddened by the same shape of edit.
- * These three survive on the live READ path behind
+ *     assertion rather than a restatement of the 410.
+ * It survives on the live READ path behind
  * `GET /machine-payments/allowances`, which is exactly why a re-added call is
  * a real risk and a real assertion.
  *
- * The three deleted names are still guarded — by the STRUCTURAL assertion
+ * The other deleted names are still guarded — by the STRUCTURAL assertion
  * below, over the route's real import bindings, which is falsifiable by a
  * single edit (re-add the import and it goes red) and carries its own positive
  * control proving the extractor can say yes. That, not the spies, is what
@@ -111,12 +129,11 @@ import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
 
 const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
-  // Only names the real module still EXPORTS (#2044). A factory entry for a
-  // deleted export is a spy nothing can ever call — see the header.
+  // Only names the real module still EXPORTS (#2044, re-measured #1993). A
+  // factory entry for a deleted export is a spy nothing can ever call — see
+  // the header. `getTokenAllowance` is the ONE survivor.
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
-    getLatestBlockTimeSec: vi.fn(),
-    computeEffectiveAllowance: vi.fn(),
   },
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
@@ -198,19 +215,17 @@ function intentRow(overrides: Record<string, unknown> = {}) {
  * assertion is the structural import-binding check below.
  */
 function expectNoOffChainCoverageArithmetic() {
-  expect(allowanceMocks.computeEffectiveAllowance).not.toHaveBeenCalled()
   expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
-  expect(allowanceMocks.getLatestBlockTimeSec).not.toHaveBeenCalled()
 }
 
 /**
  * The retired rail's off-chain spend arithmetic — every "how much is left"
- * name that must never be reachable from the payment route again. Three of
- * these (`computeEffectiveAllowance`, `getTokenAllowance`,
- * `getLatestBlockTimeSec`) are still live exports of
- * `rails/allowance-module.ts`, so they can be re-imported today; the other
- * seven were deleted with the rail by #1987 and are kept as tombstones so a
- * re-created symbol lands on a guard rather than on nothing.
+ * name that must never be reachable from the payment route again. Exactly ONE
+ * of these — `getTokenAllowance` — is still a live export of
+ * `rails/allowance-module.ts`, so it can be re-imported today; the other nine
+ * were deleted with the rail (#1987, and two more since — see the header's
+ * #1993 note) and are kept as tombstones so a re-created symbol lands on a
+ * guard rather than on nothing.
  */
 const BANNED_ARITHMETIC = [
   'computeEffectiveAllowance',
@@ -246,47 +261,6 @@ const BANNED_MODULES = [
  * otherwise re-import the arithmetic past a rule that only knew about `.js`.
  * Mutation-proven, not reasoned about (#2049).
  */
-function bannedModuleRefs(specs: Iterable<string>): string[] {
-  return [...specs].filter((s) => {
-    const normalized = s.split(/[?#]/)[0].replace(/\.(m?[jt]s)$/, '')
-    return BANNED_MODULES.some((b) => normalized === b || normalized.endsWith(`/${b}`))
-  })
-}
-
-type PaymentPathImports = {
-  /**
-   * Names bound into the route's module scope by a static import clause: every
-   * named specifier (BOTH its original name and its local alias), a default
-   * binding, and a namespace binding's local name.
-   */
-  bindings: Set<string>
-  /**
-   * Names re-exported by name from another module (`export { x } from '…'`).
-   * These bind nothing locally, so the binding rule cannot see them — but they
-   * put the symbol back on the payment route's own public surface.
-   */
-  reexports: Set<string>
-  /**
-   * Module specifiers reached by a STATIC form: `import … from '…'`,
-   * side-effect `import '…'`, `export … from '…'`, `export * from '…'`.
-   */
-  staticModuleRefs: Set<string>
-  /**
-   * Every string literal in the file's CODE. Comments are not AST nodes, so
-   * nothing written in one can appear here — which is what makes a
-   * literal-level rule safe on a file that deliberately names retired symbols
-   * in prose. This is the backstop for every runtime shape: `import('…')`,
-   * `createRequire(import.meta.url)('…')`, and whatever is invented next.
-   */
-  codeStringLiterals: Set<string>
-  /**
-   * Count of dynamic `import(...)` calls whose specifier is not a literal
-   * (a variable, a concatenation, a template with substitutions). No static
-   * analysis can resolve one, so its presence on this route IS the finding.
-   */
-  unresolvableDynamicImports: number
-}
-
 /**
  * The import STRUCTURE of `routes/payments.ts`, parsed from source with the
  * TypeScript parser.
@@ -321,78 +295,17 @@ type PaymentPathImports = {
  *    guard can see that; the spies cannot either.
  * 4. **`eval` / `new Function` string indirection.** Rule (5) below catches a
  *    computed `import()`, but not a module name assembled and eval'd.
- * 5. **A directory-index specifier.** `bannedModuleRefs()` normalizes an
+ * 5. **A directory-index specifier.** `bannedRefsIn()` normalizes an
  *    extension and a query/hash suffix, not a trailing `/index` — so
  *    `…/allowance-module/index.js` would slip rule (3)/(4). Not currently
  *    expressible: every banned module is a FILE, so that path resolves to
  *    nothing — but if one is ever re-created as a directory, this line is
  *    the reminder that the normalization must learn `/index` first.
  */
-function paymentPathImports(): PaymentPathImports {
+function paymentPathImports(): ImportFacts {
   return parseImportFacts(
     readFileSync(fileURLToPath(new URL('../payments.ts', import.meta.url)), 'utf8'),
   )
-}
-
-/**
- * The parser itself, taking source text so the extractor-control test below
- * can prove EVERY fact bucket is populatable from a fixture. Without that,
- * rules (2) and (5) rest on buckets no real input has ever filled — the same
- * "guard that cannot fail" defect this file exists to prevent, relocated into
- * its own instrument.
- */
-function parseImportFacts(src: string): PaymentPathImports {
-  const sourceFile = ts.createSourceFile(
-    'payments.ts',
-    src,
-    ts.ScriptTarget.ESNext,
-    /* setParentNodes */ true,
-    ts.ScriptKind.TS,
-  )
-
-  const facts: PaymentPathImports = {
-    bindings: new Set<string>(),
-    reexports: new Set<string>(),
-    staticModuleRefs: new Set<string>(),
-    codeStringLiterals: new Set<string>(),
-    unresolvableDynamicImports: 0,
-  }
-
-  const walk = (node: ts.Node): void => {
-    if (ts.isStringLiteralLike(node)) facts.codeStringLiterals.add(node.text)
-
-    if (ts.isImportDeclaration(node)) {
-      if (ts.isStringLiteralLike(node.moduleSpecifier)) {
-        facts.staticModuleRefs.add(node.moduleSpecifier.text)
-      }
-      const clause = node.importClause
-      if (clause?.name) facts.bindings.add(clause.name.text) // default import
-      const named = clause?.namedBindings
-      if (named && ts.isNamespaceImport(named)) facts.bindings.add(named.name.text)
-      if (named && ts.isNamedImports(named)) {
-        for (const el of named.elements) {
-          facts.bindings.add((el.propertyName ?? el.name).text) // original name
-          facts.bindings.add(el.name.text) // local alias
-        }
-      }
-    } else if (ts.isExportDeclaration(node)) {
-      if (node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)) {
-        facts.staticModuleRefs.add(node.moduleSpecifier.text)
-        const clause = node.exportClause
-        if (clause && ts.isNamedExports(clause)) {
-          for (const el of clause.elements) facts.reexports.add((el.propertyName ?? el.name).text)
-        }
-      }
-    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-      const specifier = node.arguments[0]
-      if (!specifier || !ts.isStringLiteralLike(specifier)) facts.unresolvableDynamicImports += 1
-    }
-
-    ts.forEachChild(node, walk)
-  }
-  ts.forEachChild(sourceFile, walk)
-
-  return facts
 }
 
 describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () => {
@@ -474,13 +387,25 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
     expect(facts.codeStringLiterals.has('./not-code.js')).toBe(false) // comments are not nodes
     expect(facts.unresolvableDynamicImports).toBe(1) // rule (5)'s bucket
 
+    // The two buckets #1993 added when this extractor moved into the shared
+    // helper. No rule in THIS file reads them — they carry
+    // `retired-rail-routing.guard.test.ts`'s rules 4 and 5 — but they are
+    // proven here too, because this test is the single instrument that says
+    // "every bucket the shared extractor claims to collect is populatable".
+    const shared = parseImportFacts([
+      `await app.register(routes, { prefix: '/approvals' })`,
+      `type D = { rail: 'delegation' } | { rail: 'retired_allowance' }`,
+    ].join('\n'))
+    expect(shared.registeredPrefixes.has('/approvals')).toBe(true)
+    expect([...shared.railDecisionLiterals].sort()).toEqual(['delegation', 'retired_allowance'])
+
     // And the normalization the module rules share: extension-, prefix-, and
     // query/hash-agnostic, on the module list the real rules use.
-    expect(bannedModuleRefs(['../rails/allowance-module.js?bust=1'])).toEqual([
+    expect(bannedRefsIn(['../rails/allowance-module.js?bust=1'], BANNED_MODULES)).toEqual([
       '../rails/allowance-module.js?bust=1',
     ])
-    expect(bannedModuleRefs(['../rails/allowance-module'])).toEqual(['../rails/allowance-module'])
-    expect(bannedModuleRefs(['./unrelated.js', '../modules/mpp/index.js'])).toEqual([])
+    expect(bannedRefsIn(['../rails/allowance-module'], BANNED_MODULES)).toEqual(['../rails/allowance-module'])
+    expect(bannedRefsIn(['./unrelated.js', '../modules/mpp/index.js'], BANNED_MODULES)).toEqual([])
   })
 
   it('RED LINE #4 (structural, #1987/#2049): the payment path imports NO off-chain coverage arithmetic, in ANY import shape', () => {
@@ -520,7 +445,7 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
     // module-level rule can see them. A namespace binding is the shape #2049
     // was filed for.
     expect(
-      bannedModuleRefs(imports.staticModuleRefs),
+      bannedRefsIn(imports.staticModuleRefs, BANNED_MODULES),
       'routes/payments.ts must not statically reference a retired-rail module in ANY clause form',
     ).toEqual([])
 
@@ -531,7 +456,7 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
     // This rule structurally SUBSUMES (3) for any literal specifier; (3) is
     // kept so the failure names the static shape rather than just the string.
     expect(
-      bannedModuleRefs(imports.codeStringLiterals),
+      bannedRefsIn(imports.codeStringLiterals, BANNED_MODULES),
       'routes/payments.ts must not name a retired-rail module in any runtime import() or require()',
     ).toEqual([])
 

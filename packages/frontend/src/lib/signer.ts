@@ -301,8 +301,11 @@ function getStoredPasskeySignerValue(args: {
  * Resolution order:
  *   1. If localStorage has Safe passkey signer metadata for the safeAddress + chainId, return it.
  *   2. Otherwise, if a hydrated Hybrid signer set exists for the account,
- *      resolve it with `pickSigningPath`'s precedence (#1969): marker-matched
- *      passkey → connected EOA when the set names an owner → any passkey.
+ *      resolve WITHIN that set with `pickSigningPath`'s precedence
+ *      (#1969/#2068): marker-matched passkey → connected EOA when the
+ *      connected wallet IS the set's named owner → any passkey → null.
+ *      A hydrated set never falls through to step 3 — a wallet that is not
+ *      in the set is not a signer for this account.
  *   3. Otherwise, if Wagmi has a connected EOA, return that signer.
  *   4. Otherwise return null.
  */
@@ -346,18 +349,33 @@ export function useActiveSigner(args: {
   //
   // The one refusal kept: `pickSigningPath`'s exact precedence, mirrored so
   // display and signing cannot disagree — marker-matched passkey → connected
-  // EOA (only when the set names an owner) → any passkey. Without the mirror,
-  // a MIXED account (EOA owner + passkeys, marker-less, owner wallet
-  // connected) would flip from signing with the connected EOA to a
-  // cross-device passkey ceremony, because the budget/send/re-key hooks feed
-  // `signer?.type === 'eoa'` into `pickSigningPath` as its `eoaConnected`
-  // input. Pinned by signer.test.ts › "mixed account: a connected EOA still
+  // EOA (only when the connected wallet IS the set's named owner, #2068) →
+  // any passkey. Without the mirror, a MIXED account (EOA owner + passkeys,
+  // marker-less, owner wallet connected) would flip from signing with the
+  // connected EOA to a cross-device passkey ceremony, because the
+  // budget/send/re-key hooks feed the resolved signer into `pickSigningPath`.
+  // Pinned by signer.test.ts › "mixed account: a connected EOA still
   // wins when no device marker matches (#1969 precedence mirror)".
+  //
+  // #2068: "an EOA is connected" is NOT the same as "the owner is connected".
+  // The EOA rung requires the connected address to EQUAL the set's
+  // `owner_address` — an unrelated wallet would be offered a signature the
+  // account rejects at verification time, and a signer offered but failing
+  // at signature time is worse than absent. On a mismatch the resolution
+  // stays inside the set: any passkey if one exists, otherwise null — never
+  // the EOA fallthrough below, which is for accounts WITHOUT a hydrated set
+  // (legacy Safes, pre-hydration renders).
   const hybridSigners = getStoredHybridSigners(args)
-  if (hybridSigners && args.safeAddress && args.chainId !== undefined && hybridSigners.passkeys.length > 0) {
-    const markerMatched = hybridPasskeyOnDevice(hybridSigners) !== null
-    const eoaAvailable = Boolean(address && walletClient)
-    if (markerMatched || !(hybridSigners.owner_address && eoaAvailable)) {
+  if (hybridSigners && args.safeAddress && args.chainId !== undefined) {
+    const hasPasskeys = hybridSigners.passkeys.length > 0
+    const markerMatched = hasPasskeys && hybridPasskeyOnDevice(hybridSigners) !== null
+    const connectedIsOwner = Boolean(
+      hybridSigners.owner_address &&
+        address &&
+        walletClient &&
+        address.toLowerCase() === hybridSigners.owner_address.toLowerCase(),
+    )
+    if (hasPasskeys && (markerMatched || !connectedIsOwner)) {
       return {
         type: 'delegator_passkey',
         accountAddress: args.safeAddress,
@@ -365,8 +383,15 @@ export function useActiveSigner(args: {
         signers: hybridSigners,
       }
     }
-    // Mixed account, no marker, owner-capable wallet connected: fall through
-    // to the EOA branch below — the same answer `pickSigningPath` gives.
+    if (!connectedIsOwner) {
+      // Hydrated set, no passkey, connected wallet is not the named owner
+      // (or nothing is connected): the account has no reachable signer from
+      // here. Refuse rather than offer a wallet the account will reject.
+      return null
+    }
+    // No marker (or no passkeys) and the OWNER wallet is connected: fall
+    // through to the EOA branch below — the same answer `pickSigningPath`
+    // gives.
   }
 
   if (address && walletClient) {

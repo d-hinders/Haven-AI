@@ -180,6 +180,36 @@ describe('useSafeOperationGate', () => {
     expect(result.current).toEqual({ kind: 'ready' })
   })
 
+  it('hybrid account: owner-only set is READY when the connected wallet IS the named owner (#2068)', () => {
+    mockHybridAuth()
+    setStoredHybridSigners({ ...HYBRID_SIGNERS, owner_address: EOA_ADDRESS, passkeys: [] })
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
+    mockUseWalletClient.mockReturnValue({ data: { type: 'walletClient' } })
+
+    const { result } = renderHook(() =>
+      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current).toEqual({ kind: 'ready' })
+  })
+
+  it('hybrid account: owner-only set stays no_signer for an UNRELATED connected wallet (#2068)', () => {
+    mockHybridAuth()
+    setStoredHybridSigners({
+      ...HYBRID_SIGNERS,
+      owner_address: '0x2222222222222222222222222222222222222222',
+      passkeys: [],
+    })
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS }) // Y ≠ X
+    mockUseWalletClient.mockReturnValue({ data: { type: 'walletClient' } })
+
+    const { result } = renderHook(() =>
+      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current).toEqual({ kind: 'no_signer' })
+  })
+
   it('hybrid account: no_signer when no signer set is known — even with a wallet connected', () => {
     mockHybridAuth()
     // A globally connected EOA says nothing about who may sign for a Hybrid.

@@ -121,9 +121,25 @@ export function useSafeOperationGate(args: {
       // metadata a Safe passkey needs is physically absent on this device.
       return { kind: 'ready' }
     }
-    // No signer set known (hydration failed or none enrolled). Deliberately
-    // NOT falling through to the connected-EOA branch: a random connected
-    // wallet cannot sign for a Hybrid account.
+    // #2068: an owner-only hybrid set (EOA owner, zero enrolled passkeys)
+    // CAN sign — but only with the named owner. The check is the connected
+    // ADDRESS against the set's `owner_address`, mirroring `pickSigningPath`
+    // and `useActiveSigner`: "a wallet is connected" never satisfied "the
+    // owner is connected", and a gate opened for a wallet whose signature
+    // the account rejects would be worse than the false `no_signer` it
+    // replaces.
+    if (
+      hybridSigners?.owner_address &&
+      address &&
+      walletClient &&
+      address.toLowerCase() === hybridSigners.owner_address.toLowerCase()
+    ) {
+      return { kind: 'ready' }
+    }
+    // No signer set known (hydration failed or none enrolled), or the set
+    // names an owner this connected wallet is not. Deliberately NOT falling
+    // through to the connected-EOA branch: a random connected wallet cannot
+    // sign for a Hybrid account.
     return { kind: 'no_signer' }
   }
 

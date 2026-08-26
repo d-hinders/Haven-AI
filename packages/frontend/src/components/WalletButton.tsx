@@ -177,18 +177,14 @@ interface PopoverProps {
    * a credential chosen by array position and never verified as the user's.
    * Those differ in kind, which is why this state gets a marker they do not.
    *
-   * **`onThisDevice: false` is not reachable in the product today, and that is
-   * recorded here rather than left for the next reader to rediscover.**
-   * `useActiveSigner` (`lib/signer.ts`) only returns a `delegator_passkey` at
-   * all when `hybridPasskeyOnDevice` already matched, pinned by
-   * `signer.test.ts` > "does NOT resolve the hybrid signer when the device
-   * marker is missing". So the marker-less user reaches no Hybrid branch here
-   * — the dashboard gives them no passkey-based signing path at all. That is a
-   * bigger gap than the one #1952 describes, and it is filed as #1969 rather
-   * than changed from this component. This rendering becomes user-visible the moment #1969
-   * closes, with NO guaranteed review checkpoint at that time — which is the
-   * reason it is built correct now rather than later. Do not read it as
-   * shipped, user-visible behaviour.
+   * **`onThisDevice: false` is LIVE, user-visible behaviour since #1969**
+   * (owner decision 2026-08-26). `useActiveSigner` now resolves a
+   * `delegator_passkey` for any non-empty hydrated signer set, mirroring
+   * `pickSigningPath`'s precedence, so the marker-less user reaches this
+   * rendering for real — the state this block was built ahead of. Rendered
+   * evidence lives in `e2e/wallet-signer-offering.spec.ts`, which drives the
+   * app into the marker-less state through the real hydration path rather
+   * than forced props.
    */
   signingWith?: { label: string; keyId: string; onThisDevice: boolean }
   unavailablePasskey?: boolean

@@ -1633,7 +1633,7 @@ export default function DesignSystemPage() {
                 className="mb-2 flex items-start gap-2 text-xs text-[var(--v2-ink-3)]"
               >
                 <Icon icon={Info} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-                <span>Connect a wallet to update this agent budget.</span>
+                <span>Connect the account&apos;s owner wallet to update this agent budget.</span>
               </p>
               <div className="flex gap-3">
                 <Button variant="ghost" className="flex-1">Back</Button>
@@ -1826,14 +1826,14 @@ export default function DesignSystemPage() {
         description="Which passkey is about to sign, as the wallet menu states it. Two states, because they are two different facts: a credential this device's marker matched, and the passkeys[0] fallback used when no enrolled passkey carries this device's marker. The fallback is deliberate and load-bearing — see delegation-rail-security-model.md §6 — and until #1952 the menu rendered NOTHING in that case, going silent in exactly the case where the credential was chosen by array position."
       >
         {/*
-          Rendered with props forced, on purpose, and this is the only honest way
-          to photograph the second state: `useActiveSigner` returns a
-          `delegator_passkey` only when the device marker already matched, so no
-          app-state fixture and no screenshot scenario can drive a browser into
-          the fallback render (that upstream gate is #1969). The primitive
-          gallery's existing job — showing states a user flow does not reach —
-          is exactly what is needed, so the two states go under the blocking
-          pixel gate here rather than being asserted and left unseen.
+          Rendered with props forced, as every gallery state is — and since
+          #1969 (owner decision 2026-08-26) the fallback state is ALSO a
+          reachable production render: `useActiveSigner` resolves a
+          `delegator_passkey` for any non-empty hydrated signer set, so a
+          marker-less user reaches it through ordinary hydration. The
+          app-state proof lives in `e2e/wallet-signer-offering.spec.ts`; this
+          showcase keeps both states side by side under the blocking pixel
+          gate so their designed difference stays photographed.
         */}
         {/*
           Each cell is `min-h-[290px]` wrapping a `relative h-0` positioning

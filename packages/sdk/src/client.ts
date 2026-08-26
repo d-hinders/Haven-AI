@@ -95,6 +95,7 @@ import {
   chainIdOrNull,
   decimalFromUsdcAtomic,
   explorerUrlOrEmpty,
+  noCompatiblePaymentOptionError,
   requestInitFromSnapshot,
   sameAddress,
   snapshotX402Request,
@@ -344,11 +345,7 @@ export class HavenClient {
   ): Promise<X402Intent> {
     const option = selectStandardPaymentOption(paymentRequired.accepts)
     if (!option) {
-      throw new HavenApiError(
-        'No compatible payment option found in x402 requirements. ' +
-          'Haven supports standard x402 exact payments on Base USDC.',
-        400,
-      )
+      throw noCompatiblePaymentOptionError(paymentRequired.accepts)
     }
 
     // The funding transfer tops up the agent's delegate EOA. With no local key
@@ -858,11 +855,7 @@ export class HavenClient {
     // 1. Select best payment option
     const option = selectStandardPaymentOption(paymentRequired.accepts)
     if (!option) {
-      throw new HavenApiError(
-        'No compatible payment option found in x402 requirements. ' +
-        'Haven supports standard x402 exact payments on Base USDC.',
-        400,
-      )
+      throw noCompatiblePaymentOptionError(paymentRequired.accepts)
     }
 
     const idempotencyKey = options.idempotencyKey ?? buildX402IdempotencyKey(paymentRequired, option)
@@ -1068,11 +1061,7 @@ export class HavenClient {
 
     const option = selectStandardPaymentOption(input.paymentRequired.accepts)
     if (!option) {
-      throw new HavenApiError(
-        'No compatible payment option found in x402 requirements. ' +
-        'Haven supports standard x402 exact payments on Base USDC.',
-        400,
-      )
+      throw noCompatiblePaymentOptionError(input.paymentRequired.accepts)
     }
 
     const idempotencyKey = input.idempotencyKey ?? buildX402IdempotencyKey(input.paymentRequired, option)

@@ -63,7 +63,20 @@ export type Anchor = (
   onBroadcast?: (txHash: string) => Promise<void>,
 ) => Promise<AnchorResult>
 
-export type AnchorRecovery = (chainId: number, txHash: string) => Promise<AnchorResult | null>
+/**
+ * A recovered anchor carries what the mined transaction ACTUALLY attested
+ * (#1847). Recovery can cross a re-key: the broadcast was built from the
+ * facts of its day, and by the time its receipt is read the agent may hold a
+ * different key. `attested` is decoded from the transaction's own bytes so
+ * `markAnchored` can record the chain's truth — the fresh claim would blind
+ * `STALE_ANCHOR_PREDICATE` forever, silencing the #1699 re-anchor sweep and
+ * its alarm for exactly the attestation that most needs them.
+ */
+export interface RecoveredAnchor extends AnchorResult {
+  attested: { agentEoa: string; smartAccount: string }
+}
+
+export type AnchorRecovery = (chainId: number, txHash: string) => Promise<RecoveredAnchor | null>
 
 let recoveryImpl: AnchorRecovery | null = null
 export function setAnchorRecovery(recovery: AnchorRecovery | null): void {
@@ -263,8 +276,17 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
     // attention counter alarming; a wrongly permitted one mints a second
     // real, revocable credential that no later tick can take back.
     let result: AnchorResult | null = null
+    // What the recovered transaction attested, decoded from its own bytes
+    // (#1847). Stays null on the mint path, where the claim IS the truth.
+    let recoveredAttested: RecoveredAnchor['attested'] | null = null
     if (existing.tx_hash && !existing.attestation_uid) {
-      if (recoveryImpl) result = await recoveryImpl(chainId, existing.tx_hash)
+      if (recoveryImpl) {
+        const recovered = await recoveryImpl(chainId, existing.tx_hash)
+        if (recovered) {
+          result = recovered
+          recoveredAttested = recovered.attested
+        }
+      }
       if (!result) {
         // Fail-safe when no probe is wired: absent a way to prove death, the
         // answer is "do not re-mint", never "assume dropped".
@@ -286,7 +308,23 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
     if (!result) {
       result = await anchorImpl(chainId, claim, (txHash) => repo.recordBroadcast(agentId, txHash))
     }
-    await markAnchored(agentId, result, claim)
+    // A RECOVERED anchor is recorded as what its transaction attested, never
+    // as the fresh claim (#1847). The two differ exactly when a re-key
+    // completed between the broadcast and this recovery — #2065's
+    // "attest lands late" race — and writing the fresh claim there would set
+    // `agent_eoa = delegate_address` for an attestation that names the
+    // RETIRED key: `STALE_ANCHOR_PREDICATE` false forever, the #1699
+    // re-anchor sweep and its alarm both blind, every receipt built from the
+    // row describing bytes that are not on-chain. Recording the truth makes
+    // the divergence VISIBLE, and the existing invariant queue retires and
+    // reissues it on its next tick — no new machinery.
+    await markAnchored(
+      agentId,
+      result,
+      recoveredAttested
+        ? { ...claim, agentEoa: recoveredAttested.agentEoa, smartAccount: recoveredAttested.smartAccount }
+        : claim,
+    )
     // Close the anchor race (#973). Anchoring takes seconds, and the owner can
     // revoke the agent during them. The revoke hook is a no-op in that window —
     // its enqueue requires an ALREADY-anchored passport — so without this the

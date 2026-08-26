@@ -165,7 +165,11 @@ describe('useSafeOperationGate', () => {
     expect(result.current).toEqual({ kind: 'ready' })
   })
 
-  it('hybrid account: passkey_on_other_device when signers exist but none is on this device', () => {
+  it('hybrid account: READY when signers exist but none is on this device (#1969 — cross-device ceremony is a working path)', () => {
+    // Pre-#1969 this returned passkey_on_other_device, which consumers treat
+    // as BLOCKED (isOnchainActionBlocked) — a false blocker (#1097) for a set
+    // that signs via the cross-device ceremony. The availability hint lives
+    // next to the working actions, not in this gate.
     mockHybridAuth()
     setStoredHybridSigners(HYBRID_SIGNERS)
 
@@ -173,7 +177,37 @@ describe('useSafeOperationGate', () => {
       useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
-    expect(result.current).toEqual({ kind: 'passkey_on_other_device' })
+    expect(result.current).toEqual({ kind: 'ready' })
+  })
+
+  it('hybrid account: owner-only set is READY when the connected wallet IS the named owner (#2068)', () => {
+    mockHybridAuth()
+    setStoredHybridSigners({ ...HYBRID_SIGNERS, owner_address: EOA_ADDRESS, passkeys: [] })
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
+    mockUseWalletClient.mockReturnValue({ data: { type: 'walletClient' } })
+
+    const { result } = renderHook(() =>
+      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current).toEqual({ kind: 'ready' })
+  })
+
+  it('hybrid account: owner-only set stays no_signer for an UNRELATED connected wallet (#2068)', () => {
+    mockHybridAuth()
+    setStoredHybridSigners({
+      ...HYBRID_SIGNERS,
+      owner_address: '0x2222222222222222222222222222222222222222',
+      passkeys: [],
+    })
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS }) // Y ≠ X
+    mockUseWalletClient.mockReturnValue({ data: { type: 'walletClient' } })
+
+    const { result } = renderHook(() =>
+      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current).toEqual({ kind: 'no_signer' })
   })
 
   it('hybrid account: no_signer when no signer set is known — even with a wallet connected', () => {

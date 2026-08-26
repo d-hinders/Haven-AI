@@ -51,7 +51,7 @@ const HOW_IT_WORKS = [
   {
     step: '02',
     title: 'Set agent rules',
-    body: 'Set how much each agent can spend, and over what period. Anything outside that budget waits for your manual approval.',
+    body: 'Set how much each agent can spend, and over what period. Anything outside that budget is declined before any money moves.',
   },
   {
     step: '03',
@@ -63,7 +63,7 @@ const HOW_IT_WORKS = [
 const POLICY_METRICS = [
   { value: '$500', label: 'Daily budget' },
   { value: 'USDC', label: 'Allowed currencies' },
-  { value: '>$100', label: 'Requires approval' },
+  { value: '0', label: 'Approval queues' },
   { value: '100%', label: 'Audited payments' },
 ]
 

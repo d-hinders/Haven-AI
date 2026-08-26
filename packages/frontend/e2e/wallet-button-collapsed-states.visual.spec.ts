@@ -34,10 +34,12 @@
  * passkey on the device, which is precisely the shape the e2e fixture already
  * has: `seedAuthenticatedSession` seeds no passkey store at all, and an `eoa`
  * signer falls through both passkey branches by construction (`WalletButton`
- * narrows on `'passkey'` / `'delegator_passkey'` only). #1969 — whether a user
- * with no device marker should get a passkey signer — is the OPEN owner
- * decision that governs the other branch; this file captures what the product
- * does today and changes nothing about signer resolution.
+ * narrows on `'passkey'` / `'delegator_passkey'` only). Note the fixture user
+ * has no HYBRID account either: since #1969 (owner decision 2026-08-26) a
+ * hybrid user with a hydrated signer set resolves a `delegator_passkey` even
+ * marker-less, so reaching the connected-EOA branch additionally requires a
+ * legacy-Safe (or empty-set) account, which is what this fixture is. This
+ * file captures rendering only and changes nothing about signer resolution.
  *
  * **wrong network.** Recorded as having "no capture path in the mocked harness
  * at all". Re-derived: RainbowKit hands the render prop a `chain` object

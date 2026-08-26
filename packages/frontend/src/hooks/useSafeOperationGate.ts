@@ -7,7 +7,6 @@ import { useAuth } from '@/context/AuthContext'
 import {
   getStoredHybridSigners,
   getStoredPasskeySigner,
-  hybridPasskeyOnDevice,
   hybridSignersStorageKey,
   passkeyStorageKey,
 } from '@/lib/signer'
@@ -109,13 +108,38 @@ export function useSafeOperationGate(args: {
 
   if (isHybridAccount) {
     if (hybridSigners && hybridSigners.passkeys.length > 0) {
-      return hybridPasskeyOnDevice(hybridSigners)
-        ? { kind: 'ready' }
-        : { kind: 'passkey_on_other_device' }
+      // #1969 (owner decision 2026-08-26): a non-empty hydrated set is READY,
+      // marker or not. The set is the account's on-chain-enrolled signers, and
+      // the ceremony works without a local marker (cross-device WebAuthn — the
+      // same shipped posture as `pickSigningPath`). Returning
+      // `passkey_on_other_device` here made this gate a false blocker (#1097):
+      // it stripped Send/Receive from the dashboard hero for a user whose
+      // send modal works, while the availability hint already lives next to
+      // the working actions (DelegationSendModal, AccountSignersCard, the
+      // #1952 wallet-menu disclosure). `passkey_on_other_device` remains the
+      // LEGACY-Safe answer below, where the block is real: the stored signer
+      // metadata a Safe passkey needs is physically absent on this device.
+      return { kind: 'ready' }
     }
-    // No signer set known (hydration failed or none enrolled). Deliberately
-    // NOT falling through to the connected-EOA branch: a random connected
-    // wallet cannot sign for a Hybrid account.
+    // #2068: an owner-only hybrid set (EOA owner, zero enrolled passkeys)
+    // CAN sign — but only with the named owner. The check is the connected
+    // ADDRESS against the set's `owner_address`, mirroring `pickSigningPath`
+    // and `useActiveSigner`: "a wallet is connected" never satisfied "the
+    // owner is connected", and a gate opened for a wallet whose signature
+    // the account rejects would be worse than the false `no_signer` it
+    // replaces.
+    if (
+      hybridSigners?.owner_address &&
+      address &&
+      walletClient &&
+      address.toLowerCase() === hybridSigners.owner_address.toLowerCase()
+    ) {
+      return { kind: 'ready' }
+    }
+    // No signer set known (hydration failed or none enrolled), or the set
+    // names an owner this connected wallet is not. Deliberately NOT falling
+    // through to the connected-EOA branch: a random connected wallet cannot
+    // sign for a Hybrid account.
     return { kind: 'no_signer' }
   }
 

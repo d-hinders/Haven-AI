@@ -232,6 +232,13 @@ export function approvalBlockReason(
     return `Your wallet is connected to the wrong network. Switch to ${approvalChainName} to approve the agent budget.`
   }
   if (gate.kind === 'no_signer') return 'Connect a wallet or use a passkey on this device to approve the agent budget.'
+  // #2073: a wallet IS connected but it is not this account's owner —
+  // "connect a wallet" would send the user back to the wallet they already
+  // connected. Checked after the no_signer branches so the wrong-chain copy
+  // (which offers a one-click fix) keeps precedence for its own state.
+  if (gate.kind === 'wrong_wallet') {
+    return "The connected wallet is not this account's owner. Switch to the owner wallet to approve the agent budget."
+  }
   if (!signerReady) return 'Connect a wallet or use a passkey on this device to approve the agent budget.'
   return null
 }

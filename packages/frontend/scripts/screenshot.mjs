@@ -1008,6 +1008,42 @@ async function newFixtureContext(browser, vp, scenario) {
     }, Object.entries(seeded))
   }
 
+  // A CONNECTED wallet, through the real wagmi path (#2073). Same posture as
+  // `scenario.seed()` above: this stubs the BROWSER-side seam the product
+  // reads (an EIP-1193 provider on `window.ethereum`), so wagmi's own
+  // `injected()` connector reconnect, `useAccount`, `useSafeOperationGate`
+  // and the header render are all real. The two seeded wagmi keys are what
+  // lets the targetless injected connector reconnect on mount
+  // (`isAuthorized` requires `injected.connected`; `recentConnectorId` puts
+  // it first). Nothing above the provider is forced. Declare
+  // `connectedWallet: '0x…'` on a scenario to use it; the stub answers only
+  // the read methods a mounted app needs, and throws loudly on anything else
+  // so a scenario that starts SIGNING fails instead of hanging.
+  if (scenario?.connectedWallet) {
+    await context.addInitScript(
+      ({ addr, chainIdHex }) => {
+        window.localStorage.setItem('wagmi.injected.connected', 'true')
+        window.localStorage.setItem('wagmi.recentConnectorId', '"injected"')
+        const provider = {
+          isMetaMask: true,
+          request: async ({ method }) => {
+            if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [addr]
+            if (method === 'eth_chainId') return chainIdHex
+            if (method === 'net_version') return String(parseInt(chainIdHex, 16))
+            throw new Error(`screenshot wallet stub: unanswered method ${method}`)
+          },
+          on: () => {},
+          removeListener: () => {},
+        }
+        Object.defineProperty(window, 'ethereum', { value: provider, configurable: true })
+      },
+      {
+        addr: scenario.connectedWallet,
+        chainIdHex: `0x${FIXTURE_SAFE.chain_id.toString(16)}`,
+      },
+    )
+  }
+
   // The dev server's overlay ("N · 1 Issue") renders in a `nextjs-portal` web
   // component and lands INSIDE the PNG — dev chrome in an artefact a reviewer
   // is meant to judge the product by. Hide it; it is not part of the app.
@@ -2379,6 +2415,66 @@ export const SCENARIOS = {
       const confirm = page.getByRole('dialog', { name: 'Remove USDC budget?' })
       await confirm.waitFor({ timeout: 15_000 })
       await shoot(confirm, 'remove-confirm')
+    },
+  },
+  'wrong-wallet': {
+    description:
+      'The wrong-wallet gate state (#2073): a hydrated hybrid signer set naming an EOA owner, a connected wallet that is NOT it — the header Wrong wallet pill and its popover',
+    // ── Why this scenario exists ─────────────────────────────────────────────
+    //
+    // #2068 made the signer gate fail closed for an unrelated wallet, and
+    // #2072's design review recorded that none of the states it re-routes was
+    // capturable: the gate reads a localStorage-hydrated signer set AND a
+    // wagmi-connected wallet, and the harness could express the first
+    // (`scenario.seed`) but not the second. `connectedWallet` (the #2073 seam
+    // in `newFixtureContext`) is the missing input. Everything above the
+    // stubbed provider is the product's own code: wagmi reconnects the
+    // injected connector, `useSafeOperationGate` compares the connected
+    // address to the set's `owner_address`, and the header renders the
+    // mismatch. The signer set arrives through the REAL hydration path — the
+    // api() override below is what `AuthContext` reads and writes to the
+    // device store; nothing seeds the store directly.
+    connectedWallet: '0x' + '99'.repeat(20), // ≠ the owner below, by construction
+    api(apiPath) {
+      if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) {
+        // Owner-only set: an EOA owner, zero enrolled passkeys — #2068's
+        // shape, where the connected wallet's identity is the whole answer.
+        return {
+          account_address: FIXTURE_SAFE.safe_address,
+          chain_id: FIXTURE_SAFE.chain_id,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60_000,
+      })
+      await dismissMobileSidebar(page, vp)
+
+      // The header names the mismatch. Waiting on the accessible name pins
+      // the state through the real path — reconnect, hydration, gate — and a
+      // run where the normal address pill renders instead FAILS here rather
+      // than photographing the silent-disagreement defect as evidence.
+      const pill = page.getByRole('button', { name: 'Wrong wallet' })
+      await pill.waitFor({ timeout: 30_000 })
+      const header = page.locator('header').first()
+      await shoot(header, 'header-pill')
+
+      // The fix is one click away: the wallet menu with Switch wallet.
+      await pill.click()
+      const popover = page.getByRole('dialog', { name: 'Wallet menu' })
+      await popover.waitFor({ timeout: 15_000 })
+      await popover.getByRole('button', { name: 'Switch wallet' }).waitFor({ timeout: 15_000 })
+      // The mismatch note (design-review finding on #2073): the popover must
+      // not photograph identical to the healthy connected state.
+      await popover
+        .getByText('This is not the wallet that controls this account', { exact: false })
+        .waitFor({ timeout: 15_000 })
+      await shoot(popover, 'popover')
     },
   },
   'modal-migrations': {

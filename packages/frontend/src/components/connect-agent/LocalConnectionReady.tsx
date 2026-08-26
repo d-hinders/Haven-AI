@@ -135,8 +135,10 @@ export function LocalConnectionReady({
               {isSwitchingChain ? 'Switching network…' : `Switch to ${approvalChainName}`}
             </Button>
           )}
-          {operationGate.kind === 'no_signer' && !isWrongChain && (
-            // No wallet at all — show the connect button.
+          {((operationGate.kind === 'no_signer' && !isWrongChain) ||
+            // #2073: wrong wallet connected — the same control is the fix,
+            // because the WalletButton popover carries "Switch wallet".
+            operationGate.kind === 'wrong_wallet') && (
             <div className="mt-3">
               <WalletButton />
             </div>

@@ -16,8 +16,8 @@ import { InlineErrorNote, WarningCallout } from './SetupNotices'
  * A confirmation, not a second form: every row restates a CHOICE already
  * made on steps 1-2 (name, wallet, budget, passport), never
  * explains the protocol. The one policy fact worth restating here — that an
- * over-budget request waits for approval — is a single helper line under the
- * Budget row rather than its own row.
+ * over-budget payment is declined by the on-chain rules (#2063) — is a single
+ * helper line under the Budget row rather than its own row.
  */
 export function ReviewStep({ flow }: { flow: AgentConnectionSetupFlow }) {
   return (

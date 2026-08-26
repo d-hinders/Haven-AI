@@ -854,8 +854,13 @@ there is genuinely nothing on-chain that tells two look-alike intents apart.
 Attaching a verified settlement to either would attribute a real payment to the
 wrong purchase and strand the one that caused it. The confirm therefore refuses
 outright when another `submitted` erc7710 intent of the same
-agent/chain/token/recipient/amount exists within the maximum settlement window:
-**both** stay `submitted`. A missing book entry is recoverable; a wrong one is
+agent/chain/token/recipient/amount exists close enough in time for the two
+settlement windows to OVERLAP: **both** stay `submitted`. That reach is wider
+than one window — a window is `[t - skew, t + M + skew]`, so two of them
+intersect whenever their authorize times are within `M + 2 * skew`, not
+`M + skew` (`AMBIGUITY_WINDOW_SECONDS`). Sizing it to one window's own forward
+reach would leave a skew-wide band of genuinely overlapping look-alikes
+unguarded. A missing book entry is recoverable; a wrong one is
 not. Making the child intent-unique (a per-intent salt) would close this
 exactly and is tracked separately.
 

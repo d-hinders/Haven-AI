@@ -61,8 +61,11 @@ const CLOCK_SKEW_SECONDS = 120
  * `t2 - skew <= t1 + M + skew`, i.e. when `t2 - t1 <= M + 2 * skew`. Using
  * `M + skew` (the window's own forward reach) leaves a `skew`-wide band of
  * genuinely-overlapping look-alikes the guard would not see — which is the
- * mis-attribution this whole guard exists to prevent. Proven by the boundary
- * test at `Δt = M + skew + ε` in the repository suite.
+ * mis-attribution this whole guard exists to prevent. Pinned by the two
+ * `BOUNDARY:` tests in
+ * `modules/mpp/__tests__/erc7710-settlement-evidence.test.ts`, which run
+ * through this seam so they exercise THIS constant rather than a copy of it —
+ * one at `Δt` inside the overlap but past `M + skew`, one past the overlap.
  */
 export const AMBIGUITY_WINDOW_SECONDS = MAX_SETTLEMENT_WINDOW_SECONDS + 2 * CLOCK_SKEW_SECONDS
 

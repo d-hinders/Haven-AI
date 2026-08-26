@@ -74,11 +74,11 @@ export async function provisionThrowawayIdentity(
     return { status: res.status, json: (await res.json().catch(() => ({}))) as T }
   }
 
-  const signup = await userCall<{ token?: string }>('POST', '/auth/signup', null, {
+  const signup = await userCall<{ token?: string; error?: string }>('POST', '/auth/signup', null, {
     name: `QA ${options.label} (throwaway)`, email, password,
   })
   const token = signup.json.token
-  if (!token) return { error: `throwaway signup failed (${signup.status})` }
+  if (!token) return { error: `throwaway signup failed (${signup.status}): ${signup.json.error ?? ''}` }
 
   const hybrid = await userCall<{ error?: string }>('POST', '/accounts/hybrid', token, {
     chain_id: options.chainId, owner_address: owner.address,
@@ -92,18 +92,19 @@ export async function provisionThrowawayIdentity(
   const safe = me.json.safes?.find((s) => s.account_type === 'delegator_hybrid')
   if (!safe) return { error: 'provisioned account missing from /auth/me' }
 
-  const agentRes = await userCall<{ id?: string; api_key?: string }>('POST', '/agents', token, {
-    name: `QA ${options.label} agent`, delegate_address: delegate.address, safe_id: safe.id,
-    allowances: [{
-      token_address: SEPOLIA_USDC,
-      token_symbol: 'USDC',
-      allowance_amount: options.budgetAtomic,
-      reset_period_min: 1440,
-    }],
-  })
+  // #2020 retired the per-token `allowances` mirror: POST /agents now REFUSES a
+  // non-empty array rather than silently dropping it. The budget this throwaway
+  // actually spends is the delegation granted by grantAndActivate() below, so
+  // there is nothing to send here.
+  const agentRes = await userCall<{ id?: string; api_key?: string; error?: string }>(
+    'POST', '/agents', token,
+    { name: `QA ${options.label} agent`, delegate_address: delegate.address, safe_id: safe.id },
+  )
   const agentId = agentRes.json.id
   const agentApiKey = agentRes.json.api_key
-  if (!agentId || !agentApiKey) return { error: `throwaway agent creation failed (${agentRes.status})` }
+  if (!agentId || !agentApiKey) {
+    return { error: `throwaway agent creation failed (${agentRes.status}): ${agentRes.json.error ?? ''}` }
+  }
 
   let delegateAccountAddress: string | null = null
 

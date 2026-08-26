@@ -54,17 +54,19 @@ async function seedIntent(agentId: string, userId: string): Promise<string> {
   return r.rows[0].id
 }
 
-async function seedApproval(agentId: string, userId: string): Promise<string> {
-  const r = await db.query<{ id: string }>(
-    `INSERT INTO approval_requests
-       (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
-        amount_raw, amount_human, status, expires_at)
-     VALUES ($1, $2, $3, 'USDC', $4, $5, '100000', '0.10', 'executed',
-             NOW() + interval '1 hour')
-     RETURNING id`,
-    [agentId, userId, ADDR('f1'), ADDR('0e'), ADDR('aa')],
-  )
-  return r.rows[0].id
+// #2055: `approval_requests` is dropped (migration 070), and its DROP TABLE
+// ... CASCADE took the FK on `machine_payment_evidence.approval_request_id`
+// with it — the column survives as a plain, unconstrained UUID (the
+// migration's own header: "columns they governed survive the drop as plain
+// UUIDs"). The write path this column feeds is unreachable application code
+// (#2055 instruction: still exists, on purpose, not to be asserted gone),
+// but its ON CONFLICT behaviour is real DB behaviour worth proving, and
+// proving it no longer needs a live `approval_requests` row to point at —
+// any UUID satisfies the column now that nothing constrains it.
+function fakeApprovalId(): string {
+  seq += 1
+  const hex = seq.toString(16).padStart(12, '0')
+  return `00000000-0000-4000-8000-${hex}`
 }
 
 function evidenceInput(
@@ -152,7 +154,7 @@ describeDb('machine-payments repository (#1224)', () => {
 
   it('the approval-anchored upsert dedupes on its own partial unique index', async () => {
     const agent = await seedAgent()
-    const approvalId = await seedApproval(agent.agentId, agent.userId)
+    const approvalId = fakeApprovalId()
     const input = evidenceInput(agent, {
       referenceColumn: 'approval_request_id',
       approvalRequestId: approvalId,

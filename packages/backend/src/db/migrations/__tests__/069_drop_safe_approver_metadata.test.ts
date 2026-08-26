@@ -89,7 +89,18 @@ describeDb('migration 069: drop safe_approver_metadata (#1990)', () => {
     expect(rows[0].execution_rail).toBe('delegation')
   })
 
-  it('KEEPS the two tables split out to #2020 and #2021 — the shrink guard', async () => {
+  // #2055 (epic #1440 slice, migration 070): was "KEEPS the two tables split
+  // out to #2020 and #2021 — the shrink guard", asserting BOTH
+  // `agent_allowances` AND `approval_requests` still existed after 069's
+  // up(). `approval_requests` has since graduated from "split out, kept" to
+  // "actually dropped" — migration 070 (#2021's own migration, guarded by
+  // the CAPTAIN-owned `070_drop_approval_requests.test.ts`, not this file)
+  // drops it, and `initDbHarness()` runs the FULL migration set, so the
+  // table is already gone by the time THIS test's `up()` call runs — before
+  // 069 does anything at all. That is not a 069 regression: 069's own up()
+  // never touched `approval_requests`, only `safe_approver_metadata`. The
+  // shrink guard this test still owns is `agent_allowances` alone.
+  it('KEEPS agent_allowances, split out to #2020 — the shrink guard', async () => {
     await up(db as never)
 
     // agent_allowances: `routes/agents.ts:95` reads it for ALL agent ids
@@ -98,77 +109,24 @@ describeDb('migration 069: drop safe_approver_metadata (#1990)', () => {
     // every user of the product. → #2020.
     expect(await tableExists('agent_allowances')).toBe(true)
 
-    // approval_requests: `transaction-history.ts` joins it unconditionally,
-    // and dropping it contradicts #1440's own "accounts/history stay
-    // READABLE". → #2021, as an owner DECISION.
-    expect(await tableExists('approval_requests')).toBe(true)
+    // approval_requests: split out to #2021 as of 069, but #2021's own
+    // migration 070 has since dropped it for real — proven where it
+    // happens, in `070_drop_approval_requests.test.ts`, not here.
+    expect(await tableExists('approval_requests')).toBe(false)
   })
 
-  it('PROVES the approval_requests FK cascade hazard #2021 must not repeat', async () => {
-    // Not a hazard THIS migration has — `safe_approver_metadata`'s only
-    // foreign key points outward, at `user_safes(id)`, and nothing
-    // references it. But this file is the precedent #2021's author will
-    // copy, and the hazard has never been written down anywhere, so it is
-    // demonstrated here rather than asserted:
-    // `machine_payment_evidence.approval_request_id` is ON DELETE CASCADE
-    // (018), so emptying `approval_requests` before dropping it silently
-    // destroys money-path proof-of-payment evidence.
-    //
-    // `DROP TABLE ... CASCADE` drops the CONSTRAINT, not the child rows —
-    // which is exactly what makes the DELETE-first instinct dangerous
-    // rather than merely redundant.
-    const { userId } = await seedUserSafe(4)
-    const agent = await db.query<{ id: string }>(
-      `INSERT INTO agents (user_id, name, delegate_address, api_key_hash, api_key_prefix, status)
-       VALUES ($1, 'Cascade probe', '0x00000000000000000000000000000000000000c1',
-               $2, 'sk_agent_cas', 'active') RETURNING id`,
-      [userId, `hash-cascade-${Date.now()}`],
-    )
-    const agentId = agent.rows[0].id
-
-    const approval = await db.query<{ id: string }>(
-      `INSERT INTO approval_requests
-         (agent_id, user_id, safe_address, token_symbol, token_address,
-          to_address, amount_raw, amount_human, expires_at)
-       VALUES ($1, $2, '0x00000000000000000000000000000000000000a1', 'USDC',
-               '0x00000000000000000000000000000000000000t1',
-               '0x00000000000000000000000000000000000000d1', '10000', '0.01',
-               NOW() + INTERVAL '1 hour')
-       RETURNING id`,
-      [agentId, userId],
-    )
-    const approvalId = approval.rows[0].id
-
-    const evidence = await db.query<{ id: string }>(
-      `INSERT INTO machine_payment_evidence
-         (agent_id, user_id, rail, tx_hash, chain_id, resource_url,
-          payer_address, settlement_address, token_symbol, token_address,
-          amount_raw, amount_human, approval_request_id)
-       VALUES ($1, $2, 'x402', '0xfeed', 84532, 'https://merchant.example/r',
-               '0x00000000000000000000000000000000000000p1',
-               '0x00000000000000000000000000000000000000s1', 'USDC',
-               '0x00000000000000000000000000000000000000t1', '10000', '0.01', $3)
-       RETURNING id`,
-      [agentId, userId, approvalId],
-    )
-    const evidenceId = evidence.rows[0].id
-
-    // Positive control: the evidence row is really there before the DELETE,
-    // so its later absence means the cascade fired and not that the insert
-    // never landed.
-    const before = await db.query(`SELECT id FROM machine_payment_evidence WHERE id = $1`, [
-      evidenceId,
-    ])
-    expect(before.rows).toHaveLength(1)
-
-    await db.query(`DELETE FROM approval_requests WHERE id = $1`, [approvalId])
-
-    const after = await db.query(`SELECT id FROM machine_payment_evidence WHERE id = $1`, [
-      evidenceId,
-    ])
-    // GONE. This is the outage #2021's migration header must warn about.
-    expect(after.rows).toHaveLength(0)
-  })
+  // #2055: was "PROVES the approval_requests FK cascade hazard #2021 must
+  // not repeat" — demonstrated here, against a still-live `approval_requests`
+  // table, BEFORE #2021's migration existed, as the precedent its author
+  // would copy. #2021's migration (070) now exists and copied it: the same
+  // demonstration — seed an evidence row anchored on an approval, delete the
+  // approval, show the evidence row survives the *migration's* CASCADE
+  // (not a hand-issued DELETE) — is proven in
+  // `070_drop_approval_requests.test.ts` ("the drop severs FKs without
+  // touching evidence ROWS — the #2021 hazard, proven"). It cannot be
+  // re-proven here: `approval_requests` no longer exists in a DB that has
+  // run the full migration set, so `INSERT INTO approval_requests` errors
+  // rather than demonstrating anything.
 
   // ── Reversibility. ───────────────────────────────────────────────────────
 

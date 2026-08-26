@@ -131,7 +131,6 @@
     "packages/backend/src/rails/sweep.ts",
     "packages/backend/src/routes/agent-delegations.ts",
     "packages/backend/src/routes/agent-rekey.ts",
-    "packages/backend/src/routes/approvals.ts",
     "packages/backend/src/routes/hybrid-accounts.ts",
     "packages/backend/src/routes/machine-payments.ts",
     "packages/backend/src/routes/payments.ts",

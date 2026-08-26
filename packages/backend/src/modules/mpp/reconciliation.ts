@@ -9,7 +9,6 @@
  * type checks).
  */
 import {
-  findReconciliationApproval,
   findReconciliationEvent,
   findReconciliationIntent,
   upsertReconciliationEvent,
@@ -46,13 +45,12 @@ export async function handleReconciliationEvent(
   reason: string | undefined,
   details: Record<string, unknown> | undefined,
 ): Promise<MppHandlerResult> {
-  let payment: ReconciliationPaymentRow | null = await findReconciliationIntent(
+  // #2055: the approval_requests fallback is gone with the table — a payment
+  // id either resolves as an intent or is unknown.
+  const payment: ReconciliationPaymentRow | null = await findReconciliationIntent(
     paymentId,
     agentId,
   )
-  if (!payment) {
-    payment = await findReconciliationApproval(paymentId, agentId)
-  }
   if (!payment) {
     return { statusCode: 404, body: { error: 'Payment not found' } }
   }

@@ -68,6 +68,7 @@ import * as catalogSubmissions from './066_catalog_submissions.js'
 import * as agentsMcpServerName from './067_agents_mcp_server_name.js'
 import * as catalogLifecycle from './068_catalog_lifecycle.js'
 import * as dropSafeApproverMetadata from './069_drop_safe_approver_metadata.js'
+import * as dropApprovalRequests from './070_drop_approval_requests.js'
 
 export interface Migration {
   version: string
@@ -149,4 +150,5 @@ export const migrations: Migration[] = [
   agentsMcpServerName,
   catalogLifecycle,
   dropSafeApproverMetadata,
+  dropApprovalRequests,
 ]

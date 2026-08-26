@@ -16,7 +16,6 @@
  */
 import {
   attachEvidenceProof,
-  findApprovalForEvidenceScoped,
   findIntentEvidenceSource,
   findIntentForEvidenceScoped,
   getIntentSettlementFields,
@@ -306,11 +305,10 @@ async function findProtocolPaymentForEvidence(
   agentId: string,
   paymentId: string,
 ): Promise<ProtocolPaymentEvidenceRow | null> {
+  // #2055: the approval_requests fallback is gone with the table — a payment
+  // id either resolves as an intent or is unknown.
   const payment = await findIntentForEvidenceScoped(paymentId, agentId)
-  if (payment) return payment as PaymentIntentEvidenceRow
-
-  const approval = await findApprovalForEvidenceScoped(paymentId, agentId)
-  return (approval as ApprovalRequestEvidenceRow | null) ?? null
+  return (payment as PaymentIntentEvidenceRow | null) ?? null
 }
 
 export async function attachMachinePaymentEvidence(

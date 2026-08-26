@@ -50,7 +50,6 @@ import passportVerifyRoutes from './routes/passport-verify.js'
 import agentConnectionSetupRoutes from './routes/agent-connection-setups.js'
 import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
-import approvalRoutes from './routes/approvals.js'
 import agentActivityRoutes from './routes/agent-activity.js'
 import x402Routes from './routes/x402.js'
 import userSafesRoutes from './routes/user-safes.js'
@@ -267,7 +266,8 @@ await app.register(passportVerifyRoutes, { prefix: '/passport' })
 await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
 await app.register(contactRoutes, { prefix: '/contacts' })
 await app.register(paymentRoutes, { prefix: '/payments' })
-await app.register(approvalRoutes, { prefix: '/approvals' })
+// #2055: /approvals is deregistered — the approval queue died with the
+// AllowanceModule rail and its table is dropped; the routes went with it.
 await app.register(agentActivityRoutes, { prefix: '/agent-activity' })
 await app.register(x402Routes, { prefix: '/x402' })
 await app.register(userSafesRoutes, { prefix: '/user/safes' })

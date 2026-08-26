@@ -357,8 +357,11 @@ export const CONFIRM_SETTLEMENT_OBSERVED_SQL = `UPDATE payment_intents
  *   attributing a real payment to the wrong purchase, and stranding the one
  *   that actually caused it. Haven refuses to GUESS: when a look-alike
  *   `submitted` erc7710 intent of the same agent/chain/token/recipient/amount
- *   exists within `$6` seconds (the maximum settlement window, so the only
- *   span in which two windows can overlap), the confirm is refused and BOTH
+ *   exists within `$6` seconds — the caller passes the span in which two
+ *   settlement windows can actually OVERLAP, which is wider than one window's
+ *   own forward reach (see `AMBIGUITY_WINDOW_SECONDS` in
+ *   `modules/x402/settlement-observed.ts` for the arithmetic) — the confirm is
+ *   refused and BOTH
  *   intents stay `submitted`. Failing closed on an ambiguous settlement is the
  *   whole point: a missing book entry is recoverable, a wrong one is not.
  *
@@ -376,7 +379,11 @@ export interface ObservedSettlementConfirm {
   agentId: string
   usdValue: number | string | null
   eurValue: number | string | null
-  /** Maximum settlement-window span, in seconds — the ambiguity guard's reach. */
+  /**
+   * The ambiguity guard's reach, in seconds: how far apart two intents'
+   * `created_at` values can be and still have overlapping settlement windows.
+   * NOT the same as one window's width — see `AMBIGUITY_WINDOW_SECONDS`.
+   */
   windowSeconds: number
 }
 

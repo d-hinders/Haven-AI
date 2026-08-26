@@ -338,6 +338,47 @@ describeDb('erc7710 settlement completion → evidence pipeline (#2092)', () => 
     expect(feedSettledPaymentBestEffort).not.toHaveBeenCalled()
   })
 
+  it('BOUNDARY: a look-alike whose window merely OVERLAPS still blocks', async () => {
+    // Δt = 800 is further apart than one window's forward reach (600 + 120), so
+    // a guard sized to that reach would miss it — yet the two windows genuinely
+    // overlap in [t1+680, t1+720] and one settlement is valid for BOTH. This
+    // goes through the REAL wiring, so it pins the production constant, not a
+    // copy of it. (The off-by-a-skew this catches was found by review.)
+    getTransactionReceipt.mockResolvedValue(goodReceipt())
+    getBlock.mockResolvedValue(blockAt(700))
+    const { agentId, userId } = await seedAgent()
+    const real = await seedIntent({ agentId, userId })
+    await seedIntent({ agentId, userId, createdOffsetSec: 800 })
+
+    await expect(attach(agentId, real, HASH_A)).rejects.toThrow('settlement_unverified')
+    expect((await readIntent(real)).status).toBe('submitted')
+  })
+
+  it('BOUNDARY: a look-alike whose windows CANNOT overlap does not block', async () => {
+    // Δt = 900 > 600 + 2*120: no instant lies inside both windows, so the block
+    // timestamp alone separates them and refusing would be pure loss.
+    getTransactionReceipt.mockResolvedValue(goodReceipt())
+    const { agentId, userId } = await seedAgent()
+    const real = await seedIntent({ agentId, userId })
+    await seedIntent({ agentId, userId, createdOffsetSec: 900 })
+
+    await expect(attach(agentId, real, HASH_A)).resolves.not.toBeNull()
+    expect((await readIntent(real)).status).toBe('confirmed')
+  })
+
+  it('an intent with no authorize time refuses rather than inventing a window', async () => {
+    getTransactionReceipt.mockResolvedValue(goodReceipt())
+    const { agentId, userId } = await seedAgent()
+    const intentId = await seedIntent({ agentId, userId })
+    await db.query(`UPDATE payment_intents SET created_at = NULL WHERE id = $1`, [intentId])
+
+    await expect(attach(agentId, intentId, HASH_A)).rejects.toThrow('settlement_unverified')
+    expect((await readIntent(intentId)).status).toBe('submitted')
+    expect(await readEvidence(intentId)).toHaveLength(0)
+    // The chain is never consulted — the window cannot be established at all.
+    expect(getTransactionReceipt).not.toHaveBeenCalled()
+  })
+
   it('a sibling intent for a DIFFERENT amount does not block the real one', async () => {
     getTransactionReceipt.mockResolvedValue(goodReceipt())
     const { agentId, userId } = await seedAgent()

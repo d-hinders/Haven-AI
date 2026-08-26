@@ -14,6 +14,7 @@ import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import { confirmObservedSettlement } from '../x402-authorizations.js'
+import { AMBIGUITY_WINDOW_SECONDS } from '../../../modules/x402/settlement-observed.js'
 
 let seq = 0
 
@@ -32,7 +33,9 @@ async function seedAgent(): Promise<{ agentId: string; userId: string }> {
   return { agentId: agent.rows[0].id, userId: user.rows[0].id }
 }
 
-const WINDOW_SECONDS = 720
+// The PRODUCTION reach, imported rather than restated — a local copy would let
+// the seam's own value drift while these tests stayed green.
+const WINDOW_SECONDS = AMBIGUITY_WINDOW_SECONDS
 
 interface IntentSeed {
   agentId: string

@@ -51,6 +51,21 @@ import { MAX_SETTLEMENT_WINDOW_SECONDS } from './x402-delegation.js'
  */
 const CLOCK_SKEW_SECONDS = 120
 
+/**
+ * How far apart two intents' `created_at` values can be and still have
+ * OVERLAPPING settlement windows — the reach the ambiguity guard must have.
+ *
+ * The arithmetic matters and is easy to get wrong. A window is asymmetric
+ * about its own authorize time `t`: `[t - skew, t + M + skew]`. Two such
+ * windows around `t1 <= t2` intersect exactly when
+ * `t2 - skew <= t1 + M + skew`, i.e. when `t2 - t1 <= M + 2 * skew`. Using
+ * `M + skew` (the window's own forward reach) leaves a `skew`-wide band of
+ * genuinely-overlapping look-alikes the guard would not see — which is the
+ * mis-attribution this whole guard exists to prevent. Proven by the boundary
+ * test at `Δt = M + skew + ε` in the repository suite.
+ */
+export const AMBIGUITY_WINDOW_SECONDS = MAX_SETTLEMENT_WINDOW_SECONDS + 2 * CLOCK_SKEW_SECONDS
+
 /** The intent fields this seam needs; a structural subset of the evidence source row. */
 export interface ObservableSettlementIntent {
   id: string
@@ -79,8 +94,6 @@ export type SettlementObservation =
   | { outcome: 'not_applicable' }
   /** Refused. `retryable` distinguishes "ask again later" from a settled no. */
   | { outcome: 'unverified'; retryable: boolean; reason: string }
-  /** Refused because more than one open intent could own this settlement. */
-  | { outcome: 'ambiguous'; reason: string }
 
 function settlementSchemeOf(intent: ObservableSettlementIntent): string | null {
   const raw = intent.machine_metadata
@@ -137,7 +150,18 @@ export async function observeErc7710Settlement(
   // by the maximum rather than by the intent's own `maxTimeoutSeconds` keeps
   // the check derived from a construction invariant instead of from a value
   // parsed back out of `prepared_user_op`, and can only ever be MORE permissive.
-  const authorizeSec = Math.floor(new Date(intent.created_at ?? Date.now()).getTime() / 1000)
+  const authorizeSec = Math.floor(new Date(intent.created_at ?? '').getTime() / 1000)
+  if (!Number.isFinite(authorizeSec)) {
+    // No authorize time means no window, and no window means check 7 — the only
+    // intent-specific check — cannot run. Refuse rather than substitute a
+    // wall-clock "now": a window around the wrong anchor is worse than none,
+    // because it would silently pass a settlement from an unrelated payment.
+    return {
+      outcome: 'unverified',
+      retryable: false,
+      reason: 'The payment has no authorize time, so its settlement window cannot be established',
+    }
+  }
 
   const verification = await verifySettlementTransferTx(txHash, {
     chainId: intent.chain_id,
@@ -175,7 +199,7 @@ export async function observeErc7710Settlement(
       agentId: intent.agent_id,
       usdValue: fiat.usd,
       eurValue: fiat.eur,
-      windowSeconds: MAX_SETTLEMENT_WINDOW_SECONDS + CLOCK_SKEW_SECONDS,
+      windowSeconds: AMBIGUITY_WINDOW_SECONDS,
     },
     db,
   )
@@ -187,6 +211,13 @@ export async function observeErc7710Settlement(
     // different intent, or the ambiguity guard refused because a look-alike
     // open intent means Haven cannot tell which purchase this settlement paid
     // for. Refuse rather than guess which.
+    //
+    // Deliberately NOT distinguished into three outcomes: telling them apart
+    // needs a second read after the failed UPDATE, and that read races the
+    // very state the UPDATE just lost — it could only ever report what was
+    // true a moment later. All three are the same answer to the caller (this
+    // payment was not confirmed, and reporting the same hash again will not
+    // change that), so the message names all three rather than asserting one.
     return {
       outcome: 'unverified',
       retryable: false,

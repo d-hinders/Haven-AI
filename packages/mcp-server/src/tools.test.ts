@@ -5558,3 +5558,323 @@ describe('#2051 — cap binds the authorized option', () => {
     })
   })
 })
+
+/**
+ * #2054 — an erc7710-ONLY merchant is reachable through the two MCP purchase
+ * tools, and unreachability is refused for the REAL reason.
+ *
+ * `buildX402Quote` was standard-anchored: it threw "no compatible payment
+ * option" whenever `selectStandardPaymentOption` found nothing, so a merchant
+ * advertising ONLY an erc7710-tagged entry — the PREFERRED scheme on the
+ * delegation rail (#1450) — was refused before scheme selection ever saw it.
+ * The quote now falls back to describing the erc7710 entry, and the tools
+ * refuse a null scheme selection with the real reason (the ACCOUNT's rail)
+ * instead of falling through to a message that blames the merchant.
+ *
+ * Fixture discipline (#2051's lesson): the erc7710-only entry carries
+ * 2 500 000 — an amount NOTHING else in this file's default fixtures carries
+ * (PAYMENT_REQUIRED's standard entry is 1 000 000 / 1 500 000, the catalog's
+ * indicative price is 1 500 000) — so an assertion on it cannot be satisfied
+ * by an inherited number.
+ */
+describe('#2054 — erc7710-only merchants', () => {
+  const FACILITATOR = '0x4444444444444444444444444444444444444444'
+  const ERC7710_ONLY_ATOMIC = '2500000' // 2.50 USDC — unique to this suite by design
+  const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+  const LEGACY_AGENT = { ...AGENT_RESPONSE, execution_rail: 'legacy' }
+
+  /** A merchant advertising erc7710 and NOTHING else — no standard entry at all. */
+  const ERC7710_ONLY_PR = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: ERC7710_ONLY_ATOMIC,
+        maxAmountRequired: ERC7710_ONLY_ATOMIC,
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR] },
+      },
+    ],
+  }
+
+  /** Negative control: one entry, payable by NEITHER selector (unknown asset). */
+  const NOTHING_SETTLEABLE_PR = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        asset: '0x0000000000000000000000000000000000000001',
+      },
+    ],
+  }
+
+  const CHILD = {
+    payment_id: 'pay_7710_only',
+    status: 'pending_signature',
+    sign_data: {
+      hash: '0x' + '22'.repeat(32),
+      signature_scheme: 'eip712_delegation',
+      typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+    },
+  }
+
+  function x402Body() {
+    const call = calls.find((c) => new URL(c.url).pathname === '/x402')
+    if (!call) return undefined
+    const raw = call.body
+    return (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, any>
+  }
+
+  describe('haven_pay_mcp_tool', () => {
+    async function pay(
+      pr: unknown,
+      agentRoute: RouteDefinition,
+      cap: Record<string, string>,
+    ) {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
+        },
+        'GET /machine-payments/agent': agentRoute,
+        'POST /x402': { status: 201, body: CHILD },
+      })
+      return handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        ...cap,
+      })
+    }
+
+    it('delegation rail: prepares DIRECT settlement and reports the erc7710 amount end-to-end', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(ERC7710_ONLY_PR, { status: 200, body: DELEGATION_AGENT }, { max_amount_human: '3' }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(res.data.settlement).toMatchObject({ scheme: 'erc7710', funding_leg: false })
+      // The authorize carries the erc7710 entry's OWN amount and scheme.
+      expect(x402Body()?.amount).toBe(ERC7710_ONLY_ATOMIC)
+      expect(x402Body()?.settlementScheme).toBe('erc7710')
+      expect(x402Body()?.facilitatorAddresses).toEqual([FACILITATOR])
+      // The response reports what was actually authorized — top level AND the
+      // summary an agent surfaces to the user (#2051's misreport pins).
+      expect(res.data.amount_atomic).toBe(ERC7710_ONLY_ATOMIC)
+      expect(res.data.amount).toBe('2.5')
+      expect(res.data.agent_summary).toMatchObject({
+        amount_atomic: ERC7710_ONLY_ATOMIC,
+        amount: '2.5',
+        token: 'USDC',
+      })
+    })
+
+    it('a stated cap UNDER the erc7710 price refuses PRICE_EXCEEDS_MAX before any authorize', async () => {
+      const res = await pay(
+        ERC7710_ONLY_PR,
+        { status: 200, body: DELEGATION_AGENT },
+        { max_amount_human: '1' },
+      )
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('PRICE_EXCEEDS_MAX')
+      expect((res as { message?: string }).message).toContain('max_amount_human 1 USDC')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('a stated cap OVER the erc7710 price still succeeds — the cap binds, it does not block', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(ERC7710_ONLY_PR, { status: 200, body: DELEGATION_AGENT }, { max_amount: ERC7710_ONLY_ATOMIC }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()?.amount).toBe(ERC7710_ONLY_ATOMIC)
+    })
+
+    it('LEGACY rail: refuses with the rail as the reason, not "no compatible payment option"', async () => {
+      const res = await pay(
+        ERC7710_ONLY_PR,
+        { status: 200, body: LEGACY_AGENT },
+        { max_amount_human: '3' },
+      )
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('ERC7710_RAIL_REQUIRED')
+      const message = (res as { message?: string }).message ?? ''
+      expect(message).toContain('delegation-rail')
+      expect(message).toContain("'legacy' rail")
+      expect(message).not.toContain('No compatible payment option')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('a FAILED agent read refuses rather than guessing a rail it could not see', async () => {
+      const res = await pay(ERC7710_ONLY_PR, { status: 500, body: {} }, { max_amount_human: '3' })
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('ERC7710_RAIL_REQUIRED')
+      expect((res as { message?: string }).message).toContain('could not be read')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('negative control: a merchant with NOTHING settleable still refuses as before', async () => {
+      const res = await pay(
+        NOTHING_SETTLEABLE_PR,
+        { status: 200, body: DELEGATION_AGENT },
+        { max_amount_human: '3' },
+      )
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+      expect(x402Body()).toBeUndefined()
+    })
+  })
+
+  describe('haven_prepare_catalog_purchase', () => {
+    const CATALOG_ENTRY = {
+      id: 'cat_1',
+      name: 'CloudNest 50GB',
+      description: 'Cloud storage tier',
+      category: 'compute',
+      resource_url: 'http://merchant.test/mcp',
+      rail: 'x402',
+      protocol: 'mcp',
+      tool_name: 'create_text',
+      tool_arguments: { prompt: 'Hello' },
+      price_display: '$1.50 USDC',
+      price_atomic: '1500000',
+      asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+      network: 'eip155:8453',
+      status: 'active',
+      verified_at: '2026-06-16T08:50:39.772Z',
+    }
+
+    function allowances(remaining: string, rail: 'legacy' | 'delegation') {
+      return {
+        agent_id: 'agt_1',
+        safe_address: '0xSafe',
+        delegate_address: '0xDelegate',
+        chain_id: 8453,
+        allowances: [
+          {
+            id: rail === 'delegation' ? 'delegation-1' : 'allowance-1',
+            token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+            token_symbol: 'USDC',
+            allowance_amount: '5.000000',
+            reset_period_min: 1440,
+            onchain: { amount: '5000000', spent: '0', remaining, is_active: true },
+          },
+        ],
+      }
+    }
+
+    async function prepare(
+      pr: unknown,
+      agent: Record<string, unknown>,
+      cap: Record<string, string>,
+      opts: { remaining?: string } = {},
+    ) {
+      const rail =
+        (agent as { execution_rail?: string }).execution_rail === 'delegation'
+          ? 'delegation'
+          : 'legacy'
+      stubFetch({
+        'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY },
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
+        },
+        'POST /x402': { status: 201, body: CHILD },
+        'GET /machine-payments/agent': { status: 200, body: agent },
+        'GET /machine-payments/allowances': {
+          status: 200,
+          body: allowances(opts.remaining ?? '5000000000', rail as 'legacy' | 'delegation'),
+        },
+      })
+      return handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', ...cap })
+    }
+
+    it('delegation rail: prepares DIRECT settlement with the catalog fields and allowance block kept', async () => {
+      const res = ok<Record<string, any>>(
+        await prepare(ERC7710_ONLY_PR, DELEGATION_AGENT, { max_amount_human: '3' }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(res.data.catalog_id).toBe('cat_1')
+      expect(res.data.allowance).toMatchObject({ rail: 'delegation', sufficient: true })
+      expect(x402Body()?.amount).toBe(ERC7710_ONLY_ATOMIC)
+      expect(x402Body()?.settlementScheme).toBe('erc7710')
+      expect(res.data.amount_atomic).toBe(ERC7710_ONLY_ATOMIC)
+      expect(res.data.amount).toBe('2.5')
+      expect(res.data.agent_summary).toMatchObject({
+        amount_atomic: ERC7710_ONLY_ATOMIC,
+        amount: '2.5',
+        token: 'USDC',
+      })
+    })
+
+    it('a stated cap UNDER the erc7710 price refuses PRICE_EXCEEDS_MAX before any authorize', async () => {
+      const res = await prepare(ERC7710_ONLY_PR, DELEGATION_AGENT, { max_amount_human: '1' })
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('PRICE_EXCEEDS_MAX')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('the delegation BUDGET pre-check reads the erc7710 amount on this newly reachable path', async () => {
+      const res = await prepare(ERC7710_ONLY_PR, DELEGATION_AGENT, { max_amount_human: '3' }, {
+        remaining: '1000000', // under the 2.50 the erc7710 entry authorizes
+      })
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('DELEGATION_BUDGET_EXCEEDED')
+      expect((res as { message?: string }).message).toContain(ERC7710_ONLY_ATOMIC)
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('LEGACY rail: refuses with the rail as the reason, not "no compatible payment option"', async () => {
+      const res = await prepare(ERC7710_ONLY_PR, LEGACY_AGENT, { max_amount_human: '3' })
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('ERC7710_RAIL_REQUIRED')
+      expect((res as { message?: string }).message).not.toContain('No compatible payment option')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('negative control: a merchant with NOTHING settleable still refuses as before', async () => {
+      const res = await prepare(NOTHING_SETTLEABLE_PR, DELEGATION_AGENT, { max_amount_human: '3' })
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+      expect(x402Body()).toBeUndefined()
+    })
+  })
+
+  describe('haven_quote_mcp_tool', () => {
+    async function quoteTool(pr: unknown) {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
+        },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+      })
+      return handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      })
+    }
+
+    it('quotes an erc7710-only merchant and says so, instead of refusing it as incompatible', async () => {
+      const res = ok<Record<string, any>>(await quoteTool(ERC7710_ONLY_PR))
+      expect(res.data.amount_atomic).toBe(ERC7710_ONLY_ATOMIC)
+      expect(res.data.accepted_scheme).toBe('erc7710')
+      expect(res.data.erc7710_only).toBe(true)
+    })
+
+    it('a standard quote is labeled standard and carries no erc7710_only flag', async () => {
+      const res = ok<Record<string, any>>(await quoteTool(PAYMENT_REQUIRED))
+      expect(res.data.accepted_scheme).toBe('standard')
+      expect(res.data.erc7710_only).toBeUndefined()
+      // Unchanged: the standard entry's own amount, not this suite's.
+      expect(res.data.amount_atomic).toBe('1500000')
+    })
+
+    it('negative control: a merchant with NOTHING settleable is still refused at the quote', async () => {
+      // This is the pin that keeps `buildX402Quote`'s fallback honest: a
+      // mutation that falls back to ANY accepts[] entry (rather than the
+      // erc7710 selector's) would happily quote this unpayable merchant.
+      const res = await quoteTool(NOTHING_SETTLEABLE_PR)
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+    })
+  })
+})

@@ -30,7 +30,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-25" # #2041: the hosted GENERIC plain-HTTP x402 path (`haven_pay_x402_quote` -> `haven_submit`) now applies the shared #1450/#1453 settlement-scheme selector instead of hard-routing to the EIP-3009 bridge, so two claims here were corrected rather than appended to. The "Hosted Generic Split Flow" diagram was the ONLY shape of that path and is now labelled as the EIP-3009 shape, with the erc7710 shape recorded beside it (two steps SHORTER -- no funding relay, no `haven_x402_sign_header`). And the #1456/#1547 roll-call paragraph enumerated by name every tool wired to the selector, with the generic entry point conspicuously absent -- which read as "only the MCP-merchant tools can reach erc7710"; it now names `haven_pay_x402_quote`/`haven_submit`. Nothing about the backend dispatch contract, the payTo-shape table or the delegation-rail sequence moved: no new scheme, no new wire enum, no new authority. Scope: those two sections plus the surrounding erc7710 prose; the legacy-rail and MPP sections were not re-read. Prior: #1987: the "the code that implements it is still present" banner was future-tense and is now false (legacy-authorize.ts is deleted) — rewritten past-tense; the dead `domain/payment-coverage.ts` link removed from Source of truth (the file is deleted, the link 404'd); and the shared-writers paragraph no longer names legacy-authorize.ts as a live caller. Prior: #1986: the legacy AllowanceModule two-leg no longer RUNS — every x402 and payment entry point answers 410 for an allowance_module account. The sequence is kept as history (its code is deleted by #1987) and the rail banner now says so; the delegation-rail ERC-7710 sequence re-read against the diff and unchanged. Prior: #1984: "import-only" corrected. The two-leg funding model and both rails' x402 sequences re-read against the diff and unchanged — this slice closes account provisioning only, not payment. Prior: #1640 re-verify: authMiddleware now refuses purpose-claim tokens and catalog.ts routes through it instead of a hand-rolled jwtVerify. Agent API-key auth (agentAuth.ts) is a separate credential type and untouched, so every x402 sequence claim here re-read against the diff stands. # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-26" # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -916,6 +916,28 @@ header comes back from Haven. So the settle tool branches before the funding
 relay, not after it. Note what the SDK does NOT do
 on this path: it builds no header locally and touches no funds, because the
 backend assembles the MetaMask payload in `assembleSettlementPayload`.
+
+As of [#2054](https://github.com/d-hinders/Haven-AI/issues/2054) the **quote
+path itself is selection-aware**, which is what makes an **erc7710-ONLY**
+merchant (no untagged `accepts[]` entry at all) reachable through the two MCP
+purchase tools: `buildX402Quote` — the helper behind `haven_quote_mcp_tool`,
+`haven_quote_catalog_purchase`, `haven_pay_mcp_tool` and
+`haven_prepare_catalog_purchase` — no longer throws when
+`selectStandardPaymentOption` finds nothing; it falls back to DESCRIBING the
+erc7710 entry and labels which selector produced it (`acceptedScheme` on the
+quote, surfaced as `accepted_scheme` / `erc7710_only` on the quote tools). The
+selector's #1453 skip is untouched, and the 3009 settlement paths keep
+re-selecting through it, so an erc7710-described quote can never leak into an
+EIP-3009 authorization. The two purchase tools then refuse a **null scheme
+selection** with `ERC7710_RAIL_REQUIRED` — the account's rail cannot settle
+the merchant's only compatible entry, or (pay tool only) the rail could not be
+read — before any pricing or intent, instead of falling through to a
+"no compatible payment option" that blames the merchant. A merchant with
+nothing payable of EITHER kind still gets exactly that pre-existing refusal,
+where it is accurate. Cap coherence is preserved by construction: the
+guaranteed-non-null selection removed the `?? quote.accepted` display
+fallbacks, so the quote shown, the cap checked (`priceSelectedOption`), and
+the amount authorized all read the SAME selected option (#2051's invariant).
 
 **Still unproven end to end, and worth stating rather than assuming.** The
 nightly `x402-erc7710-settle` QA leg exercises the RAW API and deliberately

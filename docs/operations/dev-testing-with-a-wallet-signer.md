@@ -7,7 +7,7 @@ covers:
   - packages/frontend/src/hooks/useAccountSigners.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/backend/src/rails/hybrid-signer-actions.ts
-last-verified: "2026-08-14" # #1199: two-to-one passkey removal matches the existing one-signer posture
+last-verified: "2026-08-26" # #2068: the "any connected wallet is accepted by the UI; ownership fails on-chain" sentence was made false by the client-side owner match (pickSigningPath/useActiveSigner compare the connected address to owner_address before offering the EOA path) — rewritten to describe the new failure shape (silent fallback to passkey/QR or no-signer, never an on-chain failure). Rest of the walkthrough re-read against the diff; the connect-first and hint paragraphs stand. Prior: #1199: two-to-one passkey removal matches the existing one-signer posture
 ---
 
 # Dev testing with a wallet signer
@@ -48,9 +48,12 @@ to the passkey, which lives on another domain, and you land on the cross-device
 QR screen — a dead end, because that QR is domain-bound too. Close it, connect,
 retry.
 
-**Connect the *enrolled* wallet.** Any connected wallet is accepted by the UI;
-the ownership check happens on-chain, so the wrong account fails with an unhelpful
-error. Check MetaMask's selected account first.
+**Connect the *enrolled* wallet.** Since #2068 the ownership check is
+client-side: the EOA path is only offered when the connected address equals the
+account's `owner_address`. A wrong account no longer fails on-chain with an
+unhelpful error — it is never offered at all, and the app falls back to the
+passkey path (the cross-device QR dead end above) or shows the no-signer state.
+Check MetaMask's selected account first; "connected" alone proves nothing here.
 
 The card may say *"This account's passkey may be on another device"*.
 On a preview that's expected — ignore it, the wallet signs.

@@ -1633,7 +1633,7 @@ export default function DesignSystemPage() {
                 className="mb-2 flex items-start gap-2 text-xs text-[var(--v2-ink-3)]"
               >
                 <Icon icon={Info} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-                <span>Connect a wallet to update this agent budget.</span>
+                <span>Connect the account&apos;s owner wallet to update this agent budget.</span>
               </p>
               <div className="flex gap-3">
                 <Button variant="ghost" className="flex-1">Back</Button>

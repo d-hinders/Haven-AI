@@ -249,7 +249,7 @@ export function useAgentRekey(agentId: string, chainId: number) {
     }
   }, [agentId])
 
-  const signingPath = pickSigningPath(signers, signer?.type === 'eoa')
+  const signingPath = pickSigningPath(signers, signer?.type === 'eoa' ? signer.address : null)
 
   /**
    * Whether this device can sign the re-key at all.

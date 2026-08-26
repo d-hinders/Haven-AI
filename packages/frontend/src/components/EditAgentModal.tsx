@@ -136,7 +136,7 @@ export default function EditAgentModal({
     safeAddress: safeAddress as Address,
     chainId,
   })
-  const budgetApprovalMessage = 'Connect a wallet to update this agent budget.'
+  const budgetApprovalMessage = "Connect the account's owner wallet to update this agent budget."
   const { toast } = useToast()
 
   // Tokens already configured on-chain for this delegate, matched by both

@@ -21,7 +21,7 @@ vi.mock('@/lib/delegationPasskeySigner', () => ({
   signUserOpWithPasskey: mockSignUserOp,
 }))
 
-const { useDelegationBudget } = await import('@/hooks/useDelegationBudget')
+const { useDelegationBudget, pickSigningPath } = await import('@/hooks/useDelegationBudget')
 
 const AGENT = 'agent-1'
 const PASSKEY_SIGNERS = {
@@ -223,6 +223,73 @@ describe('multi-signer accounts (the Daniel regression)', () => {
     const prepareCall = mockPost.mock.calls.find(([url]) => String(url).endsWith('/revoke'))!
     expect(prepareCall[1]).toMatchObject({ signature_scheme: 'eip712_userop' })
     expect(signTypedData).toHaveBeenCalled()
+  })
+})
+
+describe('pickSigningPath owner match (#2068)', () => {
+  // The EOA rung takes the connected ADDRESS: "a wallet is connected" never
+  // satisfied "the owner is connected". These pin the rung's address check
+  // directly, independent of useActiveSigner's mirror of the same rule.
+  const OWNER = '0x' + 'ee'.repeat(20)
+  const OTHER = '0x' + '99'.repeat(20)
+  const MIXED = {
+    account_address: '0x' + 'aa'.repeat(20),
+    chain_id: 84532,
+    owner_address: OWNER,
+    passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+  }
+
+  it('mixed set + unrelated connected wallet → passkey, never eoa', () => {
+    expect(pickSigningPath(MIXED as never, OTHER)).toBe('passkey')
+  })
+
+  it('mixed set + the owner wallet connected → eoa (case-insensitive)', () => {
+    expect(pickSigningPath(MIXED as never, OWNER.toUpperCase().replace('0X', '0x'))).toBe('eoa')
+  })
+
+  it('owner-only set + unrelated connected wallet → null (offered-but-failing is worse than absent)', () => {
+    expect(pickSigningPath({ ...MIXED, passkeys: [] } as never, OTHER)).toBeNull()
+  })
+
+  it('owner-only set + the owner wallet connected → eoa', () => {
+    expect(pickSigningPath({ ...MIXED, passkeys: [] } as never, OWNER)).toBe('eoa')
+  })
+
+  it('a device-marked passkey still beats the connected owner wallet', () => {
+    mockOnDevice.mockReturnValue(true)
+    expect(pickSigningPath(MIXED as never, OWNER)).toBe('passkey')
+  })
+
+  it('hook-level: a mixed account with an UNRELATED wallet connected signs with the passkey, not the wallet', async () => {
+    // Simulates the hydration-failed corner where useActiveSigner could only
+    // offer the bare connected EOA: pickSigningPath must still refuse the
+    // non-owner wallet and route the grant through the WebAuthn ceremony.
+    const MIXED_SIGNERS = { ...MIXED }
+    mockApi(MIXED_SIGNERS)
+    mockOnDevice.mockReturnValue(false)
+    const signTypedData = vi.fn()
+    mockSigner.mockReturnValue({ type: 'eoa', address: OTHER, walletClient: { signTypedData } })
+    const message = { delegate: '0xd', delegator: '0xa', authority: '0x0', caveats: [], salt: '1' }
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({ delegation_hash: '0xhash', version: 1, signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message } })
+      }
+      return Promise.resolve({ activated: true })
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'ab'.repeat(200))
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.grant({
+        tokenAddress: ('0x' + 'cc'.repeat(20)) as never,
+        budgetAtomic: '1000',
+        periodSeconds: 86400,
+      })
+      expect(res.ok).toBe(true)
+    })
+    expect(mockSignDelegation).toHaveBeenCalled()
+    expect(signTypedData).not.toHaveBeenCalled()
   })
 })
 

@@ -242,6 +242,56 @@ describe('useActiveSigner', () => {
     expect(result.current).toEqual({ type: 'eoa', address: EOA_ADDRESS, walletClient })
   })
 
+  it('mixed account: an UNRELATED connected wallet never takes the EOA rung (#2068) — the passkey is offered instead', () => {
+    // The set names owner X; the connected wallet is Y ≠ X. Pre-#2068 the
+    // EOA rung read "a wallet is connected" as "the owner is connected" and
+    // offered Y, whose signature the account rejects at verification time.
+    // A signer offered but failing at signature time is worse than absent:
+    // the resolution must stay inside the set and offer the passkey.
+    const OWNER = '0x2222222222222222222222222222222222222222' as Address
+    setStoredHybridSigners({ ...HYBRID_SIGNERS, owner_address: OWNER })
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS }) // Y ≠ X
+    mockUseWalletClient.mockReturnValue({ data: { transport: {} } })
+
+    const { result } = renderHook(() =>
+      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current?.type).toBe('delegator_passkey')
+  })
+
+  it('owner-only hybrid set: the connected OWNER wallet resolves as the EOA signer (#2068), case-insensitively', () => {
+    const walletClient = { transport: {} }
+    // Stored owner in checksummed-ish case, connected address lowercase —
+    // the comparison must be case-insensitive to avoid a false refusal.
+    setStoredHybridSigners({
+      ...HYBRID_SIGNERS,
+      owner_address: EOA_ADDRESS.toUpperCase().replace('0X', '0x'),
+      passkeys: [],
+    })
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
+    mockUseWalletClient.mockReturnValue({ data: walletClient })
+
+    const { result } = renderHook(() =>
+      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current).toEqual({ type: 'eoa', address: EOA_ADDRESS, walletClient })
+  })
+
+  it('owner-only hybrid set: an UNRELATED connected wallet resolves NOTHING (#2068 — no signer beats a failing one)', () => {
+    const OWNER = '0x2222222222222222222222222222222222222222' as Address
+    setStoredHybridSigners({ ...HYBRID_SIGNERS, owner_address: OWNER, passkeys: [] })
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS }) // Y ≠ X
+    mockUseWalletClient.mockReturnValue({ data: { transport: {} } })
+
+    const { result } = renderHook(() =>
+      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current).toBeNull()
+  })
+
   it('mixed account: a marker-matched passkey beats the connected EOA (#1969 — device marker first, as before)', () => {
     setStoredHybridSigners({ ...HYBRID_SIGNERS, owner_address: EOA_ADDRESS })
     rememberPasskeyCredentialOnDevice(credentialIdFromKeyId(HYBRID_KEY_ID))

@@ -4,7 +4,7 @@ import { realpathSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { helpText, parseArgs } from './args.js'
 import { failedConnectOutcome, runConnect } from './runtime.js'
-import { redactSecrets } from './redact.js'
+import { redactForAutomation, redactSecrets } from './redact.js'
 
 export interface CliIo {
   stdout: (message: string) => void
@@ -24,6 +24,8 @@ export async function runCli(
     parsed = parseArgs(argv)
   } catch (err) {
     if (wantsJson) {
+      // #2091: same stderr mirror as the run-failure path below.
+      io.stderr(`${redactForAutomation(err instanceof Error ? err.message : String(err))}\n`)
       io.stdout(`${JSON.stringify(failedConnectOutcome(undefined, err))}\n`)
     } else {
       io.stderr(`${redactSecrets(err instanceof Error ? err.message : String(err))}\n`)
@@ -214,6 +216,13 @@ export async function runCli(
     return 0
   } catch (err) {
     if (parsed.json) {
+      // #2091: mirror the redacted message to stderr as well — stdout stays
+      // pure JSON for the automation contract, but the prose channel must
+      // never be silently discarded (progress lines already go to stderr in
+      // --json mode; the failure that ends the run belongs there too). Same
+      // redaction bar as those progress lines and the JSON message field:
+      // redactForAutomation, which also masks credential-file paths.
+      io.stderr(`${redactForAutomation(err instanceof Error ? err.message : String(err))}\n`)
       io.stdout(`${JSON.stringify(failedConnectOutcome(parsed.options.runtime, err))}\n`)
     } else {
       io.stderr(`${redactSecrets(err instanceof Error ? err.message : String(err))}\n`)

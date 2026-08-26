@@ -25,7 +25,9 @@ describe('structured Connect CLI output', () => {
 
     expect(exitCode).toBe(1)
     expect(stdout).toHaveLength(1)
-    expect(stderr).toEqual([])
+    // #2091: stdout stays one pure-JSON line, but the prose is no longer
+    // discarded — the redacted message is mirrored to stderr.
+    expect(stderr.join('')).toContain('--unknown')
     expect(JSON.parse(stdout[0])).toMatchObject({
       schema_version: 1,
       outcome: 'failed',
@@ -99,6 +101,61 @@ describe('--json never prompts for a runtime (#1719)', () => {
         outcome: 'failed',
         error: { code: 'runtime_undetermined', next_action: 'rerun_connect_with_explicit_runtime' },
       })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  // #2091, the Codex field deadlock: the backend's setup prompt permits a
+  // retry only with a runtime "the refusal lists", and --json used to discard
+  // the list with the prose. The JSON record must carry the values, and the
+  // prose must still reach stderr — stdout stays pure JSON.
+  it('carries allowed_runtimes in the --json refusal and mirrors the message to stderr', async () => {
+    const stdout: string[] = []
+    const stderr: string[] = []
+    const spy = vi.spyOn(runtime, 'runConnect').mockRejectedValue(
+      new ConnectError(
+        'runtime_undetermined',
+        'could not determine the agent runtime — one of: claude-code, codex-cli',
+        'rerun_connect_with_explicit_runtime',
+        { allowedRuntimes: ['claude-code', 'codex-cli'] },
+      ),
+    )
+    try {
+      const exitCode = await runCli(
+        ['--setup', 'hv_setup_x', '--api', 'https://api.haven.example', '--json'],
+        { stdout: (message) => stdout.push(message), stderr: (message) => stderr.push(message) },
+      )
+      expect(exitCode).toBe(1)
+      expect(stdout).toHaveLength(1)
+      expect(JSON.parse(stdout[0]).error).toMatchObject({
+        code: 'runtime_undetermined',
+        allowed_runtimes: ['claude-code', 'codex-cli'],
+        message: expect.stringContaining('could not determine the agent runtime'),
+      })
+      expect(stderr.join('')).toContain('could not determine the agent runtime')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  // Review finding on #2091: the stderr mirror holds the same redaction bar
+  // as the JSON message field and the --json progress lines — secrets AND
+  // credential-file paths, not secrets alone.
+  it('redacts credential-file paths from the mirrored stderr message', async () => {
+    const stderr: string[] = []
+    const spy = vi.spyOn(runtime, 'runConnect').mockRejectedValue(
+      new Error('Refusing to overwrite existing Haven credential file: /Users/x/.haven/agents/a/signer.json (sk_agent_supersecret)'),
+    )
+    try {
+      await runCli(
+        ['--setup', 'hv_setup_x', '--api', 'https://api.haven.example', '--json'],
+        { stdout: () => undefined, stderr: (message) => stderr.push(message) },
+      )
+      const mirrored = stderr.join('')
+      expect(mirrored).not.toContain('signer.json')
+      expect(mirrored).not.toContain('sk_agent_supersecret')
+      expect(mirrored).toContain('[credential-file-redacted]')
     } finally {
       spy.mockRestore()
     }

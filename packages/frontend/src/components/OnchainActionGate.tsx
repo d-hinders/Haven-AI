@@ -6,6 +6,7 @@ import NetworkGate from './NetworkGate'
 import PasskeyOtherDeviceNotice from './PasskeyOtherDeviceNotice'
 import { Info } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { truncateAddress } from '@/components/haven'
 
 interface OnchainActionGateProps {
   requiredChainId: number
@@ -32,6 +33,13 @@ export function getOnchainActionBlockMessage(
   noSignerMessage: string,
 ): string | null {
   if (operationGate.kind === 'no_signer') return noSignerMessage
+  // #2073: name the mismatch. The generic no-signer copy reads as "nothing is
+  // connected", which is false here and leaves the user re-connecting the
+  // same wrong wallet. The message is built from the gate's own addresses
+  // rather than taken from the caller, so every surface states the same fact.
+  if (operationGate.kind === 'wrong_wallet') {
+    return `Connected wallet ${truncateAddress(operationGate.connectedAddress)} is not this account's owner. Switch to the owner wallet ${truncateAddress(operationGate.ownerAddress)} to continue.`
+  }
   if (operationGate.kind === 'passkey_on_other_device') {
     return 'Use the device with this Haven account passkey to approve.'
   }

@@ -1640,11 +1640,32 @@ export default function DesignSystemPage() {
                 <Button disabled className="flex-1">Update budget</Button>
               </div>
             </div>
+            <div>
+              <p
+                role="status"
+                className="mb-2 flex items-start gap-2 text-xs text-[var(--v2-ink-3)]"
+              >
+                <Icon icon={Info} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+                <span>
+                  Connected wallet 0x9999…9999 is not this account&apos;s owner. Switch to the
+                  owner wallet 0xeeee…eeee to continue.
+                </span>
+              </p>
+              <div className="flex gap-3">
+                <Button variant="ghost" className="flex-1">Back</Button>
+                <Button disabled className="flex-1">Update budget</Button>
+              </div>
+            </div>
             <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
               <span className="font-medium text-[var(--v2-ink-2)]">Pattern:</span> caption above, disabled
               primary button below. For a network-mismatch the same caption sits above a ghost{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1">Switch wallet to {'{chain}'}</code>{' '}
-              button (white background, brand focus ring) instead of the primary action.
+              button (white background, brand focus ring) instead of the primary action. A wallet
+              that is connected but is not the account&apos;s owner gets the second caption
+              (`wrong_wallet` in `useSafeOperationGate`, #2073): it names both addresses, because
+              &quot;connect a wallet&quot; would send the user back to the wallet they already
+              connected. The header wallet pill renders the matching &quot;Wrong wallet&quot;
+              state in the same case.
             </p>
           </div>
         </Card>

@@ -357,6 +357,40 @@ describe('Tooltip touch-to-mouse suppression window (#2046)', () => {
     })
   })
 
+  it('re-arms the full window from the latest touch, not from the first', () => {
+    // `haven-reviewer`'s finding on this block: every other case here advances
+    // once from a single stamp, so none of them could tell a window measured
+    // from the LAST touch from one measured from the first. On a hybrid device
+    // that is the difference between a second tap suppressing its own echo and
+    // a second tap being handled by a window that has already expired.
+    withMonotonicClock((advance) => {
+      render(
+        <Tooltip label={LONG_LABEL}>
+          <span data-testid="child">not recorded</span>
+        </Tooltip>,
+      )
+      const trigger = triggerOf(screen.getByTestId('child'))
+
+      tap(trigger)
+      expect(screen.getByRole('tooltip')).toBeInTheDocument()
+      advance(900)
+
+      // Far enough past the first tap that a window anchored there would have
+      // 899 ms left, and 1899 ms will have elapsed by the assertion below.
+      tap(trigger)
+      expect(screen.queryByRole('tooltip')).toBeNull()
+
+      advance(WINDOW_MS - 1)
+      fireEvent.mouseEnter(trigger)
+      expect(screen.queryByRole('tooltip')).toBeNull()
+
+      // And still a window, not a latch: one more millisecond releases it.
+      advance(1)
+      fireEvent.mouseEnter(trigger)
+      expect(screen.getByRole('tooltip')).toHaveTextContent(LONG_LABEL)
+    })
+  })
+
   it('hovers on a fresh page load, before any touch has happened', () => {
     // `performance.now()` counts from the page's time origin, so early in a
     // page's life it is a small number. With `lastTouchAt` seeded `0` — the

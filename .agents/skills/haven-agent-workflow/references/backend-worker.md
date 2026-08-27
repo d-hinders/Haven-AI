@@ -26,8 +26,8 @@ Implementation rules:
 Product/security rules:
 - Haven separates requested financial actions from execution authority.
 - Agents receive credentials, not private keys.
-- Agent spending authority is constrained by Safe AllowanceModule allowances.
-- Anything over remaining allowance should route to approval rather than execute.
+- Agent spending authority is constrained by the agent's signed budget delegation and its on-chain caveat enforcers (period budget, recipient pin, expiry).
+- Anything over the remaining budget is declined before any money moves — never queued for approval. There is no approval queue on any live rail, so do not build one, and do not add a routing branch for one.
 - Treat x402 delegate keys as hot payment keys and keep authority small and auditable.
 - Payment, x402/MPP, MCP, SDK, direct API, and demo entrypoints must share validated state or have parity tests when the same behavior is exposed through more than one path.
 - Displayed key prefixes, setup tokens, invoice numbers, nonces, and visual identifiers need enough entropy for their use and duplicate handling where relevant.

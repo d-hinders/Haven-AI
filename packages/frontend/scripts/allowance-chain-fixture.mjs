@@ -102,8 +102,49 @@ export const FIXTURE_BLOCK_TIMESTAMP = Math.floor(Date.parse('2026-07-10T09:00:0
  * atomic and `resetTimeMin` must match a RESET_PERIODS entry so the row reads
  * "Daily" rather than a raw "1440m" fallthrough. `lastResetMin` is optional and
  * defaults to 0 — see the note at `getTokenAllowance` for what that decides.
+ *
+ * EVERY option is documented here on purpose, in ONE block. #2106 added
+ * `moduleEnabled` in a SECOND `@param {object} opts` block that named only the
+ * new field — and TypeScript takes JSDoc as authoritative for the whole options
+ * object, so documenting one property REPLACED the inferred shape instead of
+ * extending it. The default kept every caller's behaviour identical while the
+ * type surface silently lost `chainId`, `safeAddress`, `delegates` and `rows`;
+ * two existing callers stopped compiling
+ * (`e2e/agent-panel-states.visual.spec.ts`, `chain-fed-capture-guard.test.ts`).
+ * Nothing local caught it: the suites were green because the runtime contract
+ * was intact, and only a workspace-wide `tsc --noEmit` — what CI runs — sees a
+ * narrowed shared type. So: add a property here, document it HERE, alongside
+ * the others.
+ *
+ * @param {object} opts
+ * @param {number} opts.chainId Chain the seeded Safe lives on; resolves the
+ *   AllowanceModule address from the shared registry.
+ * @param {string} opts.safeAddress The Safe `isModuleEnabled` is called on.
+ * @param {readonly string[]} opts.delegates Delegate addresses `getDelegates`
+ *   reports.
+ * @param {readonly { token: string, amount: bigint, spent: bigint, resetTimeMin: number, lastResetMin?: number }[]} opts.rows
+ *   Per-token allowance rows reported for `delegates[0]`.
+ *
+ *   `readonly` on both array params is load-bearing, not stylistic: callers
+ *   seed these as `as const` tuples (`agent-panel-states.visual.spec.ts`), and
+ *   a mutable `T[]` annotation rejects a `readonly T[]` argument. Annotating
+ *   them mutably reproduced this fix's own bug one layer down — inference had
+ *   been permissive, and writing the type down narrowed it. A `readonly`
+ *   parameter accepts both forms and this function only ever reads them.
+ * @param {boolean} [opts.moduleEnabled] Whether the Safe answers
+ *   `isModuleEnabled` TRUE. Defaults to true — every existing caller seeds a
+ *   legacy Safe that has the module, and their captures depend on it.
+ *
+ *   Pass `false` to seed a **delegation-rail** account (#2106). That is not a
+ *   cosmetic variant: a Hybrid DeleGator has no AllowanceModule, so `true` is
+ *   a state the delegation rail cannot actually produce. Capturing `/custody`
+ *   against the default photographed a delegation-rail account being told its
+ *   spend control was the Safe AllowanceModule — a *different* falsehood from
+ *   the one #2106 is about, which made the evidence useless for the branch it
+ *   was supposed to prove. With `false`, `useOnChainAllowances` returns early
+ *   and none of the other reads below is reached.
  */
-export function makeAllowanceChainFixture({ chainId, safeAddress, delegates, rows }) {
+export function makeAllowanceChainFixture({ chainId, safeAddress, delegates, rows, moduleEnabled = true }) {
   const allowanceModule = getChainData(chainId).contracts.allowanceModule
 
   /** The reads `useOnChainAllowances` makes, by signature rather than hand-cut hex. */
@@ -112,7 +153,7 @@ export function makeAllowanceChainFixture({ chainId, safeAddress, delegates, row
       signature: 'function isModuleEnabled(address) view returns (bool)',
       // `isModuleEnabled` is called ON THE SAFE; the rest on the module.
       to: safeAddress,
-      returns: () => encodeAbiParameters(parseAbiParameters('bool'), [true]),
+      returns: () => encodeAbiParameters(parseAbiParameters('bool'), [moduleEnabled]),
     },
     getDelegates: {
       signature: 'function getDelegates(address,uint48,uint8) view returns (address[],uint48)',

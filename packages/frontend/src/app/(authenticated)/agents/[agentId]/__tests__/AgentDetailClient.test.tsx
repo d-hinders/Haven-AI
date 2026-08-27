@@ -214,6 +214,48 @@ describe('AgentDetailClient last-activity metadata', () => {
     vi.useRealTimers()
   })
 
+  /**
+   * #2106: the headline stat row carried a "Pending approvals" tile fed by
+   * `routes/agent-activity.ts`'s hardcoded `const pendingApprovals = 0` — the
+   * backend's own comment says the queue died with the AllowanceModule rail.
+   * A counter that can only ever read 0 tells the user a queue EXISTS and is
+   * currently empty; on the delegation rail an out-of-budget payment reverts
+   * on-chain and is never held for anyone. The tile is removed rather than
+   * re-labelled.
+   *
+   * Asserted on the LABEL and on the helper separately: a rename that kept the
+   * permanently-zero counter would pass a label-only check.
+   */
+  it('renders no Pending-approvals tile — the queue it implies does not exist (#2106)', () => {
+    mockUseAgentActivity.mockReturnValue({
+      activity: [],
+      stats: { all_time: [], today: [], this_week: [], pending_approvals: 0 },
+      loading: false,
+    })
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.queryByText('Pending approvals')).not.toBeInTheDocument()
+    expect(screen.queryByText('Payments waiting on you')).not.toBeInTheDocument()
+  })
+
+  it('keeps the two stat tiles that count something real (#2106)', () => {
+    mockUseAgentActivity.mockReturnValue({
+      activity: [],
+      stats: {
+        all_time: [{ token: 'USDC', total_spent: '482.50', tx_count: 37 }],
+        today: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
+        this_week: [],
+        pending_approvals: 0,
+      },
+      loading: false,
+    })
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.getByText('All-time transactions')).toBeInTheDocument()
+    expect(screen.getByText('37')).toBeInTheDocument()
+    expect(screen.getByText('Today')).toBeInTheDocument()
+  })
+
   it('renders the compact last-activity field without a default connected badge', () => {
     render(<AgentDetailClient agentId="agent-1" />)
 

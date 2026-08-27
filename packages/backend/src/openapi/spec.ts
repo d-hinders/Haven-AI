@@ -774,8 +774,9 @@ const x402AuthorizeResponse = {
   ],
 } as const
 
-// #2105: this string is attached to EVERY endpoint's security scheme, so the
-// primitive it names is the one an integrator reads first. It named "on-chain
+// #2105: this string is attached to every AGENT-AUTHENTICATED operation — 26 of
+// the document's 134 — so the primitive it names is the one an integrator
+// building against the agent API reads first. It named "on-chain
 // Safe module state" — the retired AllowanceModule (#1986). The live
 // enforcement primitive is the agent's owner-signed budget delegation, enforced
 // by the DelegationManager's audited caveat enforcers at redemption. The

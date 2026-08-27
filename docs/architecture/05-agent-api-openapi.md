@@ -62,7 +62,8 @@ servers, connector, and selected dashboard setup flows:
   retired — it now documents an unconditional HTTP 410, #1328)
 - machine-payment evidence and reconciliation event writes
 - machine-payment allowance, receipt, and payment-receipt reads
-- direct Safe transfers and delegate sweep recovery
+- delegate sweep recovery (direct Safe transfers via `POST /machine-payments/send`
+  are RETIRED — the operation documents only its 410/422 refusals, #1987/#2105)
 - wallet transaction listing
 - catalog discovery
 - health and OpenAPI discovery
@@ -298,8 +299,11 @@ delegate signature = authority
 on-chain budget delegation = enforcement
 ```
 
-This is the `AgentApiKey` security-scheme description verbatim, and it is
-attached to every operation in the document. #2105 moved the third clause off
+This restates the `AgentApiKey` security-scheme description, which is attached
+to every agent-authenticated operation — 26 of the document's 134, the rest
+being `DashboardJwt`, `SetupToken` or public. (The description itself is prose;
+the block above is a three-line paraphrase of its middle sentence.) #2105 moved
+the third clause off
 the retired primitive: it read `on-chain Safe allowance = enforcement`, naming
 the AllowanceModule the whole of epic #1440 retired. Enforcement is the agent's
 owner-signed budget delegation — its audited caveat enforcers, checked by the

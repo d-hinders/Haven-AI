@@ -554,6 +554,90 @@ describe('retired-rail residue in the published contract (#2105)', () => {
     expect(description).not.toMatch(/Safe module state/i)
   })
 
+  /**
+   * #2105, found by haven-reviewer. The retired rail survived on the LIVE
+   * rail's primary success response: `paymentSignData` — the `sign_data` of the
+   * 201 of POST /payments, and of the x402 authorize 200/201 through
+   * `X402SignablePayment` — required the `executeAllowanceTransfer` argument
+   * list (`safe`/`payment_token`/`payment`/`nonce`), was
+   * `additionalProperties: false`, and therefore FORBADE the
+   * `signature_scheme` and `typed_data` the live handlers actually emit.
+   *
+   * Asserted against real emitted bodies through the spec's own validator, not
+   * against the description — an integrator following the old schema would sign
+   * a bare hash with raw ECDSA.
+   */
+  describe('sign_data describes the delegation rail, not executeAllowanceTransfer', () => {
+    // Copied from the emitters: routes/payments.ts' 201 and
+    // modules/x402/delegation-authorize.ts' funding shape.
+    const directPaymentSignData = {
+      hash: '0x' + 'ab'.repeat(32),
+      signature_scheme: 'eip712_userop',
+      typed_data: { domain: { chainId: 8453 }, types: {}, primaryType: 'UserOperation', message: {} },
+      components: {
+        account: '0x' + '44'.repeat(20),
+        token: '0x' + '55'.repeat(20),
+        to: '0x' + '66'.repeat(20),
+        amount: '1000000',
+      },
+      instructions: 'Sign sign_data.typed_data with your delegate (agent) key using EIP-712.',
+    }
+    const x402FundingSignData = {
+      ...directPaymentSignData,
+      components: { safe: '0x' + '77'.repeat(20), ...directPaymentSignData.components },
+    }
+
+    const signDataSchema = openapiSpec.components.schemas.SignablePaymentIntent.properties.sign_data
+
+    it.each([
+      ['the direct-payment 201 shape', directPaymentSignData],
+      ['the x402 funding shape (adds components.safe)', x402FundingSignData],
+    ])('accepts %s', (_label, payload) => {
+      expect(matchSpec(signDataSchema, payload)).toEqual([])
+    })
+
+    it('still REJECTS the retired AllowanceModule shape', () => {
+      // Positive control for the validator: it must be able to say no. This is
+      // the exact body the old schema demanded.
+      const retired = {
+        hash: '0x' + 'ab'.repeat(32),
+        components: {
+          safe: '0x' + '77'.repeat(20),
+          token: '0x' + '55'.repeat(20),
+          to: '0x' + '66'.repeat(20),
+          amount: '1000000',
+          payment_token: '0x' + '00'.repeat(20),
+          payment: '0',
+          nonce: 3,
+        },
+        instructions: 'Sign the hash with your delegate private key using raw ECDSA.',
+      }
+      expect(matchSpec(signDataSchema, retired).length).toBeGreaterThan(0)
+    })
+
+    it('rejects an UNDECLARED components field — the object is closed', () => {
+      // Guards the `additionalProperties: false` above. It was `true` first;
+      // nothing noticed when a mutation flipped it, because both real shapes
+      // are fully declared. This is what makes the closure load-bearing.
+      const withStrayField = {
+        ...directPaymentSignData,
+        components: { ...directPaymentSignData.components, nonce: 3 },
+      }
+      expect(matchSpec(signDataSchema, withStrayField).length).toBeGreaterThan(0)
+    })
+
+    it('names eip712_userop as the only scheme, and requires typed_data', () => {
+      expect(signDataSchema.required).toContain('signature_scheme')
+      expect(signDataSchema.required).toContain('typed_data')
+      expect(signDataSchema.properties.signature_scheme.enum).toEqual(['eip712_userop'])
+      // The retired argument list must not be back in the required set.
+      const componentsRequired = signDataSchema.properties.components.required
+      for (const gone of ['payment_token', 'payment', 'nonce', 'safe']) {
+        expect(componentsRequired).not.toContain(gone)
+      }
+    })
+  })
+
   it('keeps AgentPaymentStatus.kind approval_request as a documented wire-compat value', () => {
     // The retained case, and deliberately asymmetric with the deletions above:
     // this enum value is still declared by the backend's own status type and

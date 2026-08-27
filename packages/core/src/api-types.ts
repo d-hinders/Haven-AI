@@ -1804,7 +1804,7 @@ export type paths = {
         put?: never;
         /**
          * Submit a delegate signature and relay a payment intent.
-         * @description The signature must be produced outside Haven by the agent-held delegate key. Haven verifies it against the delegate address and on-chain allowance before relaying.
+         * @description The signature must be produced outside Haven by the agent-held delegate key. #2105 (found by review): Haven does NOT verify it against the delegate address or an on-chain allowance, as this said — that was the retired AllowanceModule scheme (`sign_hash` + raw-ECDSA `recoverSigner`), which died with the rail (#1986). Haven now applies a SHAPE check only and relays; the real validator is the account itself (EIP-1271 / the 4337 signature check on the typed data) and the budget delegation's caveat enforcers on redemption. An intent pinned to a retired rail is refused 410 here rather than relayed.
          */
         post: operations["submitPaymentSignature"];
         delete?: never;
@@ -2018,7 +2018,7 @@ export type paths = {
         put?: never;
         /**
          * RETIRED: plain transfer. Validates the body, then always refuses.
-         * @description RETIRED (#1987, epic #1440). This route belonged to the Safe / AllowanceModule rail and no longer has a success path: `modules/mpp/send.ts` is three refusals and nothing else. After body validation (400) the account's rail decides which refusal you get — **410** on either retired rail (Safe / AllowanceModule, #1986; session, #834) and **422** `rail_not_supported` on the delegation rail, which MPP never supported (#1251). Those three cases are exhaustive, so 2xx is unreachable here. Fail-closed: no intent row, no approval row, no sign_data, no chain read. To send from a delegation-rail account use POST /payments, which redeems the agent's budget delegation directly. The operation stays documented rather than deleted because it is still registered and still answers — an integrator needs the refusal contract, not a 404.
+         * @description RETIRED (#1987, epic #1440). This route belonged to the Safe / AllowanceModule rail and no longer has a success path: `modules/mpp/send.ts` is three refusals and nothing else. After body validation (400) the account's rail decides which refusal you get — **410** on either retired rail (Safe / AllowanceModule, #1986; session, #834) and **422** `rail_not_supported` on the delegation rail, which MPP never supported (#1251). Those three cases exhaust the HANDLER, so 2xx is unreachable here; the route in front of it can still answer 400, 401, 403 or 429. Fail-closed: no intent row, no approval row, no sign_data, no chain read. To send from a delegation-rail account use POST /payments, which redeems the agent's budget delegation directly. The operation stays documented rather than deleted because it is still registered and still answers — an integrator needs the refusal contract, not a 404.
          */
         post: operations["sendTransfer"];
         delete?: never;
@@ -2876,20 +2876,34 @@ export type components = {
             /** Format: date-time */
             expires_at: string;
             sign_data: {
+                /** @description The UserOperation hash. Present for reference and replay-matching — do NOT sign it directly; sign `typed_data`. */
                 hash: string;
+                /**
+                 * @description The delegation rail's only scheme. The retired AllowanceModule rail's raw-ECDSA-over-`hash` scheme died with it (#1986) and is not offered here.
+                 * @enum {string}
+                 */
+                signature_scheme: "eip712_userop";
+                /** @description The EIP-712 payload to sign VERBATIM with the delegate key. The account validates this, not `hash`. */
+                typed_data: {
+                    [key: string]: unknown;
+                };
                 components: {
-                    /** @example 0x1111111111111111111111111111111111111111 */
-                    safe: string;
+                    /**
+                     * @description The delegator account the UserOperation runs on.
+                     * @example 0x1111111111111111111111111111111111111111
+                     */
+                    account?: string;
+                    /**
+                     * @description Present on the x402 funding shape only.
+                     * @example 0x1111111111111111111111111111111111111111
+                     */
+                    safe?: string;
                     /** @example 0x1111111111111111111111111111111111111111 */
                     token: string;
                     /** @example 0x1111111111111111111111111111111111111111 */
                     to: string;
                     /** @description Atomic token amount. */
                     amount: string;
-                    /** @example 0x1111111111111111111111111111111111111111 */
-                    payment_token: string;
-                    payment: string;
-                    nonce: number;
                 };
                 instructions: string;
             };
@@ -11996,7 +12010,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid. */
+            /** @description EITHER a retired rail — the Safe / AllowanceModule rail (#1986) or the session rail (#834), refused before anything is written and before any chain read, with a message naming POST /accounts/hybrid — OR an idempotent replay of a request whose intent has since expired. The two are distinguished by `idempotent_replay` on the body; only the first is a rail refusal. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -12011,7 +12025,22 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description Money-path rate limit. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Preparation failed against the chain, or an idempotent replay of a request whose payment has failed. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -13171,7 +13200,7 @@ export interface operations {
                     recipient: string;
                     /** @description Human-readable amount, e.g. "1.5". */
                     amount: string;
-                    /** @description Optional idempotency key to deduplicate retried requests. */
+                    /** @description Validated (1–128 characters) and then IGNORED — nothing is deduplicated, because every call refuses. Accepted only so an existing client is refused by the rail rather than by a body error (#2105). */
                     idempotency_key?: string;
                 };
             };
@@ -13236,6 +13265,21 @@ export interface operations {
             };
             /** @description The account is on the delegation rail, which this MPP route never supported (#1251). `error_code` is `rail_not_supported` and the message names POST /payments and the x402 purchase flow. With both retired rails answering 410 above, this is the response every remaining account gets. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Money-path rate limit. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

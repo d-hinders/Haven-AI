@@ -113,6 +113,8 @@ beforeEach(() => {
     signersLoading: false,
     budgetsByAgent: new Map([[AGENT.id, [ACTIVE_BUDGET]]]),
     budgetsLoading: false,
+    budgetsError: false,
+    reloadBudgets: vi.fn(),
   })
 })
 
@@ -166,6 +168,102 @@ describe('/custody — delegation rail (#2106)', () => {
     const text = container.textContent ?? ''
     expect(text).toContain('Signers (control this account — Haven is not one)')
     expect(text).not.toContain('Owners (control this Safe — Haven is not one)')
+  })
+})
+
+/**
+ * #2106 review finding. A failed delegation read used to be stored as an empty
+ * array, which the card rendered as "No agent budget granted on this account."
+ * — an affirmative claim that the agent has no on-chain limit. That is the SAME
+ * defect this issue exists to close, reached from the other direction, so the
+ * unknown state has to stay distinguishable from the empty one.
+ */
+describe('/custody — a failed delegation read is never "no budget" (#2106)', () => {
+  beforeEach(() => {
+    mockUseUserSafes.mockReturnValue({ safes: [safe('delegator_hybrid')], loading: false })
+    mockUseDelegationCustodyProof.mockReturnValue({
+      signers: null,
+      signersLoading: false,
+      budgetsByAgent: new Map(),
+      budgetsLoading: false,
+      budgetsError: true,
+      reloadBudgets: vi.fn(),
+    })
+  })
+
+  it('does not claim the account has no budget', () => {
+    const { container } = render(<CustodyPage />)
+    expect(container.textContent ?? '').not.toContain('No agent budget granted')
+  })
+
+  it('says the read failed, and says it is not a statement about existence', () => {
+    const { container } = render(<CustodyPage />)
+    const text = container.textContent ?? ''
+    expect(text).toContain('could not load')
+    expect(text).toContain('not a statement that none exist')
+  })
+
+  it('offers a retry — a failed proof must not be a dead end', () => {
+    render(<CustodyPage />)
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+  })
+
+  it('does not assert on-chain spend control it could not read', () => {
+    const { container } = render(<CustodyPage />)
+    expect(container.textContent ?? '').not.toContain('Signed budget delegation')
+  })
+})
+
+/**
+ * #2106 review finding. Nothing flips `agent_delegations.status` on expiry —
+ * it only moves pending → active → replaced/revoked — so an expired delegation
+ * still reads 'active'. Its TimestampEnforcer rejects it on-chain, so
+ * summarising it as live spend control would be a false custody claim.
+ */
+describe('/custody — an expired delegation is not live spend control (#2106)', () => {
+  const EXPIRED = {
+    ...ACTIVE_BUDGET,
+    delegation_hash: `0x${'7f'.repeat(32)}`,
+    expires_at: Math.floor(Date.UTC(2020, 0, 1) / 1000),
+  }
+
+  beforeEach(() => {
+    mockUseUserSafes.mockReturnValue({ safes: [safe('delegator_hybrid')], loading: false })
+    mockUseDelegationCustodyProof.mockReturnValue({
+      signers: null,
+      signersLoading: false,
+      budgetsByAgent: new Map([[AGENT.id, [EXPIRED]]]),
+      budgetsLoading: false,
+      budgetsError: false,
+      reloadBudgets: vi.fn(),
+    })
+  })
+
+  it('does not summarise an expired delegation as live spend control', () => {
+    const { container } = render(<CustodyPage />)
+    expect(container.textContent ?? '').not.toContain('Signed budget delegation')
+  })
+
+  it('still lists the row, tagged expired — hiding it would be its own dishonesty', () => {
+    const { container } = render(<CustodyPage />)
+    const text = container.textContent ?? ''
+    expect(text).toContain('Research agent')
+    expect(text).toContain('expired')
+  })
+
+  it('a delegation still inside its window IS live spend control', () => {
+    mockUseDelegationCustodyProof.mockReturnValue({
+      signers: null,
+      signersLoading: false,
+      budgetsByAgent: new Map([[AGENT.id, [ACTIVE_BUDGET]]]),
+      budgetsLoading: false,
+      budgetsError: false,
+      reloadBudgets: vi.fn(),
+    })
+    const { container } = render(<CustodyPage />)
+    const text = container.textContent ?? ''
+    expect(text).toContain('Signed budget delegation')
+    expect(text).not.toContain('expired')
   })
 })
 

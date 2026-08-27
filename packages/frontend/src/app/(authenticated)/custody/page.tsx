@@ -59,6 +59,7 @@ import { getChainConfig, getExplorerUrl, getTokensForChain } from '@/lib/chains'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { budgetPeriodLabel } from '@/lib/budget-period'
 import { truncate } from '@/lib/format'
+import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -165,21 +166,38 @@ function expiryLabel(expiresAt: number): string {
   })
 }
 
+/**
+ * Whether a delegation still constrains anything RIGHT NOW.
+ *
+ * `status` alone is not enough (#2106 review finding). Nothing in
+ * `routes/agent-delegations.ts` flips a row's status on expiry — it only moves
+ * pending → active → replaced/revoked — so a delegation whose TimestampEnforcer
+ * window has closed still reads `'active'` in the database. The enforcer
+ * rejects it on-chain, so presenting it as live spend control would be exactly
+ * the kind of false claim this page exists to prevent.
+ */
+function isLiveBudget(budget: DelegationBudget, nowSec: number): boolean {
+  if (budget.status !== 'active') return false
+  return budget.expires_at === 0 || budget.expires_at > nowSec
+}
+
 function DelegationControlCard({ safe, agents }: { safe: UserSafe; agents: Agent[] }) {
   const safeAgents = agents.filter((a) => a.safe_id === safe.id)
-  const { signers, signersLoading, budgetsByAgent, budgetsLoading } = useDelegationCustodyProof(
-    safe.safe_address,
-    safe.chain_id,
-    safeAgents.map((a) => a.id),
-  )
+  const { signers, signersLoading, budgetsByAgent, budgetsLoading, budgetsError, reloadBudgets } =
+    useDelegationCustodyProof(safe.safe_address, safe.chain_id, safeAgents.map((a) => a.id))
 
   // Only ACTIVE delegations constrain anything — a pending one is not yet
-  // signed onto the account, and a replaced/revoked one enforces nothing.
+  // signed onto the account, and a replaced/revoked one enforces nothing. An
+  // expired-but-still-'active' row is KEPT and tagged rather than hidden: it
+  // is real history the user may be looking for, and silently dropping a row
+  // is its own kind of dishonesty.
+  const nowSec = Math.floor(Date.now() / 1000)
   const rows = safeAgents.flatMap((agent) =>
     (budgetsByAgent.get(agent.id) ?? [])
       .filter((b) => b.status === 'active')
-      .map((budget) => ({ agent, budget })),
+      .map((budget) => ({ agent, budget, live: isLiveBudget(budget, nowSec) })),
   )
+  const liveRows = rows.filter((r) => r.live)
 
   const signerCount = signers ? signers.passkeys.length + (signers.owner_address ? 1 : 0) : 0
 
@@ -221,10 +239,14 @@ function DelegationControlCard({ safe, agents }: { safe: UserSafe; agents: Agent
         <Stat label="Spend control">
           {budgetsLoading ? (
             <Skeleton variant="text" className="h-4 w-32" />
-          ) : rows.length > 0 ? (
+          ) : liveRows.length > 0 ? (
             <span className="inline-flex items-center gap-2">
               Signed budget delegation <OnChainBadge />
             </span>
+          ) : budgetsError ? (
+            // Never "no budget" on a failed read — that is a claim, and this
+            // page must not make one it cannot back.
+            <span className="text-[var(--v2-ink-3)]">—</span>
           ) : (
             <span className="text-[var(--v2-ink-3)]">No agent budget granted</span>
           )}
@@ -237,6 +259,16 @@ function DelegationControlCard({ safe, agents }: { safe: UserSafe; agents: Agent
         </p>
         {budgetsLoading ? (
           <Skeleton variant="text" className="h-4 w-48" />
+        ) : budgetsError && rows.length === 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
+            <p className="text-sm text-[var(--v2-ink-2)]">
+              Haven could not load this account&rsquo;s agent budgets. This is not a statement that
+              none exist.
+            </p>
+            <Button size="sm" variant="ghost" onClick={() => void reloadBudgets()}>
+              Try again
+            </Button>
+          </div>
         ) : rows.length === 0 ? (
           <p className="text-sm text-[var(--v2-ink-3)]">
             No agent budget granted on this account.
@@ -247,35 +279,48 @@ function DelegationControlCard({ safe, agents }: { safe: UserSafe; agents: Agent
                 inside its `overflow-x-auto` wrapper rather than collapsing
                 columns, because these rows carry no self-labelling content
                 (#1999). No `revealAt` columns, so it queries nothing. */}
+            {/* FOUR columns, not five, and Recipient before Expires — a
+                design-review finding (#2106). At 390 this table scrolls
+                inside its wrapper rather than collapsing (the #1999 dense
+                admin shape), and with five columns the RECIPIENT PIN — the
+                row-level proof unique to this rail, the thing the legacy
+                table never carried — was the cell clipped off-screen by
+                default. Token folded into the Budget cell ("250.00 USDC per
+                week"), which reads better anyway and buys back the width. */}
             <Table className="text-sm">
               <Table.Head collapseWhenNarrow={false}>
                 <tr>
                   <Table.HeaderCell align="left">Agent / delegation</Table.HeaderCell>
-                  <Table.HeaderCell align="left">Token</Table.HeaderCell>
                   <Table.HeaderCell align="left">Budget</Table.HeaderCell>
                   <Table.HeaderCell align="left">Recipient</Table.HeaderCell>
                   <Table.HeaderCell align="left">Expires</Table.HeaderCell>
                 </tr>
               </Table.Head>
               <Table.Body>
-                {rows.map(({ agent, budget }) => (
+                {rows.map(({ agent, budget, live }) => (
                   <DelegationRow
                     key={budget.delegation_hash}
                     agentName={agent.name}
                     budget={budget}
                     chainId={safe.chain_id}
+                    live={live}
                   />
                 ))}
               </Table.Body>
             </Table>
           </div>
         )}
+        {/* Trimmed on design review (#2106): the "Haven cannot widen them"
+            sentence repeated the "What Haven cannot do" bullet verbatim in
+            other words, and "caveat enforcers" is Delegation-Framework
+            internals with no meaning to the reader. What SURVIVES the trim is
+            the honesty caveat — these are the signed terms, not a fresh
+            on-chain read — because that is the one sentence keeping the card
+            from overclaiming. */}
         <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
-          Token, budget, period and expiry are <OnChainBadge /> enforced by the caveat enforcers
-          your delegation carries, and a pinned recipient is enforced the same way — a payment
-          outside them reverts on-chain rather than waiting for anyone&rsquo;s approval. These are
-          the terms of the delegation you signed; Haven cannot widen them without another
-          signature from you. Stop an agent&rsquo;s budget on-chain from{' '}
+          Budget, period, expiry and any pinned recipient are <OnChainBadge /> enforced — a payment
+          outside them reverts on-chain instead of waiting for anyone&rsquo;s approval. These are
+          the terms of the delegation you signed. Stop an agent&rsquo;s budget on-chain from{' '}
           <Link href="/agents" className="text-[var(--v2-brand)] hover:underline">
             Agents
           </Link>
@@ -290,10 +335,12 @@ function DelegationRow({
   agentName,
   budget,
   chainId,
+  live,
 }: {
   agentName: string
   budget: DelegationBudget
   chainId: number
+  live: boolean
 }) {
   const sym = tokenSymbol(budget.token_address, chainId)
   return (
@@ -304,9 +351,8 @@ function DelegationRow({
           {truncate(budget.delegation_hash)}
         </span>
       </td>
-      <td className="px-4 py-3 text-[var(--v2-ink-2)]">{sym}</td>
       <td className="px-4 py-3 text-[var(--v2-ink-2)]">
-        {formatAllowanceForToken(budget.budget_atomic, chainId, sym)}{' '}
+        {formatAllowanceForToken(budget.budget_atomic, chainId, sym)} {sym}{' '}
         {budgetPeriodLabel(Math.round(budget.period_seconds / 60))}
       </td>
       <td className="px-4 py-3 text-[var(--v2-ink-2)]">
@@ -319,7 +365,14 @@ function DelegationRow({
           <span className="text-[var(--v2-ink-3)]">Any recipient</span>
         )}
       </td>
-      <td className="px-4 py-3 text-[var(--v2-ink-2)]">{expiryLabel(budget.expires_at)}</td>
+      <td className="px-4 py-3 text-[var(--v2-ink-2)]">
+        {expiryLabel(budget.expires_at)}
+        {live ? null : (
+          <span className="ml-2 rounded-full bg-[var(--v2-surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--v2-ink-3)]">
+            expired
+          </span>
+        )}
+      </td>
     </tr>
   )
 }
@@ -450,7 +503,10 @@ const SHARED_CANNOT = [
 
 const RAIL_CANNOT: Record<CustodyRail, string[]> = {
   delegation: [
-    'Expand an agent’s budget without a new delegation you sign — the caveat enforcers hold the old one until you replace it.',
+    // "Caveat enforcers" was cut on design review (#2106): it is MetaMask
+    // Delegation-Framework internals, undefined anywhere on the page, and the
+    // claim stands without it.
+    'Expand an agent’s budget without a new delegation you sign.',
     'Block you — you can stop any agent’s budget on-chain, and your account’s signers act without Haven.',
   ],
   safe: [

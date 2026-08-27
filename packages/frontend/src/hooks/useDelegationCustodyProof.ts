@@ -33,6 +33,19 @@ export interface DelegationCustodyProof {
   /** Agent id → that agent's delegations (every status, callers filter). */
   budgetsByAgent: Map<string, DelegationBudget[]>
   budgetsLoading: boolean
+  /**
+   * At least one agent's delegation read FAILED (#2106 review finding).
+   *
+   * Load-bearing, not decoration. Without it a failed read is indistinguishable
+   * from an empty result, and the card renders "No agent budget granted" — an
+   * affirmative claim that this agent has no on-chain limit, on the one page
+   * that exists to stop Haven making false custody claims. That is the same
+   * defect as the one #2106 fixes, arrived at from the other direction, so the
+   * unknown state has to stay distinguishable from the empty one.
+   */
+  budgetsError: boolean
+  /** Retry the delegation reads — a failed proof must never be a dead end. */
+  reloadBudgets: () => Promise<void>
 }
 
 export function useDelegationCustodyProof(
@@ -44,6 +57,7 @@ export function useDelegationCustodyProof(
   const [signersLoading, setSignersLoading] = useState(Boolean(accountAddress))
   const [budgetsByAgent, setBudgetsByAgent] = useState<Map<string, DelegationBudget[]>>(new Map())
   const [budgetsLoading, setBudgetsLoading] = useState(agentIds.length > 0)
+  const [budgetsError, setBudgetsError] = useState(false)
 
   // Agent ids arrive as a fresh array on every parent render, so the effect
   // keys off a stable join instead — without it the fetch loops forever.
@@ -74,23 +88,29 @@ export function useDelegationCustodyProof(
     const ids = agentKey ? agentKey.split(',') : []
     if (ids.length === 0) {
       setBudgetsByAgent(new Map())
+      setBudgetsError(false)
       setBudgetsLoading(false)
       return
     }
     setBudgetsLoading(true)
     const next = new Map<string, DelegationBudget[]>()
+    let failed = false
     await Promise.all(
       ids.map(async (id) => {
         try {
           const res = await api.get<{ delegations: DelegationBudget[] }>(`/agents/${id}/delegations`)
           next.set(id, res?.delegations ?? [])
         } catch {
-          // One agent's failed read must not void the others' rows.
-          next.set(id, [])
+          // One agent's failed read must not void the others' rows — but it
+          // must not be recorded as an empty result either. The agent is left
+          // ABSENT from the map and the failure is flagged, so the card can
+          // say "could not load" instead of "no budget granted".
+          failed = true
         }
       }),
     )
     setBudgetsByAgent(next)
+    setBudgetsError(failed)
     setBudgetsLoading(false)
   }, [agentKey])
 
@@ -102,5 +122,12 @@ export function useDelegationCustodyProof(
     void loadBudgets()
   }, [loadBudgets])
 
-  return { signers, signersLoading, budgetsByAgent, budgetsLoading }
+  return {
+    signers,
+    signersLoading,
+    budgetsByAgent,
+    budgetsLoading,
+    budgetsError,
+    reloadBudgets: loadBudgets,
+  }
 }

@@ -56,6 +56,14 @@ export const LEADER_LOCK_KEYS = {
    * reuse a value, not merely to avoid live ones.
    */
   catalogIngest: 811008,
+  /**
+   * erc7710 settlement observer (#2117): discovers settled-but-unreported
+   * erc7710 x402 payments on-chain and completes them. Deliberately its OWN
+   * key — nothing else shares its RPC + write cadence, and a shared key would
+   * let another monitor's tick starve a settlement that has already been
+   * invisible to the reporting feed too long.
+   */
+  delegationSettlementObserver: 811009,
 } as const
 
 /**
@@ -73,6 +81,15 @@ export const KEYED_LOCK_NAMESPACES = {
    * by mutual exclusion rather than a check-then-act (#1711, epic #1717).
    */
   catalogSubmissionQueue: 811101,
+  /**
+   * One erc7710 intent's passive completion at a time, per intent id (#2117).
+   * The observer is leader-gated already, but a keyed lock ALSO serialises the
+   * observer against the agent-report path: both may be completing the SAME
+   * intent concurrently, and the CAS inside `confirmObservedSettlement` is what
+   * makes exactly one of them win. The lock makes the loser's re-read see the
+   * winner's write instead of a silent no-op.
+   */
+  settlementObservation: 811102,
 } as const
 
 export interface QueryableClientLike {

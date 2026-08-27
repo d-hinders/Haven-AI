@@ -84,6 +84,13 @@ const ERC20_TRANSFER_IFACE = new ethers.Interface([
   'event Transfer(address indexed from, address indexed to, uint256 value)',
 ])
 
+/**
+ * The ERC-20 `Transfer` event topic (keccak of the canonical signature).
+ * Exported for the passive settlement observer, which needs it to filter
+ * `eth_getLogs` candidates down to Transfer events of the expected token.
+ */
+export const ERC20_TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)')
+
 export interface ExpectedSettlementTransfer {
   chainId: number
   /**

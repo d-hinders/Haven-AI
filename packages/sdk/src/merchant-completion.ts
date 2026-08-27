@@ -44,6 +44,19 @@ import { decodeBase64Json } from './base64.js'
 
 const MERCHANT_BODY_SNIPPET_LIMIT = 1000
 
+// #2117: the backend distinguishes a RETRYABLE evidence-report refusal from a
+// TERMINAL one on the WIRE (packages/backend/src/modules/mpp/evidence.ts,
+// attachEvidenceHandler). `settlement_unobservable` — the reported erc7710
+// settlement tx is not mined yet, or the chain cannot be read — maps to HTTP
+// 503 ("report it again"); `settlement_unverified` and every validation
+// failure are 4xx ("reporting it again will not change that"). The SDK keys on
+// that status, never on message text: only a 503 earns a few bounded retries,
+// and the evidence report stays best-effort — it must never stall the
+// paid-resource response that already went back to the agent.
+const EVIDENCE_RETRYABLE_STATUS = 503
+const EVIDENCE_MAX_ATTEMPTS = 3
+const EVIDENCE_BACKOFF_MS = [500, 1000] as const
+
 export type PaymentPoster = <T>(path: string, body: Record<string, unknown>) => Promise<T>
 export type PaymentStatusReader = (paymentId: string) => Promise<PaymentStatusResult>
 export type AgentReader = () => Promise<{ delegateAddress?: string }>
@@ -328,27 +341,46 @@ export class MerchantCompletion {
     protocolReceiptHeaderName?: string
     protocolReceiptHeader?: string
   }): Promise<void> {
-    try {
-      await this.post('/machine-payments/evidence', {
-        paymentId: input.paymentId,
-        rail: input.rail,
-        txHash: input.txHash,
-        resourceUrl: input.resourceUrl,
-        merchantStatus: input.merchantStatus,
-        challengePayload: input.challengePayload,
-        selectedPayment: input.selectedPayment,
-        paymentProofHeaderName: input.paymentProofHeaderName,
-        paymentProofHeader: input.paymentProofHeader,
-        protocolReceiptHeaderName: input.protocolReceiptHeaderName,
-        protocolReceiptHeader: input.protocolReceiptHeader,
-        protocolReceiptPayload: input.protocolReceiptHeader
-          ? parseProtocolReceiptHeader(input.protocolReceiptHeader)
-          : undefined,
-      })
-    } catch {
-      // Evidence reporting is best-effort. The paid resource response remains
-      // the caller-visible result when merchant retry succeeded.
+    const body = {
+      paymentId: input.paymentId,
+      rail: input.rail,
+      txHash: input.txHash,
+      resourceUrl: input.resourceUrl,
+      merchantStatus: input.merchantStatus,
+      challengePayload: input.challengePayload,
+      selectedPayment: input.selectedPayment,
+      paymentProofHeaderName: input.paymentProofHeaderName,
+      paymentProofHeader: input.paymentProofHeader,
+      protocolReceiptHeaderName: input.protocolReceiptHeaderName,
+      protocolReceiptHeader: input.protocolReceiptHeader,
+      protocolReceiptPayload: input.protocolReceiptHeader
+        ? parseProtocolReceiptHeader(input.protocolReceiptHeader)
+        : undefined,
     }
+
+    // #2117: bounded retries on the retryable wire form only — backend HTTP
+    // 503 (`settlement_unobservable`: the erc7710 settlement tx is not mined
+    // yet, or the chain is unreadable). Eating a retryable 503 dropped the
+    // evidence report for good, which left the payment invisible to the
+    // Fortnox feed. A terminal refusal (409 `settlement_unverified`, 400
+    // validation, 404 unknown payment) or a transport failure will not change
+    // on a re-report, so it is still swallowed immediately — evidence
+    // reporting is best-effort by contract, and the paid resource response
+    // remains the caller-visible result.
+    for (let attempt = 0; attempt < EVIDENCE_MAX_ATTEMPTS; attempt++) {
+      try {
+        await this.post('/machine-payments/evidence', body)
+        return
+      } catch (err) {
+        if (!(err instanceof HavenApiError && err.statusCode === EVIDENCE_RETRYABLE_STATUS)) {
+          return
+        }
+        if (attempt < EVIDENCE_BACKOFF_MS.length) {
+          await sleep(EVIDENCE_BACKOFF_MS[attempt])
+        }
+      }
+    }
+    // All bounded attempts refused with 503 — swallow, exactly as before.
   }
 }
 
@@ -390,4 +422,8 @@ export function parseProtocolReceiptHeader(value: string): Record<string, unknow
       return undefined
     }
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

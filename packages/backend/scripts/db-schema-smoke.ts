@@ -171,6 +171,7 @@ import {
   MARK_INTENT_SUBMITTED_FOR_SETTLEMENT_SQL,
   RECORD_X402_SIGNATURE_SQL,
   REFRESH_STALE_X402_INTENT_SQL,
+  FIND_PENDING_ERC7710_SETTLEMENTS_SQL,
 } from '../src/infra/repositories/x402-authorizations.js'
 import {
   ATTACH_EVIDENCE_FOR_APPROVAL_SQL,
@@ -667,6 +668,7 @@ const QUERIES: SmokeQuery[] = [
   { name: 'x402: one-shot fail', sql: FAIL_X402_INTENT_SQL },
   { name: 'x402: settle intent load (#830)', sql: FIND_SETTLE_INTENT_SQL },
   { name: 'x402: settle flip to submitted (#976 ordering)', sql: MARK_INTENT_SUBMITTED_FOR_SETTLEMENT_SQL },
+  { name: 'x402: observer eligibility scan (#2117)', sql: FIND_PENDING_ERC7710_SETTLEMENTS_SQL },
   // machine-payment evidence / reconciliation / sweeps / merchant receipts:
   { name: 'evidence: base upsert anchored on intent', sql: UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL },
   { name: 'evidence: base upsert anchored on approval', sql: UPSERT_EVIDENCE_BASE_FOR_APPROVAL_SQL },

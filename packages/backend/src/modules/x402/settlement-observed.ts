@@ -38,7 +38,10 @@ import {
   confirmObservedSettlement,
   type Executor,
 } from '../../infra/repositories/x402-authorizations.js'
-import { verifySettlementTransferTx } from '../../infra/chain/settlement-transfer-verifier.js'
+import {
+  verifySettlementTransferTx,
+  type ExpectedSettlementTransfer,
+} from '../../infra/chain/settlement-transfer-verifier.js'
 import { getFiatValuesForTokenAmount } from '../../infra/fiat-values.js'
 import { MAX_SETTLEMENT_WINDOW_SECONDS } from './x402-delegation.js'
 
@@ -49,7 +52,7 @@ import { MAX_SETTLEMENT_WINDOW_SECONDS } from './x402-delegation.js'
  * narrowing it could reject a genuine payment — which on this path means
  * silently dropping it out of the user's bookkeeping.
  */
-const CLOCK_SKEW_SECONDS = 120
+export const CLOCK_SKEW_SECONDS = 120
 
 /**
  * How far apart two intents' `created_at` values can be and still have
@@ -133,6 +136,39 @@ export function isPendingErc7710Settlement(intent: ObservableSettlementIntent): 
 }
 
 /**
+ * Derive the on-chain transfer this intent's settlement must match — the ONE
+ * definition of "a settlement of THIS payment", shared by every caller that
+ * verifies one.
+ *
+ * Returns null when the intent has no usable authorize time: no window means
+ * the window clamp (`notBeforeSec`/`notAfterSec`) cannot be derived, and a
+ * window around the wrong anchor is worse than none because it would silently
+ * pass a settlement from an unrelated payment.
+ */
+export function expectedSettlementTransferFor(
+  intent: ObservableSettlementIntent,
+): ExpectedSettlementTransfer | null {
+  // The settlement window: the child delegation's `timestamp` caveat is
+  // enforced on-chain and can never exceed `authorize + MAX_SETTLEMENT_WINDOW_SECONDS`,
+  // so a genuine settlement of THIS child is mined inside this span. Bounding
+  // by the maximum rather than by the intent's own `maxTimeoutSeconds` keeps
+  // the check derived from a construction invariant instead of from a value
+  // parsed back out of `prepared_user_op`, and can only ever be MORE permissive.
+  const authorizeSec = Math.floor(new Date(intent.created_at ?? '').getTime() / 1000)
+  if (!Number.isFinite(authorizeSec)) return null
+
+  return {
+    chainId: intent.chain_id,
+    tokenAddress: intent.token_address,
+    fromAddress: intent.safe_address,
+    toAddress: intent.to_address,
+    amountRaw: intent.amount_raw,
+    notBeforeSec: authorizeSec - CLOCK_SKEW_SECONDS,
+    notAfterSec: authorizeSec + MAX_SETTLEMENT_WINDOW_SECONDS + CLOCK_SKEW_SECONDS,
+  }
+}
+
+/**
  * Complete a `submitted` erc7710 intent from an agent-reported settlement tx
  * hash, after verifying that hash on-chain.
  *
@@ -147,14 +183,8 @@ export async function observeErc7710Settlement(
 ): Promise<SettlementObservation> {
   if (!isPendingErc7710Settlement(intent)) return { outcome: 'not_applicable' }
 
-  // The settlement window: the child delegation's `timestamp` caveat is
-  // enforced on-chain and can never exceed `authorize + MAX_SETTLEMENT_WINDOW_SECONDS`,
-  // so a genuine settlement of THIS child is mined inside this span. Bounding
-  // by the maximum rather than by the intent's own `maxTimeoutSeconds` keeps
-  // the check derived from a construction invariant instead of from a value
-  // parsed back out of `prepared_user_op`, and can only ever be MORE permissive.
-  const authorizeSec = Math.floor(new Date(intent.created_at ?? '').getTime() / 1000)
-  if (!Number.isFinite(authorizeSec)) {
+  const expected = expectedSettlementTransferFor(intent)
+  if (!expected) {
     // No authorize time means no window, and no window means check 7 — the only
     // intent-specific check — cannot run. Refuse rather than substitute a
     // wall-clock "now": a window around the wrong anchor is worse than none,
@@ -166,15 +196,7 @@ export async function observeErc7710Settlement(
     }
   }
 
-  const verification = await verifySettlementTransferTx(txHash, {
-    chainId: intent.chain_id,
-    tokenAddress: intent.token_address,
-    fromAddress: intent.safe_address,
-    toAddress: intent.to_address,
-    amountRaw: intent.amount_raw,
-    notBeforeSec: authorizeSec - CLOCK_SKEW_SECONDS,
-    notAfterSec: authorizeSec + MAX_SETTLEMENT_WINDOW_SECONDS + CLOCK_SKEW_SECONDS,
-  })
+  const verification = await verifySettlementTransferTx(txHash, expected)
 
   if (verification.outcome !== 'verified') {
     // Fail closed. `rpc_unavailable` and a not-yet-mined transaction are the

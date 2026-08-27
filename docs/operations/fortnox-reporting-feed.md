@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/infra/repositories/reporting-feed-syncs.ts
   - packages/frontend/src/app/(authenticated)/reporting/page.tsx
   - packages/frontend/src/hooks/useReporting.ts
-last-verified: "2026-08-26" # #2092: re-read the "flow, end to end" section only — the entry condition was stated as "x402 funding confirmation or MPP receipt", which excluded erc7710 by construction and was the doc-level shadow of the bug; corrected, with the scheme-agnostic entry and its residual gap named. The verification, troubleshooting and recovery sections were NOT re-read in this pass. Prior 2026-08-13: feed live-verified end-to-end on a real user account (entitlement grant -> connect -> x402 purchase -> pushed w/ invoice number -> read-back "Registered"); added the Fortnox first-visit UI-wizard gotcha. Prior same-day: #1365 recovery gaps
+last-verified: "2026-08-27" # #2117: the "flow, end to end" section's Residual-gap paragraph rewritten — the erc7710 settlement observer now closes the no-`PAYMENT-RESPONSE`-hash case (the same seam completes intents and writes evidence; the one remaining no-path case is an RPC outage spanning the scan window). Scope: that paragraph only; the verification/troubleshooting/recovery sections NOT re-read. Prior: #2092: re-read the "flow, end to end" section only — the entry condition was stated as "x402 funding confirmation or MPP receipt", which excluded erc7710 by construction and was the doc-level shadow of the bug; corrected, with the scheme-agnostic entry and its residual gap named. The verification, troubleshooting and recovery sections were NOT re-read in this pass. Prior 2026-08-13: feed live-verified end-to-end on a real user account (entitlement grant -> connect -> x402 purchase -> pushed w/ invoice number -> read-back "Registered"); added the Fortnox first-visit UI-wizard gotcha. Prior same-day: #1365 recovery gaps
 ---
 
 # Fortnox reporting feed — operations runbook
@@ -60,10 +60,21 @@ delegation chain and Haven submits nothing, so the intent used to sit at
 dashboard. `POST /machine-payments/evidence` now completes such an intent from
 the merchant's reported settlement hash after verifying it on-chain — see
 [`04-x402-payment-sequence.md` § Completing an erc7710 settlement](../architecture/04-x402-payment-sequence.md).
-**Residual gap:** a merchant that returns no `PAYMENT-RESPONSE` transaction
-leaves Haven nothing to verify, so that payment stays `submitted` and never
-reaches the feed — neither by auto-feed nor by "Sync now", since the backfill
-enumerates `machine_payment_evidence`.
+**Residual gap (closed by the erc7710 settlement observer, #2117).** A merchant
+that returns no `PAYMENT-RESPONSE` transaction used to leave Haven nothing to
+verify, so that payment stayed `submitted` and never reached the feed — neither
+by auto-feed nor by "Sync now", since the backfill enumerates
+`machine_payment_evidence`. The observer now discovers such settlements
+Haven-side: every tick it scans `submitted` delegation-rail x402 intents whose
+settlement window is still open, finds the settlement transaction on-chain
+(ERC-20 `Transfer` from the Safe to the merchant in the intent's token), runs
+it through the same on-chain verifier that gates the agent-report path, and
+only on a `verified` verdict completes the intent and writes the evidence row —
+so the payment reaches Fortnox by auto-feed exactly like a reported one (see
+[`04-x402-payment-sequence.md` § Settlement observer](../architecture/04-x402-payment-sequence.md)).
+The one remaining no-path case is an RPC outage spanning the whole scan window
+(≤ ~13 minutes after authorize); such an intent stays `submitted`, fail-closed,
+never wrongly completed.
 
 What the accountant sees in Fortnox: an unbooked supplier invoice with the
 payment-evidence PDF(s) attached, `Booked: false`, no voucher — until they

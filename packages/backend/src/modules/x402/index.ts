@@ -31,3 +31,14 @@ export {
   chainIdFromX402Network,
   ZERO_ADDRESS,
 } from './helpers.js'
+
+// The settlement-completion seam (#2096/#2117): route orchestration and the
+// passive erc7710 settlement observer both consume the same verify-then-confirm
+// transition and the same window derivation, so both import them through the
+// module index (dep-lint rule 6) rather than a deep path.
+export {
+  expectedSettlementTransferFor,
+  isPendingErc7710Settlement,
+  observeErc7710Settlement,
+} from './settlement-observed.js'
+export type { ObservableSettlementIntent, SettlementObservation } from './settlement-observed.js'

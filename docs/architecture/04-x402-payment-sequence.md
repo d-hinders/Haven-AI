@@ -904,14 +904,25 @@ attribution is `409`. **Replay:** one settlement transaction may confirm at most
 one intent — the guarded `UPDATE` refuses a hash already carried by another row,
 serialized by a per-hash `pg_advisory_xact_lock`.
 
-**Accepted residual gap.** A merchant that returns no `PAYMENT-RESPONSE` (or one
-without a transaction) gives Haven no hash to verify, so that payment stays
-`submitted` and stays out of the feed. Inventing an anchor client-side is
-precisely what the verification exists to prevent; passive on-chain observation
-of the settlement would close it and is out of scope here. The same applies to
-the generic plain-HTTP erc7710 flow (#2041), where the AGENT retries the
-merchant and Haven never sees the header — such an agent completes the payment
-by posting the settlement hash to `POST /machine-payments/evidence` itself.
+**Settlement observer — the residual gap is closed (#2117).** A merchant that
+returns no `PAYMENT-RESPONSE` (or one without a transaction) gives Haven no
+hash to verify. Inventing an anchor client-side is precisely what the
+verification exists to prevent — so instead of guessing, the erc7710
+settlement observer (`infra/erc7710-settlement-observer.ts`) DISCOVERS the
+settlement on-chain: per pending `submitted` intent it reads the token
+contract's `Transfer` logs between the Safe and the merchant over the
+settlement window, and feeds the candidate hash through the exact same
+`verifySettlementTransferTx` + `observeErc7710Settlement` seam, which then
+confirms the intent and (via `recordMachinePaymentEvidenceBase`) writes the
+evidence row and fires the Fortnox feed. Discovery adds NO trust of its own —
+a candidate merely found can confirm nothing; any finding short of `verified`
+is skipped and retried next tick, and an RPC outage is never a verdict. The
+observer is leader-locked with a per-intent advisory lock, serialising each
+completion against the agent-report path (the CAS/replay/ambiguity guards
+decide the winner). The generic plain-HTTP erc7710 flow (#2041), where the
+AGENT retries the merchant and Haven never sees the header, is covered by the
+same observer: the on-chain settlement is discovered regardless of how the
+hash would have travelled.
 
 ### What the settlement child delegation actually constrains
 

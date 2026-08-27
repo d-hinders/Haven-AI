@@ -11,6 +11,10 @@ import { SharedRateLimitStore, setRateLimitDegradedReporter } from './middleware
 import { deleteExpiredRateLimits } from './infra/repositories/rate-limit-counters.js'
 import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './infra/delegate-balance-monitor.js'
+import {
+  ERC7710_SETTLEMENT_OBSERVER_INTERVAL_MS,
+  runErc7710SettlementObserver,
+} from './infra/erc7710-settlement-observer.js'
 import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './infra/relayer-balance-monitor.js'
 import { runIfLeader, LEADER_LOCK_KEYS } from './platform/leader-lock.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './domain/chains.js'
@@ -435,6 +439,27 @@ const start = async () => {
     }
     void runDelegateMonitor()
     setInterval(runDelegateMonitor, DELEGATE_MONITOR_INTERVAL_MS).unref()
+
+    // erc7710 settlement observer (#2117): closes the fail-forever gap where a
+    // direct-settlement payment is settled on-chain but the intent never moves
+    // because no agent reported the hash. Every tick it discovers the
+    // settlement of pending erc7710 intents on-chain (getLogs + the exact
+    // verifier), completes the confirmed intents, and pushes them through the
+    // same evidence pipeline the agent-report path uses — which is what makes
+    // them appear in Fortnox and in the backfill. Leader-locked like every
+    // other tick; the per-intent keyed advisory lock inside the monitor
+    // serialises each completion against the HTTP path.
+    const runErc7710Observer = async () => {
+      try {
+        await runIfLeader(LEADER_LOCK_KEYS.delegationSettlementObserver, async () => {
+          await runErc7710SettlementObserver(app.log)
+        })
+      } catch (err) {
+        app.log.warn({ err }, 'erc7710 settlement observer tick failed')
+      }
+    }
+    void runErc7710Observer()
+    setInterval(runErc7710Observer, ERC7710_SETTLEMENT_OBSERVER_INTERVAL_MS).unref()
 
     // Relayer balance monitor: hourly read-only scan of the relayer EOA's
     // native balance per served chain — structured warning + edge-triggered

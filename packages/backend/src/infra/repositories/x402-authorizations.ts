@@ -23,6 +23,10 @@
 import pool from '../../db.js'
 import { type Executor, withTransaction } from '../transaction.js'
 import { type PaymentIntentRow } from './payment-intents.js'
+// Type-only: the observer's eligibility rows are consumed directly by
+// `recordMachinePaymentEvidenceBase`, whose input type this is — no value
+// import, so no runtime coupling between the two repositories.
+import { type EvidenceSourceRow } from './machine-payments.js'
 
 export type { Executor }
 
@@ -420,4 +424,76 @@ export async function confirmObservedSettlement(
     await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [input.txHash.toLowerCase()])
     return confirmObservedSettlementRow(input, tx)
   })
+}
+
+// ── Passive settlement observer eligibility (issue #2117) ───────────────────
+
+/**
+ * The passive observer's scan window: how old an intent's `created_at` can be
+ * and still be worth re-reading. The settlement child is redeemable only
+ * inside `authorize .. authorize + window` (widened by the same clock skew the
+ * confirm uses), so an intent whose window has been over by more than a small
+ * grace here can never be completed by observation — leaving it in the scan
+ * would just waste RPC calls every tick. The +60s grace exists so an intent
+ * whose window closed a few blocks ago is still checked once: the verifier's
+ * exact `notAfterSec` clamp is the real gate, and a slightly-expired scan is
+ * strictly safer than one that drops a payment a block early.
+ */
+export const ERC7710_SETTLEMENT_OBSERVER_MAX_AGE_SECONDS = 780
+
+/**
+ * Pending erc7710 settlement candidates for the passive observer (#2117):
+ * intents that (a) sit at exactly the lifecycle the observer can complete —
+ * `submitted`, delegation rail, erc7710 scheme, no hash yet — and (b) whose
+ * settlement window is still plausibly open as of NOW.
+ *
+ * The column list mirrors {@link FIND_INTENT_EVIDENCE_SOURCE_SQL} so each row
+ * is directly consumable by both `observeErc7710Settlement` and
+ * `recordMachinePaymentEvidenceBase` (the two functions the observer calls),
+ * with no reshape in between.
+ *
+ * Windows that are over are left alone by this predicate (`created_at` too
+ * old), and so is anything not at `submitted` — a confirmed-but-evidence-less
+ * intent is a different gap with a different owner (the backfill), and this
+ * query must not grow to swallow it.
+ */
+export const FIND_PENDING_ERC7710_SETTLEMENTS_SQL = `SELECT 'payment_intent'::TEXT AS kind,
+            id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+            to_address, amount_raw, amount_human, tx_hash, status, source,
+            x402_resource_url, x402_merchant_address, x402_idempotency_key,
+            payment_rail, payment_resource_url, merchant_address,
+            machine_challenge_id, machine_idempotency_key, machine_metadata,
+            execution_rail,
+            created_at,
+            confirmed_at
+     FROM payment_intents
+     WHERE status = 'submitted'
+       AND COALESCE(payment_rail, source) = 'x402'
+       AND execution_rail = 'delegation'
+       AND machine_metadata->>'settlement_scheme' = 'erc7710'
+       AND tx_hash IS NULL
+       AND created_at IS NOT NULL
+       AND created_at >= NOW() - ($1 * interval '1 second')
+       AND created_at <= NOW()
+     ORDER BY created_at ASC
+     LIMIT $2`
+
+/**
+ * Read the observer's candidate set for one tick. `maxAgeSeconds` bounds how
+ * far back a still-plausibly-open window can reach (see
+ * {@link ERC7710_SETTLEMENT_OBSERVER_MAX_AGE_SECONDS}); `limit` bounds the
+ * work one tick may start. Oldest-first so the longest-waiting payment is
+ * completed before fresher ones — a payment past its window is the one that
+ * has already been invisible to Fortnox the longest.
+ */
+export async function findPendingErc7710Settlements(
+  maxAgeSeconds: number,
+  limit: number,
+  db: Executor = pool,
+): Promise<EvidenceSourceRow[]> {
+  const result = await db.query<EvidenceSourceRow>(FIND_PENDING_ERC7710_SETTLEMENTS_SQL, [
+    maxAgeSeconds,
+    limit,
+  ])
+  return result.rows
 }

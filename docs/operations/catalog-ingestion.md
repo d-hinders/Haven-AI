@@ -6,7 +6,7 @@ covers:
   - packages/backend/src/infra/repositories/catalog-submissions.ts
   - packages/backend/src/index.ts
   - packages/backend/src/db/migrations/068_catalog_lifecycle.ts
-last-verified: "2026-08-24"
+last-verified: "2026-08-27" # #2117: a file this doc `covers:` by exact path gained a sibling leader-locked tick — `packages/backend/src/index.ts` now also runs the erc7710 settlement observer (`delegationSettlementObserver`); the catalogue-ingestion lifecycle (`catalogIngest`) and its queue/probe/retention contract are unchanged. Scope: that covered-file relationship only.
 ---
 
 # Operations Runbook — Verified Payable Directory ingestion (#1714)

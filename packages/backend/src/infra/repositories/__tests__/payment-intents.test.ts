@@ -11,6 +11,7 @@
  * domain-free rule.
  */
 import { beforeAll, beforeEach, expect, it } from 'vitest'
+import { randomUUID } from 'node:crypto'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
@@ -259,6 +260,27 @@ describeDb('payment-intents repository (#1223)', () => {
       insertSendIntent({ ...legacyInput(agentId, userId), sendIdempotencyKey: 'send-1' }),
     ).resolves.toBeTruthy()
     expect(await findSendIntentByIdempotencyKey(agentId, 'send-1')).not.toBeNull()
+  })
+
+  it('insertMachineIntent honours an EXPLICIT id — the erc7710 child is salted from it (#2094)', async () => {
+    // The wiring the whole of #2094 rests on. The settlement child's salt is
+    // derived from the intent id BEFORE the row exists, so the id the caller
+    // salted with must be the id the row ends up with. If the insert quietly
+    // ignored it and let gen_random_uuid() win, the child would name a row
+    // that does not exist and no verifier or sweeper could ever recompute it.
+    const agent = await seedAgent()
+    const id = randomUUID()
+    const row = await insertMachineIntent(machineInput(agent, { id, rail: 'x402' }))
+    expect(row?.id).toBe(id)
+    expect(
+      (await db.query(`SELECT id FROM payment_intents WHERE id = $1`, [id])).rows,
+    ).toHaveLength(1)
+  })
+
+  it('insertMachineIntent without an id still gets the column default — every other caller is untouched', async () => {
+    const agent = await seedAgent()
+    const row = await insertMachineIntent(machineInput(agent))
+    expect(row?.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-/)
   })
 
   it('insertMachineIntent ON CONFLICT DO NOTHING: the replay returns null and the caller reloads the winner', async () => {

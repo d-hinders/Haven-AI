@@ -932,31 +932,68 @@ contract, `from` the payer smart account, `to` the merchant `payTo`, for
 **exactly** the authorized atomic amount; and the mined block's timestamp falls
 inside **this intent's own settlement window** (the settlement child's
 `timestamp` caveat is enforced on-chain, so a genuine settlement of this child
-cannot be mined outside `authorize .. authorize + 600s`). Deliberately NOT
-checked: the facilitator's DelegationManager calldata (facilitator-specific and
-opaque — the Transfer log is the settlement's universal EFFECT, and the caveat
-enforcers already bounded on-chain what could move), the submitter identity
-(redemption is permissionless; who paid the gas is not an integrity property),
-and reorg depth beyond one confirmation.
+cannot be mined outside `authorize .. authorize + 600s`).
 
-**Ambiguity is refused, never guessed.** Checks 1–6 are about the transfer's
-SHAPE; only the window is about WHICH intent. That matters because
-`buildSettlementDelegation` builds a **byte-identical** settlement child for two
-authorizations that share merchant, token, amount and expiry second — `salt` is
-constant and the expiry is the only clock-derived field — so within one window
-there is genuinely nothing on-chain that tells two look-alike intents apart.
-Attaching a verified settlement to either would attribute a real payment to the
-wrong purchase and strand the one that caused it. The confirm therefore refuses
-outright when another `submitted` erc7710 intent of the same
-agent/chain/token/recipient/amount exists close enough in time for the two
-settlement windows to OVERLAP: **both** stay `submitted`. That reach is wider
-than one window — a window is `[t - skew, t + M + skew]`, so two of them
-intersect whenever their authorize times are within `M + 2 * skew`, not
-`M + skew` (`AMBIGUITY_WINDOW_SECONDS`). Sizing it to one window's own forward
-reach would leave a skew-wide band of genuinely overlapping look-alikes
-unguarded. A missing book entry is recoverable; a wrong one is
-not. Making the child intent-unique (a per-intent salt) would close this
-exactly and is tracked separately.
+Since [#2094](https://github.com/d-hinders/Haven-AI/issues/2094) there is a
+check 8, and it is the only one about WHICH payment rather than what shape it
+had: when the transaction carries `RedeemedDelegation` logs from the **pinned**
+DelegationManager, the emitted `Delegation` struct is re-hashed with the
+framework's own `hashDelegation` and this intent's stored `delegation_hash`
+must be among them; if it is not, the transaction demonstrably settled a
+different payment and is refused. It is deliberately conditional and can never
+turn a genuine settlement into a refusal — no stored child, no manager pinned
+for the chain, or no decodable log from it means check 8 is skipped and the
+verdict is checks 1–7 exactly as before. An absent log is "we learned nothing
+here", not evidence of a forgery.
+
+Deliberately NOT checked: the facilitator's DelegationManager **calldata**
+(facilitator-specific and opaque — the Transfer log is the settlement's
+universal EFFECT, and the caveat enforcers already bounded on-chain what could
+move; check 8 reads the pinned manager's fixed-ABI EVENT instead, which is why
+it adds no coupling to any facilitator), the submitter identity (redemption is
+permissionless; who paid the gas is not an integrity property), and reorg depth
+beyond one confirmation.
+
+**The child is intent-unique (#2094).** The settlement child is salted with
+`keccak256("haven-x402-settlement:" || <payment intent id>)`, and the intent id
+is generated BEFORE the child is built and written as the row's explicit
+primary key. Two authorizations that share merchant, token, amount and expiry
+second therefore no longer produce a byte-identical child: their `childHash`
+values differ, their `RedeemedDelegation` logs differ, and check 8 above can
+name exactly one of them. The salt is **derived, never random** — the mapping
+intent → child is a pure function of stored data, so a verifier (and a future
+passive settlement sweeper) can recompute the child it should look for from the
+intent row alone rather than trusting an opaque column. Nothing sensitive
+reaches the chain: the preimage is a domain tag plus a v4 UUID that is already
+the public `payment_id`, it is hashed so it is not legible on-chain anyway, and
+the domain tag makes a collision with a budget-delegation salt
+(`haven-delegation:…`, `rails/delegation-policy.ts`) structurally impossible.
+
+**Ambiguity is still refused, never guessed.** Checks 1–7 are about the
+transfer's SHAPE and its window; only check 8 is about WHICH intent, so the
+guard that refuses to place an unattributable settlement is **kept** — narrowed,
+not deleted. A look-alike `submitted` erc7710 twin of the same
+agent/chain/token/recipient/amount, close enough in time for the two settlement
+windows to OVERLAP, still refuses the confirm and leaves **both** `submitted`,
+UNLESS all three hold: check 8 bound this settlement to this intent's own
+child, this intent has a recorded child, and the twin has a recorded child that
+is a DIFFERENT one. A twin whose child was never recorded is *unknown*, and
+unknown is ambiguous rather than different — spelled out as two `IS NOT NULL`s
+plus `<>` precisely so `IS DISTINCT FROM` cannot read NULL as "a different
+child". The overlap reach is unchanged and still wider than one window — a
+window is `[t - skew, t + M + skew]`, so two of them intersect whenever their
+authorize times are within `M + 2 * skew`, not `M + skew`
+(`AMBIGUITY_WINDOW_SECONDS`); sizing it to one window's own forward reach would
+leave a skew-wide band of genuinely overlapping look-alikes unguarded. A missing
+book entry is recoverable; a wrong one is not.
+
+**In-flight authorizations are unaffected.** An authorization created before
+#2094 and settled after it carries the old constant salt, and its stored
+`delegation_hash` was taken from that child; the verifier re-hashes what the
+chain EMITS rather than what today's builder would build, so it binds exactly as
+a new child does. Two such pre-#2094 look-alikes share one child hash, fail the
+"different child" conjunct, and are still both refused — which is the correct
+answer for them, and the reason the guard is kept rather than removed.
 
 **Fail closed, in every direction.** Anything short of a full match leaves the
 intent `submitted` with no evidence row, no fee row and no feed call. An
@@ -971,7 +1008,11 @@ serialized by a per-hash `pg_advisory_xact_lock`.
 without a transaction) gives Haven no hash to verify, so that payment stays
 `submitted` and stays out of the feed. Inventing an anchor client-side is
 precisely what the verification exists to prevent; passive on-chain observation
-of the settlement would close it and is out of scope here. The same applies to
+of the settlement would close it and is tracked as
+[#2117](https://github.com/d-hinders/Haven-AI/issues/2117) — #2094's
+intent-unique child is what makes such a sweeper safe to build, since a swept
+`Transfer` can now be tied to one intent by its `RedeemedDelegation` log instead
+of being plausibly attributable to two. The same applies to
 the generic plain-HTTP erc7710 flow (#2041), where the AGENT retries the
 merchant and Haven never sees the header — such an agent completes the payment
 by posting the settlement hash to `POST /machine-payments/evidence` itself.

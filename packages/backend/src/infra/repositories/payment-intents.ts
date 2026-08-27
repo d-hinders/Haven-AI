@@ -287,6 +287,7 @@ function machineIntentInsertSql(
   conflictColumn: 'machine_idempotency_key' | 'x402_idempotency_key',
 ): string {
   return `INSERT INTO payment_intents (
+      id,
       agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
       to_address, amount_raw, amount_human, delegate_address,
       allowance_nonce, sign_hash, status, source, x402_resource_url, x402_category,
@@ -295,7 +296,13 @@ function machineIntentInsertSql(
       machine_idempotency_key, machine_metadata,
       execution_rail, session_permission_id, session_user_op,
       delegation_hash, budget_delegation_hash, prepared_user_op, expires_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+    ) VALUES (
+      -- #2094: an explicit id when the caller needs the row's identity BEFORE
+      -- the insert (the erc7710 settlement child is salted from it); NULL
+      -- falls through to the column's own gen_random_uuid() default, which is
+      -- what every other caller still gets.
+      COALESCE($30::uuid, gen_random_uuid()),
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
       'pending_signature', $13, $14, $15, $16, $17,
       $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, NOW() + interval '10 minutes')
     ON CONFLICT (agent_id, ${conflictColumn})
@@ -309,6 +316,14 @@ export const INSERT_MACHINE_INTENT_MACHINE_KEY_SQL = machineIntentInsertSql('mac
 export const INSERT_MACHINE_INTENT_X402_KEY_SQL = machineIntentInsertSql('x402_idempotency_key')
 
 export interface NewMachineIntent {
+  /**
+   * #2094: an explicit primary key, for the one caller that must know the
+   * intent's identity before the row exists — the erc7710 authorize salts its
+   * settlement child from this id, so the child and the row that stores it are
+   * one thing. Omit it everywhere else and the column default supplies a
+   * `gen_random_uuid()` exactly as before.
+   */
+  id?: string
   agent: { id: string; user_id: string; safe_address: string; chain_id: number; delegate_address: string }
   rail: string
   payTo: string
@@ -346,7 +361,7 @@ export async function insertMachineIntent(
   db: Executor = pool,
 ): Promise<PaymentIntentRow | null> {
   const {
-    agent, rail, payTo, tokenSymbol, tokenAddress, amountRaw, amountHuman,
+    id, agent, rail, payTo, tokenSymbol, tokenAddress, amountRaw, amountHuman,
     allowanceNonce, signHash, resourceUrl, category, merchantAddress,
     challengeId, idempotencyKey, metadata,
     executionRail, sessionPermissionId, sessionUserOp,
@@ -368,6 +383,7 @@ export async function insertMachineIntent(
     idempotencyKey ?? null, metadata != null ? JSON.stringify(metadata) : null,
     executionRail ?? null, sessionPermissionId ?? null, sessionUserOp ?? null,
     delegationHash ?? null, budgetDelegationHash ?? null, preparedUserOp ?? null,
+    id ?? null,
   ])
   return result.rows[0] ?? null
 }

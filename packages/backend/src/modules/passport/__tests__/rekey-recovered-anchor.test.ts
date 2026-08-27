@@ -73,7 +73,8 @@ async function seedBroadcastLostAgent() {
   )
   const userId = user.rows[0].id
   const safe = await db.query<{ id: string }>(
-    `INSERT INTO user_safes (user_id, safe_address, chain_id) VALUES ($1, $2, $3) RETURNING id`,
+    `INSERT INTO user_safes (user_id, safe_address, chain_id, execution_rail, account_type)
+     VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid') RETURNING id`,
     [userId, TREASURY, CHAIN],
   )
   const agent = await db.query<{ id: string }>(
@@ -180,7 +181,8 @@ describeDb('#1847 — recovered anchors are attributed from the chain, not from 
     )
     const userId = user.rows[0].id
     const safe = await db.query<{ id: string }>(
-      `INSERT INTO user_safes (user_id, safe_address, chain_id) VALUES ($1, $2, $3) RETURNING id`,
+      `INSERT INTO user_safes (user_id, safe_address, chain_id, execution_rail, account_type)
+     VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid') RETURNING id`,
       [userId, TREASURY, CHAIN],
     )
     const agent = await db.query<{ id: string }>(

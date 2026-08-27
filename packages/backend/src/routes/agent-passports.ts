@@ -13,6 +13,11 @@ import type { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { findAgentChain } from '../infra/repositories/agent-passports.js'
 import {
+  hasBoundAccount,
+  isPassportIssuableAccount,
+  passportRailRefusalReason,
+} from '../domain/passport-issuance-rail.js'
+import {
   getPassport,
   requestPassport,
   issuePassportBestEffort,
@@ -75,6 +80,19 @@ export default async function agentPassportRoutes(app: FastifyInstance): Promise
       // agent is NOT blocked: pausing is reversible, and `standing` already
       // reports it as `suspended` rather than active.
       return reply.code(409).send({ error: 'Agent is revoked — a passport cannot be issued' })
+    }
+    if (
+      hasBoundAccount(agent.execution_rail, agent.account_type) &&
+      !isPassportIssuableAccount(agent.execution_rail, agent.account_type)
+    ) {
+      // #2138 (owner decision 2026-08-27). 409 and not 400, matching the
+      // revoked-agent guard above: this is a conflict with the account's
+      // state, not a malformed request — the same call sent to a
+      // delegation-rail agent is valid. Explicit here, because this is the
+      // route whose whole purpose is to ask for a passport; the two
+      // fire-and-forget paths (agent creation, connect-setup register) skip
+      // silently rather than fail the creation they are attached to.
+      return reply.code(409).send({ error: passportRailRefusalReason(agent.execution_rail) })
     }
     if (agent.chain_id == null) {
       return reply.code(400).send({

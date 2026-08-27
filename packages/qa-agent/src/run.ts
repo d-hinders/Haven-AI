@@ -14,6 +14,7 @@ import type { Scenario, ScenarioContext, ScenarioResult } from './scenarios/type
 import { withinBudgetSettle } from './scenarios/within-budget-settle.js'
 import { overBudgetRefused } from './scenarios/over-budget-refused.js'
 import { x402OverBudgetRejected } from './scenarios/x402-over-budget-rejected.js'
+import { x402Erc7710OverBudgetRejected } from './scenarios/x402-erc7710-over-budget-rejected.js'
 import { x402Delegation3009 } from './scenarios/x402-delegation-3009.js'
 import { x402Delegation3009Sweep } from './scenarios/x402-delegation-3009-sweep.js'
 import { x402Erc7710Settle } from './scenarios/x402-erc7710-settle.js'
@@ -49,14 +50,21 @@ import { runPreflight, formatPreflight } from './lib/preflight.js'
 //   x402-over-budget-rejected  driven on the EIP-3009 funding shape, where the
 //                           budget really is enforced at authorize.
 //
-// STATE THE TRADE HONESTLY — a coverage gap remains, and it is NOT the one the
-// re-base closes. On **erc7710** direct settlement, x402 authorize returns 201
-// with a signable child delegation for ANY amount: the budget is enforced when
-// the merchant redeems the chain, not by Haven. So "an over-budget x402 call is
-// never turned into a signable intent" is FALSE on the preferred scheme, and
-// nothing here covers the redemption-side revert — that needs a merchant that
-// actually attempts it. Verified live against dev on 2026-08-25 and handed to
-// #1993 rather than asserted around.
+//   x402-erc7710-over-budget-rejected  the same invariant on the PREFERRED
+//                           scheme, added by #2082. Until then, erc7710
+//                           authorize returned 201 with a signable child for
+//                           ANY amount (verified live against dev 2026-08-25,
+//                           handed to #1993 rather than asserted around), so
+//                           "an over-budget x402 call is never turned into a
+//                           signable intent" was FALSE on the path most
+//                           payments take. The pre-check made the case exist
+//                           to prove; this leg proves it.
+//
+// STATE WHAT IS STILL UNCOVERED. Neither over-budget x402 leg proves the CHAIN
+// refuses an over-budget redemption — that needs a merchant that actually
+// attempts one, and no leg does. The caveat stack was always the gate and is
+// unchanged by #2082; what the new leg asserts is WHEN Haven says no, not
+// whether the chain would have.
 //
 // x402 coverage is DELEGATION-RAIL ONLY. The legacy `x402-settle` and
 // `x402-sweep-recovery` legs were removed by owner decision (#1535): the
@@ -90,6 +98,11 @@ const SCENARIOS: Scenario[] = [
   withinBudgetSettle,
   overBudgetRefused,
   x402OverBudgetRejected,
+  // #2082: the same refusal on the erc7710 shape, straight after its 3009
+  // sibling so a failure is diagnosed against a scheme the leg above has
+  // already shown healthy — and so the two read as one invariant, two
+  // schemes, rather than as unrelated legs.
+  x402Erc7710OverBudgetRejected,
   x402Delegation3009,
   x402Delegation3009Sweep,
   x402Erc7710Settle,

@@ -103,7 +103,22 @@ export const FIXTURE_BLOCK_TIMESTAMP = Math.floor(Date.parse('2026-07-10T09:00:0
  * "Daily" rather than a raw "1440m" fallthrough. `lastResetMin` is optional and
  * defaults to 0 — see the note at `getTokenAllowance` for what that decides.
  */
-export function makeAllowanceChainFixture({ chainId, safeAddress, delegates, rows }) {
+/**
+ * @param {object} opts
+ * @param {boolean} [opts.moduleEnabled] Whether the Safe answers
+ *   `isModuleEnabled` TRUE. Defaults to true — every existing caller seeds a
+ *   legacy Safe that has the module, and their captures depend on it.
+ *
+ *   Pass `false` to seed a **delegation-rail** account (#2106). That is not a
+ *   cosmetic variant: a Hybrid DeleGator has no AllowanceModule, so `true` is
+ *   a state the delegation rail cannot actually produce. Capturing `/custody`
+ *   against the default photographed a delegation-rail account being told its
+ *   spend control was the Safe AllowanceModule — a *different* falsehood from
+ *   the one #2106 is about, which made the evidence useless for the branch it
+ *   was supposed to prove. With `false`, `useOnChainAllowances` returns early
+ *   and none of the other reads below is reached.
+ */
+export function makeAllowanceChainFixture({ chainId, safeAddress, delegates, rows, moduleEnabled = true }) {
   const allowanceModule = getChainData(chainId).contracts.allowanceModule
 
   /** The reads `useOnChainAllowances` makes, by signature rather than hand-cut hex. */
@@ -112,7 +127,7 @@ export function makeAllowanceChainFixture({ chainId, safeAddress, delegates, row
       signature: 'function isModuleEnabled(address) view returns (bool)',
       // `isModuleEnabled` is called ON THE SAFE; the rest on the module.
       to: safeAddress,
-      returns: () => encodeAbiParameters(parseAbiParameters('bool'), [true]),
+      returns: () => encodeAbiParameters(parseAbiParameters('bool'), [moduleEnabled]),
     },
     getDelegates: {
       signature: 'function getDelegates(address,uint48,uint8) view returns (address[],uint48)',

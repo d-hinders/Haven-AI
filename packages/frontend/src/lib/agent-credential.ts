@@ -141,14 +141,22 @@ export function buildAgentCredential(input: HandoffInput): AgentCredentialArtifa
         'Windows (PowerShell): ' +
         '`icacls path\\to\\this\\file.json /inheritance:r /grant:r "$env:UserName:R"`. ' +
         'Do not store this file in cloud-synced folders (iCloud, Dropbox, OneDrive) or shared dotfile repositories.',
+      // #2106: this note named the Safe AllowanceModule to every agent on
+      // every rail, and it lands in `~/.haven/*.json` rather than staying in
+      // the browser. On the delegation rail the authority is a signed budget
+      // delegation whose caveat enforcers refuse an out-of-policy payment
+      // on-chain; the AllowanceModule rail is retired (#1440). The claim that
+      // is true on both — the on-chain policy is the gate, this file is a
+      // stale-able snapshot — is stated WITHOUT naming a primitive, so the
+      // note cannot go false again the next time a rail changes.
       budget_summary:
-        'budget_summary is a snapshot of the on-chain Safe AllowanceModule limits at credential ' +
-        'creation. The on-chain limits are the authoritative gate. If you change allowances in ' +
-        'Haven later, this snapshot will be stale; the agent will still be constrained by the ' +
-        'updated on-chain limits.',
+        'budget_summary is a snapshot of this agent’s on-chain spend authority at credential ' +
+        'creation. The on-chain policy is the authoritative gate — a payment outside it is ' +
+        'refused on-chain, not by this file. If you change the budget in Haven later, this ' +
+        'snapshot will be stale; the agent stays constrained by the updated on-chain policy.',
       refresh:
         'You can update the budget in Haven without regenerating this credential. The same api_key ' +
-        'and delegate_key continue to work; only the on-chain allowances change.',
+        'and delegate_key continue to work; only the on-chain policy changes.',
     },
   }
 

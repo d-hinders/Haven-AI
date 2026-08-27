@@ -655,7 +655,16 @@ export default function AgentDetailClient({ agentId }: Props) {
         </div>
       ) : null}
 
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* #2106: the third tile was "Pending approvals", fed by a backend
+          constant of 0 (`routes/agent-activity.ts` — "pending approvals are
+          structurally zero — the queue died with the AllowanceModule rail").
+          Rendered as a counter it told the user a queue exists and happens to
+          be empty; on the delegation rail no queue exists at all — an
+          out-of-budget payment REVERTS on-chain, it is never held for
+          approval. A tile that can only ever read 0 is removed rather than
+          re-labelled. The wire field survives per the #2055 compatibility
+          convention; nothing in the UI reads it. */}
+      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
         <StatBlock
           label="All-time transactions"
           value={stats ? String(stats.all_time.reduce((sum, item) => sum + item.tx_count, 0)) : '0'}
@@ -665,11 +674,6 @@ export default function AgentDetailClient({ agentId }: Props) {
           label="Today"
           value={stats ? String(stats.today.reduce((sum, item) => sum + item.tx_count, 0)) : '0'}
           helper="Payments started today"
-        />
-        <StatBlock
-          label="Pending approvals"
-          value={stats ? String(stats.pending_approvals) : '0'}
-          helper="Payments waiting on you"
         />
       </div>
 

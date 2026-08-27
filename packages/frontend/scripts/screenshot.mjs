@@ -567,6 +567,45 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
     }
   }
+  if (pathname.startsWith('/agents/') && pathname.endsWith('/delegations')) {
+    // #2106: the delegation rail's actual spend authority, as
+    // `GET /agents/:id/delegations` returns it. `/custody` renders this on a
+    // `delegator_hybrid` account instead of the retired AllowanceModule read,
+    // so the capture has to carry both recipient states — PINNED (an
+    // AllowedCalldataEnforcer caveat) and open — or the rendered review never
+    // sees the branch that was wrong.
+    if (pathname === `/agents/${FIXTURE_AGENTS[0].id}/delegations`) {
+      return {
+        delegations: [{
+          id: 'dlg-1', chain_id: FIXTURE_SAFE.chain_id,
+          token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          recipient_address: ADDR.merchant,
+          delegation_hash: '0x' + '4d'.repeat(32),
+          version: 1, status: 'active',
+          budget_atomic: '250000000', period_seconds: 604_800,
+          start_date: '2026-06-02T10:00:00.000Z',
+          expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
+          created_at: '2026-06-02T10:00:00.000Z',
+        }],
+      }
+    }
+    if (pathname === `/agents/${FIXTURE_AGENTS[1].id}/delegations`) {
+      return {
+        delegations: [{
+          id: 'dlg-2', chain_id: FIXTURE_SAFE.chain_id,
+          token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          recipient_address: null,
+          delegation_hash: '0x' + '5e'.repeat(32),
+          version: 2, status: 'active',
+          budget_atomic: '500000000', period_seconds: 86_400,
+          start_date: '2026-05-18T10:00:00.000Z',
+          expires_at: Math.floor(Date.UTC(2027, 4, 18) / 1000),
+          created_at: '2026-05-18T10:00:00.000Z',
+        }],
+      }
+    }
+    return { delegations: [] }
+  }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/passport')) {
     // Agent Passport status (#1072). Only agent-research carries one — the
     // other fixture agents render the "no passport, opt in" state, which is
@@ -765,6 +804,21 @@ export const CHAIN_FED_ROUTES = [
   {
     pattern: /^\/custody(\/|$)/,
     reads: 'useOnChainAllowances — SafeControlCard reads the module and delegates at render',
+    // #2106: `/custody` became CONDITIONALLY chain-fed. It renders one of two
+    // cards per account, and only the legacy Safe one mounts
+    // `useOnChainAllowances`; the delegation-rail card reads
+    // `/accounts/hybrid/:address/signers` and `/agents/:id/delegations` over
+    // the API and touches the chain not at all. So on an all-delegation-rail
+    // account — which, since #1984, is every new account — zero chain reads is
+    // the CORRECT observation, not the empty-surface defect this guard exists
+    // to catch.
+    //
+    // The route stays listed rather than being deleted: the legacy branch
+    // still reads at render, and dropping the entry would retire the guard for
+    // the rail that still needs it. Instead a capture may declare itself
+    // legitimately silent, and must say which rail makes it so.
+    silentWhen: 'every account rendered is on the delegation rail (account_type ' +
+      "'delegator_hybrid'), whose card issues no chain read",
   },
 ]
 
@@ -862,12 +916,47 @@ export function abortChainWatch() {
   chainWatch = null
 }
 
-export function endChainWatch() {
+/**
+ * End the watch and report every chain-fed page that issued no read.
+ *
+ * `expectedSilentRoutes` (#2106) lets ONE capture declare that a specific
+ * chain-fed route is legitimately silent for it. It exists because `/custody`
+ * stopped being unconditionally chain-fed: it renders a per-account card, and
+ * only the legacy Safe branch reads the chain at render.
+ *
+ * Deliberately narrow, so it cannot become a way to wave the guard through:
+ *
+ *  - It is per capture AND per route — never a global flag, and never "this
+ *    scenario reads no chain at all".
+ *  - The route must still be declared chain-fed AND carry a `silentWhen`
+ *    reason, so the exemption is anchored to a written explanation of which
+ *    state makes silence correct rather than to a bare boolean.
+ *  - A declared-silent route that DID read is reported too (below). That
+ *    direction matters as much: it catches the day the delegation card starts
+ *    reading the chain and this declaration quietly stops being true.
+ */
+export function endChainWatch(expectedSilentRoutes = []) {
   const watch = chainWatch
   chainWatch = null
   if (!watch) return
+  const expected = (pathname) =>
+    expectedSilentRoutes.some((p) => (p instanceof RegExp ? p.test(pathname) : p === pathname))
   for (const [pathname, page] of watch.pages) {
-    if (page.observed > 0) continue
+    const declaredSilent = expected(pathname)
+    if (page.observed > 0) {
+      if (declaredSilent) {
+        CHAIN_SILENT_CAPTURES.push({
+          capture: watch.label,
+          viewport: watch.viewport,
+          route: pathname,
+          reads: page.reads,
+          unexpectedRead: `declared chain-silent, but issued ${page.observed} read(s) ` +
+            `(${[...page.methods].join(', ')}) — the declaration is stale`,
+        })
+      }
+      continue
+    }
+    if (declaredSilent) continue
     CHAIN_SILENT_CAPTURES.push({
       capture: watch.label,
       viewport: watch.viewport,
@@ -2462,6 +2551,94 @@ export const SCENARIOS = {
       await shoot(popover, 'popover')
     },
   },
+  'custody-delegation-rail': {
+    description: '/custody rendered for a DELEGATION-rail account (#2106)',
+    // The account the shared fixture already describes (`account_type:
+    // 'delegator_hybrid'`), but with the chain answering HONESTLY for that
+    // rail: a Hybrid DeleGator has no AllowanceModule, so `isModuleEnabled`
+    // is FALSE. The shared chain fixture answers true — correct for the
+    // legacy Safe every other capture seeds, and impossible here.
+    //
+    // That distinction is the whole point of this scenario. A plain route
+    // capture of `/custody` inherits the shared `true` and photographs a
+    // delegation-rail account being told its spend control is the Safe
+    // AllowanceModule — which is a real defect, but NOT the one #2106
+    // describes, and it hides the two sentences the issue is actually about
+    // ("AllowanceModule not enabled" / "No on-chain agent allowances on this
+    // Safe"). Those only render when the module reads false, so the before/
+    // after pair has to be taken here or it proves nothing.
+    //
+    // `moduleEnabled: false` makes `useOnChainAllowances` return early, so no
+    // delegate or allowance read is reached and none needs seeding.
+    chain: makeAllowanceChainFixture({
+      chainId: FIXTURE_SAFE.chain_id,
+      safeAddress: FIXTURE_SAFE.safe_address,
+      delegates: [],
+      rows: [],
+      moduleEnabled: false,
+    }),
+    // The delegation-rail card mounts no chain hook at all — its proof comes
+    // from `/accounts/hybrid/:address/signers` and `/agents/:id/delegations`.
+    // Zero reads on `/custody` is therefore the correct observation HERE, and
+    // only here: the legacy scenario below leaves the guard armed, and if this
+    // card ever starts reading the chain the declaration is reported as stale.
+    expectedSilentRoutes: [/^\/custody(\/|$)/],
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/custody`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      // Wait on the page's own heading rather than either branch's copy: this
+      // scenario is run against BOTH the pre-fix and post-fix page, so a wait
+      // keyed to one branch's wording would fail half the pair by design.
+      await page.getByRole('heading', { name: 'Custody', level: 1 }).waitFor({ timeout: 30_000 })
+      await shoot(page.locator('#main-content'), 'page')
+    },
+  },
+  'custody-legacy-rail': {
+    description: '/custody rendered for a LEGACY Safe-rail account (#2106)',
+    // #2106 rail-branches `/custody` on `account_type`. The DELEGATION branch
+    // is what a plain `npm run screenshot -- /custody` captures, because the
+    // shared fixture's account is `delegator_hybrid`. The legacy branch is
+    // therefore unreachable by route capture, and "the other branch is
+    // unchanged" is exactly the claim that needs a picture rather than an
+    // argument by symmetry — so this scenario puts the same account on the
+    // other rail and shoots the same page.
+    //
+    // Only `/auth/me`, `/user/safes` and the Safe details read are overridden.
+    // The chain fixture is inherited: `answerSharedChainRead` already answers
+    // `isModuleEnabled` → true with one 500-USDC daily row, which is what the
+    // legacy card is supposed to render.
+    api(apiPath) {
+      const legacySafe = { ...FIXTURE_SAFE, account_type: 'safe' }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [legacySafe] }
+      if (apiPath === '/user/safes') return { safes: [legacySafe] }
+      if (apiPath.startsWith(`/safe/${FIXTURE_SAFE.safe_address}/details`)) {
+        // Two owners, threshold 2 — the owners/threshold proof is the part of
+        // this page that was ALWAYS true on this rail, so the capture has to
+        // show it populated rather than the empty-fallback "— / 0".
+        return {
+          address: FIXTURE_SAFE.safe_address,
+          owners: [APPROVER_WALLET, APPROVER_UNKNOWN],
+          threshold: 2,
+          nonce: 12,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/custody`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      // Wait on the legacy branch's OWN copy, not on a generic heading: a run
+      // that somehow served the delegation branch fails here instead of
+      // shooting the wrong card under this scenario's name.
+      await page
+        .getByText('Owners (control this Safe — Haven is not one)', { exact: false })
+        .waitFor({ timeout: 30_000 })
+      await shoot(page.locator('#main-content'), 'page')
+    },
+  },
   'modal-migrations': {
     description: 'InfoModal and ComingSoonModal rendered from the design-system reference',
     api() {
@@ -3011,7 +3188,7 @@ async function main() {
           // (#1971).
           abortChainWatch()
         }
-        endChainWatch()
+        endChainWatch(scenario.expectedSilentRoutes ?? [])
         await scenarioContext.close()
       }
     }

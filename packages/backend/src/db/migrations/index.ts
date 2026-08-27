@@ -69,6 +69,7 @@ import * as agentsMcpServerName from './067_agents_mcp_server_name.js'
 import * as catalogLifecycle from './068_catalog_lifecycle.js'
 import * as dropSafeApproverMetadata from './069_drop_safe_approver_metadata.js'
 import * as dropApprovalRequests from './070_drop_approval_requests.js'
+import * as dropAllowanceNonceWatermarks from './071_drop_allowance_nonce_watermarks.js'
 
 export interface Migration {
   version: string
@@ -151,4 +152,5 @@ export const migrations: Migration[] = [
   catalogLifecycle,
   dropSafeApproverMetadata,
   dropApprovalRequests,
+  dropAllowanceNonceWatermarks,
 ]

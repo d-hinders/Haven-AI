@@ -34,14 +34,15 @@ const RETIRED_APPROVAL_STATUSES = [
 
 describe('payment status presentation', () => {
   it('maps every reachable payment status to a product label and tone', () => {
-    expect(paymentStatusPresentation('pending_signature')).toEqual({
-      label: 'Awaiting signature',
-      tone: 'brand',
+    expect(
+      Object.fromEntries(REACHABLE_PAYMENT_STATUSES.map((s) => [s, paymentStatusPresentation(s)])),
+    ).toEqual({
+      pending_signature: { label: 'Awaiting signature', tone: 'brand' },
+      submitted: { label: 'Submitted', tone: 'brand' },
+      confirmed: { label: 'Sent', tone: 'success' },
+      failed: { label: 'Failed', tone: 'danger' },
+      expired: { label: 'Expired', tone: 'neutral' },
     })
-    expect(paymentStatusPresentation('submitted')).toEqual({ label: 'Submitted', tone: 'brand' })
-    expect(paymentStatusPresentation('confirmed')).toEqual({ label: 'Sent', tone: 'success' })
-    expect(paymentStatusPresentation('failed')).toEqual({ label: 'Failed', tone: 'danger' })
-    expect(paymentStatusPresentation('expired')).toEqual({ label: 'Expired', tone: 'neutral' })
   })
 
   it('maps agent status copy for product surfaces', () => {
@@ -73,6 +74,12 @@ describe('payment status presentation', () => {
   it('centralizes the failure check', () => {
     expect(failedOrRejectedStatus('failed')).toBe(true)
     expect(failedOrRejectedStatus('expired')).toBe(false)
+    // The `'rejected'` arm is approval-era residue that #2120 deliberately
+    // KEPT (see the module header's "Deliberately left" note). A decision
+    // with no guard is not a decision — remove or rename the arm and this
+    // goes red, instead of AgentDetailClient's error tinting changing
+    // silently for a status that cannot arrive.
+    expect(failedOrRejectedStatus('rejected')).toBe(true)
   })
 
   /**

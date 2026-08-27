@@ -21,16 +21,17 @@ Run an exploratory **UI** QA pass as the agent, using **this session's own model
 
 ## Phase 3 — Explore the surfaces (the brief)
 
-**Observe only — do not submit state-changing actions.** This layer looks, it doesn't act. Navigate, open, scroll, and inspect, but do **not**: complete the connect-agent flow / generate a credential, Approve or Reject in the approvals queue, or Send/Confirm a payment. The dev QA identity is shared with the deterministic harness and Layer 2b (#577); a stray submit here mutates state other runs depend on. Record what you observe per surface — including flows a scripted test wouldn't try, short of actually submitting them.
+**Observe only — do not submit state-changing actions.** This layer looks, it doesn't act. Navigate, open, scroll, and inspect, but do **not** submit anything that changes state. **The rule is the rule, not the list** — if a control would write, assume it is off-limits even if it is not named below. On the surfaces in step 6 that currently means: completing the connect-agent flow / generating a credential; **Pause agent**, **Resume agent**, **Remove agent**, **Restore to list**, **Revoke agent budget**, or granting / raising a budget on the agent detail page; and Send/Confirm on any payment. The dev QA identity is shared with the deterministic harness and Layer 2b (#577); a stray submit here mutates state other runs depend on. Record what you observe per surface — including flows a scripted test wouldn't try, short of actually submitting them.
 
-6. **Surfaces to visit:** dashboard (balances), transactions list + the transaction **detail panel**, agents list + the **connect-agent modal** (open it; do not complete it), and **approvals** (view; do not approve/reject).
+6. **Surfaces to visit:** dashboard (balances), transactions list + the transaction **detail panel**, agents list + the **connect-agent modal** (open it; do not complete it), and the **agent detail** page including its budget card (view; do not grant, raise, or revoke).
+   *(#2103: this list named **approvals** until the approve/reject screen was deleted by #1989 — `/approvals` does not route, so a run spent time navigating to a 404. The agent detail page is where budget authority is now visible — and note it carries five live write buttons, which is why the observe-only rule above leads with the principle rather than an enumeration.)*
 7. **What to look for on each:**
    - **Broken layout / horizontal overflow** — the existing `expectNoHorizontalOverflow` helper (`packages/frontend/e2e/fixtures/haven-api.ts`) is the invariant to reproduce by eye: no horizontal scrollbar at standard widths.
    - **Secret leakage** — no private key, API key, JWT, or setup token ever rendered in the UI (especially the connect-agent setup prompt — reuse the "no-secret-leak" expectation from the mocked suite).
    - **Console errors / failed requests** — capture the browser console and network panel; a red console on a real deploy is a finding.
    - **Dead ends & confusing states** — buttons that go nowhere, empty states with no next step, ambiguous loading/error states.
    - **Money & authority clarity** — for any screen that moves money or changes agent authority, check it answers the AGENTS.md "Money And Risk Clarity" questions: who can spend, from which Haven wallet, how much, on what/for whom, when approval is required, what happened already, and how to pause/revoke/stop.
-8. **Visual capture (optional):** screenshot key screens (dashboard, transaction detail, connect modal, approvals) for a visual-diff baseline across runs. Save under the Playwright artifact paths; review artifacts for secrets before committing.
+8. **Visual capture (optional):** screenshot key screens (dashboard, transaction detail, connect modal, agent detail) for a visual-diff baseline across runs. Save under the Playwright artifact paths; review artifacts for secrets before committing.
 
 ## Phase 4 — Report
 

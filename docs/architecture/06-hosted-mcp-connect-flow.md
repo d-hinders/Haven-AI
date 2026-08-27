@@ -123,10 +123,10 @@ The erc7710 shape is shorter by exactly the funding leg: no funding relay to
 confirm, no `haven_x402_sign_header`, no delegate hot balance and nothing to
 sweep.
 
-**Balance-aware x402 coverage — HISTORY, not live behaviour** (#2130). The
-three-way split below was the LEGACY AllowanceModule rail's arithmetic, and its
-middle branch is the approval queue epic #1440 retired. It is kept as the record
-of what that rail did:
+> ⚠️ **The balance-aware coverage split below NO LONGER RUNS.** It was the
+> LEGACY AllowanceModule rail's arithmetic, and its middle branch is the
+> approval queue epic #1440 retired. Kept as the record of what that rail did
+> (#2130) — the live behaviour is stated immediately after it.
 
 - `amount <= remaining allowance` could execute;
 - `remaining < amount <= remaining + delegate balance` **queued for approval**;
@@ -196,7 +196,7 @@ The edge signer exposes four local, no-network tools:
   connector-reported MCP server name — a display label only, never authority
   (nothing keys off it, and it is not unique).
 - API-key rotation changes identity credentials, not signing authority.
-- Queued or insufficient requests expose no signable hash.
+- Declined or insufficient requests expose no signable hash — nothing is queued.
 - x402 authorization is bound to amount, merchant, resource, asset, and network.
 - Sweep authorization is bound to the registered delegate and Haven wallet.
 - Users can pause or revoke in Haven and revoke Safe permissions outside Haven.

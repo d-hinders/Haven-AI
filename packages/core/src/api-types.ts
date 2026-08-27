@@ -7194,8 +7194,12 @@ export interface operations {
                             evidenceUid: string | null;
                             chainId: number | null;
                             controls: {
-                                /** @description The rail whose primitive holds the policy: 'delegation' or 'allowance'. */
-                                rail: string;
+                                /**
+                                 * @description The account's execution rail, verbatim from user_safes. Only 'delegation' is live; 'allowance_module' (#1440) and 'session_key' (#834) are retired and cannot transact. This field named a shorter, non-existent rail value until #2110 — one the column CHECK has never permitted.
+                                 * @enum {string}
+                                 */
+                                rail: "delegation" | "allowance_module" | "session_key";
+                                /** @description True only on the delegation rail, where the caveat enforcers revert an out-of-policy redemption on-chain. False on both retired rails: a legacy account may still hold a real on-chain allowance, but every agent payment entry point answers 410, so there is no spend for a contract to govern. */
                                 policyEnforcedOnchain: boolean;
                                 treasuryBound: boolean;
                             } | null;

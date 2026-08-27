@@ -40,7 +40,7 @@ Guardrails:
 
 When choosing the workflow, include likely reviewer traps for the change type:
 - Transactions, activity, and dashboards: raw vs formatted values, totals/counts, pagination, dedupe, source labels, and cross-surface row consistency.
-- Approvals and pending actions: new statuses, migrations or constraints, expiry, single vs multi-approval behavior, notification counts, and post-action copy.
+- Budget grants, revocation, and re-key: the owner signatures that DO exist — new statuses, migrations or constraints, expiry, activation and replacement behavior, and post-action copy. (Not a per-payment approval queue: an over-budget payment is declined on-chain, never held.)
 - Send, receive, contacts, and modals: scroll fit, z-index, close behavior, primary CTA hierarchy, typing/autocomplete behavior, duplicate enforcement, and network context.
 - Hooks, APIs, and shared utilities: required context, caller audits, response-shape compatibility, structured errors, and regression tests for non-happy paths.
 - Multi-Entrypoint Parity: payment, x402/MPP, MCP, SDK, direct API, hosted/local signing, and demo paths share validated state or have parity tests.

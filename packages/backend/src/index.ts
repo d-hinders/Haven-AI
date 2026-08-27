@@ -13,6 +13,7 @@ import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './infra/delegate-balance-monitor.js'
 import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './infra/relayer-balance-monitor.js'
 import { runIfLeader, LEADER_LOCK_KEYS } from './platform/leader-lock.js'
+import { SETTLEMENT_SWEEP_INTERVAL_MS } from './modules/x402/index.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './domain/chains.js'
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
@@ -480,6 +481,33 @@ const start = async () => {
     }
     void runOutboundBump()
     setInterval(runOutboundBump, OUTBOUND_BUMP_INTERVAL_MS).unref()
+
+    // Passive erc7710 settlement observation (#2117, #2092 residual). On
+    // erc7710 direct settlement the merchant redeems the chain and Haven
+    // submits nothing, so an intent stays `submitted` until an AGENT reports
+    // the settlement hash. When that report never comes — no
+    // `PAYMENT-RESPONSE` transaction, or the generic plain-HTTP flow (#2041)
+    // where Haven never sees the header — the payment has no evidence row and
+    // is therefore permanently absent from the Fortnox feed. This tick finds
+    // such a settlement by looking its intent-unique settlement child (#2094)
+    // up in the pinned DelegationManager's `RedeemedDelegation` logs and
+    // completes it through the same seam the agent-reported path uses.
+    //
+    // It never guesses: attribution is only ever the manager naming this
+    // intent's own child, never transfer shape. Bounded RPC, and an outage
+    // confirms nothing and waits for the next tick.
+    const runSettlementSweep = async () => {
+      try {
+        await runIfLeader(LEADER_LOCK_KEYS.settlementSweep, async () => {
+          const { runSettlementSweepTick } = await import('./modules/x402/index.js')
+          await runSettlementSweepTick(app.log)
+        })
+      } catch (err) {
+        app.log.warn({ err }, 'Settlement sweep tick failed')
+      }
+    }
+    void runSettlementSweep()
+    setInterval(runSettlementSweep, SETTLEMENT_SWEEP_INTERVAL_MS).unref()
 
     // L0 passport anchor sweep (#972 / #973). Both halves of issuance are
     // fire-and-forget by design — an EAS write must never block agent creation

@@ -56,6 +56,14 @@ export const LEADER_LOCK_KEYS = {
    * reuse a value, not merely to avoid live ones.
    */
   catalogIngest: 811008,
+  /**
+   * Passive erc7710 settlement observation (#2117) — completes `submitted`
+   * delegation-rail x402 intents whose settlement hash nobody reported.
+   * Leader-gated because every replica would otherwise run the same bounded
+   * `eth_getLogs` scan, and the RPC cost is the expensive part; correctness
+   * does not depend on it (the confirm is a CAS serialized per hash).
+   */
+  settlementSweep: 811009,
 } as const
 
 /**

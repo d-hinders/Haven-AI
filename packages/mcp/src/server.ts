@@ -107,8 +107,11 @@ export const MCP_INSTRUCTIONS = [
   'paywall. Tool responses carry nextAction — follow it; description prose',
   'is fallback, not the source of truth.',
   '',
-  'pending_approval means stop and tell the user — do not retry, re-sign, or',
-  're-pay while a payment is pending. Spend authority is enforced on-chain by',
+  'A payment outside the agent budget is declined before any money moves. Haven',
+  'holds no approval queue, so there is nothing to poll and no approval will',
+  'ever arrive for it. On a decline, or on any status you do not',
+  'recognise, stop and tell the user: do not retry or re-sign, and ask them to',
+  'grant or raise the budget in Haven. Spend authority is enforced on-chain by',
   'the user\'s account; Haven never holds keys and cannot override it.',
 ].join('\n')
 

@@ -350,8 +350,9 @@ const PAY_DESCRIPTION = [
   'For read-only allowance/budget questions use haven_get_allowances instead.',
   'Returns { payment_id, payload_hash, expires_at }. Sign with haven_sign — delegation-rail responses',
   'include typed_data_b64: pass it to the signer UNCHANGED as one opaque string, never re-typed —',
-  'then relay with haven_submit. Over-budget returns status "pending_approval" with payload_hash null;',
-  'the wallet owner approves in Haven. Haven never receives the signing key.',
+  'then relay with haven_submit. A payment outside the on-chain budget, recipient or expiry is declined',
+  'at prepare — nothing to sign, nothing queued: ask the user to raise the budget in Haven.',
+  'Haven never receives the signing key.',
 ].join(' ')
 
 /**
@@ -427,10 +428,10 @@ const PREPARE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
     'Prefer this over haven_pay_mcp_tool when you hold a catalog_id from haven_discover_tools. A degraded catalog row refuses and names haven_pay_mcp_tool as the manual fallback. Read-only budget questions: haven_get_allowances.',
   behavior:
     'Exactly ONE cap is REQUIRED — max_amount_human (whole tokens, preferred) or max_amount (atomic); both or neither refuses before any network call, and with no user-stated cap, quote first (haven_quote_catalog_purchase) and cap at the quoted amount. The cap is enforced against the LIVE quote before any funding intent exists. ' +
-    'Returns the same compact quote shape as haven_pay_mcp_tool plus catalog fields and a rail-aware allowance block { rail, sufficient, remaining_atomic, source }: on the legacy rail an insufficient amount proceeds and queues for owner approval; on the delegation rail an over-budget quote REFUSES here (no approval queue exists on that rail). sufficient can be null with a warning when the read itself failed — the on-chain policy remains the real gate. ' +
+    'Returns the same compact quote shape as haven_pay_mcp_tool plus catalog fields and an allowance block { rail, sufficient, remaining_atomic, source }: an over-budget quote REFUSES here, before any payment exists and with no approval queue to fall back on. sufficient can be null with a warning when the read itself failed — the on-chain policy remains the real gate. ' +
     'The response guidance says which settlement shape you are on (erc7710 direct settlement has no funding leg and no payment_header). Catalog prices are indicative; the live quote in this response is authoritative (CATALOG_PRICE_DIFFERS warns on mismatch). An unknown catalog_id, or one curated for a different chain, refuses with 404.',
   nextActionGuidance:
-    'Next: the signer tool named by the response guidance, then haven_settle_mcp_tool. On status "pending_approval", tell the user and poll haven_get_payment_status — never re-quote or re-pay while pending.',
+    'Next: the signer tool named by the response guidance, then haven_settle_mcp_tool. On a refusal, tell the user the budget was exceeded and ask them to raise it in Haven — never re-quote, re-pay, or poll: nothing is queued.',
 })
 
 const QUOTE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
@@ -474,7 +475,7 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'quoted price as-is and the response carries cap_warning.',
   'Returns { payment_id, payload_hash, expires_at, x402, signer_compatibility } — compact by default;',
   'include_signing_payload=true on a same-idempotency_key re-run returns the inline payload for an',
-  'older signer. Over-budget returns status "pending_approval" with payload_hash null.',
+  'older signer. Over-budget is declined at prepare; nothing is ever held for later approval.',
   'After signing and haven_submit confirms funding, build the header with haven_x402_sign_header and',
   'retry the merchant YOURSELF — Haven never talks to this merchant and never holds the key.',
   'When the merchant advertises extra.assetTransferMethod "erc7710" and the account is on the',
@@ -483,7 +484,7 @@ const PAY_X402_QUOTE_DESCRIPTION = [
 ].join(' ')
 
 const RESUME_X402_DESCRIPTION = [
-  'Resume an approved x402 payment: retrieve the signing context so the signer can rebuild the',
+  'Resume an authorized x402 payment: retrieve the signing context so the signer can rebuild the',
   'X-PAYMENT header and the agent can retry the merchant. Use after haven_get_payment_status returns',
   'nextAction=retry_original_x402_request. Pass resume_state or payment_id.',
   'Returns { payment_id, payment_required, x402 } in the haven_pay_x402_quote shape — next is',
@@ -1211,9 +1212,8 @@ export function createToolHandlers(
             // times out, so `sufficient` here can be computed from a figure
             // that was never actually confirmed live. `remainingIsFromChain`
             // is only ever set on the delegation rail (#1319 wire field) —
-            // `undefined` on the legacy rail is not "optimistic", it is
-            // "not applicable", so this only warns when the flag is
-            // explicitly false.
+            // `undefined` is not "optimistic", it is "not applicable", so
+            // this only warns when the flag is explicitly false.
             if (rail === 'delegation' && match?.onchain.remainingIsFromChain === false) {
               warnings.push({
                 code: AgentPaymentWarningCode.AllowanceReadOptimistic,
@@ -1229,16 +1229,16 @@ export function createToolHandlers(
             warnings.push({
               code: AgentPaymentWarningCode.AllowanceCheckUnavailable,
               message:
-                `Could not read ${rail === 'delegation' ? 'the active delegation budget' : 'the AllowanceModule allowance'} ` +
+                'Could not read the active delegation budget ' +
                 `for this agent (${err instanceof Error ? err.message : String(err)}). Proceeding without a pre-check — ` +
                 'the on-chain policy remains the actual spend gate; this only affects the guidance shown here.',
             })
           }
 
-          // 6. Delegation rail: over-budget REVERTS at prepare, no approval
-          // queue exists on that rail (#1090) — refuse BEFORE any funding
-          // intent (mutation-tested: reading agent_allowances here instead of
-          // the derived budgets must fail a test).
+          // 6. Over-budget REVERTS at prepare and no approval queue exists
+          // anywhere (#1090; the last one died with #2055) — refuse BEFORE any
+          // funding intent (mutation-tested: reading agent_allowances here
+          // instead of the derived budgets must fail a test).
           if (rail === 'delegation' && allowanceBlock.sufficient === false) {
             throw new HostedToolError({
               code: 'DELEGATION_BUDGET_EXCEEDED',
@@ -1246,7 +1246,7 @@ export function createToolHandlers(
                 `The amount this purchase would authorize (${priced.amountAtomic} ${priced.token} atomic) ` +
                 `exceeds the agent's remaining active delegation budget ` +
                 `(${allowanceBlock.remaining_atomic} ${priced.token} atomic). ` +
-                'There is no approval queue on the delegation rail — an over-budget redemption would revert ' +
+                'There is no approval queue — an over-budget redemption would revert ' +
                 'on-chain. Ask the wallet owner to grant or raise the budget in Haven before retrying.',
               statusCode: 403,
               nextAction: AgentPaymentNextAction.FundSafeOrRaiseAllowance,
@@ -1532,9 +1532,9 @@ export function createToolHandlers(
         await preflightMcpPaymentHeader(haven, args)
         const funding = await submitSignatureWithExpiryMapping(haven, args.payment_id, args.signature)
         if (funding.status !== 'confirmed') {
-          // Funding did not confirm (e.g. queued for approval). Do not deliver the
-          // merchant header — return the funding status so the agent can act.
-          // Echo payment_id so the agent can cross-reference the queued payment
+          // Funding did not confirm. Do not deliver the merchant header —
+          // return the funding status so the agent can act. Echo payment_id so
+          // the agent can cross-reference the payment
           // (haven_get_payment_status / haven_list_receipts) without re-deriving it.
           const fundingPending = isPendingApproval(funding.status)
           return {
@@ -1543,8 +1543,9 @@ export function createToolHandlers(
             funding_tx_hash: funding.txHash ?? null,
             settled: false,
             // #1308 review: the two non-confirmed states have DIFFERENT next
-            // actions — queued-for-approval is a user decision, a transient
-            // funding state is a poll.
+            // actions. `fundingPending` is the retained fail-closed branch for
+            // a status no live rail emits any more (see `isPendingApproval`) —
+            // it stops the agent; a transient funding state is a poll.
             ...buildAgentGuidance({
               nextAction: fundingPending
                 ? AgentPaymentNextAction.WaitForUserApproval
@@ -1553,7 +1554,7 @@ export function createToolHandlers(
               nextArguments: { payment_id: args.payment_id },
               safeToContinue: !fundingPending,
               reason: fundingPending
-                ? 'Funding is queued for the wallet owner. Tell the user; do not re-sign or re-settle while pending.'
+                ? 'Funding did not complete and is not payable. Tell the user; do not re-sign or re-settle, and do not wait for an approval — none is queued.'
                 : 'Funding is not confirmed yet. Poll next_tool, then finish settlement with haven_complete_mcp_tool once confirmed.',
               summary: { payment_id: args.payment_id, status: funding.status },
             }),
@@ -1906,15 +1907,17 @@ export function createToolHandlers(
     },
 
     haven_resume_x402_payment: async (input) => {
-      // #2041: this tool is the APPROVAL-resume flow, and it is structurally
+      // #2041: this tool is the funding-resume flow, and it is structurally
       // unreachable for an erc7710 intent rather than broken for one. Its gate
       // below requires nextAction === 'retry_original_x402_request', which the
       // backend emits for exactly one state — status 'executed', meaning "the
-      // user completed the FUNDING payment" (agent-payment-status.ts). erc7710
-      // has no funding payment, a successful settle leaves the intent at
-      // 'submitted' (#1508), and an over-budget erc7710 authorize returns
-      // pending_signature rather than entering the approval lifecycle at all
-      // (#2023) — so no erc7710 intent reaches 'executed'. Note also that the
+      // funding payment completed" (agent-payment-status.ts). erc7710 has no
+      // funding payment, a successful settle leaves the intent at 'submitted'
+      // (#1508), and an over-budget erc7710 authorize now refuses HTTP 403
+      // delegation_budget_exceeded before an intent row is even created
+      // (#2098/#2082, tightening #2023's finding — it used to return
+      // pending_signature and enter no approval lifecycle) — so a fortiori no
+      // erc7710 intent reaches 'executed'. Note also that the
       // resume state's `accepted` is SYNTHESIZED as a plain exact option with
       // no extra.assetTransferMethod, so a resumed quote would select 3009 by
       // construction. Left unchanged deliberately: the 3009 path through here
@@ -2537,6 +2540,29 @@ async function resolveResumeState(
   )
 }
 
+/**
+ * RETAINED DELIBERATELY, and unreachable from any live rail (#2101).
+ *
+ * No Haven rail mints a payment-level `pending` / `pending_approval` any more:
+ * the legacy AllowanceModule rail answers 410 at every agent-payment entry
+ * point (#1986, `rails/execution-rail.ts`), the delegation rail refuses an
+ * out-of-policy payment during prepare with 403/502 and nothing written
+ * (`routes/payments.ts`), and #2055 dropped the `approval_requests` table the
+ * status was read back from. `pending_approval` appears in no migration, so no
+ * `payment_intents` row can carry it either.
+ *
+ * The branches guarded by this helper are kept because they are fail-CLOSED —
+ * they stop the agent and hand the payment_id back instead of delivering a
+ * merchant header for funding that did not confirm. Deleting them would trade
+ * a defined stop for an undefined fall-through on a stored row from before the
+ * retirement, which is strictly worse on a money surface. What was removed is
+ * the agent-visible PROMISE: no description or instruction tells a model to
+ * expect this status or to wait for an approval, so a model that ever meets it
+ * follows the general "a status you do not recognise → stop and tell the user"
+ * rule in the server instructions. The wire-type question (whether the status
+ * union itself should shrink) belongs with the OpenAPI schema decision in
+ * #2105, not with a prose fix.
+ */
 function isPendingApproval(status: string | undefined): boolean {
   return status === 'pending' || status === 'pending_approval'
 }

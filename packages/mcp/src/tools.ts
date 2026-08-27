@@ -402,6 +402,16 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
   }
 }
 
+/**
+ * RETAINED DELIBERATELY, and unreachable from any live rail (#2101). The same
+ * reasoning as the hosted server's copy in `packages/mcp-server/src/tools.ts`:
+ * no rail mints a payment-level `pending` / `pending_approval` any more (410 on
+ * the legacy rail per #1986; 403/502 at prepare with nothing written on the
+ * delegation rail; `approval_requests` dropped by #2055), but the one branch it
+ * guards is fail-CLOSED — it stops the agent rather than continuing. What was
+ * removed is the agent-visible promise: `MCP_INSTRUCTIONS` no longer tells a
+ * model to branch on this status or to wait for an approval.
+ */
 function isPendingApproval(status: string | undefined): boolean {
   return status === 'pending' || status === 'pending_approval'
 }

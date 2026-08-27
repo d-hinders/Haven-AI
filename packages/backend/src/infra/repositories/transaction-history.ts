@@ -74,21 +74,6 @@ export interface PaymentIntentAgentRow {
   amount_sek: string | null
 }
 
-export interface ApprovalRequestAgentRow {
-  id: string
-  tx_hash: string
-  safe_id: string
-  chain_id: number
-  agent_id: string
-  agent_name: string
-  source: string | null
-  payment_resource_url: string | null
-  merchant_address: string | null
-  payment_proof_status: string | null
-  payment_reconciliation_event_type: string | null
-  amount_sek: string | null
-}
-
 export interface DelegateSweepAgentRow {
   id: string
   tx_hash: string
@@ -121,30 +106,6 @@ export interface X402PaymentIntentRow {
   amount_sek: string | null
   settlement_scheme: string | null
   confirmed_at: string | null
-  created_at: string
-}
-
-export interface X402ApprovalRequestRow {
-  id: string
-  tx_hash: string
-  agent_id: string
-  agent_name: string
-  safe_id: string
-  safe_address: string
-  safe_name: string
-  chain_id: number
-  token_symbol: string
-  token_address: string
-  to_address: string
-  amount_raw: string
-  amount_human: string
-  merchant_address: string | null
-  payment_resource_url: string | null
-  payment_proof_status: string | null
-  payment_reconciliation_event_type: string | null
-  amount_sek: string | null
-  settlement_scheme: string | null
-  executed_at: string | null
   created_at: string
 }
 

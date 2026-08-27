@@ -14,7 +14,12 @@ import {
 import { type AgentContext } from '../../middleware/agentAuth.js'
 import { quoteFee } from '../fee/index.js'
 
-export type AgentPaymentKind = 'payment_intent' | 'approval_request'
+/**
+ * #2085: narrowed — this module constructs `'payment_intent'` and nothing
+ * else, and no read can supply another value (see
+ * `infra/repositories/__tests__/approval-kind-unconstructible.test.ts`).
+ */
+export type AgentPaymentKind = 'payment_intent'
 
 /**
  * Platform fee surfaced on a machine-payment status (#386 — no silent
@@ -383,13 +388,10 @@ function paymentIntentState(status: string): {
 // status this module reports is a payment intent now.
 
 export function agentPaymentStatusHttpCode(status: AgentPaymentStatus): number {
-  if (status.kind === 'approval_request') {
-    if (status.status === 'pending' || status.status === 'approved' || status.status === 'proposed') return 202
-    if (status.status === 'executed') return 200
-    if (status.status === 'rejected') return 409
-    if (status.status === 'expired') return 410
-  }
-
+  // #2085: the `kind === 'approval_request'` block that stood here mapped the
+  // queue's statuses (202/200/409/410). It was unreachable — the comment four
+  // lines above already said every status this module reports is a payment
+  // intent — so removing it changes no response.
   if (status.status === 'confirmed') return 200
   if (status.status === 'pending_signature' || status.status === 'submitted') return 409
   if (status.status === 'expired') return 410

@@ -8,7 +8,6 @@ import { getIntentStatus } from '../../infra/repositories/payment-intents.js'
 import { getX402HourlyUsage } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../../domain/agent-payment-taxonomy.js'
-import type { X402ApprovalRow } from './types.js'
 
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 const DECIMAL_ATOMIC_AMOUNT_RE = /^[0-9]+$/
@@ -120,53 +119,4 @@ export function existingX402IntentMismatch(
   }
 
   return null
-}
-
-export function pendingApprovalResponse(
-  approval: X402ApprovalRow,
-  remainingHuman: string | null,
-  context: {
-    url: string
-    merchantPayTo: string | null
-    chainId: number
-    amountAtomic: string
-    asset: string
-    network: string
-    description?: string
-    idempotencyKey?: string
-  },
-) {
-  return {
-    payment_id: approval.id,
-    kind: 'approval_request',
-    rail: AgentPaymentRail.X402,
-    status: 'pending_approval',
-    phase: AgentPaymentPhase.UserApprovalRequired,
-    next_action: AgentPaymentNextAction.WaitForUserApproval,
-    message:
-      `This x402 funding payment of ${approval.amount_human} ${approval.token_symbol} is waiting for user approval in Haven. ` +
-      'Do not start a new merchant session or create another payment; poll this payment id and resume the original x402 request after approval.',
-    remaining: remainingHuman,
-    requested: approval.amount_human,
-    token: approval.token_symbol,
-    resource_url: context.url,
-    merchant_address: context.merchantPayTo,
-    chain_id: context.chainId,
-    amount_atomic: context.amountAtomic,
-    asset: context.asset,
-    network: context.network,
-    description: context.description ?? null,
-    idempotency_key: context.idempotencyKey ?? null,
-    expires_at: approval.expires_at,
-    challenge_id: approval.machine_challenge_id,
-    x402: {
-      amount_atomic: context.amountAtomic,
-      asset: context.asset,
-      network: context.network,
-      resource_url: context.url,
-      merchant_address: context.merchantPayTo,
-      description: context.description ?? null,
-      idempotency_key: context.idempotencyKey ?? null,
-    },
-  }
 }

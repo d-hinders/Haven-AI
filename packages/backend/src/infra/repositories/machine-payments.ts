@@ -161,7 +161,14 @@ export const FIND_INTENT_EVIDENCE_SOURCE_SQL = `SELECT 'payment_intent'::TEXT AS
      LIMIT 1`
 
 export interface EvidenceSourceRow {
-  kind: 'payment_intent' | 'approval_request'
+  /**
+   * #2085: narrowed to the literal this query actually selects
+   * (`'payment_intent'::TEXT AS kind`, FROM `payment_intents`). #2055 dropped
+   * `approval_requests`, so no sibling read can widen it again without a
+   * migration. Pinned by
+   * `infra/repositories/__tests__/approval-kind-unconstructible.test.ts`.
+   */
+  kind: 'payment_intent'
   id: string
   agent_id: string
   user_id: string
@@ -236,8 +243,27 @@ export async function findIntentForEvidenceScoped(
 // #2055: `FIND_APPROVAL_FOR_EVIDENCE_SQL` / `findApprovalForEvidenceScoped`
 // are gone with `approval_requests`. The evidence WRITE variants that key on
 // `approval_request_id` below stay: that column lives on the evidence tables,
-// which survive the drop — the paths are merely unreachable now that no
-// payment can resolve to kind 'approval_request' (residue for #1993).
+// which survive the drop.
+//
+// #2085 STATUS — read this before deleting them. They are now *fully*
+// unreachable, not merely unlikely: every caller resolves its reference column
+// through `referenceColumnForPayment` (`modules/mpp/evidence.ts`) or the
+// inlined equivalent in `reconciliation.ts`, and after #2085 both always
+// answer `'payment_intent_id'`, because no payment can resolve to kind
+// `'approval_request'`. That IS grounds for removal — but the removal is a
+// repository-layer change on the money-path perimeter and wants its own
+// characterization test, the way #2085 gave the `kind` discriminator one. It
+// is tracked as #2118 rather than left implied.
+//
+// (This comment previously said "residue for #1993". #1993 is CLOSED — it is
+// the audit that filed #2085 — so it pointed at a tracker nobody could act on.
+// Do not re-point a live TODO at a closed issue; that is how residue survives
+// an audit.)
+//
+// Note what is NOT dead nearby: the `approval_request_id` COLUMN and every
+// READ of it. Historical evidence rows still carry values there (migration 070
+// dropped the table with CASCADE precisely so they would survive), and
+// `mapEvidence` uses it as their only `payment_id` anchor.
 
 // ── Evidence attach (proof upgrade, lib/machine-payment-evidence.ts) ─────────
 
@@ -346,7 +372,14 @@ export async function getIntentSettlementFields(
 
 export interface ReconciliationPaymentRow {
   id: string
-  kind: 'payment_intent' | 'approval_request'
+  /**
+   * #2085: narrowed to the literal this query actually selects
+   * (`'payment_intent'::TEXT AS kind`, FROM `payment_intents`). #2055 dropped
+   * `approval_requests`, so no sibling read can widen it again without a
+   * migration. Pinned by
+   * `infra/repositories/__tests__/approval-kind-unconstructible.test.ts`.
+   */
+  kind: 'payment_intent'
   user_id: string
   tx_hash: string | null
   status: string

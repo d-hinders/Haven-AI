@@ -194,7 +194,18 @@ export function sessionRailRetired(kind: 'account' | 'intent'): { statusCode: 41
  * `insertMachineApproval`) sit on legacy code paths — so a queued approval
  * can no longer become actionable.
  */
-export function allowanceModuleRailRetired(kind: 'account' | 'intent' | 'approval'): {
+/**
+ * #2085: the `'approval'` variant is gone. It had **zero** production callers
+ * — only `'account'` and `'intent'` are ever passed — and its message had
+ * become false: it promised the queued approval "stays readable, and it can
+ * still be rejected", while `/approvals` is deregistered (404, not 410) and
+ * migration 070 dropped the table. A refusal nothing can reach, describing a
+ * capability nothing has.
+ *
+ * The rail SEAM itself is untouched and stays, per CLAUDE.md, for
+ * reversibility — this removes one dead branch inside it, not the seam.
+ */
+export function allowanceModuleRailRetired(kind: 'account' | 'intent'): {
   statusCode: 410
   body: { error: string }
 } {
@@ -206,11 +217,8 @@ export function allowanceModuleRailRetired(kind: 'account' | 'intent' | 'approva
       error:
         kind === 'account'
           ? `The Safe rail is retired — this account can no longer pay. ${REONBOARD}`
-          : kind === 'intent'
-            ? 'The Safe rail is retired — this payment can no longer execute. ' +
-              'Re-onboard the account on the delegation rail and authorize again.'
-            : 'The Safe rail is retired — this queued approval can no longer be executed. ' +
-              'It stays readable, and it can still be rejected.',
+          : 'The Safe rail is retired — this payment can no longer execute. ' +
+            'Re-onboard the account on the delegation rail and authorize again.',
     },
   }
 }

@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/routes/__tests__/x402.test.ts
   - packages/backend/src/routes/__tests__/machine-payments.test.ts
   - docs/contributing/ai-agent-workflow.md
-last-verified: "2026-08-25" # #2055: insertMachineApproval + approval-requests.ts recorded as deleted with the table. Prior: #1987: the Coverage-strategies section said `decideCoverage`'s code was "still present (deleted by #1987)" — it has now been deleted outright, with `domain/payment-coverage.ts` and every caller, so the claim is corrected to past tense. Dead `covers:` globs for the module and its test removed. The shared-primitive boundary claims re-read and unaffected. Prior: #1986: decideCoverage's legacy branch is now unreachable in production — every caller refuses upstream with 410. Noted; the delegation-rail branch and the shared-primitive boundaries re-read against the diff and unchanged. Prior: #1328 — mpp_demo route retired, shared primitives unchanged (see new section) + same-day dev: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
+last-verified: "2026-08-27" # #2102: the Current design list described `decideCoverage` selecting "execute, queue, or insufficient coverage" in the present tense. The file and helper were DELETED by #1987 (and removed from the money-path glob list in the same change) — verified by grep: zero references repo-wide. Annotated inline and put in the past tense, matching the treatment the very next bullet already gives `insertMachineApproval`. That inconsistency is why this read as ambiguous archaeology rather than a defect. Scope: that one bullet. Prior: #2055: insertMachineApproval + approval-requests.ts recorded as deleted with the table. Prior: #1987: the Coverage-strategies section said `decideCoverage`'s code was "still present (deleted by #1987)" — it has now been deleted outright, with `domain/payment-coverage.ts` and every caller, so the claim is corrected to past tense. Dead `covers:` globs for the module and its test removed. The shared-primitive boundary claims re-read and unaffected. Prior: #1986: decideCoverage's legacy branch is now unreachable in production — every caller refuses upstream with 410. Noted; the delegation-rail branch and the shared-primitive boundaries re-read against the diff and unchanged. Prior: #1328 — mpp_demo route retired, shared primitives unchanged (see new section) + same-day dev: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # x402 / Machine-Payment Consolidation (PT-1)
@@ -23,7 +23,9 @@ the resulting shared contract, not an active implementation plan.
 
 The x402 and generic/MPP money paths share four policy-first primitives:
 
-- `decideCoverage` selects execute, queue, or insufficient coverage.
+- `decideCoverage` (`src/domain/payment-coverage.ts` — file and helper both
+  DELETED by #1987, and removed from the money-path glob list with it)
+  selected execute, queue, or insufficient coverage.
 - `insertMachineApproval` (`infra/repositories/approval-requests.ts` — file
   and helper both DELETED with the table by #2055) wrote
   approval requests — called directly by both modules since #997 removed the

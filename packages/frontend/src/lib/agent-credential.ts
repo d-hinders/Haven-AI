@@ -15,9 +15,14 @@
  * Unknown fields are ignored by today's loader, so the superset is safe.
  *
  * Important: `budget_summary` is a SNAPSHOT at creation time. The user can
- * change allowances later in Haven, and the on-chain Safe AllowanceModule is
- * the authoritative gate either way. Tools that need live data should call
- * `haven_get_allowances` against Haven's API.
+ * change the budget later in Haven, and the on-chain policy is the
+ * authoritative gate either way — on the delegation rail that is the budget
+ * delegation's caveat enforcers. (#2107: this said "the on-chain Safe
+ * AllowanceModule", which #2106 had already corrected in this file's OUTPUT
+ * without correcting the comment describing it. The census strips comments by
+ * design, so nothing would ever have flagged it — fixed here because adding
+ * this file to the guard asserts it is clean, and that assertion should be
+ * true of the whole file rather than only the part the scanner reads.)
  */
 
 import { getChainConfig } from '@/lib/chains'

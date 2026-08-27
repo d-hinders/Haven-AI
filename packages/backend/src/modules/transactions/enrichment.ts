@@ -122,6 +122,13 @@ export async function enrichTransactionsWithAgents(
       }
     })
   } catch {
+    // #2097: on any DB/repo failure the rows are returned UNMODIFIED — a
+    // matched agent keeps its agentId/agentName but no `initiatedBy`
+    // classification is stamped. Deliberate and fail-soft: the frontend's
+    // initiator helper degrades to explicit 'Unknown' on a missing record,
+    // never 'You', so an enrichment outage cannot falsely claim a human
+    // initiator. The trade is that unknown-vs-agent goes unreported here;
+    // keep the two in agreement if this path ever gets a logger.
     return transactions
   }
 }

@@ -578,6 +578,54 @@ describeDb('passive erc7710 settlement sweep (#2117)', () => {
     }
   })
 
+  it('AMBIGUITY WITHIN one range survives the merge with a later range that names the child once', async () => {
+    const { agentId, userId } = await seedAgent()
+    // Same shared child again, but this time the OLDER candidate's range is the
+    // one that is internally ambiguous, and the NEWER range names the child
+    // exactly once. A merge that let the single sighting overwrite the poison
+    // would resurrect the guess the first range already refused.
+    const older = await unreportedPayment(agentId, userId, { ageSec: 5 * 60 * 60 })
+    const newer = await unreportedPayment(agentId, userId, {
+      ageSec: 30 * 60,
+      delegationHash: older.built.childHash,
+    })
+    const OTHER_TX = `0x${'9c'.repeat(32)}`
+    const THIRD_TX = `0x${'3d'.repeat(32)}`
+    const olderAuthorizeSec = Math.floor(Date.now() / 1000) - 5 * 60 * 60
+    const newerAuthorizeSec = Math.floor(Date.now() / 1000) - 30 * 60
+    const nowSec = Math.floor(Date.now() / 1000)
+
+    getBlock.mockImplementation(async (which: string | number) => {
+      if (which === 'latest') return { number: 1_000_000, timestamp: nowSec }
+      if (which === 995_000) return { number: 995_000, timestamp: nowSec - 10_000 }
+      if (which === 999_000) return { number: 999_000, timestamp: newerAuthorizeSec + 60 }
+      return { number: 900_000, timestamp: olderAuthorizeSec + 60 }
+    })
+    getLogs.mockImplementation(async (filter: { toBlock: number }) =>
+      filter.toBlock >= 998_000
+        ? // the newer range: ONE sighting
+          [{ ...redeemedLog(older.built.child as never), transactionHash: OTHER_TX }]
+        : // the older range: TWO different transactions redeeming one child
+          [
+            { ...redeemedLog(older.built.child as never), transactionHash: SWEEP_TX },
+            { ...redeemedLog(older.built.child as never), transactionHash: THIRD_TX },
+          ],
+    )
+    getTransactionReceipt.mockImplementation(async (hash: string) => ({
+      status: 1,
+      blockNumber: hash === OTHER_TX ? 999_000 : 900_000,
+      logs: [transferLog(), redeemedLog(older.built.child as never)],
+    }))
+
+    const result = await runSettlementSweepTick(silentLog)
+
+    expect(result.confirmed).toBe(0)
+    for (const id of [older.id, newer.id]) {
+      expect((await readIntent(id)).status).toBe('submitted')
+      expect(await readEvidence(id)).toHaveLength(0)
+    }
+  })
+
   // ── Scope: nothing else can enter the sweep ─────────────────────────────
 
   it('does not sweep a payment younger than the grace period', async () => {

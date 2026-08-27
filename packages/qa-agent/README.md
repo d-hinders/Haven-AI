@@ -48,6 +48,7 @@ exists to prove. The invariants outlived the rail; only the instruments changed.
 | `within-budget-settle` | A payment inside the budget settles on-chain + is logged | `POST /payments` → sign the `eip712_userop` typed data → poll to `confirmed`. Also the suite's **positive control**: the leg that proves the money path can still say YES |
 | `over-budget-refused` | A payment over the budget is refused before it becomes signable, never auto-executed | The ERC20PeriodTransferEnforcer reverts during gas estimation → HTTP 502, **no intent row**. Renamed from `over-budget-queue`: the approval QUEUE it asserted does not exist on this rail and no longer exists anywhere |
 | `x402-over-budget-rejected` | A priced x402 call above the budget is refused, never a signable intent | The same enforcer, on the **EIP-3009 funding leg** of `POST /x402/authorize` |
+| `x402-erc7710-over-budget-rejected` | The same invariant on the **preferred** scheme (#2082) | A fail-fast remaining-budget pre-check in `POST /x402/authorize`'s erc7710 branch → HTTP 403 `delegation_budget_exceeded`, **no settlement child, no intent row, no delegate deploy**. The on-chain enforcer is still the gate; the pre-check only makes the refusal arrive at authorize instead of at merchant redemption |
 
 **A 502 is not proof, and these legs do not treat it as proof.** A bundler
 outage, an RPC failure and a policy refusal all produce the same status, so the
@@ -58,13 +59,22 @@ offered, and (3) decode the ABI-encoded revert reason and require it to **name
 a caveat enforcer** (`lib/revert-reason.ts`). Asserting only the status is the
 defect #2016 was filed about.
 
-⚠️ **Known gap — over-budget on erc7710 is NOT covered.** On erc7710 direct
-settlement, `POST /x402/authorize` returns 201 with a signable child delegation
-for any amount; the budget is enforced when the merchant redeems the chain
-on-chain. So "never turned into a signable intent" is false on the preferred
-scheme, and proving the redemption-side revert needs a merchant that attempts
-it. Verified live on 2026-08-25 and recorded on #1993 rather than asserted
-around.
+**The erc7710 gap is closed at authorize, and only at authorize (#2082).**
+Until then, `POST /x402/authorize` returned 201 with a signable child
+delegation for any amount on erc7710 — so "never turned into a signable intent"
+was false on the preferred scheme (verified live 2026-08-25, recorded on #1993
+rather than asserted around). The pre-check made the case exist to prove, and
+`x402-erc7710-over-budget-rejected` proves it. Its own vacuous-pass guards are
+the ones the shape needs: a 403 is ALSO what a missing delegation returns, so
+the leg requires `error_code: delegation_budget_exceeded` and requires the
+`remaining_atomic` in the refusal to match the budget it derived the request
+from.
+
+⚠️ **Still uncovered: the redemption-side revert.** Neither over-budget leg
+proves the CHAIN refuses an over-budget redemption — that needs a merchant that
+actually attempts one, and none of these legs do. The caveat stack was always
+the gate and #2082 did not touch it; what the new leg asserts is WHEN Haven
+says no, not whether the chain would have.
 
 **x402 settlement is covered on the delegation rail only.** The legacy
 `x402-settle` and `x402-sweep-recovery` legs were removed by owner decision

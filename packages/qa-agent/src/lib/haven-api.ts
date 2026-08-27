@@ -46,6 +46,15 @@ export interface X402AuthorizeResult {
   phase?: string
   shortfall?: number | string
   remaining_allowance?: number | string
+  /**
+   * Present on the #2082 erc7710 over-budget refusal (403
+   * `delegation_budget_exceeded`): the live remaining period budget and the
+   * shortfall, atomic units. The leg compares `remaining_atomic` against the
+   * number it derived the request from — a refusal quoting some other budget
+   * is a refusal about some other delegation.
+   */
+  remaining_atomic?: string
+  shortfall_atomic?: string
   /** Present on a delegation-rail 502: the bundler/simulation failure (#2016). */
   details?: string
   /** erc7710 direct settlement (#1064): the child-delegation typed data the delegate signs. */

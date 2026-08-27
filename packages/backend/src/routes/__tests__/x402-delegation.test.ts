@@ -5,13 +5,17 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 
-const { mockQuery, mockSelect, mockCompute, mockCreateIntent, mockPrepareFunding, mockEnsureDeployed } = vi.hoisted(() => ({
+const {
+  mockQuery, mockSelect, mockCompute, mockCreateIntent, mockPrepareFunding, mockEnsureDeployed,
+  mockReadRemaining,
+} = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockSelect: vi.fn(),
   mockCompute: vi.fn(),
   mockCreateIntent: vi.fn(),
   mockPrepareFunding: vi.fn(),
   mockEnsureDeployed: vi.fn(),
+  mockReadRemaining: vi.fn(),
 }))
 vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
 
@@ -46,6 +50,14 @@ vi.mock('../../middleware/agentAuth.js', () => ({
 vi.mock('../../rails/delegation-authorization.js', () => ({
   selectDelegation: mockSelect,
   prepareDelegationPayment: mockPrepareFunding,
+}))
+// #2082: the erc7710 branch now reads the live remaining budget before it
+// builds a settlement child. Mocked here rather than left to fall through:
+// unmocked, every erc7710 test would make a real Base-Sepolia RPC call, take
+// the 2s timeout, and fail OPEN — so the suite would pass without ever
+// exercising the check it is meant to pin.
+vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
+  readRemainingBudget: (...a: unknown[]) => mockReadRemaining(...a),
 }))
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
@@ -107,6 +119,12 @@ describe('x402 delegation-rail settlement (#830)', () => {
     mockCreateIntent.mockReset()
     mockPrepareFunding.mockReset()
     mockEnsureDeployed.mockReset()
+    mockReadRemaining.mockReset()
+    // #2082: default to a live enforcer read with the FULL 5 USDC budget
+    // available — every existing case authorizes 0.1 USDC, so the pre-check
+    // is a no-op for them and the erc7710 assertions below stay about what
+    // they were about. The over-budget block overrides this.
+    mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
     mockCompute.mockResolvedValue(DELEGATE_ACCT)
     // #1667: default to an already-deployed delegate account; the regression
     // block below overrides this to exercise the counterfactual first payment.
@@ -247,6 +265,175 @@ describe('x402 delegation-rail settlement (#830)', () => {
       })
       expect(res.statusCode).toBe(201)
       expect(mockEnsureDeployed).not.toHaveBeenCalled()
+    })
+  })
+
+  // ── #2082: fail-fast remaining-budget pre-check on erc7710 ───────────────
+  //
+  // The gap this closes, measured live against dev on 2026-08-25 (#1993): an
+  // over-budget erc7710 authorize returned 201 `pending_signature` WITH
+  // `sign_data`. The money was never at risk — the child is chained under the
+  // budget delegation and `ERC20PeriodTransferEnforcer` reverts at merchant
+  // redemption — but Haven handed the agent a header that could not settle,
+  // and the refusal arrived after a signature and four round trips. The two
+  // sibling entry points (`POST /payments`, the 3009 funding shape) both
+  // refuse at authorize; this made the PREFERRED scheme (#1450) the last one
+  // to say no.
+  //
+  // The chain is still the gate. Every case below is about WHEN the refusal
+  // arrives, never about whether an over-budget payment could succeed.
+  describe('remaining-budget pre-check on erc7710 authorize (#2082)', () => {
+    function primeErc7710() {
+      mockSelect.mockResolvedValue({
+        delegation_hash: `0x${'12'.repeat(32)}`,
+        delegation_json: JSON.stringify(signedBudget),
+        recipient_address: null,
+      })
+      mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    }
+
+    it('REGRESSION: an over-budget authorize is refused 403 with NOTHING written', async () => {
+      // Delete the pre-check and this returns 201 with a signable child —
+      // which is exactly the pre-#2082 behaviour, so this case is the mutant
+      // detector for the whole block.
+      primeErc7710()
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '50000', fromChain: true }) // 0.05 USDC
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ amount: '100000' }), // 0.1 USDC
+      })
+      expect(res.statusCode).toBe(403)
+      const body = res.json()
+      expect(body.sign_data).toBeUndefined()
+      expect(body.payment_id).toBeUndefined()
+      expect(mockCreateIntent).not.toHaveBeenCalled()
+      // Pre-funding means pre-EVERYTHING expensive: the relayer-paid delegate
+      // deploy (#1667) must not run for a payment that cannot settle either.
+      expect(mockEnsureDeployed).not.toHaveBeenCalled()
+    })
+
+    it('the refusal is actionable, not a bare error — taxonomy fields and the shortfall', async () => {
+      // MCP's normalizeError reads `phase`/`next_action` straight off the
+      // body, so these fields are what turn the 403 into "ask the owner to
+      // raise the budget" instead of "retry".
+      primeErc7710()
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '50000', fromChain: true })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ amount: '100000' }),
+      })
+      expect(res.json()).toMatchObject({
+        error_code: 'delegation_budget_exceeded',
+        phase: 'insufficient_funds',
+        next_action: 'fund_safe_or_raise_allowance',
+        rail: 'x402',
+        token: 'USDC',
+        amount_atomic: '100000',
+        remaining_atomic: '50000',
+        shortfall_atomic: '50000',
+        chain_id: 84532,
+      })
+      expect(res.json().error).toMatch(/no approval queue on the delegation rail/)
+    })
+
+    it('the read is keyed on the SELECTED budget delegation, and on the agent chain', async () => {
+      // A pre-check that read some other delegation would refuse (or admit)
+      // for a budget the settlement child is not chained under.
+      primeErc7710()
+      await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody(),
+      })
+      expect(mockReadRemaining).toHaveBeenCalledWith(84532, JSON.stringify(signedBudget), '100000')
+    })
+
+    it('POSITIVE CONTROL: a within-budget authorize is unchanged — 201 with a signable child', async () => {
+      primeErc7710()
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ amount: '100000' }),
+      })
+      expect(res.statusCode).toBe(201)
+      expect(res.json().sign_data.signature_scheme).toBe('eip712_delegation')
+      expect(mockCreateIntent).toHaveBeenCalled()
+    })
+
+    it('spends the LAST of the budget: remaining exactly equal to the amount is allowed', async () => {
+      // The comparison is `remaining < amount`, not `<=`. Getting this wrong
+      // would strand the final payment of every period behind a refusal the
+      // chain would not have made.
+      primeErc7710()
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '100000', fromChain: true })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ amount: '100000' }),
+      })
+      expect(res.statusCode).toBe(201)
+    })
+
+    it('FAILS OPEN: a degraded read never refuses — the chain stays the gate', async () => {
+      // `fromChain: false` is a fallback number, not a measurement. Refusing
+      // on it would turn an RPC outage into a stopped agent; the enforcer
+      // still reverts at redemption if the payment really is over budget.
+      primeErc7710()
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '1', fromChain: false })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ amount: '100000' }),
+      })
+      expect(res.statusCode).toBe(201)
+      expect(res.json().sign_data).toBeDefined()
+    })
+
+    it('FAILS OPEN: a THROWN read never refuses either', async () => {
+      // readRemainingBudget catches its own failures today, so this pins the
+      // seam rather than the reader: a future reader that rejects must not
+      // become a new way for authorize to 500 on a fundable payment.
+      primeErc7710()
+      mockReadRemaining.mockRejectedValue(new Error('rpc exploded'))
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ amount: '100000' }),
+      })
+      expect(res.statusCode).toBe(201)
+    })
+
+    it('FAILS OPEN: an UNPARSEABLE remaining value never refuses either', async () => {
+      // `BigInt()` throws on a malformed string, so the parse lives inside the
+      // same guard as the read. Outside it, a reader that returned garbage
+      // would turn a fundable payment into a 500 — the one outcome this whole
+      // block must be incapable of producing.
+      primeErc7710()
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: 'not-a-number', fromChain: true })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ amount: '100000' }),
+      })
+      expect(res.statusCode).toBe(201)
+    })
+
+    it('the 3009 funding shape does not consult it — that leg refuses at prepare', async () => {
+      // Scope guard: #2082 is the erc7710 branch only. The funding leg already
+      // refuses over-budget at authorize (502, decoded enforcer), and a second
+      // pre-check there would be a second source of truth for one condition.
+      mockPrepareFunding.mockResolvedValue(PREPARED)
+      mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+      })
+      expect(res.statusCode).toBe(201)
+      expect(mockReadRemaining).not.toHaveBeenCalled()
     })
   })
 

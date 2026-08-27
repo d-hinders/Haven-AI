@@ -488,7 +488,7 @@ describeDb('erc7710 settlement completion → evidence pipeline (#2092)', () => 
     }
 
     /** A settlement receipt: the transfer, plus the manager's redemption log. */
-    function settlementReceipt(child: Record<string, unknown>, managerAddress?: string) {
+    function settlementReceipt(child: Record<string, unknown>, managerAddress?: `0x${string}`) {
       return {
         status: 1,
         blockNumber: 42,

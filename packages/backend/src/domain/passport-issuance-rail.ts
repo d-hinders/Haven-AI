@@ -50,6 +50,12 @@ export const PASSPORT_ISSUABLE_ACCOUNT_TYPE = 'delegator_hybrid'
  * @param alias the `user_safes` alias in the surrounding query
  */
 export function passportIssuableRailSql(alias: string): string {
+  // The alias is interpolated into raw SQL. One hardcoded call site today, but
+  // this is a shared `domain/` helper and the next caller is not in view —
+  // assert rather than trust (#2138 review nit 5).
+  if (!/^[a-z_][a-z0-9_]*$/i.test(alias)) {
+    throw new Error(`unsafe SQL alias for passport rail predicate: ${alias}`)
+  }
   return `(${alias}.execution_rail = '${PASSPORT_ISSUABLE_RAIL}' OR ${alias}.account_type = '${PASSPORT_ISSUABLE_ACCOUNT_TYPE}')`
 }
 

@@ -181,21 +181,30 @@ describeDb('passport issuance is delegation-rail only (#2138)', () => {
 
   // ── The drift guard: SQL and TypeScript must agree ──────────────────────
 
-  it('the SQL predicate and the TS predicate agree across the whole CHECK domain', async () => {
+  it('the SQL predicate and the TS predicate agree across BOTH axes of the domain', async () => {
     // Two languages, one rule, and nothing in the type system makes them
     // agree. Asserted per rail against the real query rather than by reading
     // both and eyeballing them.
     const domain = railDomainFromMigration()
     expect(domain.sort()).toEqual(['allowance_module', 'delegation', 'session_key'])
 
+    // Review nit 4: the rail axis alone did not justify the name. Both axes
+    // are varied now, so "the whole domain" means the whole domain — the
+    // account_type arm is the one that lets a hybrid account qualify on a
+    // non-delegation rail string, and it deserves the same guard.
     for (const rail of domain) {
-      await resetDb()
-      const { agentId } = await seedAgentOnRail(rail, 'safe')
-      await seedRetryablePassport(agentId)
+      for (const accountType of ['safe', 'delegator_hybrid']) {
+        await resetDb()
+        const { agentId } = await seedAgentOnRail(rail, accountType)
+        await seedRetryablePassport(agentId)
 
-      const sqlSaysEligible = (await listRetryable(50)).length === 1
-      const tsSaysEligible = isPassportIssuableAccount(rail, 'safe')
-      expect(sqlSaysEligible, `SQL and TS disagree for rail=${rail}`).toBe(tsSaysEligible)
+        const sqlSaysEligible = (await listRetryable(50)).length === 1
+        const tsSaysEligible = isPassportIssuableAccount(rail, accountType)
+        expect(
+          sqlSaysEligible,
+          `SQL and TS disagree for rail=${rail} account_type=${accountType}`,
+        ).toBe(tsSaysEligible)
+      }
     }
   })
 

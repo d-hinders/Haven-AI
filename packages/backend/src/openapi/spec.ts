@@ -2195,7 +2195,7 @@ export const openapiSpec = {
         operationId: 'requestAgentPassport',
         summary: 'Opt an existing agent in to a passport.',
         description:
-          "Owner action, never agent-authenticated: an agent must not be able to issue itself a credential. Records the request synchronously and returns **202** — the EAS write is fire-and-forget, so poll the GET (or the public verifier) for the anchored state. Idempotent: an already-anchored passport returns **200** with `already_issued: true` rather than minting a second attestation. Refusals are shaped by whose problem it is — a revoked agent is a 409 (terminal, and anchoring now would spend gas on an attestation that must be revoked immediately), an unbound or unsupported chain is a 400, and a deployment that has not configured issuance is a 503, because that is the operator's gap and not the caller's mistake. A PAUSED agent is deliberately not blocked: pausing is reversible and `standing` already reports it as suspended.",
+          "Owner action, never agent-authenticated: an agent must not be able to issue itself a credential. Records the request synchronously and returns **202** — the EAS write is fire-and-forget, so poll the GET (or the public verifier) for the anchored state. Idempotent: an already-anchored passport returns **200** with `already_issued: true` rather than minting a second attestation. Refusals are shaped by whose problem it is — a revoked agent is a 409 (terminal, and anchoring now would spend gas on an attestation that must be revoked immediately), an account on a RETIRED rail is also a 409 (#2138: passports are issued on the delegation rail only, because a rail that cannot transact has no spending for a contract to govern), an unbound or unsupported chain is a 400, and a deployment that has not configured issuance is a 503, because that is the operator's gap and not the caller's mistake. The rail refusal is ordered AFTER the idempotency check, so a passport already anchored on a legacy account still returns 200 — existing passports are left alone rather than revoked. A PAUSED agent is deliberately not blocked: pausing is reversible and `standing` already reports it as suspended.",
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -2229,7 +2229,11 @@ export const openapiSpec = {
           '400': { ...errorResponse, description: 'Agent has no bound account, or passports are not issued on its chain.' },
           '401': errorResponse,
           '404': errorResponse,
-          '409': { ...errorResponse, description: 'Agent is revoked — revocation is terminal.' },
+          '409': {
+            ...errorResponse,
+            description:
+              'Agent is revoked (terminal), or its account is on a retired rail — passports are issued on the delegation rail only (#2138).',
+          },
           '503': { ...errorResponse, description: 'Passport issuance is not configured on this deployment.' },
         },
       },

@@ -76,6 +76,16 @@ The one remaining no-path case is an RPC outage spanning the whole scan window
 (≤ ~13 minutes after authorize); such an intent stays `submitted`, fail-closed,
 never wrongly completed.
 
+**No longer a gap (#2094):** two of a user's own look-alike erc7710 payments —
+same merchant, token, amount and authorize second — used to be *individually*
+unattributable, so a reported settlement was refused for BOTH and neither
+reached the feed. The settlement child is now salted per intent, so each
+settlement transaction carries a `RedeemedDelegation` log naming exactly one
+payment, and each reaches the feed on its own evidence. The refusal is kept for
+the cases where attribution genuinely remains impossible (see
+[`04-x402-payment-sequence.md`](../architecture/04-x402-payment-sequence.md)
+§ *Completing an erc7710 settlement*).
+
 What the accountant sees in Fortnox: an unbooked supplier invoice with the
 payment-evidence PDF(s) attached, `Booked: false`, no voucher — until they
 attest it. Booking assigns `VoucherSeries`/`VoucherNumber`/`VoucherYear`.

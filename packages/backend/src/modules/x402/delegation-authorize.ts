@@ -8,6 +8,7 @@
  * the one deliberate behavioural difference, and a refusal that arrives
  * earlier rather than a refusal that did not exist (see its comment below).
  */
+import { randomUUID } from 'node:crypto'
 import { signX402ExpectedContext, x402PayerContextFields, x402PayerWireFields } from '../../infra/chain/x402-binding-signer.js'
 import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
@@ -361,6 +362,22 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     }
   }
 
+  // #2094: the intent id is generated HERE, before the child is built, and
+  // handed to the insert below as an explicit primary key.
+  //
+  // The ordering is the whole point. The settlement child is salted from the
+  // intent id (`settlementSalt`), so the id has to exist before the child
+  // does — letting Postgres' `gen_random_uuid()` default supply it would leave
+  // the child unable to name the row that stores it. A v4 UUID from
+  // `node:crypto` is the same value space the column default produces, so
+  // nothing downstream can tell the two sources apart.
+  //
+  // When the insert below loses the idempotency race it returns null and this
+  // id is simply discarded along with the child built from it — the winner's
+  // own child is replayed out of `prepared_user_op` (`delegationReplay`), so a
+  // discarded id can never be the one a settlement is attributed to.
+  const intentId = randomUUID()
+
   let built
   let delegateAccountAddress
   try {
@@ -369,6 +386,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     })
     built = buildSettlementDelegation({
       chainId: agent.chain_id,
+      // #2094: salts the child, making its hash unique to THIS intent.
+      intentId,
       delegateAccountAddress: delegateAccountAddress as `0x${string}`,
       budgetDelegation: JSON.parse(budget.delegation_json),
       asset: tokenAddress as `0x${string}`,
@@ -427,6 +446,9 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
   }
 
   const intent = await createPaymentIntent({
+    // #2094: the pre-generated id, so the stored row IS the one the child's
+    // salt names. Anything else silently un-attributes the settlement.
+    id: intentId,
     agent,
     rail: 'x402',
     payTo,

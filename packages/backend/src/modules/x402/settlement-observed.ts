@@ -85,6 +85,15 @@ export interface ObservableSettlementIntent {
   amount_human: string
   status: string
   tx_hash: string | null
+  /**
+   * #2094: the settlement child's hash, stored at authorize time. Intent-unique
+   * since the child is salted from the intent id, so the DelegationManager's
+   * `RedeemedDelegation` log can name THIS payment rather than its shape.
+   * Optional because a pre-#2094 row may not carry one, in which case
+   * verification falls back to transfer shape + window and the ambiguity guard
+   * keeps its original reach.
+   */
+  delegation_hash?: string | null
   /** Authorize time — the origin of this intent's settlement window. */
   created_at?: string | null
   source?: string | null
@@ -165,6 +174,9 @@ export function expectedSettlementTransferFor(
     amountRaw: intent.amount_raw,
     notBeforeSec: authorizeSec - CLOCK_SKEW_SECONDS,
     notAfterSec: authorizeSec + MAX_SETTLEMENT_WINDOW_SECONDS + CLOCK_SKEW_SECONDS,
+    // #2094: enables the verifier's check 8 — the re-hashed DelegationManager
+    // struct must equal THIS intent's child. Absent for pre-#2092 rows.
+    delegationHash: intent.delegation_hash ?? null,
   }
 }
 
@@ -225,6 +237,11 @@ export async function observeErc7710Settlement(
       usdValue: fiat.usd,
       eurValue: fiat.eur,
       windowSeconds: AMBIGUITY_WINDOW_SECONDS,
+      // #2094: only a settlement the pinned DelegationManager itself bound to
+      // THIS intent's child may narrow the ambiguity guard past look-alikes.
+      // Everything else — a pre-#2094 child, an unpinned chain, a facilitator
+      // route with no decodable manager log — keeps #2096's original reach.
+      delegationBound: verification.delegationBound,
     },
     db,
   )

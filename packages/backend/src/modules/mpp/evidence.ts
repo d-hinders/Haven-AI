@@ -206,13 +206,13 @@ function proofStatusForAttach(input: AttachMachinePaymentEvidenceInput): Payment
 
 export async function recordMachinePaymentEvidenceBase(
   intent: MachinePaymentEvidenceSource,
-): Promise<void> {
+): Promise<boolean> {
   const rail = railForPayment(intent)
-  if (!isProtocolPaymentRail(rail)) return
-  if (intent.status !== expectedStatusForPayment(intent) || !intent.tx_hash) return
+  if (!isProtocolPaymentRail(rail)) return false
+  if (intent.status !== expectedStatusForPayment(intent) || !intent.tx_hash) return false
 
   const resourceUrl = resourceUrlForPayment(intent)
-  if (!resourceUrl) return
+  if (!resourceUrl) return false
   const referenceColumn = referenceColumnForPayment(intent)
   const paymentIntentId = intent.id
   // #2085: a NEW evidence row is always anchored to a payment intent. The
@@ -279,6 +279,13 @@ export async function recordMachinePaymentEvidenceBase(
   // Fire-and-forget + idempotent: never blocks or delays settlement, inert
   // unless the hosted reporting feed is available for this user.
   feedSettledPaymentBestEffort(intent.user_id, intent.id)
+
+  // `true` = a `machine_payment_evidence` row was written (so the backfill and
+  // the Fortnox feed have something to read). `false` = the row could not be
+  // written (non-protocol rail, not confirmed, or no resource URL) — a caller
+  // like the passive observer can then count a FAILED push instead of a
+  // success; existing callers (routes/payments.ts, attach) ignore the value.
+  return true
 }
 
 export async function recordMachinePaymentEvidenceBaseById(

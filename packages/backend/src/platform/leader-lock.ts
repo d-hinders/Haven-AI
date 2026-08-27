@@ -83,11 +83,11 @@ export const KEYED_LOCK_NAMESPACES = {
   catalogSubmissionQueue: 811101,
   /**
    * One erc7710 intent's passive completion at a time, per intent id (#2117).
-   * The observer is leader-gated already, but a keyed lock ALSO serialises the
-   * observer against the agent-report path: both may be completing the SAME
-   * intent concurrently, and the CAS inside `confirmObservedSettlement` is what
-   * makes exactly one of them win. The lock makes the loser's re-read see the
-   * winner's write instead of a silent no-op.
+   * Shepherds the observer's own concurrent completions of the same intent
+   * across overlapping ticks. It does NOT serialise against the agent-report
+   * HTTP path (which takes no keyed lock) — there the shared guards inside
+   * `confirmObservedSettlement` (status CAS + hash-scoped advisory lock) are
+   * what make exactly one completion win; the loser re-reads and skips.
    */
   settlementObservation: 811102,
 } as const

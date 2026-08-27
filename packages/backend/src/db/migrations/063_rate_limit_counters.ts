@@ -19,9 +19,12 @@ export const version = '063_rate_limit_counters'
  * one time window, and skipping WAL keeps an unauthenticated request cheap.
  * The cost is that the table is truncated by crash recovery — which loses at
  * most one window of counts and cannot corrupt anything, because nothing reads
- * this table for authority. The same fail-open reasoning as
- * `allowance_nonce_watermarks` (#718): a database problem degrades this to the
- * pre-#1680 per-replica behaviour, never to an outage on the front door.
+ * this table for authority. The same fail-open reasoning as the #718
+ * allowance-nonce watermark: a database problem degrades this to the pre-#1680
+ * per-replica behaviour, never to an outage on the front door. (That table was
+ * dropped with the Safe rail — #2084, migration 071. The reasoning it set the
+ * precedent for is what survives, recorded past-tense in
+ * `docs/operations/backend-scaling.md`.)
  */
 export async function up(client: PoolClient): Promise<void> {
   await client.query(`

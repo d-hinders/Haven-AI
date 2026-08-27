@@ -330,6 +330,30 @@ export const CONFIRM_SETTLEMENT_OBSERVED_SQL = `UPDATE payment_intents
                   AND twin.created_at
                         BETWEEN me.created_at - ($6 * interval '1 second')
                             AND me.created_at + ($6 * interval '1 second')
+                  -- #2094: a twin that is DISTINGUISHABLE on-chain is not a
+                  -- look-alike. All three conjuncts are required together:
+                  --   $7  — the DelegationManager's own RedeemedDelegation log
+                  --         named THIS intent's child in THIS transaction
+                  --         (verifier check 8). Without it we are attributing
+                  --         on transfer shape alone, which cannot tell twins
+                  --         apart however different their children are.
+                  --   BOTH hashes present — a twin whose child was never
+                  --         recorded (a pre-#2092 row) is UNKNOWN, and unknown
+                  --         is ambiguous, not different. IS DISTINCT FROM
+                  --         would have called NULL "a different child" and
+                  --         waved such a twin through; it is spelled out as
+                  --         two NOT NULLs plus <> so it cannot.
+                  --   twin.delegation_hash <> me.delegation_hash — the twin's
+                  --         child really is a different child.
+                  -- Two pre-#2094 intents share a byte-identical child and so
+                  -- share a delegation_hash: they fail the last conjunct and
+                  -- the guard still refuses, which is the in-flight case.
+                  AND NOT (
+                        $7::boolean
+                    AND me.delegation_hash IS NOT NULL
+                    AND twin.delegation_hash IS NOT NULL
+                    AND twin.delegation_hash <> me.delegation_hash
+                  )
                 WHERE me.id = $2
              )
            RETURNING id`
@@ -389,6 +413,15 @@ export interface ObservedSettlementConfirm {
    * NOT the same as one window's width — see `AMBIGUITY_WINDOW_SECONDS`.
    */
   windowSeconds: number
+  /**
+   * #2094: true only when the verifier read this intent's OWN settlement child
+   * back out of the pinned DelegationManager's `RedeemedDelegation` log
+   * (check 8). It is the sole licence to look past a look-alike twin, because
+   * it is the only evidence that says WHICH payment this transaction settled
+   * rather than what shape it had. Defaults to false — an unbound settlement
+   * gets #2096's guard at full reach.
+   */
+  delegationBound?: boolean
 }
 
 export async function confirmObservedSettlementRow(
@@ -402,6 +435,7 @@ export async function confirmObservedSettlementRow(
     input.usdValue,
     input.eurValue,
     input.windowSeconds,
+    input.delegationBound ?? false,
   ])
   return result.rows.length > 0
 }
@@ -464,6 +498,7 @@ export const FIND_PENDING_ERC7710_SETTLEMENTS_SQL = `SELECT 'payment_intent'::TE
             payment_rail, payment_resource_url, merchant_address,
             machine_challenge_id, machine_idempotency_key, machine_metadata,
             execution_rail,
+            delegation_hash,
             created_at,
             confirmed_at
      FROM payment_intents

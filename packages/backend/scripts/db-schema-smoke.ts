@@ -381,10 +381,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'auth: login credentials read by email', sql: FIND_USER_CREDENTIALS_BY_EMAIL_SQL },
   { name: 'auth: /me profile read by id', sql: FIND_USER_PROFILE_BY_ID_SQL },
   { name: 'auth: session safes payload (carries account_type, #1069)', sql: LIST_SESSION_SAFES_FOR_USER_SQL },
-  // #1987: the cross-replica allowance-nonce watermark smoke (#718) went with
-  // the AllowanceModule rail's execution half. The `allowance_nonce_watermarks`
-  // TABLE is deliberately left in place — dropping tables is #1990, and this
-  // slice drops no schema.
   { name: 'outbound: enqueue a tx', sql: ENQUEUE_OUTBOUND_TX_SQL },
   { name: 'outbound: claim next per chain', sql: CLAIM_NEXT_OUTBOUND_TX_SQL },
   { name: 'outbound: mark broadcast', sql: MARK_OUTBOUND_TX_BROADCAST_SQL },

@@ -185,7 +185,7 @@ describe('completeObservedErc7710Settlement (confirm then EVIDENCE)', () => {
   it('confirmed observation → reload → evidence row → Fortnox feed', async () => {
     mocks.observeErc7710Settlement.mockResolvedValue({ outcome: 'confirmed' })
     mocks.findIntentEvidenceSource.mockResolvedValue({ ...INTENT, status: 'confirmed', tx_hash: '0xsettle' })
-    mocks.recordMachinePaymentEvidenceBase.mockResolvedValue(undefined)
+    mocks.recordMachinePaymentEvidenceBase.mockResolvedValue(true)
 
     const result = await completeObservedErc7710Settlement(INTENT, '0xsettle')
     expect(result).toEqual({ confirmed: true, evidencePushed: true, evidenceFailed: false })
@@ -205,6 +205,23 @@ describe('completeObservedErc7710Settlement (confirm then EVIDENCE)', () => {
     expect(result.confirmed).toBe(false)
     expect(result.refusedReason).toBe('unverified')
     expect(mocks.recordMachinePaymentEvidenceBase).not.toHaveBeenCalled()
+  })
+
+  it('a recorder that no-ops (no evidence row landed) is counted as evidenceFailed, never a fake success', async () => {
+    mocks.observeErc7710Settlement.mockResolvedValue({ outcome: 'confirmed' })
+    mocks.findIntentEvidenceSource.mockResolvedValue({ ...INTENT, status: 'confirmed', tx_hash: '0xsettle' })
+    // The seam can silently skip writing when the reloaded row lacks a
+    // resource URL — the observer must surface that as a FAILED push (this is
+    // the exact fail-forever gap the observer exists to close).
+    mocks.recordMachinePaymentEvidenceBase.mockResolvedValue(false)
+
+    const result = await completeObservedErc7710Settlement(INTENT, '0xsettle')
+    expect(result).toEqual({
+      confirmed: true,
+      evidencePushed: false,
+      evidenceFailed: true,
+      refusedReason: expect.stringContaining('evidence not written'),
+    })
   })
 
   it('a raced observation (not_applicable) writes NOTHING', async () => {
@@ -249,7 +266,7 @@ describe('runErc7710SettlementObserver (per-tick scan)', () => {
     mocks.getProvider.mockReturnValue(provider)
     mocks.verifySettlementTransferTx.mockResolvedValue({ outcome: 'verified' })
     mocks.findIntentEvidenceSource.mockResolvedValue({ ...INTENT, status: 'confirmed', tx_hash: '0xsettle' })
-    mocks.recordMachinePaymentEvidenceBase.mockResolvedValue(undefined)
+    mocks.recordMachinePaymentEvidenceBase.mockResolvedValue(true)
     // First intent: verified + confirmed + evidence. Second: nothing on-chain.
     mocks.observeErc7710Settlement.mockResolvedValue({ outcome: 'confirmed' })
     let logCall = 0
@@ -274,7 +291,7 @@ describe('runErc7710SettlementObserver (per-tick scan)', () => {
       return { outcome: 'confirmed' }
     })
     mocks.findIntentEvidenceSource.mockResolvedValue({ ...INTENT, status: 'confirmed', tx_hash: '0xsettle' })
-    mocks.recordMachinePaymentEvidenceBase.mockResolvedValue(undefined)
+    mocks.recordMachinePaymentEvidenceBase.mockResolvedValue(true)
 
     const report = await runErc7710SettlementObserver(log)
     expect(report).toMatchObject({ pending: 2, confirmed: 1, evidencePushed: 1 })

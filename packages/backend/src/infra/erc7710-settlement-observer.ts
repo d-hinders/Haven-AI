@@ -190,14 +190,16 @@ export interface ObservedSettlementCompletion {
 }
 
 /**
- * Complete one already-verified settlement: confirm the intent under the
- * per-intent keyed advisory lock, then write the evidence row exactly the way
- * the agent-report path does.
+ * Complete one already-verified settlement: confirm the intent, then write the
+ * evidence row exactly the way the agent-report path does.
  *
- * The keyed lock serialises this against the HTTP path completing the SAME
- * intent at the same moment; whichever wins the CAS in
- * `confirmObservedSettlement`, this function's re-read after a loss sees the
- * winner's write (returns not_applicable → skipped here).
+ * The keyed advisory lock serialises THIS observer's completions of the SAME
+ * intent against each other (single-leader ticks can still overlap on the
+ * interval); it does NOT serialise against the HTTP report path, which takes
+ * no keyed lock. The real cross-path serialization is unchanged: both paths
+ * run `confirmObservedSettlement`, whose CAS (`status='submitted' AND tx_hash
+ * IS NULL`) plus the hash-scoped per-transaction advisory lock makes exactly
+ * one of them win, and the loser's re-read sees the winner's write.
  */
 export async function completeObservedErc7710Settlement(
   intent: ObservableSettlementIntent,
@@ -222,7 +224,20 @@ export async function completeObservedErc7710Settlement(
     }
 
     try {
-      await recordMachinePaymentEvidenceBase(reloaded)
+      const landed = await recordMachinePaymentEvidenceBase(reloaded)
+      if (!landed) {
+        // The intent IS confirmed but no evidence row landed — the only
+        // reachable silent no-op after a successful confirm is a missing
+        // resource URL. That is exactly the fail-forever gap this observer
+        // exists to close, so count it as a FAILED push and log loudly rather
+        // than claiming success.
+        return {
+          confirmed: true,
+          evidencePushed: false,
+          evidenceFailed: true,
+          refusedReason: 'evidence not written by the seam (missing resource url) — see logs',
+        }
+      }
       return { confirmed: true, evidencePushed: true, evidenceFailed: false }
     } catch (err) {
       // The intent IS confirmed — a thrown evidence write must not be able to

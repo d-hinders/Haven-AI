@@ -186,6 +186,53 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(times).toEqual([...times].sort((a, b) => b - a))
     })
 
+    /**
+     * #2120 — the evidence pipeline must not photograph an approval state.
+     *
+     * These seeds are the input to every `npm run screenshot` capture, which
+     * is what the design-review pass judges. Seeding a state the backend
+     * cannot produce does not make weak evidence — it makes evidence of
+     * something that never happens, which a reviewer then signs off on.
+     * Everything asserted here is pinned to a hardcoded backend value, named
+     * beside it, so this stays a comparison rather than a preference.
+     */
+    describe('no approval state is seeded into the evidence (#2120)', () => {
+      it('mirrors the routes that hardcode every approval count to 0', () => {
+        // routes/dashboard.ts:84 — `const actionableApprovals = 0`, mirrored
+        // into `pendingApprovals` on the same response.
+        expect(fx('/dashboard/overview')).toMatchObject({
+          actionableApprovals: 0,
+          pendingApprovals: 0,
+        })
+        // routes/agent-activity.ts:129 and :242 — `const pendingApprovals = 0`.
+        expect(fx('/agent-activity/agent-research/stats')).toMatchObject({
+          pending_approvals: 0,
+        })
+        expect(fx('/agent-activity/feed')).toMatchObject({ pending_approvals: 0 })
+      })
+
+      it('seeds no approval activity row on any keyed activity endpoint', () => {
+        // #2055 removed the approval entries from both activity builders, so
+        // `type: 'approval'` is not an emittable row kind — and with it went
+        // the only path to an approval status on a row.
+        const feeds = [
+          fx('/agent-activity/agent-research/activity'),
+          fx('/agent-activity/agent-ops/activity'),
+          fx('/agent-activity/feed'),
+        ] as { activity: ActivityItem[] }[]
+        const rows = feeds.flatMap((f) => f.activity)
+        expect(rows.length).toBeGreaterThan(0) // positive control: not vacuous
+        expect(rows.map((r) => r.type).filter((t) => t !== 'payment' && t !== 'mcp_tool_call')).toEqual([])
+        for (const row of rows.filter(isPaymentActivityItem)) {
+          // The exact statuses the retired queue used to mint.
+          expect([row.id, row.status as string]).not.toEqual([
+            row.id,
+            expect.stringMatching(/^(pending|pending_approval|approved|proposed|rejected|executed)$/),
+          ])
+        }
+      })
+    })
+
     it('carries `activity` in the generic empty fallback', () => {
       // SCREENSHOT_FIXTURE=empty (and any endpoint added later) must still
       // answer with an array here, not a missing key.

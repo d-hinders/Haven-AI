@@ -9,9 +9,11 @@
  * not bind, which is the failure #1670 set out to avoid in the first place.
  *
  * Postgres rather than Redis: no new infrastructure, and this is already the
- * house pattern for process-local state that breaks under replicas — see
- * `allowance_nonce_watermarks` (#692/#1196) and the leader lock. It brings the
- * same two obligations, both honoured below.
+ * house pattern for process-local state that breaks under replicas — see the
+ * leader lock, and the #692/#1196 allowance-nonce watermark that first
+ * established it (that table went with the Safe rail in #2084; the pattern is
+ * documented in `docs/operations/backend-scaling.md`). It brings the same two
+ * obligations, both honoured below.
  *
  * **Fail-open, and bounded.** A database error, or a query slow enough to miss
  * the deadline, falls back to this instance's in-process count — the pre-#1680

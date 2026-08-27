@@ -102,8 +102,14 @@ export const dashboardOverview = {
     successfulTransactions: 3,
     activeAccounts: 1,
   },
-  actionableApprovals: 1,
-  pendingApprovals: 1,
+  // #2120: 0, matching `routes/dashboard.ts:84`, which hardcodes both to 0 —
+  // the approval queue died with the AllowanceModule rail and its table is
+  // dropped (#2055). A seeded 1 fabricated a count no backend can emit. The
+  // "no approvals affordance" absence assertions keep their teeth in
+  // `DashboardClient.test.tsx`, which feeds the component a non-zero value
+  // deliberately, as a labelled adversarial probe rather than a shared seed.
+  actionableApprovals: 0,
+  pendingApprovals: 0,
   onboardingProgress: {
     hasFirstAgentPayment: true,
   },
@@ -262,7 +268,11 @@ export async function mockHavenApi(page: Page) {
           restart_required: true,
           probe_result: 'local_stdio_mcp_ready',
         },
-        approval: { status: 'pending_approval', safe_tx_hash: null, tx_hash: null },
+        // #2120: `approval.status` is `agent_connection_setups.approval_status`,
+        // which the backend only ever writes as 'not_started' | 'submitted' |
+        // 'proposed' | 'confirmed'. 'pending_approval' is the AGENT status and
+        // was never a value of this field.
+        approval: { status: 'not_started', safe_tx_hash: null, tx_hash: null },
       })
       return
     }

@@ -41,10 +41,14 @@ test.describe('authentication flows', () => {
     await expect(page.getByText('$1,250.00')).toBeVisible()
     await expect(page.getByRole('link', { name: /Research agent Connected/ })).toBeVisible()
     // #1989: the "Open approvals" alert link is DELETED with the Safe rail.
-    // Asserted as an absence rather than dropped, and it is not a vacuous one:
-    // the fixture still serves `actionableApprovals: 1`, which is exactly what
-    // used to render this link. The three assertions above are the positive
-    // control that the dashboard really loaded.
+    // #2120 set this fixture's `actionableApprovals` to 0 — the value the real
+    // route hardcodes — so this absence no longer rests on an impossible seed.
+    // Its non-vacuity now rests where an adversarial value belongs: the
+    // labelled probe in `DashboardClient.test.tsx` ("offers neither a Send
+    // affordance nor an approvals route, even for a funded legacy Safe with
+    // pending approvals") renders the component with a non-zero count and
+    // fails if either affordance returns. The three assertions above remain
+    // the positive control that the dashboard really loaded.
     await expect(page.getByRole('link', { name: 'Open approvals' })).toHaveCount(0)
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({
       hasOverflow: false,

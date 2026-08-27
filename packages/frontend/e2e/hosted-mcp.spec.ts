@@ -1,15 +1,17 @@
 /**
  * Hosted MCP — end-to-end acceptance tests (#191)
  *
- * Covers the two key paths described in the Epic #181 acceptance criteria:
+ * Covers the in-budget path described in the Epic #181 acceptance criteria:
+ * an agent makes a payment within its on-chain budget; the UI shows the agent
+ * as active and the transaction lands in the activity feed.
  *
- *   In-budget path  — agent makes a payment within its Safe Allowance Module
- *                     headroom; the UI shows the agent as active and the
- *                     transaction lands in the activity feed.
- *
- *   Over-budget path — agent exceeds its allotted spend; Haven queues the
- *                     payment for user approval and the Approvals page shows
- *                     the pending item, keyed to the originating x402 resource.
+ * #2120: this header used to promise a second, "over-budget" path in which
+ * "Haven queues the payment for user approval and the Approvals page shows the
+ * pending item". That contradicted this file's own removal note at the bottom
+ * of the in-budget describe — the queue, its route and its page are gone
+ * (#1986/#1989/#2055), and on the delegation rail an over-budget payment
+ * REVERTS on-chain rather than queueing. The coverage gap that leaves is
+ * recorded there, not papered over here.
  *
  * What is tested here vs. in unit tests
  * ─────────────────────────────────────

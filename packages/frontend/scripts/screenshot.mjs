@@ -384,7 +384,20 @@ export const FIXTURE_AGENTS = [
     created_at: '2026-06-02T10:00:00.000Z',
     // #1878: a NAMED pair — the case multi-agent wiring exists for.
     mcp_server_name: 'haven-research',
-    mcp_last_seen_at: '2026-07-10T08:12:00.000Z', allowances: [],
+    mcp_last_seen_at: '2026-07-10T08:12:00.000Z',
+    // #2106: the DERIVED projection of this agent's active delegation, exactly
+    // as `rails/delegation-budget-view.ts` builds it on the delegation rail
+    // (250 USDC / 604800s → `allowance_amount` + `reset_period_min` in
+    // minutes). Not decoration: `AgentDetailClient` derives the token list it
+    // hands `DelegationBudgetCard` from THIS array, so an agent with a
+    // delegation but an empty `allowances` renders its budget as raw atomic
+    // units ("250000000 per week") — a state the product cannot produce,
+    // because the projection is what fills the array in the first place.
+    allowances: [{
+      id: 'alw-research', agent_id: 'agent-research',
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      token_symbol: 'USDC', allowance_amount: '250.000000', reset_period_min: 10080,
+    }],
   },
   {
     id: 'agent-ops', name: 'Ops agent',
@@ -411,7 +424,17 @@ export const FIXTURE_AGENTS = [
     safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     safe_chain_id: FIXTURE_SAFE.chain_id, account_type: 'delegator_hybrid',
     api_key_prefix: 'hvn_g7h8i9', status: 'paused',
-    created_at: '2026-04-30T10:00:00.000Z', mcp_last_seen_at: null, allowances: [],
+    created_at: '2026-04-30T10:00:00.000Z', mcp_last_seen_at: null,
+    // #2106: a PAUSED agent whose on-chain delegation is still live. That
+    // combination is deliberate evidence, not an oversight — pausing an agent
+    // in Haven does not revoke what it signed, so `/custody` must still show
+    // the budget as constraining spend. Projection matches its delegation
+    // (500 USDC / 86400s), same rule as agent-research above.
+    allowances: [{
+      id: 'alw-retired', agent_id: 'agent-retired',
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      token_symbol: 'USDC', allowance_amount: '500.000000', reset_period_min: 1440,
+    }],
   },
 ]
 
@@ -589,7 +612,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
         }],
       }
     }
-    if (pathname === `/agents/${FIXTURE_AGENTS[1].id}/delegations`) {
+    if (pathname === `/agents/${FIXTURE_AGENTS[2].id}/delegations`) {
       return {
         delegations: [{
           id: 'dlg-2', chain_id: FIXTURE_SAFE.chain_id,

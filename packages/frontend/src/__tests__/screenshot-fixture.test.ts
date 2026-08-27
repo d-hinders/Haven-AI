@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 // @ts-ignore — plain .mjs script; typed via the cast below
 import {
   fixtureFor,
+  FIXTURE_AGENTS,
   SEED_STORAGE_KEYS,
   FIXTURE_EMPTY_FALLBACK,
   SCENARIOS,
@@ -94,10 +95,34 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(pinned.delegations[0].status).toBe('active')
       expect(pinned.delegations[0].recipient_address).toMatch(/^0x/)
 
-      const open = fx('/agents/agent-ops/delegations') as {
+      // The open-recipient budget sits on `agent-retired`, not `agent-ops`:
+      // `agent-ops` is `account_type: null` (legacy Safe rail) and a legacy
+      // agent cannot hold a delegation at all. A fixture that gave it one
+      // would photograph a combination the product cannot produce.
+      const open = fx('/agents/agent-retired/delegations') as {
         delegations: { recipient_address: string | null }[]
       }
       expect(open.delegations[0].recipient_address).toBeNull()
+    })
+
+    it('never gives a legacy-rail agent a delegation', () => {
+      const legacy = FIXTURE_AGENTS.find((a) => a.id === 'agent-ops')
+      expect(legacy?.account_type).toBeNull()
+      expect(fx('/agents/agent-ops/delegations')).toEqual({ delegations: [] })
+    })
+
+    it('projects `allowances` from the delegation for every delegation-rail agent', () => {
+      // `AgentDetailClient` derives DelegationBudgetCard's token list from
+      // `allowances`; an agent with a delegation but an empty projection
+      // renders raw atomic units ("250000000 per week"). On the real rail
+      // `deriveDelegationAllowances` fills it, so the fixture must too.
+      for (const agent of FIXTURE_AGENTS.filter((a) => a.account_type === 'delegator_hybrid')) {
+        const res = fx(`/agents/${agent.id}/delegations`) as {
+          delegations: { budget_atomic: string }[]
+        }
+        if (res.delegations.length === 0) continue
+        expect(agent.allowances.length).toBeGreaterThan(0)
+      }
     })
 
     it('serves an empty list — never null — for an agent with no budget', () => {
@@ -105,7 +130,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // fallback's `delegations: []` happens to match, but keying it means the
       // harness answers the same shape whether or not the id is known, which
       // is what stops an unseeded agent rendering a crashed card.
-      expect(fx('/agents/agent-retired/delegations')).toEqual({ delegations: [] })
+      expect(fx('/agents/agent-nobody/delegations')).toEqual({ delegations: [] })
     })
   })
 

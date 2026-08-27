@@ -31,14 +31,18 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { openapiSpec } from '../../../openapi/spec.js'
-// The canonical comment stripper (#2107's census). Reused rather than
-// re-implemented: the first version of this file scanned raw source and failed
-// on its OWN docblocks, which name `'allowance'` to explain why it is wrong.
-// A guard over a surface that must DESCRIBE the defect has to strip prose, or
-// it fires on the explanation instead of the code — the exact failure mode the
-// census documents.
+// The canonical comment stripper, shared with the #2107 census. Reused rather
+// than re-implemented: the first version of this file scanned raw source and
+// failed on its OWN docblocks, which name the phantom value to explain why it
+// is wrong. A guard over a surface that must DESCRIBE a defect has to strip
+// prose, or it fires on the explanation instead of the code.
+//
+// Imported from `scripts/ci/lib/` and NOT from the census's `.test.mjs`:
+// review found that importing the test module ran its ~40 `node:test`
+// registrations as a side effect, coupling this file's result to an unrelated
+// repo-wide scan. #2110 extracted the helper for exactly that reason.
 // @ts-expect-error -- plain .mjs CI helper, no type declarations
-import { stripComments } from '../../../../../../scripts/ci/queue-framing-census.test.mjs'
+import { stripComments } from '../../../../../../scripts/ci/lib/strip-comments.mjs'
 
 const src = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
 
@@ -60,10 +64,25 @@ function railDomainFromMigration(): string[] {
 /** Mirrors `controlsOf`'s rule. Kept in sync by assertion 2, not by hope. */
 const policyEnforcedOnchain = (rail: string) => rail === 'delegation'
 
+/**
+ * Scoped to the passport's `controls` block, not the first `rail` enum in the
+ * whole spec. Review finding 4: `spec.ts` carries several other
+ * `rail: { type: 'string', enum: [...] }` schemas (the x402/mpp rail enums), so
+ * an unscoped match is positional — it happens to hit the right one today and
+ * would silently start reading a different schema if one were added earlier in
+ * serialization order. Anchoring on the sibling keys makes it structural.
+ */
 function controlsRailSchema(): string[] {
   const json = JSON.stringify(openapiSpec)
-  const found = json.match(/"rail":\{"type":"string","enum":(\[[^\]]*\])/)
-  if (!found) throw new Error('controls.rail schema not found in the spec')
+  const found = json.match(
+    /"rail":\{"type":"string","enum":(\[[^\]]*\])[^}]*\},"policyEnforcedOnchain"/,
+  )
+  if (!found) {
+    throw new Error(
+      'passport controls.rail schema not found — the anchor (rail followed by ' +
+        'policyEnforcedOnchain) no longer matches, so this test is not reading what it claims',
+    )
+  }
   return JSON.parse(found[1]) as string[]
 }
 

@@ -55,6 +55,10 @@ import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
 import { useDelegationCustodyProof } from '@/hooks/useDelegationCustodyProof'
 import { type DelegationBudget } from '@/hooks/useDelegationBudget'
 import { type UserSafe } from '@/context/AuthContext'
+// #2106: rail classification and the rail-correct claim list live in
+// `lib/`, NOT here — Next type-checks a page MODULE and refuses arbitrary
+// named exports from `page.tsx` (`next build` fails; `tsc --noEmit` does not).
+import { havenCannotLines, railOf } from '@/lib/custody-rail'
 import { getChainConfig, getExplorerUrl, getTokensForChain } from '@/lib/chains'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { budgetPeriodLabel } from '@/lib/budget-period'
@@ -70,17 +74,6 @@ const SAFE_SHORT_NAME: Record<number, string> = { 100: 'gno', 8453: 'base' }
 function safeWalletUrl(safe: UserSafe): string {
   const prefix = SAFE_SHORT_NAME[safe.chain_id] ?? ''
   return `https://app.safe.global/home?safe=${prefix}:${safe.safe_address}`
-}
-
-export type CustodyRail = 'delegation' | 'safe'
-
-/**
- * The rail marker (#1069): `'delegator_hybrid'` is the delegation rail, and
- * anything else — including the null a legacy row carries — is a legacy Safe.
- * Exported so the tests assert the branch on the same predicate the page uses.
- */
-export function railOf(safe: Pick<UserSafe, 'account_type'>): CustodyRail {
-  return safe.account_type === 'delegator_hybrid' ? 'delegation' : 'safe'
 }
 
 function resetLabel(mins: number): string {
@@ -488,52 +481,6 @@ function SafeControlCard({ safe, agents }: { safe: UserSafe; agents: Agent[] }) 
 }
 
 // ── "What Haven cannot do" ──────────────────────────────────────────────────
-
-/**
- * Two of the four claims are rail-independent; two are not, and stating a
- * rail's version to the other rail's user is exactly the defect #2106 is
- * about. The rail-specific pair is therefore chosen from the rails actually
- * present in the account list, and labelled only when both are — a
- * single-rail user (the ordinary case) still reads four unlabelled lines.
- */
-const SHARED_CANNOT = [
-  'Move your funds — every transfer needs your or your agent’s key signature; Haven only relays and pays gas.',
-  'Hold your keys — no private keys, seed phrases, or agent keys are stored by Haven.',
-]
-
-const RAIL_CANNOT: Record<CustodyRail, string[]> = {
-  delegation: [
-    // "Caveat enforcers" was cut on design review (#2106): it is MetaMask
-    // Delegation-Framework internals, undefined anywhere on the page, and the
-    // claim stands without it.
-    'Expand an agent’s budget without a new delegation you sign.',
-    'Block you — you can stop any agent’s budget on-chain, and your account’s signers act without Haven.',
-  ],
-  safe: [
-    'Expand an agent’s allowance without a Safe transaction you sign.',
-    'Block you — you can manage this Safe from any Safe-compatible app and revoke agents on-chain.',
-  ],
-}
-
-const RAIL_PREFIX: Record<CustodyRail, string> = {
-  delegation: 'On your Haven account: ',
-  safe: 'On your legacy Safe: ',
-}
-
-/**
- * With no accounts yet, the delegation rail is the only one a user can land
- * on — the Safe rail's four inflows have answered 410 since #1984 — so that
- * is the branch an empty list gets. Not a third "unknown rail" state.
- */
-export function havenCannotLines(safes: Pick<UserSafe, 'account_type'>[]): string[] {
-  const rails = new Set<CustodyRail>(safes.map(railOf))
-  if (rails.size === 0) rails.add('delegation')
-  const label = rails.size > 1
-  const railLines = (['delegation', 'safe'] as const)
-    .filter((rail) => rails.has(rail))
-    .flatMap((rail) => RAIL_CANNOT[rail].map((line) => (label ? RAIL_PREFIX[rail] + line : line)))
-  return [...SHARED_CANNOT, ...railLines]
-}
 
 export default function CustodyPage() {
   const { safes, loading: safesLoading } = useUserSafes()

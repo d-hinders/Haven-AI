@@ -41,7 +41,11 @@ vi.mock('@/hooks/useDelegationCustodyProof', () => ({
   useDelegationCustodyProof: () => mockUseDelegationCustodyProof(),
 }))
 
-import CustodyPage, { havenCannotLines, railOf } from '../page'
+import CustodyPage from '../page'
+// Not from '../page': Next refuses arbitrary named exports from a page
+// module, so these live in `lib/custody-rail.ts` (#2106 — `next build`
+// caught it; `tsc --noEmit` did not).
+import { havenCannotLines, railOf } from '@/lib/custody-rail'
 
 const CHAIN_ID = 84532
 const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'

@@ -50,7 +50,6 @@ export type {
   PaymentResult,
   PaymentFee,
   PaymentStatus,
-  PendingApproval,
   PaymentStatusResult,
   PaymentNextAction,
   PaymentPhase,

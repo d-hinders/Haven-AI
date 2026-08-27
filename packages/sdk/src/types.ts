@@ -840,33 +840,40 @@ export const AgentPaymentPhase = {
   PaymentSubmitted: 'payment_submitted',
   /** The direct payment is confirmed; the agent does not need to do more for this payment id. */
   PaymentConfirmed: 'payment_confirmed',
-  /** The payment needs wallet owner approval in Haven before it can continue. */
+  /**
+   * #2115: RETIRED wire value — no live rail produces it. It described the
+   * Safe rail's approval queue, which no longer exists. Kept so a stored value
+   * still typechecks; see `AgentPaymentPhaseDescriptions` below for the
+   * agent-visible wording, which this comment used to contradict.
+   */
   UserApprovalRequired: 'user_approval_required',
-  /** The wallet owner approved the request and still needs to complete the funding payment. */
+  /** #2115: RETIRED wire value — no live rail produces it. Stop and tell the user. */
   UserExecutionRequired: 'user_execution_required',
-  /** The funding payment was proposed and is waiting for the remaining account approvals. */
+  /** #2115: RETIRED wire value — no live rail produces it. Stop and tell the user. */
   WaitingForAdditionalApprovals: 'waiting_for_additional_approvals',
   /** The Haven funding leg was sent; the agent can continue the merchant/protocol leg. */
   FundingSent: 'funding_sent',
-  /** The wallet owner rejected the request; the agent should stop and tell the user. */
+  /** The payment was rejected and cannot proceed; the agent should stop and tell the user. */
   Rejected: 'rejected',
-  /** The payment or approval request expired before completion. */
+  /** The payment expired before completion. */
   Expired: 'expired',
   /** Haven could not complete the payment; the agent should stop and surface the failure. */
   Failed: 'failed',
   /**
    * Pre-flight check determined the delegate's existing balance plus the
-   * remaining on-chain allowance cannot cover the requested amount, so no
-   * payment intent was created. Distinct from `UserApprovalRequired`: there
-   * is no approval that would fix this — the originating Safe needs more
-   * funds or the agent's per-token allowance needs to be raised first.
+   * remaining on-chain budget cannot cover the requested amount, so no
+   * payment intent was created. The account must be funded or the agent's
+   * budget raised before retrying — #2115: the old wording contrasted this
+   * with `UserApprovalRequired` as if that were a live alternative, and named
+   * the retired rail's Safe and per-token allowance as the fix.
    */
   InsufficientFunds: 'insufficient_funds',
   /**
-   * Haven's funding leg (Safe → delegate) confirmed on-chain, but the
-   * merchant rejected the x402 retry. The delegate wallet may hold stranded
-   * USDC that was never settled to the merchant. The agent should stop, tell
-   * the user, and wait for the sweep flow to reclaim the funds.
+   * Haven's funding leg (account → delegate, the #946 EIP-3009 bridge)
+   * confirmed on-chain, but the merchant rejected the x402 retry. The delegate
+   * wallet may hold stranded USDC that was never settled to the merchant. The
+   * agent should stop, tell the user, and wait for the sweep flow to reclaim
+   * the funds.
    */
   FundedButUnsettled: 'funded_but_unsettled',
 } as const
@@ -880,9 +887,12 @@ export const AgentPaymentNextAction = {
   CheckStatusLater: 'check_status_later',
   /** No further agent action is required for this payment id. */
   None: 'none',
-  /** Wait for the wallet owner to approve or reject the request in Haven. */
+  /**
+   * #2115: RETIRED wire value — no live rail produces it and nothing maps to
+   * it. Stop and tell the user rather than polling; no approval will arrive.
+   */
   WaitForUserApproval: 'wait_for_user_approval',
-  /** Wait for the wallet owner to finish sending the approved funding payment. */
+  /** #2115: RETIRED wire value — no live rail produces it. Stop and tell the user rather than polling. */
   WaitForUserToCompletePayment: 'wait_for_user_to_complete_payment',
   /** Resume this payment id and retry the original x402 request with the merchant payment header. */
   RetryOriginalX402Request: 'retry_original_x402_request',
@@ -1253,14 +1263,37 @@ export interface PaymentStatusResult {
   }
 }
 
-export interface PendingApproval extends PaymentStatusResult {
-  kind: 'approval_request'
-  status: 'pending_approval' | 'pending' | string
-  phase: typeof AgentPaymentPhase.UserApprovalRequired
-  nextAction: typeof AgentPaymentNextAction.WaitForUserApproval
-  requested?: string
-  remaining?: string | null
-}
+// ── PendingApproval (REMOVED, #2115) ────────────────────────────────────────
+//
+// `export interface PendingApproval extends PaymentStatusResult` stood here
+// with `nextAction: typeof AgentPaymentNextAction.WaitForUserApproval`. It is
+// REMOVED rather than retained-with-a-note, and the distinction from #2113's
+// retention decision is the point:
+//
+// - #2113 retained the `isPendingApproval` BRANCHES in both MCP runtimes and
+//   the `pending` / `pending_approval` arms of `nextActionForStatus` here in
+//   the SDK. Those are runtime code that still does useful work if a
+//   pre-retirement row is ever read back — it answers `stop_and_tell_user`.
+//   Retaining them is fail-closed.
+// - This was not runtime code. It was a TYPE asserting that a result with
+//   `nextAction === 'wait_for_user_approval'` exists to be narrowed to. After
+//   #2113 nothing in the SDK maps any status to `WaitForUserApproval`
+//   (`nextActionForStatus` in `payment-state.ts`; zero non-test emissions
+//   repo-wide), so no value the SDK produces can inhabit it. A consumer who
+//   writes against it has written unreachable code with no runtime signal —
+//   retaining it is not fail-closed, it is a promise the type system repeats.
+//
+// Its wire twin is already gone: #2105/PR #2112 deleted the `PendingApproval`
+// and `X402PendingApproval` schemas from `packages/backend/src/openapi/spec.ts`
+// outright (pinned by `spec.test.ts`), so the contract of record no longer
+// describes this shape on any response. This hand-written twin was what was
+// left, flagged on #1289 by that session.
+//
+// `PaymentStateKind` keeps `'approval_request'` and `AgentPaymentNextAction`
+// keeps `WaitForUserApproval` — both are retained wire values carrying the
+// #2055-style "Retired wire value" descriptions, and both are still reachable
+// from raw server data. What is gone is the interface that promised a
+// well-formed result of that shape.
 
 
 /** @internal */

@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-08-25" # #2055: the inline-SQL gauge row re-measured against dep-lint (49 sites / 11 files; stale at 68/14 since the epic-#1440 deletions) — the ceiling and method are unchanged. Prior: #1714 (epic #1717): `modules/catalog/lifecycle.ts` joined the catalogue module (index.ts re-exports it), importing the catalog-submissions infra repository and the ownership/probe modules — inside the module's own boundary, no new cross-module edges, so the dependency rules were not re-verified in this pass (`npm run lint:deps` runs below); `index.ts` gained the `catalogIngest` leader-locked monitor, the same runIfLeader shape every other monitor here uses. The `infra/http/` note below is untouched — this slice added no new infra kind. Prior: #1712: `infra/http/` is a new KIND of infra — an SSRF-guarded outbound reader for untrusted, submitter-chosen hosts — and both enumerations of what infra/ holds (Target structure, and the "what belongs where" table) listed only repositories/chain clients/relayer/explorers, so each was incomplete rather than wrong. Both corrected, and the "rules 2 and 5 still await the `http/` directory" note disambiguated: that is the TOP-LEVEL routes directory, which still does not exist, not `infra/http/`, which now does — a reader skimming for "has http/ landed" would otherwise conflate them. Only the infra/ enumerations and that note were re-read; the dependency rules were NOT re-verified in this pass (they are unaffected — `npm run lint:deps` passes with zero violations and no new waiver). Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-27" # #2138: rule 3 gains a RECORDED EXCEPTION rather than a correction. `domain/passport-issuance-rail.ts` returns a SQL predicate string for `infra/repositories/agent-passports.ts` to interpolate, which the rule's prose ("no SQL string outside infra/repositories/") forbids and neither of its mechanical forms catches (`pg-only-in-infra` bans imports; the inline-SQL gauge counts `.query(` call sites) — so the doc's own "the lint config is authoritative" clause resolves it as permitted, and leaving that unwritten would be the kind of silent divergence this page exists to prevent. Noted under the security-properties section, where rule 3's meaning is already elaborated, together with why the tenant-isolation rationale does not reach it. Scope: that note only; the dependency rules, the enforcement table and the inline-SQL gauge were NOT re-measured in this pass (`npm run lint:deps` passes, and this diff adds no `.query(` call site). Prior: #2055: the inline-SQL gauge row re-measured against dep-lint (49 sites / 11 files; stale at 68/14 since the epic-#1440 deletions) — the ceiling and method are unchanged. Prior: #1714 (epic #1717): `modules/catalog/lifecycle.ts` joined the catalogue module (index.ts re-exports it), importing the catalog-submissions infra repository and the ownership/probe modules — inside the module's own boundary, no new cross-module edges, so the dependency rules were not re-verified in this pass (`npm run lint:deps` runs below); `index.ts` gained the `catalogIngest` leader-locked monitor, the same runIfLeader shape every other monitor here uses. The `infra/http/` note below is untouched — this slice added no new infra kind. Prior: #1712: `infra/http/` is a new KIND of infra — an SSRF-guarded outbound reader for untrusted, submitter-chosen hosts — and both enumerations of what infra/ holds (Target structure, and the "what belongs where" table) listed only repositories/chain clients/relayer/explorers, so each was incomplete rather than wrong. Both corrected, and the "rules 2 and 5 still await the `http/` directory" note disambiguated: that is the TOP-LEVEL routes directory, which still does not exist, not `infra/http/`, which now does — a reader skimming for "has http/ landed" would otherwise conflate them. Only the infra/ enumerations and that note were re-read; the dependency rules were NOT re-verified in this pass (they are unaffected — `npm run lint:deps` passes with zero violations and no new waiver). Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Module Boundaries
@@ -176,6 +176,26 @@ relaxed with an argument; a cycle is a defect regardless of intent.
   differently at the edges (`formatUnits` / `parseUnits` decimal handling), and
   those amounts are payments. Confining them behind a port means substitutions
   are testable in one place instead of ten route files.
+
+**Rule 3's SQL-string clause has one recorded exception** ([#2138](https://github.com/d-hinders/Haven-AI/issues/2138)).
+`domain/passport-issuance-rail.ts` exports `passportIssuableRailSql(alias)`, which
+*returns* a SQL predicate for `infra/repositories/agent-passports.ts` to interpolate.
+It reaches no database — no `pg` import, no `.query(` call site — so neither
+mechanical form of the rule fires, and the "lint config is authoritative" clause
+above resolves it as permitted. It is written down anyway, because the prose says
+*no SQL string*, and an unrecorded divergence from a normative rule is worse than a
+stated one.
+
+Why it sits in `domain/` at all: the rule it encodes — passport issuance is
+delegation-rail only — has to hold in two languages at once, a SQL predicate for the
+retry sweep's join and a TypeScript predicate for the route and `issuePassport`.
+Splitting those across layers is precisely how they drift apart; a real-DB test
+varies both axes and fails if they ever disagree. The tenant-isolation rationale
+does not reach it either: the predicate carries no user scoping and takes no user
+input, its one parameter being a table alias validated against `^[a-z_][a-z0-9_]*$`
+before interpolation. Contrast `execution-rail.ts`, kept OUT of `domain/` because it
+genuinely *reached the database* — that is the line, and this stays on the pure side
+of it.
 
 ## Enforcement: absolute, with inline waivers
 

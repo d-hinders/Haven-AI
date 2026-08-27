@@ -36,7 +36,12 @@ vi.mock('../../../infra/prices.js', async (importOriginal) => ({
 }))
 
 // Static imports are safe below the mocks: vitest hoists `vi.mock` above them.
+import { randomUUID } from 'node:crypto'
+import { hashDelegation } from '@metamask/smart-accounts-kit/utils'
 import db from '../../../db.js'
+import { buildSettlementDelegation } from '../../x402/x402-delegation.js'
+import { buildBudgetDelegation } from '../../../rails/delegation-policy.js'
+import { getDelegationContracts } from '../../../rails/delegation-contracts.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { attachMachinePaymentEvidence } from '../evidence.js'
 
@@ -48,6 +53,21 @@ const AMOUNT_RAW = '100000'
 const RESOURCE = 'https://merchant.example/paid'
 const HASH_A = `0x${'a'.repeat(64)}`
 const HASH_B = `0x${'b'.repeat(64)}`
+
+/** A signed parent budget — the settlement children below re-delegate from it. */
+const SIGNED_BUDGET = {
+  ...buildBudgetDelegation({
+    agentId: 'e7710', chainId: 84532,
+    treasuryAddress: '0x00000000000000000000000000000000000000b1',
+    delegateAccountAddress: PAYER as `0x${string}`,
+    tokenAddress: TOKEN as `0x${string}`,
+    budgetAtomic: 5_000_000n, periodSeconds: 86_400,
+    startDate: Math.floor(Date.now() / 1000) - 60,
+    expiresAt: Math.floor(Date.now() / 1000) + 86_400,
+    version: 1,
+  }),
+  signature: `0x${'ab'.repeat(65)}`,
+} as never
 
 const TRANSFER_IFACE = new ethers.Interface([
   'event Transfer(address indexed from, address indexed to, uint256 value)',
@@ -96,18 +116,26 @@ async function seedIntent(seed: {
   executionRail?: string | null
   createdOffsetSec?: number
   amountRaw?: string
+  /** #2094: an explicit id, so a real settlement child can be salted from it. */
+  id?: string
+  /** #2094: the stored settlement-child hash check 8 binds against. */
+  delegationHash?: string | null
 }): Promise<string> {
   const result = await db.query<{ id: string }>(
     `INSERT INTO payment_intents
-       (agent_id, user_id, safe_address, chain_id, token_symbol, token_address, to_address,
+       (id,
+        agent_id, user_id, safe_address, chain_id, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
         status, expires_at, source, payment_rail, execution_rail, machine_metadata,
         x402_resource_url, payment_resource_url, merchant_address, x402_merchant_address,
+        delegation_hash,
         created_at)
-     VALUES ($1, $2, $3, 84532, 'USDC', $4, $5, $6, '0.10',
+     VALUES (COALESCE($12::uuid, gen_random_uuid()),
+             $1, $2, $3, 84532, 'USDC', $4, $5, $6, '0.10',
              '0x00000000000000000000000000000000000000d1', 0, $7,
              'submitted', NOW() + interval '10 minutes', 'x402', 'x402', $8, $9::jsonb,
              $10, $10, $5, $5,
+             $13,
              NOW() + ($11 * interval '1 second'))
      RETURNING id`,
     [
@@ -122,6 +150,8 @@ async function seedIntent(seed: {
       JSON.stringify({ settlement_scheme: seed.scheme ?? 'erc7710' }),
       RESOURCE,
       seed.createdOffsetSec ?? 0,
+      seed.id ?? null,
+      seed.delegationHash ?? null,
     ],
   )
   return result.rows[0].id
@@ -408,5 +438,220 @@ describeDb('erc7710 settlement completion → evidence pipeline (#2092)', () => 
 
     await expect(attach(agentId, intentId, HASH_B)).rejects.toThrow('payment_not_confirmed')
     expect(getTransactionReceipt).not.toHaveBeenCalled()
+  })
+
+  // ── #2094: two look-alike payments, each attributed to its OWN settlement ─
+
+  describe('intent-unique settlement children (#2094)', () => {
+    /**
+     * The reason #2094 exists, proven end to end over the real seam.
+     *
+     * `A` and `B` are the collision case the issue describes: same agent, same
+     * merchant, same token, same amount, same second. Under #2096 both stayed
+     * `submitted` forever — Haven refused to guess which settlement belonged
+     * to which, and BOTH payments missed the user's books. With the child
+     * salted from the intent id, each settlement transaction carries the
+     * DelegationManager's `RedeemedDelegation` log naming exactly one of them,
+     * and each reaches the books on its own evidence.
+     *
+     * The children here are REAL — built by `buildSettlementDelegation` from
+     * the ids actually inserted — and the logs are encoded through the same
+     * ABI the manager emits. Nothing about the attribution is stubbed; only
+     * the chain that returns the receipt is.
+     */
+    const MANAGER = getDelegationContracts(84532).delegationManager
+
+    const DELEGATION_IFACE = new ethers.Interface([
+      'event RedeemedDelegation(address indexed rootDelegator, address indexed redeemer, ' +
+        '(address delegate,address delegator,bytes32 authority,' +
+        '(address enforcer,bytes terms,bytes args)[] caveats,uint256 salt,bytes signature) delegation)',
+    ])
+
+    function redeemedLog(child: Record<string, unknown>, address = MANAGER) {
+      const c = child as unknown as {
+        delegate: string; delegator: string; authority: string
+        caveats: Array<{ enforcer: string; terms: string; args: string }>; salt: string
+      }
+      const encoded = DELEGATION_IFACE.encodeEventLog('RedeemedDelegation', [
+        PAYER,
+        MERCHANT,
+        [
+          c.delegate, c.delegator, c.authority,
+          c.caveats.map((x) => [x.enforcer, x.terms, x.args]),
+          c.salt,
+          // The merchant's own signature — never seen by the backend, and
+          // deliberately not the one authorize would have stored.
+          `0x${'99'.repeat(65)}`,
+        ],
+      ])
+      return { address, topics: encoded.topics, data: encoded.data }
+    }
+
+    /** A settlement receipt: the transfer, plus the manager's redemption log. */
+    function settlementReceipt(child: Record<string, unknown>, managerAddress?: `0x${string}`) {
+      return {
+        status: 1,
+        blockNumber: 42,
+        logs: [transferLog(), redeemedLog(child, managerAddress)],
+      }
+    }
+
+    /** One authorization: an intent row and the real child salted from its id. */
+    async function authorize(agentId: string, userId: string, createdOffsetSec = 0) {
+      const id = randomUUID()
+      const built = buildSettlementDelegation({
+        chainId: 84532,
+        intentId: id,
+        delegateAccountAddress: PAYER as `0x${string}`,
+        budgetDelegation: SIGNED_BUDGET,
+        asset: TOKEN as `0x${string}`,
+        amountAtomic: BigInt(AMOUNT_RAW),
+        payTo: MERCHANT as `0x${string}`,
+        maxTimeoutSeconds: 120,
+      })
+      await seedIntent({ agentId, userId, id, delegationHash: built.childHash, createdOffsetSec })
+      return { id, built }
+    }
+
+    it('THE PROOF: two look-alike open payments are EACH confirmed by their own settlement', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await authorize(agentId, userId, 0)
+      const b = await authorize(agentId, userId, 30)
+
+      // The collision precondition: byte-identical under the old code.
+      expect(a.built.childHash).not.toBe(b.built.childHash)
+
+      getTransactionReceipt.mockImplementation(async (hash: string) =>
+        hash === HASH_A ? settlementReceipt(a.built.child as never) : settlementReceipt(b.built.child as never),
+      )
+
+      await expect(attach(agentId, a.id, HASH_A)).resolves.not.toBeNull()
+      await expect(attach(agentId, b.id, HASH_B)).resolves.not.toBeNull()
+
+      const rowA = await readIntent(a.id)
+      const rowB = await readIntent(b.id)
+      expect(rowA.status).toBe('confirmed')
+      expect(rowB.status).toBe('confirmed')
+      // Each attributed to ITS OWN transaction, not merely both confirmed.
+      expect(rowA.tx_hash).toBe(HASH_A)
+      expect(rowB.tx_hash).toBe(HASH_B)
+      // …and both reach the books, which is what #2117's feed needs.
+      expect(await readEvidence(a.id)).toHaveLength(1)
+      expect(await readEvidence(b.id)).toHaveLength(1)
+    })
+
+    it("refuses A's intent when the transaction redeemed B's child — attribution, not shape", async () => {
+      // The transfer log is a perfect match for A (same payer, merchant and
+      // amount, inside A's window). Only check 8 can tell that this
+      // transaction settled the OTHER payment.
+      const { agentId, userId } = await seedAgent()
+      const a = await authorize(agentId, userId, 0)
+      const b = await authorize(agentId, userId, 30)
+
+      getTransactionReceipt.mockResolvedValue(settlementReceipt(b.built.child as never))
+
+      await expect(attach(agentId, a.id, HASH_A)).rejects.toThrow('settlement_unverified')
+      expect((await readIntent(a.id)).status).toBe('submitted')
+      expect(await readEvidence(a.id)).toHaveLength(0)
+    })
+
+    it('a RedeemedDelegation log from some OTHER contract does not bind — the manager is pinned', async () => {
+      // Anyone may emit an event with this signature. Only the pinned,
+      // audited DelegationManager's word counts; an impostor's log leaves the
+      // settlement unbound, which puts the ambiguity guard back at full reach.
+      const { agentId, userId } = await seedAgent()
+      const a = await authorize(agentId, userId, 0)
+      await authorize(agentId, userId, 30) // a look-alike twin, still open
+
+      getTransactionReceipt.mockResolvedValue(
+        settlementReceipt(a.built.child as never, '0x00000000000000000000000000000000000000ff'),
+      )
+
+      await expect(attach(agentId, a.id, HASH_A)).rejects.toThrow('settlement_unverified')
+      expect((await readIntent(a.id)).status).toBe('submitted')
+    })
+
+    it('IN-FLIGHT: a pre-#2094 pair of identical children is STILL refused — the guard is kept, not deleted', async () => {
+      // Two authorizations created before this change share one child and one
+      // `delegation_hash`. Check 8 binds the settlement to that hash — but the
+      // hash names BOTH intents, so `delegationBound` must not be allowed to
+      // wave the twin through. #2096's refusal is the correct answer here and
+      // it still fires.
+      const { agentId, userId } = await seedAgent()
+      const legacyChild = {
+        ...((await authorize(agentId, userId, 0)).built.child as unknown as Record<string, unknown>),
+        salt: '0x00',
+      }
+      const legacyHash = hashDelegation({ ...legacyChild, signature: '0x' } as never)
+
+      await resetDb()
+      const fresh = await seedAgent()
+      const a = await seedIntent({ ...fresh, delegationHash: legacyHash, createdOffsetSec: 0 })
+      await seedIntent({ ...fresh, delegationHash: legacyHash, createdOffsetSec: 30 })
+
+      getTransactionReceipt.mockResolvedValue(settlementReceipt(legacyChild))
+
+      await expect(attach(fresh.agentId, a, HASH_A)).rejects.toThrow('settlement_unverified')
+      expect((await readIntent(a)).status).toBe('submitted')
+    })
+
+    it('IN-FLIGHT: a LONE pre-#2094 payment still confirms — the old child binds exactly as a new one does', async () => {
+      // The other half of in-flight compatibility. An authorization created
+      // before this change and settled after it carries the constant salt; the
+      // verifier reads what the chain EMITS, so it binds unchanged.
+      const { agentId, userId } = await seedAgent()
+      const seed = await authorize(agentId, userId, 0)
+      const legacyChild = {
+        ...(seed.built.child as unknown as Record<string, unknown>),
+        salt: '0x00',
+      }
+      const legacyHash = hashDelegation({ ...legacyChild, signature: '0x' } as never)
+
+      await resetDb()
+      const fresh = await seedAgent()
+      const only = await seedIntent({ ...fresh, delegationHash: legacyHash })
+
+      getTransactionReceipt.mockResolvedValue(settlementReceipt(legacyChild))
+
+      await expect(attach(fresh.agentId, only, HASH_A)).resolves.not.toBeNull()
+      expect((await readIntent(only)).status).toBe('confirmed')
+    })
+
+    it('an intent with NO stored delegation_hash keeps the #2092 verdict exactly — check 8 is skipped', async () => {
+      // A row from before #2092 stored no child hash. Nothing regresses: the
+      // transfer-shape verdict stands, and its lone confirm still works.
+      const { agentId, userId } = await seedAgent()
+      const intentId = await seedIntent({ agentId, userId, delegationHash: null })
+
+      getTransactionReceipt.mockResolvedValue(goodReceipt())
+
+      await expect(attach(agentId, intentId, HASH_A)).resolves.not.toBeNull()
+      expect((await readIntent(intentId)).status).toBe('confirmed')
+    })
+
+    it('a transaction with NO manager log at all still confirms on transfer shape — an absent log is not a forgery', async () => {
+      const { agentId, userId } = await seedAgent()
+      const a = await authorize(agentId, userId, 0)
+
+      getTransactionReceipt.mockResolvedValue(goodReceipt())
+
+      await expect(attach(agentId, a.id, HASH_A)).resolves.not.toBeNull()
+      expect((await readIntent(a.id)).status).toBe('confirmed')
+    })
+
+    it('…but an unbound settlement with a look-alike twin is STILL refused — #2096 keeps its full reach', async () => {
+      // Same as above plus an open twin. Without a manager log there is no
+      // evidence of WHICH payment this settled, so the ambiguity guard must
+      // fire exactly as it did before #2094. This is the case that proves the
+      // guard was narrowed rather than removed.
+      const { agentId, userId } = await seedAgent()
+      const a = await authorize(agentId, userId, 0)
+      await authorize(agentId, userId, 30)
+
+      getTransactionReceipt.mockResolvedValue(goodReceipt())
+
+      await expect(attach(agentId, a.id, HASH_A)).rejects.toThrow('settlement_unverified')
+      expect((await readIntent(a.id)).status).toBe('submitted')
+    })
   })
 })

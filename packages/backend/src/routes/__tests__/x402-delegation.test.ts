@@ -24,7 +24,8 @@ vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery
 // Dummy hex now (correctly) 400s — see the wrong-signer regression test.
 import { privateKeyToAccount } from 'viem/accounts'
 import { delegationSigningPayload } from '../../rails/delegation-policy.js'
-import { typedDataDigest } from '../../modules/x402/x402-delegation.js'
+import { settlementSalt, typedDataDigest } from '../../modules/x402/x402-delegation.js'
+import { hashDelegation } from '@metamask/smart-accounts-kit/utils'
 import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
 const DELEGATE_SIGNER = privateKeyToAccount(('0x' + '11'.repeat(32)) as `0x${string}`)
 async function signChild(child: unknown): Promise<`0x${string}`> {
@@ -180,6 +181,50 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(call.delegationHash).not.toBe(call.budgetDelegationHash)
     // No allowance/funding query ran — there is no funding leg on this rail:
     expect(mockQuery.mock.calls.some((c) => /allowance/i.test(String(c[0])))).toBe(false)
+  })
+
+  it('THE SWEEPER CONTRACT (#2094): the stored intent id is the salt preimage of the stored child', async () => {
+    // What #2117's passive sweeper will do, run here as an assertion: take the
+    // intent row, re-derive the salt from its id, and expect the child the
+    // backend actually stored. It fails if the id the child was salted from is
+    // ever not the id the row is written under — which no other test can see,
+    // because both halves look individually correct.
+    // Non-positional on purpose: this test asserts ONE authorize's wiring, not
+    // a sequence of queries, so it must not lengthen the positional mock chain
+    // the #1227 ratchet exists to shrink. `beforeEach` resets both.
+    mockSelect.mockResolvedValue({
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    })
+    mockCreateIntent.mockImplementation(async (input: { id?: string }) => ({
+      // Echo the id the route supplied — the real insert writes the row under it.
+      id: input.id ?? INTENT_ID,
+      status: 'pending_signature',
+      expires_at: 'x',
+    }))
+
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody(),
+    })
+    expect(res.statusCode).toBe(201)
+
+    const call = mockCreateIntent.mock.calls[0][0] as {
+      id?: string
+      delegationHash: string
+      preparedUserOp: string
+    }
+    // The route supplied an explicit id at all…
+    expect(call.id).toEqual(expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-/))
+    // …the response names that same row…
+    expect(res.json().payment_id).toBe(call.id)
+    // …and the child stored under it carries exactly that id's salt.
+    const child = JSON.parse(call.preparedUserOp).child as { salt: string }
+    expect(child.salt).toBe(settlementSalt(call.id!))
+    // The full recompute: intent id → salt → child → hash === delegation_hash.
+    expect(hashDelegation({ ...child, signature: '0x' } as never)).toBe(call.delegationHash)
   })
 
   // ── #1667: the settlement child's delegator must EXIST on-chain ──────────

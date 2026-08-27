@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 // @ts-ignore — plain .mjs script; typed via the cast below
 import {
   fixtureFor,
+  FIXTURE_AGENTS,
   SEED_STORAGE_KEYS,
   FIXTURE_EMPTY_FALLBACK,
   SCENARIOS,
@@ -72,8 +73,65 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
   })
 
   it('unkeyed endpoints fall through (null → generic empty shape)', () => {
-    expect(fx('/agents/agent-1/delegations')).toBeNull()
+    // #2106 moved `/agents/:id/delegations` OUT of this list — it is keyed
+    // now (see the delegation-rail case below), so it can no longer stand as
+    // this assertion's example of an unkeyed path. The rule being pinned is
+    // unchanged; only the specimen moved.
     expect(fx('/reporting/summary')).toBeNull()
+    expect(fx('/contacts/ct-1/history')).toBeNull()
+  })
+
+  // #2106: `/custody` renders a delegation-rail account's real spend
+  // authority from this endpoint. Both recipient states are seeded on
+  // purpose — a PINNED recipient (an AllowedCalldataEnforcer caveat) and an
+  // open one — because the page presents them differently and a fixture with
+  // only one of them cannot evidence that.
+  describe('delegation budgets (#2106)', () => {
+    it('keys the delegations endpoint for the fixture agents', () => {
+      const pinned = fx('/agents/agent-research/delegations') as {
+        delegations: { recipient_address: string | null; status: string; budget_atomic: string }[]
+      }
+      expect(pinned.delegations).toHaveLength(1)
+      expect(pinned.delegations[0].status).toBe('active')
+      expect(pinned.delegations[0].recipient_address).toMatch(/^0x/)
+
+      // The open-recipient budget sits on `agent-retired`, not `agent-ops`:
+      // `agent-ops` is `account_type: null` (legacy Safe rail) and a legacy
+      // agent cannot hold a delegation at all. A fixture that gave it one
+      // would photograph a combination the product cannot produce.
+      const open = fx('/agents/agent-retired/delegations') as {
+        delegations: { recipient_address: string | null }[]
+      }
+      expect(open.delegations[0].recipient_address).toBeNull()
+    })
+
+    it('never gives a legacy-rail agent a delegation', () => {
+      const legacy = FIXTURE_AGENTS.find((a) => a.id === 'agent-ops')
+      expect(legacy?.account_type).toBeNull()
+      expect(fx('/agents/agent-ops/delegations')).toEqual({ delegations: [] })
+    })
+
+    it('projects `allowances` from the delegation for every delegation-rail agent', () => {
+      // `AgentDetailClient` derives DelegationBudgetCard's token list from
+      // `allowances`; an agent with a delegation but an empty projection
+      // renders raw atomic units ("250000000 per week"). On the real rail
+      // `deriveDelegationAllowances` fills it, so the fixture must too.
+      for (const agent of FIXTURE_AGENTS.filter((a) => a.account_type === 'delegator_hybrid')) {
+        const res = fx(`/agents/${agent.id}/delegations`) as {
+          delegations: { budget_atomic: string }[]
+        }
+        if (res.delegations.length === 0) continue
+        expect(agent.allowances.length).toBeGreaterThan(0)
+      }
+    })
+
+    it('serves an empty list — never null — for an agent with no budget', () => {
+      // Falling through to the generic shape would be wrong here: the generic
+      // fallback's `delegations: []` happens to match, but keying it means the
+      // harness answers the same shape whether or not the id is known, which
+      // is what stops an unseeded agent rendering a crashed card.
+      expect(fx('/agents/agent-nobody/delegations')).toEqual({ delegations: [] })
+    })
   })
 
   // #1075: /agents/[agentId] rendered nothing under the harness because

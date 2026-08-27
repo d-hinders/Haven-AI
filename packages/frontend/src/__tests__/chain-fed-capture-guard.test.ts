@@ -143,6 +143,54 @@ describe('the silent-capture guard', () => {
     expect(CHAIN_SILENT_CAPTURES.map((c) => c.route)).toEqual(['/custody'])
   })
 
+  /**
+   * #2106 made `/custody` conditionally chain-fed: it renders a per-account
+   * card and only the LEGACY Safe branch mounts `useOnChainAllowances`. The
+   * delegation-rail card proves custody from two API reads and touches the
+   * chain not at all, so zero reads is correct there — but only there.
+   *
+   * Both directions are pinned, because an exemption that only ever says "fine"
+   * is the kind of guard this repo keeps finding already broken.
+   */
+  describe('a capture may declare a route legitimately chain-silent (#2106)', () => {
+    it('does not report a declared-silent route that made no read', () => {
+      beginChainWatch('scenario:custody-delegation-rail', 'desktop')
+      noteChainWatchNavigation(`${BASE}/custody`)
+      endChainWatch([/^\/custody(\/|$)/])
+      expect(CHAIN_SILENT_CAPTURES).toEqual([])
+    })
+
+    it('still reports a route the capture did NOT declare', () => {
+      // The declaration is per route: silence on /custody must not buy
+      // silence on /agents in the same capture.
+      beginChainWatch('scenario:custody-delegation-rail', 'desktop')
+      noteChainWatchNavigation(`${BASE}/custody`)
+      noteChainWatchNavigation(`${BASE}/agents`)
+      endChainWatch([/^\/custody(\/|$)/])
+      expect(CHAIN_SILENT_CAPTURES.map((c) => c.route)).toEqual(['/agents'])
+    })
+
+    it('reports a declared-silent route that DID read — the declaration is stale', () => {
+      // The direction that keeps this honest. The day the delegation card
+      // starts reading the chain, the exemption stops being true and must
+      // fail rather than quietly widen.
+      beginChainWatch('scenario:custody-delegation-rail', 'desktop')
+      noteChainWatchNavigation(`${BASE}/custody`)
+      noteChainReadObserved('eth_call')
+      endChainWatch([/^\/custody(\/|$)/])
+      expect(CHAIN_SILENT_CAPTURES).toHaveLength(1)
+      expect(CHAIN_SILENT_CAPTURES[0].route).toBe('/custody')
+      expect(CHAIN_SILENT_CAPTURES[0].unexpectedRead).toMatch(/declared chain-silent/i)
+    })
+
+    it('leaves the guard armed for a capture that declares nothing', () => {
+      beginChainWatch('scenario:custody-legacy-rail', 'desktop')
+      noteChainWatchNavigation(`${BASE}/custody`)
+      endChainWatch()
+      expect(CHAIN_SILENT_CAPTURES.map((c) => c.route)).toEqual(['/custody'])
+    })
+  })
+
   it('a read seen after the watch closed does not excuse the capture it left behind', () => {
     // Per-context bookkeeping: `endChainWatch` closes the window. A read seen
     // after it belongs to nothing, and must not retroactively clear a capture

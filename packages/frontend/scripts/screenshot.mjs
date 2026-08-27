@@ -104,8 +104,8 @@
  * before any script runs (the same keys the app and e2e fixtures use), so
  * authenticated routes render without a real login. Data: Haven-API requests
  * are answered by a route-keyed POPULATED dataset (a funded account, three
- * agents on both rails, transactions, one pending approval, contacts, agent
- * activity + spend stats) so
+ * agents on both rails, transactions, contacts, agent activity + spend
+ * stats) so
  * lists, tables and amounts render realistically — that's what the
  * design-reviewer pass judges. Anything not explicitly keyed falls back to a
  * benign empty shape — which carries every collection key the hooks read, so
@@ -455,7 +455,12 @@ export const FIXTURE_OVERVIEW = {
   totals: { usd: 12_640.55, eur: 11_690.21 },
   change: { available: true, usdAmount: 214.3, eurAmount: 198.2, usdPercent: 1.7, eurPercent: 1.7 },
   metrics: { connectedAgents: 2, monthlyAgentSpendUsd: 482.5, monthlyAgentSpendEur: 446.3, successfulTransactions: 37, activeAccounts: 1 },
-  actionableApprovals: 1, pendingApprovals: 1,
+  // #2120: 0, not 1. `routes/dashboard.ts:84` hardcodes `actionableApprovals
+  // = 0` (and mirrors it into `pendingApprovals`) — the queue died with the
+  // AllowanceModule rail and `approval_requests` is dropped. Both fields
+  // survive only for wire compatibility, so any non-zero seed here
+  // photographs a number the product cannot produce.
+  actionableApprovals: 0, pendingApprovals: 0,
   onboardingProgress: { hasFirstAgentPayment: true },
   agents: FIXTURE_AGENTS.map((a) => ({
     id: a.id, name: a.name, status: a.status, safeId: a.safe_id,
@@ -476,7 +481,11 @@ export const FIXTURE_AGENT_ACTIVITY = [
     type: 'payment', id: 'pay-1', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     amount_raw: '25000000', amount: '25.00', to: ADDR.merchant,
-    reason: null, status: 'executed', tx_hash: `0x${'a1'.repeat(32)}`,
+    // #2120: 'confirmed', not 'executed'. `payment_intents.status` is only
+    // ever written pending_signature | submitted | confirmed | failed |
+    // expired; 'executed' was an `approval_requests` status, and it only
+    // rendered "Sent" here because the deleted APPROVAL_STATUS map caught it.
+    reason: null, status: 'confirmed', tx_hash: `0x${'a1'.repeat(32)}`,
     source: 'x402', x402_resource_url: 'https://api.example.dev/reports',
     x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_SAFE.chain_id,
     safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
@@ -491,23 +500,17 @@ export const FIXTURE_AGENT_ACTIVITY = [
     next_action: 'settle', error_code: null, status_code: 200,
     created_at: '2026-07-10T08:17:00.000Z',
   },
-  {
-    type: 'approval', id: 'appr-1', agent_id: 'agent-research', agent_name: 'Research agent',
-    token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-    amount_raw: '750000000', amount: '750.00', to: ADDR.recipient,
-    reason: 'Quarterly vendor invoice exceeds the daily budget',
-    status: 'pending', tx_hash: null, source: 'api',
-    x402_resource_url: null, x402_merchant_address: null, chain_id: FIXTURE_SAFE.chain_id,
-    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
-    explorer_url: null, confirmed_at: null, payment_proof_status: null,
-    payment_flow_status: null, payment_attention_reason: null,
-    created_at: '2026-07-10T07:45:00.000Z',
-  },
+  // #2120: the `type: 'approval'` / `status: 'pending'` row that stood here is
+  // deleted. `routes/agent-activity.ts` has built this list from
+  // `payment_intents` + MCP tool invocations only since #2055 — the
+  // approval feed entries went with the dropped table — so the row seeded an
+  // activity kind no backend can emit, and every design-review capture of
+  // /agents/[agentId] rendered it as an "Approval request … Needs approval".
   {
     type: 'payment', id: 'pay-2', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     amount_raw: '4500000', amount: '4.50', to: ADDR.recipient,
-    reason: null, status: 'executed', tx_hash: `0x${'b2'.repeat(32)}`,
+    reason: null, status: 'confirmed', tx_hash: `0x${'b2'.repeat(32)}`,  // #2120: see pay-1
     source: 'api', x402_resource_url: null, x402_merchant_address: null,
     chain_id: FIXTURE_SAFE.chain_id,
     safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
@@ -527,7 +530,8 @@ export const FIXTURE_AGENT_STATS = {
   all_time: [{ token: 'USDC', total_spent: '482.50', tx_count: 37 }],
   today: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
   this_week: [{ token: 'USDC', total_spent: '109.75', tx_count: 6 }],
-  pending_approvals: 1,
+  // #2120: 0, not 1 — `routes/agent-activity.ts:129` hardcodes it.
+  pending_approvals: 0,
 }
 
 const FIXTURE_CONTACTS = [
@@ -2176,7 +2180,9 @@ export const SCENARIOS = {
             skill_installed: true,
             restart_required: true,
           },
-          approval: { status: 'pending', safe_tx_hash: null, tx_hash: null },
+          // #2120: `approval.status` is `agent_connection_setups.approval_status`,
+          // written only as 'not_started' | 'submitted' | 'proposed' | 'confirmed'.
+          approval: { status: 'not_started', safe_tx_hash: null, tx_hash: null },
         }
       }
       // A reachable signer, or `ready` is false and the screen shows the
@@ -2340,7 +2346,9 @@ export const SCENARIOS = {
             skill_installed: true,
             restart_required: true,
           },
-          approval: { status: 'pending', safe_tx_hash: null, tx_hash: null },
+          // #2120: `approval.status` is `agent_connection_setups.approval_status`,
+          // written only as 'not_started' | 'submitted' | 'proposed' | 'confirmed'.
+          approval: { status: 'not_started', safe_tx_hash: null, tx_hash: null },
         }
       }
       return undefined
@@ -2422,7 +2430,8 @@ export const SCENARIOS = {
             skill_installed: false,
             restart_required: true,
           },
-          approval: { status: 'active', safe_tx_hash: null, tx_hash: null },
+          // #2120: see above — 'active' is not a producible approval_status.
+          approval: { status: 'confirmed', safe_tx_hash: null, tx_hash: null },
         }
       }
       return undefined

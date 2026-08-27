@@ -506,6 +506,25 @@ export const FIXTURE_AGENT_ACTIVITY = [
   // approval feed entries went with the dropped table — so the row seeded an
   // activity kind no backend can emit, and every design-review capture of
   // /agents/[agentId] rendered it as an "Approval request … Needs approval".
+  // #2120: a REACHABLE failure, seeded where the fabricated approval row used
+  // to sit. `haven-design-reviewer` observed that with the approval row gone
+  // the standing capture only ever showed success badges, so the danger tone
+  // and `activityTitle`'s `status === 'failed'` branch had no rendered
+  // evidence. Every field is what the route would emit for a failed intent:
+  // no tx hash, no confirmation, and `payment_flow_status: null` because
+  // `machinePaymentLifecycle` returns null for a non-machine rail AND for any
+  // status other than 'confirmed' (packages/core/src/machine-payment-lifecycle.ts:30-35).
+  {
+    type: 'payment', id: 'pay-3', agent_id: 'agent-research', agent_name: 'Research agent',
+    token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    amount_raw: '12000000', amount: '12.00', to: ADDR.recipient,
+    reason: null, status: 'failed', tx_hash: null, source: 'api',
+    x402_resource_url: null, x402_merchant_address: null, chain_id: FIXTURE_SAFE.chain_id,
+    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    explorer_url: null, confirmed_at: null, payment_proof_status: null,
+    payment_flow_status: null, payment_attention_reason: null,
+    created_at: '2026-07-10T07:45:00.000Z',
+  },
   {
     type: 'payment', id: 'pay-2', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',

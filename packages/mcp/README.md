@@ -160,8 +160,8 @@ Every MCP tool invocation tags the underlying Haven API call with
 `X-Haven-MCP-Tool: <tool_name>`. The backend records one
 `agent_tool_invocations` row per call (tool name, payment id when present,
 result status, nextAction, error code, HTTP status, timestamp). The agent's
-activity feed in the Haven dashboard surfaces these rows alongside payments
-and approval requests, so the wallet owner can see exactly which tools the
+activity feed in the Haven dashboard surfaces these rows alongside payments,
+so the wallet owner can see exactly which tools the
 agent called and what happened — even for read-only calls that don't move
 money.
 
@@ -177,9 +177,11 @@ regardless of audit state.
    delegate address.
 3. Call `haven_quote_x402` for a paid test URL.
 4. Call `haven_pay_x402_quote` with the returned quote.
-5. If the result has `nextAction: "wait_for_user_approval"`, approve in Haven,
-   then call `haven_resume_x402_payment` with the returned `resume_state` or
-   `payment_id`.
+5. If the result has `nextAction: "retry_original_x402_request"`, call
+   `haven_resume_x402_payment` with the returned `resume_state` or
+   `payment_id`. If instead the call is declined for budget, raise the agent
+   budget in Haven and repeat from step 4 — Haven holds no approval queue, so
+   there is nothing to wait for.
 
 The legacy MPP demo flow is retired (#1328) — pay through the x402 merchant
 flow above instead.

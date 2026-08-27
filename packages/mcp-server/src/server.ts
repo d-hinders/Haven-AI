@@ -63,9 +63,12 @@ export const HOSTED_INSTRUCTIONS = [
   'If a merchant rejects AFTER funding, the delegate holds stranded funds —',
   'recover them with haven_sweep_delegate.',
   '',
-  'pending_approval, or a guidance block with safe_to_continue false, means stop',
-  'and tell the user — do not retry, re-sign, or re-pay while a payment is',
-  'pending. Spend authority is enforced on-chain by the user\'s account; Haven',
+  'A payment outside the agent budget is declined before any money moves. Haven',
+  'holds no approval queue, so there is nothing to poll and no approval will ever',
+  'arrive for it. On a decline, on a guidance block with safe_to_continue',
+  'false, or on any status you do not recognise, stop and tell the user — do not',
+  'retry, re-sign, or re-pay — and ask them to grant or raise the budget in Haven.',
+  'Spend authority is enforced on-chain by the user\'s account; Haven',
   'never holds keys and cannot override it.',
 ].join('\n')
 

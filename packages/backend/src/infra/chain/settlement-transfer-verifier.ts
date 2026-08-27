@@ -113,23 +113,12 @@
  * it to a retryable status.
  */
 import { ethers } from 'ethers'
-import { hashDelegation } from '@metamask/smart-accounts-kit/utils'
 import { getProvider } from '../../rails/allowance-module.js'
 import { getDelegationContracts } from '../../rails/delegation-contracts.js'
+import { delegationHashFromLog } from './redeemed-delegation-scanner.js'
 
 const ERC20_TRANSFER_IFACE = new ethers.Interface([
   'event Transfer(address indexed from, address indexed to, uint256 value)',
-])
-
-/**
- * The pinned DelegationManager's redemption event (#2094). The `Delegation`
- * tuple is emitted in full and NOT indexed, so the struct can be decoded and
- * re-hashed rather than merely matched on a topic.
- */
-const REDEEMED_DELEGATION_IFACE = new ethers.Interface([
-  'event RedeemedDelegation(address indexed rootDelegator, address indexed redeemer, ' +
-    '(address delegate,address delegator,bytes32 authority,' +
-    '(address enforcer,bytes terms,bytes args)[] caveats,uint256 salt,bytes signature) delegation)',
 ])
 
 /**
@@ -159,34 +148,11 @@ function redeemedDelegationHashes(
   const hashes: string[] = []
   for (const log of receipt.logs) {
     if (log.address.toLowerCase() !== manager) continue
-    let parsed: ethers.LogDescription | null = null
-    try {
-      parsed = REDEEMED_DELEGATION_IFACE.parseLog({ topics: [...log.topics], data: log.data })
-    } catch {
-      continue // some other manager event
-    }
-    if (parsed?.name !== 'RedeemedDelegation') continue
-    const d = parsed.args.delegation
-    try {
-      hashes.push(
-        hashDelegation({
-          delegate: d.delegate,
-          delegator: d.delegator,
-          authority: d.authority,
-          caveats: d.caveats.map((c: { enforcer: string; terms: string; args: string }) => ({
-            enforcer: c.enforcer,
-            terms: c.terms,
-            args: c.args,
-          })),
-          salt: d.salt,
-          signature: '0x',
-        } as never).toLowerCase(),
-      )
-    } catch {
-      // A struct the kit cannot hash tells us nothing; it must not be able to
-      // turn into either a match or a refusal.
-      continue
-    }
+    // #2117: the decode + re-hash is shared with the sweeper's forward scan, so
+    // the two attribution directions can never drift apart on what a
+    // `RedeemedDelegation` log means.
+    const hash = delegationHashFromLog(log)
+    if (hash) hashes.push(hash)
   }
   return hashes.length > 0 ? hashes : null
 }

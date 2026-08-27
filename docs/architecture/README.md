@@ -28,7 +28,7 @@ is canonical; exported PNG and SVG files are convenience artifacts.
 | 1 | [System Context](01-system-context.md) | Onboarding, security reviews, "who talks to who" questions. Shows trust boundaries. |
 | 2 | [Identity & Custody Map](02-identity-and-custody.md) | Reasoning about blast radius — what is held by user, Haven, agent, and on-chain. |
 | 3 | [Payment Execution Sequence](03-payment-sequence.md) | Tracing a payment from API call to on-chain settlement; auto-execute within the budget, declined outside it. |
-| 4 | [x402 Payment Sequence](04-x402-payment-sequence.md) | Standard SDK/local MCP, hosted generic split, hosted paid-MCP three-call fast path, and restart-recovery resume of an authorized payment. |
+| 4 | [x402 Payment Sequence](04-x402-payment-sequence.md) | Standard SDK/local MCP, hosted generic split, hosted paid-MCP three-call fast path, and restart-recovery context rehydration (the resume call itself has no reachable trigger). |
 | 5 | [Agent API OpenAPI Contract](05-agent-api-openapi.md) | Public OpenAPI surface for non-TypeScript agent integrators and external reviewers. |
 | 6 | [Hosted MCP Connect Flow & Edge-Signing Contract](06-hosted-mcp-connect-flow.md) | Topology/custody contract and two-credential split. It predates the one-call signer fast path; use docs 4 and 7 for current x402 orchestration. |
 | 7 | [Edge Signer](07-edge-signer.md) | The local component that holds the delegate key and signs — its form (signer core + local stdio MCP), the pay/x402 orchestration, and custody invariants. |

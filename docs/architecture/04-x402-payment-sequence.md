@@ -734,13 +734,27 @@ id. Local MCP normalizes most fields to camelCase while retaining
 beneath them) are gated by `assertCanResumeX402`
 ([`packages/sdk/src/x402-protocol.ts`](../../packages/sdk/src/x402-protocol.ts)),
 which hard-requires `nextAction === retry_original_x402_request` and throws
-otherwise. **Nothing emits that value today.** No backend path produces it —
-the enum member exists in `domain/agent-payment-taxonomy.ts` and in the OpenAPI
-description, and is minted nowhere — and the SDK's own `nextActionForStatus`
-maps it from `executed` alone, which is one of the four unconstructible
-statuses above. Since the backend's `next_action` and `message` **override**
-the SDK's on `GET /payments/:id` (the SDK mints its own only when the backend
-sent none), there is no route by which the guard can pass.
+otherwise. **Nothing emits that value today**, and the path is short enough to
+state exactly:
+
+1. `resumeAuthorizedX402` reads the status through `getPaymentStatus`, which
+   calls **`GET /machine-payments/:id/status`** — not `GET /payments/:id`,
+   whose response shape carries no `next_action` field at all and so cannot
+   feed this guard.
+2. That response is mapped by `mapPaymentStatusResult`
+   ([`packages/sdk/src/payment-mappers.ts`](../../packages/sdk/src/payment-mappers.ts)),
+   which is a **plain pass-through** — `nextAction: raw.next_action`, with no
+   client-side fallback. The guard therefore reads the backend's value verbatim.
+3. The backend emits `next_action` for the five reachable `payment_intents`
+   statuses and never emits `retry_original_x402_request`. The literal exists
+   only as an enum member in `domain/agent-payment-taxonomy.ts` and in an
+   OpenAPI description; nothing mints it.
+
+The SDK *does* map `executed` → `retry_original_x402_request` in
+`nextActionForStatus`, but that function is reached only through
+`paymentStateFromRaw`, which is typed to authorize/sign responses rather than
+this status route — and `executed` is one of the four unconstructible statuses
+above in any case. So the guard has no route by which it can pass.
 
 So do not document or build a resume loop as a live recovery step. The code is
 retained fail-closed — it refuses rather than proceeding — and the honest

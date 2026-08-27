@@ -30,7 +30,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-26" # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-27" # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -754,6 +754,36 @@ The flow is a two-call variant of `/x402/authorize`:
    delegation account it builds a **settlement child delegation** and returns the
    EIP-712 `typed_data` the agent must sign — not an AllowanceModule funding hash,
    and it never queues an approval (over-budget/wrong-recipient reverts on-chain).
+
+   **An over-budget amount is refused here, before the child exists**
+   ([#2082](https://github.com/d-hinders/Haven-AI/issues/2082)). Authorize reads
+   the selected budget delegation's live remaining period budget — the same
+   `ERC20PeriodTransferEnforcer` storage read `GET /machine-payments/allowances`
+   performs (#1145) — and answers `403` `delegation_budget_exceeded` with
+   `phase: insufficient_funds`, `next_action: fund_safe_or_raise_allowance` and
+   the shortfall, writing nothing and deploying nothing.
+
+   Read this as a fail-fast convenience, **not a policy boundary**, and the
+   distinction is the whole point. The caveat stack is still the gate: it
+   refused an over-budget redemption before this check existed and refuses one
+   now, and nothing here widens what the chain will allow. What changed is
+   *when* Haven says no. Previously this branch prepared nothing at authorize —
+   unlike `POST /payments` and the EIP-3009 shape, which estimate a redemption
+   and so surface the enforcer's refusal as a `502` with no intent row — so an
+   over-budget erc7710 request came back `201 pending_signature` **with**
+   `sign_data`, and the refusal only landed after the agent had signed, settled,
+   and retried the merchant. Since [#1450](https://github.com/d-hinders/Haven-AI/issues/1450)
+   made erc7710 the preferred scheme, the path most payments take was the one
+   that refused latest.
+
+   The check **fails OPEN**: `readRemainingBudget` reports `fromChain: false`
+   when the enforcer read failed or the delegation carries no period caveat it
+   can speak for, and a fallback number never refuses a payment. Refusing on a
+   degraded RPC read would turn a transient outage into a stopped agent, which
+   is the same posture as #1145's fallback and #1319's `remaining_is_from_chain`
+   honesty flag. The EIP-3009 branch is deliberately untouched — it already
+   refuses at authorize, and a second pre-check there would be a second source
+   of truth for one condition.
 
    Before the intent is created, authorize also **deploys the child's delegator —
    the delegate hybrid account — if it is still counterfactual**

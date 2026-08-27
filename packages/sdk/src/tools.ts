@@ -97,7 +97,7 @@ const authorizeX402Schema = {
     },
     idempotencyKey: {
       type: 'string' as const,
-      description: 'Stable caller-supplied key for this user intent. Reuse it when resuming after user approval.',
+      description: 'Stable caller-supplied key for this user intent. Reuse it when resuming the same payment.',
     },
   },
   required: ['url', 'payTo', 'amount', 'asset', 'network'] as const,
@@ -108,7 +108,7 @@ const resumeX402Schema = {
   properties: {
     payment_id: {
       type: 'string' as const,
-      description: 'The payment or approval request ID returned by authorize_x402_payment.',
+      description: 'The payment ID returned by authorize_x402_payment.',
     },
     url: {
       type: 'string' as const,
@@ -143,9 +143,9 @@ const resumeX402Schema = {
 }
 
 const MAKE_PAYMENT_DESCRIPTION =
-  'Request and sign a payment from the user-controlled Safe within approved on-chain limits. ' +
+  'Request and sign a payment from the user-controlled account within its on-chain budget. ' +
   'For read-only allowance, budget, spend-limit, remaining-amount, or reset-period questions, use get_allowances instead of making a payment. ' +
-  'Haven authenticates the agent, validates the signed intent, and relays the Safe AllowanceModule transaction; it does not hold keys or control funds. ' +
+  'Haven authenticates the agent and relays the signed transaction that redeems the agent budget delegation; it does not hold keys or control funds. ' +
   'Gnosis Chain tokens: EURe, USDC.e, xDAI. Base tokens: USDC, ETH.'
 
 // Descriptions are composed from the shared semantic source so the SDK and MCP
@@ -155,22 +155,22 @@ const MAKE_PAYMENT_DESCRIPTION =
 
 const GET_STATUS_DESCRIPTION =
   sharedDescriptions.getPaymentStatus.summary + ' ' +
-  'Accepts payment intent IDs and approval request IDs. Returns the current status, phase, next_action, transaction hash if available, and payment details.'
+  'Accepts payment intent IDs. Returns the current status, phase, next_action, transaction hash if available, and payment details.'
 
 const GET_ALLOWANCES_DESCRIPTION = composeDescription(sharedDescriptions.getAllowances)
 
 const AUTHORIZE_X402_DESCRIPTION =
   composeDescription(sharedDescriptions.payX402) + ' ' +
   'In this SDK tool set, the allowance lookup tool is get_allowances. ' +
-  'When a paid API returns x402 payment requirements, use this tool to sign with the agent-owned delegate key and request a policy-limited Safe AllowanceModule top-up when needed. ' +
+  'When a paid API returns x402 payment requirements, use this tool to sign with the agent-owned delegate key; funding, when the scheme needs it, is redeemed from the agent budget delegation and is bounded by it. ' +
   'Haven relays signed transactions only; the agent key authorizes payment and on-chain limits enforce spend. ' +
-  'If this returns pending_approval, tell the user it is waiting in Haven, preserve the original merchant/MCP session and x402 details, call get_payment_status later, and use resume_x402_payment only when next_action is retry_original_x402_request. Do not start a new merchant session or loop retries while approval is pending. ' +
+  'A payment outside the on-chain budget is declined before any money moves — report the decline and ask the user to raise the budget in Haven; do not loop retries and do not wait for an approval, because none is queued. Preserve the original merchant/MCP session and x402 details, and use resume_x402_payment only when next_action is retry_original_x402_request. ' +
   'Use the returned payment_header as the X-PAYMENT header on the retry request when doing a manual HTTP retry.'
 
 const RESUME_X402_DESCRIPTION =
   sharedDescriptions.resumeX402.summary + ' ' +
   'Use this only after get_payment_status returns next_action=retry_original_x402_request. ' +
-  'It checks the approved payment, validates the original x402 details, and returns a merchant X-PAYMENT header without creating a new approval request or merchant session.'
+  'It checks the authorized payment, validates the original x402 details, and returns a merchant X-PAYMENT header without creating a new payment or merchant session.'
 
 const SWEEP_DELEGATE_DESCRIPTION = composeDescription(sharedDescriptions.sweep_delegate)
 

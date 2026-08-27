@@ -2473,6 +2473,22 @@ describe('haven_settle_mcp_tool', () => {
     // payment_id is echoed on the not-settled path too, for status follow-up.
     expect(result.data.payment_id).toBe('pay_pending')
     expect(spy).not.toHaveBeenCalled()
+
+    // #2101: this branch used to emit next_action=wait_for_user_approval beside
+    // a reason telling the agent not to wait — a payload contradicting itself,
+    // with the FIELD winning under the agent contract. No live rail can ever
+    // resolve that wait (410 on the legacy rail per #1986; 403/502 at prepare
+    // on the delegation rail; `approval_requests` dropped by #2055), so the
+    // verdict is stop. This assertion was mutation-proven: it is the one that
+    // was missing when the field was first corrected.
+    const guidance = result.data as unknown as {
+      next_action: string
+      safe_to_continue: boolean
+      reason: string
+    }
+    expect(guidance.next_action).toBe('stop_and_tell_user')
+    expect(guidance.safe_to_continue).toBe(false)
+    expect(guidance.reason).toContain('do not wait for an approval')
   })
 
   it('waits for on-chain funding confirmation BEFORE delivering to the merchant', async () => {
@@ -3704,11 +3720,16 @@ describe('structured agent guidance (#1308)', () => {
     const result = ok<{ next_action: string; safe_to_continue: boolean }>(
       await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
     )
-    expect(result.data.next_action).toBe('wait_for_user_approval')
+    // #2101: the authoritative field must say STOP, not wait. No live rail
+    // mints this status (410 on the legacy rail per #1986; 403/502 at prepare
+    // on the delegation rail; `approval_requests` dropped by #2055), so an
+    // agent that followed `wait_for_user_approval` here — the field the agent
+    // contract says to follow FIRST — would poll a loop that cannot terminate.
+    expect(result.data.next_action).toBe('stop_and_tell_user')
     expect(result.data.safe_to_continue).toBe(false)
   })
 
-  it('pending approval is UNSAFE to continue and points at status polling', async () => {
+  it('a retained pending status is UNSAFE to continue and tells the agent to stop', async () => {
     stubFetch({
       ...stubs(),
       'POST /x402': {
@@ -3724,8 +3745,13 @@ describe('structured agent guidance (#1308)', () => {
       agent_summary: Record<string, unknown>
     }>(await pay())
 
+    // #2101: the authoritative field must say STOP, not wait. No live rail
+    // mints this status (410 on the legacy rail per #1986; 403/502 at prepare
+    // on the delegation rail; `approval_requests` dropped by #2055), so an
+    // agent that followed `wait_for_user_approval` here — the field the agent
+    // contract says to follow FIRST — would poll a loop that cannot terminate.
     expect(result.data.status).toBe('pending_approval')
-    expect(result.data.next_action).toBe('wait_for_user_approval')
+    expect(result.data.next_action).toBe('stop_and_tell_user')
     expect(result.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
     expect((result.data as { next_tool_server?: string }).next_tool_server).toBe('haven')
     expect((result.data as { next_tool_name?: string }).next_tool_name).toBe('haven_get_payment_status')

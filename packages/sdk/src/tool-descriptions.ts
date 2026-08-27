@@ -26,7 +26,7 @@ export interface ToolDescription {
   /** Concrete behaviour the tool performs end-to-end, including which
    * non-custodial guarantee applies. */
   behavior: string
-  /** What the agent should do next on error / pending-approval states.
+  /** What the agent should do next on error / declined states.
    * Empty string if not applicable. */
   nextActionGuidance: string
 }
@@ -56,10 +56,10 @@ export const toolDescriptions = {
     selectionGuidance:
       'Do not use this for read-only allowance, budget, spend-limit, remaining-amount, reset-period, or what-can-I-spend questions; use the allowance lookup tool instead.',
     behavior:
-      'Signs the EIP-3009 payment from the delegate wallet, asks Haven for a Safe AllowanceModule top-up if needed, and returns the merchant response or a pending-approval state.',
+      'Signs the payment locally and returns the merchant response. Settlement is either direct account-to-merchant with no funding leg, or a bridge that first redeems the agent\'s budget delegation to fund the delegate wallet for an EIP-3009 authorization. A payment outside the on-chain budget is declined before any money moves; nothing is queued for a human to approve later.',
     nextActionGuidance:
-      'If approval is needed, preserve the returned resume_state and wait for nextAction=retry_original_x402_request before resuming. ' +
-      'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the originating Safe is funded or the agent allowance raised — stop and tell the user the shortfall reported on the response.',
+      'Preserve the returned resume_state and resume only on nextAction=retry_original_x402_request. ' +
+      'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the account is funded or the agent budget raised — stop and tell the user the shortfall reported on the response.',
   },
   payX402OneShot: {
     summary:
@@ -67,16 +67,16 @@ export const toolDescriptions = {
     selectionGuidance:
       'Prefer this over the quote+pay split when the agent just wants the paid resource and does not need to inspect the price first. If you already have a quote from haven_quote_x402, use haven_pay_x402_quote instead. Do not use for read-only allowance, budget, spend-limit, remaining-amount, reset-period, or what-can-I-spend questions; use the allowance lookup tool instead.',
     behavior:
-      'Calls the URL, parses any HTTP 402 x402 challenge, signs the EIP-3009 payment from the delegate wallet, asks Haven for a Safe AllowanceModule top-up if needed, then retries the original request with the X-PAYMENT header and returns the merchant response. If the resource returns a non-402 status, returns it unchanged without contacting Haven.',
+      'Calls the URL, parses any HTTP 402 x402 challenge, signs the payment locally, then retries the original request with the X-PAYMENT header and returns the merchant response. Settlement is either direct account-to-merchant with no funding leg, or a bridge that first redeems the agent\'s budget delegation to fund the delegate wallet for an EIP-3009 authorization. A payment outside the on-chain budget is declined before any money moves; nothing is queued for a human to approve later. If the resource returns a non-402 status, returns it unchanged without contacting Haven.',
     nextActionGuidance:
-      'If approval is needed, preserve the returned resume_state or paymentId and call the resume tool once nextAction=retry_original_x402_request. ' +
-      'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the originating Safe is funded or the agent allowance raised — stop and tell the user the shortfall reported on the response.',
+      'Preserve the returned resume_state or paymentId and resume only on nextAction=retry_original_x402_request. ' +
+      'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the account is funded or the agent budget raised — stop and tell the user the shortfall reported on the response.',
   },
   resumeX402: {
     summary:
-      'Resume an x402 payment after the Haven wallet owner approved the funding step.',
+      'Resume an x402 payment whose Haven-side authorization already succeeded but whose merchant retry did not complete.',
     behavior:
-      'Accepts either resume_state or payment_id, validates the original x402 details against the approved Haven funding, and retries the merchant request with the X-PAYMENT header. No new Haven approval is created.',
+      'Accepts either resume_state or payment_id, validates the original x402 details against the authorized Haven funding, and retries the merchant request with the X-PAYMENT header. No new Haven payment is created.',
     nextActionGuidance:
       'Only use when get_payment_status returns nextAction=retry_original_x402_request; do not start a new merchant session.',
   },
@@ -88,14 +88,14 @@ export const toolDescriptions = {
     summary:
       'Fetch structured Haven payment status, including phase and nextAction taxonomy for agent recovery.',
     behavior:
-      'Accepts a payment intent or approval request id and returns the full state taxonomy (phase, nextAction, rail, amount, merchant, resource url, idempotency key, message).',
+      'Accepts a payment intent id and returns the full state taxonomy (phase, nextAction, rail, amount, merchant, resource url, idempotency key, message).',
     nextActionGuidance: '',
   },
   getResumeState: {
     summary:
       'Rehydrate stored x402 resume_state by payment_id.',
     behavior:
-      'Returns the context that the agent originally received in a pending-approval response, reconstructed from Haven\'s database. This is context only; signing still happens locally when a resume tool is called.',
+      'Returns the x402 context the agent originally received when the payment was authorized, reconstructed from Haven\'s database. This is context only; signing still happens locally when a resume tool is called.',
     nextActionGuidance: '',
   },
   getAgent: {
@@ -104,7 +104,7 @@ export const toolDescriptions = {
     selectionGuidance:
       'Use this as the one-shot orientation/bootstrap at the start of a session, or whenever you need to confirm identity together with whether the agent can spend right now. For a detailed per-token breakdown (configured vs spent vs reset window) use haven_get_allowances.',
     behavior:
-      'Reads identity plus the live spend-authority snapshot in one shot — the on-chain AllowanceModule on the legacy rail, the active budget delegation on the delegation rail. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. It covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify the signer with a signer tool call or connect --doctor. What an over-budget payment does differs by rail: on the legacy AllowanceModule rail it is queued for the wallet owner to approve in Haven; on the delegation rail there is no approval queue — an over-budget redemption reverts on-chain, so ask the owner to grant or raise the budget in Haven rather than waiting for an approval. allowances[] carries remainingAtomic and remainingDisplay per token. Identity fields (id, name, status, safeAddress, delegateAddress, chainId) are unchanged from before.',
+      'Reads identity plus the live spend-authority snapshot in one shot — the agent\'s active on-chain budget delegation. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. It covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify the signer with a signer tool call or connect --doctor. An over-budget payment is declined before any money moves: there is no approval queue, so ask the owner to grant or raise the budget in Haven rather than waiting for an approval. allowances[] carries remainingAtomic and remainingDisplay per token. Identity fields (id, name, status, safeAddress, delegateAddress, chainId) are unchanged from before.',
     nextActionGuidance: '',
   },
   getAllowances: {
@@ -113,7 +113,7 @@ export const toolDescriptions = {
     selectionGuidance:
       'Use this when the user asks about allowance, budget, spend limit, remaining amount, remaining allowance, remaining budget, daily limit, reset period, what can I spend, or what the agent can still spend.',
     behavior:
-      'Returns the per-token spend authority for the account\'s rail: the Safe AllowanceModule snapshot (allowance, spent, remaining, reset window) on the legacy rail, or the active budget delegation (remaining = the period budget; over-budget redemptions revert on-chain, nothing queues) on the delegation rail. Configured amounts from Haven are returned alongside.',
+      'Returns the per-token spend authority for the account: the active budget delegation (remaining = the period budget, which re-arms natively at the period boundary). An over-budget payment is declined before any money moves; nothing queues. Configured amounts from Haven are returned alongside.',
     nextActionGuidance: '',
   },
   listReceipts: {
@@ -144,10 +144,10 @@ export const toolDescriptions = {
       'Do NOT use for read-only allowance or budget questions — use haven_get_allowances.',
     behavior:
       'Builds the JSON-RPC tools/call envelope, runs the MCP Streamable-HTTP initialize handshake automatically (if the endpoint is MCP-shaped), ' +
-      'pays any HTTP 402 x402 challenge through Haven\'s AllowanceModule path, and retries the request, returning the JSON-RPC result (the actual merchant output) on success. ' +
-      'Amounts within the on-chain allowance execute automatically; over-allowance transfers are queued as pending_approval — follow the response\'s nextAction when present.',
+      'pays any HTTP 402 x402 challenge against the agent\'s on-chain budget delegation, and retries the request, returning the JSON-RPC result (the actual merchant output) on success. ' +
+      'Amounts within the remaining on-chain budget execute automatically; anything outside it is declined before any money moves — follow the response\'s nextAction when present.',
     nextActionGuidance:
-      'If pending_approval is returned, preserve payment_id and resume_state and wait for the wallet owner to approve in Haven. ' +
+      'On a decline, report the reason to the user and ask them to raise the budget in Haven — there is no approval queue to wait on. ' +
       'Use haven_resume_x402_payment once nextAction=retry_original_x402_request.',
   },
   discoverTools: {
@@ -208,13 +208,12 @@ export const toolDescriptions = {
       'Do NOT use for x402 paid endpoints — use haven_pay_x402 instead. ' +
       'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances.',
     behavior:
-      'Sends the requested amount through the Safe AllowanceModule. ' +
-      'Amounts within the remaining on-chain allowance for the asset execute automatically; ' +
-      'amounts that exceed the allowance are queued as pending_approval for the wallet owner to approve in Haven. ' +
-      'The agent\'s signing key signs the AllowanceModule transfer hash; Haven never receives the key.',
+      'Sends the requested amount by redeeming the agent\'s on-chain budget delegation, account to recipient with no funding leg. ' +
+      'Budget, recipient and expiry are enforced on-chain while the transfer is prepared, so a request outside them is declined before any money moves and before the agent is asked to sign — it is never queued for a human to approve later. ' +
+      'The agent\'s signing key signs the account\'s typed data; Haven never receives the key.',
     nextActionGuidance:
-      'If pending_approval is returned, preserve the payment_id and wait for the wallet owner to approve in Haven. ' +
-      'Poll haven_get_payment_status until nextAction=none.',
+      'On a decline, report the reason to the user and ask them to grant or raise the budget in Haven — there is nothing to poll and no approval will arrive. ' +
+      'After a successful send, poll haven_get_payment_status until nextAction=none.',
   },
 } as const satisfies Record<string, ToolDescription>
 

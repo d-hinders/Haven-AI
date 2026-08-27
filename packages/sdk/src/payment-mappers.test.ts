@@ -199,7 +199,11 @@ describe('raw payment state mapping', () => {
       rail: 'direct',
       status: 'pending_approval',
       phase: AgentPaymentPhase.UserApprovalRequired,
-      nextAction: AgentPaymentNextAction.WaitForUserApproval,
+      // #2101: STOP, not wait. The phase is a retained descriptive label; the
+      // nextAction is the field agents follow FIRST, and no approval can ever
+      // arrive to end a wait (410 on the legacy rail per #1986; 403/502 at
+      // prepare on the delegation rail; `approval_requests` dropped by #2055).
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
       amount: '2.50',
       token: '',
       resourceUrl: null,
@@ -207,7 +211,11 @@ describe('raw payment state mapping', () => {
       txHash: null,
       expiresAt: '',
       chainId: 0,
-      message: 'x402 payment is above the remaining agent budget and is waiting for user approval in Haven (payment_id: ar_1).',
+      // #2101: the minted message must NOT promise an approval that will never
+      // arrive — no live rail queues a payment (410 on the legacy rail, #1986;
+      // 403/502 at prepare on the delegation rail; `approval_requests` dropped
+      // by #2055). The fail-closed branch stays, but it tells the agent to stop.
+      message: "x402 payment is not payable: it is outside the agent's on-chain budget and no approval is pending (payment_id: ar_1). Ask the user to grant or raise the budget in Haven.",
       amountAtomic: '2500000',
       asset: 'top-asset',
       network: 'eip155:8453',
@@ -310,7 +318,8 @@ describe('raw payment state mapping', () => {
     expect(caught).toBeInstanceOf(HavenApiError)
     expect(caught).not.toBeInstanceOf(HavenPaymentStateError)
     expect(caught).toMatchObject({
-      message: 'Payment exceeds the on-chain allowance and was queued for owner approval (payment_id: ).',
+      // #2101: declined, not queued — see the note above.
+      message: "Payment exceeds the agent's on-chain budget and was declined; no approval is pending and none will arrive (payment_id: ).",
       statusCode: 202,
       body: raw,
     })

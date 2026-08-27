@@ -153,9 +153,13 @@ function resolveToken(chainId: number, symbol: string) {
  * A key that matches an existing row returns the FIRST request's result:
  * a still-signable intent replays its original sign_data (delegation-rail
  * rows rebuild the EIP-712 payload from the stored UserOperation, the #961
- * discipline — never a fresh estimation), a pending approval replays as 202
- * (a retry must not open a second approval), and anything that has progressed
+ * discipline — never a fresh estimation), and anything that has progressed
  * reports its real status instead of a stale instruction.
+ *
+ * #2105: this used to add "a pending approval replays as 202 (a retry must not
+ * open a second approval)". There is no such branch any more — #2055 deleted
+ * the `approval_requests` fallback (see the note at its old site below), so no
+ * replay can produce a 202 and the OpenAPI spec no longer documents one.
  *
  * A null return from a 23505 catch site means the conflicting row was ALREADY
  * terminal (or was lazily expired here) — the caller rethrows rather than

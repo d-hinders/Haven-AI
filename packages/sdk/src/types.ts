@@ -1009,36 +1009,36 @@ export const AgentPaymentPhaseDescriptions: Record<AgentPaymentPhase, string> = 
   [AgentPaymentPhase.AgentSignatureRequired]: 'The agent must sign and submit the prepared payment before Haven can relay it.',
   [AgentPaymentPhase.PaymentSubmitted]: 'Haven has received the signed payment and the agent should poll for confirmation.',
   [AgentPaymentPhase.PaymentConfirmed]: 'The direct payment is confirmed; the agent does not need to do more for this payment id.',
-  [AgentPaymentPhase.UserApprovalRequired]: 'The payment needs wallet owner approval in Haven before it can continue.',
-  [AgentPaymentPhase.UserExecutionRequired]: 'The wallet owner approved the request and still needs to complete the funding payment.',
-  [AgentPaymentPhase.WaitingForAdditionalApprovals]: 'The funding payment was proposed and is waiting for the remaining account approvals.',
+  [AgentPaymentPhase.UserApprovalRequired]: 'Retired wire value: no live rail produces it. It described the Safe rail\'s approval queue, which no longer exists — an out-of-policy payment is declined before any money moves. If it is ever seen, stop and tell the user; no approval is pending.',
+  [AgentPaymentPhase.UserExecutionRequired]: 'Retired wire value: no live rail produces it. Stop and tell the user.',
+  [AgentPaymentPhase.WaitingForAdditionalApprovals]: 'Retired wire value: no live rail produces it. Stop and tell the user.',
   [AgentPaymentPhase.FundingSent]: 'The Haven funding leg was sent; the agent can continue the merchant/protocol leg.',
-  [AgentPaymentPhase.Rejected]: 'The wallet owner rejected the request; the agent should stop and tell the user.',
-  [AgentPaymentPhase.Expired]: 'The payment or approval request expired before completion.',
+  [AgentPaymentPhase.Rejected]: 'The payment was rejected and cannot proceed; the agent should stop and tell the user.',
+  [AgentPaymentPhase.Expired]: 'The payment expired before completion.',
   [AgentPaymentPhase.Failed]: 'Haven could not complete the payment; the agent should stop and surface the failure.',
   [AgentPaymentPhase.InsufficientFunds]:
-    'Pre-flight check determined the delegate balance plus the remaining on-chain allowance cannot cover the requested amount, so no payment was created. The originating Safe must be funded or the agent allowance raised before retrying.',
+    'Pre-flight check determined the delegate balance plus the remaining on-chain budget cannot cover the requested amount, so no payment was created. The account must be funded or the agent budget raised before retrying.',
   [AgentPaymentPhase.FundedButUnsettled]:
-    "Haven's funding leg confirmed on-chain but the merchant rejected the x402 retry. The delegate wallet may hold stranded funds. The agent should stop and wait for the wallet owner to sweep the stranded funds back to the Safe.",
+    "Haven's funding leg confirmed on-chain but the merchant rejected the x402 retry. The delegate wallet may hold stranded funds. The agent should stop and wait for the wallet owner to sweep the stranded funds back to the account.",
 }
 
 export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, string> = {
   [AgentPaymentNextAction.SignAndSubmitPayment]: 'Sign with the delegate key and submit the payment to Haven.',
   [AgentPaymentNextAction.CheckStatusLater]: 'Poll getPaymentStatus later using this payment id.',
   [AgentPaymentNextAction.None]: 'No further agent action is required for this payment id.',
-  [AgentPaymentNextAction.WaitForUserApproval]: 'Wait for the wallet owner to approve or reject the request in Haven.',
-  [AgentPaymentNextAction.WaitForUserToCompletePayment]: 'Wait for the wallet owner to finish sending the approved funding payment.',
+  [AgentPaymentNextAction.WaitForUserApproval]: 'Retired wire value: no live rail produces it, and nothing maps to it. It described a per-payment approval queue that no longer exists. If it is ever seen, stop and tell the user rather than polling — no approval will arrive.',
+  [AgentPaymentNextAction.WaitForUserToCompletePayment]: 'Retired wire value: no live rail produces it. Stop and tell the user rather than polling.',
   [AgentPaymentNextAction.RetryOriginalX402Request]: 'Resume this payment id and retry the original x402 request with the merchant payment header.',
   [AgentPaymentNextAction.StopAndTellUser]: 'Stop retrying this payment and tell the user what happened.',
   [AgentPaymentNextAction.RequestAgainIfUserStillWantsIt]: 'Ask again only if the user still wants the payment after expiry.',
   [AgentPaymentNextAction.PaymentWindowExpired]:
     'The x402 funding/quote window expired. Re-quote with the same idempotency key before asking the signer to build a merchant payment header again.',
   [AgentPaymentNextAction.FundSafeOrRaiseAllowance]:
-    'Stop and tell the user that the originating Safe needs to be funded or the agent allowance raised before the payment can succeed.',
+    'Stop and tell the user that the account needs to be funded or the agent budget raised before the payment can succeed.',
   [AgentPaymentNextAction.RetryWithExplicitContext]:
     'Retry the same tool call, this time passing merchant_url, tool_name, arguments, and mcp_transport explicitly — the server had no stored context to rehydrate for this payment id.',
   [AgentPaymentNextAction.SweepStrandedFunds]:
-    'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating Safe.',
+    'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating account.',
 }
 
 export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode, string> = {
@@ -1171,7 +1171,7 @@ export interface AgentPaymentSummary {
 }
 
 export const AgentPaymentRailDescriptions: Record<AgentPaymentRail, string> = {
-  [AgentPaymentRail.Direct]: 'Standard Haven payment from the user-controlled Safe through an approved delegate allowance.',
+  [AgentPaymentRail.Direct]: 'Standard Haven payment from the user-controlled account, redeeming the agent\'s on-chain budget delegation.',
   [AgentPaymentRail.X402]: 'x402 HTTP 402 payment flow with a Haven funding leg and merchant retry leg.',
   [AgentPaymentRail.Mpp]: 'Categorical MPP rail value used as a resume-state discriminator. Response bodies carry a granular mpp_* value instead.',
   [AgentPaymentRail.MppDemo]: 'Haven internal MPP demo rail. Not for production traffic.',

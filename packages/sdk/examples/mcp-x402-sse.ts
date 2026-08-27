@@ -130,8 +130,8 @@ async function quoteAndPay(): Promise<void> {
   } catch (err) {
     if (err instanceof HavenPaymentStateError && err.resumeState) {
       await writeFile(resumeFile, JSON.stringify(err.resumeState, null, 2))
-      console.error(`Waiting for user approval in Haven. Resume state saved to ${resumeFile}.`)
-      console.error(`After approval, rerun with HAVEN_RESUME_PAYMENT_ID=${err.resumeState.paymentId}.`)
+      console.error(`Payment did not complete in one pass. Resume state saved to ${resumeFile}.`)
+      console.error(`Once the funding leg confirms, rerun with HAVEN_RESUME_PAYMENT_ID=${err.resumeState.paymentId}.`)
       console.error(`The local file fallback is still available with HAVEN_X402_RESUME=1.`)
       return
     }

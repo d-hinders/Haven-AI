@@ -1767,7 +1767,7 @@ export type paths = {
         put?: never;
         /**
          * Create a direct Haven payment intent.
-         * @description Creates a signable payment intent or queues an over-budget request for wallet owner approval. The agent must sign returned sign_data with its delegate key before Haven can relay execution.
+         * @description Creates a signable payment intent on the delegation rail. The agent must sign the returned sign_data with its delegate key before Haven can relay execution; the budget delegation's caveat enforcers authorize it on-chain at redemption. #2105: there is no over-budget approval branch — an over-budget payment REVERTS during gas estimation rather than queuing, and the approval queue died with the Safe rail (#2055). Both retired rails are refused with 410 before anything is written.
          */
         post: operations["createPaymentIntent"];
         delete?: never;
@@ -1804,7 +1804,7 @@ export type paths = {
         put?: never;
         /**
          * Submit a delegate signature and relay a payment intent.
-         * @description The signature must be produced outside Haven by the agent-held delegate key. Haven verifies it against the delegate address and on-chain allowance before relaying.
+         * @description The signature must be produced outside Haven by the agent-held delegate key. #2105 (found by review): Haven does NOT verify it against the delegate address or an on-chain allowance, as this said — that was the retired AllowanceModule scheme (`sign_hash` + raw-ECDSA `recoverSigner`), which died with the rail (#1986). Haven now applies a SHAPE check only and relays; the real validator is the account itself (EIP-1271 / the 4337 signature check on the typed data) and the budget delegation's caveat enforcers on redemption. An intent pinned to a retired rail is refused 410 here rather than relayed.
          */
         post: operations["submitPaymentSignature"];
         delete?: never;
@@ -1864,7 +1864,7 @@ export type paths = {
         put?: never;
         /**
          * Authorize an x402 funding payment.
-         * @description Creates or executes the Haven funding leg for an x402 merchant request. Haven relays only independently signed payloads; it does not sign on behalf of the agent. If approval is required, preserve the original merchant session and resume after next_action is retry_original_x402_request.
+         * @description Creates or executes the Haven side of an x402 merchant request. Haven relays only independently signed payloads; it does not sign on behalf of the agent. The scheme follows the payTo shape: a merchant payTo builds an erc7710 settlement child delegation and settles account→merchant directly with NO funding leg; the EIP-3009 bridge (agent-EOA payTo + merchantPayTo) is the fallback and is the only shape that still funds anything. #2105: there is no approval branch — spend authority is the agent's budget delegation, refused up front with 403 when the amount exceeds the live remaining budget (#2082) and enforced on-chain by the caveat enforcers at redemption. Preserve the original merchant session and resume once next_action is retry_original_x402_request.
          */
         post: operations["authorizeX402Payment"];
         delete?: never;
@@ -2017,8 +2017,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Send ETH or USDC directly from the agent's Safe to a recipient address.
-         * @description Creates an AllowanceModule payment intent for a plain transfer. If the amount is within the remaining on-chain allowance, a sign_data hash is returned for the agent to sign (via POST /payments/{id}/sign). If the amount exceeds the remaining allowance, the transfer is queued as a pending_approval for the wallet owner to approve in Haven.
+         * RETIRED: plain transfer. Validates the body, then always refuses.
+         * @description RETIRED (#1987, epic #1440). This route belonged to the Safe / AllowanceModule rail and no longer has a success path: `modules/mpp/send.ts` is three refusals and nothing else. After body validation (400) the account's rail decides which refusal you get — **410** on either retired rail (Safe / AllowanceModule, #1986; session, #834) and **422** `rail_not_supported` on the delegation rail, which MPP never supported (#1251). Those three cases exhaust the HANDLER, so 2xx is unreachable here; the route in front of it can still answer 400, 401, 403 or 429. Fail-closed: no intent row, no approval row, no sign_data, no chain read. To send from a delegation-rail account use POST /payments, which redeems the agent's budget delegation directly. The operation stays documented rather than deleted because it is still registered and still answers — an integrator needs the refusal contract, not a 404.
          */
         post: operations["sendTransfer"];
         delete?: never;
@@ -2590,7 +2590,7 @@ export type components = {
             /** @example 0x1111111111111111111111111111111111111111 */
             token_address: string;
             token_symbol: string;
-            /** @description Decimal atomic token amount. Leading zeroes are accepted and canonicalized; effective amount must be positive and capped at uint96 for Safe AllowanceModule compatibility. */
+            /** @description Decimal atomic token amount. Leading zeroes are accepted and canonicalized; effective amount must be positive and capped at uint96 — the word size of the delegation rail's ERC20PeriodTransferEnforcer. */
             allowance_amount: string;
             reset_period_min: number;
         };
@@ -2876,41 +2876,37 @@ export type components = {
             /** Format: date-time */
             expires_at: string;
             sign_data: {
+                /** @description The UserOperation hash. Present for reference and replay-matching — do NOT sign it directly; sign `typed_data`. */
                 hash: string;
+                /**
+                 * @description The delegation rail's only scheme. The retired AllowanceModule rail's raw-ECDSA-over-`hash` scheme died with it (#1986) and is not offered here.
+                 * @enum {string}
+                 */
+                signature_scheme: "eip712_userop";
+                /** @description The EIP-712 payload to sign VERBATIM with the delegate key. The account validates this, not `hash`. */
+                typed_data: {
+                    [key: string]: unknown;
+                };
                 components: {
-                    /** @example 0x1111111111111111111111111111111111111111 */
-                    safe: string;
+                    /**
+                     * @description The delegator account the UserOperation runs on.
+                     * @example 0x1111111111111111111111111111111111111111
+                     */
+                    account?: string;
+                    /**
+                     * @description Present on the x402 funding shape only.
+                     * @example 0x1111111111111111111111111111111111111111
+                     */
+                    safe?: string;
                     /** @example 0x1111111111111111111111111111111111111111 */
                     token: string;
                     /** @example 0x1111111111111111111111111111111111111111 */
                     to: string;
                     /** @description Atomic token amount. */
                     amount: string;
-                    /** @example 0x1111111111111111111111111111111111111111 */
-                    payment_token: string;
-                    payment: string;
-                    nonce: number;
                 };
                 instructions: string;
             };
-        };
-        PendingApproval: {
-            /** Format: uuid */
-            payment_id: string;
-            /** @enum {string} */
-            kind: "approval_request";
-            /** @enum {string} */
-            status: "pending_approval" | "pending";
-            phase: components["schemas"]["AgentPaymentPhase"];
-            next_action: components["schemas"]["AgentPaymentNextAction"];
-            message: string;
-            remaining?: string | null;
-            requested?: string;
-            token?: string;
-            /** Format: date-time */
-            expires_at: string;
-        } & {
-            [key: string]: unknown;
         };
         PaymentIntentStatus: {
             /** Format: uuid */
@@ -2974,7 +2970,10 @@ export type components = {
         AgentPaymentStatus: {
             /** Format: uuid */
             payment_id: string;
-            /** @enum {string} */
+            /**
+             * @description Always `payment_intent` in practice. `approval_request` is kept for wire compatibility in the #2055 style: the approval queue died with the Safe rail and `approval_requests` was dropped (migration 070), so no payment can resolve to that kind any more — but the value stays declared because the backend's own status type still carries it and this route still serializes the field. Do not write a branch on it.
+             * @enum {string}
+             */
             kind: "payment_intent" | "approval_request";
             rail: components["schemas"]["AgentPaymentRail"];
             status: string;
@@ -3150,21 +3149,6 @@ export type components = {
             resource_url?: string;
             explorer_url?: string;
         };
-        X402PendingApproval: components["schemas"]["PendingApproval"] & {
-            /** @enum {string} */
-            rail: "x402";
-            /** Format: uri */
-            resource_url: string;
-            merchant_address?: string | null;
-            chain_id: number;
-            amount_atomic: string;
-            /** @example 0x1111111111111111111111111111111111111111 */
-            asset: string;
-            network: string;
-            idempotency_key?: string | null;
-            challenge_id?: string | null;
-            x402: components["schemas"]["RailContext"];
-        };
         X402ResumeState: {
             /** @enum {string} */
             rail: "x402";
@@ -3277,7 +3261,7 @@ export type components = {
             delegate_account_address: string | null;
             chain_id: number;
             /**
-             * @description Which on-chain policy primitive gates this agent's spend (#1306): the legacy Safe AllowanceModule (import-only accounts) or the delegation rail's active budget delegations. Reporting only — the on-chain state is the real gate either way.
+             * @description Which rail this agent's account is on (#1306). `delegation` means spend is gated by the agent's active budget delegations, enforced on-chain by the caveat enforcers. `legacy` is the RETIRED Safe / AllowanceModule rail (#1986) and gates nothing any more — every payment entry point answers 410 for such an account, so read it as "this account cannot pay until it re-onboards via POST /accounts/hybrid", not as a second live policy primitive. Reporting only; the enum keeps both values because a retired-rail account can still read its own identity here.
              * @enum {string}
              */
             execution_rail: "legacy" | "delegation";
@@ -3307,7 +3291,7 @@ export type components = {
                     last_reset_min: number;
                     nonce: number;
                     is_reset_pending: boolean;
-                    /** @description Delegation rail only (#1319, provenance for #1145's fallback): true when `remaining` came from a live ERC20PeriodTransferEnforcer read, false when the read failed and this is the fallback full configured budget. Absent on the legacy AllowanceModule rail, which has no fallback concept. Reporting only — the on-chain policy is the actual gate either way, this only says how fresh this number is. */
+                    /** @description Delegation rail only (#1319, provenance for #1145's fallback): true when `remaining` came from a live ERC20PeriodTransferEnforcer read, false when the read failed and this is the fallback full configured budget. #2105: it is now effectively always present, because this whole summary is a delegation-rail response — since #2020 the retired Safe / AllowanceModule rail answers 410 here rather than a summary, so there is no longer a second rail for the field to be absent on. Reporting only — the on-chain policy is the actual gate; this only says how fresh this number is. */
                     remaining_is_from_chain?: boolean;
                 };
             }[];
@@ -11946,6 +11930,17 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Idempotent replay of a request whose intent has already progressed to a terminal, reportable state. Body is an `AgentPaymentStatus` plus `idempotent_replay: true`. Deliberately NOT a strict $ref: `AgentPaymentStatus` is `additionalProperties: false`, so the replay marker is not a member of it — the permissive shape is the accurate one here, and narrowing it would be a claim the route does not honour. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
             /** @description Payment intent requires the agent signature. */
             201: {
                 headers: {
@@ -11953,15 +11948,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SignablePaymentIntent"];
-                };
-            };
-            /** @description Payment exceeds remaining on-chain allowance and is waiting for wallet owner approval. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PendingApproval"];
                 };
             };
             /** @description Error response */
@@ -12009,7 +11995,22 @@ export interface operations {
                     };
                 };
             };
-            /** @description A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid. */
+            /** @description Idempotency conflict: the key already belongs to a payment with a different token, recipient or amount, or it replays an intent that is mid-flight (pending_signature / submitted). Only `payment_intents` carry the key — the approval-queue replay fallback is gone with the table (#2055). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description EITHER a retired rail — the Safe / AllowanceModule rail (#1986) or the session rail (#834), refused before anything is written and before any chain read, with a message naming POST /accounts/hybrid — OR an idempotent replay of a request whose intent has since expired. The two are distinguished by `idempotent_replay` on the body; only the first is a rail refusal. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -12024,7 +12025,22 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description Money-path rate limit. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Preparation failed against the chain, or an idempotent replay of a request whose payment has failed. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -12452,7 +12468,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["X402PendingApproval"] | components["schemas"]["X402SignablePayment"] | components["schemas"]["X402ConfirmedPayment"] | components["schemas"]["AgentPaymentStatus"];
+                    "application/json": components["schemas"]["X402SignablePayment"] | components["schemas"]["X402ConfirmedPayment"] | components["schemas"]["AgentPaymentStatus"];
                 };
             };
             /** @description Signable or confirmed x402 funding payment. */
@@ -12461,16 +12477,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["X402PendingApproval"] | components["schemas"]["X402SignablePayment"] | components["schemas"]["X402ConfirmedPayment"] | components["schemas"]["AgentPaymentStatus"];
-                };
-            };
-            /** @description x402 funding payment is waiting for wallet owner approval. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["X402PendingApproval"];
+                    "application/json": components["schemas"]["X402SignablePayment"] | components["schemas"]["X402ConfirmedPayment"] | components["schemas"]["AgentPaymentStatus"];
                 };
             };
             /** @description Error response */
@@ -12598,7 +12605,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["X402PendingApproval"] | components["schemas"]["X402SignablePayment"] | components["schemas"]["X402ConfirmedPayment"] | components["schemas"]["AgentPaymentStatus"];
+                    "application/json": components["schemas"]["X402SignablePayment"] | components["schemas"]["X402ConfirmedPayment"] | components["schemas"]["AgentPaymentStatus"];
                 };
             };
             /** @description Error response */
@@ -12790,21 +12797,21 @@ export interface operations {
         };
         responses: {
             /** @description Same response as POST /x402/authorize. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["X402SignablePayment"] | components["schemas"]["X402ConfirmedPayment"] | components["schemas"]["AgentPaymentStatus"];
+                };
+            };
+            /** @description Same response as POST /x402/authorize. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["X402PendingApproval"] | components["schemas"]["X402SignablePayment"] | components["schemas"]["X402ConfirmedPayment"] | components["schemas"]["AgentPaymentStatus"];
-                };
-            };
-            /** @description Same response as POST /x402/authorize. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["X402PendingApproval"];
+                    "application/json": components["schemas"]["X402SignablePayment"] | components["schemas"]["X402ConfirmedPayment"] | components["schemas"]["AgentPaymentStatus"];
                 };
             };
             /** @description Error response */
@@ -12854,6 +12861,21 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Same as POST /x402/authorize: a retired rail — Safe / AllowanceModule (#1986) or session (#834). Fail-closed, nothing written. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13178,73 +13200,13 @@ export interface operations {
                     recipient: string;
                     /** @description Human-readable amount, e.g. "1.5". */
                     amount: string;
-                    /** @description Optional idempotency key to deduplicate retried requests. */
+                    /** @description Validated (1–128 characters) and then IGNORED — nothing is deduplicated, because every call refuses. Accepted only so an existing client is refused by the rail rather than by a body error (#2105). */
                     idempotency_key?: string;
                 };
             };
         };
         responses: {
-            /** @description Idempotent replay of a request whose payment has already progressed (e.g. confirmed, or an approval the owner executed). Body is the canonical payment-status object with idempotent_replay: true. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Payment intent created — ready for signing. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        payment_id: string;
-                        /** @enum {string} */
-                        status: "pending_signature";
-                        /** Format: date-time */
-                        expires_at: string;
-                        /** @enum {string} */
-                        asset: "ETH" | "USDC";
-                        amount: string;
-                        recipient: string;
-                        sign_data: {
-                            hash: string;
-                            components?: Record<string, never>;
-                            instructions: string;
-                        };
-                        /** @description Present and true when this is a replay of an earlier request with the same idempotency_key. */
-                        idempotent_replay?: boolean;
-                    };
-                };
-            };
-            /** @description Transfer queued as pending_approval — exceeds remaining on-chain allowance. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        payment_id: string;
-                        /** @enum {string} */
-                        status: "pending_approval";
-                        asset: string;
-                        amount?: string;
-                        recipient?: string;
-                        /** Format: date-time */
-                        expires_at: string;
-                        message?: string;
-                        /** @description Present and true when this is a replay of an earlier request with the same idempotency_key. */
-                        idempotent_replay?: boolean;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
+            /** @description Body validation, in `routes/machine-payments.ts` and therefore BEFORE the rail refusal: unsupported asset, malformed recipient, non-positive amount, or an idempotency_key outside 1–128 characters. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13274,8 +13236,20 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description Agent authenticated but not authorized to act (#1130): `agent_pending_approval` — the key is valid but the agent awaits its first budget grant in Haven; `agent_paused` — the owner paused API-initiated transactions. `detail` carries the operator action. Contrast 401, which means the key itself is unknown or revoked. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        detail?: string;
+                    };
+                };
+            };
+            /** @description The account is on a retired rail — Safe / AllowanceModule (#1986) or session (#834). Fail-closed: nothing is written and no chain read is made. The message names POST /accounts/hybrid. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13289,30 +13263,23 @@ export interface operations {
                     };
                 };
             };
-            /** @description Idempotent replay of a request that is mid-flight (intent submitted but not yet confirmed) or whose approval was rejected. */
-            409: {
+            /** @description The account is on the delegation rail, which this MPP route never supported (#1251). `error_code` is `rail_not_supported` and the message names POST /payments and the x402 purchase flow. With both retired rails answering 410 above, this is the response every remaining account gets. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
                         [key: string]: unknown;
                     };
                 };
             };
-            /** @description Either the account is on a retired rail — the Safe / AllowanceModule rail (#1986) or the session rail (#834), refused before any intent or approval row is written — or this is an idempotent replay of a request whose payment has expired. */
-            410: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            502: {
+            /** @description Money-path rate limit. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

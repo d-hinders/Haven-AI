@@ -66,7 +66,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-25" # #2055: the approval-queue clause updated (deleted outright, not readable/rejectable) and "approvals" dropped from the PostgreSQL store list. Prior: #1992: the "Haven runs two on-chain policy rails" line was false - the AllowanceModule rail is retired (#1986 410s, #1987/#1988/#1989 deletions), so there is ONE live rail. Corrected, and the backend component one-liner no longer advertises allowances/approvals as live surfaces. Scope: the rail paragraph and the components table row. Prior: #1714 (epic #1717): catalogue ingestion lifecycle added to the catalog module — modules/catalog/lifecycle.ts drives the self-service submission queue (ownership proof → SSRF-hardened probe → re-verification → retention) on the new leader-locked catalogIngest monitor in index.ts; the operator-curated refresh and discovery are unchanged. Prior: #1984: the rail line said the legacy AllowanceModule rail was "import-only" — #1984 closes IMPORT too, so nothing enters it by any route; corrected to closed-to-new-accounts. The rest of the overview re-read against the diff: the delegation rail is still where new accounts are provisioned, and the custody boundary is unchanged. Prior: #1199: signer-removal recovery change re-verified; delegation authority overview unchanged
+last-verified: "2026-08-27" # #2105: the bolded one-line security model re-based off the retired rail. It read `on-chain AllowanceModule state = enforcement for automatic Safe funding`, and #2105 removed the last live copy of that wording from the served OpenAPI contract (`AgentApiKey`'s security-scheme description), which would have left the overview presenting an obsolete formulation as the security model while README.md and doc 05 both carried the corrected one — the #1992 pattern in reverse. The paragraph beneath it is kept and now reads as history rather than as a correction of a live claim. Caught by haven-doc-reviewer. Scope: that line and the paragraph under it; nothing else in the overview re-verified in this pass. Prior: #2055: the approval-queue clause updated (deleted outright, not readable/rejectable) and "approvals" dropped from the PostgreSQL store list. Prior: #1992: the "Haven runs two on-chain policy rails" line was false - the AllowanceModule rail is retired (#1986 410s, #1987/#1988/#1989 deletions), so there is ONE live rail. Corrected, and the backend component one-liner no longer advertises allowances/approvals as live surfaces. Scope: the rail paragraph and the components table row. Prior: #1714 (epic #1717): catalogue ingestion lifecycle added to the catalog module — modules/catalog/lifecycle.ts drives the self-service submission queue (ownership proof → SSRF-hardened probe → re-verification → retention) on the new leader-locked catalogIngest monitor in index.ts; the operator-curated refresh and discovery are unchanged. Prior: #1984: the rail line said the legacy AllowanceModule rail was "import-only" — #1984 closes IMPORT too, so nothing enters it by any route; corrected to closed-to-new-accounts. The rest of the overview re-read against the diff: the delegation rail is still where new accounts are provisioned, and the custody boundary is unchanged. Prior: #1199: signer-removal recovery change re-verified; delegation authority overview unchanged
 ---
 
 # Haven — Architecture Overview
@@ -78,10 +78,13 @@ Agents request payments through high-level tools; Safe-originated funding and
 user payments follow user-approved on-chain authority, while agent-wallet
 merchant payments are signed locally and bound to exact payment context. One
 line holds the security model:
-**API auth = identity, signature = authority, on-chain AllowanceModule state =
-enforcement for automatic Safe funding.**
+**API auth = identity, signature = authority, on-chain delegation state =
+enforcement.**
 
-That line describes the **legacy AllowanceModule rail**, which is **RETIRED**
+That line read `on-chain AllowanceModule state = enforcement for automatic Safe
+funding` until #2105, which corrected the last live copy of the old wording in
+the served OpenAPI contract and then here. It described the **legacy
+AllowanceModule rail**, which is **RETIRED**
 (#1440) — closed to new accounts (#1984), fail-closed for spending with HTTP 410
 on every payment and x402 entry point (#1986), and its execution machinery
 deleted (#1987/#1988/#1989). Existing Safe accounts stay readable; they cannot

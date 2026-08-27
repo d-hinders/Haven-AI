@@ -47,9 +47,16 @@ function nextActionForStatus(status: string): PaymentNextAction | null {
   if (status === 'pending_signature') return AgentPaymentNextAction.SignAndSubmitPayment
   if (status === 'submitted') return AgentPaymentNextAction.CheckStatusLater
   if (status === 'confirmed') return AgentPaymentNextAction.None
-  if (status === 'pending' || status === 'pending_approval') return AgentPaymentNextAction.WaitForUserApproval
+  // #2101: STOP, not wait. No live rail mints these payment statuses (410 on
+  // the legacy rail, #1986; 403/502 at prepare on the delegation rail;
+  // `approval_requests` dropped by #2055), so nothing will ever transition a
+  // row out of them. `nextAction` is the field the agent contract says to
+  // follow FIRST — emitting `wait_for_user_approval` here would contradict
+  // the message beside it and send a compliant agent into a poll loop that
+  // cannot terminate. The fail-closed branch is retained; its verdict is stop.
+  if (status === 'pending' || status === 'pending_approval') return AgentPaymentNextAction.StopAndTellUser
   if (status === 'approved') return AgentPaymentNextAction.WaitForUserToCompletePayment
-  if (status === 'proposed') return AgentPaymentNextAction.WaitForUserApproval
+  if (status === 'proposed') return AgentPaymentNextAction.StopAndTellUser
   if (status === 'executed') return AgentPaymentNextAction.RetryOriginalX402Request
   if (status === 'rejected') return AgentPaymentNextAction.StopAndTellUser
   if (status === 'expired') return AgentPaymentNextAction.RequestAgainIfUserStillWantsIt
@@ -64,7 +71,13 @@ function messageForState(
   nextAction: PaymentNextAction,
 ): string {
   if (status === 'pending' || status === 'pending_approval') {
-    return `${label} is above the remaining agent budget and is waiting for user approval in Haven (payment_id: ${paymentId}).`
+    // No live Haven rail mints these statuses for a payment: an out-of-policy
+    // payment is refused during prepare (403/502 from POST /payments) with
+    // nothing written, and the queue table the old text pointed at is gone.
+    // The branch is kept fail-closed for a stored row from before the
+    // retirement, but the message must not promise an approval that will
+    // never arrive — the agent is told to stop, not to poll.
+    return `${label} is not payable: it is outside the agent's on-chain budget and no approval is pending (payment_id: ${paymentId}). Ask the user to grant or raise the budget in Haven.`
   }
   if (status === 'executed') {
     return 'The user completed the funding payment. Retry the original x402 request.'
@@ -154,7 +167,7 @@ export function throwPaymentStateError(
 
   if (raw.status === 'pending_approval') {
     throw new HavenApiError(
-      `${label} exceeds the on-chain allowance and was queued for owner approval (payment_id: ${raw.payment_id}).`,
+      `${label} exceeds the agent's on-chain budget and was declined; no approval is pending and none will arrive (payment_id: ${raw.payment_id}).`,
       statusCode,
       raw,
     )

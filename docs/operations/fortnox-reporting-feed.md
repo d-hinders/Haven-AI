@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/infra/repositories/reporting-feed-syncs.ts
   - packages/frontend/src/app/(authenticated)/reporting/page.tsx
   - packages/frontend/src/hooks/useReporting.ts
-last-verified: "2026-08-13" # feed live-verified end-to-end on a real user account (entitlement grant -> connect -> x402 purchase -> pushed w/ invoice number -> read-back "Registered"); added the Fortnox first-visit UI-wizard gotcha. Prior same-day: #1365 recovery gaps
+last-verified: "2026-08-26" # #2092: re-read the "flow, end to end" section only — the entry condition was stated as "x402 funding confirmation or MPP receipt", which excluded erc7710 by construction and was the doc-level shadow of the bug; corrected, with the scheme-agnostic entry and its residual gap named. The verification, troubleshooting and recovery sections were NOT re-read in this pass. Prior 2026-08-13: feed live-verified end-to-end on a real user account (entitlement grant -> connect -> x402 purchase -> pushed w/ invoice number -> read-back "Registered"); added the Fortnox first-visit UI-wizard gotcha. Prior same-day: #1365 recovery gaps
 ---
 
 # Fortnox reporting feed — operations runbook
@@ -26,7 +26,7 @@ proved the mechanism live on 2026-07-16).
 
 ```
 Purchase settles on-chain
-  │  (x402 funding confirmation or MPP receipt)
+  │  (x402 funding confirmation, erc7710 settlement observed, or MPP receipt)
   ▼
 machine_payment_evidence row written (with book-time SEK amount when FX is ready)
   │
@@ -49,6 +49,21 @@ feedSettledPaymentBestEffort()          ← fire-and-forget: NEVER blocks settle
   └─ markPushed(external_ref = 'fortnox:supplierinvoice:<GivenNumber>')
        or markSkipped(reason) / markFailed(error) — both retryable via "Sync now" (#1365)
 ```
+
+**Every settlement scheme enters at the same door (#2092).** The feed has never
+had a rail or scheme filter and still does not — what it needs is a `confirmed`
+intent with a `tx_hash`, which is what produces the `machine_payment_evidence`
+row above. On EIP-3009 Haven submits the funding transaction and learns that
+hash itself; on **erc7710 direct settlement** the merchant redeems the
+delegation chain and Haven submits nothing, so the intent used to sit at
+`submitted` forever and those purchases reached neither Fortnox nor the
+dashboard. `POST /machine-payments/evidence` now completes such an intent from
+the merchant's reported settlement hash after verifying it on-chain — see
+[`04-x402-payment-sequence.md` § Completing an erc7710 settlement](../architecture/04-x402-payment-sequence.md).
+**Residual gap:** a merchant that returns no `PAYMENT-RESPONSE` transaction
+leaves Haven nothing to verify, so that payment stays `submitted` and never
+reaches the feed — neither by auto-feed nor by "Sync now", since the backfill
+enumerates `machine_payment_evidence`.
 
 What the accountant sees in Fortnox: an unbooked supplier invoice with the
 payment-evidence PDF(s) attached, `Booked: false`, no voucher — until they

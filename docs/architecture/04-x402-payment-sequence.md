@@ -8,6 +8,7 @@ covers:
   - packages/backend/src/routes/x402-resources.ts
   - packages/backend/src/modules/payments/agent-payment-status.ts
   - packages/backend/src/modules/x402/x402-delegation.ts
+  - packages/backend/src/infra/chain/settlement-transfer-verifier.ts
   - packages/backend/src/rails/delegation-rail.ts
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/routes/machine-payments.ts
@@ -831,12 +832,86 @@ The flow is a two-call variant of `/x402/authorize`:
    payment at all — see the delivery matrix in
    [`11-agent-passport-schema.md`](11-agent-passport-schema.md).
 
-The intent moves to `submitted`; final settlement is observed through the
-merchant/receipt path. `POST /x402/:id/settle` is Base-only and, as of this
-writing, sits on the OpenAPI drift check's `KNOWN_UNDOCUMENTED_ROUTES` allowlist
-pending the epic docs sweep (#834). Operational detail (gas sponsorship, vendor
+The intent moves to `submitted`. `POST /x402/:id/settle` is Base-only and, as of
+this writing, sits on the OpenAPI drift check's `KNOWN_UNDOCUMENTED_ROUTES`
+allowlist pending the epic docs sweep (#834). Operational detail (gas sponsorship, vendor
 dependencies): [`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md);
 security model: [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
+
+#### Completing an erc7710 settlement (#2092)
+
+`submitted` is where the intent used to STOP. Haven submits nothing on this
+scheme, so nothing flipped it to `confirmed` and it never acquired a
+`tx_hash` — and every downstream surface is keyed on exactly that pair:
+`recordMachinePaymentEvidenceBase` (book-time FX in `amount_sek`, the
+fee-ledger row, and `feedSettledPaymentBestEffort`), `GET /receipts`,
+`POST /machine-payments/:id/merchant-receipt`, and dashboard transaction
+history. erc7710 payments were therefore absent from the Fortnox reporting
+feed and from the UI, while EIP-3009 payments reached both.
+
+The completion seam is **scheme-agnostic by construction**: no consumer knows
+about schemes. `POST /machine-payments/evidence` — the call the SDK already
+made after a successful paid retry — gained one pre-step
+([`modules/x402/settlement-observed.ts`](../../packages/backend/src/modules/x402/settlement-observed.ts)).
+When the reported payment is a `submitted`, delegation-rail,
+`settlement_scheme: 'erc7710'` intent with no hash, the reported `txHash` is
+**verified on-chain** and the intent is confirmed; from that point it is
+indistinguishable from a 3009 intent and the existing pipeline runs unchanged.
+On every other shape the pre-step is a no-op, so eip3009 and the legacy rail
+keep exactly the transitions they had.
+
+**What the hash is checked against.** The hash is client input on a path that
+ends in the user's bookkeeping, so
+[`infra/chain/settlement-transfer-verifier.ts`](../../packages/backend/src/infra/chain/settlement-transfer-verifier.ts)
+requires ALL of: the tx is mined on the intent's own chain; its receipt status
+is success; it carries an ERC-20 `Transfer` log emitted by the intent's token
+contract, `from` the payer smart account, `to` the merchant `payTo`, for
+**exactly** the authorized atomic amount; and the mined block's timestamp falls
+inside **this intent's own settlement window** (the settlement child's
+`timestamp` caveat is enforced on-chain, so a genuine settlement of this child
+cannot be mined outside `authorize .. authorize + 600s`). Deliberately NOT
+checked: the facilitator's DelegationManager calldata (facilitator-specific and
+opaque — the Transfer log is the settlement's universal EFFECT, and the caveat
+enforcers already bounded on-chain what could move), the submitter identity
+(redemption is permissionless; who paid the gas is not an integrity property),
+and reorg depth beyond one confirmation.
+
+**Ambiguity is refused, never guessed.** Checks 1–6 are about the transfer's
+SHAPE; only the window is about WHICH intent. That matters because
+`buildSettlementDelegation` builds a **byte-identical** settlement child for two
+authorizations that share merchant, token, amount and expiry second — `salt` is
+constant and the expiry is the only clock-derived field — so within one window
+there is genuinely nothing on-chain that tells two look-alike intents apart.
+Attaching a verified settlement to either would attribute a real payment to the
+wrong purchase and strand the one that caused it. The confirm therefore refuses
+outright when another `submitted` erc7710 intent of the same
+agent/chain/token/recipient/amount exists close enough in time for the two
+settlement windows to OVERLAP: **both** stay `submitted`. That reach is wider
+than one window — a window is `[t - skew, t + M + skew]`, so two of them
+intersect whenever their authorize times are within `M + 2 * skew`, not
+`M + skew` (`AMBIGUITY_WINDOW_SECONDS`). Sizing it to one window's own forward
+reach would leave a skew-wide band of genuinely overlapping look-alikes
+unguarded. A missing book entry is recoverable; a wrong one is
+not. Making the child intent-unique (a per-intent salt) would close this
+exactly and is tracked separately.
+
+**Fail closed, in every direction.** Anything short of a full match leaves the
+intent `submitted` with no evidence row, no fee row and no feed call. An
+unreachable RPC — including a receipt that reads back but whose block does not —
+is reported as `503` (retryable — "not known yet"), never as a confirmation and
+never as a permanent rejection; a revert, a mismatch, or an ambiguous
+attribution is `409`. **Replay:** one settlement transaction may confirm at most
+one intent — the guarded `UPDATE` refuses a hash already carried by another row,
+serialized by a per-hash `pg_advisory_xact_lock`.
+
+**Accepted residual gap.** A merchant that returns no `PAYMENT-RESPONSE` (or one
+without a transaction) gives Haven no hash to verify, so that payment stays
+`submitted` and stays out of the feed. Inventing an anchor client-side is
+precisely what the verification exists to prevent; passive on-chain observation
+of the settlement would close it and is out of scope here. The same applies to
+the generic plain-HTTP erc7710 flow (#2041), where the AGENT retries the
+merchant and Haven never sees the header — such an agent completes the payment
+by posting the settlement hash to `POST /machine-payments/evidence` itself.
 
 ### What the settlement child delegation actually constrains
 

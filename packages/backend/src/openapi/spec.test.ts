@@ -16,6 +16,10 @@ import {
   AgentPaymentPhase,
   AgentPaymentRail,
 } from '../domain/agent-payment-taxonomy.js'
+// #2105: the retired-rail guard at the bottom of this file asserts the spec
+// against the HANDLER's real return value, not against its own description.
+import { handleSend } from '../modules/mpp/send.js'
+import type { AgentContext } from '../middleware/agentAuth.js'
 
 /**
  * The route files that publish the agent payment surface. Adding a new route
@@ -421,4 +425,143 @@ describe('openapi drift — declared routes vs published spec', () => {
       ).toEqual([])
     })
   }
+})
+
+/**
+ * #2105 (epic #1440). The published contract must not describe the retired
+ * Safe / AllowanceModule rail as live.
+ *
+ * The failure this guards against is specific and was real: the spec
+ * documented a `201 pending_signature` / `202 pending_approval` happy path for
+ * `POST /machine-payments/send`, a route whose handler is three refusals and
+ * nothing else, and did not document the 422 that actually happens. A
+ * documented-but-unreachable 2xx is not cosmetic — it is an instruction to an
+ * integrator to build a branch that can never run.
+ *
+ * The first block is the one that matters. It does NOT restate a description:
+ * it CALLS `handleSend` with each rail state and asserts that the status it
+ * really returns is a status the spec really documents. `handleSend` reads
+ * only `execution_rail` and `chain_id` off its agent, so this needs no
+ * database — the #1446 discipline (assert against the behaviour, not against
+ * the prose that describes it) at zero cost.
+ */
+describe('retired-rail residue in the published contract (#2105)', () => {
+  const sendResponses = openapiSpec.paths['/machine-payments/send'].post.responses
+  const documentedSendCodes = Object.keys(sendResponses)
+
+  const agentOnRail = (executionRail: string | null): AgentContext => ({
+    id: '00000000-0000-4000-8000-000000000001',
+    user_id: '00000000-0000-4000-8000-000000000002',
+    name: 'guard',
+    delegate_address: '0x' + '11'.repeat(20),
+    safe_address: '0x' + '22'.repeat(20),
+    chain_id: 8453,
+    status: 'active',
+    execution_rail: executionRail,
+  })
+
+  // `resolveExecutionRail` is exhaustively { delegation | retired_session |
+  // retired_allowance }, and its fall-through means *anything* that is not the
+  // two literals resolves to retired_allowance — including null, which is what
+  // a missing Safe row yields. All four inputs below are therefore real
+  // populations, not synthetic ones.
+  const RAIL_CASES: Array<{ rail: string | null; expected: number; why: string }> = [
+    { rail: 'session_key', expected: 410, why: 'session rail retired (#834)' },
+    { rail: 'allowance_module', expected: 410, why: 'Safe rail retired (#1986)' },
+    { rail: null, expected: 410, why: 'no Safe row falls through to retired_allowance' },
+    { rail: 'delegation', expected: 422, why: 'MPP never supported the delegation rail (#1251)' },
+  ]
+
+  it.each(RAIL_CASES)(
+    'POST /machine-payments/send really answers $expected on rail=$rail ($why), and the spec documents it',
+    async ({ rail, expected }) => {
+      const result = await handleSend(agentOnRail(rail), 'USDC', '0x' + '33'.repeat(20), '1.0', undefined)
+
+      expect(result.statusCode).toBe(expected)
+      expect(
+        documentedSendCodes,
+        `handleSend returns ${result.statusCode} for execution_rail=${String(rail)}, but the ` +
+        `OpenAPI spec for POST /machine-payments/send documents only ` +
+        `[${documentedSendCodes.join(', ')}]. Add the response, do not delete the assertion.`,
+      ).toContain(String(result.statusCode))
+    },
+  )
+
+  it('documents NO success response on POST /machine-payments/send — the handler has no success path', () => {
+    // Positive control for the predicate itself: it must be able to SEE a 2xx.
+    // POST /payments is the live sibling and genuinely has one, so if this
+    // first expectation ever fails, the filter is broken and the second
+    // expectation below is worthless rather than reassuring.
+    const livePaymentCodes = Object.keys(openapiSpec.paths['/payments'].post.responses)
+    const is2xx = (code: string) => /^2\d\d$/.test(code)
+    expect(livePaymentCodes.filter(is2xx).length).toBeGreaterThan(0)
+
+    expect(documentedSendCodes.filter(is2xx)).toEqual([])
+    expect(documentedSendCodes).toContain('422')
+  })
+
+  it('documents no 202 approval branch on any payment entry point', () => {
+    for (const path of ['/payments', '/x402/authorize', '/x402'] as const) {
+      expect(
+        Object.keys(openapiSpec.paths[path].post.responses),
+        `${path} must not document a 202: no handler behind it emits one — the delegation rail ` +
+        'enforces budget on-chain instead of queuing an approval.',
+      ).not.toContain('202')
+    }
+  })
+
+  it('has removed the approval schemas outright, leaving no dangling $ref', () => {
+    const schemas = openapiSpec.components.schemas as Record<string, unknown>
+    expect(schemas.PendingApproval).toBeUndefined()
+    expect(schemas.X402PendingApproval).toBeUndefined()
+
+    const refs: string[] = []
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) return void node.forEach(walk)
+      if (node === null || typeof node !== 'object') return
+      for (const [key, value] of Object.entries(node)) {
+        if (key === '$ref' && typeof value === 'string') refs.push(value)
+        else walk(value)
+      }
+    }
+    walk(openapiSpec)
+
+    // Positive control: the walker must actually be finding refs, and must be
+    // finding a schema we know is still referenced. Without this, a walker that
+    // silently collected nothing would report a clean bill of health.
+    expect(refs.length).toBeGreaterThan(50)
+    expect(refs).toContain('#/components/schemas/AgentPaymentStatus')
+
+    const componentRefs = refs
+      .filter((ref) => ref.startsWith('#/components/schemas/'))
+      .map((ref) => ref.slice('#/components/schemas/'.length))
+    expect(componentRefs).not.toContain('PendingApproval')
+    expect(componentRefs).not.toContain('X402PendingApproval')
+
+    // Every remaining component $ref must resolve. This is what turns the two
+    // deletions above from "a string is absent" into "the document is intact".
+    const unresolved = [...new Set(componentRefs)].filter((name) => !(name in schemas))
+    expect(unresolved, 'Dangling $ref targets in openapiSpec.components.schemas').toEqual([])
+  })
+
+  it('names the delegation rail, not Safe module state, as the enforcement primitive', () => {
+    const description = openapiSpec.components.securitySchemes.AgentApiKey.description
+    // The three-way split must survive the rewrite ...
+    expect(description).toMatch(/API auth is identity/i)
+    expect(description).toMatch(/signature is authority/i)
+    // ... while the primitive holding "enforcement" is the live one.
+    expect(description).toMatch(/budget delegation/i)
+    expect(description).not.toMatch(/Safe module state/i)
+  })
+
+  it('keeps AgentPaymentStatus.kind approval_request as a documented wire-compat value', () => {
+    // The retained case, and deliberately asymmetric with the deletions above:
+    // this enum value is still declared by the backend's own status type and
+    // still serialized by a live route, so it stays — but it must carry a note
+    // saying it is unreachable, or it reads as a branch worth writing.
+    const kind = openapiSpec.components.schemas.AgentPaymentStatus.properties.kind
+    expect(kind.enum).toContain('approval_request')
+    expect(kind.description).toMatch(/wire compatibility/i)
+    expect(kind.description).toMatch(/Do not write a branch on it/i)
+  })
 })

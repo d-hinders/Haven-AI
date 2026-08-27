@@ -399,7 +399,7 @@ export async function runSettlementSweepTick(
         const existing = index.get(hash)
         if (existing === undefined) {
           index.set(hash, tx)
-        } else if (false) {
+        } else if (existing === AMBIGUOUS || tx === AMBIGUOUS) {
           // Ambiguity found WITHIN one range must survive the merge too, or a
           // second range naming the same child would overwrite the poison.
           index.set(hash, AMBIGUOUS)

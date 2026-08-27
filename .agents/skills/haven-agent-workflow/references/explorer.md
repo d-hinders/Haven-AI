@@ -18,7 +18,7 @@ Also inspect:
 - `packages/frontend/src/components/haven`
 - the route, component, API, test, and state-management files relevant to the requested feature
 - existing shared utilities, labels, row components, and nearby tests before suggesting new code
-- related surfaces that may need to stay aligned, especially dashboard, account detail, agent detail, transactions, approvals, contacts, and `/design-system`
+- related surfaces that may need to stay aligned, especially dashboard, account detail, agent detail (incl. its budget card), transactions, contacts, and `/design-system`
 - related entrypoints for the same behavior, especially HTTP headers, MCP tool arguments, SDK helpers, direct APIs, generated snippets, and demo scripts
 
 Return:

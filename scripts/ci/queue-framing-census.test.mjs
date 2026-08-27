@@ -83,7 +83,110 @@ const GUARDED_FILES = [
   'packages/mcp/src/server.ts',
   'packages/mcp/src/tools.ts',
   'packages/mcp/README.md',
+  // #2107 — the surfaces #2107 was filed to reach, now that #2100/#2101/#2103/
+  // #2105/#2106 have cleared them. Each was verified clean against the phrase
+  // list before being added; adding a file that still trips would have made
+  // this a red-CI change rather than a guard.
+  //
+  // Slash commands and installed skill files. NOT reachable by the docs
+  // coupling gate at all: no `covers:` glob names them, and `docs:check`'s
+  // skill validator checks structure, not claims. This is the class #2103
+  // fixed after `qa-dev.md` spent weeks telling a QA agent that a correct
+  // on-chain refusal was a FAILURE — in a run that feeds `qa-freshness`.
+  '.claude/commands/qa-dev.md',
+  '.claude/commands/qa-explore-ui.md',
+  '.agents/skills/haven-agent-workflow/references/backend-worker.md',
+  '.agents/skills/haven-agent-workflow/references/workflow-coordinator.md',
+  '.agents/skills/haven-agent-workflow/references/explorer.md',
+  '.agents/skills/haven-agent-workflow/references/reviewer.md',
+  // Published npm READMEs the #2100 sweep did not cover. These left the repo.
+  'packages/signer/README.md',
+  'packages/connect/README.md',
+  'packages/cli/README.md',
+  // The local MCP first-launch consent gate (#2086) — the last thing an
+  // operator reads before handing payment tools to a model.
+  'packages/mcp/src/consent.ts',
+  // Frontend surfaces cleared by #2106. `agent-credential.ts` matters most:
+  // its text is written into `~/.haven/*.json` and read by the agent runtime.
+  'packages/frontend/src/lib/agent-credential.ts',
+  'packages/frontend/src/lib/payment-status.ts',
+  // Contributor-facing templates that teach the invariant (#2103).
+  'docs/contributing/loop-engineering.md',
+  'docs/bug-reports/_run-report-template.md',
 ]
+
+/**
+ * THE LINE THIS CENSUS CAN HOLD, AND WHERE IT STOPS — measured (#2107).
+ *
+ * The list above guards surfaces where naming the retired rail is **never
+ * correct**. It cannot guard a surface that must **describe** the retirement,
+ * and that distinction — not "code vs docs" — is the real boundary.
+ *
+ * This census works on SOURCE because it strips comments first: a maintainer
+ * comment may legitimately name the retired rail to explain the retirement,
+ * and stripping means archaeology cannot be mistaken for a live claim.
+ * **Markdown has no comments to strip.** In a doc, a retirement record, a
+ * `last-verified` note and a live false claim are all just prose, and a
+ * substring scanner cannot tell them apart.
+ *
+ * Measured on this branch, every one of these trips the list for a reason that
+ * is CORRECT prose:
+ *
+ *   CLAUDE.md                                  "safe allowancemodule" — its
+ *                                              Execution Primitives section
+ *                                              describes the retired rail, as
+ *                                              it must
+ *   docs/operations/local-to-hosted-mcp.md     two hits, one of them the line
+ *                                              that says the rail *is retired*
+ *   docs/architecture/06-hosted-mcp-connect-   the hit is inside its own
+ *   flow.md                                    `last-verified` note recording
+ *                                              the #2102 fix
+ *   frontend custody/page.tsx                  names the module inside the
+ *                                              LEGACY-rail branch (#2106),
+ *                                              where it is the right answer
+ *
+ * Adding any of them means either a red CI on correct prose, or widening the
+ * allowlist until the list stops discriminating — the failure this file's own
+ * allowlist notes already warn about ("a phrase that trips on the fix is a
+ * guard that pressures the next author into reverting it").
+ *
+ * **Two files were dropped from this change for the same reason, found in
+ * review.** The root `README.md` and `packages/backend/src/openapi/spec.ts`
+ * both PASS today — but only because their correct retirement prose happens to
+ * write `Safe + AllowanceModule` and `Safe / AllowanceModule` with a
+ * separator. Delete the separator in an otherwise meaning-preserving copy-edit
+ * and `safe allowancemodule` fires on prose that is still exactly true (2 such
+ * lines in the README, 9 in the spec). Guarding a file whose correctness rests
+ * on a punctuation character is the same self-inflicted fragility this comment
+ * block exists to argue against; both belong in the describes-the-retirement
+ * category, not the never-names-it one. The spec's description prose is
+ * therefore still ungated — a real coverage gap, named rather than claimed.
+ *
+ * **A third file went the same way on the re-review**, and it is the useful
+ * one: `packages/qa-agent/src/pilot/README.md` carries
+ * `**Safe / AllowanceModule rail** (retired #1986, …)` in live prose, the
+ * identical separator-dependent shape. It had already been added to the guard
+ * before anyone noticed — so the standard was being applied to two files and
+ * not to a third of exactly the same kind. Its "What was deleted, and why"
+ * section is a retirement record; it belongs with the describes-it group.
+ *
+ * So the docs whose job is to DESCRIBE the retirement stay out — architecture,
+ * operations, product docs and the gravity files — while the two contributor
+ * templates listed above are on the guarded side precisely because they should
+ * never need the vocabulary at all. The gap is named rather than papered over:
+ * **prose in any doc that must describe the retirement is still ungated.**
+ * (This paragraph said "docs stay out" flatly until review caught it — while
+ * the list two dozen lines above already contained two `docs/**` entries. A
+ * comment contradicting itself across a screen is the defect class this whole
+ * census exists to catch, so it is recorded rather than quietly reworded.)
+ *
+ * Closing it needs a different mechanism
+ * — a marker convention that lets a doc label a sentence as a retirement
+ * record, or a claim-level check rather than a phrase-level one — not a longer
+ * phrase list. #2121 is a live example of what still gets through: a
+ * `contract: true` doc whose diagram shows a `pending_approval` branch it
+ * explicitly says works on the delegation rail.
+ */
 
 /**
  * Prose only. Nothing here can appear inside a legitimate code literal, an
@@ -217,6 +320,18 @@ test('POSITIVE CONTROL: the scanner does not flag the corrected replacement pros
     'An over-budget payment is declined before any money moves: there is no approval queue, so ask the owner to grant or raise the budget in Haven rather than waiting for an approval.',
     'spend_authority_readiness is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none.',
     'Sends the requested amount by redeeming the agent\'s on-chain budget delegation, account to recipient with no funding leg.',
+    // #2107: both of these were REWRITTEN because the census flagged them —
+    // and both were already correct. `backend-worker.md` said "never queued
+    // for approval" (a negation of the banned phrase) and `qa-dev.md` QUOTED
+    // the old wording while correcting it. A substring scanner cannot see a
+    // negation or a quotation, so the guard tripped on its own fix.
+    //
+    // Rewriting rather than widening the allowlist is the deliberate choice:
+    // the phrase list IS the vocabulary, and corrected prose is expected to
+    // avoid it — that is what this whole control asserts. Pinned here so a
+    // future widening cannot start flagging them again.
+    'Anything over the remaining budget is declined before any money moves — never held for a human to approve later. There is no approval queue on any live rail, so do not build one.',
+    'The refusal IS the pass. This step told a QA agent to expect the payment to be held for a human until #2103, which is exactly backwards.',
   ]
   for (const sentence of corrected) {
     assert.deepEqual(

@@ -32,7 +32,8 @@ Run each goal through the actual tools. Record the outcome (pass/fail + what you
    *(Do not record a refusal as a failure. There is no approval queue on the
    delegation rail — the budget's on-chain caveat enforcers decline an
    over-budget payment, and since #2055 there is no queue for one to wait in.
-   The refusal IS the pass. This step said "queued for approval" until #2103,
+   The refusal IS the pass. This step told a QA agent to expect
+   the payment to be held for a human until #2103,
    which is exactly backwards: an agent following it recorded the correct
    behaviour as a FAIL. Its deterministic sibling is the `over-budget-refused`
    harness leg — renamed from `over-budget-queue` by #2016 for the same reason.)*

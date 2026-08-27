@@ -64,7 +64,6 @@ export async function handleReconciliationEvent(
   // their `approval_request_id` values, so the READ side stays. Only the write
   // branch is gone, because it could not be taken.
   let event = await upsertReconciliationEvent({
-    conflictColumn: 'payment_intent_id',
     agentId,
     userId: payment.user_id,
     paymentIntentId: payment.id,
@@ -80,7 +79,7 @@ export async function handleReconciliationEvent(
     details: details ? JSON.stringify(details) : null,
   })
   if (!event) {
-    event = await findReconciliationEvent('payment_intent_id', payment.id, agentId, eventType)
+    event = await findReconciliationEvent(payment.id, agentId, eventType)
   }
   if (!event) throw new Error('reconciliation_event_conflict_not_found')
 

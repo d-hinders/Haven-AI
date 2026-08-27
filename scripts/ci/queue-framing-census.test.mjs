@@ -113,6 +113,18 @@ const GUARDED_FILES = [
   // Contributor-facing templates that teach the invariant (#2103).
   'docs/contributing/loop-engineering.md',
   'docs/bug-reports/_run-report-template.md',
+  // #2115 — the backend half. `GET /payments/:id`'s `message` and
+  // `next_action` are passed STRAIGHT THROUGH by the SDK
+  // (`mapPaymentStatusResult` in `packages/sdk/src/payment-mappers.ts`; the SDK
+  // only mints its own text when the backend sent none), so a queue claim here
+  // overrides every corrected string in the surfaces above. This file is the
+  // one that answers the tool an agent calls to decide what to do next.
+  'packages/backend/src/modules/payments/agent-payment-status.ts',
+  // #2115 — the SDK's exported wire types. Their `x-enumDescriptions` are
+  // agent-visible through the OpenAPI spec, and the retired values carry
+  // "Retired wire value: … stop and tell the user" prose that a future edit
+  // could quietly re-point at a queue.
+  'packages/sdk/src/types.ts',
 ]
 
 /**
@@ -243,6 +255,12 @@ const QUEUE_CLAIMS = [
   "allowancemodule path",
   'pending_approval means stop',
   'after approval',
+  // #2115 — the two claim shapes the backend's `messageForRail` used that
+  // nothing above matched. "waiting for user approval" caught its `pending`
+  // strings; its `approved` and `proposed` strings asserted the queue just as
+  // hard and walked straight past the census.
+  'the user approved this',
+  'the remaining account approvals',
 ]
 
 /**

@@ -2,9 +2,8 @@
 owner: "@d-hinders"
 status: research
 covers:
-  - packages/qa-agent/src/pilot/**
   - docs/research/erc4337-pilot-rig.md
-last-verified: "2026-07-12"
+last-verified: "2026-08-27" # #2087: dropped the `packages/qa-agent/src/pilot/**` glob — the session-rail scripts this report covered are deleted, and the glob still resolving (to three unrelated delegation-rail scripts) would map a superseded report onto live code. The sibling docs cover is kept and still resolves. Front-matter only; the body is unchanged superseded record and was not re-verified. Prior: none — this doc carried a bare date with no verification note before now.
 ---
 
 > **Superseded (#834, 2026-07-12):** the session rail this report piloted is

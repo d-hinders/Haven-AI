@@ -92,6 +92,11 @@ const GUARDED_FILES = [
  *
  * Deliberately NOT banned, and each for a stated reason:
  * - "approval queue": the corrected prose says there is NO approval queue.
+ * - "is pending" and "poll next_tool": too broad — the first matches the
+ *   CORRECTED "no approval is pending", the second matches the legitimate
+ *   transient funding poll (check_status_later). Both were tried and rejected:
+ *   a phrase that trips on the fix is a guard that pressures the next author
+ *   into reverting it.
  * - "wait_for_user_approval" / "pending_approval": retained wire values, and
  *   the SDK README documents them as "No longer produced" retirement records
  *   in the #2055 style.
@@ -113,6 +118,11 @@ const QUEUE_CLAIMS = [
   // #2100/#2101 — agent-facing additions
   'queued for owner approval',
   'queues for owner approval',
+  'queued for the wallet owner',
+  'queued for the owner',
+  'while it is pending',
+  'while approval is pending',
+  'until the payment is approved',
   'queued as pending_approval',
   'queued as a pending_approval',
   'waiting for user approval',
@@ -140,21 +150,35 @@ const QUEUE_CLAIMS = [
  * has never been the shape of this defect — the defect is whole sentences — and
  * the positive controls below prove the scanner still detects real prose.
  */
-export function stripComments(source) {
-  return source
+export function stripComments(source, { markdown = false } = {}) {
+  const stripped = source
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/(^|[^:])\/\/.*$/gm, '$1')
-    .replace(/^\s*[*#]\s?.*$/gm, ' ')
+  // JSDoc continuation lines (` * …`) and `#` comments are noise in SOURCE
+  // files. In MARKDOWN both are content — `# Heading` and `* bullet` — and
+  // blanking them would hide a queue claim written in a heading or a
+  // star-bulleted list from the census entirely. Reviewer finding on #2100:
+  // no live false negative, but a latent hole in three published READMEs.
+  const decommented = markdown ? stripped : stripped.replace(/^\s*[*#]\s?.*$/gm, ' ')
+  // Join adjacent string literals. A banned sentence in source is almost never
+  // one literal — it is `'…is queued for the ' + 'wallet owner…'` wrapped across
+  // lines by the formatter, and a contiguous-substring scanner sails straight
+  // past it. This was not hypothetical: the three hosted guidance payloads the
+  // #2100 review found had exactly that shape, and the census caught them only
+  // because a SECOND banned phrase happened to sit inside one literal.
+  return decommented.replace(/['"`]\s*\+\s*['"`]/g, '')
 }
 
-export function findQueueClaims(source) {
-  const haystack = stripComments(source).toLowerCase()
+export function findQueueClaims(source, options) {
+  const haystack = stripComments(source, options).toLowerCase()
   return QUEUE_CLAIMS.filter((phrase) => haystack.includes(phrase))
 }
 
 for (const file of GUARDED_FILES) {
   test(`${file} makes no queue-and-approve claim`, () => {
-    const hits = findQueueClaims(readFileSync(resolve(repoRoot, file), 'utf8'))
+    const hits = findQueueClaims(readFileSync(resolve(repoRoot, file), 'utf8'), {
+      markdown: file.endsWith('.md'),
+    })
     assert.deepEqual(
       hits,
       [],
@@ -201,6 +225,26 @@ test('POSITIVE CONTROL: the scanner does not flag the corrected replacement pros
       `the census flags corrected prose as a queue claim: ${sentence}`,
     )
   }
+})
+
+test('POSITIVE CONTROL: markdown headings and star-bullets are not stripped away', () => {
+  // The source-file stripper blanks `# …` and `* …` lines. In a README those are
+  // a heading and a bullet, so running it there would silently hide a claim.
+  const md = '# Payments queued for approval\n* The payment waits for your approval.\n'
+  assert.deepEqual(findQueueClaims(md, { markdown: true }).sort(), ['queued for approval', 'waits for your approval'])
+  // …and the source-file mode is what makes the retained-code comments tolerable.
+  assert.deepEqual(findQueueClaims(md), [])
+})
+
+test('POSITIVE CONTROL: a claim split across concatenated string literals is still caught', () => {
+  // The shape a formatter actually produces. Without literal-joining this reads
+  // as "...queued for the ' + 'wallet owner..." and matches nothing.
+  const wrapped = [
+    "  reason:",
+    "    'The amount exceeds the remaining budget, so the payment is queued for the ' +",
+    "    'wallet owner. Tell the user.',",
+  ].join('\n')
+  assert.deepEqual(findQueueClaims(wrapped), ['queued for the wallet owner'])
 })
 
 test('POSITIVE CONTROL: comment stripping does not blind the scanner to real prose', () => {

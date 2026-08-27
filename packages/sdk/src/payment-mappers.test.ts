@@ -199,7 +199,11 @@ describe('raw payment state mapping', () => {
       rail: 'direct',
       status: 'pending_approval',
       phase: AgentPaymentPhase.UserApprovalRequired,
-      nextAction: AgentPaymentNextAction.WaitForUserApproval,
+      // #2101: STOP, not wait. The phase is a retained descriptive label; the
+      // nextAction is the field agents follow FIRST, and no approval can ever
+      // arrive to end a wait (410 on the legacy rail per #1986; 403/502 at
+      // prepare on the delegation rail; `approval_requests` dropped by #2055).
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
       amount: '2.50',
       token: '',
       resourceUrl: null,

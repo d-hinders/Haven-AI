@@ -1047,15 +1047,19 @@ export function createToolHandlers(
               status: 'pending_approval',
               payload_hash: null,
               // #1308: over-budget is a USER decision — never continue silently.
+              // #2101: this is a DECLINE, not a queue. next_action is the field the
+              // agent contract says to follow FIRST, so it must say stop — prose
+              // saying "do not wait" beside a next_action of wait_for_user_approval
+              // is a payload that contradicts itself, and the field wins.
               ...buildAgentGuidance({
-                nextAction: AgentPaymentNextAction.WaitForUserApproval,
+                nextAction: AgentPaymentNextAction.StopAndTellUser,
                 nextTool: 'mcp__haven__haven_get_payment_status',
                 nextArguments: { payment_id: err.paymentId ?? null },
                 safeToContinue: false,
                 reason:
-                  'The amount exceeds the remaining budget, so the payment is queued for the ' +
-                  'wallet owner. Tell the user, then poll next_tool — do NOT re-quote or re-pay ' +
-                  'the same purchase while it is pending.',
+                  'The amount exceeds the remaining budget, so the payment was declined. ' +
+                  'Nothing is queued and no approval will arrive: tell the user, and ask the ' +
+                  'wallet owner to raise the budget in Haven. Do NOT re-quote, re-pay, or poll.',
                 summary: { payment_id: err.paymentId ?? 'unknown', status: 'pending_approval' },
               }),
             }
@@ -1441,17 +1445,21 @@ export function createToolHandlers(
               status: 'pending_approval',
               payload_hash: null,
               // #1308: over-budget is a USER decision — never continue silently.
+              // #2101: this is a DECLINE, not a queue. next_action is the field the
+              // agent contract says to follow FIRST, so it must say stop — prose
+              // saying "do not wait" beside a next_action of wait_for_user_approval
+              // is a payload that contradicts itself, and the field wins.
               // Legacy rail only reaches here — the delegation rail refused
               // earlier, before any intent existed.
               ...buildAgentGuidance({
-                nextAction: AgentPaymentNextAction.WaitForUserApproval,
+                nextAction: AgentPaymentNextAction.StopAndTellUser,
                 nextTool: 'mcp__haven__haven_get_payment_status',
                 nextArguments: { payment_id: err.paymentId ?? null },
                 safeToContinue: false,
                 reason:
-                  'The amount exceeds the remaining allowance, so the payment is queued for the ' +
-                  'wallet owner. Tell the user, then poll next_tool — do NOT re-quote or re-pay ' +
-                  'the same purchase while it is pending.',
+                  'The amount exceeds the remaining budget, so the payment was declined. ' +
+                  'Nothing is queued and no approval will arrive: tell the user, and ask the ' +
+                  'wallet owner to raise the budget in Haven. Do NOT re-quote, re-pay, or poll.',
                 summary: { payment_id: err.paymentId ?? 'unknown', status: 'pending_approval' },
               }),
             }
@@ -1548,7 +1556,7 @@ export function createToolHandlers(
             // it stops the agent; a transient funding state is a poll.
             ...buildAgentGuidance({
               nextAction: fundingPending
-                ? AgentPaymentNextAction.WaitForUserApproval
+                ? AgentPaymentNextAction.StopAndTellUser
                 : AgentPaymentNextAction.CheckStatusLater,
               nextTool: 'mcp__haven__haven_get_payment_status',
               nextArguments: { payment_id: args.payment_id },
@@ -1888,15 +1896,19 @@ export function createToolHandlers(
               // #1308 review: the decomposed twin gets the SAME unsafe-to-continue
               // signal as the one-call tool — this is the state the contract
               // exists for.
+              // #2101: this is a DECLINE, not a queue. next_action is the field the
+              // agent contract says to follow FIRST, so it must say stop — prose
+              // saying "do not wait" beside a next_action of wait_for_user_approval
+              // is a payload that contradicts itself, and the field wins.
               ...buildAgentGuidance({
-                nextAction: AgentPaymentNextAction.WaitForUserApproval,
+                nextAction: AgentPaymentNextAction.StopAndTellUser,
                 nextTool: 'mcp__haven__haven_get_payment_status',
                 nextArguments: { payment_id: err.paymentId ?? null },
                 safeToContinue: false,
                 reason:
-                  'The amount exceeds the remaining budget, so the payment is queued for the ' +
-                  'wallet owner. Tell the user, then poll next_tool — do NOT re-quote or re-pay ' +
-                  'the same purchase while it is pending.',
+                  'The amount exceeds the remaining budget, so the payment was declined. ' +
+                  'Nothing is queued and no approval will arrive: tell the user, and ask the ' +
+                  'wallet owner to raise the budget in Haven. Do NOT re-quote, re-pay, or poll.',
                 summary: { payment_id: err.paymentId ?? 'unknown', status: 'pending_approval' },
               }),
             }

@@ -18,8 +18,10 @@ describe('agent payment state taxonomy', () => {
 
     expect(AgentPaymentNextActionSchema.enum).toContain(AgentPaymentNextAction.RetryOriginalX402Request)
     expect(AgentPaymentNextActionSchema.enum).toContain(AgentPaymentNextAction.PaymentWindowExpired)
+    // #2101: the value survives for wire compatibility but nothing maps to it
+    // any more, and its description must say so rather than instruct a wait.
     expect(AgentPaymentNextActionSchema['x-enumDescriptions'][AgentPaymentNextAction.WaitForUserApproval])
-      .toContain('wallet owner')
+      .toContain('no live rail produces it')
     expect(AgentPaymentNextActionSchema['x-enumDescriptions'][AgentPaymentNextAction.PaymentWindowExpired])
       .toContain('same idempotency key')
 

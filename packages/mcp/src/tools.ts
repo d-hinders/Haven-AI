@@ -177,9 +177,20 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           }
         } catch (err) {
           if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
+            // #2101: retained fail-closed (see `isPendingApproval` below), but it
+            // used to return a bare status string whose only explanation lived in
+            // MCP_INSTRUCTIONS' now-deleted "pending_approval means stop" line.
+            // Carry the verdict IN BAND rather than leaning on the general
+            // unrecognised-status rule: this branch is the one place a model can
+            // still meet the status, and it must not read as "poll and wait".
             return {
               payment_id: err.paymentId,
               status: 'pending_approval',
+              next_action: 'stop_and_tell_user',
+              message:
+                'This payment is not payable and nothing is queued for anyone to approve — ' +
+                'stop and tell the user, then ask the wallet owner to grant or raise the ' +
+                'agent budget in Haven. Do not retry, re-sign, or poll.',
               asset: args.asset,
               amount: args.amount,
               recipient: args.recipient,

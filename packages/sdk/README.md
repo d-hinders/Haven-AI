@@ -352,9 +352,9 @@ x402 tool-window failures:
 | `agent_signature_required` | Haven prepared a payment intent; the agent must sign and submit. | no |
 | `payment_submitted` | Haven received the signed payment; the agent should poll for confirmation. | no |
 | `payment_confirmed` | Direct payment is confirmed on chain. | yes |
-| `user_approval_required` | **No longer produced.** Described the retired Safe rail's approval queue; kept in the exported enum for wire compatibility only. A payment outside the budget is now declined outright — see [Payments outside the agent's budget](#payments-outside-the-agents-budget). | n/a |
-| `user_execution_required` | **No longer produced.** Same retirement as above. | n/a |
-| `waiting_for_additional_approvals` | **No longer produced.** Same retirement as above. | n/a |
+| `user_approval_required` | **No live rail produces it.** Described the retired Safe rail's approval queue; kept in the exported enum for wire compatibility only. A payment outside the budget is now declined outright — see [Payments outside the agent's budget](#payments-outside-the-agents-budget). | n/a |
+| `user_execution_required` | **No live rail produces it.** Same retirement as above. | n/a |
+| `waiting_for_additional_approvals` | **No live rail produces it.** Same retirement as above. | n/a |
 | `funding_sent` | Haven funding leg landed; the agent can continue the merchant/protocol leg. Only the EIP-3009 bridge has a funding leg; erc7710 direct settlement has none. | no |
 | `rejected` | The payment was rejected and cannot proceed. | yes |
 | `expired` | Payment expired before completion. | yes |
@@ -369,8 +369,8 @@ The merchant settlement leg of x402 (and the MPP retry) is the agent's own reque
 | `sign_and_submit_payment` | Sign with the delegate key and submit the payment to Haven. |
 | `check_status_later` | Poll `getPaymentStatus(payment_id)` later. |
 | `none` | Stop polling; no more action is needed for this payment id. |
-| `wait_for_user_approval` | **No longer produced.** Retired with the Safe rail's approval queue; kept in the exported enum for wire compatibility. If you ever receive it, stop and tell the user — no approval is queued and nothing will arrive. |
-| `wait_for_user_to_complete_payment` | **No longer produced.** Same retirement as above. |
+| `wait_for_user_approval` | **No longer produced — nothing maps to it.** Retired with the Safe rail's approval queue; kept in the exported enum for wire compatibility. The SDK's own status mapping now answers `stop_and_tell_user` for the statuses that used to yield this. |
+| `wait_for_user_to_complete_payment` | **No longer produced — nothing maps to it.** Same retirement as above. |
 | `retry_original_x402_request` | Resume this payment id and retry the original x402 request with the merchant payment header. Do not start a new merchant session. |
 | `stop_and_tell_user` | Stop retrying and tell the user the payment failed or was rejected. |
 | `request_again_if_user_still_wants_it` | The request expired; ask again only if the user still wants the payment. |

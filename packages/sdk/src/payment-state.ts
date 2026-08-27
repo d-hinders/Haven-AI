@@ -47,9 +47,16 @@ function nextActionForStatus(status: string): PaymentNextAction | null {
   if (status === 'pending_signature') return AgentPaymentNextAction.SignAndSubmitPayment
   if (status === 'submitted') return AgentPaymentNextAction.CheckStatusLater
   if (status === 'confirmed') return AgentPaymentNextAction.None
-  if (status === 'pending' || status === 'pending_approval') return AgentPaymentNextAction.WaitForUserApproval
+  // #2101: STOP, not wait. No live rail mints these payment statuses (410 on
+  // the legacy rail, #1986; 403/502 at prepare on the delegation rail;
+  // `approval_requests` dropped by #2055), so nothing will ever transition a
+  // row out of them. `nextAction` is the field the agent contract says to
+  // follow FIRST — emitting `wait_for_user_approval` here would contradict
+  // the message beside it and send a compliant agent into a poll loop that
+  // cannot terminate. The fail-closed branch is retained; its verdict is stop.
+  if (status === 'pending' || status === 'pending_approval') return AgentPaymentNextAction.StopAndTellUser
   if (status === 'approved') return AgentPaymentNextAction.WaitForUserToCompletePayment
-  if (status === 'proposed') return AgentPaymentNextAction.WaitForUserApproval
+  if (status === 'proposed') return AgentPaymentNextAction.StopAndTellUser
   if (status === 'executed') return AgentPaymentNextAction.RetryOriginalX402Request
   if (status === 'rejected') return AgentPaymentNextAction.StopAndTellUser
   if (status === 'expired') return AgentPaymentNextAction.RequestAgainIfUserStillWantsIt

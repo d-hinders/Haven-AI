@@ -24,7 +24,7 @@
  * `{ delegationManager, permissionContext, delegator }`.
  */
 
-import { hashTypedData, pad, type Address, type Hex } from 'viem'
+import { hashTypedData, keccak256, pad, stringToBytes, type Address, type Hex } from 'viem'
 import { Interface } from 'ethers'
 import { createDelegation, type Delegation } from '@metamask/smart-accounts-kit'
 import { encodeDelegations, hashDelegation } from '@metamask/smart-accounts-kit/utils'
@@ -36,8 +36,68 @@ const ERC20_IFACE = new Interface(['function transfer(address to, uint256 amount
 /** Cap on how long a settlement grant may live, whatever the merchant asks. */
 export const MAX_SETTLEMENT_WINDOW_SECONDS = 600 // the #715 discipline carries over
 
+/**
+ * Domain-separated salt that makes a settlement child INTENT-UNIQUE (#2094).
+ *
+ * ## The defect it fixes
+ *
+ * Until #2094 the child was built with the kit's default salt (`0x00`,
+ * verified by probe), and its only clock-derived field was the `timestamp`
+ * caveat's `beforeThreshold`. Two authorizations sharing merchant `payTo`,
+ * token, amount and expiry SECOND therefore produced a BYTE-IDENTICAL child
+ * with the same `childHash`: nothing on-chain distinguished two of a user's
+ * own look-alike open payments, so a verified settlement could be attached to
+ * either one. #2096 answered that by refusing to guess (the ambiguity guard in
+ * `CONFIRM_SETTLEMENT_OBSERVED_SQL`) — safe, but both payments then miss the
+ * books.
+ *
+ * ## Why the INTENT ID, and why hashed
+ *
+ * The salt must be **derived**, never random: the completion seam — and the
+ * passive settlement sweeper #2117 wants — has to RECOMPUTE the expected child
+ * for a stored intent rather than trust an opaque column. The payment intent's
+ * `id` is the only value that is (a) unique per intent by primary key, (b)
+ * already stored on the row the verifier starts from, and (c) fixed before the
+ * child exists. So the mapping intent → child is a pure function of the intent
+ * row, reproducible by anyone holding it.
+ *
+ * It is HASHED rather than used raw for shape, not secrecy: `createDelegation`
+ * wants a 32-byte salt and a UUID is 16, and the `haven-x402-settlement:`
+ * domain tag makes it structurally impossible for a settlement salt to collide
+ * with a budget-delegation salt (`delegationSalt`, `rails/delegation-policy.ts`,
+ * whose tag is `haven-delegation:`).
+ *
+ * ## On-chain leak assessment
+ *
+ * The salt is PUBLIC — it travels in the child and is emitted verbatim in the
+ * DelegationManager's `RedeemedDelegation` log. It leaks nothing:
+ *
+ * - The preimage is a domain tag plus a v4 UUID: 122 bits of CSPRNG entropy
+ *   with no user, agent, merchant, amount or timing information encoded in it.
+ * - That UUID is not a Haven secret either — it is the `payment_id` already
+ *   returned to the agent in the authorize response, quoted in the settle URL
+ *   and shown in the dashboard. Nothing is authorized by knowing it.
+ * - Because it is hashed, the id is not even legible on-chain; recovering it
+ *   would mean inverting keccak over a 122-bit-random preimage. Correlating
+ *   two settlements as "the same user's" is likewise no easier than before —
+ *   the payer smart account is already in the `Transfer` log's `from`.
+ *
+ * Both directions are what we want: opaque to an observer, recomputable by
+ * anyone who legitimately holds the intent row.
+ */
+export function settlementSalt(intentId: string): Hex {
+  return keccak256(stringToBytes(`haven-x402-settlement:${intentId}`))
+}
+
 export interface X402SettlementRequest {
   chainId: number
+  /**
+   * The payment intent this child settles. #2094: the ONLY source of the
+   * child's uniqueness — the caller generates the intent id BEFORE building
+   * (see `delegation-authorize.ts`) so that the child and the row that stores
+   * it are one thing.
+   */
+  intentId: string
   /** The agent's delegate account — the child's delegator. */
   delegateAccountAddress: Address
   /** The SIGNED budget delegation (the parent) as stored by #828. */
@@ -68,6 +128,12 @@ export interface BuiltSettlementDelegation {
  */
 export function buildSettlementDelegation(req: X402SettlementRequest): BuiltSettlementDelegation {
   if (req.amountAtomic <= 0n) throw new Error('settlement amount must be positive')
+  // #2094: refuse to build an un-attributable child rather than quietly fall
+  // back to the constant salt. An empty intent id would reintroduce the exact
+  // byte-identical-child defect this parameter exists to remove, and it would
+  // do so silently — on a money path whose failure mode is a wrong row in
+  // someone's books.
+  if (!req.intentId) throw new Error('settlement intent id is required to salt the child delegation')
   const env = getDelegationEnvironment(req.chainId)
   const nowSec = Math.floor(Date.now() / 1000)
   const windowSec = Math.min(Math.max(req.maxTimeoutSeconds, 60), MAX_SETTLEMENT_WINDOW_SECONDS)
@@ -106,6 +172,10 @@ export function buildSettlementDelegation(req: X402SettlementRequest): BuiltSett
       maxAmount: req.amountAtomic,
     },
     caveats: caveats as never,
+    // #2094: the intent-unique salt. Without it two authorizations sharing
+    // merchant/token/amount/expiry-second hash to the same child and no
+    // settlement of either can be attributed to one rather than the other.
+    salt: settlementSalt(req.intentId),
   })
   const childHash = hashDelegation({ ...child, signature: '0x' } as Delegation)
   return {

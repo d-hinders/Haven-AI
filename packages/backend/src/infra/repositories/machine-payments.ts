@@ -153,6 +153,7 @@ export const FIND_INTENT_EVIDENCE_SOURCE_SQL = `SELECT 'payment_intent'::TEXT AS
             payment_rail, payment_resource_url, merchant_address,
             machine_challenge_id, machine_idempotency_key, machine_metadata,
             execution_rail,
+            delegation_hash,
             created_at,
             confirmed_at
      FROM payment_intents
@@ -193,6 +194,13 @@ export interface EvidenceSourceRow {
   machine_metadata: Record<string, unknown> | string | null
   /** #2092: the rail the intent was authorized on — the erc7710 completion seam's guard. */
   execution_rail: string | null
+  /**
+   * #2094: the settlement child's hash. Intent-unique since the child is
+   * salted from the intent id, so the completion seam can bind the reported
+   * settlement to THIS payment via the DelegationManager's own
+   * `RedeemedDelegation` log instead of to its transfer shape alone.
+   */
+  delegation_hash: string | null
   /** #2092: authorize time — the origin of the erc7710 settlement window. */
   created_at: string | null
   confirmed_at: string | null
@@ -222,6 +230,7 @@ export const FIND_INTENT_FOR_EVIDENCE_SQL = `SELECT 'payment_intent'::TEXT AS ki
             payment_rail, payment_resource_url, merchant_address,
             machine_challenge_id, machine_idempotency_key, machine_metadata,
             execution_rail,
+            delegation_hash,
             created_at,
             confirmed_at
      FROM payment_intents

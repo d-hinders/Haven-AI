@@ -297,44 +297,32 @@ function railContext(input: {
   return {}
 }
 
-function messageForRail(
-  rail: string,
-  status: string,
-  fallback: string,
-): string {
-  if (rail === AgentPaymentRail.X402) {
-    if (status === 'pending') {
-      return 'This x402 funding payment is waiting for user approval in Haven. Do not start a new merchant session or create another payment; poll this payment id and resume the original x402 request after approval.'
-    }
-    if (status === 'approved') {
-      return 'The user approved this x402 funding request, but the funding payment has not been sent yet. Keep the original merchant session and poll this payment id.'
-    }
-    if (status === 'proposed') {
-      return 'The x402 funding payment was submitted and is waiting for the remaining account approvals. Keep the original merchant session and poll this payment id.'
-    }
-    if (status === 'executed') {
-      return 'The user completed the Haven funding payment. Resume this payment id and retry the original x402 request with the merchant payment header; do not create a new merchant session.'
-    }
-    return fallback
-  }
-
-  if (isMppRail(rail)) {
-    if (status === 'pending') {
-      return 'This MPP payment is waiting for user approval in Haven. Do not start a new challenge or create another payment; poll this payment id and resume the original MPP request after approval.'
-    }
-    if (status === 'approved') {
-      return 'The user approved this MPP payment request, but the funding payment has not been sent yet. Keep the original challenge and poll this payment id.'
-    }
-    if (status === 'proposed') {
-      return 'The MPP payment was submitted and is waiting for the remaining account approvals. Keep the original challenge and poll this payment id.'
-    }
-    if (status === 'executed') {
-      return 'The user completed the Haven payment. Resume this payment id and retry the original MPP request with the machine payment proof; do not create a new challenge.'
-    }
-  }
-
-  return fallback
-}
+// #2115: `messageForRail` is DELETED, not reworded. It overrode the payment
+// intent's own message on the x402 and MPP rails for four statuses —
+// `pending`, `approved`, `proposed`, `executed` — and all four are
+// unconstructible on this path.
+//
+// The proof, in one line: this module reads `payment_intents` and nothing else
+// (`findIntentStatusRow`; the `approval_requests` fallback died with #2055),
+// and every write to `payment_intents.status` in the repository layer sets one
+// of five literals — `pending_signature` (the four INSERTs in
+// `infra/repositories/payment-intents.ts`), `submitted`, `confirmed`,
+// `expired`, `failed` (the UPDATEs there and in `x402-authorizations.ts` /
+// `agent-rekeys.ts`). The four overridden statuses were `approval_requests`
+// statuses, fed here by `approvalState`, which #2055 deleted with the table.
+// Pinned by `__tests__/status-domain.test.ts` on the real-DB harness.
+//
+// Why it mattered more than the average dead branch: `GET /payments/:id` is
+// the endpoint an agent calls to decide what to do next, and the SDK passes
+// `message`/`next_action` straight through (`mapPaymentStatusResult` in
+// `packages/sdk/src/payment-mappers.ts`) — so the backend's string wins over
+// every client-side correction #2113 made. Those strings told an agent, in the
+// imperative, to hold the merchant session open and poll for an approval that
+// no live rail can produce: the legacy AllowanceModule rail answers 410 at
+// every agent-payment entry point (#1986, `rails/execution-rail.ts`), and the
+// delegation rail declines an out-of-policy payment at prepare with nothing
+// written (`routes/payments.ts` 403/502; `modules/x402/delegation-authorize.ts`
+// 403 `delegation_budget_exceeded`, #2082).
 
 function paymentIntentState(status: string): {
   phase: AgentPaymentPhaseValue
@@ -377,10 +365,22 @@ function paymentIntentState(status: string): {
     }
   }
 
+  // #2115: the catch-all, retained FAIL-CLOSED. The five branches above are
+  // the whole reachable status domain (see the `messageForRail` deletion note
+  // and `__tests__/status-domain.test.ts`), so nothing live lands here — but
+  // if a status this module does not recognise is ever read back, the honest
+  // verdict is STOP, not poll. It used to answer `check_status_later`, which
+  // is a poll instruction for a row nothing can transition; that is the same
+  // defect #2101/PR #2113 fixed one layer up in the SDK's
+  // `nextActionForStatus`, and the backend's own `next_action` overrides the
+  // SDK's, so the fix has to be made here too. `phase` is deliberately left at
+  // `payment_submitted`: it is the least-wrong member of a closed wire enum
+  // for a state that cannot occur, and `next_action` is the field the agent
+  // contract says to follow first.
   return {
     phase: AgentPaymentPhase.PaymentSubmitted,
-    nextAction: AgentPaymentNextAction.CheckStatusLater,
-    message: `The payment is ${status}.`,
+    nextAction: AgentPaymentNextAction.StopAndTellUser,
+    message: `This payment is in an unrecognised state ("${status}") that no live Haven rail produces. Do not poll or retry it — tell the user to review this payment in Haven.`,
   }
 }
 
@@ -617,7 +617,7 @@ export async function getAgentPaymentStatus(
       tx_hash: payment.tx_hash,
       expires_at: payment.expires_at,
       chain_id: payment.chain_id,
-      message: messageForRail(rail, payment.status, state.message),
+      message: state.message,
       fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
       ...railContext({
         rail,

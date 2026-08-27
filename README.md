@@ -59,7 +59,7 @@ This is a TypeScript monorepo:
 
 | Package | Description |
 |---|---|
-| `packages/backend` | Fastify API for auth, Haven wallets, agents, payments, x402/MPP, receipts, the Fortnox reporting feed, and OpenAPI (the legacy approval queue is readable and rejectable only — retired with the Safe rail, #1440) |
+| `packages/backend` | Fastify API for auth, Haven wallets, agents, payments, x402/MPP, receipts, the Fortnox reporting feed, and OpenAPI (the legacy approval queue is gone entirely — its route was deregistered and its table dropped by #2055) |
 | `packages/frontend` | Next.js dashboard for Haven accounts, Haven wallets, agent rules, connect-agent handoff, and activity |
 | `packages/sdk` | `@haven_ai/sdk` for direct agent integrations, tool definitions, x402/MPP quote/pay/resume helpers, and payment state handling |
 | `packages/mcp` | `@haven_ai/mcp` local stdio MCP server that reads a local credential file and signs locally |
@@ -184,7 +184,7 @@ The credential contains an agent API key and a delegate signing key. Haven store
 
 Most users connect an agent through the dashboard's **Connect your agent** flow. The hosted MCP path sends only the API key to the hosted MCP endpoint; the delegate signing key stays local with the runtime or `@haven_ai/signer`.
 
-Developers can also integrate directly with `@haven_ai/sdk`. The SDK wraps direct payments, quote-first x402/MPP flows, manual approval resume state, and ready-made tool definitions for Claude/OpenAI-style tool calling.
+Developers can also integrate directly with `@haven_ai/sdk`. The SDK wraps direct payments, quote-first x402/MPP flows, and ready-made tool definitions for Claude/OpenAI-style tool calling.
 
 ### Install
 
@@ -373,7 +373,7 @@ Dashboard endpoints use the signed-in user's JWT. The OpenAPI contract is served
 | Agent payments | API key | `/payments`, `/payments/:id/sign`, `/payments/:id`, `/payments` |
 | Agent info | API key | `/machine-payments/agent`, `/machine-payments/allowances`, `/machine-payments/receipts`, `/machine-payments/:id/status`, resume-state endpoints |
 | x402 | API key or protocol challenge | `/x402` (the legacy internal `mpp_demo` flow at `/demo/mpp/*` and `POST /machine-payments/authorize` is retired — the latter now refuses with HTTP 410, #1328) |
-| Activity | JWT | `/agent-activity/*` for payments, approvals, MCP tool calls, pending counts, and last activity |
+| Activity | JWT | `/agent-activity/*` for payments, MCP tool calls, and last activity |
 
 ### Payment intent request
 
@@ -494,7 +494,7 @@ Haven-AI/
 - **TypeScript** throughout (backend + frontend)
 - **Fastify** — backend API
 - **Next.js 15** — frontend dashboard
-- **PostgreSQL** — agents, policies, payment intents, receipts, audit trail (plus the retired rail's approval rows, kept readable until #1990 drops them)
+- **PostgreSQL** — agents, policies, payment intents, receipts, audit trail
 - **Safe + AllowanceModule** — legacy rail, **retired** (#1440): reads and owner-signed relay only, no `@safe-global/protocol-kit`
 - **MetaMask smart-accounts-kit + permissionless** — Hybrid DeleGator delegation rail
 - **wagmi + viem** — wallet connection + blockchain interaction

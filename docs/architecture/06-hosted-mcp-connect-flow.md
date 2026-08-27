@@ -18,7 +18,7 @@ covers:
   - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
-last-verified: "2026-08-25" # #2041: the generic decomposed path gains its erc7710 shape, and the #1986 warning banner is SCOPE-CORRECTED rather than deleted. It said hosted keyless x402 works for NO account; the true claim is rail-scoped (the legacy allowance rail 410s), and the second premise it rested on -- that the hosted construct refuses typed-data funding intents -- had already been overtaken by #1254/#1456, as `08-local-vs-hosted-mcp.md` measured on 2026-08-25. #2041 falsifies the blanket claim a second, independent way, which is why it is fixed here rather than left contradicting `08`: a delegation-rail account now completes an erc7710 payment end to end through exactly this generic surface. Also re-read the balance-aware coverage bullets and the connect-flow sections: unchanged. Scope: the x402 subsection only. Prior: #1986: the "hosted keyless construct is allowance-rail only" note re-read against the payment 410 — it is now a statement that hosted x402 works for nobody, and says so. Direct-payment flow confirmed rail-agnostic and unaffected. Registration/connect steps re-read and unchanged. Prior: #1878: two claims corrected, both of the same shape — an exhaustive list of what registration sends. Step 4 said the connector sends "only" the setup token, runtime/version, public address and proof, and API-key hash/prefix, and the review checklist said registration contains "public proof and hashed API-key metadata only". Both are now false: the connector also sends the resolved MCP server name it wired the agent as. It is a non-secret display label and the custody half of each sentence is untouched — no private key, no plaintext API key — but "only" is a strong word and a reader auditing the wire boundary against this page would have found a field the page denies exists. Both now name it AND say what it is not (never authority, not unique, nothing keys off it), because a new field in a custody checklist reads as a custody change unless the doc says otherwise. Scope: those two lines; the rest of the flow, the hosted/local topology split and the remaining checklist items were re-read only for contradiction, and none contradicts. Prior: #1702: re-verified, NOT edited. Implicated only because `packages/connect/**` is in `covers:` and #1702 rewrites that package's README; the body makes no claim about credential-overwrite semantics, `--name`, or re-key, and its review-checklist line "API-key rotation changes identity credentials, not signing authority" is about the separate `POST /agents/:id/rotate-key` route and stays true. Recorded so the coupling-gate loop is closed in the audit trail rather than left as an unaddressed flag. Prior: #1813: dropped the `covers:` entry for `lib/hosted-connect.ts`, deleted as unreachable. No claim in the body named it — the flow described here is served by ConnectAgentModal, not the retired hosted card. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
+last-verified: "2026-08-27" # #2102: three live-rail corrections. The Trust boundary table's enforcement row named the Safe AllowanceModule and had NO delegation-rail row at all; it now names the budget delegation's caveat enforcers. The Direct payment section said an over-budget request "queues for user approval and returns no signable hash" and that submit "executes the AllowanceModule transfer" — neither happens: it is declined before any money moves, and submit relays a sponsored UserOp redeeming the delegation. Why this doc drifted while its neighbours did not: its own last-verified chain scopes every prior pass (#1986, #2041) to the x402 subsection, so the Direct payment section above it was never in one. Also corrected, after review declined to confirm my judgement that it was fine: the connect-flow step's legacy half said the agent "cannot spend until the AllowanceModule permission exists on-chain", whose parallel with the delegation-rail sentence beside it implies spend then becomes possible. It does not — #1986 refuses every payment path unconditionally — and `tryVerifySetupAuthority` is live, so a user can still walk the step and land in a dead end. Scope: the table row, the Direct payment steps, and the connect-flow step's legacy-rail sentence. (This note said "two" while describing three until review caught it — the count and the Scope line were not updated when the third paragraph was inserted between them. Recorded rather than silently corrected: a verification note that miscounts its own scope is the same defect class as the doc-disagreeing-with-itself this change exists to fix.) Prior: #2041: the generic decomposed path gains its erc7710 shape, and the #1986 warning banner is SCOPE-CORRECTED rather than deleted. It said hosted keyless x402 works for NO account; the true claim is rail-scoped (the legacy allowance rail 410s), and the second premise it rested on -- that the hosted construct refuses typed-data funding intents -- had already been overtaken by #1254/#1456, as `08-local-vs-hosted-mcp.md` measured on 2026-08-25. #2041 falsifies the blanket claim a second, independent way, which is why it is fixed here rather than left contradicting `08`: a delegation-rail account now completes an erc7710 payment end to end through exactly this generic surface. Also re-read the balance-aware coverage bullets and the connect-flow sections: unchanged. Scope: the x402 subsection only. Prior: #1986: the "hosted keyless construct is allowance-rail only" note re-read against the payment 410 — it is now a statement that hosted x402 works for nobody, and says so. Direct-payment flow confirmed rail-agnostic and unaffected. Registration/connect steps re-read and unchanged. Prior: #1878: two claims corrected, both of the same shape — an exhaustive list of what registration sends. Step 4 said the connector sends "only" the setup token, runtime/version, public address and proof, and API-key hash/prefix, and the review checklist said registration contains "public proof and hashed API-key metadata only". Both are now false: the connector also sends the resolved MCP server name it wired the agent as. It is a non-secret display label and the custody half of each sentence is untouched — no private key, no plaintext API key — but "only" is a strong word and a reader auditing the wire boundary against this page would have found a field the page denies exists. Both now name it AND say what it is not (never authority, not unique, nothing keys off it), because a new field in a custody checklist reads as a custody change unless the doc says otherwise. Scope: those two lines; the rest of the flow, the hosted/local topology split and the remaining checklist items were re-read only for contradiction, and none contradicts. Prior: #1702: re-verified, NOT edited. Implicated only because `packages/connect/**` is in `covers:` and #1702 rewrites that package's README; the body makes no claim about credential-overwrite semantics, `--name`, or re-key, and its review-checklist line "API-key rotation changes identity credentials, not signing authority" is about the separate `POST /agents/:id/rotate-key` route and stays true. Recorded so the coupling-gate loop is closed in the audit trail rather than left as an unaddressed flag. Prior: #1813: dropped the `covers:` entry for `lib/hosted-connect.ts`, deleted as unreachable. No claim in the body named it — the flow described here is served by ConnectAgentModal, not the retired hosted card. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -33,10 +33,10 @@ runtime or `@haven_ai/signer`.
 |---|---|---|
 | Hosted MCP | API key / Bearer token | Identity, state reads, orchestration, unsigned payload construction, signature relay |
 | Edge signer | Delegate private key | Local signing authority |
-| Safe AllowanceModule | On-chain allowance | Automatic-spend enforcement |
+| Budget delegation | On-chain caveat enforcers | Automatic-spend enforcement |
 
 API authentication is identity, a delegate signature is authority, and the
-on-chain module is enforcement. Hosted MCP must never accept, store, or log a
+on-chain caveat stack is enforcement. Hosted MCP must never accept, store, or log a
 delegate key. It has a boot-time guard that rejects an injected key.
 
 For direct funding relay, the agent sends only the locally produced
@@ -59,9 +59,12 @@ Staged Connect Agent pairing is the only current dashboard flow:
    the dashboard shows so several agents in one harness can be told apart;
    #1878). No private key or plaintext API key is registered.
 5. The user approves, in the modal, with one signature — and that signature is
-   the authority. On the legacy rail it is a wallet approval, and the agent
-   cannot spend until the AllowanceModule permission exists on-chain. On the
-   delegation rail it is the budget delegation itself, granted at the same step
+   the authority. On the legacy rail it is a wallet approval — but note the
+   parallel with the next sentence does not hold: since #1986 that
+   AllowanceModule permission no longer unlocks spend on any payment path, so
+   for an existing legacy Safe this step is vestigial. `tryVerifySetupAuthority`
+   is still live code, so a user really can walk through it and land nowhere.
+   On the delegation rail it is the budget delegation itself, granted at the same step
    of the same flow; the agent cannot spend until that budget is active, and
    its limits are carried by the caveat enforcers at redemption rather than by
    a module permission.
@@ -75,12 +78,13 @@ never a delegate key.
 ## Direct payment
 
 1. `haven_pay` asks the backend to construct a payment intent.
-2. Within the remaining allowance, it returns `payment_id`, `payload_hash`, and
-   expiry. Above the remaining allowance it queues for user approval and
-   returns no signable hash.
-3. `haven_sign` signs the hash locally.
+2. Within the remaining budget, it returns `payment_id`, `payload_hash`, and
+   expiry. Above the remaining budget it is **declined before any money moves**
+   — nothing is queued and no one is asked to review it, because there is no
+   approval queue on the delegation rail (`approval_requests` went with #2055).
+3. `haven_sign` signs the payload locally.
 4. `haven_submit` relays the signature; the backend verifies the delegate and
-   executes the AllowanceModule transfer.
+   submits the sponsored UserOp that redeems the budget delegation.
 
 ## x402
 

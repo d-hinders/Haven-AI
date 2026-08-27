@@ -50,6 +50,8 @@ interface IntentSeed {
   /** Distinguishing shape fields, for look-alike vs. non-look-alike twins. */
   toAddress?: string
   amountRaw?: string
+  /** #2094: the settlement child's hash — what makes two twins distinguishable. */
+  delegationHash?: string | null
 }
 
 async function seedIntent(seed: IntentSeed): Promise<string> {
@@ -60,13 +62,13 @@ async function seedIntent(seed: IntentSeed): Promise<string> {
        (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
         status, expires_at, source, payment_rail, execution_rail, machine_metadata, tx_hash,
-        created_at)
+        delegation_hash, created_at)
      VALUES ($1, $2, '0x00000000000000000000000000000000000000f1', 'USDC',
              '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
              $9,
              $10, '0.10', '0x00000000000000000000000000000000000000d1',
              0, $3, $4, NOW() + interval '10 minutes', $5, $5, $6, $7::jsonb, $8,
-             NOW() + ($11 * interval '1 second'))
+             $12, NOW() + ($11 * interval '1 second'))
      RETURNING id`,
     [
       seed.agentId,
@@ -80,6 +82,7 @@ async function seedIntent(seed: IntentSeed): Promise<string> {
       seed.toAddress ?? '0x00000000000000000000000000000000000000aa',
       seed.amountRaw ?? '100000',
       seed.createdOffsetSec ?? 0,
+      seed.delegationHash ?? null,
     ],
   )
   return result.rows[0].id
@@ -90,7 +93,12 @@ async function readIntent(id: string) {
   return r.rows[0]
 }
 
-const confirm = (intentId: string, agentId: string, txHash = HASH_A) =>
+const confirm = (
+  intentId: string,
+  agentId: string,
+  txHash = HASH_A,
+  delegationBound = false,
+) =>
   confirmObservedSettlement({
     txHash,
     intentId,
@@ -98,7 +106,12 @@ const confirm = (intentId: string, agentId: string, txHash = HASH_A) =>
     usdValue: 0.1,
     eurValue: 0.09,
     windowSeconds: WINDOW_SECONDS,
+    delegationBound,
   })
+
+/** Two distinct settlement-child hashes — what #2094's salt actually buys. */
+const CHILD_A = `0x${'1'.repeat(64)}`
+const CHILD_B = `0x${'2'.repeat(64)}`
 
 describeDb('erc7710 settlement-observed transition (#2092)', () => {
   beforeAll(async () => {
@@ -323,5 +336,77 @@ describeDb('erc7710 settlement-observed transition (#2092)', () => {
     await seedIntent({ agentId, userId, createdOffsetSec: 30, status: 'confirmed', txHash: HASH_B })
 
     await expect(confirm(first, agentId, HASH_A)).resolves.toBe(true)
+  })
+
+  // ── #2094: the ambiguity guard NARROWED, never removed ──────────────────
+  //
+  // Every case below fixes ONE of the three conjuncts that let a twin be
+  // looked past, so no single conjunct can be deleted without a named red.
+
+  it('a look-alike twin with a DIFFERENT child no longer blocks a delegation-bound settlement', async () => {
+    const { agentId, userId } = await seedAgent()
+    const first = await seedIntent({ agentId, userId, delegationHash: CHILD_A })
+    const twin = await seedIntent({ agentId, userId, createdOffsetSec: 30, delegationHash: CHILD_B })
+
+    await expect(confirm(first, agentId, HASH_A, true)).resolves.toBe(true)
+    // …and the twin is still open, waiting for its OWN settlement.
+    expect((await readIntent(twin)).status).toBe('submitted')
+    await expect(confirm(twin, agentId, HASH_B, true)).resolves.toBe(true)
+  })
+
+  it('CONJUNCT 1 — an UNBOUND settlement is still refused, however different the children are', async () => {
+    // Distinct children prove nothing when the chain never told us which one
+    // this transaction redeemed. This is #2096's guard at full reach.
+    const { agentId, userId } = await seedAgent()
+    const first = await seedIntent({ agentId, userId, delegationHash: CHILD_A })
+    await seedIntent({ agentId, userId, createdOffsetSec: 30, delegationHash: CHILD_B })
+
+    await expect(confirm(first, agentId, HASH_A, false)).resolves.toBe(false)
+    expect((await readIntent(first)).status).toBe('submitted')
+  })
+
+  it('CONJUNCT 2 — an intent with NO stored child is still refused, even when bound', async () => {
+    const { agentId, userId } = await seedAgent()
+    const first = await seedIntent({ agentId, userId, delegationHash: null })
+    await seedIntent({ agentId, userId, createdOffsetSec: 30, delegationHash: CHILD_B })
+
+    await expect(confirm(first, agentId, HASH_A, true)).resolves.toBe(false)
+    expect((await readIntent(first)).status).toBe('submitted')
+  })
+
+  it('CONJUNCT 3 — a twin sharing the SAME child is still refused: the pre-#2094 in-flight pair', async () => {
+    // Two authorizations created before the salt landed carry one byte-identical
+    // child and therefore one hash. Binding to that hash names BOTH of them, so
+    // it must not be allowed to wave the twin through.
+    const { agentId, userId } = await seedAgent()
+    const first = await seedIntent({ agentId, userId, delegationHash: CHILD_A })
+    const twin = await seedIntent({ agentId, userId, createdOffsetSec: 30, delegationHash: CHILD_A })
+
+    await expect(confirm(first, agentId, HASH_A, true)).resolves.toBe(false)
+    expect((await readIntent(first)).status).toBe('submitted')
+    expect((await readIntent(twin)).status).toBe('submitted')
+  })
+
+  it('CONJUNCT 4 — a twin whose OWN child was never recorded is still refused: unknown is ambiguous', async () => {
+    // A pre-#2092 twin stores no child hash. `IS DISTINCT FROM` would call
+    // NULL "a different child" and wave it through; it is not different, it is
+    // unknown, and on a money path unknown must fail closed. Pinned here
+    // rather than left to SQL intuition about NULL.
+    const { agentId, userId } = await seedAgent()
+    const first = await seedIntent({ agentId, userId, delegationHash: CHILD_A })
+    await seedIntent({ agentId, userId, createdOffsetSec: 30, delegationHash: null })
+
+    await expect(confirm(first, agentId, HASH_A, true)).resolves.toBe(false)
+    expect((await readIntent(first)).status).toBe('submitted')
+  })
+
+  it('binding does NOT weaken the replay guard — one transaction still confirms at most one payment', async () => {
+    const { agentId, userId } = await seedAgent()
+    const first = await seedIntent({ agentId, userId, delegationHash: CHILD_A })
+    const second = await seedIntent({ agentId, userId, createdOffsetSec: 30, delegationHash: CHILD_B })
+
+    await expect(confirm(first, agentId, HASH_A, true)).resolves.toBe(true)
+    await expect(confirm(second, agentId, HASH_A, true)).resolves.toBe(false)
+    expect((await readIntent(second)).status).toBe('submitted')
   })
 })

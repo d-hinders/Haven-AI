@@ -508,7 +508,6 @@ describe('HavenClient structural boundary', () => {
       'PaymentResumeState',
       'PaymentStatus',
       'PaymentStatusResult',
-      'PendingApproval',
       'PostPurchaseAllowanceSummary',
       'ReceiptVerification',
       'ResumeAuthorizedX402Input',

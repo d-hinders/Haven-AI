@@ -17,8 +17,11 @@
  * Convention — see `README.md` in this directory. Executor last, defaulting to
  * the pool; tenant scope (`agentId`) required; SQL in exported constants so
  * `scripts/db-schema-smoke.ts` can PREPARE it by import. The statements that
- * interpolate a reference/conflict column do so through a two-value union
- * mapped to exported concrete constants — never raw input.
+ * interpolate a reference column do so through a single-valued literal type
+ * mapped to exported concrete constants — never raw input. (#2118 narrowed
+ * that from a two-value union when the approval-anchored writes were
+ * deleted; the interpolation seam stays, so a second anchor could only ever
+ * be added back as a type, not as a caller-supplied string.)
  *
  * **The SQL here is verbatim from the call sites.**
  */
@@ -27,7 +30,6 @@ import pool from '../../db.js'
 import { type Executor, type QueryRow } from '../transaction.js'
 
 export type { Executor }
-
 
 // ── Evidence base upsert (lib/machine-payment-evidence.ts) ───────────────────
 
@@ -247,9 +249,11 @@ export async function findIntentForEvidenceScoped(
 }
 
 // #2055: `FIND_APPROVAL_FOR_EVIDENCE_SQL` / `findApprovalForEvidenceScoped`
-// are gone with `approval_requests`. The evidence WRITE variants that key on
-// `approval_request_id` below stay: that column lives on the evidence tables,
-// which survive the drop.
+// are gone with `approval_requests`. This note used to add that the evidence
+// WRITE variants keyed on `approval_request_id` STAY, because the column
+// survives the drop — true when it was written, and false as of #2118 below.
+// The column's survival is still the reason the READ path stays; it stopped
+// being a reason to keep the writes once nothing could reach them.
 //
 // #2118: the approval-keyed evidence/reconciliation WRITE builders that used
 // to live here are DELETED. They were fully unreachable after #2085 — every

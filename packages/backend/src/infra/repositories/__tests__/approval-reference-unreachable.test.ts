@@ -189,6 +189,33 @@ describeDb('approval-keyed reference: writes unreachable, reads intact (#2118)',
     expect(tables).toContain('machine_payment_reconciliation_events')
   })
 
+  it("the historical rows' partial unique index still exists AND still rejects a duplicate", async () => {
+    // #2118 review finding 3. Deleting `UPSERT_EVIDENCE_BASE_FOR_APPROVAL_SQL`
+    // also deleted the only test that exercised
+    // `idx_machine_payment_evidence_approval_request` (migration 018's
+    // `UNIQUE ... WHERE approval_request_id IS NOT NULL`). The statement was
+    // the test's subject, but the INDEX is a separate fact — it is what stops
+    // a historical row being duplicated — and nothing re-checked it once the
+    // test went. A migration that dropped it would have gone unnoticed.
+    //
+    // Asserted BEHAVIOURALLY rather than by looking the index up in
+    // `pg_indexes`: a name lookup passes on an index that has been redefined
+    // into uselessness. A rejected duplicate cannot.
+    const agent = await seedAgent()
+    const approvalRequestId = '99999999-8888-7777-6666-555555555555'
+    await seedHistoricalApprovalEvidence(agent.agentId, agent.userId, approvalRequestId)
+
+    await expect(
+      seedHistoricalApprovalEvidence(agent.agentId, agent.userId, approvalRequestId),
+    ).rejects.toMatchObject({ code: '23505' })
+
+    const rows = await db.query(
+      `SELECT 1 FROM machine_payment_evidence WHERE approval_request_id = $1`,
+      [approvalRequestId],
+    )
+    expect(rows.rows).toHaveLength(1)
+  })
+
   it('the approval_requests TABLE is gone — so nothing could anchor a NEW write to one', async () => {
     const t = await db.query(
       `SELECT 1 FROM information_schema.tables

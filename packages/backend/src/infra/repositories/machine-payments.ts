@@ -28,14 +28,14 @@ import { type Executor, type QueryRow } from '../transaction.js'
 
 export type { Executor }
 
-export type EvidenceReferenceColumn = 'payment_intent_id' | 'approval_request_id'
 
 // ── Evidence base upsert (lib/machine-payment-evidence.ts) ───────────────────
 
 /**
- * Parameterised by its conflict clause so the intent- and approval-anchored
- * writes cannot drift; the concrete statements are the exported constants
- * below. FX columns COALESCE so book-time values freeze at settlement.
+ * FX columns COALESCE so book-time values freeze at settlement.
+ *
+ * #2118: this was parameterised so the intent- and approval-anchored writes
+ * could not drift. Only the intent-anchored write survives.
  */
 function evidenceBaseUpsertSql(conflictClause: string): string {
   return `INSERT INTO machine_payment_evidence (
@@ -78,14 +78,15 @@ function evidenceBaseUpsertSql(conflictClause: string): string {
 export const UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL = evidenceBaseUpsertSql(
   'ON CONFLICT (payment_intent_id)',
 )
-export const UPSERT_EVIDENCE_BASE_FOR_APPROVAL_SQL = evidenceBaseUpsertSql(
-  'ON CONFLICT (approval_request_id) WHERE approval_request_id IS NOT NULL',
-)
 
 export interface EvidenceBaseInput {
-  referenceColumn: EvidenceReferenceColumn
   paymentIntentId: string | null
-  approvalRequestId: string | null
+  /**
+   * #2118: pinned to `null`. The COLUMN survives and historical rows still
+   * carry values (migration 070), but no NEW evidence row can be anchored to
+   * an approval — the type, not a convention, is what makes that impossible.
+   */
+  approvalRequestId: null
   agentId: string
   userId: string
   rail: string
@@ -113,11 +114,7 @@ export async function upsertEvidenceBase(
   input: EvidenceBaseInput,
   db: Executor = pool,
 ): Promise<void> {
-  const sql =
-    input.referenceColumn === 'payment_intent_id'
-      ? UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL
-      : UPSERT_EVIDENCE_BASE_FOR_APPROVAL_SQL
-  await db.query(sql, [
+  await db.query(UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL, [
     input.paymentIntentId,
     input.approvalRequestId,
     input.agentId,
@@ -254,29 +251,25 @@ export async function findIntentForEvidenceScoped(
 // `approval_request_id` below stay: that column lives on the evidence tables,
 // which survive the drop.
 //
-// #2085 STATUS — read this before deleting them. They are now *fully*
-// unreachable, not merely unlikely: every caller resolves its reference column
-// through `referenceColumnForPayment` (`modules/mpp/evidence.ts`) or the
-// inlined equivalent in `reconciliation.ts`, and after #2085 both always
-// answer `'payment_intent_id'`, because no payment can resolve to kind
-// `'approval_request'`. That IS grounds for removal — but the removal is a
-// repository-layer change on the money-path perimeter and wants its own
-// characterization test, the way #2085 gave the `kind` discriminator one. It
-// is tracked as #2118 rather than left implied.
+// #2118: the approval-keyed evidence/reconciliation WRITE builders that used
+// to live here are DELETED. They were fully unreachable after #2085 — every
+// caller resolved its reference column through `referenceColumnForPayment`
+// (`modules/mpp/evidence.ts`) or the inlined literal in `reconciliation.ts`,
+// and both always answered `'payment_intent_id'`. The removal is pinned by
+// `__tests__/approval-reference-unreachable.test.ts`, which proves the write
+// path unreachable AND the read path intact, on the real-DB harness.
 //
-// (This comment previously said "residue for #1993". #1993 is CLOSED — it is
-// the audit that filed #2085 — so it pointed at a tracker nobody could act on.
-// Do not re-point a live TODO at a closed issue; that is how residue survives
-// an audit.)
-//
-// Note what is NOT dead nearby: the `approval_request_id` COLUMN and every
-// READ of it. Historical evidence rows still carry values there (migration 070
-// dropped the table with CASCADE precisely so they would survive), and
-// `mapEvidence` uses it as their only `payment_id` anchor.
+// What deliberately SURVIVES, and why the deletion stops exactly here: the
+// `approval_request_id` COLUMN and every READ of it. Migration 070 dropped
+// `approval_requests` with CASCADE precisely so historical evidence and
+// reconciliation rows would keep their values, and `mapEvidence` uses the
+// column as those rows' only `payment_id` anchor — reachable today through
+// `GET /receipts`. Removing the column or the fallback returns
+// `payment_id: null` for every pre-#2055 receipt; the test asserts exactly that.
 
 // ── Evidence attach (proof upgrade, lib/machine-payment-evidence.ts) ─────────
 
-function evidenceAttachSql(referenceColumn: EvidenceReferenceColumn): string {
+function evidenceAttachSql(referenceColumn: 'payment_intent_id'): string {
   return `UPDATE machine_payment_evidence
      SET proof_status = CASE
            WHEN $3 = 'protocol_receipt_attached' THEN $3
@@ -298,10 +291,8 @@ function evidenceAttachSql(referenceColumn: EvidenceReferenceColumn): string {
 }
 
 export const ATTACH_EVIDENCE_FOR_INTENT_SQL = evidenceAttachSql('payment_intent_id')
-export const ATTACH_EVIDENCE_FOR_APPROVAL_SQL = evidenceAttachSql('approval_request_id')
 
 export interface AttachEvidenceParams {
-  referenceColumn: EvidenceReferenceColumn
   paymentId: string
   agentId: string
   proofStatus: string
@@ -319,11 +310,7 @@ export async function attachEvidenceProof<R extends QueryRow>(
   input: AttachEvidenceParams,
   db: Executor = pool,
 ): Promise<R | null> {
-  const sql =
-    input.referenceColumn === 'payment_intent_id'
-      ? ATTACH_EVIDENCE_FOR_INTENT_SQL
-      : ATTACH_EVIDENCE_FOR_APPROVAL_SQL
-  const result = await db.query<R>(sql, [
+  const result = await db.query<R>(ATTACH_EVIDENCE_FOR_INTENT_SQL, [
     input.paymentId,
     input.agentId,
     input.proofStatus,
@@ -427,7 +414,7 @@ export async function findReconciliationIntent(
 // #2055: `FIND_RECONCILIATION_APPROVAL_SQL` / `findReconciliationApproval`
 // are gone with `approval_requests` (see the evidence-read note above).
 
-function reconciliationEventUpsertSql(conflictColumn: EvidenceReferenceColumn): string {
+function reconciliationEventUpsertSql(conflictColumn: 'payment_intent_id'): string {
   return `INSERT INTO machine_payment_reconciliation_events (
         agent_id, user_id, payment_intent_id, approval_request_id, rail, event_type, tx_hash,
         resource_url, merchant_address, machine_challenge_id, machine_idempotency_key,
@@ -451,8 +438,6 @@ function reconciliationEventUpsertSql(conflictColumn: EvidenceReferenceColumn): 
 
 export const UPSERT_RECONCILIATION_EVENT_FOR_INTENT_SQL =
   reconciliationEventUpsertSql('payment_intent_id')
-export const UPSERT_RECONCILIATION_EVENT_FOR_APPROVAL_SQL =
-  reconciliationEventUpsertSql('approval_request_id')
 
 export interface ReconciliationEventRow {
   id: string
@@ -461,11 +446,11 @@ export interface ReconciliationEventRow {
 }
 
 export interface UpsertReconciliationEventInput {
-  conflictColumn: EvidenceReferenceColumn
   agentId: string
   userId: string
   paymentIntentId: string | null
-  approvalRequestId: string | null
+  /** #2118: pinned to `null` — see `EvidenceBaseInput.approvalRequestId`. */
+  approvalRequestId: null
   rail: string
   eventType: string
   txHash: string
@@ -486,11 +471,7 @@ export async function upsertReconciliationEvent(
   input: UpsertReconciliationEventInput,
   db: Executor = pool,
 ): Promise<ReconciliationEventRow | null> {
-  const sql =
-    input.conflictColumn === 'approval_request_id'
-      ? UPSERT_RECONCILIATION_EVENT_FOR_APPROVAL_SQL
-      : UPSERT_RECONCILIATION_EVENT_FOR_INTENT_SQL
-  const result = await db.query<ReconciliationEventRow>(sql, [
+  const result = await db.query<ReconciliationEventRow>(UPSERT_RECONCILIATION_EVENT_FOR_INTENT_SQL, [
     input.agentId,
     input.userId,
     input.paymentIntentId,
@@ -508,7 +489,7 @@ export async function upsertReconciliationEvent(
   return result.rows[0] ?? null
 }
 
-function reconciliationEventFindSql(conflictColumn: EvidenceReferenceColumn): string {
+function reconciliationEventFindSql(conflictColumn: 'payment_intent_id'): string {
   return `SELECT id, status, created_at
          FROM machine_payment_reconciliation_events
          WHERE ${conflictColumn} = $1
@@ -519,25 +500,21 @@ function reconciliationEventFindSql(conflictColumn: EvidenceReferenceColumn): st
 
 export const FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL =
   reconciliationEventFindSql('payment_intent_id')
-export const FIND_RECONCILIATION_EVENT_FOR_APPROVAL_SQL =
-  reconciliationEventFindSql('approval_request_id')
 
 export async function findReconciliationEvent(
-  conflictColumn: EvidenceReferenceColumn,
   paymentId: string,
   agentId: string,
   eventType: string,
   db: Executor = pool,
 ): Promise<ReconciliationEventRow | null> {
-  const sql =
-    conflictColumn === 'approval_request_id'
-      ? FIND_RECONCILIATION_EVENT_FOR_APPROVAL_SQL
-      : FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL
-  const result = await db.query<ReconciliationEventRow>(sql, [paymentId, agentId, eventType])
+  const result = await db.query<ReconciliationEventRow>(
+    FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL,
+    [paymentId, agentId, eventType],
+  )
   return result.rows[0] ?? null
 }
 
-function resolveReconciliationForPaymentSql(referenceColumn: EvidenceReferenceColumn): string {
+function resolveReconciliationForPaymentSql(referenceColumn: 'payment_intent_id'): string {
   return `UPDATE machine_payment_reconciliation_events
        SET status = 'resolved',
            updated_at = NOW()
@@ -549,21 +526,14 @@ function resolveReconciliationForPaymentSql(referenceColumn: EvidenceReferenceCo
 
 export const RESOLVE_RECONCILIATION_FOR_INTENT_SQL =
   resolveReconciliationForPaymentSql('payment_intent_id')
-export const RESOLVE_RECONCILIATION_FOR_APPROVAL_SQL =
-  resolveReconciliationForPaymentSql('approval_request_id')
 
 /** A settle proof arrived for this payment — close its stranded-funds flag. */
 export async function resolveReconciliationForPayment(
-  referenceColumn: EvidenceReferenceColumn,
   paymentId: string,
   agentId: string,
   db: Executor = pool,
 ): Promise<void> {
-  const sql =
-    referenceColumn === 'approval_request_id'
-      ? RESOLVE_RECONCILIATION_FOR_APPROVAL_SQL
-      : RESOLVE_RECONCILIATION_FOR_INTENT_SQL
-  await db.query(sql, [paymentId, agentId])
+  await db.query(RESOLVE_RECONCILIATION_FOR_INTENT_SQL, [paymentId, agentId])
 }
 
 export const RESOLVE_STRANDED_EVENTS_FOR_AGENT_SQL = `UPDATE machine_payment_reconciliation_events

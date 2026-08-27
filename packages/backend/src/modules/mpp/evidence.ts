@@ -171,10 +171,6 @@ function referenceKindForPayment(intent: MachinePaymentEvidenceSource): MachineP
   return intent.kind ?? 'payment_intent'
 }
 
-function referenceColumnForPayment(_intent: MachinePaymentEvidenceSource): 'payment_intent_id' {
-  return 'payment_intent_id'
-}
-
 function expectedStatusForPayment(_intent: MachinePaymentEvidenceSource): string {
   return 'confirmed'
 }
@@ -213,7 +209,6 @@ export async function recordMachinePaymentEvidenceBase(
 
   const resourceUrl = resourceUrlForPayment(intent)
   if (!resourceUrl) return
-  const referenceColumn = referenceColumnForPayment(intent)
   const paymentIntentId = intent.id
   // #2085: a NEW evidence row is always anchored to a payment intent. The
   // COLUMN survives with historical values (migration 070) and `mapEvidence`
@@ -230,7 +225,6 @@ export async function recordMachinePaymentEvidenceBase(
   const fxAt = sek ? new Date().toISOString() : null
 
   await upsertEvidenceBase({
-    referenceColumn,
     paymentIntentId,
     approvalRequestId,
     agentId: intent.agent_id,
@@ -393,9 +387,7 @@ export async function attachMachinePaymentEvidence(
   await recordMachinePaymentEvidenceBase(payment)
 
   const proofStatus = proofStatusForAttach(input)
-  const referenceColumn = referenceColumnForPayment(payment)
   const evidence = await attachEvidenceProof<MachinePaymentEvidenceRow>({
-    referenceColumn,
     paymentId: payment.id,
     agentId: input.agentId,
     proofStatus,
@@ -410,7 +402,7 @@ export async function attachMachinePaymentEvidence(
   })
 
   if (evidence) {
-    await resolveReconciliationForPayment(referenceColumn, payment.id, input.agentId)
+    await resolveReconciliationForPayment(payment.id, input.agentId)
 
     // Post-settlement delegate reconciliation (#716, epic #713): a settle
     // proof just arrived, so for standard x402 (funding went to the agent's

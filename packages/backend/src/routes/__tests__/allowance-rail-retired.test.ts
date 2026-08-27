@@ -434,7 +434,12 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
 
       expect(res.statusCode).toBe(404)
       // Not the on-chain-rail 410: there is no handler left to produce it.
-      expect(res.json().error).not.toBe(allowanceModuleRailRetired('approval').body.error)
+      // #2085 removed the `'approval'` variant this compared against — it was
+      // unreachable and its message was false. Comparing against the two
+      // SURVIVING variants is strictly stronger: it rules out every 410 this
+      // codebase can still produce, not just the one that no longer exists.
+      expect(res.json().error).not.toBe(allowanceModuleRailRetired('account').body.error)
+      expect(res.json().error).not.toBe(allowanceModuleRailRetired('intent').body.error)
       expect(mockQuery).not.toHaveBeenCalled()
     })
   })

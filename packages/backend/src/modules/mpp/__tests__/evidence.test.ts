@@ -183,7 +183,10 @@ describe('recordMachinePaymentEvidenceBase', () => {
       { status: 'pending_signature' },
       { tx_hash: null },
       { payment_resource_url: null, x402_resource_url: null },
-      { kind: 'approval_request', status: 'confirmed' },
+      // #2085: `{ kind: 'approval_request', status: 'confirmed' }` was the
+      // fifth case. It exercised the approval branch's different expected
+      // status ('executed'), which no read can produce — see
+      // `infra/repositories/__tests__/approval-kind-unconstructible.test.ts`.
     ]
 
     for (const overrides of cases) {
@@ -206,15 +209,22 @@ describe('recordMachinePaymentEvidenceBase', () => {
     expect(params[1]).toBeNull()
   })
 
-  it('uses the approval request conflict target and id column for approval evidence', async () => {
-    await recordMachinePaymentEvidenceBase(payment({
-      kind: 'approval_request',
-      status: 'executed',
-    }))
+  it('NEVER writes an approval-anchored evidence row (#2085)', async () => {
+    // Replaces a test that asserted the opposite branch. That branch could not
+    // run — evidence is written only from `FIND_INTENT_FOR_EVIDENCE_SQL`,
+    // which hardcodes the kind — so the old test pinned a shape production
+    // could not emit.
+    //
+    // Inverted rather than deleted, because the READ side is deliberately
+    // still live: migration 070 dropped `approval_requests` with CASCADE so
+    // historical evidence rows would SURVIVE holding `approval_request_id`,
+    // and `mapEvidence` still surfaces it as their `payment_id`. This asserts
+    // only that nothing NEW is anchored that way.
+    await recordMachinePaymentEvidenceBase(payment({ status: 'confirmed' }))
 
     const { sql, params } = evidenceInsert()
-    expect(sql).toContain('ON CONFLICT (approval_request_id) WHERE approval_request_id IS NOT NULL')
-    expect(params[0]).toBeNull()
-    expect(params[1]).toBe('33333333-3333-3333-3333-333333333333')
+    expect(sql).toContain('ON CONFLICT (payment_intent_id)')
+    expect(sql).not.toContain('ON CONFLICT (approval_request_id)')
+    expect(params[1]).toBeNull()
   })
 })

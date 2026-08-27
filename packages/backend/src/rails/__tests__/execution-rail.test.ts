@@ -69,16 +69,27 @@ describe('resolveExecutionRail — retirement decided in the seam (#993)', () =>
 })
 
 describe('allowanceModuleRailRetired — the ONE Safe-rail refusal producer (#1986)', () => {
-  it('produces 410 for all three kinds, each naming what refused', () => {
+  it('produces 410 for both kinds, each naming what refused', () => {
     expect(allowanceModuleRailRetired('account').statusCode).toBe(410)
     expect(allowanceModuleRailRetired('account').body.error).toMatch(/Safe rail is retired/)
     expect(allowanceModuleRailRetired('account').body.error).toMatch(/delegation rail/)
     expect(allowanceModuleRailRetired('intent').statusCode).toBe(410)
     expect(allowanceModuleRailRetired('intent').body.error).toMatch(/can no longer execute/)
-    expect(allowanceModuleRailRetired('approval').statusCode).toBe(410)
-    expect(allowanceModuleRailRetired('approval').body.error).toMatch(/queued approval/)
-    // The queue stays readable and rejectable — the refusal says so.
-    expect(allowanceModuleRailRetired('approval').body.error).toMatch(/rejected/)
+  })
+
+  it('no longer offers an `approval` kind (#2085)', () => {
+    // It had zero production callers, and its message had gone false: it said
+    // the queued approval "stays readable, and it can still be rejected" while
+    // /approvals is deregistered and migration 070 dropped the table. This
+    // test asserted that false promise verbatim (`/rejected/`) — a test
+    // holding wrong copy in place, the same shape #2086 found in the MCP
+    // consent gate. Pinned as a type-level absence so re-adding the variant
+    // has to be deliberate.
+    const kinds: Array<Parameters<typeof allowanceModuleRailRetired>[0]> = ['account', 'intent']
+    expect(kinds).toHaveLength(2)
+    for (const kind of kinds) {
+      expect(allowanceModuleRailRetired(kind).body.error).not.toMatch(/queued approval/)
+    }
   })
 
   it('does not collide with the session-rail refusal (#834 stays distinct)', () => {

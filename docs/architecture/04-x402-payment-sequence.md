@@ -1004,18 +1004,86 @@ attribution is `409`. **Replay:** one settlement transaction may confirm at most
 one intent — the guarded `UPDATE` refuses a hash already carried by another row,
 serialized by a per-hash `pg_advisory_xact_lock`.
 
-**Accepted residual gap.** A merchant that returns no `PAYMENT-RESPONSE` (or one
-without a transaction) gives Haven no hash to verify, so that payment stays
-`submitted` and stays out of the feed. Inventing an anchor client-side is
-precisely what the verification exists to prevent; passive on-chain observation
-of the settlement would close it and is tracked as
-[#2117](https://github.com/d-hinders/Haven-AI/issues/2117) — #2094's
-intent-unique child is what makes such a sweeper safe to build, since a swept
-`Transfer` can now be tied to one intent by its `RedeemedDelegation` log instead
-of being plausibly attributable to two. The same applies to
-the generic plain-HTTP erc7710 flow (#2041), where the AGENT retries the
-merchant and Haven never sees the header — such an agent completes the payment
-by posting the settlement hash to `POST /machine-payments/evidence` itself.
+#### Completing a settlement nobody reported (#2117)
+
+When the merchant returns no `PAYMENT-RESPONSE` transaction, or the generic
+plain-HTTP erc7710 flow (#2041) means Haven never sees the header at all, no
+hash is ever reported and the section above never runs. Those payments used to
+stay `submitted` forever — settled money, permanently absent from the books.
+[`modules/x402/settlement-sweeper.ts`](../../packages/backend/src/modules/x402/settlement-sweeper.ts)
+is the leader-gated tick that completes them.
+
+**It runs attribution in the reverse direction, on the same evidence.** The
+reported-hash path asks "given this hash, is it this payment?"; the sweep asks
+"given this payment, which transaction settled it?" — and answers it by looking
+this intent's stored `delegation_hash` up in the pinned DelegationManager's
+`RedeemedDelegation` logs over a bounded block range, then handing the
+transaction it finds to the very same seam, which re-runs checks 1–8 and the
+guarded `UPDATE` unchanged. #2094 is what makes this possible at all: the child
+is salted from the intent id, so the lookup key is intent-unique and
+recomputable from the row.
+
+**There is deliberately no second attribution path, and this is the load-bearing
+decision.** The sweep never proposes a candidate from transfer shape, and it
+passes `requireDelegationBound`, so the seam refuses even a shape-perfect match
+inside the right window when the pinned manager did not name this payment's
+child. The reasoning is about which failure is worse on an accounting feed:
+today's behaviour is *fail-closed — never wrong, sometimes missing*, and a sweep
+that guessed would trade it for *sometimes wrong*. A missing row is found at
+reconciliation; a confidently misattributed one is not. So the sweep completes
+what the chain can name and refuses everything else.
+
+**The window bounds the transaction; it does not bound the search.** A
+settlement of this child cannot be mined outside `authorize .. authorize + 600s`
+— the `timestamp` caveat fixes that on-chain, forever, and check 7 still
+enforces it. How long Haven keeps *looking* is a separate, much wider bound (24
+hours). The distinction matters because the likeliest real failure is an RPC
+outage spanning a payment's window: if the sweep only ever considered live
+windows, that payment would be lost for good and the gap would merely have
+moved. Searching further back is not less safe — check 7 is unchanged — it only
+costs more history.
+
+**Cost and outages.** Each candidate is scanned over **its own** settlement
+window — a few hundred blocks, where its transaction provably is — so no
+candidate's coverage depends on any other's. That matters because the residual
+gaps below are permanent for the payments they affect while the database still
+returns them as candidates for a full day: a design that let the oldest
+candidate anchor one shared range would let a single stuck row freeze the scan
+short of the chain head and starve every newer payment on that chain. Overlapping
+windows share their `eth_getLogs` calls (one per 500-block batch, filtered by the
+pinned manager address and the redemption topic), a hard budget of 20 batches per
+chain per tick applies, a candidate the budget did not reach is left untouched
+rather than judged, an exponential backoff keeps a fruitlessly-scanned candidate
+from spending the budget every tick, and a 90-second grace means the ordinary
+agent-reported completion happens first so the sweep costs nothing on the happy
+path. **Any** RPC failure
+— an unreadable head, a failed batch — abandons the whole scan for that chain
+and returns "not known yet": nothing is confirmed, nothing is marked failed, and
+there is no in-tick retry, so a dead RPC cannot become a hot loop. A partial log
+index is never used, because "hash absent from a truncated range" is
+indistinguishable from "not settled".
+
+**Accepted residual gaps.** Three, and all three stay `submitted` with no
+evidence row rather than being guessed at. Each is logged as an operational
+warning once its settlement window has closed, so the residue is visible rather
+than silent:
+
+1. **A facilitator route that emits no decodable `RedeemedDelegation` log** from
+   the pinned manager. Nothing on-chain names the payment, and transfer shape is
+   not an answer to "which payment".
+2. **A pre-#2094 look-alike pair.** Two authorizations that predate the salt
+   share one child hash, so the ambiguity guard's "different child" conjunct
+   fails and both stay refused — exactly as #2096 refuses them, and correctly.
+3. **A settlement older than the 24-hour recovery horizon**, i.e. an outage
+   lasting longer than a day. This is the residual that replaces "any unreported
+   settlement is invisible forever", and it is a great deal narrower.
+
+An agent on the plain-HTTP flow can still complete its own payment at any time
+by posting the settlement hash to `POST /machine-payments/evidence`; and since
+#2117 the SDK no longer discards the backend's retryable `503`
+(`settlement_unobservable`) — it retries with bounded backoff, so a settlement
+that simply had not been mined yet at report time no longer costs the payment
+its place in the books.
 
 ### What the settlement child delegation actually constrains
 

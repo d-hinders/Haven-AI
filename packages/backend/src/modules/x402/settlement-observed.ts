@@ -100,8 +100,13 @@ export interface ObservableSettlementIntent {
 }
 
 export type SettlementObservation =
-  /** The intent is now `confirmed` with the reported hash. */
-  | { outcome: 'confirmed' }
+  /**
+   * The intent is now `confirmed` with the reported hash. `delegationBound`
+   * reports whether the pinned DelegationManager's own `RedeemedDelegation`
+   * log named THIS intent's settlement child (verifier check 8) — i.e. whether
+   * the attribution rested on on-chain identity or only on transfer shape.
+   */
+  | { outcome: 'confirmed'; delegationBound: boolean }
   /** Not a pending erc7710 settlement — the caller's existing gates apply unchanged. */
   | { outcome: 'not_applicable' }
   /** Refused. `retryable` distinguishes "ask again later" from a settled no. */
@@ -149,10 +154,33 @@ export function isPendingErc7710Settlement(intent: ObservableSettlementIntent): 
  * touches the row until the chain has confirmed the transfer really happened,
  * from this account, to this merchant, for this exact amount, in this token.
  */
+export interface ObserveSettlementOptions {
+  /**
+   * Refuse to confirm unless verifier check 8 BOUND this transaction to this
+   * intent's own settlement child (#2117).
+   *
+   * Off for the agent-reported path, which is unchanged: there the agent named
+   * one transaction for one payment, checks 1–7 plus the database's replay and
+   * ambiguity guards carry the attribution, and a facilitator route that emits
+   * no decodable manager log still completes.
+   *
+   * ON for the passive sweeper, and non-negotiably so. The sweeper searched a
+   * whole window of open intents for a transaction nobody reported, so "a
+   * transfer of the right shape inside the right window" is not evidence of
+   * WHICH payment it settled — it is exactly the coin flip that would put a
+   * confidently wrong row in someone's books. A missing row surfaces at
+   * reconciliation; a wrong one does not. So the sweep confirms only what the
+   * manager itself named, and there is deliberately no transfer-shape fallback
+   * behind this flag.
+   */
+  requireDelegationBound?: boolean
+}
+
 export async function observeErc7710Settlement(
   intent: ObservableSettlementIntent,
   txHash: string,
   db?: Executor,
+  options: ObserveSettlementOptions = {},
 ): Promise<SettlementObservation> {
   if (!isPendingErc7710Settlement(intent)) return { outcome: 'not_applicable' }
 
@@ -197,6 +225,26 @@ export async function observeErc7710Settlement(
       retryable:
         verification.outcome === 'rpc_unavailable' || verification.outcome === 'not_found',
       reason: verification.reason,
+    }
+  }
+
+  if (options.requireDelegationBound && !verification.delegationBound) {
+    // Checks 1–7 passed: a transfer of exactly this shape really happened
+    // inside this intent's window. That is still not an answer to "which
+    // payment", and this caller asked for an answer to that question. Refuse
+    // BEFORE anything is written — the guard has to sit here, ahead of the
+    // confirm, because after the row moves there is nothing left to refuse.
+    //
+    // Not retryable-as-in-transient, but not terminal either: the caller sweeps
+    // again and this intent simply stays unattributable, which is the residual
+    // #2096 already documents and this flag preserves rather than papers over.
+    return {
+      outcome: 'unverified',
+      retryable: false,
+      reason:
+        `Transaction ${txHash} matches this payment's transfer shape and window, but the ` +
+        'DelegationManager did not name this payment\'s settlement child — passive ' +
+        'observation will not attribute a settlement on shape alone',
     }
   }
 
@@ -248,5 +296,5 @@ export async function observeErc7710Settlement(
     }
   }
 
-  return { outcome: 'confirmed' }
+  return { outcome: 'confirmed', delegationBound: verification.delegationBound }
 }

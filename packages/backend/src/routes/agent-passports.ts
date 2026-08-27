@@ -13,6 +13,11 @@ import type { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { findAgentChain } from '../infra/repositories/agent-passports.js'
 import {
+  hasBoundAccount,
+  isPassportIssuableAccount,
+  passportRailRefusalReason,
+} from '../domain/passport-issuance-rail.js'
+import {
   getPassport,
   requestPassport,
   issuePassportBestEffort,
@@ -97,7 +102,28 @@ export default async function agentPassportRoutes(app: FastifyInstance): Promise
     const existing = await getPassport(agentId)
     if (existing?.status === 'anchored') {
       // Idempotent: never mint a second attestation or re-spend gas.
+      //
+      // #2138 review finding 1: this MUST stay ahead of the rail gate below.
+      // The owner's decision was to leave existing passports alone, so a
+      // repeat POST for an already-anchored legacy passport has to keep
+      // answering 200 — gating it would answer 409 and tell the caller the
+      // passport cannot exist, about a passport that does. `issuePassport`
+      // already orders these correctly; this route duplicates the check and
+      // originally got the order wrong.
       return reply.code(200).send({ passport: serialize(existing), already_issued: true })
+    }
+    if (
+      hasBoundAccount(agent.execution_rail, agent.account_type) &&
+      !isPassportIssuableAccount(agent.execution_rail, agent.account_type)
+    ) {
+      // #2138 (owner decision 2026-08-27). 409 and not 400, matching the
+      // revoked-agent guard above: a conflict with the account's state, not a
+      // malformed request — the same call to a delegation-rail agent is valid.
+      // Explicit here because this is the route whose whole purpose is to ask
+      // for a passport; the two fire-and-forget paths (agent creation,
+      // connect-setup register) skip silently rather than fail the creation
+      // they are attached to.
+      return reply.code(409).send({ error: passportRailRefusalReason(agent.execution_rail) })
     }
 
     await requestPassport(agentId, agent.chain_id)

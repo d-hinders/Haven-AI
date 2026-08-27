@@ -83,6 +83,23 @@ export type VerificationResult =
  */
 function controlsOf(row: VerificationRow): ControlSummary | null {
   if (!row.execution_rail) return null
+  // #2138 considered adding the `account_type === 'delegator_hybrid'` OR-arm
+  // here, to match the ISSUANCE allowlist in
+  // `domain/passport-issuance-rail.ts`, and declined. Recorded here so the
+  // next reader does not re-derive it:
+  //
+  // `rail` above passes `execution_rail` through VERBATIM — it reports the raw
+  // column, not a derived eligibility judgement — and `policyEnforcedOnchain`
+  // is currently a function of that same raw value, so the two fields agree by
+  // construction. Adding the OR-arm would DECOUPLE them: a divergent row could
+  // then read `rail: 'allowance_module'` beside `policyEnforcedOnchain: true`,
+  // a receipt contradicting itself in one document. That is worse than the
+  // narrower rule, not more honest.
+  //
+  // "May Haven mint a fresh credential for this account" (issuance) and "what
+  // does this attestation's rail field actually claim" (verification) are
+  // different questions. Inert either way today — both markers move together
+  // in live data — which is why this is a deliberate boundary, not a bug.
   return {
     rail: row.execution_rail,
     policyEnforcedOnchain: row.execution_rail === 'delegation',

@@ -11,9 +11,18 @@ import { toolDescriptions, toolSchemas, type HavenMcpToolName } from './tools.js
  * Haven credential file is about to expose Haven payment tools to a model.
  * Before the server starts taking JSON-RPC calls we want the operator to
  * acknowledge — exactly once per credential + tool set — what those tools
- * can do and what the on-chain allowance cap actually is. The on-chain
- * AllowanceModule remains the policy primitive; this gate is informational
- * rather than enforcement.
+ * can do and what the on-chain budget actually is. The agent's budget
+ * delegation and its caveat enforcers remain the policy primitive; this gate
+ * is informational rather than enforcement.
+ *
+ * #2086: the copy below used to describe the legacy Safe AllowanceModule and
+ * an approval queue that would catch an over-budget payment. Both are gone —
+ * the AllowanceModule rail is retired (#1986) and the approval queue's table
+ * with it (#2055) — so the gate was promising an operator a human backstop
+ * that does not exist. It is now one accurate description of the delegation
+ * rail rather than rail-aware prose, because the delegation rail is the only
+ * rail that can pay at all: a legacy account gets HTTP 410 from the payment
+ * paths, so a second branch here would describe a state no reader can be in.
  *
  * Resolution:
  *   - `HAVEN_MCP_ACK=<hash>` env var matching the current consent hash → pass.
@@ -120,20 +129,23 @@ export function renderConsentBlock(input: ConsentInput, hash: string): string {
   }
   lines.push('')
   if (input.allowanceSummary.length === 0) {
-    lines.push('On-chain allowance: none configured.')
-    lines.push('  Any payment will queue for manual approval. The on-chain')
-    lines.push('  Safe AllowanceModule is the real spend gate.')
+    lines.push('On-chain budget: none configured.')
+    lines.push('  Until the wallet owner grants this agent a budget in Haven,')
+    lines.push('  every payment it attempts is declined on-chain.')
   } else {
-    lines.push('On-chain allowance (the real spend gate, Safe AllowanceModule):')
+    lines.push('On-chain budget (the real spend gate — enforced by the agent\'s')
+    lines.push('signed delegation, not by Haven):')
     for (const a of input.allowanceSummary) {
       const reset = a.resetMinutes ? ` per ${a.resetMinutes} min` : ' (no reset)'
       lines.push(`  • up to ${a.amount} ${a.token}${reset}`)
     }
   }
   lines.push('')
-  lines.push('Anything above the on-chain allowance pauses for owner approval')
-  lines.push('in the Haven dashboard. Revoking the agent on-chain disables')
-  lines.push('every MCP tool that would spend.')
+  lines.push('Anything above the on-chain budget is declined before any money')
+  lines.push('moves — it is not queued, and no one is asked to review it. If the')
+  lines.push('agent needs more room, the wallet owner grants or raises the budget')
+  lines.push('in Haven. Revoking the agent on-chain disables every MCP tool that')
+  lines.push('would spend.')
   lines.push('')
   lines.push(`Consent hash: ${hash}`)
   lines.push('')

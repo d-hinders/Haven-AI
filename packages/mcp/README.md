@@ -119,8 +119,15 @@ Tools this server will expose to your agent runtime:
       Return configured and on-chain allowance state …
   …
 
-On-chain allowance (the real spend gate, Safe AllowanceModule):
+On-chain budget (the real spend gate — enforced by the agent's
+signed delegation, not by Haven):
   • up to 50.000000 USDC per 1440 min
+
+Anything above the on-chain budget is declined before any money
+moves — it is not queued, and no one is asked to review it. If the
+agent needs more room, the wallet owner grants or raises the budget
+in Haven. Revoking the agent on-chain disables every MCP tool that
+would spend.
 
 Consent hash: 6f4b…d1a2
 ```
@@ -158,9 +165,10 @@ and approval requests, so the wallet owner can see exactly which tools the
 agent called and what happened — even for read-only calls that don't move
 money.
 
-The audit log is informational. The on-chain Safe AllowanceModule remains
-the only thing that can stop a spend; revoking the agent on-chain disables
-every MCP tool that would settle, regardless of audit state.
+The audit log is informational. The agent's signed budget delegation — its
+on-chain caveat enforcers — remains the only thing that can stop a spend;
+revoking the agent on-chain disables every MCP tool that would settle,
+regardless of audit state.
 
 ## Manual sanity test
 

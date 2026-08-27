@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { toolDescriptions } from './tools.js'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -196,7 +198,160 @@ describe('consent gate', () => {
     const block = renderConsentBlock(input, hash)
     expect(block).toContain(`Consent hash: ${hash}`)
     expect(block).toContain('haven_pay_x402_quote')
-    expect(block).toContain('Safe AllowanceModule')
+    // #2086: this asserted 'Safe AllowanceModule'. The gate named a rail that
+    // can no longer pay at all (#1986 answers 410 on the payment paths), so
+    // the test was holding the wrong copy in place rather than protecting it.
+    expect(block).toContain('signed delegation')
+  })
+
+  // ── #2086: the gate must not promise a human backstop ────────────────────
+  //
+  // The consent block is the LAST thing an operator reads before handing
+  // payment tools to a model, and it used to tell them an over-budget payment
+  // "pauses for owner approval in the Haven dashboard". Nothing pauses and
+  // nobody is asked: the budget delegation's caveat enforcers decline it
+  // on-chain, and since #2055 there is not even a table an approval could
+  // live in. An operator who believed that sentence would size a budget
+  // expecting a second pair of eyes that does not exist.
+  //
+  // These assertions are deliberately about ABSENCE as well as presence — a
+  // rewrite that reads well but leaves one queue sentence behind is the
+  // failure mode, and only the negative assertions catch it.
+  describe('delegation-rail framing (#2086)', () => {
+    const cases: [string, ConsentInput][] = [
+      ['with a budget', input],
+      ['with no budget configured', { ...input, allowanceSummary: [] }],
+    ]
+
+    /**
+     * The gate's OWN prose, with the embedded tool inventory removed.
+     *
+     * `renderConsentBlock` interpolates `toolDescriptions[name]` verbatim, and
+     * those descriptions live in `@haven_ai/sdk` (`tool-descriptions.ts`) —
+     * a different package, a different surface, and one with its own
+     * shrink-only size ratchet (#1591). Seven of them still name the
+     * AllowanceModule; that is real residue and is filed as its own issue
+     * rather than absorbed here, because rewriting agent-visible tool prose
+     * changes what models do and is not this issue's scope.
+     *
+     * Removing them by exact value rather than by line shape: the layout is
+     * incidental, the strings are the thing being excluded, and a formatting
+     * change must not silently widen what these assertions cover.
+     */
+    /**
+     * The one vocabulary. Re-review of #2086 found the README test carrying a
+     * NARROWER list than the gate's, and demonstrated the hole: editing only
+     * the README's audit-log sentence to "…held for a second pair of eyes
+     * before they are allowed to settle" left all 25 tests green. The README
+     * is hand-maintained prose that no renderer constrains, so it is the
+     * easier of the two to re-break — holding it to a weaker standard than the
+     * generated block had it exactly backwards.
+     *
+     * `docs/product/copy-guidelines.md`: never describe an out-of-rules
+     * payment as pending, queued, or waiting — nothing is held.
+     */
+    const HUMAN_BACKSTOP_PATTERNS = [
+      /AllowanceModule/i,
+      /manual approval/i,
+      /owner approval/i,
+      /pauses for/i,
+      /queue for|pending approval|awaiting approval/i,
+      /manual review|sign-off|signed off|flag(ged)? for/i,
+      /held for|escalat|second pair of eyes/i,
+    ]
+
+    function gateProse(block: string, subject: ConsentInput): string {
+      return subject.toolNames.reduce(
+        (acc, name) => acc.split(toolDescriptions[name]).join(''),
+        block,
+      )
+    }
+
+    for (const [label, subject] of cases) {
+      it(`names no approval queue or AllowanceModule ${label}`, () => {
+        const block = renderConsentBlock(subject, computeConsentHash(subject))
+        const prose = gateProse(block, subject)
+        for (const pattern of HUMAN_BACKSTOP_PATTERNS) {
+          expect(prose).not.toMatch(pattern)
+        }
+      })
+
+      it(`states the on-chain decline, in the product's own terms ${label}`, () => {
+        const block = renderConsentBlock(subject, computeConsentHash(subject))
+        expect(block).toMatch(/declined/i)
+        expect(gateProse(block, subject)).toMatch(/declined/i)
+        // The remedy has to be reachable from BOTH states — there is nothing
+        // to "raise" when no budget was ever granted.
+        expect(block).toContain('grants or raises the budget')
+        expect(block).toMatch(/on-chain budget/i)
+      })
+    }
+
+    it('says explicitly that nobody reviews an over-budget payment', () => {
+      // The single most load-bearing sentence in the rewrite: an operator's
+      // wrong belief here is a funding decision, not a wording preference.
+      const block = renderConsentBlock(input, computeConsentHash(input))
+      expect(block).toContain('it is not queued, and no one is asked to review it')
+    })
+
+    it('pins the closing paragraph EXACTLY, with nothing appended after it', () => {
+      // Review of #2086 demonstrated the hole this closes: every other
+      // assertion here is substring-shaped, so appending
+      // "...unless the wallet owner has manual review switched on for large
+      // payments." right after the pinned true sentence left all 23 tests
+      // green. A re-introduced backstop does not have to REPLACE the correct
+      // copy — it can simply follow it, and a keyword list can always be
+      // out-worded ("manual review", "flag for", "sign-off").
+      //
+      // So the paragraph is pinned by exact value AND anchored to the line
+      // that must come next, which is what makes appending detectable at all.
+      const closing = [
+        'Anything above the on-chain budget is declined before any money',
+        'moves — it is not queued, and no one is asked to review it. If the',
+        'agent needs more room, the wallet owner grants or raises the budget',
+        'in Haven. Revoking the agent on-chain disables every MCP tool that',
+        'would spend.',
+      ].join('\n')
+      for (const subject of [input, { ...input, allowanceSummary: [] }]) {
+        const block = renderConsentBlock(subject, computeConsentHash(subject))
+        expect(block).toContain(`${closing}\n\nConsent hash: `)
+      }
+    })
+
+    it('the shipped README shows the copy the gate actually prints', () => {
+      // packages/mcp/package.json ships README.md on npm, and its
+      // "first-launch consent" section reproduces the block as an example —
+      // so it is operator-facing copy that drifts silently. It DID drift:
+      // review of #2086 found it still showing "On-chain allowance (the real
+      // spend gate, Safe AllowanceModule)" after the renderer had moved on.
+      // Nothing checked it, so nothing said so.
+      //
+      // Pinning the two load-bearing sentences rather than the whole block:
+      // the README example is deliberately abridged (elided tool list, fake
+      // hash), so exact equality would fail for reasons that are not drift.
+      const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
+      expect(readme).toContain('On-chain budget (the real spend gate')
+      expect(readme).toContain('it is not queued, and no one is asked to review it')
+      // The SAME vocabulary the gate is held to — see HUMAN_BACKSTOP_PATTERNS.
+      for (const pattern of HUMAN_BACKSTOP_PATTERNS) {
+        expect(readme).not.toMatch(pattern)
+      }
+    })
+
+    it('does not change the consent hash — prose is not hashed', () => {
+      // The hash covers identity + tool names + allowance summary, never the
+      // rendered text (`computeConsentHash`). This is why re-basing the copy
+      // does NOT invalidate existing HAVEN_MCP_ACK values or sidecar acks, and
+      // why the frontend's pre-computed hash (lib/mcp-consent-hash.ts) needs
+      // no matching change. Pinned so a future refactor that folds prose into
+      // the hash has to argue with a test instead of silently re-prompting
+      // every operator.
+      const before = computeConsentHash(input)
+      const rendered = renderConsentBlock(input, before)
+      expect(rendered).toContain(before)
+      expect(computeConsentHash(input)).toBe(before)
+      expect(computeConsentHash({ ...input, allowanceSummary: [] })).not.toBe(before)
+    })
   })
 
   it('uses credential allowance snapshot when live allowances are not available yet', async () => {
@@ -302,11 +457,14 @@ describe('consent block — empty allowance', () => {
     process.env = originalEnv
   })
 
-  it('explains the manual-approval path when no allowance is configured', () => {
+  it('explains what happens when no budget is configured', () => {
+    // #2086: this asserted 'manual approval' — the gate told an operator with
+    // NO budget that payments would queue for a human. They are declined
+    // on-chain; there is no queue and no human.
     const withoutAllowance: ConsentInput = { ...input, allowanceSummary: [] }
     const hash = computeConsentHash(withoutAllowance)
     const block = renderConsentBlock(withoutAllowance, hash)
-    expect(block).toContain('On-chain allowance: none configured')
-    expect(block).toContain('manual approval')
+    expect(block).toContain('On-chain budget: none configured')
+    expect(block).toContain('every payment it attempts is declined on-chain')
   })
 })

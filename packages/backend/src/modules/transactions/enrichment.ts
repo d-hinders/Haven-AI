@@ -93,9 +93,16 @@ export async function enrichTransactionsWithAgents(
       const agent = agentByTransactionIdentity.get(
         paymentAgentIdentityKey(tx.hash, tx.safeId, tx.chainId),
       )
+      // #2097: the initiator record follows the EFFECTIVE attribution — an
+      // agent matched here, or one already on the row (confirmed x402 rows
+      // arrive pre-attributed from `mergeX402Transactions`), makes the row
+      // 'agent'. An outbound row that stays unattributed is a raw transfer
+      // with no matched intent — 'unknown'. Inbound rows carry no initiator
+      // record (undefined).
+      const attributedAgentId = agent?.id ?? tx.agentId
       return {
         ...tx,
-        agentId: agent?.id ?? tx.agentId,
+        agentId: attributedAgentId,
         agentName: agent?.name ?? tx.agentName,
         source: agent?.source ?? tx.source,
         x402ResourceUrl: agent?.resourceUrl ?? tx.x402ResourceUrl,
@@ -107,6 +114,11 @@ export async function enrichTransactionsWithAgents(
         activityType: agent?.activityType ?? tx.activityType,
         amountSek: agent?.amountSek ?? tx.amountSek,
         settlementScheme: agent?.settlementScheme ?? tx.settlementScheme,
+        initiatedBy: attributedAgentId
+          ? 'agent'
+          : tx.direction === 'out'
+            ? 'unknown'
+            : undefined,
       }
     })
   } catch {

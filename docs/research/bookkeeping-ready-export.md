@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/modules/reporting/fortnox.ts
   - packages/backend/src/routes/accounting.ts
   - packages/backend/src/routes/fortnox.ts
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-27" # #2117: a file this doc covers by glob (`modules/mpp/evidence.ts`) — `recordMachinePaymentEvidenceBase` now RETURNS whether a `machine_payment_evidence` row was written, so the passive erc7710 settlement observer can count a failed push instead of a silent no-op; the bookkeeping-export shape it documents is otherwise unchanged. Scope: that return-value addition only. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Architecture — bookkeeping-ready export (Fortnox / SIE / beyond)

@@ -11,7 +11,7 @@ covers:
   - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/types.ts
   - packages/sdk/src/payment-fee.test.ts
-last-verified: "2026-08-12" # re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
+last-verified: "2026-08-27" # #2117: a file this doc covers by glob (`modules/mpp/evidence.ts`) — `recordMachinePaymentEvidenceBase` now RETURNS whether a `machine_payment_evidence` row was written, so the passive erc7710 settlement observer can count a failed push instead of a silent no-op; the fee-ledger behaviour it documents is otherwise unchanged. Scope: that return-value addition only. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Haven — Platform fee scaffold and target design

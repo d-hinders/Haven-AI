@@ -12,7 +12,7 @@ covers:
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/loop-engineering.md
   - docs/contributing/loop-harness-index.md
-last-verified: "2026-08-21" # the haven-reviewer rule is unconditional (owner decision 2026-08-21) — this file scoped it to a risk list, which is the licence three skips in one session were drawn from. AGENTS.md is canonical. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-27" # #2117: a file this doc `covers:` by exact path was re-verified — `docs/contributing/loop-harness-index.md` records the `recordMachinePaymentEvidenceBase` return-value addition; the review-loop rules this doc describes are unchanged. Scope: that covered-file relationship only. Prior: the haven-reviewer rule is unconditional (owner decision 2026-08-21) — this file scoped it to a risk list, which is the licence three skips in one session were drawn from. AGENTS.md is canonical. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Haven Code Quality Loop

@@ -26,8 +26,8 @@ import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@
 import { truncate, timeAgo } from '@/lib/format'
 import { formatAgentLastActivityTitle, formatAgentLastActivityValue } from '@/lib/agent-last-seen'
 import {
-  activityStatusPresentation,
   agentStatusPresentation,
+  paymentStatusPresentation,
   failedOrRejectedStatus,
 } from '@/lib/payment-status'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
@@ -70,9 +70,10 @@ function activityTitle(item: PaymentActivityItem, agentName?: string): string {
   if (sourceTitle) {
     return agentName ? `${sourceTitle} by ${agentName}` : sourceTitle
   }
-  if (item.type === 'approval') return 'Approval request'
+  // #2120: the `'approval'` row title and the `'rejected'` status title went
+  // with the queue — no backend route can emit either (see the decision note
+  // in `lib/payment-status.ts`), and the narrowed types now say so.
   if (item.status === 'failed') return 'Payment failed'
-  if (item.status === 'rejected') return 'Payment rejected'
   return 'Agent payment'
 }
 
@@ -107,7 +108,10 @@ function activityToTransaction(
   agentName: string,
   walletName: string,
 ): AggregatedTransaction {
-  const status = activityStatusPresentation(item.status)
+  // #2120: was `activityStatusPresentation`, which merged an approval-status
+  // family into this lookup. Activity rows carry `payment_intents.status` and
+  // nothing else since #2055, so the merge had no second family left to merge.
+  const status = paymentStatusPresentation(item.status)
   const isError = failedOrRejectedStatus(item.status)
   const createdMs = new Date(item.created_at).getTime()
   const rowWalletName = activityWalletName(item, walletName)
@@ -800,7 +804,10 @@ export default function AgentDetailClient({ agentId }: Props) {
           <div>
             <div className="mb-4">
               <h2 className="text-base font-semibold text-[var(--v2-ink)]">Recent activity</h2>
-              <p className="mt-1 text-sm text-[var(--v2-ink-3)]">Payments and approval requests from this agent.</p>
+              {/* #2120: was "Payments and approval requests from this agent." This list
+                  has been payments-only since #2055 removed the approval feed entries,
+                  so the subtitle promised a row kind the section can never show. */}
+              <p className="mt-1 text-sm text-[var(--v2-ink-3)]">Payments made by this agent.</p>
             </div>
             <Card hover={false}>
               <TransactionsTable

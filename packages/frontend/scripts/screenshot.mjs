@@ -137,6 +137,7 @@ import { resolveToken } from '@haven_ai/core'
 import { makeAllowanceChainFixture } from './allowance-chain-fixture.mjs'
 import { spawn } from 'node:child_process'
 import { rm, stat, writeFile } from 'node:fs/promises'
+import net from 'node:net'
 import { setTimeout as sleep } from 'node:timers/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -694,18 +695,310 @@ function slug(route) {
   return route.replace(/^\//, '').replace(/\//g, '_') || 'root'
 }
 
-async function waitForServer(url, timeoutMs = 90_000) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url, { redirect: 'manual' })
-      if (res.status < 500) return
-    } catch {
-      /* not up yet */
-    }
-    await sleep(1000)
+export function firstLine(text) {
+  return String(text).split('\n')[0].trim()
+}
+
+/**
+ * The one line that says whether this run produced evidence (#2108).
+ *
+ * It exists because of how the harness is actually invoked. `npm run screenshot
+ * ... | tail -30` reports **`tail`'s** exit code, so the shell sees 0 while the
+ * run failed — a false green that has now misled several sessions, including
+ * the one that filed this issue. An exit code does not survive a pipe; a line
+ * of stdout does. `RESULT` is greppable on purpose, and it is the LAST thing
+ * printed so a `tail` of any depth catches it.
+ *
+ * Pure and exported so a test can pin both colours — a formatter that can only
+ * produce "ok" would restate the defect it is here to remove.
+ */
+export function formatRunResult(ok, detail) {
+  return ok ? `screenshot: RESULT ok — ${detail}` : `screenshot: RESULT FAILED — ${detail}`
+}
+
+function printRunResult(ok, detail) {
+  const line = formatRunResult(ok, detail)
+  // Deliberately stdout in both cases: a reader piping to `tail` or `head` is
+  // usually capturing stdout only, and the failing colour is the one they most
+  // need to survive that pipe.
+  console.log(line)
+}
+
+/**
+ * The measured cold `next dev` compile in this repo, in seconds (#2108).
+ *
+ * Not a guess and not a round number: repeated first-boot runs on a worktree
+ * with no `.next/` land between these two values under normal agent load. It
+ * is exported because three things have to agree about it — the default
+ * budget, the failure message that tells the reader what "too slow" is being
+ * measured against, and the test that pins the default above it. A constant
+ * that lives in one of the three and is retyped into the other two drifts.
+ */
+export const COLD_COMPILE_RANGE_S = { min: 315, max: 448 }
+
+/**
+ * Two budgets, because readiness is two events, not one (#2108).
+ *
+ * The bug this replaces was a SINGLE 90s deadline covering both, set roughly
+ * 3.5–5x below the thing it was measuring, so the capture harness could not
+ * succeed on a cold worktree at all. The lazy fix is a bigger constant, and it
+ * is wrong in the other direction: one 500s deadline makes a dev server that
+ * will NEVER come up take eight minutes to say so, and the message it finally
+ * prints is the same one a slow-but-healthy compile prints.
+ *
+ * They are separated because the two events have different orders of
+ * magnitude AND different causes:
+ *
+ *   listenTimeoutMs   `next dev` BINDING its port. This is process startup —
+ *                     seconds, cold or warm, because binding happens before
+ *                     any compilation. 90s was always the right order of
+ *                     magnitude for this; it was only ever the wrong one for
+ *                     the event below. Exceeding it means a startup failure,
+ *                     which is a different remedy from "wait longer".
+ *
+ *   readyTimeoutMs    that listening server ANSWERING, which is the webpack
+ *                     compile. This is the 315–448s event. The budget is
+ *                     ~2.2x the measured maximum: enough headroom for a
+ *                     genuinely contended machine, and affordable ONLY
+ *                     because the failures that are not slowness — the
+ *                     process dying, the port never opening — are detected by
+ *                     progress rather than by waiting this budget out.
+ *
+ * Both are overridable (`SCREENSHOT_LISTEN_TIMEOUT_MS`,
+ * `SCREENSHOT_READY_TIMEOUT_MS`) so a slower machine needs no code edit.
+ */
+export const READINESS_DEFAULTS = {
+  listenTimeoutMs: 90_000,
+  // Rounded to whole seconds: `COLD_COMPILE_RANGE_S.max * 2.2 * 1000` is 985600.0000000001
+  // in float, and a budget that prints with a fractional millisecond invites the
+  // reader to wonder what else about it is accidental.
+  readyTimeoutMs: Math.round(COLD_COMPILE_RANGE_S.max * 2.2) * 1_000,
+  progressIntervalMs: 15_000,
+}
+
+/**
+ * A budget that cannot fit the thing it measures, named as such.
+ *
+ * Returns the problems as strings rather than throwing, so the same predicate
+ * is usable as a warning at runtime and as an assertion in a test. It has to
+ * be able to say NO for a plausible-looking number — a floor that only ever
+ * says yes is the defect this whole issue is an instance of — so the test
+ * feeds it the old 90_000 and requires it to object.
+ */
+export function readinessBudgetProblems(budgets) {
+  const problems = []
+  if (budgets.readyTimeoutMs < COLD_COMPILE_RANGE_S.max * 1000) {
+    problems.push(
+      `readyTimeoutMs=${budgets.readyTimeoutMs}ms is below the MEASURED cold \`next dev\` compile ` +
+        `in this repo (${COLD_COMPILE_RANGE_S.min}–${COLD_COMPILE_RANGE_S.max}s) — a cold worktree ` +
+        'will fail during compilation, for a reason that has nothing to do with the page being captured',
+    )
   }
-  throw new Error(`dev server did not become ready at ${url} within ${timeoutMs}ms`)
+  if (budgets.listenTimeoutMs >= budgets.readyTimeoutMs) {
+    problems.push(
+      `listenTimeoutMs=${budgets.listenTimeoutMs}ms is not shorter than readyTimeoutMs=${budgets.readyTimeoutMs}ms — ` +
+        'a dev server that never binds its port would then take the full cold-start budget to report, ' +
+        'which is the failure mode the split exists to avoid',
+    )
+  }
+  return problems
+}
+
+/**
+ * Resolve the budgets from the environment. Pure in `env` so it is testable.
+ *
+ * A malformed override THROWS rather than falling back to the default: silently
+ * ignoring `SCREENSHOT_READY_TIMEOUT_MS=6OO000` (letter O) would produce exactly
+ * the confusing timeout this issue is about, with the reader certain they had
+ * raised it.
+ */
+export function resolveReadinessBudgets(env = process.env) {
+  const read = (name, fallback) => {
+    const raw = env[name]
+    if (raw === undefined || raw === '') return fallback
+    const n = Number(raw)
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+      throw new Error(`${name} must be a positive whole number of milliseconds; got ${JSON.stringify(raw)}`)
+    }
+    return n
+  }
+  return {
+    listenTimeoutMs: read('SCREENSHOT_LISTEN_TIMEOUT_MS', READINESS_DEFAULTS.listenTimeoutMs),
+    readyTimeoutMs: read('SCREENSHOT_READY_TIMEOUT_MS', READINESS_DEFAULTS.readyTimeoutMs),
+    progressIntervalMs: READINESS_DEFAULTS.progressIntervalMs,
+  }
+}
+
+/**
+ * The failure messages, as data, in one place.
+ *
+ * Every one of them names the CAUSE and the REMEDY, because the message this
+ * replaces named neither: "did not become ready within 90000ms" sent several
+ * sessions looking for a broken page, a port collision, or Playwright — the
+ * three things it was NOT. Pure and exported so the tests can pin the words a
+ * reader is going to act on, rather than trusting that a message exists.
+ */
+export function describeReadinessFailure(kind, ctx) {
+  const prewarm =
+    'Or pre-warm a server yourself and point the harness at it:\n' +
+    `      npm run dev -w packages/frontend -- --hostname 127.0.0.1 --port ${ctx.port ?? '<port>'}\n` +
+    `      SCREENSHOT_BASE_URL=http://127.0.0.1:${ctx.port ?? '<port>'} npm run screenshot -w packages/frontend -- <route>\n` +
+    '    The #1800 identity check still runs on that server, so the PNGs are still provably this worktree.'
+  if (kind === 'process-exited') {
+    return (
+      `dev server PROCESS EXITED (code ${ctx.exitCode}) after ${ctx.elapsedS}s — this is NOT a timeout.\n` +
+      `    Cause: \`npm run dev\` in ${ctx.cwdLabel ?? 'packages/frontend'} could not stay up. Nothing was ever listening on ${ctx.url}.\n` +
+      '    Remedy: run that command by hand in this worktree and read its output. A missing `npm install`, an\n' +
+      '    unbuilt `@haven_ai/core` (`npm run build -w packages/core`), or an occupied port are the usual reasons.'
+    )
+  }
+  if (kind === 'never-listened') {
+    return (
+      `dev server never opened a socket on ${ctx.url} within ${ctx.budgetMs}ms (${Math.round(ctx.budgetMs / 1000)}s).\n` +
+      '    Cause: the `next dev` process is alive but has not BOUND its port. That is a startup failure, not a slow\n' +
+      `    compile — a compiling server binds its port within seconds and only then spends ${COLD_COMPILE_RANGE_S.min}–${COLD_COMPILE_RANGE_S.max}s compiling.\n` +
+      '    Remedy: run `npm run dev -w packages/frontend` by hand and read its output. If this machine really is that\n' +
+      '    slow to start, raise SCREENSHOT_LISTEN_TIMEOUT_MS.'
+    )
+  }
+  if (kind === 'stopped-listening') {
+    return (
+      `dev server at ${ctx.url} accepted a connection and then STOPPED listening after ${ctx.elapsedS}s.\n` +
+      '    Cause: the server died mid-compile — an out-of-memory kill or a crash in `next dev`, not a slow page.\n' +
+      '    Remedy: run `npm run dev -w packages/frontend` by hand; the crash prints there and is discarded here\n' +
+      '    (the harness spawns it with stdio ignored).'
+    )
+  }
+  return (
+    `dev server at ${ctx.url} is LISTENING but did not answer within ${ctx.budgetMs}ms (${Math.round(ctx.budgetMs / 1000)}s).\n` +
+    `    Cause: a cold \`next dev\` compile in this repo measures ${COLD_COMPILE_RANGE_S.min}–${COLD_COMPILE_RANGE_S.max}s. This run exceeded even the\n` +
+    '    budget above it, so the compile is either far slower than measured (a contended machine) or genuinely stuck.\n' +
+    '    Remedy: raise SCREENSHOT_READY_TIMEOUT_MS.\n' +
+    `    ${prewarm}`
+  )
+}
+
+/** Is anything accepting TCP connections there? Deliberately not an HTTP request:
+ *  a bare connect does not ask a compiling Next dev server to do any work. */
+function probeListeningDefault(url, timeoutMs = 2000) {
+  const { hostname, port } = new URL(url)
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: hostname, port: Number(port) })
+    const done = (answer) => {
+      socket.destroy()
+      resolve(answer)
+    }
+    socket.setTimeout(timeoutMs)
+    socket.once('connect', () => done(true))
+    socket.once('timeout', () => done(false))
+    socket.once('error', () => done(false))
+  })
+}
+
+async function probeAnsweringDefault(url, signal) {
+  const res = await fetch(url, { redirect: 'manual', signal })
+  return res.status
+}
+
+/**
+ * Wait for the spawned dev server, measuring PROGRESS rather than only a deadline (#2108).
+ *
+ * The sequence, and why each step is a step:
+ *
+ *   1. The child process is watched THROUGHOUT. If it exits, the wait ends
+ *      immediately with `process-exited` — a dead server is reported in
+ *      seconds, whatever budget was configured. This is what makes a large
+ *      cold-compile budget affordable.
+ *   2. Phase A waits for the port to accept a connection, on the SHORT budget.
+ *      Binding is startup, not compilation.
+ *   3. Phase B waits for that listening server to answer, on the LONG budget,
+ *      and re-checks the socket between attempts so a mid-compile crash is
+ *      reported as `stopped-listening` rather than waiting the budget out.
+ *   4. Progress is printed on a fixed interval in both phases, so a five-minute
+ *      wait is visibly a wait. The old version printed nothing for 90 seconds
+ *      and then failed, which is indistinguishable from a hang and is part of
+ *      why this kept being misdiagnosed.
+ *
+ * Every collaborator is injectable so the phases are testable without a real
+ * server: a readiness check that can only be exercised by waiting five minutes
+ * for a real compile is a check nobody runs.
+ */
+export async function waitForServer(url, opts = {}) {
+  const {
+    child = null,
+    budgets = resolveReadinessBudgets(),
+    probeListening = probeListeningDefault,
+    probeAnswering = probeAnsweringDefault,
+    pollIntervalMs = 1000,
+    sleepFn = sleep,
+    now = Date.now,
+    log = console.log,
+    cwdLabel,
+  } = opts
+
+  const port = (() => {
+    try {
+      return new URL(url).port || undefined
+    } catch {
+      return undefined
+    }
+  })()
+  const started = now()
+  const elapsedS = () => Math.round((now() - started) / 1000)
+  let lastProgressAt = started
+  const progress = (line) => {
+    if (now() - lastProgressAt < budgets.progressIntervalMs) return
+    lastProgressAt = now()
+    log(`screenshot: ${line} (${elapsedS()}s elapsed)`)
+  }
+  const fail = (kind, ctx) => {
+    const err = new Error(describeReadinessFailure(kind, { url, port, cwdLabel, elapsedS: elapsedS(), ...ctx }))
+    err.readinessFailure = kind
+    return err
+  }
+  // `exitCode` is non-null once the child has exited; `signalCode` covers a kill.
+  const childDead = () => child && (child.exitCode !== null || child.signalCode != null)
+
+  // Phase A — did it bind a port?
+  const listenDeadline = started + budgets.listenTimeoutMs
+  let listening = false
+  while (now() < listenDeadline) {
+    if (childDead()) throw fail('process-exited', { exitCode: child.exitCode ?? child.signalCode })
+    if (await probeListening(url)) {
+      listening = true
+      break
+    }
+    progress(`waiting for \`next dev\` to bind ${url}`)
+    await sleepFn(pollIntervalMs)
+  }
+  if (!listening) {
+    if (childDead()) throw fail('process-exited', { exitCode: child.exitCode ?? child.signalCode })
+    throw fail('never-listened', { budgetMs: budgets.listenTimeoutMs })
+  }
+  log(
+    `screenshot: dev server is listening on ${url} after ${elapsedS()}s — now waiting for the first compile ` +
+      `(measured cold: ${COLD_COMPILE_RANGE_S.min}–${COLD_COMPILE_RANGE_S.max}s, budget ${Math.round(budgets.readyTimeoutMs / 1000)}s)`,
+  )
+
+  // Phase B — is it answering?
+  const readyDeadline = started + budgets.readyTimeoutMs
+  while (now() < readyDeadline) {
+    if (childDead()) throw fail('process-exited', { exitCode: child.exitCode ?? child.signalCode })
+    try {
+      const status = await probeAnswering(url)
+      if (status < 500) {
+        log(`screenshot: dev server answered ${status} after ${elapsedS()}s`)
+        return
+      }
+    } catch {
+      /* still compiling, or the connection was dropped — the socket check below decides which */
+    }
+    if (childDead()) throw fail('process-exited', { exitCode: child.exitCode ?? child.signalCode })
+    if (!(await probeListening(url))) throw fail('stopped-listening', {})
+    progress('dev server is listening and still compiling — this is the cold `next dev` compile, not a hang')
+    await sleepFn(pollIntervalMs)
+  }
+  throw fail('not-answering', { budgetMs: budgets.readyTimeoutMs })
 }
 
 /**
@@ -2907,6 +3200,13 @@ async function main() {
   // Resolved BEFORE retention runs, because the archived run's manifest records
   // which branch/commit displaced it.
   const identity = buildRunIdentity(worktreeIdentity(ROOT))
+  // Resolved here, not at the spawn, so a malformed override fails before the
+  // run does any work — and so a budget too small for a cold compile is called
+  // out at the top of the log rather than 90 seconds later as a mystery timeout.
+  const readinessBudgets = resolveReadinessBudgets()
+  for (const problem of readinessBudgetProblems(readinessBudgets)) {
+    console.warn(`⚠ screenshot: ${problem}`)
+  }
   console.log(`screenshot: worktree ${identity.worktree}`)
   console.log(
     `screenshot: branch ${identity.branch} @ ${identity.commit.slice(0, 12)}${identity.dirty ? ' (dirty working tree)' : ''}`,
@@ -3003,7 +3303,9 @@ async function main() {
       server.on('exit', (code) => {
         if (code && code !== 0 && code !== null) console.error(`dev server exited ${code}`)
       })
-      await waitForServer(BASE_URL)
+      // The child handle is passed so the wait can end the moment `next dev`
+      // dies, instead of waiting out a budget sized for a cold compile (#2108).
+      await waitForServer(BASE_URL, { child: server, budgets: readinessBudgets, cwdLabel: path.relative(process.cwd(), ROOT) || ROOT })
     } else {
       console.log(`screenshot: capturing an already-running server at ${BASE_URL}`)
     }
@@ -3493,21 +3795,25 @@ async function main() {
     )
     for (const m of viewportMismatches) console.error(`  ${m.file}`)
   }
-  if (
-    viewportMismatches.length > 0 ||
-    gotoFailures.length > 0 ||
-    deletedCaptures.length > 0 ||
-    CHAIN_READ_GAPS.length > 0 ||
-    CHAIN_SILENT_CAPTURES.length > 0
-  ) {
+  const failures = [
+    viewportMismatches.length > 0 && `${viewportMismatches.length} PNG(s) not named after any resolved viewport`,
+    gotoFailures.length > 0 && `${gotoFailures.length} route(s) failed to navigate`,
+    deletedCaptures.length > 0 && `${deletedCaptures.length} capture(s) deleted as unusable`,
+    CHAIN_READ_GAPS.length > 0 && `${CHAIN_READ_GAPS.length} chain-fed route(s) issued no on-chain reads`,
+    CHAIN_SILENT_CAPTURES.length > 0 && `${CHAIN_SILENT_CAPTURES.length} silent chain-fed capture(s)`,
+  ].filter(Boolean)
+  if (failures.length > 0) {
+    printRunResult(false, failures.join('; '))
     process.exit(1)
   }
+  printRunResult(true, `${captured.length} PNG(s) in ${path.relative(process.cwd(), OUT_DIR) || OUT_DIR}`)
 }
 
 // Run only as a CLI (fixtureFor is imported by tests).
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
     console.error('screenshot failed:', err instanceof Error ? err.message : err)
+    printRunResult(false, err instanceof Error ? firstLine(err.message) : String(err))
     process.exit(1)
   })
 }

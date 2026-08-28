@@ -98,7 +98,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     const status = await getAgentPaymentStatus(agent, request.params.id)
 
     if (!status) {
-      return reply.code(404).send({ error: 'Payment or approval request not found' })
+      return reply.code(404).send({ error: 'Payment not found' })
     }
 
     return reply.send(status)

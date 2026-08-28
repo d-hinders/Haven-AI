@@ -26,6 +26,15 @@ export interface AllowanceInfo {
 export interface EffectiveAllowance {
   remaining: bigint
   effectiveSpent: bigint
+  /**
+   * The next reset boundary, on the CHAIN-time period grid.
+   *
+   * It is a `Date` for convenience, but it is not a wall-clock instant: it is
+   * derived from the `nowSec` passed in. Anything that turns it into a
+   * countdown must measure it against that SAME `nowSec`, never `Date.now()`
+   * — mixing the two is #1995, where the reset decision and the countdown for
+   * that decision were computed from different clocks.
+   */
   nextResetTime: Date | null
   isResetPending: boolean
 }

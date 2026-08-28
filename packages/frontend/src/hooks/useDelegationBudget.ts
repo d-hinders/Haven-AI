@@ -25,13 +25,21 @@ import type { AccountSigners, DelegationMessage } from '@/lib/delegationPasskeyS
  * multi-signer fix): a Hybrid account accepts ANY of its enrolled signers
  * on-chain, so "the account has an EOA owner" must never disable the passkey
  * path — that stranded every passkey user who enrolled a wallet as backup.
- * Preference: a passkey enrolled on this device → a connected owner wallet →
- * any passkey (the authenticator can find credentials our device markers
- * missed). Null only when the account has no reachable signer from here.
+ * Preference: a passkey enrolled on this device → the connected wallet WHEN
+ * it is the set's named owner → any passkey (the authenticator can find
+ * credentials our device markers missed). Null only when the account has no
+ * reachable signer from here.
+ *
+ * #2068: the EOA rung takes the connected ADDRESS, not a boolean — "a wallet
+ * is connected" never satisfied "the owner is connected". An unrelated
+ * connected wallet used to be picked here for a mixed account, and its
+ * signature then failed at verification; a signer offered but failing at
+ * signature time is worse than absent, so a non-owner wallet now falls
+ * through to the passkey rung (or to null for an owner-only set).
  */
 export function pickSigningPath(
   signers: AccountSigners | null,
-  eoaConnected: boolean,
+  connectedEoaAddress: string | null | undefined,
 ): 'passkey' | 'eoa' | null {
   if (!signers) return null
   const hasPasskeys = signers.passkeys.length > 0
@@ -39,7 +47,13 @@ export function pickSigningPath(
     hasPasskeys &&
     signers.passkeys.some((p) => hasPasskeyCredentialOnDevice(credentialIdFromKeyId(p.key_id)))
   if (onDevice) return 'passkey'
-  if (signers.owner_address && eoaConnected) return 'eoa'
+  if (
+    signers.owner_address &&
+    connectedEoaAddress &&
+    signers.owner_address.toLowerCase() === connectedEoaAddress.toLowerCase()
+  ) {
+    return 'eoa'
+  }
   if (hasPasskeys) return 'passkey'
   return null
 }
@@ -175,7 +189,7 @@ export function useDelegationBudget(agentId: string, chainId: number) {
   // The signing path is a DEVICE decision, not an account-shape decision:
   // an account with both an owner and passkeys signs with whichever is
   // reachable here (passkey preferred).
-  const signingPath = pickSigningPath(signers, signer?.type === 'eoa')
+  const signingPath = pickSigningPath(signers, signer?.type === 'eoa' ? signer.address : null)
 
   const grant = useCallback(
     async (input: GrantInput): Promise<BudgetResult> => {

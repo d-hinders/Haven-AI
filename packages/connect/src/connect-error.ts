@@ -15,15 +15,29 @@
  * Codes are additive and never renamed: a consumer pinned to an older
  * connector must keep recognising the ones it already knows.
  */
+export interface ConnectErrorDetails {
+  /**
+   * The `--runtime` values a retry may use, when the refusal is about runtime
+   * selection (#2091). The values lived only in `message` prose, which the
+   * `--json` contract discards entirely — while the backend's setup prompt
+   * instructs an agent to retry only with "one of the values that refusal
+   * lists". Carrying them structurally is what makes that retry reachable
+   * from automation.
+   */
+  allowedRuntimes?: readonly string[]
+}
+
 export class ConnectError extends Error {
   readonly code: string
   readonly nextAction: string
+  readonly details: ConnectErrorDetails
 
-  constructor(code: string, message: string, nextAction: string) {
+  constructor(code: string, message: string, nextAction: string, details: ConnectErrorDetails = {}) {
     super(message)
     this.name = 'ConnectError'
     this.code = code
     this.nextAction = nextAction
+    this.details = details
   }
 }
 

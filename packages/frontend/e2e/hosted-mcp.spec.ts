@@ -1,15 +1,17 @@
 /**
  * Hosted MCP — end-to-end acceptance tests (#191)
  *
- * Covers the two key paths described in the Epic #181 acceptance criteria:
+ * Covers the in-budget path described in the Epic #181 acceptance criteria:
+ * an agent makes a payment within its on-chain budget; the UI shows the agent
+ * as active and the transaction lands in the activity feed.
  *
- *   In-budget path  — agent makes a payment within its Safe Allowance Module
- *                     headroom; the UI shows the agent as active and the
- *                     transaction lands in the activity feed.
- *
- *   Over-budget path — agent exceeds its allotted spend; Haven queues the
- *                     payment for user approval and the Approvals page shows
- *                     the pending item, keyed to the originating x402 resource.
+ * #2120: this header used to promise a second, "over-budget" path in which
+ * "Haven queues the payment for user approval and the Approvals page shows the
+ * pending item". That contradicted this file's own removal note at the bottom
+ * of the in-budget describe — the queue, its route and its page are gone
+ * (#1986/#1989/#2055), and on the delegation rail an over-budget payment
+ * REVERTS on-chain rather than queueing. The coverage gap that leaves is
+ * recorded there, not papered over here.
  *
  * What is tested here vs. in unit tests
  * ─────────────────────────────────────
@@ -121,80 +123,22 @@ test.describe('Hosted MCP — in-budget path', () => {
 
 // ── Over-budget path ──────────────────────────────────────────────────────────
 
-test.describe('Hosted MCP — over-budget path', () => {
-  test.beforeEach(async ({ page }) => {
-    await mockHavenApi(page)
-    await seedAuthenticatedSession(page)
-  })
-
-  test('over-budget x402 payment appears in the approvals queue', async ({ page }) => {
-    const browserErrors = collectBrowserErrors(page)
-
-    await page.goto('/approvals')
-    await dismissMobileSidebar(page)
-
-    // The approvals page must be reachable
-    await expect(page.getByRole('heading', { name: 'Approvals' })).toBeVisible()
-
-    // The pending x402 approval from the mock is shown with the agent name.
-    // The name appears in both the approval row and a heading, so use .first().
-    await expect(page.getByText('Research agent').first()).toBeVisible()
-
-    // The approval shows the amount and token.
-    // Multiple elements may show "12.50" or "USDC" — pin to first.
-    await expect(page.getByText(/12\.50/).first()).toBeVisible()
-    await expect(page.getByText(/USDC/).first()).toBeVisible()
-
-    // The source URL is shown (proves x402 provenance).
-    // The URL can appear multiple times (row + detail) — pin to first.
-    await expect(page.getByText(/research\.example/i).first()).toBeVisible()
-
-    expect(await expectNoHorizontalOverflow(page)).toMatchObject({
-      hasOverflow: false,
-      contentRegionFound: true,
-    })
-    expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
-  })
-
-  test('dashboard alert links to the approvals queue when an over-budget approval is pending', async ({
-    page,
-  }) => {
-    const browserErrors = collectBrowserErrors(page)
-
-    await page.goto('/dashboard')
-    await dismissMobileSidebar(page)
-
-    // Dashboard shows an "Open approvals" alert when there are pending approvals
-    const alertLink = page.getByRole('link', { name: 'Open approvals' })
-    await expect(alertLink).toBeVisible()
-
-    await alertLink.click()
-    await expect(page).toHaveURL(/\/approvals$/)
-    await expect(page.getByRole('heading', { name: 'Approvals' })).toBeVisible()
-
-    expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
-  })
-
-  // REMOVED (#1771): 'approval page renders without horizontal overflow on
-  // mobile'. It narrowed the viewport to 390px with `setViewportSize` inside
-  // the DESKTOP project and asserted the old document-level overflow metric —
-  // and that assertion was its entire body. Inside the authenticated shell
-  // that metric could not fail, so the test proved nothing whatsoever, which
-  // is why nobody noticed it was also not testing mobile: `setViewportSize`
-  // leaves `maxTouchPoints` at 0, the pointer fine and the UA desktop (the
-  // #1768/#1770 finding).
-  //
-  // Not a coverage loss. `/approvals` is in `navigation.mobile.spec.ts`'
-  // ROUTES, which checks it at 393px under real Pixel 5 emulation using the
-  // content-region metric, and gates every PR since #1770 — strictly stronger
-  // on every axis. Repairing this one would have left two places asserting the
-  // same thing with the weaker one lying about being mobile.
-  //
-  // If you want a new mobile assertion, add it to a `*.mobile.spec.ts`.
-})
-
-// ── Connected-state path (mcp_last_seen_at) ───────────────────────────────────
-
+// REMOVED (#1989): the entire `Hosted MCP — over-budget path` describe — both
+// 'over-budget x402 payment appears in the approvals queue' and 'dashboard
+// alert links to the approvals queue when an over-budget approval is pending'.
+//
+// Both drove `/approvals`, which no longer routes, and asserted on a queue UI
+// deleted with the Safe rail. `POST /approvals/:id/approve` has answered HTTP
+// 410 since #1986, so even the backend half of what they described is gone.
+//
+// ⚠️ This IS a coverage loss, and naming it honestly matters more than the
+// tests did. Over-budget is still a real product behaviour — it just has a
+// different shape on the delegation rail, where the budget is enforced
+// on-chain during gas estimation and an over-budget payment REVERTS rather
+// than queueing. Nothing in this file exercises that path today. Repointing
+// these two at it would have meant inventing assertions about a flow they
+// were never written for, so the gap is recorded for the epic's residue
+// sweep (#1993) instead of being papered over with a green test.
 test.describe('Hosted MCP — connected state', () => {
   /**
    * The component-level connected-state rendering this once pointed at

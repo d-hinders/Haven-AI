@@ -14,10 +14,11 @@ import InvestorBriefingPage from '../page'
  * the day it lands instead of the day someone remembers this file.
  *
  * The second assertion is the reason "decorative" is the right word here rather
- * than an assumption. Three links on this page are labelled "Contact the team",
- * and all three render the identical arrow — so the glyph cannot be what
+ * than an assumption. Two links on this page are labelled "Contact the team"
+ * (sticky header and closing band — the hero pair was deduped by #1956), and
+ * both render the identical arrow — so the glyph cannot be what
  * distinguishes them, and hiding it removes nothing a listener was using. (They
- * also share one destination, which is why three same-named links is correct
+ * also share one destination, which is why two same-named links is correct
  * and not itself a finding.)
  */
 

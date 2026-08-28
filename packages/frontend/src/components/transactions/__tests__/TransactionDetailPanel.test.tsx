@@ -67,17 +67,68 @@ describe('TransactionDetailPanel', () => {
     expect(screen.getByText('Payment ID')).toBeInTheDocument()
   })
 
+  it('shows the settlement scheme for an eip3009 x402 payment', () => {
+    renderPanel(
+      tx({
+        source: 'x402',
+        settlementScheme: 'eip3009',
+      }),
+    )
+    expect(screen.getByText('Settlement')).toBeInTheDocument()
+    expect(screen.getByText('EIP-3009')).toBeInTheDocument()
+  })
+
+  it('shows the settlement scheme for an erc7710 x402 payment', () => {
+    renderPanel(
+      tx({
+        source: 'x402',
+        settlementScheme: 'erc7710',
+      }),
+    )
+    expect(screen.getByText('Settlement')).toBeInTheDocument()
+    expect(screen.getByText('ERC-7710')).toBeInTheDocument()
+  })
+
+  it('renders no settlement row for x402 rows without a recorded scheme', () => {
+    renderPanel(tx({ source: 'x402' }))
+    expect(screen.queryByText('Settlement')).not.toBeInTheDocument()
+  })
+
+  it('renders no settlement row for non-x402 kinds even when a scheme is present', () => {
+    renderPanel(
+      tx({
+        direction: 'out',
+        source: 'direct',
+        settlementScheme: 'eip3009',
+      }),
+    )
+    expect(screen.queryByText('Settlement')).not.toBeInTheDocument()
+  })
+
   it('shows the send body with recipient and initiator', () => {
-    renderPanel(tx({ direction: 'out', source: 'direct', agentName: undefined }))
+    renderPanel(
+      tx({ direction: 'out', source: 'direct', agentName: undefined, initiatedBy: 'human' }),
+    )
     expect(screen.getByText('Transfer')).toBeInTheDocument()
     expect(screen.getByText('To')).toBeInTheDocument()
     expect(screen.getByText('Initiator')).toBeInTheDocument()
-    expect(screen.getByText('You')).toBeInTheDocument() // no agent → user-initiated
+    expect(screen.getByText('You')).toBeInTheDocument() // "You" only for human-initiated (#2097)
+  })
+
+  it('renders explicit "Unknown" — never "You" — when an outbound row has missing attribution', () => {
+    renderPanel(tx({ direction: 'out', source: 'direct', agentName: undefined }))
+    expect(screen.getByText('Transfer')).toBeInTheDocument()
+    expect(screen.getByText('Initiator')).toBeInTheDocument()
+    expect(screen.getByText('Unknown')).toBeInTheDocument()
+    expect(screen.queryByText('You')).not.toBeInTheDocument()
   })
 
   it('attributes the initiator to the agent when present', () => {
-    renderPanel(tx({ direction: 'out', source: 'direct', agentName: 'Ops agent' }))
+    renderPanel(
+      tx({ direction: 'out', source: 'direct', agentName: 'Ops agent', initiatedBy: 'agent' }),
+    )
     expect(screen.getByText('Ops agent')).toBeInTheDocument()
+    expect(screen.queryByText('You')).not.toBeInTheDocument()
   })
 
   it('shows the receive body with sender', () => {

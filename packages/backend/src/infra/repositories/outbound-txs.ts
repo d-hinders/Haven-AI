@@ -16,13 +16,15 @@
  * proven against real Postgres in the repository test, not asserted on a
  * mock, because the guarantee IS Postgres row-locking.
  *
- * Unlike the watermark repository this one is FAIL-CLOSED: these rows are the
- * authority for "what did we broadcast", not an optimisation, so an error
- * propagates to the caller rather than degrading.
+ * Unlike the fail-open repositories in this directory (the pattern the
+ * since-deleted allowance-nonce watermark repository set, #718/#1987) this
+ * one is FAIL-CLOSED: these rows are the authority for "what did we
+ * broadcast", not an optimisation, so an error propagates to the caller
+ * rather than degrading.
  */
 
 import pool from '../../db.js'
-import type { Executor } from '../transaction.js'
+import { withTransaction, type Executor } from '../transaction.js'
 
 export type { Executor }
 
@@ -160,6 +162,22 @@ export const FIND_OUTBOUND_TX_BY_HASH_SQL = `SELECT * FROM outbound_txs
    WHERE chain_id = $1 AND tx_hash = $2
    ORDER BY created_at DESC, id
    LIMIT 1`
+
+/**
+ * One row by primary key (#1743) — the operator lane-cancel's read: the alert
+ * the worker logs for a stuck non-idempotent broadcast names the row id, and
+ * the cancel trigger loads exactly that row to verify it is still the wedge
+ * it was reported as. Primary-key lookup; no extra index needed.
+ */
+export const FIND_OUTBOUND_TX_BY_ID_SQL = `SELECT * FROM outbound_txs WHERE id = $1`
+
+export async function findOutboundTxById(
+  id: string,
+  db: Executor = pool,
+): Promise<OutboundTxRow | null> {
+  const { rows } = await db.query<OutboundTxRow>(FIND_OUTBOUND_TX_BY_ID_SQL, [id])
+  return rows[0] ?? null
+}
 
 export async function findOutboundTxByHash(
   chainId: number,
@@ -306,6 +324,83 @@ export async function markOutboundTxFailed(
     nonce?.toString() ?? null,
   ])
   return rows[0] ?? null
+}
+
+/**
+ * Roll a lane-cancel claim back (#1743): the trigger flipped the stuck row to
+ * `replaced` and then failed BEFORE anything was signed into the lane, so the
+ * flip is no longer true — the original broadcast still holds the chain-side
+ * nonce. Guarded on the exact replacement id so only the claimant that made
+ * the flip can undo it, and only while the row still points at its cancel.
+ *
+ * `updated_at` is restored to the caller-observed PRE-CLAIM value: the claim
+ * itself bumped it (`markOutboundTxReplaced` sets NOW()), and leaving that
+ * bump in place would both mute the worker's re-alert and make the trigger's
+ * own age gate refuse an immediate re-run for another
+ * STALE_BROADCAST_SECONDS — the broadcast is as stale as it was, and the row
+ * should say so.
+ *
+ * Can hit migration 061's partial UNIQUE if some other transaction stamped
+ * the nonce in the window (the dropped-attest shape) — the caller treats that
+ * as "the lane moved on" and leaves the row `replaced`.
+ */
+export const RESTORE_REPLACED_OUTBOUND_TX_SQL = `UPDATE outbound_txs
+     SET status = 'broadcast', replaced_by = NULL, updated_at = $3
+   WHERE id = $1 AND status = 'replaced' AND replaced_by = $2
+   RETURNING *`
+
+export async function restoreReplacedOutboundTx(
+  id: string,
+  replacedById: string,
+  preClaimUpdatedAt: Date,
+  db: Executor = pool,
+): Promise<OutboundTxRow | null> {
+  const { rows } = await db.query<OutboundTxRow>(RESTORE_REPLACED_OUTBOUND_TX_SQL, [
+    id,
+    replacedById,
+    preClaimUpdatedAt,
+  ])
+  return rows[0] ?? null
+}
+
+/**
+ * The lane-cancel trigger's pre-stamp failure close, ATOMICALLY (#1743
+ * review): close the cancel attempt `failed` at the nonce (so the lane cap
+ * counts it) AND roll the claim back in ONE transaction. Done as two
+ * independent writes, a process crash between them left the cancel `failed`
+ * (no scan revisits it) and the attest `replaced` (never alerts, every
+ * re-trigger refused) — the silent-permanent-wedge shape the trigger's
+ * throw-handling had just been fixed to avoid, reintroduced through a
+ * narrower door. Atomic, the crash leaves either the pre-close state (queued
+ * cancel + replaced attest — the orphan path re-broadcasts the harmless
+ * self-send and the liveness probe still arbitrates) or the fully-restored
+ * one; never the wedge.
+ *
+ * A 061 collision on the restore (another transaction stamped the nonce
+ * meanwhile) aborts BOTH writes; the caller treats the throw as "the lane
+ * moved on" and the queued cancel row degrades to the same orphan-path
+ * residual.
+ */
+export async function failCancelAttemptAndRestoreLane(
+  params: {
+    cancelId: string
+    error: string
+    nonce: bigint
+    stuckRowId: string
+    preClaimUpdatedAt: Date
+  },
+  db: Executor = pool,
+): Promise<{ restored: boolean }> {
+  return withTransaction(db, async (tx) => {
+    await markOutboundTxFailed(params.cancelId, params.error, tx, params.nonce)
+    const restored = await restoreReplacedOutboundTx(
+      params.stuckRowId,
+      params.cancelId,
+      params.preClaimUpdatedAt,
+      tx,
+    )
+    return { restored: restored !== null }
+  })
 }
 
 export async function markOutboundTxReplaced(

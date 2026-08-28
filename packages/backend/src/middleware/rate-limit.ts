@@ -187,3 +187,32 @@ export function authRateLimit(
     },
   }
 }
+
+/**
+ * Public `POST /catalog/submit` (epic #1717, #1711). Unauthenticated, so the
+ * shared key generator falls back to `ip:` — the same untrusted-proxy trap as
+ * `authRateLimit`, and the same answer: a per-IP ceiling whose "IP" is one
+ * shared proxy address is a cheap global denial-of-service (every external
+ * caller collapsed into one bucket can 429 every other), so the tier refuses
+ * to arm itself unless the operator trusts the proxy (`TRUST_PROXY_HOPS > 0`),
+ * exactly like signup/login (#1670).
+ *
+ * Tighter than auth's login tier on purpose: a merchant submits once, and
+ * submission is the spam vector the queue exists to cheapen (the ownership
+ * proof in #1712 is the real anti-abuse gate; this is just the request-storm
+ * ceiling before it). 10/min per client IP is far above any legitimate
+ * submitter and below any meaningful flood. The queue cap
+ * (`countPendingCatalogSubmissions`) is the resilient second layer — unlike
+ * this tier it binds even behind an untrusted proxy.
+ */
+export function catalogSubmitRateLimit(
+  trustProxyHops: number,
+): { rateLimit?: { max: number; timeWindow: string } } {
+  if (trustProxyHops <= 0) return {}
+  return {
+    rateLimit: {
+      max: 10,
+      timeWindow: '1 minute',
+    },
+  }
+}

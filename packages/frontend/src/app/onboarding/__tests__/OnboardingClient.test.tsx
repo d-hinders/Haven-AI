@@ -19,25 +19,28 @@ vi.mock('@/hooks/useDeployableChains', () => ({
   useDeployableChains: () => mockUseDeployableChains(),
 }))
 
-// Both enroll flows have their own suites. Here they stand in as buttons that
-// drive the two outcomes the host screen owns — completion and failure — so
-// this suite can focus on the single-screen shape and the success handoff.
-vi.mock('@/app/onboarding/PasskeyEnrollFlow', () => ({
+// The enroll flow has its own suite. Here it stands in as buttons that drive
+// the two outcomes the host screen owns — completion and failure — so this
+// suite can focus on the single-screen shape and the success handoff.
+//
+// There is only ONE flow to stand in for since #1984: the Safe rail is
+// retired, so onboarding always provisions a Hybrid delegation-rail account.
+vi.mock('@/app/onboarding/HybridEnrollFlow', () => ({
   default: ({
     onComplete,
     onError,
     onCreatingChange,
   }: {
-    onComplete: (args: { safeAddress: string; txHash: string }) => void
+    onComplete: (args: { accountAddress: string }) => void
     onError: (message: string) => void
     onCreatingChange?: (creating: boolean) => void
   }) => (
-    <>
+    <div data-testid="hybrid-enroll-flow">
       <button
         type="button"
         onClick={() => {
           onCreatingChange?.(true)
-          onComplete({ safeAddress: CREATED_ADDRESS, txHash: `0x${'cd'.repeat(32)}` })
+          onComplete({ accountAddress: CREATED_ADDRESS })
         }}
       >
         Create account with a passkey
@@ -45,12 +48,8 @@ vi.mock('@/app/onboarding/PasskeyEnrollFlow', () => ({
       <button type="button" onClick={() => onError(PASSKEY_REQUIRED_MESSAGE)}>
         fail-unsupported
       </button>
-    </>
+    </div>
   ),
-}))
-
-vi.mock('@/app/onboarding/HybridEnrollFlow', () => ({
-  default: () => <button type="button">Hybrid create</button>,
 }))
 
 import OnboardingClient, { SUCCESS_REDIRECT_MS } from '@/app/onboarding/OnboardingClient'
@@ -107,19 +106,50 @@ async function completeCreation() {
 }
 
 describe('OnboardingClient (#1162)', () => {
-  it('offers DELEGATION onboarding on Base MAINNET when the flag is on (#908 launch prep)', () => {
-    // The gate used to hardcode Base Sepolia; the mainnet launch is the flag
-    // flip on the prod Vercel scope, so the CODE must already serve 8453.
-    // Default selection with no NEXT_PUBLIC_HAVEN_CHAIN_ID is Base mainnet —
-    // exactly the prod configuration.
-    vi.stubEnv('NEXT_PUBLIC_DELEGATION_ONBOARDING', '1')
-    try {
-      render(<OnboardingClient />)
-      expect(screen.getByRole('button', { name: 'Hybrid create' })).toBeTruthy()
-      expect(screen.queryByRole('button', { name: /passkey/i })).toBeNull()
-    } finally {
-      vi.unstubAllEnvs()
-    }
+  // #1984: the Safe rail is retired, so onboarding provisions Hybrid
+  // UNCONDITIONALLY. `NEXT_PUBLIC_DELEGATION_ONBOARDING` used to choose
+  // between the Hybrid flow and a Safe deploy; it is gone. A flag whose
+  // "off" branch now hits a 410 is not a switch, it is a way to brick
+  // onboarding — so this asserts the flag has no effect at ANY value,
+  // including absent, which is the state a fresh deployment starts in.
+  it.each([
+    ['absent', undefined],
+    ['off', '0'],
+    ['on', '1'],
+    ['garbage', 'yes'],
+  ])(
+    'provisions Hybrid regardless of NEXT_PUBLIC_DELEGATION_ONBOARDING (%s)',
+    (_label, value) => {
+      if (value !== undefined) vi.stubEnv('NEXT_PUBLIC_DELEGATION_ONBOARDING', value)
+      try {
+        render(<OnboardingClient />)
+        // Assert the HYBRID flow specifically, by test id, not by the copy on
+        // its button. Measured, not assumed: an earlier version of this test
+        // asserted `getByRole('button', { name: /passkey/i })`, and a mutation
+        // that restored the old Safe fork PASSED it — because the Safe path's
+        // real component renders a /passkey/i button too. A guard against a
+        // fork has to name which branch it is on.
+        expect(screen.getByTestId('hybrid-enroll-flow')).toBeTruthy()
+        // ...and no Safe-deploy or Safe-import entry point is reachable.
+        expect(screen.queryByText(/import/i)).toBeNull()
+        expect(screen.queryByText(/deploy/i)).toBeNull()
+      } finally {
+        vi.unstubAllEnvs()
+      }
+    },
+  )
+
+  it('completing onboarding reports the account address, not a Safe address', async () => {
+    const updateUser = vi.fn()
+    mockUseAuth.mockReturnValue(authValue({ updateUser }))
+
+    render(<OnboardingClient />)
+    await completeCreation()
+
+    expect(updateUser).toHaveBeenCalledWith({
+      safe_address: CREATED_ADDRESS,
+      wallet_address: null,
+    })
   })
 
   it('renders one screen — welcome, network, passkey action — with no signer fork', () => {

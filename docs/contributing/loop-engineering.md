@@ -2,14 +2,13 @@
 owner: "@d-hinders"
 status: current
 covers:
-  - packages/backend/src/loop-harness/**
   - packages/backend/package.json
   - packages/frontend/src/lib/loop-harness/**
   - packages/frontend/package.json
   - .github/workflows/ci.yml
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/code-quality-loop.md
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-27" # #2103: the loop-shapes table's property/invariant EXAMPLE asserted "over-remaining intent => pending_approval, never executed" — an invariant template teaching contributors and agents to build a state no live rail produces (the queue died with #2055). Restated as declined-before-signable. The DIFFERENTIAL row is deliberately unchanged: computeEffectiveAllowance vs the AllowanceModule reset model is still a live differential, because allowance-math retains a legacy-display consumer. Scope: that one table cell; nothing else in this file re-verified. Prior: #2020: the backend loop-harness instance (LP-1) retired with its target; anatomy section now cites the frontend instance, dead covers glob dropped. The method itself is unchanged. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Loop Engineering (oracle-grounded automated loops)
@@ -71,16 +70,16 @@ Same discipline, different oracle:
 | Shape | Oracle | Example in Haven |
 | --- | --- | --- |
 | **Differential** | a reference model / the real artifact | `computeEffectiveAllowance` vs the AllowanceModule reset model (backend + frontend) |
-| **Property / invariant** | an asserted rule over fuzzed inputs | "over-remaining intent ⇒ `pending_approval`, never `executed`" |
+| **Property / invariant** | an asserted rule over fuzzed inputs | "over-budget intent ⇒ declined before it becomes signable, never `executed`" |
 | **Eval** (future) | a grading rubric | an LLM-assisted feature graded against expected outputs |
 
 This doc's worked examples are **differential** loops; the structure generalizes.
 
 ## 4. Anatomy of a harness
 
-The template, as instantiated twice today
-(`packages/backend/src/loop-harness/`,
-`packages/frontend/src/lib/loop-harness/`):
+The template, as instantiated today by LP-2
+(`packages/frontend/src/lib/loop-harness/`; the backend instance retired with
+its target — see the index's LP-1 withdrawal, #2020):
 
 ```
 loop-harness/
@@ -90,8 +89,8 @@ loop-harness/
   <thing>-differential.test.ts   # equivalence ratchet + regression guards
 ```
 
-(The frontend copy keeps the differential test under `loop-harness/__tests__/`
-per that package's test-layout convention; the shape is otherwise identical.)
+(The frontend instance keeps the differential test under
+`loop-harness/__tests__/` per that package's test-layout convention.)
 
 - **Reference model** — the smallest faithful port of the intended behavior,
   derived independently from the source of truth (e.g. the contract). Document

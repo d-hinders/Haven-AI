@@ -31,7 +31,9 @@ vi.mock('../../db.js', () => ({
 }))
 
 // Avoid pulling chain/ethers deploy machinery into this route test.
-vi.mock('../../modules/accounts/index.js', () => ({ relaySafeDeploy: vi.fn() }))
+// #1988 deleted `relaySafeDeploy` and the module import it came from; the
+// route no longer reaches the accounts module at all, so there is nothing
+// left to mock here.
 
 import userSafesRoutes from '../user-safes.js'
 
@@ -64,18 +66,16 @@ describe('user-safes characterization (#988)', () => {
     return { authorization: `Bearer ${token}` }
   }
 
-  describe('POST /user/safes — import', () => {
-    it('the first Safe becomes default and mirrors into legacy users.safe_address', async () => {
-      mockPoolQuery.mockImplementation(async (sql: string) => {
-        const s = String(sql)
-        if (/SELECT id FROM user_safes WHERE user_id = \$1 AND LOWER/.test(s)) return { rows: [] }
-        if (/SELECT COUNT\(\*\)/.test(s)) return { rows: [{ count: '0' }] }
-        if (/INSERT INTO user_safes/.test(s)) {
-          return { rows: [{ id: SAFE_ID, safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'My account', is_default: true, created_at: '2026-08-05T00:00:00.000Z' }] }
-        }
-        return { rows: [] }
-      })
-
+  // The import path is CLOSED (#1984, epic #1440). The three characterization
+  // cases that used to sit here — first-Safe-becomes-default, the legacy
+  // users.safe_address mirror, and the duplicate 409 — all described a handler
+  // that can no longer run. They are not deleted for tidiness: keeping them
+  // would assert that Haven still imports Safes. The refusal and its no-write
+  // guarantee are pinned in `safe-inflow-retired.test.ts`; the half that must
+  // KEEP working for existing accounts is the rename/default/delete/approver
+  // coverage below, deliberately untouched.
+  describe('POST /user/safes — import is retired', () => {
+    it('410s and writes nothing', async () => {
       const res = await app.inject({
         method: 'POST',
         url: '/user/safes',
@@ -83,53 +83,24 @@ describe('user-safes characterization (#988)', () => {
         payload: { safe_address: SAFE_ADDRESS, chain_id: 8453 },
       })
 
-      expect(res.statusCode).toBe(201)
-      expect(res.json()).toMatchObject({ id: SAFE_ID, is_default: true })
-
-      const calls = mockPoolQuery.mock.calls.map(([sql, params]) => [String(sql), params] as const)
-      const insert = calls.find(([s]) => /INSERT INTO user_safes/.test(s))
-      expect(insert?.[1]).toEqual([USER, SAFE_ADDRESS, 8453, 'My account', true])
-      const legacy = calls.find(([s]) => /UPDATE users SET safe_address = \$1/.test(s))
-      expect(legacy?.[1]).toEqual([SAFE_ADDRESS, USER])
+      expect(res.statusCode).toBe(410)
+      expect(res.json().error).toMatch(/Safe rail is retired/)
+      expect(mockPoolQuery, 'the retired import wrote nothing').not.toHaveBeenCalled()
     })
+  })
 
-    it('a second Safe is not default and leaves users.safe_address alone', async () => {
-      mockPoolQuery.mockImplementation(async (sql: string) => {
-        const s = String(sql)
-        if (/SELECT id FROM user_safes WHERE user_id = \$1 AND LOWER/.test(s)) return { rows: [] }
-        if (/SELECT COUNT\(\*\)/.test(s)) return { rows: [{ count: '1' }] }
-        if (/INSERT INTO user_safes/.test(s)) {
-          return { rows: [{ id: 'safe-2', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Second', is_default: false, created_at: '2026-08-05T00:00:00.000Z' }] }
-        }
-        return { rows: [] }
-      })
-
+  describe('POST /user/safes/deploy — relay-sponsored deploy is retired', () => {
+    it('410s without asking the relayer for anything', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/user/safes',
+        url: '/user/safes/deploy',
         headers: auth(),
-        payload: { safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Second' },
+        payload: { chain_id: 8453, owner_address: SAFE_ADDRESS },
       })
 
-      expect(res.statusCode).toBe(201)
-      expect(res.json().is_default).toBe(false)
-      const sqls = mockPoolQuery.mock.calls.map(([sql]) => String(sql))
-      expect(sqls.some((s) => /UPDATE users SET safe_address/.test(s))).toBe(false)
-    })
-
-    it('409s when the same address+chain is already linked', async () => {
-      mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: SAFE_ID }] })
-
-      const res = await app.inject({
-        method: 'POST',
-        url: '/user/safes',
-        headers: auth(),
-        payload: { safe_address: SAFE_ADDRESS, chain_id: 8453 },
-      })
-
-      expect(res.statusCode).toBe(409)
-      expect(mockPoolQuery.mock.calls[0][1]).toEqual([USER, SAFE_ADDRESS, 8453])
-      expect(mockPoolQuery).toHaveBeenCalledTimes(1)
+      expect(res.statusCode).toBe(410)
+      expect(res.json().error).toMatch(/Safe rail is retired/)
+      expect(mockPoolQuery).not.toHaveBeenCalled()
     })
   })
 
@@ -258,71 +229,9 @@ describe('user-safes characterization (#988)', () => {
     })
   })
 
-  describe('approver metadata upsert/delete', () => {
-    it('upserts approver metadata for an owned Safe', async () => {
-      mockPoolQuery
-        .mockResolvedValueOnce({ rows: [{ id: SAFE_ID, safe_address: SAFE_ADDRESS, chain_id: 8453 }] })
-        .mockResolvedValueOnce({ rows: [] })
-
-      const res = await app.inject({
-        method: 'POST',
-        url: `/user/safes/${SAFE_ID}/approvers`,
-        headers: auth(),
-        payload: { address: SAFE_ADDRESS, type: 'passkey', label: '  My passkey  ' },
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.json()).toEqual({ success: true })
-      const [sql, params] = mockPoolQuery.mock.calls[1]
-      expect(String(sql)).toContain('INSERT INTO safe_approver_metadata')
-      expect(String(sql)).toContain('ON CONFLICT (safe_id, LOWER(address))')
-      expect(params).toEqual([SAFE_ID, SAFE_ADDRESS, 'passkey', 'My passkey'])
-    })
-
-    it('rejects an invalid approver type', async () => {
-      mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: SAFE_ID, safe_address: SAFE_ADDRESS, chain_id: 8453 }] })
-
-      const res = await app.inject({
-        method: 'POST',
-        url: `/user/safes/${SAFE_ID}/approvers`,
-        headers: auth(),
-        payload: { address: SAFE_ADDRESS, type: 'ledger' },
-      })
-
-      expect(res.statusCode).toBe(400)
-      expect(mockPoolQuery).toHaveBeenCalledTimes(1)
-    })
-
-    it('deletes approver metadata case-insensitively for an owned Safe', async () => {
-      mockPoolQuery
-        .mockResolvedValueOnce({ rows: [{ id: SAFE_ID, safe_address: SAFE_ADDRESS, chain_id: 8453 }] })
-        .mockResolvedValueOnce({ rows: [] })
-
-      const res = await app.inject({
-        method: 'DELETE',
-        url: `/user/safes/${SAFE_ID}/approvers/${SAFE_ADDRESS.toUpperCase().replace('0X', '0x')}`,
-        headers: auth(),
-      })
-
-      expect(res.statusCode).toBe(200)
-      const [sql, params] = mockPoolQuery.mock.calls[1]
-      expect(String(sql)).toContain('DELETE FROM safe_approver_metadata')
-      expect(String(sql)).toContain('LOWER(address) = LOWER($2)')
-      expect(params[0]).toBe(SAFE_ID)
-    })
-
-    it('404s the upsert when the Safe is not the caller’s', async () => {
-      mockPoolQuery.mockResolvedValueOnce({ rows: [] })
-
-      const res = await app.inject({
-        method: 'POST',
-        url: `/user/safes/${SAFE_ID}/approvers`,
-        headers: auth(),
-        payload: { address: SAFE_ADDRESS },
-      })
-
-      expect(res.statusCode).toBe(404)
-      expect(mockPoolQuery).toHaveBeenCalledTimes(1)
-    })
-  })
+  // The approver-metadata cases that used to live here are deleted with the
+  // routes (#1988). Their absence is asserted in
+  // `safe-inflow-retired.test.ts`, which is where the deletion is pinned —
+  // keeping characterization cases for routes that 404 would be a guard over
+  // an empty set.
 })

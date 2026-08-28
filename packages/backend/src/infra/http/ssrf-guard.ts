@@ -46,6 +46,7 @@ export type SsrfRefusalReason =
   | 'timeout'
   | 'transport_error'
   | 'http_status'
+  | 'redirect_on_post'
 
 export interface SsrfRefusal {
   ok: false
@@ -57,6 +58,12 @@ export interface SafeResponse {
   ok: true
   status: number
   body: string
+  /**
+   * Response headers, lowercased. Needed by #1713's probe: MCP Streamable
+   * HTTP carries the session id in `mcp-session-id`, and an x402 challenge
+   * may arrive in `payment-required` rather than the body.
+   */
+  headers: Record<string, string>
   /** The URL actually read, after any re-validated redirects. */
   finalUrl: string
 }
@@ -72,6 +79,32 @@ export const DEFAULT_MAX_REDIRECTS = 3
 
 function refuse(reason: SsrfRefusalReason, detail: string): SsrfRefusal {
   return { ok: false, reason, detail }
+}
+
+/**
+ * Is this hostname an IP LITERAL, and if so which range does it fall in?
+ *
+ * Returns the stable range name (`'public-unicast'`, `'loopback'`, …) when the
+ * host is a bare address, and `null` when it is a name. Brackets are stripped
+ * first, so the IPv6 URL form `[::1]` classifies the same as `::1`.
+ *
+ * Exported because the refusal it powers is NOT a URL-level rule — it is a
+ * claim-level one, and #1959 is what that distinction cost. `assertSafeUrl`
+ * could only apply it to paths that build a URL, so the DNS-TXT half of the
+ * ownership proof (`modules/catalog/ownership.ts`) had no equivalent refusal:
+ * a canonical dotted-decimal IPv4 host survives that module's URL round-trip
+ * byte-identically and reached `resolveTxt` unchallenged. The fix is one
+ * predicate consulted by both, not a second copy of the range logic — so this
+ * function, and `ip-classification.ts` behind it, stay the single source of
+ * truth for "that is an address, not a domain".
+ *
+ * Callers outside this file want the boolean; the range is here so the guard's
+ * own refusal detail stays specific.
+ */
+export function ipLiteralRange(hostname: string): string | null {
+  const bare = hostname.replace(/^\[|\]$/g, '')
+  const verdict = isPublicUnicastAddress(bare)
+  return verdict.range === 'unparseable' ? null : verdict.range
 }
 
 /**
@@ -100,11 +133,12 @@ export function assertSafeUrl(raw: string): { ok: true; url: URL } | SsrfRefusal
     return refuse('non_default_port', `port ${url.port} is not the default https port`)
   }
   const hostname = url.hostname.replace(/^\[|\]$/g, '')
-  const literal = isPublicUnicastAddress(hostname)
-  if (literal.range !== 'unparseable') {
+  const literalRange = ipLiteralRange(hostname)
+  if (literalRange !== null) {
     // The hostname IS an IP literal. Refuse regardless of range: ownership of
-    // a domain is the claim, and a bare address cannot make it.
-    return refuse('host_not_public', `host is an IP literal (${literal.range})`)
+    // a domain is the claim, and a bare address cannot make it. Same predicate
+    // the DNS-TXT path now consults (#1959), so the two cannot drift apart.
+    return refuse('host_not_public', `host is an IP literal (${literalRange})`)
   }
   if (isLocallyBoundHostname(hostname)) {
     return refuse('host_not_public', 'host is a locally-bound name')
@@ -168,12 +202,19 @@ export interface PinnedRequest {
   family: number
   timeoutMs: number
   maxBytes: number
+  /** #1713: the probe needs POST; the ownership proof stays GET. */
+  method: 'GET' | 'POST'
+  /** Request body, POST only. Never contains a secret — see `safePostJson`. */
+  body: string | null
+  headers: Record<string, string>
 }
 
 export interface PinnedResponse {
   status: number
   location: string | null
   body: string
+  /** Lowercased response headers. Absent from a fake transport means none. */
+  headers?: Record<string, string>
 }
 
 export type PinnedTransport = (req: PinnedRequest) => Promise<PinnedResponse | SsrfRefusal>
@@ -196,7 +237,7 @@ const httpsTransport: PinnedTransport = async (req) =>
     const request = https.request(
       req.url,
       {
-        method: 'GET',
+        method: req.method,
         // Pin the connection to the address we validated.
         lookup: (_hostname, options, callback) => {
           if ((options as { all?: boolean }).all === true) {
@@ -207,12 +248,7 @@ const httpsTransport: PinnedTransport = async (req) =>
             callback(null, req.address, req.family)
           }
         },
-        headers: {
-          // Identify ourselves so a merchant reading their access log can see
-          // who asked and why.
-          'user-agent': 'Haven-DomainVerification/1.0 (+https://haven.xyz)',
-          accept: 'text/plain, */*;q=0.1',
-        },
+        headers: req.headers,
         timeout: req.timeoutMs,
       },
       (res) => {
@@ -230,10 +266,16 @@ const httpsTransport: PinnedTransport = async (req) =>
         })
         res.on('end', () => {
           const location = res.headers.location
+          const headers: Record<string, string> = {}
+          for (const [name, value] of Object.entries(res.headers)) {
+            if (typeof value === 'string') headers[name.toLowerCase()] = value
+            else if (Array.isArray(value)) headers[name.toLowerCase()] = value.join(', ')
+          }
           done({
             status: res.statusCode ?? 0,
             location: typeof location === 'string' ? location : null,
             body: Buffer.concat(chunks).toString('utf8'),
+            headers,
           })
         })
         res.on('error', (err) => done(refuse('transport_error', err.message)))
@@ -245,6 +287,7 @@ const httpsTransport: PinnedTransport = async (req) =>
       done(refuse('timeout', `no response within ${req.timeoutMs}ms`))
     })
     request.on('error', (err) => done(refuse('transport_error', err.message)))
+    if (req.body !== null) request.write(req.body)
     request.end()
   })
 
@@ -254,12 +297,43 @@ export interface SafeFetchOptions {
   maxRedirects?: number
   resolver?: AddressResolver
   transport?: PinnedTransport
+  /**
+   * Extra request headers, `safePostJson` only. Restricted to
+   * `ALLOWED_CALLER_HEADERS` — a caller may carry an MCP session id, and may
+   * NOT set `host`, `content-type`, `authorization`, or anything else that
+   * would let it retarget or re-authenticate the guarded request. Values are
+   * rejected outright if they contain CR or LF (header injection).
+   */
+  extraHeaders?: Record<string, string>
 }
+
+/** The only headers a caller may add to a guarded POST. */
+export const ALLOWED_CALLER_HEADERS = new Set(['mcp-session-id', 'mcp-protocol-version'])
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 
+/** What one guarded call sends, beyond the URL. */
+interface RequestShape {
+  method: 'GET' | 'POST'
+  body: string | null
+  headers: Record<string, string>
+  /**
+   * When true a non-200 response is RETURNED rather than refused.
+   *
+   * The ownership proof wants a document and nothing else, so a 404 is a
+   * failure. #1713's probe is the opposite: `402 Payment Required` IS the
+   * successful outcome it is looking for, and refusing every non-200 would
+   * throw away the only response that matters.
+   */
+  acceptAnyStatus: boolean
+}
+
+const HAVEN_USER_AGENT = 'Haven-CatalogVerification/1.0 (+https://haven.xyz)'
+
 /**
- * Read a merchant-controlled URL under the full guard.
+ * The single guarded-read loop. Both public entry points below go through
+ * here, so there is exactly one place where the hop policy lives — a second
+ * copy for POST is how the two drift until one of them stops re-validating.
  *
  * Every redirect hop restarts the policy from the top — `assertSafeUrl` then
  * `resolvePublicAddresses` — so a public front door that 302s to
@@ -267,7 +341,11 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
  * `assertSafeUrl` enforces https, a cross-scheme redirect is refused by
  * construction rather than by a separate rule that could drift out of sync.
  */
-export async function safeGetText(raw: string, options: SafeFetchOptions = {}): Promise<SafeFetchResult> {
+async function safeFetch(
+  raw: string,
+  shape: RequestShape,
+  options: SafeFetchOptions = {},
+): Promise<SafeFetchResult> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS
@@ -294,11 +372,25 @@ export async function safeGetText(raw: string, options: SafeFetchOptions = {}): 
       family: pinned.family,
       timeoutMs: remaining,
       maxBytes,
+      method: shape.method,
+      body: shape.body,
+      headers: shape.headers,
     })
     if ('ok' in response && response.ok === false) return response
 
     const res = response as PinnedResponse
     if (REDIRECT_STATUSES.has(res.status)) {
+      if (shape.method === 'POST') {
+        // A POST redirect is NOT followed, at any status, however public the
+        // target resolves. Re-sending a body we composed to a host the first
+        // host names turns the guard into a request forwarder with an
+        // attacker-chosen payload and an attacker-chosen victim — an
+        // amplifier that address classification cannot see, because the
+        // victim is a perfectly ordinary public host. 307/308 preserve the
+        // method and 301/302/303 downgrade it to GET; neither is a shape a
+        // JSON-RPC endpoint has any business asking us for.
+        return refuse('redirect_on_post', `HTTP ${res.status} redirect on a POST is not followed`)
+      }
       if (res.location === null) {
         return refuse('redirect_missing_location', `HTTP ${res.status} without a Location header`)
       }
@@ -308,11 +400,72 @@ export async function safeGetText(raw: string, options: SafeFetchOptions = {}): 
       continue
     }
 
-    if (res.status !== 200) {
+    if (!shape.acceptAnyStatus && res.status !== 200) {
       return refuse('http_status', `HTTP ${res.status}`)
     }
-    return { ok: true, status: res.status, body: res.body, finalUrl: checked.url.toString() }
+    return {
+      ok: true,
+      status: res.status,
+      body: res.body,
+      headers: res.headers ?? {},
+      finalUrl: checked.url.toString(),
+    }
   }
 
   return refuse('redirect_budget', `more than ${maxRedirects} redirects`)
+}
+
+/**
+ * Read a merchant-controlled URL under the full guard. 200 or a refusal —
+ * used by the domain-ownership proof (#1712), which wants a document.
+ */
+export async function safeGetText(raw: string, options: SafeFetchOptions = {}): Promise<SafeFetchResult> {
+  return safeFetch(
+    raw,
+    {
+      method: 'GET',
+      body: null,
+      headers: {
+        // Identify ourselves so a merchant reading their access log can see
+        // who asked and why.
+        'user-agent': 'Haven-DomainVerification/1.0 (+https://haven.xyz)',
+        accept: 'text/plain, */*;q=0.1',
+      },
+      acceptAnyStatus: false,
+    },
+    options,
+  )
+}
+
+/**
+ * POST a JSON document to a merchant-controlled URL under the full guard, and
+ * return whatever status comes back (#1713).
+ *
+ * `payload` is serialised by the CALLER and must never contain a credential,
+ * a signature, or anything derived from a key: this sends a body to a host an
+ * anonymous submitter named. The catalogue probe sends only JSON-RPC
+ * envelopes with literal method names — see `modules/catalog/probe.ts`.
+ */
+export async function safePostJson(
+  raw: string,
+  payload: unknown,
+  options: SafeFetchOptions = {},
+): Promise<SafeFetchResult> {
+  const body = JSON.stringify(payload)
+  const headers: Record<string, string> = {
+    'user-agent': HAVEN_USER_AGENT,
+    'content-type': 'application/json',
+    // MCP Streamable HTTP servers negotiate between JSON and SSE here.
+    accept: 'application/json, text/event-stream',
+    'content-length': String(Buffer.byteLength(body)),
+  }
+  for (const [name, value] of Object.entries(options.extraHeaders ?? {})) {
+    const lower = name.toLowerCase()
+    // Allowlist, then injection check. Both, in that order: an allowlisted
+    // name with a newline in its value still splits the request.
+    if (!ALLOWED_CALLER_HEADERS.has(lower)) continue
+    if (/[\r\n]/.test(value)) continue
+    headers[lower] = value
+  }
+  return safeFetch(raw, { method: 'POST', body, headers, acceptAnyStatus: true }, options)
 }

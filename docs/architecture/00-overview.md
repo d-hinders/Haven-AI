@@ -7,6 +7,7 @@ covers:
   - packages/backend/src/domain/chains.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
   - packages/backend/src/modules/catalog/catalog-discovery.ts
+  - packages/backend/src/modules/catalog/lifecycle.ts
   - packages/backend/src/modules/reporting/**
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
@@ -65,7 +66,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-14" # #1199: signer-removal recovery change re-verified; delegation authority overview unchanged
+last-verified: "2026-08-27" # #2138: the EAS agent-passport bullet said "issued / governed / revocable" with no rail qualifier, so it read as universal — and a legacy-rail agent could hold an issued passport until #2138 gated it. Now names the delegation-rail-only rule and why. Scope: that one bullet; nothing else in External pieces re-verified. Prior: #2102: External pieces listed "Safe + AllowanceModule — custody and on-chain policy enforcement" UNLABELLED and BEFORE "Hybrid DeleGator — a second account type for new accounts", which is backwards on both counts. Hybrid is now first and named as the account type for every new account; Safe is kept — those accounts still exist and their owners keep on-chain control — but explicitly labelled RETIRED with the closure (#1984) and refusal (#1986) refs. Kept rather than deleted deliberately: removing it would hide a rail whose accounts are still readable. #1992's scope note records that only the rail paragraph and components row were corrected in that pass, which is why this list was still stale. Scope: that one list entry pair. Prior: #2105: the bolded one-line security model re-based off the retired rail. It read `on-chain AllowanceModule state = enforcement for automatic Safe funding`, and #2105 removed the last live copy of that wording from the served OpenAPI contract (`AgentApiKey`'s security-scheme description), which would have left the overview presenting an obsolete formulation as the security model while README.md and doc 05 both carried the corrected one — the #1992 pattern in reverse. The paragraph beneath it is kept and now reads as history rather than as a correction of a live claim. Caught by haven-doc-reviewer. Scope: that line and the paragraph under it; nothing else in the overview re-verified in this pass. Prior: #2055: the approval-queue clause updated (deleted outright, not readable/rejectable) and "approvals" dropped from the PostgreSQL store list. Prior: #1992: the "Haven runs two on-chain policy rails" line was false - the AllowanceModule rail is retired (#1986 410s, #1987/#1988/#1989 deletions), so there is ONE live rail. Corrected, and the backend component one-liner no longer advertises allowances/approvals as live surfaces. Scope: the rail paragraph and the components table row. Prior: #1714 (epic #1717): catalogue ingestion lifecycle added to the catalog module — modules/catalog/lifecycle.ts drives the self-service submission queue (ownership proof → SSRF-hardened probe → re-verification → retention) on the new leader-locked catalogIngest monitor in index.ts; the operator-curated refresh and discovery are unchanged. Prior: #1984: the rail line said the legacy AllowanceModule rail was "import-only" — #1984 closes IMPORT too, so nothing enters it by any route; corrected to closed-to-new-accounts. The rest of the overview re-read against the diff: the delegation rail is still where new accounts are provisioned, and the custody boundary is unchanged. Prior: #1199: signer-removal recovery change re-verified; delegation authority overview unchanged Prior: #2097: a file this doc `covers:` by exact path (`docs/architecture/05-agent-api-openapi.md`) was re-verified — the Transaction record gains `initiatedBy`; the overview's component/API summaries are unaffected. Scope: that sibling-doc relationship only; nothing else in this file re-read.
 ---
 
 # Haven — Architecture Overview
@@ -77,14 +78,19 @@ Agents request payments through high-level tools; Safe-originated funding and
 user payments follow user-approved on-chain authority, while agent-wallet
 merchant payments are signed locally and bound to exact payment context. One
 line holds the security model:
-**API auth = identity, signature = authority, on-chain AllowanceModule state =
-enforcement for automatic Safe funding.**
+**API auth = identity, signature = authority, on-chain delegation state =
+enforcement.**
 
-That line describes the **legacy AllowanceModule rail** (import-only, existing
-accounts). Haven runs **two on-chain policy rails** — the Smart Sessions
-**session rail is retired** (#834; accounts still marked
-`execution_rail='session_key'` get HTTP 410 from the payment paths).
-New accounts are provisioned on the
+That line read `on-chain AllowanceModule state = enforcement for automatic Safe
+funding` until #2105, which corrected the last live copy of the old wording in
+the served OpenAPI contract and then here. It described the **legacy
+AllowanceModule rail**, which is **RETIRED**
+(#1440) — closed to new accounts (#1984), fail-closed for spending with HTTP 410
+on every payment and x402 entry point (#1986), and its execution machinery
+deleted (#1987/#1988/#1989). Existing Safe accounts stay readable; they cannot
+spend. The Smart Sessions **session rail is retired** too (#834; accounts still
+marked `execution_rail='session_key'` get HTTP 410 from the payment paths).
+**Haven runs one live on-chain policy rail**, the
 **delegation rail** (epic #821, `account_type='delegator_hybrid'`,
 `execution_rail='delegation'`), where the same identity/authority split holds but
 enforcement is a signed MetaMask delegation with audited caveat enforcers (period
@@ -97,7 +103,7 @@ with no funding leg and no approval queue. Deep dive:
 
 | Package | One-liner |
 |---|---|
-| `@haven/backend` | Fastify API: auth, Haven wallets/Safes, agents, allowances, approvals, payments, x402/MPP, receipts, catalog, reporting (incl. the live Fortnox feed adapter, `modules/reporting/`), and [OpenAPI](05-agent-api-openapi.md). |
+| `@haven/backend` | Fastify API: auth, Haven wallets, agents, budgets, payments, x402/MPP, receipts, catalog, reporting (incl. the live Fortnox feed adapter, `modules/reporting/`), and [OpenAPI](05-agent-api-openapi.md). The retired rail’s approval queue was deleted outright by #2055 — routes deregistered, `approval_requests` dropped. |
 | `@haven/frontend` | Next.js dashboard: onboarding, wallets, agent rules, approvals, activity, custody/recovery, catalog, and guarded reporting. |
 | `@haven_ai/sdk` | TypeScript agent client plus shared signing, x402, sweep, and payment-state primitives used by direct integrations and the MCP/signer packages. |
 | `@haven_ai/connect` | Connector CLI: generates the delegate key and API key locally, registers the public signing address/proof and API-key hash, stores local credentials, writes runtime config, and returns the user to Haven to approve the agent's authority (wallet approval on the legacy rail; budget-delegation signature on the delegation rail). |
@@ -138,20 +144,24 @@ payment. Current contracts:
 
 ## External pieces
 
-- **Safe + AllowanceModule** — custody and on-chain policy enforcement
-  ([identity & custody](02-identity-and-custody.md)).
-- **Hybrid DeleGator (epic #821)** — a second account type for new accounts
+- **Hybrid DeleGator (epic #821)** — the account type for every new account
   (`account_type='delegator_hybrid'`): MetaMask's audited smart account with
   policy as delegations + caveat enforcers. Payments redeem the agent's
   budget delegation via sponsored UserOps (#829); budgets refill natively
   on-chain. See `docs/security/delegation-rail-security-model.md`.
+- **Safe + AllowanceModule — RETIRED (epic #1440).** Existing Safe accounts
+  remain readable and their owners keep on-chain control, but the rail is
+  closed to new accounts (#1984) and refuses every payment path (#1986). It is
+  listed here because those accounts still exist, not because anything routes
+  to it ([identity & custody](02-identity-and-custody.md)).
 - **EAS (Ethereum Attestation Service) — L0 agent passports (epic #970):**
   opt-in, revocable credential attesting an agent's **governance, not
   identity** (issued / governed / revocable), anchored by the gas-only relayer
-  on Base Sepolia. Haven's verifier is authoritative for live standing; the
+  on Base Sepolia. **Issued on the delegation rail only** (#2138) — a retired
+  rail cannot transact, so there is no spending for a contract to govern. Haven's verifier is authoritative for live standing; the
   on-chain anchor is eventually consistent. See
   [agent passport schema](11-agent-passport-schema.md).
-- **PostgreSQL** — users, wallets, agents, allowances, payments, approvals,
+- **PostgreSQL** — users, wallets, agents, allowances, payments,
   receipts, catalog/reporting state, and audit records.
 - **Base** (8453) is the primary production network; **Base Sepolia** (84532)
   is the dev/QA testnet; **Gnosis Chain** (100) remains supported for existing

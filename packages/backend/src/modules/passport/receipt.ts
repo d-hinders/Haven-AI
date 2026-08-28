@@ -90,7 +90,12 @@ export const RECEIPT_VERSION = 'haven-passport-receipt/2'
  * there is deliberately no flag here that widens it.
  */
 export interface ControlSummary {
-  /** The rail whose primitive holds the policy: 'delegation' or 'allowance'. */
+  /**
+   * The account's `execution_rail`, verbatim from `user_safes`. The CHECK
+   * domain is `delegation | allowance_module | session_key` (migration 041);
+   * only `delegation` is live (#1440, #834). Never `'allowance'` — that value
+   * was documented for years and is not one the column can hold (#2110).
+   */
   rail: string
   /** Whether the spending policy is enforced by a contract rather than by Haven. */
   policyEnforcedOnchain: boolean

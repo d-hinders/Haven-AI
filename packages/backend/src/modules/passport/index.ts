@@ -44,6 +44,7 @@ export {
   type PassportClaim,
   type Anchor,
   type AnchorResult,
+  type RecoveredAnchor,
   type AnchorLivenessProbe,
 } from './issuance.js'
 

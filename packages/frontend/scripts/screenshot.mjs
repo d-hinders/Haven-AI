@@ -10,7 +10,18 @@
  *   npm run screenshot -w packages/frontend                 # /design-system only
  *   npm run screenshot -w packages/frontend -- /dashboard,/agents
  *   npm run screenshot -w packages/frontend -- --scenario=connect-agent
+ *   npm run screenshot -w packages/frontend -- --viewport=320x568 /dashboard
  *   npm run screenshot -w packages/frontend -- --keep=5   # retain 5 old runs
+ *
+ * ── Looking at a width outside the committed set (#2006) ─────────────────────
+ * `--viewport=<W>[xH]` (repeatable/comma-separated, or `SCREENSHOT_VIEWPORTS`)
+ * shoots the requested widths INSTEAD OF the committed pair, for that run only.
+ * Nothing a gate compares changes: the four gate consumers import `VIEWPORTS`
+ * from `evidence-viewports.mjs` and never the override. Overridden viewports
+ * are named after their dimensions, so the PNG filenames and the manifest's
+ * `viewports` / `viewport_source` state the widths the run actually used.
+ * The reasoning — and why 320 is deliberately NOT in the committed set — is in
+ * `evidence-viewports.mjs`.
  *
  * ── The previous run survives this one (#1888) ───────────────────────────────
  * This run writes FLAT into `.screenshots/`, exactly as before, so every literal
@@ -56,6 +67,20 @@
  * capture for real, with `captured_without_unclip` saying so; and a shell that
  * arrived late is reported under `shell_waits` rather than failing at random.
  *
+ * ── And the route has to have actually RENDERED (#2036) ─────────────────────
+ * A capture that succeeds while showing nothing is worse than one that fails.
+ * `/dashboard` was captured twice on both viewports showing the app shell and a
+ * body containing only `Loading...`, and the run exited 0 — the PNGs are
+ * well-formed, plausible, and filed under a name claiming they show the route.
+ * Neither neighbouring guard could see it: `blank-below-fold` needs a capture
+ * taller than a viewport and a loading state is short, and the shell guards ask
+ * whether `#main-content` mounted — it did; the `next/dynamic` chunk inside it
+ * did not. So `captureFullPage` now also demands POSITIVE evidence that the
+ * route's own content region filled (`resolveContentSettled`), waits for it,
+ * and on failure removes the PNG with cause `still-loading` exactly like a
+ * blank one. The margin it cleared is recorded per capture in the manifest
+ * under `content_settle`, so a green run says what it measured.
+ *
  * ── Scenarios (#1409) ────────────────────────────────────────────────────────
  * Some surfaces no URL can reach: the connect-agent modal lives behind a
  * four-step dialog AND a connection state machine that only advances on a
@@ -79,8 +104,8 @@
  * before any script runs (the same keys the app and e2e fixtures use), so
  * authenticated routes render without a real login. Data: Haven-API requests
  * are answered by a route-keyed POPULATED dataset (a funded account, three
- * agents on both rails, transactions, one pending approval, contacts, agent
- * activity + spend stats) so
+ * agents on both rails, transactions, contacts, agent activity + spend
+ * stats) so
  * lists, tables and amounts render realistically — that's what the
  * design-reviewer pass judges. Anything not explicitly keyed falls back to a
  * benign empty shape — which carries every collection key the hooks read, so
@@ -101,13 +126,29 @@
  * Deterministic: animations disabled, network idle awaited, fixed viewports.
  */
 import { chromium } from '@playwright/test'
+// The chain FACTS (token addresses) come from the shared registry the app
+// itself reads, never restated here — a fixture that hard-codes a contract
+// address is a fixture that silently stops matching the product the day the
+// registry moves.
+import { resolveToken } from '@haven_ai/core'
+// The on-chain read seam's encoder (#1935/#1971), extracted by #1930 so the
+// visual-regression spec can answer the same reads without importing this CLI.
+// Re-exported below, beside the shared fixture that is built from it.
+import { makeAllowanceChainFixture } from './allowance-chain-fixture.mjs'
 import { spawn } from 'node:child_process'
 import { rm, stat, writeFile } from 'node:fs/promises'
+import net from 'node:net'
 import { setTimeout as sleep } from 'node:timers/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { VIEWPORTS } from './evidence-viewports.mjs'
-import { SHELL_MODE, captureFullPage } from './full-page-capture.mjs'
+import { resolveCaptureViewports } from './evidence-viewports.mjs'
+import {
+  MIN_CONTENT_CHARS,
+  MIN_CONTENT_ELEMENTS,
+  SCROLL_SHELL_ROOT,
+  SHELL_MODE,
+  captureFullPage,
+} from './full-page-capture.mjs'
 import { CLIP_TOLERANCE_PX, measureHiddenBelowFold } from './clip-guard.mjs'
 import { ARCHIVE_DIR_NAME, resolveKeepRuns, retainPreviousRun } from './capture-retention.mjs'
 import {
@@ -180,6 +221,8 @@ const KEEP_RUNS = resolveKeepRuns(ARGS, process.env)
  *   'missing-scroll-root'  the shell is there and no longer matches — real
  *   'not-rendered'         cold `next dev` / failed hydration — not a selector
  *   'blank-below-fold'     the PNG came back empty below the first viewport
+ *   'still-loading'        the shell mounted, the ROUTE never did (#2036) — the
+ *                          one cause whose PNG looks entirely healthy
  *   'unknown'              anything else, never silently folded into the above
  */
 export function describeDeletedCapture(err, { route, viewport, file, written = true }) {
@@ -207,6 +250,34 @@ export function describeDeletedCapture(err, { route, viewport, file, written = t
     // (painted ratio, offending box, wait duration) survives.
     text: message.slice(0, 600),
   }
+}
+
+/**
+ * Every PNG this run wrote must be named after a viewport this run RESOLVED
+ * (#2006).
+ *
+ * The failure it exists to catch is the one a viewport override is most likely
+ * to have: the widths are parsed, printed and stamped into the manifest, and
+ * the capture loop quietly iterates something else. Nothing about that is
+ * visible in a PNG — a 390px render is a perfectly good-looking image — so the
+ * manifest would claim 320 over a set of files that are not 320. Filenames
+ * carry `vp.name`, so a disagreement between the resolved set and the written
+ * names is exactly that defect.
+ *
+ * What it does NOT cover, stated because the obvious reading is wider than the
+ * truth: a run that captured NOTHING has no filenames to disagree, so this
+ * returns empty. That case is already fatal through `gotoFailures` /
+ * `deletedCaptures`, which is why this guard is scoped to the wrong-width one.
+ *
+ * Pure and exported so it can be tested without booting a browser.
+ */
+export function findViewportMismatches(files, viewports) {
+  const names = viewports.map((vp) => vp.name)
+  // `<slug>-<vp.name>.png`, and the taller re-shoot `<base>-<vp.name>-full.png`.
+  const suffixes = names.flatMap((name) => [`-${name}.png`, `-${name}-full.png`])
+  return files
+    .filter((file) => !suffixes.some((suffix) => file.endsWith(suffix)))
+    .map((file) => ({ file, expected: names }))
 }
 
 /**
@@ -239,6 +310,13 @@ export const FIXTURE_SAFE = {
   is_default: true,
   created_at: '2026-05-01T10:00:00.000Z',
 }
+// #2017 approver-badge fixture addresses. Three owners, one per branch of
+// `classifyApprover`: an enrolled passkey, the user's own wallet, and an
+// address Haven holds no record of.
+export const APPROVER_PASSKEY = '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2'
+export const APPROVER_WALLET = '0x5B1869D9A4C187F2Eaa108F3062412ECf0526B24'
+export const APPROVER_UNKNOWN = '0x9A7f6E2b1c4D8e05F3a2B9c6D1e8F40b3C5a7D91'
+
 export const FIXTURE_USER = {
   id: 'user-fixture',
   name: 'Screenshot Fixture',
@@ -307,7 +385,20 @@ export const FIXTURE_AGENTS = [
     created_at: '2026-06-02T10:00:00.000Z',
     // #1878: a NAMED pair — the case multi-agent wiring exists for.
     mcp_server_name: 'haven-research',
-    mcp_last_seen_at: '2026-07-10T08:12:00.000Z', allowances: [],
+    mcp_last_seen_at: '2026-07-10T08:12:00.000Z',
+    // #2106: the DERIVED projection of this agent's active delegation, exactly
+    // as `rails/delegation-budget-view.ts` builds it on the delegation rail
+    // (250 USDC / 604800s → `allowance_amount` + `reset_period_min` in
+    // minutes). Not decoration: `AgentDetailClient` derives the token list it
+    // hands `DelegationBudgetCard` from THIS array, so an agent with a
+    // delegation but an empty `allowances` renders its budget as raw atomic
+    // units ("250000000 per week") — a state the product cannot produce,
+    // because the projection is what fills the array in the first place.
+    allowances: [{
+      id: 'alw-research', agent_id: 'agent-research',
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      token_symbol: 'USDC', allowance_amount: '250.000000', reset_period_min: 10080,
+    }],
   },
   {
     id: 'agent-ops', name: 'Ops agent',
@@ -334,21 +425,19 @@ export const FIXTURE_AGENTS = [
     safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     safe_chain_id: FIXTURE_SAFE.chain_id, account_type: 'delegator_hybrid',
     api_key_prefix: 'hvn_g7h8i9', status: 'paused',
-    created_at: '2026-04-30T10:00:00.000Z', mcp_last_seen_at: null, allowances: [],
+    created_at: '2026-04-30T10:00:00.000Z', mcp_last_seen_at: null,
+    // #2106: a PAUSED agent whose on-chain delegation is still live. That
+    // combination is deliberate evidence, not an oversight — pausing an agent
+    // in Haven does not revoke what it signed, so `/custody` must still show
+    // the budget as constraining spend. Projection matches its delegation
+    // (500 USDC / 86400s), same rule as agent-research above.
+    allowances: [{
+      id: 'alw-retired', agent_id: 'agent-retired',
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      token_symbol: 'USDC', allowance_amount: '500.000000', reset_period_min: 1440,
+    }],
   },
 ]
-
-export const FIXTURE_APPROVALS = [{
-  id: 'appr-1', agent_id: 'agent-ops', agent_name: 'Ops agent',
-  safe_address: FIXTURE_SAFE.safe_address, chain_id: FIXTURE_SAFE.chain_id,
-  token_symbol: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-  to_address: ADDR.recipient, amount_raw: '750000000', amount_human: '750.00',
-  reason: 'Quarterly vendor invoice exceeds the daily budget',
-  source: 'api', x402_resource_url: null, merchant_address: null,
-  payment_rail: null, payment_resource_url: null,
-  status: 'pending', created_at: '2026-07-10T07:45:00.000Z',
-  expires_at: '2026-07-11T07:45:00.000Z', tx_hash: null, reviewed_at: null,
-}]
 
 const FIXTURE_PORTFOLIO = {
   totalUsd: 12_640.55, totalEur: 11_690.21,
@@ -367,7 +456,12 @@ export const FIXTURE_OVERVIEW = {
   totals: { usd: 12_640.55, eur: 11_690.21 },
   change: { available: true, usdAmount: 214.3, eurAmount: 198.2, usdPercent: 1.7, eurPercent: 1.7 },
   metrics: { connectedAgents: 2, monthlyAgentSpendUsd: 482.5, monthlyAgentSpendEur: 446.3, successfulTransactions: 37, activeAccounts: 1 },
-  actionableApprovals: 1, pendingApprovals: 1,
+  // #2120: 0, not 1. `routes/dashboard.ts:84` hardcodes `actionableApprovals
+  // = 0` (and mirrors it into `pendingApprovals`) — the queue died with the
+  // AllowanceModule rail and `approval_requests` is dropped. Both fields
+  // survive only for wire compatibility, so any non-zero seed here
+  // photographs a number the product cannot produce.
+  actionableApprovals: 0, pendingApprovals: 0,
   onboardingProgress: { hasFirstAgentPayment: true },
   agents: FIXTURE_AGENTS.map((a) => ({
     id: a.id, name: a.name, status: a.status, safeId: a.safe_id,
@@ -388,13 +482,31 @@ export const FIXTURE_AGENT_ACTIVITY = [
     type: 'payment', id: 'pay-1', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     amount_raw: '25000000', amount: '25.00', to: ADDR.merchant,
-    reason: null, status: 'executed', tx_hash: `0x${'a1'.repeat(32)}`,
+    // #2120: 'confirmed', not 'executed'. `payment_intents.status` is only
+    // ever written pending_signature | submitted | confirmed | failed |
+    // expired; 'executed' was an `approval_requests` status, and it only
+    // rendered "Sent" here because the deleted APPROVAL_STATUS map caught it.
+    reason: null, status: 'confirmed', tx_hash: `0x${'a1'.repeat(32)}`,
     source: 'x402', x402_resource_url: 'https://api.example.dev/reports',
     x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_SAFE.chain_id,
     safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
-    confirmed_at: '2026-07-10T08:20:00.000Z', payment_proof_status: 'verified',
-    payment_flow_status: 'paid', payment_attention_reason: null,
+    // #2126: BOTH fields were fabricated. `payment_proof_status` mirrors
+    // `machine_payment_evidence.proof_status`, whose only constructible values
+    // are `payment_confirmed | merchant_response_observed |
+    // protocol_receipt_attached` (`modules/mpp/evidence.ts:38-41`; the column
+    // default is `'payment_confirmed'`, `db/migrations/014_machine_payment_evidence.ts:13`).
+    // 'verified' is not one of them and no write site can produce it.
+    // `payment_flow_status` is DERIVED per row by the route, never read —
+    // `routes/agent-activity.ts:50-55` feeds `machinePaymentLifecycle` with
+    // rail=source, paymentStatus=status, paymentProofStatus, and
+    // reconciliationEventType. For rail 'x402' (in MACHINE_PAYMENT_RAILS,
+    // `packages/core/src/machine-payment-lifecycle.ts:9`), status 'confirmed',
+    // no reconciliation event, and a proof status that is neither
+    // 'protocol_receipt_attached' nor 'merchant_response_observed' (:44-49),
+    // the function falls through to `:51` and returns 'confirming_merchant'.
+    confirmed_at: '2026-07-10T08:20:00.000Z', payment_proof_status: 'payment_confirmed',
+    payment_flow_status: 'confirming_merchant', payment_attention_reason: null,
     created_at: '2026-07-10T08:18:00.000Z',
   },
   {
@@ -403,12 +515,25 @@ export const FIXTURE_AGENT_ACTIVITY = [
     next_action: 'settle', error_code: null, status_code: 200,
     created_at: '2026-07-10T08:17:00.000Z',
   },
+  // #2120: the `type: 'approval'` / `status: 'pending'` row that stood here is
+  // deleted. `routes/agent-activity.ts` has built this list from
+  // `payment_intents` + MCP tool invocations only since #2055 — the
+  // approval feed entries went with the dropped table — so the row seeded an
+  // activity kind no backend can emit, and every design-review capture of
+  // /agents/[agentId] rendered it as an "Approval request … Needs approval".
+  // #2120: a REACHABLE failure, seeded where the fabricated approval row used
+  // to sit. `haven-design-reviewer` observed that with the approval row gone
+  // the standing capture only ever showed success badges, so the danger tone
+  // and `activityTitle`'s `status === 'failed'` branch had no rendered
+  // evidence. Every field is what the route would emit for a failed intent:
+  // no tx hash, no confirmation, and `payment_flow_status: null` because
+  // `machinePaymentLifecycle` returns null for a non-machine rail AND for any
+  // status other than 'confirmed' (packages/core/src/machine-payment-lifecycle.ts:30-35).
   {
-    type: 'approval', id: 'appr-1', agent_id: 'agent-research', agent_name: 'Research agent',
+    type: 'payment', id: 'pay-3', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-    amount_raw: '750000000', amount: '750.00', to: ADDR.recipient,
-    reason: 'Quarterly vendor invoice exceeds the daily budget',
-    status: 'pending', tx_hash: null, source: 'api',
+    amount_raw: '12000000', amount: '12.00', to: ADDR.recipient,
+    reason: null, status: 'failed', tx_hash: null, source: 'api',
     x402_resource_url: null, x402_merchant_address: null, chain_id: FIXTURE_SAFE.chain_id,
     safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     explorer_url: null, confirmed_at: null, payment_proof_status: null,
@@ -419,13 +544,19 @@ export const FIXTURE_AGENT_ACTIVITY = [
     type: 'payment', id: 'pay-2', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     amount_raw: '4500000', amount: '4.50', to: ADDR.recipient,
-    reason: null, status: 'executed', tx_hash: `0x${'b2'.repeat(32)}`,
+    reason: null, status: 'confirmed', tx_hash: `0x${'b2'.repeat(32)}`,  // #2120: see pay-1
     source: 'api', x402_resource_url: null, x402_merchant_address: null,
     chain_id: FIXTURE_SAFE.chain_id,
     safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'b2'.repeat(32)}`,
+    // #2126: null, not 'paid'. `source: 'api'` is not in
+    // `MACHINE_PAYMENT_RAILS` (`x402 | mpp_demo | mpp_crypto | spt`,
+    // `packages/core/src/machine-payment-lifecycle.ts:9`), so the first branch
+    // (`:30-32`) returns `{ paymentFlowStatus: null, … }` before any proof
+    // status is consulted. A non-machine rail can NEVER carry a non-null flow
+    // status — 'paid' was unreachable for this row by construction.
     confirmed_at: '2026-07-09T14:02:00.000Z', payment_proof_status: null,
-    payment_flow_status: 'paid', payment_attention_reason: null,
+    payment_flow_status: null, payment_attention_reason: null,
     created_at: '2026-07-09T14:01:00.000Z',
   },
   {
@@ -439,7 +570,8 @@ export const FIXTURE_AGENT_STATS = {
   all_time: [{ token: 'USDC', total_spent: '482.50', tx_count: 37 }],
   today: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
   this_week: [{ token: 'USDC', total_spent: '109.75', tx_count: 6 }],
-  pending_approvals: 1,
+  // #2120: 0, not 1 — `routes/agent-activity.ts:129` hardcodes it.
+  pending_approvals: 0,
 }
 
 const FIXTURE_CONTACTS = [
@@ -460,9 +592,10 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname.startsWith('/portfolio/')) return FIXTURE_PORTFOLIO
   if (pathname.startsWith('/balances/')) return FIXTURE_BALANCES
   if (pathname === '/agents') return { agents: FIXTURE_AGENTS }
-  if (pathname === '/approvals') {
-    return { approvals: FIXTURE_APPROVALS, actionable_count: 1, pending_count: 1 }
-  }
+  // `/approvals` is NOT keyed here. #1989 deleted the route and #2055
+  // deregistered the backend endpoint outright — the "still a live, READABLE
+  // endpoint" this fixture used to claim stopped being true with the table
+  // drop. Unkeyed paths fall through to FIXTURE_EMPTY_FALLBACK (#1993).
   if (pathname === '/contacts') return { contacts: FIXTURE_CONTACTS }
   if (pathname === '/agent-activity/feed') {
     return { activity: FIXTURE_AGENT_ACTIVITY, pending_approvals: FIXTURE_AGENT_STATS.pending_approvals }
@@ -500,6 +633,45 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
       owner_address: null,
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
     }
+  }
+  if (pathname.startsWith('/agents/') && pathname.endsWith('/delegations')) {
+    // #2106: the delegation rail's actual spend authority, as
+    // `GET /agents/:id/delegations` returns it. `/custody` renders this on a
+    // `delegator_hybrid` account instead of the retired AllowanceModule read,
+    // so the capture has to carry both recipient states — PINNED (an
+    // AllowedCalldataEnforcer caveat) and open — or the rendered review never
+    // sees the branch that was wrong.
+    if (pathname === `/agents/${FIXTURE_AGENTS[0].id}/delegations`) {
+      return {
+        delegations: [{
+          id: 'dlg-1', chain_id: FIXTURE_SAFE.chain_id,
+          token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          recipient_address: ADDR.merchant,
+          delegation_hash: '0x' + '4d'.repeat(32),
+          version: 1, status: 'active',
+          budget_atomic: '250000000', period_seconds: 604_800,
+          start_date: '2026-06-02T10:00:00.000Z',
+          expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
+          created_at: '2026-06-02T10:00:00.000Z',
+        }],
+      }
+    }
+    if (pathname === `/agents/${FIXTURE_AGENTS[2].id}/delegations`) {
+      return {
+        delegations: [{
+          id: 'dlg-2', chain_id: FIXTURE_SAFE.chain_id,
+          token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          recipient_address: null,
+          delegation_hash: '0x' + '5e'.repeat(32),
+          version: 2, status: 'active',
+          budget_atomic: '500000000', period_seconds: 86_400,
+          start_date: '2026-05-18T10:00:00.000Z',
+          expires_at: Math.floor(Date.UTC(2027, 4, 18) / 1000),
+          created_at: '2026-05-18T10:00:00.000Z',
+        }],
+      }
+    }
+    return { delegations: [] }
   }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/passport')) {
     // Agent Passport status (#1072). Only agent-research carries one — the
@@ -543,18 +715,365 @@ function slug(route) {
   return route.replace(/^\//, '').replace(/\//g, '_') || 'root'
 }
 
-async function waitForServer(url, timeoutMs = 90_000) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url, { redirect: 'manual' })
-      if (res.status < 500) return
-    } catch {
-      /* not up yet */
-    }
-    await sleep(1000)
+export function firstLine(text) {
+  return String(text).split('\n')[0].trim()
+}
+
+/**
+ * The one line that says whether this run produced evidence (#2108).
+ *
+ * It exists because of how the harness is actually invoked. `npm run screenshot
+ * ... | tail -30` reports **`tail`'s** exit code, so the shell sees 0 while the
+ * run failed — a false green that has now misled several sessions, including
+ * the one that filed this issue. An exit code does not survive a pipe; a line
+ * of stdout does. `RESULT` is greppable on purpose, and it is the LAST thing
+ * printed so a `tail` of any depth catches it.
+ *
+ * Pure and exported so a test can pin both colours — a formatter that can only
+ * produce "ok" would restate the defect it is here to remove.
+ */
+export function formatRunResult(ok, detail) {
+  return ok ? `screenshot: RESULT ok — ${detail}` : `screenshot: RESULT FAILED — ${detail}`
+}
+
+function printRunResult(ok, detail) {
+  const line = formatRunResult(ok, detail)
+  // Deliberately stdout in both cases: a reader piping to `tail` or `head` is
+  // usually capturing stdout only, and the failing colour is the one they most
+  // need to survive that pipe.
+  console.log(line)
+}
+
+/**
+ * The measured cold `next dev` compile in this repo, in seconds (#2108).
+ *
+ * Not a guess and not a round number: repeated first-boot runs on a worktree
+ * with no `.next/` land between these two values under normal agent load. It
+ * is exported because three things have to agree about it — the default
+ * budget, the failure message that tells the reader what "too slow" is being
+ * measured against, and the test that pins the default above it. A constant
+ * that lives in one of the three and is retyped into the other two drifts.
+ */
+export const COLD_COMPILE_RANGE_S = { min: 315, max: 448 }
+
+/**
+ * Two budgets, because readiness is two events, not one (#2108).
+ *
+ * The bug this replaces was a SINGLE 90s deadline covering both, set roughly
+ * 3.5–5x below the thing it was measuring, so the capture harness could not
+ * succeed on a cold worktree at all. The lazy fix is a bigger constant, and it
+ * is wrong in the other direction: one 500s deadline makes a dev server that
+ * will NEVER come up take eight minutes to say so, and the message it finally
+ * prints is the same one a slow-but-healthy compile prints.
+ *
+ * They are separated because the two events have different orders of
+ * magnitude AND different causes:
+ *
+ *   listenTimeoutMs   `next dev` BINDING its port. This is process startup —
+ *                     seconds, cold or warm, because binding happens before
+ *                     any compilation. 90s was always the right order of
+ *                     magnitude for this; it was only ever the wrong one for
+ *                     the event below. Exceeding it means a startup failure,
+ *                     which is a different remedy from "wait longer".
+ *
+ *   readyTimeoutMs    that listening server ANSWERING, which is the webpack
+ *                     compile. This is the 315–448s event. The budget is
+ *                     ~2.2x the measured maximum: enough headroom for a
+ *                     genuinely contended machine, and affordable ONLY
+ *                     because the failures that are not slowness — the
+ *                     process dying, the port never opening — are detected by
+ *                     progress rather than by waiting this budget out.
+ *
+ * Both are overridable (`SCREENSHOT_LISTEN_TIMEOUT_MS`,
+ * `SCREENSHOT_READY_TIMEOUT_MS`) so a slower machine needs no code edit.
+ */
+export const READINESS_DEFAULTS = {
+  listenTimeoutMs: 90_000,
+  // Rounded to whole seconds: `COLD_COMPILE_RANGE_S.max * 2.2 * 1000` is 985600.0000000001
+  // in float, and a budget that prints with a fractional millisecond invites the
+  // reader to wonder what else about it is accidental.
+  readyTimeoutMs: Math.round(COLD_COMPILE_RANGE_S.max * 2.2) * 1_000,
+  progressIntervalMs: 15_000,
+}
+
+/**
+ * A budget that cannot fit the thing it measures, named as such.
+ *
+ * Returns the problems as strings rather than throwing, so the same predicate
+ * is usable as a warning at runtime and as an assertion in a test. It has to
+ * be able to say NO for a plausible-looking number — a floor that only ever
+ * says yes is the defect this whole issue is an instance of — so the test
+ * feeds it the old 90_000 and requires it to object.
+ */
+export function readinessBudgetProblems(budgets) {
+  const problems = []
+  if (budgets.readyTimeoutMs < COLD_COMPILE_RANGE_S.max * 1000) {
+    problems.push(
+      `readyTimeoutMs=${budgets.readyTimeoutMs}ms is below the MEASURED cold \`next dev\` compile ` +
+        `in this repo (${COLD_COMPILE_RANGE_S.min}–${COLD_COMPILE_RANGE_S.max}s) — a cold worktree ` +
+        'will fail during compilation, for a reason that has nothing to do with the page being captured',
+    )
   }
-  throw new Error(`dev server did not become ready at ${url} within ${timeoutMs}ms`)
+  if (budgets.listenTimeoutMs >= budgets.readyTimeoutMs) {
+    problems.push(
+      `listenTimeoutMs=${budgets.listenTimeoutMs}ms is not shorter than readyTimeoutMs=${budgets.readyTimeoutMs}ms — ` +
+        'a dev server that never binds its port would then take the full cold-start budget to report, ' +
+        'which is the failure mode the split exists to avoid',
+    )
+  }
+  return problems
+}
+
+/**
+ * Resolve the budgets from the environment. Pure in `env` so it is testable.
+ *
+ * A malformed override THROWS rather than falling back to the default: silently
+ * ignoring `SCREENSHOT_READY_TIMEOUT_MS=6OO000` (letter O) would produce exactly
+ * the confusing timeout this issue is about, with the reader certain they had
+ * raised it.
+ */
+export function resolveReadinessBudgets(env = process.env) {
+  const read = (name, fallback) => {
+    const raw = env[name]
+    if (raw === undefined || raw === '') return fallback
+    const n = Number(raw)
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+      throw new Error(`${name} must be a positive whole number of milliseconds; got ${JSON.stringify(raw)}`)
+    }
+    return n
+  }
+  return {
+    listenTimeoutMs: read('SCREENSHOT_LISTEN_TIMEOUT_MS', READINESS_DEFAULTS.listenTimeoutMs),
+    readyTimeoutMs: read('SCREENSHOT_READY_TIMEOUT_MS', READINESS_DEFAULTS.readyTimeoutMs),
+    progressIntervalMs: READINESS_DEFAULTS.progressIntervalMs,
+  }
+}
+
+/**
+ * The failure messages, as data, in one place.
+ *
+ * Every one of them names the CAUSE and the REMEDY, because the message this
+ * replaces named neither: "did not become ready within 90000ms" sent several
+ * sessions looking for a broken page, a port collision, or Playwright — the
+ * three things it was NOT. Pure and exported so the tests can pin the words a
+ * reader is going to act on, rather than trusting that a message exists.
+ */
+export function describeReadinessFailure(kind, ctx) {
+  const prewarm =
+    'Or pre-warm a server yourself and point the harness at it:\n' +
+    `      npm run dev -w packages/frontend -- --hostname 127.0.0.1 --port ${ctx.port ?? '<port>'}\n` +
+    `      SCREENSHOT_BASE_URL=http://127.0.0.1:${ctx.port ?? '<port>'} npm run screenshot -w packages/frontend -- <route>\n` +
+    '    The #1800 identity check still runs on that server, so the PNGs are still provably this worktree.'
+  if (kind === 'process-exited') {
+    return (
+      `dev server PROCESS EXITED (code ${ctx.exitCode}) after ${ctx.elapsedS}s — this is NOT a timeout.\n` +
+      `    Cause: \`npm run dev\` in ${ctx.cwdLabel ?? 'packages/frontend'} could not stay up. Nothing was ever listening on ${ctx.url}.\n` +
+      '    Remedy: run that command by hand in this worktree and read its output. A missing `npm install`, an\n' +
+      '    unbuilt `@haven_ai/core` (`npm run build -w packages/core`), or an occupied port are the usual reasons.'
+    )
+  }
+  if (kind === 'never-listened') {
+    return (
+      `dev server never opened a socket on ${ctx.url} within ${ctx.budgetMs}ms (${Math.round(ctx.budgetMs / 1000)}s).\n` +
+      '    Cause: the `next dev` process is alive but has not BOUND its port. That is a startup failure, not a slow\n' +
+      `    compile — a compiling server binds its port within seconds and only then spends ${COLD_COMPILE_RANGE_S.min}–${COLD_COMPILE_RANGE_S.max}s compiling.\n` +
+      '    Remedy: run `npm run dev -w packages/frontend` by hand and read its output. If this machine really is that\n' +
+      '    slow to start, raise SCREENSHOT_LISTEN_TIMEOUT_MS.'
+    )
+  }
+  if (kind === 'stopped-listening') {
+    return (
+      `dev server at ${ctx.url} accepted a connection and then STOPPED listening after ${ctx.elapsedS}s.\n` +
+      '    Cause: the server died mid-compile — an out-of-memory kill or a crash in `next dev`, not a slow page.\n' +
+      '    Remedy: run `npm run dev -w packages/frontend` by hand; the crash prints there and is discarded here\n' +
+      '    (the harness spawns it with stdio ignored).'
+    )
+  }
+  return (
+    `dev server at ${ctx.url} is LISTENING but did not answer within ${ctx.budgetMs}ms (${Math.round(ctx.budgetMs / 1000)}s).\n` +
+    `    Cause: a cold \`next dev\` compile in this repo measures ${COLD_COMPILE_RANGE_S.min}–${COLD_COMPILE_RANGE_S.max}s. This run exceeded even the\n` +
+    '    budget above it, so the compile is either far slower than measured (a contended machine) or genuinely stuck.\n' +
+    '    Remedy: raise SCREENSHOT_READY_TIMEOUT_MS.\n' +
+    `    ${prewarm}`
+  )
+}
+
+/**
+ * The port to dial for `url`, defaulted by scheme.
+ *
+ * `new URL('http://127.0.0.1').port` is the empty string, and `Number('')` is
+ * **0** — not NaN. `net.connect({ port: 0 })` can never succeed, so a portless
+ * `SCREENSHOT_BASE_URL` would have failed with `never opened a socket` against a
+ * server that was listening perfectly well: this fix's own defect class, from the
+ * other side. Neither live caller can hit it today (the spawn path always builds
+ * `http://127.0.0.1:${port}`, and every documented pre-warm example carries a
+ * port) — but nothing forbids a portless override, so it is defaulted rather
+ * than left to depend on that. Exported for the guard, because an edge this
+ * quiet is only real if something drives it.
+ */
+export function portOf(url) {
+  const parsed = new URL(url)
+  if (parsed.port) return Number(parsed.port)
+  return parsed.protocol === 'https:' ? 443 : 80
+}
+
+/** Is anything accepting TCP connections there? Deliberately not an HTTP request:
+ *  a bare connect does not ask a compiling Next dev server to do any work. */
+export function probeListeningDefault(url, timeoutMs = 2000) {
+  const { hostname, port } = new URL(url)
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: hostname, port: portOf(url) })
+    const done = (answer) => {
+      socket.destroy()
+      resolve(answer)
+    }
+    socket.setTimeout(timeoutMs)
+    socket.once('connect', () => done(true))
+    socket.once('timeout', () => done(false))
+    socket.once('error', () => done(false))
+  })
+}
+
+/**
+ * Ask the server for an answer, but only for `timeoutMs`.
+ *
+ * The bound is not politeness, it is what makes progress reporting possible.
+ * A `fetch` to a Next dev server that is mid-compile does not fail and does not
+ * return — it HANGS until the compile finishes. An unbounded call therefore
+ * parks the readiness loop inside one await for the entire compile, so nothing
+ * ticks, nothing re-checks the socket, and the run is silent for five minutes:
+ * exactly the "is it working or is it hung?" ambiguity #2108 is about, faithfully
+ * reproduced by the code meant to remove it.
+ *
+ * Caught by running it, NOT by the unit tests — the injected `probeAnswering`
+ * in `capture-readiness.test.ts` threw instantly, so the fake was more
+ * cooperative than the real thing and the progress assertion passed against a
+ * loop that could not tick in production. Hence `probeAnsweringIsBounded` below,
+ * which tests the real probe rather than a stand-in.
+ *
+ * Re-requesting a route that is still compiling is safe: Next dev dedupes
+ * compilation per route, so each attempt joins the same in-flight build.
+ */
+async function probeAnsweringDefault(url, timeoutMs = 10_000) {
+  const res = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) })
+  return res.status
+}
+
+/**
+ * Does the real answering probe give up in bounded time? Exported so the guard
+ * can assert it against a socket that accepts and then says nothing forever —
+ * the shape a compiling `next dev` presents. A progress ticker downstream of an
+ * unbounded await is a ticker that never ticks.
+ */
+export async function probeAnsweringIsBounded(url, timeoutMs) {
+  const startedAt = Date.now()
+  try {
+    await probeAnsweringDefault(url, timeoutMs)
+    return { threw: false, elapsedMs: Date.now() - startedAt }
+  } catch {
+    return { threw: true, elapsedMs: Date.now() - startedAt }
+  }
+}
+
+/**
+ * Wait for the spawned dev server, measuring PROGRESS rather than only a deadline (#2108).
+ *
+ * The sequence, and why each step is a step:
+ *
+ *   1. The child process is watched THROUGHOUT. If it exits, the wait ends
+ *      immediately with `process-exited` — a dead server is reported in
+ *      seconds, whatever budget was configured. This is what makes a large
+ *      cold-compile budget affordable.
+ *   2. Phase A waits for the port to accept a connection, on the SHORT budget.
+ *      Binding is startup, not compilation.
+ *   3. Phase B waits for that listening server to answer, on the LONG budget,
+ *      and re-checks the socket between attempts so a mid-compile crash is
+ *      reported as `stopped-listening` rather than waiting the budget out.
+ *   4. Progress is printed on a fixed interval in both phases, so a five-minute
+ *      wait is visibly a wait. The old version printed nothing for 90 seconds
+ *      and then failed, which is indistinguishable from a hang and is part of
+ *      why this kept being misdiagnosed.
+ *
+ * Every collaborator is injectable so the phases are testable without a real
+ * server: a readiness check that can only be exercised by waiting five minutes
+ * for a real compile is a check nobody runs.
+ */
+export async function waitForServer(url, opts = {}) {
+  const {
+    child = null,
+    budgets = resolveReadinessBudgets(),
+    probeListening = probeListeningDefault,
+    probeAnswering = probeAnsweringDefault,
+    pollIntervalMs = 1000,
+    sleepFn = sleep,
+    now = Date.now,
+    log = console.log,
+    cwdLabel,
+  } = opts
+
+  const port = (() => {
+    try {
+      return new URL(url).port || undefined
+    } catch {
+      return undefined
+    }
+  })()
+  const started = now()
+  const elapsedS = () => Math.round((now() - started) / 1000)
+  let lastProgressAt = started
+  const progress = (line) => {
+    if (now() - lastProgressAt < budgets.progressIntervalMs) return
+    lastProgressAt = now()
+    log(`screenshot: ${line} (${elapsedS()}s elapsed)`)
+  }
+  const fail = (kind, ctx) => {
+    const err = new Error(describeReadinessFailure(kind, { url, port, cwdLabel, elapsedS: elapsedS(), ...ctx }))
+    err.readinessFailure = kind
+    return err
+  }
+  // `exitCode` is non-null once the child has exited; `signalCode` covers a kill.
+  const childDead = () => child && (child.exitCode !== null || child.signalCode != null)
+
+  // Phase A — did it bind a port?
+  const listenDeadline = started + budgets.listenTimeoutMs
+  let listening = false
+  while (now() < listenDeadline) {
+    if (childDead()) throw fail('process-exited', { exitCode: child.exitCode ?? child.signalCode })
+    if (await probeListening(url)) {
+      listening = true
+      break
+    }
+    progress(`waiting for \`next dev\` to bind ${url}`)
+    await sleepFn(pollIntervalMs)
+  }
+  if (!listening) {
+    if (childDead()) throw fail('process-exited', { exitCode: child.exitCode ?? child.signalCode })
+    throw fail('never-listened', { budgetMs: budgets.listenTimeoutMs })
+  }
+  log(
+    `screenshot: dev server is listening on ${url} after ${elapsedS()}s — now waiting for the first compile ` +
+      `(measured cold: ${COLD_COMPILE_RANGE_S.min}–${COLD_COMPILE_RANGE_S.max}s, budget ${Math.round(budgets.readyTimeoutMs / 1000)}s)`,
+  )
+
+  // Phase B — is it answering?
+  const readyDeadline = started + budgets.readyTimeoutMs
+  while (now() < readyDeadline) {
+    if (childDead()) throw fail('process-exited', { exitCode: child.exitCode ?? child.signalCode })
+    try {
+      const status = await probeAnswering(url)
+      if (status < 500) {
+        log(`screenshot: dev server answered ${status} after ${elapsedS()}s`)
+        return
+      }
+    } catch {
+      /* still compiling, or the connection was dropped — the socket check below decides which */
+    }
+    if (childDead()) throw fail('process-exited', { exitCode: child.exitCode ?? child.signalCode })
+    if (!(await probeListening(url))) throw fail('stopped-listening', {})
+    progress('dev server is listening and still compiling — this is the cold `next dev` compile, not a hang')
+    await sleepFn(pollIntervalMs)
+  }
+  throw fail('not-answering', { budgetMs: budgets.readyTimeoutMs })
 }
 
 /**
@@ -589,6 +1108,353 @@ export class ScenarioHttpError {
 
 /** Sugar for the above, so a scenario reads `return httpError(500)`. */
 export const httpError = (status, body) => new ScenarioHttpError(status, body)
+
+/**
+ * ── The on-chain read seam (#1935) ──────────────────────────────────────────
+ *
+ * `scenario.api()` above answers the HAVEN BACKEND. A second class of state is
+ * populated from the CHAIN instead, and until this existed the harness could
+ * not reach any of it: `EditAgentModal`'s "Current agent budgets" list — the
+ * rows carrying the per-row remove control #1923 resized — is
+ * `existingOnChainAllowances`, which is `useOnChainAllowances` reading the
+ * Safe AllowanceModule through viem. No `/api/*` body of any shape puts a row
+ * in that list, exactly as no 200 body could reach `loadError` in #1725.
+ *
+ * The seam is the same one #1725 found: state the harness cannot express, added
+ * to the harness rather than approximated by a cleverer payload. And it is a
+ * NETWORK seam, not a component stub — which is what makes the capture
+ * evidence. viem's transport for the app's chain is `fallback()` over a handful
+ * of plain `http(url)` endpoints (`lib/wagmi.ts`), so the reads leave the
+ * browser as ordinary JSON-RPC POSTs that Playwright routes like anything else
+ * — and the route matches on pathname across every origin, so which endpoint
+ * the fallback happens to pick does not matter. Answering them runs
+ * the app's REAL read path end to end: viem encodes the call, the fixture
+ * returns ABI-encoded return data, viem decodes it, `useOnChainAllowances` maps
+ * it, and `EditAgentModal` renders the rows. Every line between the wire and
+ * the pixel is production code. Nothing is passed to a component by hand.
+ *
+ * `scenario.chain(method, params)` returns the JSON-RPC `result` for one call,
+ * or `undefined` to say it has no answer. The harness takes over ALL chain
+ * traffic: an unanswered method is served a JSON-RPC error rather than being let
+ * out to a public node, because a capture whose data came from the live internet
+ * is not deterministic evidence. The gap is recorded and FAILS THE RUN — see
+ * `CHAIN_READ_GAPS`.
+ *
+ * ── Every capture, not only the ones that opt in (#1971) ─────────────────────
+ *
+ * #1935 applied this only to a scenario that declared `chain`; everything else
+ * fell through to `route.continue()`. That was safe for one reason and it was
+ * not the reason it looked like: the shared fixture sat on chain 84532, which
+ * `lib/wagmi.ts` had no transport for, so no chain request was ever made and
+ * there was nothing to let out. Every chain-fed capture was painting its empty
+ * branch instead. #1971 gave 84532 a transport — the app OFFERS it, and the dev
+ * deployment DEFAULTS to it, so the missing transport was a product defect, not
+ * a fixture one — and the reads are now real. A scenario that declares nothing
+ * therefore inherits `answerSharedChainRead`, the shared fixture's own Safe on
+ * the shared fixture's own chain, so no capture reaches a public node and no
+ * capture is a picture of a read that never happened.
+ */
+
+/**
+ * Chain reads a scenario left unanswered, recorded per call and fatal at the
+ * end of the run.
+ *
+ * Fatal rather than advisory, and that is the point rather than strictness for
+ * its own sake. An unanswered read does not blank the screen — viem throws,
+ * `useOnChainAllowances` swallows it into an empty map (its `catch` logs and
+ * moves on), and the modal renders WITHOUT the budget list. That is a
+ * plausible, well-formed, completely wrong PNG: the empty state of the very
+ * surface the capture exists to show. This is the `deleted_captures` rule one
+ * layer down — evidence that cannot show the defect is worse than no evidence.
+ */
+const CHAIN_READ_GAPS = []
+
+/**
+ * ── The silent half: a chain-fed capture whose reads NEVER HAPPENED (#1971) ──
+ *
+ * `CHAIN_READ_GAPS` above catches "the app asked and this fixture had no
+ * answer". It cannot catch the failure that hid #1971 for the entire life of
+ * this harness, because that one produces no request to be unanswered.
+ *
+ * The mechanism: `@wagmi/core`'s `getClient` CATCHES `ChainNotConfiguredError`
+ * and returns `undefined`, so a fixture chain the app has no transport for
+ * makes `usePublicClient({ chainId })` `undefined`, and every consumer guards
+ * on exactly that and returns at its first line —
+ * `if (!publicClient || !safeAddress) { setLoading(false); return }`. Nothing
+ * throws, nothing is logged, no request is issued, and the surface paints its
+ * empty branch. Every PNG of an on-chain surface this harness has ever produced
+ * was that, and none of them looked wrong.
+ *
+ * So the harness measures the thing it could not previously distinguish: for a
+ * capture whose page visited a route that reads the chain at render, it asserts
+ * the app ACTUALLY ASKED. Zero observed reads on a chain-fed route is fatal,
+ * the same stance `deleted_captures` takes one layer down — a photogenic wrong
+ * answer is worse than a failed run.
+ *
+ * Only routes that read the chain AT RENDER belong here, and `/dashboard` was
+ * wrongly in this list until review checked it against the component tree.
+ * Nothing on `/dashboard` mounts `useOnChainAllowances` -- `AgentPanel` lives on
+ * `/agents` and `ApprovalQueue` on `/approvals`, and `ApprovalQueue`'s
+ * `usePublicClient` only GATES a button: calling the hook issues no request,
+ * only a `readContract` on the returned client does. Five scenarios land on
+ * `/dashboard` before opening their modal, so the mistake would have made
+ * `npm run screenshot -- --scenario=all` red on unchanged `dev` -- precisely the
+ * always-on alarm this file's own `stillClipped` note warns about. A gating
+ * `usePublicClient` is NOT the signal; a render-time read is, and
+ * `chain-fed-route-coverage.test.ts` now derives that fact from the app's own
+ * import graph rather than from a second hand-maintained list.
+ *
+ * Keyed on ROUTE rather than on scenario, deliberately. A scenario list would
+ * need an entry per scenario and would silently under-report the day someone
+ * adds the sixteenth; routes change rarely, and the property being asserted is
+ * a property of the screen, not of the story told about it.
+ */
+export const CHAIN_FED_ROUTES = [
+  {
+    pattern: /^\/agents(\/|$)/,
+    reads: 'useOnChainAllowances — via useAgentPanelState (AgentPanel, unmanaged-delegate ' +
+      'discovery) and AgentDetailClient/EditAgentModal (the budget list)',
+  },
+  {
+    pattern: /^\/custody(\/|$)/,
+    reads: 'useOnChainAllowances — SafeControlCard reads the module and delegates at render',
+    // #2106: `/custody` became CONDITIONALLY chain-fed. It renders one of two
+    // cards per account, and only the legacy Safe one mounts
+    // `useOnChainAllowances`; the delegation-rail card reads
+    // `/accounts/hybrid/:address/signers` and `/agents/:id/delegations` over
+    // the API and touches the chain not at all. So on an all-delegation-rail
+    // account — which, since #1984, is every new account — zero chain reads is
+    // the CORRECT observation, not the empty-surface defect this guard exists
+    // to catch.
+    //
+    // The route stays listed rather than being deleted: the legacy branch
+    // still reads at render, and dropping the entry would retire the guard for
+    // the rail that still needs it. Instead a capture may declare itself
+    // legitimately silent, and must say which rail makes it so.
+    silentWhen: 'every account rendered is on the delegation rail (account_type ' +
+      "'delegator_hybrid'), whose card issues no chain read",
+  },
+]
+
+/** Chain-fed captures where the app issued no chain read at all. Fatal. */
+export const CHAIN_SILENT_CAPTURES = []
+
+/**
+ * Live counters for the context currently being captured, keyed PER PAGE.
+ *
+ * Per-page rather than per-context, and that distinction is the whole guard —
+ * caught by independent review before this shipped. One context sweeps several
+ * routes (`npm run screenshot -- /agents /dashboard` is ONE browser context and
+ * two screens), so a single shared counter answers "did this context read the
+ * chain anywhere", which is not the question. If `/agents` regressed to zero
+ * reads while `/dashboard` still read fine, a context-wide counter is non-zero
+ * and the regression is swallowed — the exact failure this guard exists to
+ * catch, missed by the guard. In the other direction it would flag every
+ * chain-fed page in the sweep when only one was broken, and a report that names
+ * four screens for one defect is the kind nobody trusts twice.
+ */
+let chainWatch = null
+
+export function beginChainWatch(label, viewport) {
+  chainWatch = { label, viewport, current: null, pages: new Map() }
+}
+
+export function noteChainReadObserved(method) {
+  if (!chainWatch) return
+  const page = chainWatch.pages.get(chainWatch.current)
+  if (!page) return
+  page.observed += 1
+  page.methods.add(method)
+}
+
+/**
+ * Record a main-frame navigation.
+ *
+ * Sets the page reads are attributed to from here on, and opens a tally the
+ * first time a chain-fed route is seen. A page is registered once: re-navigating
+ * to the same pathname (a scenario that returns to a screen) keeps the reads it
+ * already made rather than resetting them to zero.
+ */
+export function noteChainWatchNavigation(url) {
+  if (!chainWatch) return
+  let pathname
+  try {
+    pathname = new URL(url).pathname
+  } catch {
+    return
+  }
+  const fed = CHAIN_FED_ROUTES.find((route) => route.pattern.test(pathname))
+  chainWatch.current = fed ? pathname : null
+  if (fed && !chainWatch.pages.has(pathname)) {
+    chainWatch.pages.set(pathname, { reads: fed.reads, observed: 0, methods: new Set() })
+  }
+}
+
+/**
+ * Withdraw a page from the watch — its capture never got far enough to be
+ * judged (#1971 review, and observed live on the authoring run).
+ *
+ * A `goto` that times out still fires `framenavigated`, so the page enters the
+ * watch, renders nothing, issues no chain read, and is reported as a silent
+ * chain-fed capture. On a loaded machine that is a *machine* failure wearing the
+ * diagnosis of a *transport* failure — printed directly beneath the `goto
+ * failed:` line that already says what really happened, and pointing the reader
+ * at `lib/wagmi.ts` for a bug that is not there. The run still exits 1 on the
+ * navigation failure, so nothing is let through by staying quiet here; what is
+ * avoided is a confident wrong cause, which is the same defect this whole
+ * change is about, one level up.
+ */
+export function forgetChainWatchPage(url) {
+  if (!chainWatch) return
+  let pathname
+  try {
+    pathname = new URL(url).pathname
+  } catch {
+    return
+  }
+  chainWatch.pages.delete(pathname)
+  if (chainWatch.current === pathname) chainWatch.current = null
+}
+
+/**
+ * Discard the whole watch — this capture failed for a reason of its own.
+ *
+ * Same reasoning as `forgetChainWatchPage`, for a scenario that threw: its
+ * `scenario failed:` line is already on the record and already exits the run 1.
+ * The cost is real and is accepted deliberately: a scenario that failed BECAUSE
+ * its chain data never arrived (a `waitFor` on a budget row) loses the sharper
+ * diagnosis. The exchange is that a scenario failing for any of a dozen other
+ * reasons no longer accuses the transport.
+ */
+export function abortChainWatch() {
+  chainWatch = null
+}
+
+/**
+ * End the watch and report every chain-fed page that issued no read.
+ *
+ * `expectedSilentRoutes` (#2106) lets ONE capture declare that a specific
+ * chain-fed route is legitimately silent for it. It exists because `/custody`
+ * stopped being unconditionally chain-fed: it renders a per-account card, and
+ * only the legacy Safe branch reads the chain at render.
+ *
+ * Deliberately narrow, so it cannot become a way to wave the guard through:
+ *
+ *  - It is per capture AND per route — never a global flag, and never "this
+ *    scenario reads no chain at all".
+ *  - The route must still be declared chain-fed AND carry a `silentWhen`
+ *    reason, so the exemption is anchored to a written explanation of which
+ *    state makes silence correct rather than to a bare boolean.
+ *  - A declared-silent route that DID read is reported too (below). That
+ *    direction matters as much: it catches the day the delegation card starts
+ *    reading the chain and this declaration quietly stops being true.
+ */
+export function endChainWatch(expectedSilentRoutes = []) {
+  const watch = chainWatch
+  chainWatch = null
+  if (!watch) return
+  const expected = (pathname) =>
+    expectedSilentRoutes.some((p) => (p instanceof RegExp ? p.test(pathname) : p === pathname))
+  for (const [pathname, page] of watch.pages) {
+    const declaredSilent = expected(pathname)
+    if (page.observed > 0) {
+      if (declaredSilent) {
+        CHAIN_SILENT_CAPTURES.push({
+          capture: watch.label,
+          viewport: watch.viewport,
+          route: pathname,
+          reads: page.reads,
+          unexpectedRead: `declared chain-silent, but issued ${page.observed} read(s) ` +
+            `(${[...page.methods].join(', ')}) — the declaration is stale`,
+        })
+      }
+      continue
+    }
+    if (declaredSilent) continue
+    CHAIN_SILENT_CAPTURES.push({
+      capture: watch.label,
+      viewport: watch.viewport,
+      route: pathname,
+      reads: page.reads,
+    })
+  }
+}
+
+/**
+ * Answer one JSON-RPC request from `scenario.chain`, or decline it.
+ *
+ * Returns `true` when the request was fulfilled here, `false` when the caller
+ * should fall through to its normal handling. Deliberately conservative about
+ * what it claims: a POST is only treated as chain traffic when its body parses
+ * as a JSON-RPC 2.0 envelope (or a batch of them), so a scenario declaring
+ * `chain` cannot accidentally capture an unrelated POST to some other host.
+ */
+async function answerChainRead(route, req, scenario) {
+  // Every capture gets a chain fixture, not only a scenario that opts in
+  // (#1971). Before #1971 this line was `if (typeof scenario?.chain !==
+  // 'function') return false` and the request fell through to
+  // `route.continue()` — which was harmless only because the fixture chain had
+  // no transport and no request was ever made. Now that it does, an
+  // un-intercepted read would reach a public node and the capture would stop
+  // being deterministic evidence.
+  const answer = typeof scenario?.chain === 'function' ? scenario.chain : answerSharedChainRead
+  if (req.method() !== 'POST') return false
+  let payload
+  try {
+    payload = req.postDataJSON()
+  } catch {
+    return false
+  }
+  const batched = Array.isArray(payload)
+  const calls = batched ? payload : [payload]
+  if (calls.length === 0) return false
+  const isRpc = (c) => c && c.jsonrpc === '2.0' && typeof c.method === 'string'
+  if (!calls.every(isRpc)) return false
+
+  // Observed — recorded BEFORE any answer is computed, because the guard this
+  // feeds is about whether the app ASKED, not about whether we could reply.
+  for (const call of calls) noteChainReadObserved(call.method)
+
+  const answers = calls.map((call) => {
+    let result
+    try {
+      result = answer(call.method, call.params ?? [])
+    } catch (err) {
+      // A throw from a scenario's own answer is a fixture bug, and it must not
+      // read like a chain that declined — record it in the same place.
+      CHAIN_READ_GAPS.push({
+        scenario: scenario?.name ?? 'shared fixture',
+        method: call.method,
+        reason: `threw: ${String(err?.message ?? err).slice(0, 200)}`,
+      })
+      return {
+        jsonrpc: '2.0',
+        id: call.id ?? null,
+        error: { code: -32000, message: `screenshot fixture: ${String(err?.message ?? err)}` },
+      }
+    }
+    if (result === undefined) {
+      CHAIN_READ_GAPS.push({
+        scenario: scenario?.name ?? 'shared fixture',
+        method: call.method,
+        reason: 'the scenario returned undefined — no answer was declared for this read',
+      })
+      return {
+        jsonrpc: '2.0',
+        id: call.id ?? null,
+        error: { code: -32601, message: `screenshot fixture: no answer for ${call.method}` },
+      }
+    }
+    return { jsonrpc: '2.0', id: call.id ?? null, result }
+  })
+
+  await route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify(batched ? answers : answers[0]),
+  })
+  return true
+}
 
 /**
  * One browser context wired to the shared auth + data fixture.
@@ -630,6 +1496,42 @@ async function newFixtureContext(browser, vp, scenario) {
     }, Object.entries(seeded))
   }
 
+  // A CONNECTED wallet, through the real wagmi path (#2073). Same posture as
+  // `scenario.seed()` above: this stubs the BROWSER-side seam the product
+  // reads (an EIP-1193 provider on `window.ethereum`), so wagmi's own
+  // `injected()` connector reconnect, `useAccount`, `useSafeOperationGate`
+  // and the header render are all real. The two seeded wagmi keys are what
+  // lets the targetless injected connector reconnect on mount
+  // (`isAuthorized` requires `injected.connected`; `recentConnectorId` puts
+  // it first). Nothing above the provider is forced. Declare
+  // `connectedWallet: '0x…'` on a scenario to use it; the stub answers only
+  // the read methods a mounted app needs, and throws loudly on anything else
+  // so a scenario that starts SIGNING fails instead of hanging.
+  if (scenario?.connectedWallet) {
+    await context.addInitScript(
+      ({ addr, chainIdHex }) => {
+        window.localStorage.setItem('wagmi.injected.connected', 'true')
+        window.localStorage.setItem('wagmi.recentConnectorId', '"injected"')
+        const provider = {
+          isMetaMask: true,
+          request: async ({ method }) => {
+            if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [addr]
+            if (method === 'eth_chainId') return chainIdHex
+            if (method === 'net_version') return String(parseInt(chainIdHex, 16))
+            throw new Error(`screenshot wallet stub: unanswered method ${method}`)
+          },
+          on: () => {},
+          removeListener: () => {},
+        }
+        Object.defineProperty(window, 'ethereum', { value: provider, configurable: true })
+      },
+      {
+        addr: scenario.connectedWallet,
+        chainIdHex: `0x${FIXTURE_SAFE.chain_id.toString(16)}`,
+      },
+    )
+  }
+
   // The dev server's overlay ("N · 1 Issue") renders in a `nextjs-portal` web
   // component and lands INSIDE the PNG — dev chrome in an artefact a reviewer
   // is meant to judge the product by. Hide it; it is not part of the app.
@@ -652,7 +1554,13 @@ async function newFixtureContext(browser, vp, scenario) {
     // (api.ts BASE_URL = '/api'). Intercept those; everything else on the
     // frontend origin (pages, `/_next` assets) loads normally.
     const api = pathname.startsWith('/api/') ? pathname.slice(4) : null
-    if (api === null) return route.continue()
+    if (api === null) {
+      // Chain reads leave the browser as JSON-RPC POSTs to a public node, not
+      // through `/api/*` — so they land here, in the `route.continue()` branch
+      // that used to let them onto the real internet (#1935).
+      if (await answerChainRead(route, req, scenario)) return
+      return route.continue()
+    }
 
     const json = (body) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
@@ -676,8 +1584,8 @@ async function newFixtureContext(browser, vp, scenario) {
     const populated = fixtureFor(api + search)
     if (populated !== null) return json(populated)
     // Anything unkeyed → a benign empty shape carrying every collection
-    // key the hooks read, so a missing key never throws (e.g. useApprovals
-    // reads `.approvals`, which it then `.filter`s).
+    // key the hooks read, so a missing key never throws (e.g. a hook that
+    // reads `.contacts`, which it then `.filter`s).
     return json(FIXTURE_EMPTY_FALLBACK)
   })
 
@@ -711,6 +1619,90 @@ async function dismissMobileSidebar(page, vp) {
  * the rendered result, not the seed — expressed for the capture harness, which
  * has no `expect`.
  */
+/**
+ * Assert `EditAgentModal`'s budget list is the SEEDED list, before it is shot
+ * (#1935).
+ *
+ * #1873's rule, which this file already applies to API-seeded state and which
+ * chain-seeded state needs more, not less: seeding a state is not rendering the
+ * branch. The failure this exists to make impossible is specific and quiet — if
+ * `getTokenAllowance` came back wrong, or came back once and was reused for both
+ * rows, the list still renders, still has two rows, still has two remove
+ * controls, and the PNG still looks like a budget list. So:
+ *
+ *  1. the row SYMBOLS are an exact ordered array over the seeded pair, which
+ *     also proves the ERC-20 and native-token branches of `tokenSymbolFromAddr`
+ *     both resolved rather than falling through to a truncated address;
+ *  2. the row PERIODS must DIFFER between the two rows. `resetTimeMin` is the
+ *     third word of the `uint256[5]` each row decodes independently, so two
+ *     matching periods is the exact signature of one answer being served twice
+ *     — the silent duplicate a positional fixture would produce;
+ *  3. every row carries exactly one remove control, addressed by its ARIA name.
+ *
+ * The icon fit is deliberately measured rather than left to the pixels, on
+ * #1924's reasoning: an overflowing glyph photographs perfectly happily, so a
+ * capture is exactly as consistent with the bug as with the fix. Measured as a
+ * DIFFERENCE between two boxes on the same render (#1875/#1909), never as an
+ * absolute local pixel claim.
+ */
+async function assertBudgetRows(list, expected = { symbols: ['USDC', 'ETH'] }) {
+  const rows = await list.evaluate((el) =>
+    Array.from(el.querySelectorAll('button[aria-label^="Remove "]')).map((button) => {
+      const row = button.closest('div.flex.items-center.justify-between')
+      const svg = button.querySelector('svg')
+      const b = button.getBoundingClientRect()
+      const s = svg?.getBoundingClientRect()
+      return {
+        label: button.getAttribute('aria-label') ?? '',
+        symbol: row?.firstElementChild?.textContent?.trim() ?? '',
+        text: row?.textContent?.trim() ?? '',
+        hasIcon: Boolean(svg),
+        overflowX: s ? Math.round((s.width - b.width) * 100) / 100 : null,
+        overflowY: s ? Math.round((s.height - b.height) * 100) / 100 : null,
+      }
+    }),
+  )
+
+  const symbols = rows.map((r) => r.symbol)
+  if (symbols.length !== expected.symbols.length || symbols.some((sym, i) => sym !== expected.symbols[i])) {
+    throw new Error(
+      `budget list: rendered rows [${symbols.join(', ')}] but the chain fixture seeded ` +
+        `[${expected.symbols.join(', ')}] — the capture would be filed as the budget list ` +
+        'while showing something else',
+    )
+  }
+  for (const row of rows) {
+    if (row.label !== `Remove ${row.symbol} budget`) {
+      throw new Error(
+        `budget list: the ${row.symbol} row's remove control is labelled "${row.label}" — ` +
+          'a row and its control disagree about which budget it removes',
+      )
+    }
+    if (!row.hasIcon) {
+      throw new Error(`budget list: the ${row.symbol} row's remove control rendered no glyph`)
+    }
+    if (row.overflowX > 0 || row.overflowY > 0) {
+      throw new Error(
+        `budget list: the ${row.symbol} remove glyph OVERFLOWS its button by ` +
+          `+${row.overflowX}x+${row.overflowY}px. The button does not clip, so every capture ` +
+          'photographs the overflow happily — size the glyph to the control (#1858/#1923).',
+      )
+    }
+  }
+
+  // Period, read off the row's own text. Two rows seeded with different reset
+  // periods MUST render differently; identical text means one on-chain answer
+  // was served for both tokens and the second row is a lie.
+  const periods = rows.map((r) => r.text.split('/').pop()?.trim() ?? '')
+  if (new Set(periods).size !== periods.length) {
+    throw new Error(
+      `budget list: both rows report the same period (${periods.join(' / ')}), but the fixture ` +
+        'seeds a different resetTimeMin per token — one getTokenAllowance answer was reused ' +
+        'for both rows, so the list is not per-token data',
+    )
+  }
+}
+
 async function refuseIfPresent(locator, what) {
   const found = await locator.count()
   if (found > 0) {
@@ -777,6 +1769,84 @@ function setBackupRecoveryStage(next) {
   }
   backupRecoveryStage = next
 }
+
+// ── The AllowanceModule chain fixture (#1935, generalised by #1971) ──────────
+//
+// The factory itself now lives in `allowance-chain-fixture.mjs` (#1930) so the
+// visual-regression spec can answer the same reads without importing this CLI
+// — imported at the top with the rest. The move was mechanical; the reasoning
+// that shaped it — multicall unwrapping, the per-chain Multicall3 assertion,
+// why an unanswered read must be loud — travelled with the code and is
+// documented there. Re-exported because `screenshot-fixture.test.ts` and the
+// scenarios below both reach for it through this module.
+export { makeAllowanceChainFixture }
+
+// ── The SHARED fixture's chain answers (#1971) ───────────────────────────────
+//
+// On the shared fixture's own chain (84532), for the shared fixture's own Safe,
+// seeded from the shared fixture's own agent. `agent-ops` is the one fixture
+// agent on the LEGACY rail (`account_type: null`) with a `delegate_address`, and
+// both are required: `EditAgentModal` hides the whole budget half on
+// `delegator_hybrid` (#1079, `showBudgetFields`) and `useOnChainAllowances` keys
+// its map by delegate.
+//
+// The USDC row deliberately MATCHES `agent-ops`'s API allowance (500.000000 /
+// 1440min, `FIXTURE_AGENTS`) rather than inventing a second number. The two
+// sources render side by side on AgentPanel, and a fixture whose chain and API
+// disagree would photograph a contradiction the product cannot actually produce.
+// The delegate set is exactly the managed one for the same reason — seeding a
+// stranger here would render an "unmanaged delegate" warning in every capture.
+export const SHARED_CHAIN_ROWS = [
+  {
+    token: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,
+    amount: 500_000000n,
+    spent: 137_500000n,
+    resetTimeMin: 1440,
+  },
+]
+export const answerSharedChainRead = makeAllowanceChainFixture({
+  chainId: FIXTURE_SAFE.chain_id,
+  safeAddress: FIXTURE_SAFE.safe_address,
+  delegates: [ADDR.delegate],
+  rows: SHARED_CHAIN_ROWS,
+})
+
+// ── EditAgentModal's on-chain budget list (#1935) ────────────────────────────
+//
+// Kept on Base MAINNET and scenario-local, unchanged by #1971. Two rows rather
+// than one, on purpose: one row cannot tell "the list rendered" apart from "the
+// list rendered ONE row and dropped the rest", and the remove control is per
+// row. An ERC-20 and the native token, because they take different branches
+// through `tokenSymbolFromAddr` / `tokenDecimalsFromAddr`
+// (`EditAgentModal.tsx:843-863`) — the zero address is special-cased — so the
+// pair exercises both and the capture shows both symbols resolved. Keeping it on
+// 8453 also keeps this scenario's evidence a CONTROL for the shared fixture's:
+// two different chains, two different answer sets, one factory.
+const BUDGET_CHAIN_ID = 8453
+const BUDGET_USDC = resolveToken(BUDGET_CHAIN_ID, 'USDC').address
+const BUDGET_NATIVE = '0x0000000000000000000000000000000000000000'
+
+const BUDGET_FIXTURE_SAFE = { ...FIXTURE_SAFE, chain_id: BUDGET_CHAIN_ID }
+
+/** The shared fixture's LEGACY-rail agent, moved onto the same chain as its account. */
+const BUDGET_FIXTURE_AGENT = {
+  ...FIXTURE_AGENTS.find((a) => a.id === 'agent-ops'),
+  safe_chain_id: BUDGET_CHAIN_ID,
+}
+
+const BUDGET_ROWS = [
+  // amount / spent are atomic; resetTimeMin matches RESET_PERIODS so the row
+  // reads "Daily" rather than a raw "1440m" fallthrough.
+  { token: BUDGET_USDC, amount: 500_000000n, spent: 137_500000n, resetTimeMin: 1440 },
+  { token: BUDGET_NATIVE, amount: 250000000000000000n, spent: 0n, resetTimeMin: 10080 },
+]
+
+const answerBudgetChainRead = makeAllowanceChainFixture({
+  chainId: BUDGET_CHAIN_ID,
+  safeAddress: BUDGET_FIXTURE_SAFE.safe_address,
+  delegates: [BUDGET_FIXTURE_AGENT.delegate_address],
+  rows: BUDGET_ROWS,
+})
 
 export const SCENARIOS = {
   'design-system-buttons': {
@@ -1051,6 +2121,78 @@ export const SCENARIOS = {
       // the same trap the Backup & recovery scenario documents above.
       await card.getByText('Updating on-chain').waitFor({ timeout: 15_000 })
       await card.getByText(/signing key was replaced/).waitFor({ timeout: 15_000 })
+
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'card')
+    },
+  },
+  'approver-type-badges': {
+    description:
+      'Approvers list on a legacy Safe — all three badge states in one PNG: Passkey, Wallet, and the Unknown that #2017 replaced an absence-inferred "Wallet" with',
+    // No route capture can show this. The SHARED fixture's account is
+    // `delegator_hybrid`, so `useSafeDetails` is deliberately passed null
+    // (#1107) and the Approvers section never renders at all. This scenario
+    // serves a LEGACY Safe with three owners chosen so each one lands in a
+    // different branch of `classifyApprover`, which is the whole point: a
+    // capture that could only ever show one badge state cannot evidence a
+    // change about the other two.
+    api(apiPath) {
+      const LEGACY_SAFE = { ...FIXTURE_SAFE, account_type: 'safe' }
+      const user = {
+        ...FIXTURE_USER,
+        wallet_address: APPROVER_WALLET,
+        safes: [LEGACY_SAFE],
+      }
+      if (apiPath === '/auth/me') return user
+      if (apiPath === '/user/safes') return { safes: [LEGACY_SAFE] }
+      // Keyed, not left to the empty fallback: the fallback serves
+      // `passkeys: []`, under which EVERY owner would render Unknown and the
+      // PNG would evidence nothing about the Passkey branch.
+      if (apiPath === '/passkeys') {
+        return {
+          passkeys: [
+            {
+              id: 'passkey-fixture',
+              credential_id: 'approver-badge-credential',
+              signer_address: APPROVER_PASSKEY,
+              chain_id: FIXTURE_SAFE.chain_id,
+              safe_address: FIXTURE_SAFE.safe_address,
+              created_at: '2026-03-03T12:00:00.000Z',
+            },
+          ],
+        }
+      }
+      if (apiPath === `/safe/${FIXTURE_SAFE.safe_address}/details`) {
+        return {
+          address: FIXTURE_SAFE.safe_address,
+          // Order is the render order, and it is deliberate: Passkey (known),
+          // Wallet (the user's own, positively matched), Unknown (an owner
+          // Haven holds no record for — a rotated passkey, one enrolled
+          // outside Haven, or a wallet; the badge no longer guesses which).
+          owners: [APPROVER_PASSKEY, APPROVER_WALLET, APPROVER_UNKNOWN],
+          threshold: 2,
+          nonce: 7,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      const heading = page.getByText('Approvers', { exact: true })
+      await heading.waitFor({ timeout: 15_000 })
+
+      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
+
+      // Wait on the BADGES, not the heading. The section renders as soon as
+      // `details.owners` is non-empty, so waiting on the heading alone would
+      // happily capture a half-settled list. All three are waited for
+      // explicitly, so a capture missing any state fails the run instead of
+      // becoming the evidence.
+      await card.getByText('Passkey', { exact: true }).waitFor({ timeout: 15_000 })
+      await card.getByText('Wallet', { exact: true }).waitFor({ timeout: 15_000 })
+      await card.getByText('Unknown', { exact: true }).waitFor({ timeout: 15_000 })
 
       await card.scrollIntoViewIfNeeded()
       await shoot(card, 'card')
@@ -1425,7 +2567,9 @@ export const SCENARIOS = {
             skill_installed: true,
             restart_required: true,
           },
-          approval: { status: 'pending', safe_tx_hash: null, tx_hash: null },
+          // #2120: `approval.status` is `agent_connection_setups.approval_status`,
+          // written only as 'not_started' | 'submitted' | 'proposed' | 'confirmed'.
+          approval: { status: 'not_started', safe_tx_hash: null, tx_hash: null },
         }
       }
       // A reachable signer, or `ready` is false and the screen shows the
@@ -1463,6 +2607,62 @@ export const SCENARIOS = {
       await dialog.getByText(/Local connection verified/).click()
       await dialog.getByText('Public address').waitFor({ timeout: 10_000 })
       await shoot(dialog, 'approve-verification-open')
+    },
+  },
+  'retired-rail-account': {
+    description:
+      'Account detail for a LEGACY Safe account after the rail retirement (#1989) — RetiredRailNotice present, no Send action',
+    // #1989's design review named this gap: `RetiredRailNotice` is the one
+    // surface the slice ADDS, and no existing capture can show it. Every other
+    // account fixture is `delegator_hybrid`, which by construction renders the
+    // Send button and never renders the notice — so the shared fixture proves
+    // the opposite of what this scenario is for.
+    //
+    // The ONE override is `account_type: 'safe'`, spread from the shared
+    // fixture, exactly as `connect-agent-approve-legacy` above does it. The
+    // account is otherwise identical, which is what makes the pair readable:
+    // the same account on the other rail.
+    api(apiPath) {
+      if (apiPath === '/auth/me') {
+        return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      }
+      if (apiPath === '/user/safes') {
+        return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, {
+        waitUntil: 'networkidle',
+        timeout: 60_000,
+      })
+      await dismissMobileSidebar(page, vp)
+
+      const main = page.locator('main')
+      await main.waitFor({ timeout: 30_000 })
+
+      // The subject.
+      await page
+        .getByText(/Haven no longer sends payments from this account/)
+        .waitFor({ timeout: 20_000 })
+
+      // The READ boundary, asserted on the render rather than argued: the
+      // account is still fully readable next to the notice. Without these the
+      // capture could be filed for a page that failed to load its data and
+      // showed the notice over skeletons.
+      await page.getByRole('heading', { name: FIXTURE_SAFE.name }).waitFor({ timeout: 20_000 })
+      await page.getByRole('button', { name: 'Receive' }).waitFor({ timeout: 20_000 })
+
+      // The negative half, and the reason this scenario is evidence at all.
+      // A notice proves a notice; it does not prove the spend affordance is
+      // gone. If a regression rendered Send ALONGSIDE the notice, every wait
+      // above would still pass and the PNG would be filed under this name.
+      await refuseIfPresent(
+        page.getByRole('button', { name: 'Send', exact: true }),
+        'retired-rail-account · Send button',
+      )
+
+      await shoot(main, 'account')
     },
   },
   'connect-agent-approve-legacy': {
@@ -1533,7 +2733,9 @@ export const SCENARIOS = {
             skill_installed: true,
             restart_required: true,
           },
-          approval: { status: 'pending', safe_tx_hash: null, tx_hash: null },
+          // #2120: `approval.status` is `agent_connection_setups.approval_status`,
+          // written only as 'not_started' | 'submitted' | 'proposed' | 'confirmed'.
+          approval: { status: 'not_started', safe_tx_hash: null, tx_hash: null },
         }
       }
       return undefined
@@ -1615,7 +2817,8 @@ export const SCENARIOS = {
             skill_installed: false,
             restart_required: true,
           },
-          approval: { status: 'active', safe_tx_hash: null, tx_hash: null },
+          // #2120: see above — 'active' is not a producible approval_status.
+          approval: { status: 'confirmed', safe_tx_hash: null, tx_hash: null },
         }
       }
       return undefined
@@ -1639,6 +2842,220 @@ export const SCENARIOS = {
         .getByText(/Research agent can now spend up to .* from /)
         .waitFor({ timeout: 30_000 })
       await shoot(dialog, 'approved')
+    },
+  },
+  'edit-agent-budget': {
+    description:
+      "EditAgentModal's on-chain budget list and its per-row remove control (#1935)",
+    // ── What this closes ─────────────────────────────────────────────────────
+    //
+    // #1923 resized this modal's remove glyph from 12px to 14px, and said so
+    // honestly: the control "has never been captured at any commit", because
+    // the rows come from an on-chain read no HTTP fixture reaches. #1935 is that
+    // gap. The seam it needed is `scenario.chain` (see `answerChainRead`) — the
+    // same shape #1725 arrived at for `loadError`: when a state is out of reach
+    // because the harness cannot express its INPUT, the harness grows, it does
+    // not get a cleverer payload.
+    //
+    // Nothing here is stubbed above the wire. The fixture answers JSON-RPC; the
+    // app's own viem client, `useOnChainAllowances`, `AgentDetailClient` and
+    // `EditAgentModal` do everything from there. The list in the PNG is the
+    // product's, rendered from the product's own decode of ABI-encoded bytes.
+    api(apiPath) {
+      // All three, though the detail page reads agents from `/agents` and the
+      // safe from `/auth/me`: two safe-serving endpoints that disagree about
+      // which CHAIN an account is on would be a trap for the next scenario that
+      // reaches for the other one, and the disagreement would be invisible
+      // (the reasoning `add-funds-unresolved-chain` records).
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [BUDGET_FIXTURE_SAFE] }
+      if (apiPath === '/user/safes') return { safes: [BUDGET_FIXTURE_SAFE] }
+      if (apiPath === '/agents') return { agents: [BUDGET_FIXTURE_AGENT] }
+      return undefined
+    },
+    chain: answerBudgetChainRead,
+    async run({ page, vp, shoot }) {
+      // `domcontentloaded`, not `networkidle`: this is the first scenario whose
+      // page holds a LIVE on-chain poll (`useOnChainAllowances` re-reads every
+      // 30s), so the quiet window the other scenarios rely on is not guaranteed
+      // to arrive here. Every state below is waited for by its own subject
+      // instead, which is the condition that actually matters.
+      await page.goto(`${BASE_URL}/agents/${BUDGET_FIXTURE_AGENT.id}`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60_000,
+      })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Agent options' }).click({ timeout: 30_000 })
+      await page.getByRole('menuitem', { name: 'Update budget' }).click({ timeout: 15_000 })
+
+      const dialog = page.getByRole('dialog', { name: 'Edit agent' })
+      // The heading pins the MODE. `openUpdateBudget` sets `mode: 'budget'`, and
+      // 'all' mode renders the same list under a different heading — so waiting
+      // on the list alone would happily photograph the wrong entry point's
+      // modal under this scenario's name.
+      await dialog.getByRole('heading', { name: 'Update budget' }).waitFor({ timeout: 30_000 })
+
+      const list = dialog.getByText('Current agent budgets').locator('xpath=..')
+      await list.waitFor({ timeout: 30_000 })
+      await assertBudgetRows(list)
+      await shoot(list, 'budget-list')
+
+      // The confirm step the remove control opens. Captured because it is the
+      // other half of the same control and is equally unreachable without the
+      // chain read — the dialog names the specific token, which only exists
+      // because a real row was clicked.
+      await list.getByRole('button', { name: 'Remove USDC budget' }).click()
+      const confirm = page.getByRole('dialog', { name: 'Remove USDC budget?' })
+      await confirm.waitFor({ timeout: 15_000 })
+      await shoot(confirm, 'remove-confirm')
+    },
+  },
+  'wrong-wallet': {
+    description:
+      'The wrong-wallet gate state (#2073): a hydrated hybrid signer set naming an EOA owner, a connected wallet that is NOT it — the header Wrong wallet pill and its popover',
+    // ── Why this scenario exists ─────────────────────────────────────────────
+    //
+    // #2068 made the signer gate fail closed for an unrelated wallet, and
+    // #2072's design review recorded that none of the states it re-routes was
+    // capturable: the gate reads a localStorage-hydrated signer set AND a
+    // wagmi-connected wallet, and the harness could express the first
+    // (`scenario.seed`) but not the second. `connectedWallet` (the #2073 seam
+    // in `newFixtureContext`) is the missing input. Everything above the
+    // stubbed provider is the product's own code: wagmi reconnects the
+    // injected connector, `useSafeOperationGate` compares the connected
+    // address to the set's `owner_address`, and the header renders the
+    // mismatch. The signer set arrives through the REAL hydration path — the
+    // api() override below is what `AuthContext` reads and writes to the
+    // device store; nothing seeds the store directly.
+    connectedWallet: '0x' + '99'.repeat(20), // ≠ the owner below, by construction
+    api(apiPath) {
+      if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) {
+        // Owner-only set: an EOA owner, zero enrolled passkeys — #2068's
+        // shape, where the connected wallet's identity is the whole answer.
+        return {
+          account_address: FIXTURE_SAFE.safe_address,
+          chain_id: FIXTURE_SAFE.chain_id,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60_000,
+      })
+      await dismissMobileSidebar(page, vp)
+
+      // The header names the mismatch. Waiting on the accessible name pins
+      // the state through the real path — reconnect, hydration, gate — and a
+      // run where the normal address pill renders instead FAILS here rather
+      // than photographing the silent-disagreement defect as evidence.
+      const pill = page.getByRole('button', { name: 'Wrong wallet' })
+      await pill.waitFor({ timeout: 30_000 })
+      const header = page.locator('header').first()
+      await shoot(header, 'header-pill')
+
+      // The fix is one click away: the wallet menu with Switch wallet.
+      await pill.click()
+      const popover = page.getByRole('dialog', { name: 'Wallet menu' })
+      await popover.waitFor({ timeout: 15_000 })
+      await popover.getByRole('button', { name: 'Switch wallet' }).waitFor({ timeout: 15_000 })
+      // The mismatch note (design-review finding on #2073): the popover must
+      // not photograph identical to the healthy connected state.
+      await popover
+        .getByText('This is not the wallet that controls this account', { exact: false })
+        .waitFor({ timeout: 15_000 })
+      await shoot(popover, 'popover')
+    },
+  },
+  'custody-delegation-rail': {
+    description: '/custody rendered for a DELEGATION-rail account (#2106)',
+    // The account the shared fixture already describes (`account_type:
+    // 'delegator_hybrid'`), but with the chain answering HONESTLY for that
+    // rail: a Hybrid DeleGator has no AllowanceModule, so `isModuleEnabled`
+    // is FALSE. The shared chain fixture answers true — correct for the
+    // legacy Safe every other capture seeds, and impossible here.
+    //
+    // That distinction is the whole point of this scenario. A plain route
+    // capture of `/custody` inherits the shared `true` and photographs a
+    // delegation-rail account being told its spend control is the Safe
+    // AllowanceModule — which is a real defect, but NOT the one #2106
+    // describes, and it hides the two sentences the issue is actually about
+    // ("AllowanceModule not enabled" / "No on-chain agent allowances on this
+    // Safe"). Those only render when the module reads false, so the before/
+    // after pair has to be taken here or it proves nothing.
+    //
+    // `moduleEnabled: false` makes `useOnChainAllowances` return early, so no
+    // delegate or allowance read is reached and none needs seeding.
+    chain: makeAllowanceChainFixture({
+      chainId: FIXTURE_SAFE.chain_id,
+      safeAddress: FIXTURE_SAFE.safe_address,
+      delegates: [],
+      rows: [],
+      moduleEnabled: false,
+    }),
+    // The delegation-rail card mounts no chain hook at all — its proof comes
+    // from `/accounts/hybrid/:address/signers` and `/agents/:id/delegations`.
+    // Zero reads on `/custody` is therefore the correct observation HERE, and
+    // only here: the legacy scenario below leaves the guard armed, and if this
+    // card ever starts reading the chain the declaration is reported as stale.
+    expectedSilentRoutes: [/^\/custody(\/|$)/],
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/custody`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      // Wait on the page's own heading rather than either branch's copy: this
+      // scenario is run against BOTH the pre-fix and post-fix page, so a wait
+      // keyed to one branch's wording would fail half the pair by design.
+      await page.getByRole('heading', { name: 'Custody', level: 1 }).waitFor({ timeout: 30_000 })
+      await shoot(page.locator('#main-content'), 'page')
+    },
+  },
+  'custody-legacy-rail': {
+    description: '/custody rendered for a LEGACY Safe-rail account (#2106)',
+    // #2106 rail-branches `/custody` on `account_type`. The DELEGATION branch
+    // is what a plain `npm run screenshot -- /custody` captures, because the
+    // shared fixture's account is `delegator_hybrid`. The legacy branch is
+    // therefore unreachable by route capture, and "the other branch is
+    // unchanged" is exactly the claim that needs a picture rather than an
+    // argument by symmetry — so this scenario puts the same account on the
+    // other rail and shoots the same page.
+    //
+    // Only `/auth/me`, `/user/safes` and the Safe details read are overridden.
+    // The chain fixture is inherited: `answerSharedChainRead` already answers
+    // `isModuleEnabled` → true with one 500-USDC daily row, which is what the
+    // legacy card is supposed to render.
+    api(apiPath) {
+      const legacySafe = { ...FIXTURE_SAFE, account_type: 'safe' }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [legacySafe] }
+      if (apiPath === '/user/safes') return { safes: [legacySafe] }
+      if (apiPath.startsWith(`/safe/${FIXTURE_SAFE.safe_address}/details`)) {
+        // Two owners, threshold 2 — the owners/threshold proof is the part of
+        // this page that was ALWAYS true on this rail, so the capture has to
+        // show it populated rather than the empty-fallback "— / 0".
+        return {
+          address: FIXTURE_SAFE.safe_address,
+          owners: [APPROVER_WALLET, APPROVER_UNKNOWN],
+          threshold: 2,
+          nonce: 12,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/custody`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      // Wait on the legacy branch's OWN copy, not on a generic heading: a run
+      // that somehow served the delegation branch fails here instead of
+      // shooting the wrong card under this scenario's name.
+      await page
+        .getByText('Owners (control this Safe — Haven is not one)', { exact: false })
+        .waitFor({ timeout: 30_000 })
+      await shoot(page.locator('#main-content'), 'page')
     },
   },
   'modal-migrations': {
@@ -1816,152 +3233,12 @@ export const SCENARIOS = {
       await shoot(dialog, 'unresolved')
     },
   },
-  'send-review': {
-    description:
-      "Send modal STEP 2 (review) — the only TransactionMovement consumer never captured (#1856)",
-    // `TransactionMovement` is a shared primitive with five call sites.
-    // `SendModal.tsx:848` is the one no PNG has ever shown: no URL reaches
-    // step 2, and #1835 could only close the GEOMETRY half of the gap with a
-    // headless width guard. This scenario closes the picture half.
-    //
-    // Two fixture overrides, and the honesty of the capture rests on both
-    // being at boundaries the PRODUCT itself writes, so every line of app code
-    // between the boundary and the pixels is the real one:
-    //
-    //  1. `account_type` dropped → the Safe rail. Same override, for the same
-    //     reachability reason, as `add-funds`/`receive-funds`: the shared
-    //     fixture's `delegator_hybrid` safe has a hydrated passkey that is not
-    //     on this device, and the dashboard hero hides Send entirely for a
-    //     non-Safe-rail account (`DashboardClient.tsx:907`).
-    //  2. `seed` writes the device-local passkey record (see `seed()` below).
-    //     `useSafeOperationGate` returns `no_signer` without it, and
-    //     `SendModal.tsx:821` disables Continue while `signingUnavailable` —
-    //     which is precisely the blocker #1856 was filed on.
-    //
-    // Why that is FAITHFUL rather than a screen the product cannot enter: a
-    // stored passkey signer is the ordinary state of any user who enrolled a
-    // passkey on the device they are sending from — it is the majority path,
-    // not an exotic one. Nothing is stubbed downstream of it. The gate runs its
-    // real branch and returns `ready`; `useActiveSigner` resolves a real
-    // `passkey` signer, which is what makes "Approve with · Device approval"
-    // and "Network fees are paid by Haven (ETH)" render the words a passkey
-    // user actually reads; `OnchainActionGate` takes its unblocked path and
-    // `NetworkGate` renders children because no wallet is connected — again
-    // the real branch for a passkey user, not a bypass. No component is
-    // patched and no step state is forced: the run TYPES an amount and a
-    // recipient and CLICKS Continue, so `handleReview`'s own validation is
-    // what admits the capture.
-    //
-    // What the capture is therefore NOT evidence about: pressing Send. The
-    // seeded credential is not a real WebAuthn credential, so this scenario
-    // stops at review — which is all #1856 asks for, and the reason it stops
-    // is worth stating rather than discovering later.
-    //
-    // Per #1835's measurement the primitive gets ~310px here, roughly double
-    // the ~150px below which the arrow strands, so no defect is expected. This
-    // closes an evidence gap; it is not a bug hunt.
-    seed() {
-      // Exactly the record `setStoredPasskeySigner` writes, under exactly the
-      // key `passkeyStorageKey` computes. `getStoredPasskeySigner` VALIDATES
-      // every field and returns null on anything it does not recognise — a
-      // wrong `schemaVersion`, a non-address `address`, a public-key half
-      // without its twin — and a null there puts the gate silently back on
-      // `no_signer`. `screenshot-fixture.test.ts` runs this record through
-      // that parser and asserts it round-trips every field, so a schema bump
-      // or a dropped field fails a test rather than quietly un-reaching this
-      // capture. It does NOT pin the literal values below — they are fixture
-      // data, free to change, as long as the parser still accepts them.
-      return {
-        [`haven_passkey_${FIXTURE_SAFE.safe_address.toLowerCase()}_${FIXTURE_SAFE.chain_id}`]:
-          JSON.stringify({
-            schemaVersion: 1,
-            address: '0x5B1869D9A4C187F2Eaa108F3062412ECf0526B24',
-            credentialId: 'screenshot-fixture-credential',
-            publicKey: { x: `0x${'11'.repeat(32)}`, y: `0x${'22'.repeat(32)}` },
-            chainId: FIXTURE_SAFE.chain_id,
-            safeAddress: FIXTURE_SAFE.safe_address.toLowerCase(),
-            createdAt: Date.parse('2026-05-01T12:00:00.000Z'),
-          }),
-      }
-    },
-    api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE }] }
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE }] }
-      // Keyed explicitly rather than left to the generic empty fallback. That
-      // fallback happens to be truthy, so `!safeDetails` passes and Continue
-      // enables — by accident. `threshold` then reads `undefined ?? 1`, and a
-      // threshold of 1 vs 2 is the difference between the review screen under
-      // capture and one carrying an extra "will wait for approval" banner. A
-      // capture whose layout depends on an accident is not evidence.
-      if (apiPath === `/safe/${FIXTURE_SAFE.safe_address}/details`) {
-        return {
-          address: FIXTURE_SAFE.safe_address,
-          owners: ['0x5B1869D9A4C187F2Eaa108F3062412ECf0526B24'],
-          threshold: 1,
-          nonce: 7,
-        }
-      }
-      return undefined
-    },
-    async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
-      await dismissMobileSidebar(page, vp)
-
-      await page.getByRole('button', { name: 'Send', exact: true }).first().click()
-      const dialog = page.getByRole('dialog')
-
-      const amount = dialog.getByPlaceholder('0.00')
-      await amount.waitFor({ timeout: 20_000 })
-      await amount.fill('25.50')
-      // `ADDR.merchant`, deliberately, and NOT `ADDR.recipient`: the latter is
-      // `FIXTURE_CONTACTS[0]`'s address, so `handleRecipientChange` resolves it
-      // to "Cloud vendor" and the movement line renders a NAME. Both are real
-      // product states, but a pasted unknown address is the plain path and the
-      // one whose `To` half is a truncated address — the same shape the
-      // `ApprovalQueue` capture already evidences, so the two are comparable.
-      // Measured, not assumed: the first run of this scenario used
-      // `ADDR.recipient` and failed on the `To 0x9f8f…79A2` assertion because
-      // the screen said "To Cloud vendor".
-      await dialog
-        .getByPlaceholder('Paste address or choose a saved recipient')
-        .fill(ADDR.merchant)
-
-      // Asserted, not assumed. If the seed ever stops satisfying the gate this
-      // is where the run fails — loudly, with "Continue is disabled" as the
-      // message — instead of timing out somewhere downstream with a reason
-      // nobody can read. It is the blocker #1856 names, so it gets its own
-      // check rather than being inferred from a later failure.
-      const cont = dialog.getByRole('button', { name: 'Continue' })
-      if (await cont.isDisabled()) {
-        throw new Error(
-          'Continue is disabled on the send form — the operation gate is not `ready`, ' +
-            'so the review step cannot be driven (see this scenario\'s `seed()`).',
-        )
-      }
-      await cont.click()
-
-      // Confirmed by the review step's OWN copy and by the primitive this
-      // capture exists for. A run that shot a dialog without the movement line
-      // would be an evidence gap wearing a PNG, which is the exact failure
-      // #1856 is about.
-      await dialog.getByText('You are sending').waitFor({ timeout: 20_000 })
-      // `.first()` because the primitive nests its halves: three ancestors
-      // contain "From Operating wallet" as a substring, and a bare locator
-      // would trip strict mode rather than assert anything.
-      await dialog.getByText(`From ${FIXTURE_SAFE.name}`).first().waitFor({ timeout: 20_000 })
-      await dialog
-        .getByText(`To ${truncateFixtureAddress(ADDR.merchant)}`)
-        .first()
-        .waitFor({ timeout: 20_000 })
-      await shoot(dialog, 'review')
-    },
-  },
-}
-
-// Mirror of `truncate` in `src/lib/format.ts` — the review step renders the
-// recipient through it, so the assertion above has to spell the same string.
-function truncateFixtureAddress(address) {
-  return `${address.slice(0, 6)}…${address.slice(-4)}`
+  // 'send-review' (#1856) is DELETED with its subject (#1989, epic #1440): it
+  // drove the legacy `SendModal` to step 2, and that modal is gone with the
+  // Safe rail. Its `TransactionMovement` evidence gap is closed differently now
+  // — `/transactions` and `/design-system` both render the primitive and are
+  // captured, and the mobile geometry sweep in
+  // `e2e/transaction-row.mobile.spec.ts` measures it at 320/390/393px.
 }
 
 function resolveScenarios(names) {
@@ -1983,14 +3260,41 @@ async function main() {
   // leaks both (the try/finally that cleans them up starts further down).
   const scenarios = resolveScenarios(SCENARIO_ARGS)
 
+  // The widths THIS run shoots (#2006). Same stance as the scenario check
+  // above: a malformed `--viewport=` throws before a server or a browser is
+  // acquired. With no override this is the committed set, unchanged — see
+  // `evidence-viewports.mjs` for why the gates must keep importing VIEWPORTS
+  // directly and never this.
+  const { viewports: captureViewports, source: viewportSource } = resolveCaptureViewports(
+    ARGS,
+    process.env,
+  )
+
   // Provenance, printed before anything is captured and stamped into the
   // manifest afterwards: a PNG on its own cannot say which branch it shows.
   // Resolved BEFORE retention runs, because the archived run's manifest records
   // which branch/commit displaced it.
   const identity = buildRunIdentity(worktreeIdentity(ROOT))
+  // Resolved here, not at the spawn, so a malformed override fails before the
+  // run does any work — and so a budget too small for a cold compile is called
+  // out at the top of the log rather than 90 seconds later as a mystery timeout.
+  const readinessBudgets = resolveReadinessBudgets()
+  for (const problem of readinessBudgetProblems(readinessBudgets)) {
+    console.warn(`⚠ screenshot: ${problem}`)
+  }
   console.log(`screenshot: worktree ${identity.worktree}`)
   console.log(
     `screenshot: branch ${identity.branch} @ ${identity.commit.slice(0, 12)}${identity.dirty ? ' (dirty working tree)' : ''}`,
+  )
+  // Printed for both cases on purpose. "Which widths did this run shoot" is a
+  // question a reviewer reading a PNG in a thread has to be able to answer, and
+  // an override that announces itself only when something goes wrong is one
+  // more silent capture path.
+  console.log(
+    `screenshot: viewports ${captureViewports.map((vp) => `${vp.name} (${vp.width}x${vp.height})`).join(', ')}` +
+      (viewportSource === 'committed'
+        ? ' — the committed evidence set'
+        : ` — OVERRIDE via ${viewportSource}, this run only; no baseline is affected`),
   )
 
   // This used to be `rm -rf OUT_DIR`, which destroyed the previous run
@@ -2074,7 +3378,9 @@ async function main() {
       server.on('exit', (code) => {
         if (code && code !== 0 && code !== null) console.error(`dev server exited ${code}`)
       })
-      await waitForServer(BASE_URL)
+      // The child handle is passed so the wait can end the moment `next dev`
+      // dies, instead of waiting out a budget sized for a cold compile (#2108).
+      await waitForServer(BASE_URL, { child: server, budgets: readinessBudgets, cwdLabel: path.relative(process.cwd(), ROOT) || ROOT })
     } else {
       console.log(`screenshot: capturing an already-running server at ${BASE_URL}`)
     }
@@ -2125,10 +3431,24 @@ async function main() {
   // Captures that only succeeded after waiting for the shell to mount — the
   // ProtectedRoute race, made visible instead of intermittent (#1936).
   const raced = []
+  // POSITIVE evidence, per capture, that the route resolved rather than being
+  // photographed mid-load (#2036): how much the route's own content region was
+  // actually holding when the shutter fired. Recorded even on a clean run,
+  // because "the guard passed" and "the guard ran and here is the margin" are
+  // different claims, and only the second one survives being read later.
+  const contentSettles = []
+  // Captures whose CONTENT (not shell) arrived only after a wait. The
+  // still-loading refusals live in `deletedCaptures` under cause
+  // 'still-loading'; these are the ones the wait rescued.
+  const contentRaced = []
   try {
-    for (const vp of VIEWPORTS) {
+    for (const vp of captureViewports) {
       const context = await newFixtureContext(browser, vp, null)
       const page = await context.newPage()
+      beginChainWatch(`routes · ${vp.name}`, vp.name)
+      page.on('framenavigated', (frame) => {
+        if (frame === page.mainFrame()) noteChainWatchNavigation(frame.url())
+      })
       // A red console on a fixture render is a fixture-shape gap or a real
       // client bug — collect and summarise instead of shipping blank PNGs.
       let currentRoute = ROUTES[0]
@@ -2149,6 +3469,11 @@ async function main() {
           .then(() => null, (err) => err)
         if (navError) {
           gotoFailures.push({ route: routePath, viewport: vp.name, text: `goto failed: ${String(navError.message ?? navError).slice(0, 200)}` })
+          // The navigation fired `framenavigated` before it timed out, so this
+          // route is in the chain watch and would be reported as a SILENT
+          // chain-fed capture — a machine failure wearing a transport
+          // failure's diagnosis (#1971).
+          forgetChainWatchPage(`${BASE_URL}${routePath}`)
           continue // never write a mislabeled PNG
         }
         await page.waitForTimeout(400) // settle late paints
@@ -2156,12 +3481,24 @@ async function main() {
         // Un-clips the h-screen/overflow-hidden shell so `fullPage` paints the
         // whole route, then reads the PNG back and refuses a blank one (#1738).
         try {
-          const { shell } = await captureFullPage(page, {
+          const { shell, content } = await captureFullPage(page, {
             path: file,
             label: `${routePath} · ${vp.name}`,
             viewportDevicePx: vp.height * DEVICE_SCALE_FACTOR,
           })
           captured.push(path.relative(ROOT, file))
+          if (content) {
+            contentSettles.push({
+              route: routePath,
+              viewport: vp.name,
+              chars: content.chars,
+              elements: content.elements,
+              waited_ms: content.waitedMs,
+            })
+            if (content.raced) {
+              contentRaced.push({ route: routePath, viewport: vp.name, waitedMs: content.waitedMs })
+            }
+          }
           if (shell.mode === SHELL_MODE.NO_SCROLL_SHELL) {
             shellless.push({ route: routePath, viewport: vp.name, height: shell.height })
           } else if (shell.raced) {
@@ -2195,6 +3532,7 @@ async function main() {
           continue
         }
       }
+      endChainWatch()
       await context.close()
 
       // Scenarios get their own context per viewport: a virtual clock and
@@ -2203,6 +3541,10 @@ async function main() {
         const label = `scenario:${scenario.name}`
         const scenarioContext = await newFixtureContext(browser, vp, scenario)
         const scenarioPage = await scenarioContext.newPage()
+        beginChainWatch(label, vp.name)
+        scenarioPage.on('framenavigated', (frame) => {
+          if (frame === scenarioPage.mainFrame()) noteChainWatchNavigation(frame.url())
+        })
         scenarioPage.on('console', (msg) => {
           if (msg.type() === 'error') {
             consoleErrors.push({ route: label, viewport: vp.name, text: msg.text().slice(0, 300) })
@@ -2269,7 +3611,12 @@ async function main() {
             viewport: vp.name,
             text: `scenario failed: ${String(err?.message ?? err).slice(0, 300)}`,
           })
+          // Its own failure is already on the record and already exits the run
+          // 1; a silent-chain-read verdict on top would name the wrong cause
+          // (#1971).
+          abortChainWatch()
         }
+        endChainWatch(scenario.expectedSilentRoutes ?? [])
         await scenarioContext.close()
       }
     }
@@ -2277,6 +3624,11 @@ async function main() {
     await browser.close()
     teardown()
   }
+
+  // Did the run shoot the widths it resolved? Computed BEFORE the manifest is
+  // written, and recorded in it, so a contradiction between the claim and the
+  // files is on the record rather than only on a console someone scrolled past.
+  const viewportMismatches = findViewportMismatches(captured, captureViewports)
 
   // Provenance an artifact can be traced by after the fact — which branch and
   // commit these PNGs actually show, and that the server was proven to be this
@@ -2295,6 +3647,14 @@ async function main() {
         own_server: OWN_SERVER,
         identity_verified: identity.identity_verified === true,
         routes: ROUTES,
+        // The widths these PNGs were ACTUALLY shot at, and where that came
+        // from (#2006). Without this a 320px capture is indistinguishable from
+        // a 390px one once the PNG is attached to a review thread.
+        viewports: captureViewports.map(({ name, width, height }) => ({ name, width, height })),
+        viewport_source: viewportSource,
+        // Empty on every honest run. Non-empty means the files and the
+        // `viewports` claim above disagree — see `findViewportMismatches`.
+        viewport_mismatches: viewportMismatches,
         scenarios: scenarios.map((s) => s.name),
         files: captured,
         // The absences, on the record. A capture that was written and then
@@ -2302,8 +3662,23 @@ async function main() {
         // and the manifest is the only place a later reader can tell them apart
         // (#1936/#1939/#1943).
         deleted_captures: deletedCaptures,
+        // Chain reads a scenario declared `chain` for and then had no answer
+        // for (#1935). Non-empty means at least one capture in this run shows a
+        // surface whose on-chain data silently failed to load.
+        unanswered_chain_reads: CHAIN_READ_GAPS,
+        // Captures of a chain-fed route where the app issued NO chain read at
+        // all (#1971) — the failure `unanswered_chain_reads` structurally
+        // cannot see, because it produces no request to go unanswered.
+        silent_chain_fed_captures: CHAIN_SILENT_CAPTURES,
         captured_without_unclip: shellless,
         shell_waits: raced,
+        // What each route's OWN content region was holding at capture time
+        // (#2036). A reader can check the margin between these numbers and the
+        // floor instead of taking "the run was green" on trust — and a route
+        // that quietly slid towards the floor is visible here before it starts
+        // failing runs.
+        content_settle: contentSettles,
+        content_waits: contentRaced,
         // Retention, recorded so the live manifest can be read as "this is the
         // current run, and here is where the one before it went" (#1888). A
         // reader who finds PNGs under `previous/` can tell from HERE that they
@@ -2349,6 +3724,23 @@ async function main() {
       `\nℹ ${raced.length} capture(s) had to WAIT for the app shell to mount (ProtectedRoute race, #1936):`,
     )
     for (const e of raced) console.log(`  [${e.route} · ${e.viewport}] shell appeared after ${e.waitedMs}ms`)
+  }
+  if (contentRaced.length > 0) {
+    console.log(
+      `\nℹ ${contentRaced.length} capture(s) had to WAIT for the ROUTE'S CONTENT to resolve, not just the shell (#2036):`,
+    )
+    for (const e of contentRaced) {
+      console.log(`  [${e.route} · ${e.viewport}] content region filled after ${e.waitedMs}ms`)
+    }
+  }
+  if (contentSettles.length > 0) {
+    console.log(
+      `\nℹ route content confirmed present at capture time (#2036) — floor is ` +
+        `${MIN_CONTENT_CHARS} chars / ${MIN_CONTENT_ELEMENTS} elements in "${SCROLL_SHELL_ROOT}":`,
+    )
+    for (const e of contentSettles) {
+      console.log(`  [${e.route} · ${e.viewport}] ${e.chars} chars, ${e.elements} elements`)
+    }
   }
   for (const line of formatDeletionReport(deletedCaptures)) console.error(line)
   if (clipped.length > 0) {
@@ -2426,6 +3818,36 @@ async function main() {
         '   which one wherever you attach these, and do NOT attach them as a whole screen.)',
     )
   }
+  if (CHAIN_READ_GAPS.length > 0) {
+    console.error(
+      `\n✗ ${CHAIN_READ_GAPS.length} on-chain read(s) went UNANSWERED — any capture of a chain-fed ` +
+        'surface in this run is showing an empty state, not the state it is filed under (#1935):',
+    )
+    for (const g of CHAIN_READ_GAPS) {
+      console.error(`  [scenario:${g.scenario}] ${g.method} — ${g.reason}`)
+    }
+    console.error(
+      '  (a scenario that declares `chain` owns ALL of its chain traffic — nothing is allowed out\n' +
+        '   to a public node, so an undeclared read resolves to a JSON-RPC error and the hook\n' +
+        '   swallows it into an empty result. Declare the method, or stop declaring `chain`.)',
+    )
+  }
+  if (CHAIN_SILENT_CAPTURES.length > 0) {
+    console.error(
+      `\n✗ ${CHAIN_SILENT_CAPTURES.length} capture(s) of a CHAIN-FED route issued ZERO on-chain ` +
+        'reads — the data did not arrive empty, it was never asked for (#1971):',
+    )
+    for (const c of CHAIN_SILENT_CAPTURES) {
+      console.error(`  [${c.capture} · ${c.viewport}] ${c.route} — expected: ${c.reads}`)
+    }
+    console.error(
+      '  (the usual cause is a fixture chain the app has no wagmi transport for. `getClient`\n' +
+        "   CATCHES ChainNotConfiguredError and returns undefined, so usePublicClient is\n" +
+        '   undefined and every consumer returns at its first line — silently. Check that\n' +
+        `   FIXTURE_SAFE.chain_id (${FIXTURE_SAFE.chain_id}) is registered in lib/wagmi.ts, which\n` +
+        '   derives its chains from SUPPORTED_CHAINS in lib/chains.ts.)',
+    )
+  }
   if (consoleErrors.length > 0) {
     console.log(`\n⚠ ${consoleErrors.length} console error(s) during capture — the PNGs may show broken screens:`)
     for (const e of consoleErrors) console.log(`  [${e.route} · ${e.viewport}] ${e.text}`)
@@ -2440,13 +3862,33 @@ async function main() {
   // Broken evidence must not exit 0 — a failed navigation means missing PNGs,
   // and a blank capture means the run produced something that LOOKS like
   // evidence (#1738).
-  if (gotoFailures.length > 0 || deletedCaptures.length > 0) process.exit(1)
+  if (viewportMismatches.length > 0) {
+    console.error(
+      `\n✗ ${viewportMismatches.length} PNG(s) are NOT named after any viewport this run resolved ` +
+        `(${captureViewports.map((vp) => vp.name).join(', ')}) — the run captured something other than ` +
+        'what it was asked for, and the manifest would have claimed otherwise:',
+    )
+    for (const m of viewportMismatches) console.error(`  ${m.file}`)
+  }
+  const failures = [
+    viewportMismatches.length > 0 && `${viewportMismatches.length} PNG(s) not named after any resolved viewport`,
+    gotoFailures.length > 0 && `${gotoFailures.length} route(s) failed to navigate`,
+    deletedCaptures.length > 0 && `${deletedCaptures.length} capture(s) deleted as unusable`,
+    CHAIN_READ_GAPS.length > 0 && `${CHAIN_READ_GAPS.length} chain-fed route(s) issued no on-chain reads`,
+    CHAIN_SILENT_CAPTURES.length > 0 && `${CHAIN_SILENT_CAPTURES.length} silent chain-fed capture(s)`,
+  ].filter(Boolean)
+  if (failures.length > 0) {
+    printRunResult(false, failures.join('; '))
+    process.exit(1)
+  }
+  printRunResult(true, `${captured.length} PNG(s) in ${path.relative(process.cwd(), OUT_DIR) || OUT_DIR}`)
 }
 
 // Run only as a CLI (fixtureFor is imported by tests).
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
     console.error('screenshot failed:', err instanceof Error ? err.message : err)
+    printRunResult(false, err instanceof Error ? firstLine(err.message) : String(err))
     process.exit(1)
   })
 }

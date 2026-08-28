@@ -299,9 +299,15 @@ function getStoredPasskeySignerValue(args: {
  * Read the active human signer for a specific Safe.
  *
  * Resolution order:
- *   1. If localStorage has passkey signer metadata for the safeAddress + chainId, return it.
- *   2. Otherwise, if Wagmi has a connected EOA, return that signer.
- *   3. Otherwise return null.
+ *   1. If localStorage has Safe passkey signer metadata for the safeAddress + chainId, return it.
+ *   2. Otherwise, if a hydrated Hybrid signer set exists for the account,
+ *      resolve WITHIN that set with `pickSigningPath`'s precedence
+ *      (#1969/#2068): marker-matched passkey → connected EOA when the
+ *      connected wallet IS the set's named owner → any passkey → null.
+ *      A hydrated set never falls through to step 3 — a wallet that is not
+ *      in the set is not a signer for this account.
+ *   3. Otherwise, if Wagmi has a connected EOA, return that signer.
+ *   4. Otherwise return null.
  */
 export function useActiveSigner(args: {
   safeAddress?: Address
@@ -326,17 +332,66 @@ export function useActiveSigner(args: {
     return passkeySigner
   }
 
-  // #1079: a Hybrid DeleGator account whose passkey is on this device. Before
-  // the EOA branch on purpose — the account's OWN signer beats whatever wallet
-  // happens to be globally connected.
+  // #1079: a Hybrid DeleGator account resolves its OWN signer set — before the
+  // EOA branch on purpose, because the account's own signer beats whatever
+  // wallet happens to be globally connected.
+  //
+  // #1969 (owner decision 2026-08-26): a NON-EMPTY hydrated set resolves even
+  // when no device marker matches. The set is the account's on-chain-enrolled
+  // signers from the owner-scoped read, so every listed passkey can sign for
+  // THIS account by construction; the only unknown is device availability,
+  // which only the WebAuthn ceremony can answer (cross-device transport is a
+  // real signing path — the same shipped posture as `pickSigningPath` and
+  // §6 of docs/security/delegation-rail-security-model.md, #1097). Which
+  // credential would sign is `hybridPasskeyToSignWith` — the selector the
+  // signing path uses — and the marker-less case is DISCLOSED in the wallet
+  // menu (#1952) rather than silently offered.
+  //
+  // The one refusal kept: `pickSigningPath`'s exact precedence, mirrored so
+  // display and signing cannot disagree — marker-matched passkey → connected
+  // EOA (only when the connected wallet IS the set's named owner, #2068) →
+  // any passkey. Without the mirror, a MIXED account (EOA owner + passkeys,
+  // marker-less, owner wallet connected) would flip from signing with the
+  // connected EOA to a cross-device passkey ceremony, because the
+  // budget/send/re-key hooks feed the resolved signer into `pickSigningPath`.
+  // Pinned by signer.test.ts › "mixed account: a connected EOA still
+  // wins when no device marker matches (#1969 precedence mirror)".
+  //
+  // #2068: "an EOA is connected" is NOT the same as "the owner is connected".
+  // The EOA rung requires the connected address to EQUAL the set's
+  // `owner_address` — an unrelated wallet would be offered a signature the
+  // account rejects at verification time, and a signer offered but failing
+  // at signature time is worse than absent. On a mismatch the resolution
+  // stays inside the set: any passkey if one exists, otherwise null — never
+  // the EOA fallthrough below, which is for accounts WITHOUT a hydrated set
+  // (legacy Safes, pre-hydration renders).
   const hybridSigners = getStoredHybridSigners(args)
-  if (hybridSigners && args.safeAddress && args.chainId !== undefined && hybridPasskeyOnDevice(hybridSigners)) {
-    return {
-      type: 'delegator_passkey',
-      accountAddress: args.safeAddress,
-      chainId: args.chainId,
-      signers: hybridSigners,
+  if (hybridSigners && args.safeAddress && args.chainId !== undefined) {
+    const hasPasskeys = hybridSigners.passkeys.length > 0
+    const markerMatched = hasPasskeys && hybridPasskeyOnDevice(hybridSigners) !== null
+    const connectedIsOwner = Boolean(
+      hybridSigners.owner_address &&
+        address &&
+        walletClient &&
+        address.toLowerCase() === hybridSigners.owner_address.toLowerCase(),
+    )
+    if (hasPasskeys && (markerMatched || !connectedIsOwner)) {
+      return {
+        type: 'delegator_passkey',
+        accountAddress: args.safeAddress,
+        chainId: args.chainId,
+        signers: hybridSigners,
+      }
     }
+    if (!connectedIsOwner) {
+      // Hydrated set, no passkey, connected wallet is not the named owner
+      // (or nothing is connected): the account has no reachable signer from
+      // here. Refuse rather than offer a wallet the account will reject.
+      return null
+    }
+    // No marker (or no passkeys) and the OWNER wallet is connected: fall
+    // through to the EOA branch below — the same answer `pickSigningPath`
+    // gives.
   }
 
   if (address && walletClient) {

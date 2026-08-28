@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - scripts/docs/**
+  - scripts/ci/queue-framing-census.test.mjs
   - .github/workflows/docs.yml
   - .github/workflows/docs-coupling.yml
   - .agents/skills/haven-agent-workflow/references/doc-reviewer.md
@@ -14,7 +15,7 @@ covers:
   - packages/backend/src/docs-drift/docs-drift.test.ts
   - packages/backend/src/docs-drift/env-example-drift.test.ts
   - .env.example
-last-verified: "2026-08-23" # #1885: Phase 1 §"Finding a break that is already on `dev`" re-read against `scripts/docs/chain-sweep.mjs` and `chain-integrity.mjs` on `origin/dev` — records that the sweep now classifies a DECLARED RESET separately from an unrestored break (`N unrestored, M declared reset`), why the blanket `nowLine` check was rejected (one declared compaction would excuse every break in the doc, a false negative in the tool built to find silent losses), and the binding actually used (the commit that INTRODUCED the declaration). Also records `--ref=` and the `--follow` rename residual with the measurement that shows it currently empty. Nothing in Phases 2-4 re-verified in this pass. Prior: #1869: Phase 2 §"Coupling gate" re-read against `scripts/docs/coupling-gate.mjs` on `origin/dev` (not against #1824's description of itself) — the same-day-suppression paragraph #1854 flagged and left is REPLACED, because `implicatedDocs` no longer compares `last-verified` to today and the `today` parameter is gone from its signature rather than accepted-and-ignored. The replacement states the behaviour and carries only the reasoning a reader needs (the heuristic's entire live domain was somebody else's stamp, since `changedSet.has(doc)` already covers a doc this change verified), and quotes the 22-advisories/15-of-40-merges/0-blocking measurement WITH its window (`0d299034`) because the docstring records the counts as traffic-dependent. The `--strict` carve-out the old paragraph described is genuinely gone; the one that REMAINS is different and now documented where it lives — a `contract: true` doc under `--strict` skips the incidental-path filter (`filterIncidental = !(strict && contract)`). Phase 1 also gains `scripts/docs/chain-sweep.mjs` (#1876) and the reason it is needed: a chain break already on `dev` is invisible to the diff-scoped check permanently, not merely deferred to the next editor. Nothing else in Phases 2-4 re-verified in this pass. Prior: #1854: Phase 2 §"Scoping covers" re-read against `scripts/docs/coupling-gate.mjs` — documents the test-content carve-out (`packages/qa-agent/**`, `packages/frontend/e2e/**`) and the `__screenshots__/` carve-out from it, which is checked first; the same-day-suppression paragraph in this section is STALE since #1824 and is NOT fixed here (#1869) — nothing else re-verified in this pass. Prior: #1843: Phase 1 re-read against `scripts/docs/*` and `docs.yml` — gains the `last-verified` chain-integrity check (third `docs:check` step, inside the existing required job, needs `fetch-depth: 0`), the `chain-reset` escape hatch, and why the rule is containment rather than #1843's proposed subsequence; nothing in Phases 2–4 re-verified in this pass. Prior: #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
+last-verified: "2026-08-28" # #2124: Phase 2's queue-framing-census subsection re-read against `scripts/ci/queue-framing-census.test.mjs` and `.github/workflows/ci.yml`; records the census's guarded-files boundary, its every-PR CI home, and why it is neither the coupling gate nor claim-truth verification. Prior: #1993: added the empty-`covers` reason rule to the front-matter schema section, describing the new BLOCKING check in `scripts/docs/validate-frontmatter.mjs` (a `covers: []` must carry an inline `# reason`), why it is enforced rather than encouraged (a doc with `covers: []` looks governed while no coupling gate can implicate it — strictly worse than no front-matter, which is at least visibly outside the system), and its SCOPE (`docs/**` plus the four root gravity files; Markdown under `packages/**` has no front-matter and is outside the system entirely). That section re-read against the validator on this branch. Nothing else in Phases 1-4 re-verified in this pass. Prior: #1885: Phase 1 §"Finding a break that is already on `dev`" re-read against `scripts/docs/chain-sweep.mjs` and `chain-integrity.mjs` on `origin/dev` — records that the sweep now classifies a DECLARED RESET separately from an unrestored break (`N unrestored, M declared reset`), why the blanket `nowLine` check was rejected (one declared compaction would excuse every break in the doc, a false negative in the tool built to find silent losses), and the binding actually used (the commit that INTRODUCED the declaration). Also records `--ref=` and the `--follow` rename residual with the measurement that shows it currently empty. Nothing in Phases 2-4 re-verified in this pass. Prior: #1869: Phase 2 §"Coupling gate" re-read against `scripts/docs/coupling-gate.mjs` on `origin/dev` (not against #1824's description of itself) — the same-day-suppression paragraph #1854 flagged and left is REPLACED, because `implicatedDocs` no longer compares `last-verified` to today and the `today` parameter is gone from its signature rather than accepted-and-ignored. The replacement states the behaviour and carries only the reasoning a reader needs (the heuristic's entire live domain was somebody else's stamp, since `changedSet.has(doc)` already covers a doc this change verified), and quotes the 22-advisories/15-of-40-merges/0-blocking measurement WITH its window (`0d299034`) because the docstring records the counts as traffic-dependent. The `--strict` carve-out the old paragraph described is genuinely gone; the one that REMAINS is different and now documented where it lives — a `contract: true` doc under `--strict` skips the incidental-path filter (`filterIncidental = !(strict && contract)`). Phase 1 also gains `scripts/docs/chain-sweep.mjs` (#1876) and the reason it is needed: a chain break already on `dev` is invisible to the diff-scoped check permanently, not merely deferred to the next editor. Nothing else in Phases 2-4 re-verified in this pass. Prior: #1854: Phase 2 §"Scoping covers" re-read against `scripts/docs/coupling-gate.mjs` — documents the test-content carve-out (`packages/qa-agent/**`, `packages/frontend/e2e/**`) and the `__screenshots__/` carve-out from it, which is checked first; the same-day-suppression paragraph in this section is STALE since #1824 and is NOT fixed here (#1869) — nothing else re-verified in this pass. Prior: #1843: Phase 1 re-read against `scripts/docs/*` and `docs.yml` — gains the `last-verified` chain-integrity check (third `docs:check` step, inside the existing required job, needs `fetch-depth: 0`), the `chain-reset` escape hatch, and why the rule is containment rather than #1843's proposed subsequence; nothing in Phases 2–4 re-verified in this pass. Prior: #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
 ---
 
 # Documentation-quality system
@@ -79,6 +80,32 @@ the per-change history lives in the shards and git log, not on that line.
   with no direct code mirror (indexes, research, archives, process prose). Keep
   it **tight** — list only the code whose change would actually invalidate the
   doc, so the Phase 2 coupling gate stays high-signal.
+- **An empty `covers` must say why, inline** (#1993):
+  `covers: []  # narrative — no direct code mirror`. Blocking in
+  `validate-frontmatter.mjs`.
+
+  The reason it is enforced rather than merely encouraged: a doc with
+  front-matter and `covers: []` *looks* governed — it has an owner, a
+  `last-verified`, a row in the inventory — while **no coupling gate can ever
+  implicate it**, because an empty glob list matches nothing. That is strictly
+  worse than a doc with no front-matter at all, which is at least *visibly*
+  outside the system; here the registration itself is the misleading signal. It
+  bit for real: `ABOUT_HAVEN.md`, the designated first-read mental-model doc,
+  came to flatly contradict five merged Safe-retirement slices, and nothing
+  mechanical would ever have said so (#1992).
+
+  The rule does not forbid an empty `covers` — plenty of docs genuinely have no
+  code mirror. It forces the DECISION to be written down, so an audit can tell
+  *deliberately uncoupled, here is why* from *nobody ever decided*. Twenty of
+  the twenty-two empty-covers docs already carried such a note by hand; #1993
+  made the convention mechanical and filled the two that did not.
+
+  **What it does not reach.** Only the files this validator enumerates —
+  `docs/**` plus the four root gravity files. A Markdown file under
+  `packages/**` (`packages/qa-agent/README.md`, the package READMEs) has no
+  front-matter at all and sits outside the docs-quality system entirely. That
+  is a separate, *visible* gap and is tracked on its own; this rule closes the
+  invisible one.
 - `status` must match location: `docs/archive/**` is `archived`,
   `docs/research/**` is `research`.
 
@@ -330,6 +357,24 @@ accepted-and-ignored, so reintroducing the behaviour is a visible change rather
 than a one-line revival. `last-verified` dates are still read — `ageDays` reports
 each implicated doc's staleness in the advisory comment, where a wall-clock
 skew of a day never changes an outcome.
+
+#### Queue-framing census ([#2107](https://github.com/d-hinders/Haven-AI/issues/2107))
+
+The [queue-framing census](../../scripts/ci/queue-framing-census.test.mjs) runs
+in the every-PR `ci_config_checks` job and checks a small, explicit
+`GUARDED_FILES` list, including agent-facing surfaces no `covers:` glob names.
+It is deliberately zero-tolerance rather than a shrink-only baseline: a guarded
+file either has no queue-and-approve phrase hit or cannot join the list.
+
+The two checks answer different questions. The coupling gate asks whether a
+doc that describes changed code was touched; the census asks whether selected
+prose is absent. **Neither establishes that the prose which remains is true** —
+that needs the per-claim evidence and review in the shipping PR. The census also
+cannot cover a surface whose job is to describe the retired rail: a substring
+scanner cannot distinguish a correct retirement record from a false live claim.
+That deliberate gap includes the architecture and operations docs, the root
+README and OpenAPI spec; [#2121](https://github.com/d-hinders/Haven-AI/issues/2121)
+is the live example of the claim-level drift that can still pass both checks.
 
 **Scoping `covers` (#1077).** `covers` means *this doc describes that code*, not
 *this doc applies to that code*. A standing checklist that globs

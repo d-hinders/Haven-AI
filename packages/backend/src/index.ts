@@ -13,6 +13,7 @@ import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './infra/delegate-balance-monitor.js'
 import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './infra/relayer-balance-monitor.js'
 import { runIfLeader, LEADER_LOCK_KEYS } from './platform/leader-lock.js'
+import { SETTLEMENT_SWEEP_INTERVAL_MS } from './modules/x402/index.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './domain/chains.js'
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
@@ -50,7 +51,6 @@ import passportVerifyRoutes from './routes/passport-verify.js'
 import agentConnectionSetupRoutes from './routes/agent-connection-setups.js'
 import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
-import approvalRoutes from './routes/approvals.js'
 import agentActivityRoutes from './routes/agent-activity.js'
 import x402Routes from './routes/x402.js'
 import userSafesRoutes from './routes/user-safes.js'
@@ -61,6 +61,7 @@ import x402ResourceRoutes from './routes/x402-resources.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
 import openapiRoutes from './routes/openapi.js'
 import catalogRoutes from './routes/catalog.js'
+import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import analyticsRoutes from './routes/analytics.js'
 import accountingRoutes from './routes/accounting.js'
 import fortnoxRoutes from './routes/fortnox.js'
@@ -68,7 +69,11 @@ import reportingRoutes from './routes/reporting.js'
 import { registerConnector } from './modules/reporting/index.js'
 import { FortnoxConnector } from './modules/reporting/index.js'
 import { fortnoxConfigured } from './modules/reporting/index.js'
-import { refreshCatalog, type QueryableLike } from './modules/catalog/index.js'
+import {
+  refreshCatalog,
+  runCatalogIngestTick,
+  type QueryableLike,
+} from './modules/catalog/index.js'
 import { ingestDiscoveredCatalog } from './modules/catalog/index.js'
 import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
 import { registerAgentLastSeenHook } from './middleware/agentAuth.js'
@@ -262,7 +267,8 @@ await app.register(passportVerifyRoutes, { prefix: '/passport' })
 await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
 await app.register(contactRoutes, { prefix: '/contacts' })
 await app.register(paymentRoutes, { prefix: '/payments' })
-await app.register(approvalRoutes, { prefix: '/approvals' })
+// #2055: /approvals is deregistered — the approval queue died with the
+// AllowanceModule rail and its table is dropped; the routes went with it.
 await app.register(agentActivityRoutes, { prefix: '/agent-activity' })
 await app.register(x402Routes, { prefix: '/x402' })
 await app.register(userSafesRoutes, { prefix: '/user/safes' })
@@ -272,6 +278,7 @@ await app.register(safeExecRoutes, { prefix: '/safe' })
 await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
 await app.register(x402ResourceRoutes, { prefix: '/x402' })
 await app.register(catalogRoutes, { prefix: '/catalog' })
+await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
 await app.register(accountingRoutes, { prefix: '/accounting' })
 await app.register(fortnoxRoutes, { prefix: '/accounting/fortnox' })
@@ -288,6 +295,32 @@ if (fortnoxConfigured()) {
 
 // --- Start ---
 const CATALOG_REFRESH_INTERVAL_MS = 60 * 60 * 1000 // hourly
+
+/**
+ * Catalogue ingestion (#1714, epic #1717): the leader-locked tick that walks
+ * self-submitted queue rows through ownership proof -> verification probe and
+ * keeps the table bounded. Slow cadence on purpose: each probe is bounded by
+ * the per-hostname cooldown up-stack, and re-verification is at most daily.
+ */
+const CATALOG_INGEST_INTERVAL_MS = 5 * 60 * 1000
+
+/** Best-effort ops webhook, same Slack-compatible `{ text }` shape as the
+ * delegate/relayer monitors. A failed alert never affects the tick. */
+async function sendCatalogOpsAlert(text: string): Promise<void> {
+  const url = process.env.DELEGATE_ALERT_WEBHOOK_URL
+  if (!url) return
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(10_000),
+    })
+  } catch (err) {
+    // Deliberately silent for the same reason the monitors swallow it:
+    // alerting is best-effort in every monitor in this file.
+  }
+}
 
 /**
  * #1680: the sweep only reclaims space — every read already filters on expiry,
@@ -345,6 +378,29 @@ const start = async () => {
     }
     void runCatalogRefresh()
     setInterval(runCatalogRefresh, CATALOG_REFRESH_INTERVAL_MS).unref()
+
+    // Catalogue ingestion (epic #1717, #1714): walk submitted queue rows
+    // through ownership proof and the SSRF-hardened verification probe, and
+    // bound the table. Leader-locked like every tick here — probes must run
+    // once per interval, not once per replica. Alerts are edge-triggered by
+    // the lifecycle module, so a sustained condition alarms once instead of
+    // on every interval.
+    const runCatalogIngest = async () => {
+      try {
+        await runIfLeader(LEADER_LOCK_KEYS.catalogIngest, async () => {
+          const report = await runCatalogIngestTick()
+          if (report.acted) app.log.info(report, 'Catalog ingestion tick')
+          for (const text of report.alerts) {
+            app.log.warn({ text }, 'Catalog ingestion alert')
+            await sendCatalogOpsAlert(text)
+          }
+        })
+      } catch (err) {
+        app.log.warn({ err }, 'Catalog ingestion failed')
+      }
+    }
+    void runCatalogIngest()
+    setInterval(runCatalogIngest, CATALOG_INGEST_INTERVAL_MS).unref()
 
     // Expired rate-limit counters (#1680): nothing else removes them, and the
     // table is written by UNAUTHENTICATED traffic — so without a sweep,
@@ -425,6 +481,33 @@ const start = async () => {
     }
     void runOutboundBump()
     setInterval(runOutboundBump, OUTBOUND_BUMP_INTERVAL_MS).unref()
+
+    // Passive erc7710 settlement observation (#2117, #2092 residual). On
+    // erc7710 direct settlement the merchant redeems the chain and Haven
+    // submits nothing, so an intent stays `submitted` until an AGENT reports
+    // the settlement hash. When that report never comes — no
+    // `PAYMENT-RESPONSE` transaction, or the generic plain-HTTP flow (#2041)
+    // where Haven never sees the header — the payment has no evidence row and
+    // is therefore permanently absent from the Fortnox feed. This tick finds
+    // such a settlement by looking its intent-unique settlement child (#2094)
+    // up in the pinned DelegationManager's `RedeemedDelegation` logs and
+    // completes it through the same seam the agent-reported path uses.
+    //
+    // It never guesses: attribution is only ever the manager naming this
+    // intent's own child, never transfer shape. Bounded RPC, and an outage
+    // confirms nothing and waits for the next tick.
+    const runSettlementSweep = async () => {
+      try {
+        await runIfLeader(LEADER_LOCK_KEYS.settlementSweep, async () => {
+          const { runSettlementSweepTick } = await import('./modules/x402/index.js')
+          await runSettlementSweepTick(app.log)
+        })
+      } catch (err) {
+        app.log.warn({ err }, 'Settlement sweep tick failed')
+      }
+    }
+    void runSettlementSweep()
+    setInterval(runSettlementSweep, SETTLEMENT_SWEEP_INTERVAL_MS).unref()
 
     // L0 passport anchor sweep (#972 / #973). Both halves of issuance are
     // fire-and-forget by design — an EAS write must never block agent creation

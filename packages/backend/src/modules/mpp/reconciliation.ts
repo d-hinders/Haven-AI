@@ -9,30 +9,12 @@
  * type checks).
  */
 import {
-  findReconciliationApproval,
   findReconciliationEvent,
   findReconciliationIntent,
   upsertReconciliationEvent,
+  type ReconciliationPaymentRow,
 } from '../../infra/repositories/machine-payments.js'
 import type { MppHandlerResult } from './types.js'
-
-interface ReconciliationPaymentRow {
-  id: string
-  kind: 'payment_intent' | 'approval_request'
-  user_id: string
-  tx_hash: string | null
-  status: string
-  payment_rail: string | null
-  source: string | null
-  payment_resource_url: string | null
-  x402_resource_url: string | null
-  merchant_address: string | null
-  x402_merchant_address: string | null
-  machine_challenge_id: string | null
-  machine_idempotency_key: string | null
-  x402_idempotency_key: string | null
-}
-
 export const RECONCILIATION_EVENT_TYPES = new Set([
   'merchant_retry_rejected_after_payment',
 ])
@@ -46,19 +28,17 @@ export async function handleReconciliationEvent(
   reason: string | undefined,
   details: Record<string, unknown> | undefined,
 ): Promise<MppHandlerResult> {
-  let payment: ReconciliationPaymentRow | null = await findReconciliationIntent(
+  // #2055: the approval_requests fallback is gone with the table — a payment
+  // id either resolves as an intent or is unknown.
+  const payment: ReconciliationPaymentRow | null = await findReconciliationIntent(
     paymentId,
     agentId,
   )
   if (!payment) {
-    payment = await findReconciliationApproval(paymentId, agentId)
-  }
-  if (!payment) {
     return { statusCode: 404, body: { error: 'Payment not found' } }
   }
 
-  const expectedStatus = payment.kind === 'approval_request' ? 'executed' : 'confirmed'
-  if (payment.status !== expectedStatus || !payment.tx_hash) {
+  if (payment.status !== 'confirmed' || !payment.tx_hash) {
     return {
       statusCode: 409,
       body: {
@@ -77,16 +57,17 @@ export async function handleReconciliationEvent(
     return { statusCode: 409, body: { error: 'rail does not match payment intent' } }
   }
 
-  const paymentIntentId = payment.kind === 'payment_intent' ? payment.id : null
-  const approvalRequestId = payment.kind === 'approval_request' ? payment.id : null
-  const conflictColumn = payment.kind === 'approval_request' ? 'approval_request_id' : 'payment_intent_id'
-
+  // #2085: a NEW reconciliation event is always anchored to a payment intent.
+  // The repository still accepts `approvalRequestId` and the column still
+  // exists — migration 070 dropped the `approval_requests` TABLE with CASCADE
+  // and deliberately left historical evidence and reconciliation rows holding
+  // their `approval_request_id` values, so the READ side stays. Only the write
+  // branch is gone, because it could not be taken.
   let event = await upsertReconciliationEvent({
-    conflictColumn,
     agentId,
     userId: payment.user_id,
-    paymentIntentId,
-    approvalRequestId,
+    paymentIntentId: payment.id,
+    approvalRequestId: null,
     rail,
     eventType,
     txHash: payment.tx_hash.toLowerCase(),
@@ -98,7 +79,7 @@ export async function handleReconciliationEvent(
     details: details ? JSON.stringify(details) : null,
   })
   if (!event) {
-    event = await findReconciliationEvent(conflictColumn, payment.id, agentId, eventType)
+    event = await findReconciliationEvent(payment.id, agentId, eventType)
   }
   if (!event) throw new Error('reconciliation_event_conflict_not_found')
 

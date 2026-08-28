@@ -3,8 +3,9 @@
  * callers (routes, tests) must import ONLY from this file — see the
  * `no-deep-cross-module-import` dependency-cruiser rule in
  * `.dependency-cruiser.cjs`. Internal files (`helpers.ts`, `scheme-selection.ts`,
- * `replay.ts`, `delegation-authorize.ts`, `legacy-authorize.ts`, `authorize.ts`,
- * `settle.ts`) are private.
+ * `replay.ts`, `delegation-authorize.ts`, `authorize.ts`, `settle.ts`) are
+ * private. (`legacy-authorize.ts` was deleted with the AllowanceModule rail,
+ * #1987 / epic #1440.)
  *
  * `routes/x402.ts` keeps request validation, auth middleware wiring, rate
  * limiting, and response serialization; the authorize orchestration (scheme
@@ -22,7 +23,18 @@ export { settleX402 } from './settle.js'
 export { getX402SignContext } from './sign-context.js'
 export { getX402MerchantCallContext } from './merchant-call-context.js'
 
-export type { X402AuthorizeBody, X402ApprovalRow, X402HandlerResult, X402McpCallContextInput } from './types.js'
+/**
+ * The passive settlement sweep (#2117). Public because the composition root
+ * registers the tick and owns its interval — the monitor itself, like every
+ * other in `index.ts`, is wired at boot rather than reached from a route.
+ */
+export {
+  runSettlementSweepTick,
+  resetSettlementSweepBackoff,
+  SETTLEMENT_SWEEP_INTERVAL_MS,
+} from './settlement-sweeper.js'
+
+export type { X402AuthorizeBody, X402HandlerResult, X402McpCallContextInput } from './types.js'
 
 export {
   isPositiveDecimalAtomicAmount,

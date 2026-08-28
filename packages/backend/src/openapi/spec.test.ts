@@ -16,6 +16,10 @@ import {
   AgentPaymentPhase,
   AgentPaymentRail,
 } from '../domain/agent-payment-taxonomy.js'
+// #2105: the retired-rail guard at the bottom of this file asserts the spec
+// against the HANDLER's real return value, not against its own description.
+import { handleSend } from '../modules/mpp/send.js'
+import type { AgentContext } from '../middleware/agentAuth.js'
 
 /**
  * The route files that publish the agent payment surface. Adding a new route
@@ -85,26 +89,38 @@ describe('openapiSpec', () => {
     )
   })
 
-  it('documents allowance input constraints for owner-created agent rules', () => {
-    const createAgentAllowance =
-      openapiSpec.components.schemas.CreateAgentRequest.properties.allowances.items
+  it('documents allowance input constraints for connect-setup agent rules', () => {
+    // #2020: POST /agents no longer accepts allowance rows (the field is
+    // pinned empty-only below), so the constraints apply only to the
+    // connect-setup input, which still carries the requested budgets that
+    // become the delegation grant.
     const setupAllowance =
       openapiSpec.components.schemas.AgentConnectionAllowanceInput
 
-    for (const schema of [createAgentAllowance, setupAllowance]) {
-      expect(schema.properties.token_symbol).toMatchObject({
-        minLength: 1,
-        maxLength: 20,
-      })
-      expect(schema.properties.allowance_amount).toMatchObject({
-        type: 'string',
-        pattern: '^[0-9]+$',
-      })
-      expect(schema.properties.reset_period_min).toMatchObject({
-        minimum: 0,
-        maximum: 65535,
-      })
-    }
+    expect(setupAllowance.properties.token_symbol).toMatchObject({
+      minLength: 1,
+      maxLength: 20,
+    })
+    expect(setupAllowance.properties.allowance_amount).toMatchObject({
+      type: 'string',
+      pattern: '^[0-9]+$',
+    })
+    expect(setupAllowance.properties.reset_period_min).toMatchObject({
+      minimum: 0,
+      maximum: 65535,
+    })
+  })
+
+  it('pins the retired POST /agents allowances field to empty-only (#2020)', () => {
+    const allowances = openapiSpec.components.schemas.CreateAgentRequest.properties.allowances
+    expect(allowances.maxItems).toBe(0)
+    // The tombstoned CRUD operations answer 410, never 200.
+    const setOp = openapiSpec.paths['/agents/{id}/allowances'].post
+    const deleteOp = openapiSpec.paths['/agents/{id}/allowances/{tokenAddress}'].delete
+    expect(Object.keys(setOp.responses)).toContain('410')
+    expect(Object.keys(setOp.responses)).not.toContain('200')
+    expect(Object.keys(deleteOp.responses)).toContain('410')
+    expect(Object.keys(deleteOp.responses)).not.toContain('200')
   })
 
   it('documents reconciliation event response statuses', () => {
@@ -409,4 +425,227 @@ describe('openapi drift — declared routes vs published spec', () => {
       ).toEqual([])
     })
   }
+})
+
+/**
+ * #2105 (epic #1440). The published contract must not describe the retired
+ * Safe / AllowanceModule rail as live.
+ *
+ * The failure this guards against is specific and was real: the spec
+ * documented a `201 pending_signature` / `202 pending_approval` happy path for
+ * `POST /machine-payments/send`, a route whose handler is three refusals and
+ * nothing else, and did not document the 422 that actually happens. A
+ * documented-but-unreachable 2xx is not cosmetic — it is an instruction to an
+ * integrator to build a branch that can never run.
+ *
+ * The first block is the one that matters. It does NOT restate a description:
+ * it CALLS `handleSend` with each rail state and asserts that the status it
+ * really returns is a status the spec really documents. `handleSend` reads
+ * only `execution_rail` and `chain_id` off its agent, so this needs no
+ * database — the #1446 discipline (assert against the behaviour, not against
+ * the prose that describes it) at zero cost.
+ */
+describe('retired-rail residue in the published contract (#2105)', () => {
+  const sendResponses = openapiSpec.paths['/machine-payments/send'].post.responses
+  const documentedSendCodes = Object.keys(sendResponses)
+
+  const agentOnRail = (executionRail: string | null): AgentContext => ({
+    id: '00000000-0000-4000-8000-000000000001',
+    user_id: '00000000-0000-4000-8000-000000000002',
+    name: 'guard',
+    delegate_address: '0x' + '11'.repeat(20),
+    safe_address: '0x' + '22'.repeat(20),
+    chain_id: 8453,
+    status: 'active',
+    execution_rail: executionRail,
+  })
+
+  // `resolveExecutionRail` is exhaustively { delegation | retired_session |
+  // retired_allowance }, and its fall-through means *anything* that is not the
+  // two literals resolves to retired_allowance — including null, which is what
+  // a missing Safe row yields. All four inputs below are therefore real
+  // populations, not synthetic ones.
+  const RAIL_CASES: Array<{ rail: string | null; expected: number; why: string }> = [
+    { rail: 'session_key', expected: 410, why: 'session rail retired (#834)' },
+    { rail: 'allowance_module', expected: 410, why: 'Safe rail retired (#1986)' },
+    { rail: null, expected: 410, why: 'no Safe row falls through to retired_allowance' },
+    { rail: 'delegation', expected: 422, why: 'MPP never supported the delegation rail (#1251)' },
+  ]
+
+  it.each(RAIL_CASES)(
+    'POST /machine-payments/send really answers $expected on rail=$rail ($why), and the spec documents it',
+    async ({ rail, expected }) => {
+      const result = await handleSend(agentOnRail(rail), 'USDC', '0x' + '33'.repeat(20), '1.0', undefined)
+
+      expect(result.statusCode).toBe(expected)
+      expect(
+        documentedSendCodes,
+        `handleSend returns ${result.statusCode} for execution_rail=${String(rail)}, but the ` +
+        `OpenAPI spec for POST /machine-payments/send documents only ` +
+        `[${documentedSendCodes.join(', ')}]. Add the response, do not delete the assertion.`,
+      ).toContain(String(result.statusCode))
+    },
+  )
+
+  it('documents NO success response on POST /machine-payments/send — the handler has no success path', () => {
+    // Positive control for the predicate itself: it must be able to SEE a 2xx.
+    // POST /payments is the live sibling and genuinely has one, so if this
+    // first expectation ever fails, the filter is broken and the second
+    // expectation below is worthless rather than reassuring.
+    const livePaymentCodes = Object.keys(openapiSpec.paths['/payments'].post.responses)
+    const is2xx = (code: string) => /^2\d\d$/.test(code)
+    expect(livePaymentCodes.filter(is2xx).length).toBeGreaterThan(0)
+
+    expect(documentedSendCodes.filter(is2xx)).toEqual([])
+    expect(documentedSendCodes).toContain('422')
+  })
+
+  it('documents no 202 approval branch on any payment entry point', () => {
+    for (const path of ['/payments', '/x402/authorize', '/x402'] as const) {
+      expect(
+        Object.keys(openapiSpec.paths[path].post.responses),
+        `${path} must not document a 202: no handler behind it emits one — the delegation rail ` +
+        'enforces budget on-chain instead of queuing an approval.',
+      ).not.toContain('202')
+    }
+  })
+
+  it('has removed the approval schemas outright, leaving no dangling $ref', () => {
+    const schemas = openapiSpec.components.schemas as Record<string, unknown>
+    expect(schemas.PendingApproval).toBeUndefined()
+    expect(schemas.X402PendingApproval).toBeUndefined()
+
+    const refs: string[] = []
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) return void node.forEach(walk)
+      if (node === null || typeof node !== 'object') return
+      for (const [key, value] of Object.entries(node)) {
+        if (key === '$ref' && typeof value === 'string') refs.push(value)
+        else walk(value)
+      }
+    }
+    walk(openapiSpec)
+
+    // Positive control: the walker must actually be finding refs, and must be
+    // finding a schema we know is still referenced. Without this, a walker that
+    // silently collected nothing would report a clean bill of health.
+    expect(refs.length).toBeGreaterThan(50)
+    expect(refs).toContain('#/components/schemas/AgentPaymentStatus')
+
+    const componentRefs = refs
+      .filter((ref) => ref.startsWith('#/components/schemas/'))
+      .map((ref) => ref.slice('#/components/schemas/'.length))
+    expect(componentRefs).not.toContain('PendingApproval')
+    expect(componentRefs).not.toContain('X402PendingApproval')
+
+    // Every remaining component $ref must resolve. This is what turns the two
+    // deletions above from "a string is absent" into "the document is intact".
+    const unresolved = [...new Set(componentRefs)].filter((name) => !(name in schemas))
+    expect(unresolved, 'Dangling $ref targets in openapiSpec.components.schemas').toEqual([])
+  })
+
+  it('names the delegation rail, not Safe module state, as the enforcement primitive', () => {
+    const description = openapiSpec.components.securitySchemes.AgentApiKey.description
+    // The three-way split must survive the rewrite ...
+    expect(description).toMatch(/API auth is identity/i)
+    expect(description).toMatch(/signature is authority/i)
+    // ... while the primitive holding "enforcement" is the live one.
+    expect(description).toMatch(/budget delegation/i)
+    expect(description).not.toMatch(/Safe module state/i)
+  })
+
+  /**
+   * #2105, found by haven-reviewer. The retired rail survived on the LIVE
+   * rail's primary success response: `paymentSignData` — the `sign_data` of the
+   * 201 of POST /payments, and of the x402 authorize 200/201 through
+   * `X402SignablePayment` — required the `executeAllowanceTransfer` argument
+   * list (`safe`/`payment_token`/`payment`/`nonce`), was
+   * `additionalProperties: false`, and therefore FORBADE the
+   * `signature_scheme` and `typed_data` the live handlers actually emit.
+   *
+   * Asserted against real emitted bodies through the spec's own validator, not
+   * against the description — an integrator following the old schema would sign
+   * a bare hash with raw ECDSA.
+   */
+  describe('sign_data describes the delegation rail, not executeAllowanceTransfer', () => {
+    // Copied from the emitters: routes/payments.ts' 201 and
+    // modules/x402/delegation-authorize.ts' funding shape.
+    const directPaymentSignData = {
+      hash: '0x' + 'ab'.repeat(32),
+      signature_scheme: 'eip712_userop',
+      typed_data: { domain: { chainId: 8453 }, types: {}, primaryType: 'UserOperation', message: {} },
+      components: {
+        account: '0x' + '44'.repeat(20),
+        token: '0x' + '55'.repeat(20),
+        to: '0x' + '66'.repeat(20),
+        amount: '1000000',
+      },
+      instructions: 'Sign sign_data.typed_data with your delegate (agent) key using EIP-712.',
+    }
+    const x402FundingSignData = {
+      ...directPaymentSignData,
+      components: { safe: '0x' + '77'.repeat(20), ...directPaymentSignData.components },
+    }
+
+    const signDataSchema = openapiSpec.components.schemas.SignablePaymentIntent.properties.sign_data
+
+    it.each([
+      ['the direct-payment 201 shape', directPaymentSignData],
+      ['the x402 funding shape (adds components.safe)', x402FundingSignData],
+    ])('accepts %s', (_label, payload) => {
+      expect(matchSpec(signDataSchema, payload)).toEqual([])
+    })
+
+    it('still REJECTS the retired AllowanceModule shape', () => {
+      // Positive control for the validator: it must be able to say no. This is
+      // the exact body the old schema demanded.
+      const retired = {
+        hash: '0x' + 'ab'.repeat(32),
+        components: {
+          safe: '0x' + '77'.repeat(20),
+          token: '0x' + '55'.repeat(20),
+          to: '0x' + '66'.repeat(20),
+          amount: '1000000',
+          payment_token: '0x' + '00'.repeat(20),
+          payment: '0',
+          nonce: 3,
+        },
+        instructions: 'Sign the hash with your delegate private key using raw ECDSA.',
+      }
+      expect(matchSpec(signDataSchema, retired).length).toBeGreaterThan(0)
+    })
+
+    it('rejects an UNDECLARED components field — the object is closed', () => {
+      // Guards the `additionalProperties: false` above. It was `true` first;
+      // nothing noticed when a mutation flipped it, because both real shapes
+      // are fully declared. This is what makes the closure load-bearing.
+      const withStrayField = {
+        ...directPaymentSignData,
+        components: { ...directPaymentSignData.components, nonce: 3 },
+      }
+      expect(matchSpec(signDataSchema, withStrayField).length).toBeGreaterThan(0)
+    })
+
+    it('names eip712_userop as the only scheme, and requires typed_data', () => {
+      expect(signDataSchema.required).toContain('signature_scheme')
+      expect(signDataSchema.required).toContain('typed_data')
+      expect(signDataSchema.properties.signature_scheme.enum).toEqual(['eip712_userop'])
+      // The retired argument list must not be back in the required set.
+      const componentsRequired = signDataSchema.properties.components.required
+      for (const gone of ['payment_token', 'payment', 'nonce', 'safe']) {
+        expect(componentsRequired).not.toContain(gone)
+      }
+    })
+  })
+
+  it('keeps AgentPaymentStatus.kind approval_request as a documented wire-compat value', () => {
+    // The retained case, and deliberately asymmetric with the deletions above:
+    // this enum value is still declared by the backend's own status type and
+    // still serialized by a live route, so it stays — but it must carry a note
+    // saying it is unreachable, or it reads as a branch worth writing.
+    const kind = openapiSpec.components.schemas.AgentPaymentStatus.properties.kind
+    expect(kind.enum).toContain('approval_request')
+    expect(kind.description).toMatch(/wire compatibility/i)
+    expect(kind.description).toMatch(/Do not write a branch on it/i)
+  })
 })

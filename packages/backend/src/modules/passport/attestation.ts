@@ -24,9 +24,10 @@ import { openOutboundRecord, submitRecorded } from '../../infra/outbound-queue.j
 import {
   findOutboundEvidenceTxHash,
   findOutboundTxByHash,
+  findOutboundTxById,
 } from '../../infra/repositories/outbound-txs.js'
 import { getEasDeployment, getPassportSchemaUid } from './schema.js'
-import type { Anchor, AnchorResult, PassportClaim } from './issuance.js'
+import type { Anchor, AnchorResult, PassportClaim, RecoveredAnchor } from './issuance.js'
 import type { RevocationAnchorProbe, RevocationAnchorReading, Revoker } from './revocation.js'
 
 /** Field order MUST match PASSPORT_SCHEMA — the encoding is positional. */
@@ -254,13 +255,28 @@ export const anchorOnChain: Anchor = async (
  * Returns the result when the tx is mined and successful, null when the tx is
  * unknown or still pending (caller decides whether to re-anchor), and THROWS
  * on a mined-but-reverted tx so the caller records the failure message.
+ *
+ * The result carries `attested` — the addresses decoded from the mined
+ * transaction's OWN calldata (#1847). Recovery can cross a re-key: this
+ * broadcast was built from the facts of its day, and issuance's fresh claim
+ * may name a different key by the time the receipt is read. The caller must
+ * record what is actually on-chain, or `STALE_ANCHOR_PREDICATE` goes blind on
+ * exactly the attestation that names a retired delegate. Decoding from the
+ * calldata rather than a `getAttestation` read costs no extra contract call
+ * and cannot disagree with the transaction that minted the uid; a fee bump
+ * re-broadcasts the same bytes (`REBROADCAST_SAFE` payloads and the #1745
+ * probe's same-calldata walk both rely on that), so the decode holds for a
+ * bumped hash too. If the transaction body cannot be fetched or decoded, this
+ * THROWS — a retryable failure — rather than let the caller attribute the
+ * anchor from facts the chain does not hold.
  */
 export async function recoverAnchorFromReceipt(
   chainId: number,
   txHash: string,
-): Promise<AnchorResult | null> {
+): Promise<RecoveredAnchor | null> {
   const { eas } = getEasDeployment(chainId)
-  const receipt = await getRelayer(chainId).provider?.getTransactionReceipt(txHash)
+  const provider = getRelayer(chainId).provider
+  const receipt = await provider?.getTransactionReceipt(txHash)
   if (!receipt) return null
   if (receipt.status !== 1) {
     throw new Error(`prior passport attestation reverted (tx ${txHash})`)
@@ -268,13 +284,28 @@ export async function recoverAnchorFromReceipt(
   const iface = new Interface(EAS_ABI)
   for (const log of receipt.logs) {
     if (log.address.toLowerCase() !== eas.toLowerCase()) continue
+    let parsed
     try {
-      const parsed = iface.parseLog({ topics: [...log.topics], data: log.data })
-      if (parsed?.name === 'Attested') {
-        return { attestationUid: parsed.args.uid as string, txHash }
-      }
+      parsed = iface.parseLog({ topics: [...log.topics], data: log.data })
     } catch {
       continue // not an EAS_ABI event — other logs in the same tx are fine
+    }
+    if (parsed?.name !== 'Attested') continue
+    // Mined and ours. Attribute it from its own bytes (#1847): failures from
+    // here THROW (retryable) instead of falling through to "no event found".
+    const tx = await provider?.getTransaction(txHash)
+    if (!tx) {
+      throw new Error(
+        `tx ${txHash} mined but its body is unavailable — cannot attribute the recovered attestation (#1847)`,
+      )
+    }
+    const call = iface.decodeFunctionData('attest', tx.data)
+    const claimBytes = call[0].data.data as string
+    const decoded = AbiCoder.defaultAbiCoder().decode([...SCHEMA_TYPES], claimBytes)
+    return {
+      attestationUid: parsed.args.uid as string,
+      txHash,
+      attested: { agentEoa: decoded[0] as string, smartAccount: decoded[1] as string },
     }
   }
   // Mined, successful, but no Attested event from EAS — not our attestation.
@@ -429,11 +460,26 @@ export async function classifyAnchorTxLiveness(
   //    and the nonce it stamped at broadcast is the fact we need.
   const record = await findOutboundTxByHash(chainId, txHash)
   if (!record || record.nonce === null) return 'live'
-  // A replaced row means another transaction at the SAME nonce carries this
-  // payload forward; re-minting at a fresh nonce would duplicate it rather
-  // than replace it. (`passport_attest` is withheld from replacement by
-  // #1735, so this is defence for a hand-run bump, not a live path.)
-  if (record.status === 'replaced' || record.status === 'mined') return 'live'
+  if (record.status === 'mined') return 'live'
+  // A replaced row USUALLY means another transaction at the SAME nonce
+  // carries this payload forward — a fee bump — and re-minting at a fresh
+  // nonce would duplicate it rather than replace it. But since #1743 there is
+  // a second kind of replacement: the operator LANE CANCEL, a 0-value
+  // self-send that deliberately does NOT carry the payload and exists so the
+  // burned nonce becomes exactly the death evidence below. Walking the link
+  // and comparing calldata is what tells them apart — a replacement whose
+  // payload differs carried nothing forward, so the nonce evidence (step 3)
+  // stays the arbiter. An unwalkable link is treated as a payload-carrying
+  // bump: `live`, the conservative reading, because guessing death is the
+  // one mistake this probe exists to never make.
+  if (record.status === 'replaced') {
+    const replacement = record.replaced_by ? await findOutboundTxById(record.replaced_by) : null
+    if (!replacement || replacement.data === record.data) return 'live'
+    // A cancel-style replacement: fall through to the nonce evidence. Note
+    // the receipt re-read in step 4 still protects the race where the ATTEST
+    // mined despite the cancel — the consumed nonce plus our own receipt
+    // reads `live`, and #1043's recovery closes on the original anchor.
+  }
 
   // 3. Has the slot been consumed by something else, durably? Read as of a
   //    finalized/buried block, never the head — see `settledReadBlock`. The

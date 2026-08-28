@@ -178,12 +178,16 @@ describe('buildHandoff — policy', () => {
     expect(markdown).toContain('none configured')
   })
 
-  it('mentions the manual approval queue as the over-limit escape hatch', () => {
+  it('states that over-budget payments are declined, never queued (#2063)', () => {
     const { markdown } = buildHandoff(BASE_INPUT)
-    // Policy lives entirely on-chain now; the only "escape hatch" for
-    // payments above the allowance is the owner-approval queue.
-    expect(markdown.toLowerCase()).toMatch(/approval/)
-    expect(markdown.toLowerCase()).toMatch(/queue|dashboard/)
+    // The delegation rail - the only live rail - enforces budget, recipient
+    // and expiry on-chain at prepare: an out-of-policy payment is declined
+    // before any state is written (routes/payments.ts, 502/403). Nothing
+    // queues, so the handoff must not promise an approval queue.
+    expect(markdown).toContain('declined')
+    expect(markdown.toLowerCase()).not.toMatch(/queued for/)
+    expect(markdown.toLowerCase()).not.toMatch(/waits for your approval/)
+    expect(markdown).not.toContain('pending_approval')
   })
 })
 
@@ -195,14 +199,19 @@ describe('buildHandoff — paid API support', () => {
     expect(markdown).toContain('machine-payment')
   })
 
-  it('explains queued approval errors from over-budget payments', () => {
+  it('explains declined payments and the x402 resume discipline', () => {
     const { markdown } = buildHandoff(BASE_INPUT)
-    expect(markdown).toContain('HavenPaymentStateError')
+    expect(markdown).toContain('HavenApiError')
     expect(markdown).toContain('get_payment_status')
-    expect(markdown).toContain('retry_original_x402_request')
+    // #2145 gave the backend a real producer for this trigger
+    // (agent-payment-status.ts emits it when the funding leg confirmed but no
+    // merchant response was ever recorded). The handoff doc must gate on the
+    // structured field rather than claim the trigger is dead.
+    expect(markdown).toContain("nextAction: 'retry_original_x402_request'")
+    expect(markdown).toContain('resumeX402Payment()')
     expect(markdown).toMatch(/Do not rewrite the SDK/i)
     expect(markdown).toMatch(/start a new merchant\s+session/i)
-    expect(markdown).toMatch(/retry in a tight loop/i)
+    expect(markdown).toMatch(/in a tight loop/i)
   })
 })
 
@@ -265,7 +274,7 @@ describe('buildHandoff — SDK example', () => {
     for (const heading of [
       'Quickstart (Node.js)',
       'Paid APIs and machine-payment requests',
-      'When a payment needs approval',
+      'When a payment is declined',
       'First payment',
     ]) {
       expectNoRawSecrets(sectionStartingWith(markdown, heading))

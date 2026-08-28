@@ -16,6 +16,7 @@ import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
   abandonRekey,
+  adoptAbandonedCarry,
   completeRekey,
   findInFlightRekey,
   findRekey,
@@ -650,5 +651,224 @@ describeDb('agent_rekeys ledger (#1698)', () => {
     )
     expect(row.rows[0].rekey_id).toBeNull()
     expect(row.rows[0].carry_role).toBeNull()
+  })
+})
+
+/**
+ * #1868 — a re-key abandoned after the revoke must not forfeit the frozen
+ * carry, and nothing may reclaim a re-key the owner has not abandoned.
+ *
+ * The wedge: the abandoned re-key already revoked the delegations ON-CHAIN,
+ * so a fresh re-key finds nothing to revoke and used to walk to `metered`
+ * with an empty snapshot — the frozen measurement sat unread on the
+ * abandoned row and the agent's authority was gone until a manual re-grant.
+ * `adoptAbandonedCarry` is the exit: the fresh row inherits the abandoned
+ * row's snapshot AND its clocks. Everything here is Postgres behaviour —
+ * which predecessor qualifies, the over-grant guard, the timestamp
+ * inheritance, idempotency — so it lives on the real harness (#1219).
+ */
+describeDb('adoptAbandonedCarry (#1868)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  /** Walk a re-key to `metered` with a frozen snapshot, then abandon it. */
+  async function abandonAtMetered(seeded: Seeded, snap = snapshot()) {
+    const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, '0xrevoketx')
+    await markMetered(rekey.id, seeded.agentId, snap)
+    const abandoned = await abandonRekey(rekey.id, seeded.agentId, 'interrupted')
+    expect(abandoned?.stage).toBe('abandoned')
+    return (await findRekey(rekey.id, seeded.agentId))!
+  }
+
+  /** A fresh re-key opened after the predecessor released the slot. */
+  async function openSuccessor(seeded: Seeded) {
+    return open(seeded, { newDelegateAddress: '0x00000000000000000000000000000000000000d3' })
+  }
+
+  async function grantAfter(seeded: Seeded, status: string, rekeyId: string | null = null) {
+    await db.query(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, token_address, recipient_address, delegation_hash,
+          delegation_json, version, status, budget_atomic, period_seconds, start_date,
+          expires_at, rekey_id, carry_role)
+       VALUES ($1, 84532, $2, NULL, $3, '{}', 1, $4, '1000000', 86400, 0, 9999999999, $5,
+               CASE WHEN $5::uuid IS NULL THEN NULL ELSE 'carry' END)`,
+      [seeded.agentId, USDC, `0x${String(++seq).padStart(64, '0')}`, status, rekeyId],
+    )
+  }
+
+  it('MUTATION TARGET — the fresh re-key inherits the abandoned carry, clocks and revoke tx wholesale', async () => {
+    const seeded = await seedAgent()
+    const prior = await abandonAtMetered(seeded)
+    const successor = await openSuccessor(seeded)
+
+    const adopted = await adoptAbandonedCarry(successor.id, seeded.agentId)
+
+    expect(adopted).not.toBeNull()
+    expect(adopted!.stage).toBe('metered')
+    expect(adopted!.inherited_from_rekey_id).toBe(prior.id)
+    expect(adopted!.carry_snapshot).toEqual(prior.carry_snapshot)
+    // The measurement clock is INHERITED, never re-stamped: `metered_at`
+    // anchors the carry arithmetic to the period the remainder was measured
+    // in (#1849). Stamping adoption time here would re-create that
+    // under-grant through a side door — this is the assertion that kills the
+    // `metered_at = NOW()` mutation.
+    expect(new Date(adopted!.metered_at as string).getTime()).toBe(
+      new Date(prior.metered_at as string).getTime(),
+    )
+    expect(new Date(adopted!.revoked_at as string).getTime()).toBe(
+      new Date(prior.revoked_at as string).getTime(),
+    )
+    expect(adopted!.revoke_tx_hash).toBe('0xrevoketx')
+  })
+
+  it('MUTATION TARGET — refuses adoption when ANY grant was made after the abandoned revoke', async () => {
+    // The over-grant this guards: abandon at metered with remainder R, owner
+    // manually re-grants a full budget, agent spends it, owner revokes it,
+    // owner re-keys. Adopting R on top of that spent budget would exceed the
+    // period's original grant. The guard refuses on any post-revoke grant,
+    // whatever its current status — a revoked grant still spent.
+    const seeded = await seedAgent()
+    await abandonAtMetered(seeded)
+    await grantAfter(seeded, 'revoked')
+    const successor = await openSuccessor(seeded)
+
+    expect(await adoptAbandonedCarry(successor.id, seeded.agentId)).toBeNull()
+    // Fail closed: the successor is untouched, still at preflight, and walks
+    // the empty path exactly as before this fix.
+    const after = await findRekey(successor.id, seeded.agentId)
+    expect(after!.stage).toBe('preflight')
+    expect(after!.carry_snapshot).toBeNull()
+  })
+
+  it("MUTATION TARGET — a COMPLETED re-key's snapshot is never adopted", async () => {
+    // A completed re-key's carry was already issued and possibly spent;
+    // adopting it would be the same over-grant with a different history.
+    // This is what pins the predecessor predicate to stage='abandoned'.
+    const seeded = await seedAgent()
+    const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, '0xtx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
+    await markIssued(rekey.id, seeded.agentId)
+    await markCompleted(rekey.id, seeded.agentId)
+    const successor = await openSuccessor(seeded)
+
+    expect(await adoptAbandonedCarry(successor.id, seeded.agentId)).toBeNull()
+  })
+
+  it("the abandoned re-key's own pending issue rows do not block adoption", async () => {
+    // A re-key abandoned at `issued` left `pending` delegation rows behind.
+    // They are permanently inert — completion requires stage `issued` and
+    // `abandoned` is terminal — so they must not trip the over-grant guard:
+    // the exact population this fix serves is an owner who got FAR and then
+    // lost the key.
+    const seeded = await seedAgent()
+    const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, '0xrevoketx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
+    await markIssued(rekey.id, seeded.agentId)
+    await grantAfter(seeded, 'pending', rekey.id)
+    await abandonRekey(rekey.id, seeded.agentId, 'lost the new key too')
+    const successor = await openSuccessor(seeded)
+
+    const adopted = await adoptAbandonedCarry(successor.id, seeded.agentId)
+    expect(adopted).not.toBeNull()
+    expect(adopted!.inherited_from_rekey_id).toBe(rekey.id)
+  })
+
+  it('an ordinary PENDING grant made after the revoke still blocks adoption', async () => {
+    // Only a re-key's own pending rows are inert. An ordinary grant's signing
+    // flow is still live — it can activate later — so it blocks, fail closed.
+    const seeded = await seedAgent()
+    await abandonAtMetered(seeded)
+    await grantAfter(seeded, 'pending', null)
+    const successor = await openSuccessor(seeded)
+
+    expect(await adoptAbandonedCarry(successor.id, seeded.agentId)).toBeNull()
+  })
+
+  it('an abandonment that never froze a carry (preflight/revoked) offers nothing to adopt', async () => {
+    const seeded = await seedAgent()
+    const rekey = await open(seeded)
+    await abandonRekey(rekey.id, seeded.agentId, 'changed my mind at preflight')
+    const successor = await openSuccessor(seeded)
+
+    expect(await adoptAbandonedCarry(successor.id, seeded.agentId)).toBeNull()
+  })
+
+  it('an empty frozen snapshot is not "a carry" — nothing is adopted from it', async () => {
+    // The empty-walk short-circuit writes []. Adopting [] would be a no-op
+    // wearing an inherited tx hash; refuse instead so the response stays
+    // truthful about what happened.
+    const seeded = await seedAgent()
+    await abandonAtMetered(seeded, [])
+    const successor = await openSuccessor(seeded)
+
+    expect(await adoptAbandonedCarry(successor.id, seeded.agentId)).toBeNull()
+  })
+
+  it('POSITIVE CONTROL — a live, slow re-key is structurally unreachable: the slot refuses a successor', async () => {
+    // The abandonment signal is the owner's explicit abandon, never elapsed
+    // time. A merely slow re-key still holds the one-in-flight slot, so a
+    // successor cannot even OPEN — there is no row for adoption to act on,
+    // and the live re-key is untouched.
+    const seeded = await seedAgent()
+    const slow = await open(seeded)
+    await markRevoked(slow.id, seeded.agentId, '0xslowtx')
+    await markMetered(slow.id, seeded.agentId, snapshot())
+    // Age it: hours old, exactly the shape a timeout-based reclaim would eat.
+    await db.query(
+      `UPDATE agent_rekeys SET created_at = NOW() - interval '48 hours',
+              updated_at = NOW() - interval '48 hours' WHERE id = $1`,
+      [slow.id],
+    )
+
+    await expect(openSuccessor(seeded)).rejects.toThrow(/idx_agent_rekeys_one_in_flight/)
+
+    const untouched = await findRekey(slow.id, seeded.agentId)
+    expect(untouched!.stage).toBe('metered')
+    expect(untouched!.carry_snapshot).toEqual(slow.carry_snapshot ?? untouched!.carry_snapshot)
+  })
+
+  it('is idempotent — the second call finds the row past preflight and does nothing', async () => {
+    const seeded = await seedAgent()
+    await abandonAtMetered(seeded)
+    const successor = await openSuccessor(seeded)
+
+    expect(await adoptAbandonedCarry(successor.id, seeded.agentId)).not.toBeNull()
+    expect(await adoptAbandonedCarry(successor.id, seeded.agentId)).toBeNull()
+
+    const row = await findRekey(successor.id, seeded.agentId)
+    expect(row!.stage).toBe('metered')
+  })
+
+  it('a chain of abandonments keeps carrying the ORIGINAL measurement clock', async () => {
+    // Abandon at metered, start again, adopt, abandon AGAIN, start a third
+    // time: the third re-key must still see the first re-key's metered_at —
+    // the only clock the remainder means anything in (#1849).
+    const seeded = await seedAgent()
+    const first = await abandonAtMetered(seeded)
+
+    const second = await openSuccessor(seeded)
+    const secondAdopted = await adoptAbandonedCarry(second.id, seeded.agentId)
+    expect(secondAdopted).not.toBeNull()
+    await abandonRekey(second.id, seeded.agentId, 'interrupted again')
+
+    const third = await open(seeded, {
+      newDelegateAddress: '0x00000000000000000000000000000000000000d4',
+    })
+    const thirdAdopted = await adoptAbandonedCarry(third.id, seeded.agentId)
+
+    expect(thirdAdopted).not.toBeNull()
+    expect(thirdAdopted!.carry_snapshot).toEqual(first.carry_snapshot)
+    expect(new Date(thirdAdopted!.metered_at as string).getTime()).toBe(
+      new Date(first.metered_at as string).getTime(),
+    )
   })
 })

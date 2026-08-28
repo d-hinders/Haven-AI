@@ -272,6 +272,32 @@ describe('money-path list stays in one piece', () => {
     )
   })
 
+  test('no over-read — curated non-money fixtures never trip the gate', () => {
+    // The PRE-EMPTIVE twin of the phantom check (#1905/#1903 cross-session
+    // review). The phantom check proves the list is not UNDER-reading (every
+    // glob names real code); this one proves it is not OVER-reading either:
+    // a list that matches everything is coverage theater, the exact failure
+    // mode #1030 started out in. Add real, tracked non-money files here as the
+    // perimeter grows; if a broadened glob starts tripping one of them, the
+    // sweep fails and the glob must be scoped down, not the fixture deleted.
+    const fixtures = [
+      'packages/frontend/src/app/how-it-works/page.tsx',
+      'packages/frontend/src/components/sidebar/Sidebar.tsx',
+      'packages/frontend/src/lib/formatTokenAmount.ts',
+      'packages/backend/src/routes/health.ts',
+      'packages/core/src/api-types.ts',
+      'docs/README.md',
+      'packages/frontend/src/app/page.tsx',
+    ]
+    const all = [...loadMoneyPathGlobs(), ...loadMoneyPathControlGlobs()]
+    const trips = fixtures.filter((f) => all.some((g) => matchesGlob(f, g)))
+    assert.deepEqual(
+      trips,
+      [],
+      'non-money fixtures matched by the money-path list: ' + trips.join(', '),
+    )
+  })
+
   test('the CASP perimeter doc covers the money-path list', () => {
     // The FOURTH copy (#1899).
     //

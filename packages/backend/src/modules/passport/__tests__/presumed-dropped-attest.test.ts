@@ -34,7 +34,7 @@ import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import * as repo from '../../../infra/repositories/agent-passports.js'
 import { issuePassport, setAnchor, setAnchorLiveness, setAnchorRecovery } from '../issuance.js'
-import type { AnchorResult } from '../issuance.js'
+import type { AnchorResult, RecoveredAnchor } from '../issuance.js'
 
 const CHAIN = 84532
 const DELEGATE = '0x' + 'a'.repeat(40)
@@ -62,8 +62,8 @@ async function seedAgentWithPassport(opts: { txHash?: string | null } = {}): Pro
   )
   const userId = user.rows[0].id
   const safe = await db.query<{ id: string }>(
-    `INSERT INTO user_safes (user_id, safe_address, chain_id)
-     VALUES ($1, $2, $3) RETURNING id`,
+    `INSERT INTO user_safes (user_id, safe_address, chain_id, execution_rail, account_type)
+     VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid') RETURNING id`,
     [userId, TREASURY, CHAIN],
   )
   const agent = await db.query<{ id: string }>(
@@ -156,7 +156,7 @@ describeDb('#1745 — the presumed-dropped re-mint, characterized on real Postgr
     // The stuck transaction is still in the mempool. `getTransactionReceipt`
     // has nothing to return for it — and returns exactly what it returns for
     // a dropped one. Before #1745 this minted a second credential.
-    const recovery = vi.fn(async (): Promise<AnchorResult | null> => null)
+    const recovery = vi.fn(async (): Promise<RecoveredAnchor | null> => null)
     const anchor = vi.fn(async () => ({
       attestationUid: '0x' + 'u'.repeat(64),
       txHash: '0x' + '22'.repeat(32),
@@ -181,7 +181,7 @@ describeDb('#1745 — the presumed-dropped re-mint, characterized on real Postgr
 
   it('withholding is a STALL, not a wedge — the row is immediately due again', async () => {
     const { agentId, userId } = await seedAgentWithPassport({ txHash: STUCK_TX })
-    setAnchorRecovery(vi.fn(async (): Promise<AnchorResult | null> => null))
+    setAnchorRecovery(vi.fn(async (): Promise<RecoveredAnchor | null> => null))
     setAnchor(vi.fn())
     setAnchorLiveness(vi.fn(async () => 'live' as const))
 
@@ -210,7 +210,7 @@ describeDb('#1745 — the presumed-dropped re-mint, characterized on real Postgr
       txHash: '0x' + '22'.repeat(32),
     }
     const anchor = vi.fn(async () => fresh)
-    setAnchorRecovery(vi.fn(async (): Promise<AnchorResult | null> => null))
+    setAnchorRecovery(vi.fn(async (): Promise<RecoveredAnchor | null> => null))
     setAnchor(anchor)
     setAnchorLiveness(vi.fn(async () => 'dead' as const))
 
@@ -225,7 +225,7 @@ describeDb('#1745 — the presumed-dropped re-mint, characterized on real Postgr
   it('NO probe wired = no re-mint — the default is fail-safe, not fall-through', async () => {
     const { agentId, userId } = await seedAgentWithPassport({ txHash: STUCK_TX })
     const anchor = vi.fn()
-    setAnchorRecovery(vi.fn(async (): Promise<AnchorResult | null> => null))
+    setAnchorRecovery(vi.fn(async (): Promise<RecoveredAnchor | null> => null))
     setAnchor(anchor)
     setAnchorLiveness(null) // nothing can prove death
 
@@ -251,9 +251,12 @@ describeDb('#1745 — the presumed-dropped re-mint, characterized on real Postgr
 
   it('a recoverable receipt is still recovered, never re-minted (#1043, must not regress)', async () => {
     const { agentId, userId } = await seedAgentWithPassport({ txHash: STUCK_TX })
-    const recovered: AnchorResult = {
+    const recovered: RecoveredAnchor = {
       attestationUid: '0x' + 'c'.repeat(64),
       txHash: STUCK_TX,
+      // What the mined tx attested — the CURRENT delegate, so this healthy
+      // recovery stays out of the #1699 re-anchor queue (#1847).
+      attested: { agentEoa: DELEGATE, smartAccount: '0x' + '0'.repeat(40) },
     }
     const anchor = vi.fn()
     setAnchorRecovery(vi.fn(async () => recovered))
@@ -270,7 +273,7 @@ describeDb('#1745 — the presumed-dropped re-mint, characterized on real Postgr
 
   it('a passport that never broadcast anchors normally, and the broadcast hook persists the hash', async () => {
     const { agentId, userId } = await seedAgentWithPassport({ txHash: null })
-    const recovery = vi.fn(async (): Promise<AnchorResult | null> => null)
+    const recovery = vi.fn(async (): Promise<RecoveredAnchor | null> => null)
     const minted: AnchorResult = {
       attestationUid: '0x' + 'd'.repeat(64),
       txHash: '0x' + '33'.repeat(32),

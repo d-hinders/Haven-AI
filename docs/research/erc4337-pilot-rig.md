@@ -1,9 +1,8 @@
 ---
 owner: "@d-hinders"
 status: research
-covers:
-  - packages/qa-agent/src/pilot/**
-last-verified: "2026-07-12"
+covers: []  # #2087: every pilot script this report described (pilot:rig, pilot:provision, pilot:policies, pilot:compare) was deleted with the retired rails. The old `packages/qa-agent/src/pilot/**` glob still RESOLVES — three delegation-rail scripts remain — so it would silently map this superseded session-rail report onto code it has nothing to do with, and implicate it as advisory drift on every delegation-rail change. Narrative historical record; no live code to cover.
+last-verified: "2026-08-27" # #2087: front-matter only — `covers` emptied for the reason above. The BODY is unchanged and deliberately so: it is an explicitly superseded record (banner since #834) and its `npm run pilot:*` references are archaeology of what was run at the time, not instructions. Not re-verified. Prior: none — this doc carried a bare date with no verification note before now.
 ---
 
 > **Superseded (#834, 2026-07-12):** the session rail this report piloted is

@@ -56,7 +56,9 @@ describe('lost-result recovery (#1043)', () => {
     rows: [{
       delegate_address: '0x' + 'a'.repeat(40), agent_status: 'active',
       chain_id: 84532, safe_address: '0x' + 'b'.repeat(40),
-      account_type: null, execution_rail: null,
+      // #2138: these tests exercise lost-result recovery on the LIVE rail;
+      // issuance is delegation-rail only, so the facts must say so.
+      account_type: 'delegator_hybrid', execution_rail: 'delegation',
     }],
   }
   const pendingRow = (extra: Record<string, unknown>) => ({
@@ -67,7 +69,12 @@ describe('lost-result recovery (#1043)', () => {
   })
 
   it('recovers from the receipt instead of re-minting when a tx hash exists without a UID', async () => {
-    const recovered = { attestationUid: '0x' + 'u'.repeat(64), txHash: '0x' + 'f'.repeat(64) }
+    const recovered = {
+      attestationUid: '0x' + 'u'.repeat(64),
+      txHash: '0x' + 'f'.repeat(64),
+      // What the mined tx attested (#1847) — required of every recovery.
+      attested: { agentEoa: '0x' + 'a'.repeat(40), smartAccount: '0x' + '0'.repeat(40) },
+    }
     const anchor = vi.fn()
     const recovery = vi.fn(async () => recovered)
     setAnchor(anchor)

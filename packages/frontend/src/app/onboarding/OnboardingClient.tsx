@@ -8,9 +8,13 @@
  * dashboard, where `DashboardOnboardingGuide` takes over. There is no signer
  * fork here — the delegation rail (epic #821/#836) is passkey-first, and an
  * EOA is a later addition to an account's signer set, not a starting choice.
- * A wallet-owned account is still reachable post-onboarding from
- * Accounts → Add account, and a wallet can join an existing account's signer
- * set from Backup & recovery.
+ * A wallet can join an existing account's signer set from Backup & recovery.
+ *
+ * There is no RAIL fork here either, since #1984 (epic #1440): onboarding
+ * always provisions a Hybrid delegation-rail account. The Safe rail is
+ * retired, `NEXT_PUBLIC_DELEGATION_ONBOARDING` is gone, and the Accounts
+ * "Add account" entry point — the last way to reach a Safe deploy or import —
+ * went with it.
  */
 
 import { Check } from 'lucide-react'
@@ -20,13 +24,12 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
 import { displayName } from '@/lib/user'
-import { DEFAULT_CHAIN_ID, DELEGATION_ONBOARDING_CHAIN_IDS, getChainConfig } from '@/lib/chains'
+import { DEFAULT_CHAIN_ID, getChainConfig } from '@/lib/chains'
 import { useDeployableChains } from '@/hooks/useDeployableChains'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Select } from '@/components/ui/Select'
-import PasskeyEnrollFlow from './PasskeyEnrollFlow'
 import HybridEnrollFlow from './HybridEnrollFlow'
 
 type Phase = 'create' | 'success'
@@ -62,17 +65,6 @@ export default function OnboardingClient() {
   // redirect below can't fire mid-flow — completing enrollment gives the user
   // an account, which would otherwise bounce them past the success state.
   const creationStartedRef = useRef(false)
-
-  // Delegation-rail onboarding (#886): dark-launched behind a flag, on the
-  // chains where the rail is live — Base Sepolia since the pilot, Base
-  // mainnet since the #908 launch prep (the flag on the prod Vercel scope is
-  // the actual launch switch; flipping it is the LAST step of the mainnet
-  // canary runbook, docs/operations/mainnet-canary.md). When active, the
-  // passkey path creates a Hybrid account (counterfactual, zero tx) instead
-  // of deploying a Safe.
-  const delegationOnboarding =
-    process.env.NEXT_PUBLIC_DELEGATION_ONBOARDING === '1' &&
-    DELEGATION_ONBOARDING_CHAIN_IDS.has(selectedChainId)
 
   // Only offer chains the backend actually serves deploys on (#679). If the
   // current selection isn't served (e.g. the default is mainnet but this env
@@ -132,13 +124,6 @@ export default function OnboardingClient() {
   async function handleHybridComplete(args: { accountAddress: `0x${string}` }) {
     setError('')
     updateUser({ safe_address: args.accountAddress, wallet_address: null })
-    await refreshUser()
-    setPhase('success')
-  }
-
-  async function handlePasskeyComplete(args: { safeAddress: `0x${string}` }) {
-    setError('')
-    updateUser({ safe_address: args.safeAddress, wallet_address: null })
     await refreshUser()
     setPhase('success')
   }
@@ -244,27 +229,21 @@ export default function OnboardingClient() {
                 </div>
               )}
 
-              {delegationOnboarding ? (
-                <HybridEnrollFlow
-                  user={user}
-                  selectedChainId={selectedChainId}
-                  onCreatingChange={handleCreatingChange}
-                  onComplete={(args) => {
-                    void handleHybridComplete(args)
-                  }}
-                  onError={setError}
-                />
-              ) : (
-                <PasskeyEnrollFlow
-                  user={user}
-                  selectedChainId={selectedChainId}
-                  onCreatingChange={handleCreatingChange}
-                  onComplete={(args) => {
-                    void handlePasskeyComplete(args)
-                  }}
-                  onError={setError}
-                />
-              )}
+              {/* Hybrid, unconditionally (#1984). There is no fork left to
+                  take: the Safe rail is retired, its deploy/import routes
+                  answer 410, and the flag that used to choose between them
+                  (NEXT_PUBLIC_DELEGATION_ONBOARDING) is gone — a flag whose
+                  "off" branch cannot succeed is not a switch, it is a way to
+                  brick onboarding. */}
+              <HybridEnrollFlow
+                user={user}
+                selectedChainId={selectedChainId}
+                onCreatingChange={handleCreatingChange}
+                onComplete={(args) => {
+                  void handleHybridComplete(args)
+                }}
+                onError={setError}
+              />
             </div>
           )}
 

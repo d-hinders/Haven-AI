@@ -15,7 +15,7 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/middleware/agentToolAudit.ts
-last-verified: "2026-08-21" # #1672: the local-MCP example command drops --runtime claude-code — runtime selection is detection-first now (see mcp-runtime-compatibility.md); everything else re-read and unchanged. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
+last-verified: "2026-08-25" # #2041: the scheme-comparison table stated, in structured form, that erc7710 settles exclusively through `haven_settle_mcp_tool` -- the doc set's most direct version of "only the MCP-merchant tools can reach the preferred scheme". The settle column is now SPLIT by merchant transport, because the two settle differently and the distinction was invisible: an MCP merchant is called BY Haven so the tool delivers the header, a plain-HTTP merchant is retried by the AGENT so the tool hands it back. The plain-HTTP erc7710 cell was empty until #2041, which is the defect. Also qualified "the absence of `payment_header` is what selects erc7710" as true of `haven_settle_mcp_tool` specifically, and recorded the generic path's different mechanic (reported at quote, echoed at submit -- #1360 explicitness on a second entry point), and added the erc7710 shape to the decomposed-flow block. The two hosted-specific edge-signer properties (#1138 binding, #1455 child verification) and the rail-scope correction this doc made on 2026-08-25 re-read against the diff: both stand unchanged. Prior: Corrected a STALE refusal claim, not a behaviour change. The doc said the hosted keyless construct rejects typed-data funding intents, so delegation-rail x402 needed the local flow, and that #1986 therefore left hosted x402 "with no working rail at all". Both halves were overtaken: #1254 forwards signature_scheme + typed_data verbatim to the edge signer (delegationSignFields, packages/mcp-server/src/tools.ts), #1456 added the hosted erc7710 settle branch, and BOTH hosted schemes have green QA scenarios against the real deployed hosted MCP plus the real signer (x402-hosted-mcp-signer.ts #1154, x402-erc7710-hosted.ts #1457). The #1986 sentence was reasoning from a premise that had already stopped holding: the fail-close is rail-scoped and applies to both topologies equally, so it removed the legacy rail, never the hosted surface. Rewrote the section around what the two topologies now actually differ on — where the key lives and which party refuses — and added the scheme/payload/settle-shape table plus the two edge-signer checks (#1138 binding, #1455 child verification) the local flow does not exercise. No code changed and no other claim in this doc was re-tested beyond re-reading it for contradiction; the custody boundary and tool-model sections stand unchanged. Prior: #1986: the rail split re-read — the hosted keyless x402 construct now has NO working rail, because the allowance rail it served fails closed. Added; the local-vs-hosted signing/relay distinction itself is unchanged and re-verified. Prior: #1672: the local-MCP example command drops --runtime claude-code — runtime selection is detection-first now (see mcp-runtime-compatibility.md); everything else re-read and unchanged. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Haven — Local MCP vs Hosted MCP + Edge Signer
@@ -84,22 +84,73 @@ For a paid MCP tool in hosted mode, prefer:
 haven_pay_mcp_tool → haven_sign_x402 → haven_settle_mcp_tool
 ```
 
-The decomposed generic hosted flow remains:
+The decomposed generic hosted flow remains, in two shapes since
+[#2041](https://github.com/d-hinders/Haven-AI/issues/2041):
 
 ```text
+EIP-3009 bridge
 haven_pay_x402_quote → haven_sign → haven_submit
   → haven_x402_sign_header → merchant retry
+
+erc7710 direct settlement
+haven_pay_x402_quote → haven_sign
+  → haven_submit { settlement_scheme: "erc7710" } → payment_header
+  → merchant retry
 ```
 
 In both cases, Haven's backend constructs and records the payment intent.
 Hosted MCP never signs; it relays already signed, context-bound payloads.
 
-The modes also differ by rail. The local flow dispatches on the
-server-provided `sign_data.signature_scheme`, including the delegation rail's
-EIP-712 typed data. The hosted keyless construct rejects typed-data funding
-intents with a hard `HavenSigningError` before any signing context reaches the
-edge signer, so x402 for delegation-rail accounts currently requires the local
-flow (`HavenClient` with `delegateKey`).
+Both modes dispatch on the server-provided `sign_data.signature_scheme`,
+including the delegation rail's EIP-712 typed data. Hosted MCP does not sign it
+— it forwards `signature_scheme` and `typed_data` **verbatim** to the local edge
+signer (`delegationSignFields`, #1254), which is the whole point of the keyless
+split. So x402 works in both topologies on the delegation rail, in both
+settlement schemes:
+
+| Scheme | Signed payload | Hosted settle call (MCP merchant) | Hosted settle call (plain-HTTP merchant) | Proven by |
+|---|---|---|---|---|
+| EIP-3009 bridge | `eip712_userop` — the funding UserOp | `haven_settle_mcp_tool` **with** `payment_header` | `haven_submit`, then `haven_x402_sign_header` locally | `x402-hosted-mcp-signer.ts` (#1154) |
+| erc7710 direct | `eip712_delegation` — the settlement child | `haven_settle_mcp_tool` **without** `payment_header` (#1456) | `haven_submit` **with** `settlement_scheme: "erc7710"` (#2041) — returns `payment_header` | `x402-erc7710-hosted.ts` (#1457) |
+
+The settle column is split because the two merchant transports settle
+differently and the distinction was previously invisible: an MCP merchant is
+called BY Haven, so the settle tool delivers the header itself; a plain-HTTP
+merchant is retried by the AGENT, so the tool stops at handing the header back.
+Until #2041 the plain-HTTP row simply had no erc7710 entry — the generic path
+could not reach the preferred scheme at all, which meant the merchant transport
+was silently deciding the settlement scheme.
+
+Both scenarios run in the `qa-dev` cadence that `qa-freshness` reads for
+promotion gating; they self-skip when `QA_HOSTED_MCP_URL` /
+`QA_DEMO_MERCHANT_URL` are unset, and `.github/workflows/qa-dev.yml` sets both.
+
+The absence of `payment_header` is what selects erc7710 **on
+`haven_settle_mcp_tool`**: on that scheme the signature IS the settlement child,
+so it goes to `POST /x402/:id/settle` and Haven assembles the merchant header —
+there is no funding leg to relay and no agent-supplied header to preflight. The
+3009 path always carries a header the local signer built.
+
+That is not the only selection mechanic in the tool surface. On the generic
+`haven_pay_x402_quote` / `haven_submit` path (#2041) the scheme is instead
+reported explicitly as `settlement_scheme` at quote time and echoed by the
+caller at submit time — the same #1360 explicitness property, applied to a
+second entry point, and the reason the generic path never has to infer a scheme
+from a `payTo` shape it did not choose.
+
+Two hosted-specific properties the local flow does not exercise, both on the
+edge signer rather than on Haven: `assertExpectedBinding` verifies Haven's
+signed expected context and re-derives the digest of the bytes in hand (v2
+carries `typedDataHash` for typed-data schemes, #1138), and
+`verifySettlementChild` re-derives the erc7710 child's meaning from
+**signer-pinned** caveat-enforcer addresses rather than from anything Haven
+sends (#1455). The signer is the party that refuses; hosted MCP relays.
+
+**Rail scope (#1986).** What the legacy AllowanceModule rail's fail-close
+removed is the legacy rail, not the hosted topology: `POST /x402/authorize`
+answers HTTP 410 for an `allowance_module` account, above the funding leg, in
+BOTH topologies equally. Delegation-rail accounts — every account onboarded
+since #1984 — are unaffected, hosted and local alike.
 
 ## Related docs
 

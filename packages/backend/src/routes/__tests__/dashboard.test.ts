@@ -109,9 +109,6 @@ describe('dashboard routes', () => {
       if (sql.includes('FROM agents a')) {
         return Promise.resolve({ rows: [AGENT] })
       }
-      if (sql.includes("status IN ('pending', 'approved')")) {
-        return Promise.resolve({ rows: [{ count: '0' }] })
-      }
       if (sql.includes('FROM agent_allowances')) {
         return Promise.resolve({ rows: [] })
       }
@@ -148,8 +145,9 @@ describe('dashboard routes', () => {
     )?.[0] as string
     expect(progressQuery).toContain('FROM payment_intents')
     expect(progressQuery).toContain("status = 'confirmed'")
-    expect(progressQuery).toContain('FROM approval_requests')
-    expect(progressQuery).toContain("status = 'executed'")
+    // #2055: the approval_requests EXISTS branch is gone with the table —
+    // payment_intents is the only source of "has this agent ever paid".
+    expect(progressQuery).not.toContain('approval_requests')
 
     const agentQuery = mockQuery.mock.calls.find(([sql]) =>
       String(sql).includes('FROM agents a'),
@@ -157,27 +155,14 @@ describe('dashboard routes', () => {
     expect(agentQuery).toContain("a.status IN ('active', 'paused')")
   })
 
-  it('reports the actionable-approval COUNT the query returned — not merely that a query ran (#1208)', async () => {
-    // Before this test the count had zero assertions: the beforeEach mock
-    // returned '0', nothing read the payload field, and any arithmetic or
-    // wiring error shipped green. Return a distinctive value and follow it
-    // to the response.
-    mockQuery.mockImplementation((sql: string) => {
-      if (sql.includes("status IN ('pending', 'approved')")) {
-        return Promise.resolve({ rows: [{ count: '3' }] })
-      }
-      if (sql.includes('AS has_first_agent_payment')) {
-        return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
-      }
-      if (sql.includes('FROM user_safes') && sql.includes('ORDER BY created_at ASC')) {
-        return Promise.resolve({ rows: [SAFE] })
-      }
-      if (sql.includes('FROM agents a')) {
-        return Promise.resolve({ rows: [AGENT] })
-      }
-      return Promise.resolve({ rows: [] })
-    })
-
+  // #2055 (epic #1440, #2021 readability waiver): the approval queue is gone,
+  // so `actionableApprovals` / `pendingApprovals` are structurally zero — the
+  // wire fields survive for compatibility but no query backs them anymore.
+  // Replaces the pre-#2055 "reports the actionable-approval COUNT" and
+  // "scopes the approval count to the requesting user" tests, which pinned a
+  // query (`status IN ('pending', 'approved')` against `approval_requests`)
+  // that no longer runs.
+  it('reports actionableApprovals/pendingApprovals as hardcoded 0 — no approval query runs', async () => {
     const response = await app.inject({
       method: 'GET',
       url: '/dashboard/overview',
@@ -186,33 +171,13 @@ describe('dashboard routes', () => {
 
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({
-      actionableApprovals: 3,
-      pendingApprovals: 3,
+      actionableApprovals: 0,
+      pendingApprovals: 0,
     })
-  })
-
-  it('scopes the approval count to the requesting user — the EXECUTED call, not the constant (#1208)', async () => {
-    // The cross-tenant variant nothing guarded: drop the WHERE user_id and
-    // every tenant's approval volume leaks onto everyone's dashboard while
-    // the suite stays green. Assert against the call the route actually made
-    // (SQL text AND bind params) rather than the exported *_SQL constant —
-    // a repository that stopped using the constant would keep a
-    // constant-based assertion true forever.
-    const response = await app.inject({
-      method: 'GET',
-      url: '/dashboard/overview',
-      headers: { authorization: `Bearer ${token}` },
-    })
-    expect(response.statusCode).toBe(200)
-
-    const countCall = mockQuery.mock.calls.find(([sql]) =>
-      String(sql).includes("status IN ('pending', 'approved')"),
-    )
-    expect(countCall, 'the approval count query must run').toBeDefined()
-    const [sql, params] = countCall as [string, unknown[]]
-    expect(sql).toMatch(/FROM approval_requests/)
-    expect(sql).toMatch(/WHERE user_id = \$1/)
-    expect(params, 'the tenant bind must be the JWT sub').toEqual(['user-1'])
+    expect(
+      mockQuery.mock.calls.some(([sql]) => /approval_requests/i.test(String(sql))),
+      'no query should ever reference the dropped table',
+    ).toBe(false)
   })
 
   it('counts same-address transactions on separate chains independently', async () => {
@@ -227,9 +192,6 @@ describe('dashboard routes', () => {
       }
       if (sql.includes('FROM agents a')) {
         return Promise.resolve({ rows: [] })
-      }
-      if (sql.includes("status IN ('pending', 'approved')")) {
-        return Promise.resolve({ rows: [{ count: '0' }] })
       }
       if (sql.includes('FROM user_daily_portfolio_snapshots')) {
         return Promise.resolve({ rows: [] })
@@ -303,7 +265,6 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
       if (sql.includes('FROM agents a')) {
         return Promise.resolve({ rows: [{ ...AGENT, account_type: 'delegator_hybrid' }] })
       }
-      if (sql.includes("status IN ('pending', 'approved')")) return Promise.resolve({ rows: [{ count: '0' }] })
       if (sql.includes('FROM agent_allowances')) {
         // The frozen onboarding mirror — must NOT be what the dashboard shows.
         return Promise.resolve({ rows: [{ agent_id: AGENT.id, token_symbol: 'USDC', allowance_amount: '10.00', reset_period_min: 1440 }] })

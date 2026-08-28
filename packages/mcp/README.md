@@ -95,6 +95,8 @@ Environment variable form:
 - `haven_get_resume_state`
 - `haven_get_agent`
 - `haven_get_allowances`
+- `haven_discover_tools`
+- `haven_submit_catalog_entry`
 - `haven_list_receipts`
 
 ## First-launch consent
@@ -117,8 +119,15 @@ Tools this server will expose to your agent runtime:
       Return configured and on-chain allowance state …
   …
 
-On-chain allowance (the real spend gate, Safe AllowanceModule):
+On-chain budget (the real spend gate — enforced by the agent's
+signed delegation, not by Haven):
   • up to 50.000000 USDC per 1440 min
+
+Anything above the on-chain budget is declined before any money
+moves — it is not queued, and no one is asked to review it. If the
+agent needs more room, the wallet owner grants or raises the budget
+in Haven. Revoking the agent on-chain disables every MCP tool that
+would spend.
 
 Consent hash: 6f4b…d1a2
 ```
@@ -151,14 +160,15 @@ Every MCP tool invocation tags the underlying Haven API call with
 `X-Haven-MCP-Tool: <tool_name>`. The backend records one
 `agent_tool_invocations` row per call (tool name, payment id when present,
 result status, nextAction, error code, HTTP status, timestamp). The agent's
-activity feed in the Haven dashboard surfaces these rows alongside payments
-and approval requests, so the wallet owner can see exactly which tools the
+activity feed in the Haven dashboard surfaces these rows alongside payments,
+so the wallet owner can see exactly which tools the
 agent called and what happened — even for read-only calls that don't move
 money.
 
-The audit log is informational. The on-chain Safe AllowanceModule remains
-the only thing that can stop a spend; revoking the agent on-chain disables
-every MCP tool that would settle, regardless of audit state.
+The audit log is informational. The agent's signed budget delegation — its
+on-chain caveat enforcers — remains the only thing that can stop a spend;
+revoking the agent on-chain disables every MCP tool that would settle,
+regardless of audit state.
 
 ## Manual sanity test
 
@@ -167,9 +177,14 @@ every MCP tool that would settle, regardless of audit state.
    delegate address.
 3. Call `haven_quote_x402` for a paid test URL.
 4. Call `haven_pay_x402_quote` with the returned quote.
-5. If the result has `nextAction: "wait_for_user_approval"`, approve in Haven,
-   then call `haven_resume_x402_payment` with the returned `resume_state` or
-   `payment_id`.
+5. The pay tool performs the merchant retry itself, so a successful call needs
+   no follow-up. If the call is declined for budget, raise the agent budget in
+   Haven and repeat from step 4 — Haven holds no approval queue, so there is
+   nothing to wait for. If the process crashes after payment, a later
+   `haven_get_payment_status` call may report
+   `nextAction: 'retry_original_x402_request'` — only then call
+   `haven_resume_x402_payment` with the preserved resume state or payment id;
+   do not call it speculatively.
 
 The legacy MPP demo flow is retired (#1328) — pay through the x402 merchant
 flow above instead.

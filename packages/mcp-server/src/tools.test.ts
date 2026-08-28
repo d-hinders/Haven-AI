@@ -8,7 +8,7 @@ import {
   MerchantTimeoutError,
   SIGNER_UPDATE_FALLBACK,
 } from '@haven_ai/sdk'
-import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
+import { createToolHandlers, toolDescriptions, type ToolSuccess, type ToolPayload } from './tools.js'
 
 const DELEGATE_KEY = '0x' + 'a'.repeat(64)
 const HEADER_SIGNING_KEY = '0x' + '12'.repeat(32)
@@ -572,9 +572,18 @@ describe('haven_pay_x402_quote', () => {
     expect(payload.success).toBe(false)
     if (payload.success) throw new Error('expected failure')
     expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
-    // Guard is pure + pre-funding: neither the agent fetch nor the intent ran.
-    expect(calls.find((c) => c.url.includes('/agent'))).toBeUndefined()
+    // #2041 CHARACTERIZATION CHANGE, stated rather than quietly dropped: this
+    // used to also assert the agent fetch had not run. The cap is now asserted
+    // AFTER scheme selection — because a cap checked before selection is a cap
+    // checked against an option that may not be the one authorized, which was
+    // wrong in both directions (#2051, and the over-binding mirror) — and
+    // selection needs the account's rail. So a read-only GET now precedes this
+    // refusal.
+    //
+    // The property that protects money is unchanged and still pinned: no
+    // authorize is created, so no funding intent exists and no funds moved.
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+    expect(calls.every((c) => c.method === 'GET')).toBe(true)
   })
 
   it('returns the unsigned funding hash + x402 data for the edge, signing nothing', async () => {
@@ -819,6 +828,69 @@ describe('haven_resume_x402_payment', () => {
     expect(result.data.payment_required).toBeDefined()
     expect(result.data.x402).toBeDefined()
     expect(result.data.tx_hash).toBe('0xfunded')
+  })
+
+  /**
+   * #2041 (re-review NIT): the erc7710 disposition was an ARGUMENT in a comment
+   * and nothing would have failed if a future change let an erc7710 intent
+   * reach this handler. Pin the invariant instead of resting it on prose.
+   *
+   * The gate requires nextAction === 'retry_original_x402_request', which the
+   * backend emits for exactly one state: 'executed', meaning the user completed
+   * the FUNDING payment. A successful erc7710 settle instead leaves the intent
+   * at 'submitted' (#1508) — the merchant redeems the chain afterwards. So this
+   * models the real end state of an erc7710 payment and pins that resume
+   * REFUSES it, rather than half-resuming a flow that has no funding leg to
+   * retry. If someone later routes erc7710 into the resume lifecycle, this test
+   * is what makes them confront the question.
+   */
+  it('#2041: refuses a SUBMITTED erc7710 intent — the resume lifecycle is the funding one', async () => {
+    stubFetch({
+      'GET /machine-payments/pay_7710_submitted/status': {
+        status: 200,
+        body: {
+          payment_id: 'pay_7710_submitted',
+          status: 'submitted',
+          // NOT retry_original_x402_request: nothing was funded, so there is no
+          // funding payment for the user to have completed.
+          next_action: 'check_status_later',
+          rail: 'x402',
+          tx_hash: null,
+          message: 'The payment was submitted and is waiting for confirmation.',
+        },
+      },
+    })
+
+    const result = await handlers().haven_resume_x402_payment({
+      resume_state: {
+        rail: 'x402' as const,
+        paymentId: 'pay_7710_submitted',
+        paymentRequired: PAYMENT_REQUIRED,
+        accepted: PAYMENT_REQUIRED.accepts[0],
+        url: 'https://merchant.test/paid',
+        resourceUrl: 'https://merchant.test/paid',
+        description: null,
+        amountAtomic: '2500000',
+        amount: '2.50',
+        token: 'USDC',
+        asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+        network: 'base',
+        chainId: 8453,
+        merchantAddress: '0xMerchant',
+      },
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    // The gate refuses with the payment-state 409 rather than handing back a
+    // resume context. (The message is the backend's own — the handler prefers
+    // it over its fallback string — so the invariant is asserted on the refusal
+    // and its status, not on prose that a backend copy edit could change.)
+    expect((result as unknown as Record<string, unknown>).statusCode).toBe(409)
+    // And critically: no signing context for a scheme whose signing step has
+    // already happened.
+    expect((result as unknown as Record<string, unknown>).payload_hash).toBeUndefined()
+    expect((result as unknown as Record<string, unknown>).x402).toBeUndefined()
   })
 
   it('rejects when no payment_id and no resume_state provided', async () => {
@@ -2401,6 +2473,22 @@ describe('haven_settle_mcp_tool', () => {
     // payment_id is echoed on the not-settled path too, for status follow-up.
     expect(result.data.payment_id).toBe('pay_pending')
     expect(spy).not.toHaveBeenCalled()
+
+    // #2101: this branch used to emit next_action=wait_for_user_approval beside
+    // a reason telling the agent not to wait — a payload contradicting itself,
+    // with the FIELD winning under the agent contract. No live rail can ever
+    // resolve that wait (410 on the legacy rail per #1986; 403/502 at prepare
+    // on the delegation rail; `approval_requests` dropped by #2055), so the
+    // verdict is stop. This assertion was mutation-proven: it is the one that
+    // was missing when the field was first corrected.
+    const guidance = result.data as unknown as {
+      next_action: string
+      safe_to_continue: boolean
+      reason: string
+    }
+    expect(guidance.next_action).toBe('stop_and_tell_user')
+    expect(guidance.safe_to_continue).toBe(false)
+    expect(guidance.reason).toContain('do not wait for an approval')
   })
 
   it('waits for on-chain funding confirmation BEFORE delivering to the merchant', async () => {
@@ -3632,11 +3720,16 @@ describe('structured agent guidance (#1308)', () => {
     const result = ok<{ next_action: string; safe_to_continue: boolean }>(
       await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
     )
-    expect(result.data.next_action).toBe('wait_for_user_approval')
+    // #2101: the authoritative field must say STOP, not wait. No live rail
+    // mints this status (410 on the legacy rail per #1986; 403/502 at prepare
+    // on the delegation rail; `approval_requests` dropped by #2055), so an
+    // agent that followed `wait_for_user_approval` here — the field the agent
+    // contract says to follow FIRST — would poll a loop that cannot terminate.
+    expect(result.data.next_action).toBe('stop_and_tell_user')
     expect(result.data.safe_to_continue).toBe(false)
   })
 
-  it('pending approval is UNSAFE to continue and points at status polling', async () => {
+  it('a retained pending status is UNSAFE to continue and tells the agent to stop', async () => {
     stubFetch({
       ...stubs(),
       'POST /x402': {
@@ -3652,8 +3745,13 @@ describe('structured agent guidance (#1308)', () => {
       agent_summary: Record<string, unknown>
     }>(await pay())
 
+    // #2101: the authoritative field must say STOP, not wait. No live rail
+    // mints this status (410 on the legacy rail per #1986; 403/502 at prepare
+    // on the delegation rail; `approval_requests` dropped by #2055), so an
+    // agent that followed `wait_for_user_approval` here — the field the agent
+    // contract says to follow FIRST — would poll a loop that cannot terminate.
     expect(result.data.status).toBe('pending_approval')
-    expect(result.data.next_action).toBe('wait_for_user_approval')
+    expect(result.data.next_action).toBe('stop_and_tell_user')
     expect(result.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
     expect((result.data as { next_tool_server?: string }).next_tool_server).toBe('haven')
     expect((result.data as { next_tool_name?: string }).next_tool_name).toBe('haven_get_payment_status')
@@ -4487,5 +4585,1361 @@ describe('next_tool emission literals (#1588 review)', () => {
       .map((m) => m[1])
       .filter((v) => v.startsWith('mcp__'))
     expect(prefixed).toEqual([])
+  })
+})
+
+// ── haven_discover_tools: verified-directory badges + filter (#1716) ────────
+
+describe('haven_discover_tools verified directory (#1716)', () => {
+  const directoryFixture = {
+    entries: [
+      {
+        id: 'cat_dir_1',
+        name: 'Directory Summarizer',
+        description: 'Self-submitted service',
+        category: 'api',
+        resource_url: 'https://directory.example.com/mcp',
+        rail: 'x402',
+        protocol: 'mcp',
+        tool_name: 'summarize',
+        tool_arguments: null,
+        price_display: null,
+        price_atomic: null,
+        asset: null,
+        network: null,
+        status: 'active',
+        verified_at: '2026-08-23T10:00:00.000Z',
+        source: 'ingestion',
+        domain_verified: true,
+        verified_payable: true,
+      },
+      {
+        id: 'cat_cur_1',
+        name: 'Curated API',
+        description: 'Operator-curated',
+        category: 'ai',
+        resource_url: 'https://api.example.com/paid',
+        rail: 'x402',
+        protocol: 'http',
+        tool_name: null,
+        tool_arguments: null,
+        price_display: '$0.01 USDC',
+        price_atomic: '10000',
+        asset: 'USDC',
+        network: 'eip155:8453',
+        status: 'active',
+        verified_at: '2026-08-01T00:00:00.000Z',
+        source: 'operator',
+        domain_verified: false,
+        verified_payable: false,
+      },
+    ],
+  }
+
+  it('surfaces the badge fields on discovered entries', async () => {
+    stubFetch({ 'GET /catalog': { status: 200, body: directoryFixture } })
+    const result = ok<Array<Record<string, unknown>>>(await handlers().haven_discover_tools({}))
+    expect(result.data).toHaveLength(2)
+    expect(result.data[0]).toMatchObject({
+      source: 'ingestion',
+      domain_verified: true,
+      verified_payable: true,
+    })
+    expect(result.data[1]).toMatchObject({
+      source: 'operator',
+      domain_verified: false,
+      verified_payable: false,
+    })
+  })
+
+  it('filters client-side on verified=verified and verified=operator', async () => {
+    stubFetch({ 'GET /catalog': { status: 200, body: directoryFixture } })
+
+    const verified = ok<Array<Record<string, unknown>>>(
+      await handlers().haven_discover_tools({ verified: 'verified' }),
+    )
+    expect(verified.data.map((e) => e.id)).toEqual(['cat_dir_1'])
+
+    const operator = ok<Array<Record<string, unknown>>>(
+      await handlers().haven_discover_tools({ verified: 'operator' }),
+    )
+    expect(operator.data.map((e) => e.id)).toEqual(['cat_cur_1'])
+  })
+})
+
+// ── haven_submit_catalog_entry (#1716) ──────────────────────────────────────
+
+describe('haven_submit_catalog_entry (#1716)', () => {
+  it('posts the resource_url to the queue-only endpoint and returns token + status', async () => {
+    stubFetch({
+      'POST /catalog/submit': {
+        status: 201,
+        body: {
+          id: '00000000-0000-4000-8000-000000000001',
+          verify_token: 'ab'.repeat(24),
+          status: 'submitted',
+        },
+      },
+    })
+
+    const result = ok<{ id: string; verify_token: string; status: string }>(
+      await handlers().haven_submit_catalog_entry({
+        resource_url: 'https://merchant.example/mcp',
+      }),
+    )
+    expect(result.data).toMatchObject({
+      id: '00000000-0000-4000-8000-000000000001',
+      verify_token: 'ab'.repeat(24),
+      status: 'submitted',
+    })
+    const call = calls.find((c) => c.method === 'POST' && c.url.includes('/catalog/submit'))
+    expect(call?.body).toEqual({ resource_url: 'https://merchant.example/mcp' })
+  })
+})
+
+/**
+ * #2041 — the #1450 preference rule reaches the GENERIC plain-HTTP entry point.
+ *
+ * #1456 covered `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` and
+ * scoped itself to exactly those two. `haven_quote_x402` → `haven_pay_x402_quote`
+ * — the transport most real merchants are actually on — hard-routed to the
+ * EIP-3009 bridge, so the merchant TRANSPORT was silently deciding the
+ * settlement SCHEME.
+ *
+ * The NEGATIVES carry this suite, the same way they carry the #1456 one: a
+ * selector that always answered "erc7710" would pass a happy-path-only file.
+ * Every positive here is paired with a control on the other branch.
+ */
+describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
+  const FACILITATOR = '0x4444444444444444444444444444444444444444'
+  /**
+   * The load-bearing fixture: a plain-HTTP merchant that ADVERTISES erc7710.
+   *
+   * The two entries carry **deliberately different amounts**, and that is the
+   * point of the fixture rather than incidental detail. #1453 made the two
+   * option selectors mutually exclusive, so the cap is compared against one
+   * accepts[] entry while the erc7710 branch authorizes the OTHER — and
+   * nothing ties their amounts together. Building the erc7710 entry as a plain
+   * spread of the standard one (which is what #1456's fixtures do) gives both
+   * entries the same amount, which makes that entire failure mode invisible to
+   * a green suite. See #2051.
+   */
+  const STANDARD_ATOMIC = '1500000' // 1.50 USDC — PAYMENT_REQUIRED's maxAmountRequired
+  const ERC7710_ATOMIC = '2500000' // 2.50 USDC — what the erc7710 branch really authorizes
+  const ERC7710_PAYMENT_REQUIRED = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      ...PAYMENT_REQUIRED.accepts,
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: ERC7710_ATOMIC,
+        maxAmountRequired: ERC7710_ATOMIC,
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR] },
+      },
+    ],
+  }
+  /**
+   * The MIRROR of the fixture above: an EXPENSIVE standard entry beside a CHEAP
+   * erc7710 one. Same root cause, opposite direction — here a cap compared
+   * against the unselected standard entry OVER-binds and refuses a purchase
+   * that was never going to cost that much.
+   */
+  const EXPENSIVE_STANDARD_ATOMIC = '3000000' // 3.00 USDC — never authorized on the erc7710 branch
+  const CHEAP_ERC7710_ATOMIC = '500000' // 0.50 USDC — what actually gets authorized
+  const CHEAP_ERC7710_PAYMENT_REQUIRED = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: EXPENSIVE_STANDARD_ATOMIC,
+        maxAmountRequired: EXPENSIVE_STANDARD_ATOMIC,
+      },
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: CHEAP_ERC7710_ATOMIC,
+        maxAmountRequired: CHEAP_ERC7710_ATOMIC,
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR] },
+      },
+    ],
+  }
+
+  /** A merchant advertising erc7710 and NOTHING else — no standard entry. */
+  const ERC7710_ONLY_PAYMENT_REQUIRED = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: ERC7710_ATOMIC,
+        maxAmountRequired: ERC7710_ATOMIC,
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR] },
+      },
+    ],
+  }
+  const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+  const LEGACY_AGENT = { ...AGENT_RESPONSE, execution_rail: 'legacy' }
+  const CHILD = {
+    payment_id: 'pay_generic_7710',
+    status: 'pending_signature',
+    sign_data: {
+      hash: '0x' + '11'.repeat(32),
+      signature_scheme: 'eip712_delegation',
+      typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+    },
+  }
+
+  /**
+   * The /x402 fixture is chosen by the EXPECTED scheme, not by the challenge —
+   * a legacy account meeting a 7710-advertising merchant must still get the
+   * 3009 intent back, which is the case a careless helper gets wrong.
+   */
+  async function rawQuotePay(
+    paymentRequired: unknown,
+    agent: Record<string, unknown>,
+    expectErc7710 = false,
+    extraArgs: Record<string, unknown> = {},
+  ) {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: agent },
+      'POST /x402': { status: 201, body: expectErc7710 ? CHILD : X402_INTENT_RESPONSE },
+    })
+    return handlers().haven_pay_x402_quote({ payment_required: paymentRequired, ...extraArgs })
+  }
+
+  async function quotePay(
+    paymentRequired: unknown,
+    agent: Record<string, unknown>,
+    expectErc7710 = false,
+    extraArgs: Record<string, unknown> = {},
+  ) {
+    return ok(await rawQuotePay(paymentRequired, agent, expectErc7710, extraArgs)) as {
+      data: Record<string, any>
+    }
+  }
+
+  function authorizeBody() {
+    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    return (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, unknown>
+  }
+
+  it('delegation rail + erc7710 merchant: selects erc7710 and shapes the request for DIRECT settlement', async () => {
+    const res = await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
+
+    expect(res.data.payment_id).toBe('pay_generic_7710')
+    expect(res.data.settlement_scheme).toBe('erc7710')
+    expect(res.data.settlement.scheme).toBe('erc7710')
+    // The defining property of the preferred scheme is this ABSENCE.
+    expect(res.data.settlement.funding_leg).toBe(false)
+    expect(res.data.settlement.merchant_pay_to).toBe(PAYMENT_REQUIRED.accepts[0].payTo)
+    expect(res.data.settlement.facilitator_addresses).toEqual([FACILITATOR])
+
+    const body = authorizeBody()
+    // payTo = the MERCHANT is what selects direct settlement server-side, and
+    // the explicit scheme must AGREE with that shape (#1360).
+    expect(body.payTo).toBe(PAYMENT_REQUIRED.accepts[0].payTo)
+    expect(body.settlementScheme).toBe('erc7710')
+    // No funding target, so no separate merchant field and no funding leg.
+    expect(body).not.toHaveProperty('merchantPayTo')
+    expect(body.facilitatorAddresses).toEqual([FACILITATOR])
+    // The authorized amount is the ERC7710 entry's own, not the standard
+    // entry's — stated here because everything about the cap depends on it.
+    expect(body.amount).toBe(ERC7710_ATOMIC)
+    expect(res.data.amount_atomic).toBe(ERC7710_ATOMIC)
+  })
+
+  it('POSITIVE CONTROL — a merchant that does NOT advertise erc7710 still takes the 3009 bridge', async () => {
+    const res = await quotePay(PAYMENT_REQUIRED, DELEGATION_AGENT)
+
+    expect(res.data.settlement_scheme).toBeUndefined()
+    expect(res.data.settlement).toBeUndefined()
+    const body = authorizeBody()
+    // Byte-identical to the pre-#2041 generic path: fund the delegate EOA,
+    // record the real merchant separately, and SAY 'eip3009' out loud (#1360).
+    expect(body.settlementScheme).toBe('eip3009')
+    expect(body.payTo).toBe('0xDelegate')
+    expect(body.merchantPayTo).toBe(PAYMENT_REQUIRED.accepts[0].payTo)
+  })
+
+  it('a LEGACY-rail account never takes the branch, even when the merchant offers it', async () => {
+    const res = await quotePay(ERC7710_PAYMENT_REQUIRED, LEGACY_AGENT)
+
+    expect(res.data.settlement_scheme).toBeUndefined()
+    expect(authorizeBody().settlementScheme).toBe('eip3009')
+  })
+
+  it('an agent record with NO execution_rail is not treated as delegation', async () => {
+    // AGENT_RESPONSE carries no execution_rail at all. Guessing 'delegation'
+    // here would build a request the backend refuses; the pre-#2041 behaviour
+    // of this tool was 3009, and an unknown rail keeps it.
+    const res = await quotePay(ERC7710_PAYMENT_REQUIRED, AGENT_RESPONSE)
+
+    expect(res.data.settlement_scheme).toBeUndefined()
+    expect(authorizeBody().settlementScheme).toBe('eip3009')
+  })
+
+  it('keeps the #1348 round-trip budget on BOTH branches: exactly ONE agent fetch', async () => {
+    await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
+    const onErc7710 = calls.filter((c) =>
+      new URL(c.url).pathname.endsWith('/machine-payments/agent'),
+    ).length
+    calls = []
+    await quotePay(PAYMENT_REQUIRED, DELEGATION_AGENT)
+    const on3009 = calls.filter((c) =>
+      new URL(c.url).pathname.endsWith('/machine-payments/agent'),
+    ).length
+    expect([onErc7710, on3009]).toEqual([1, 1])
+  })
+
+  it('points the agent at the erc7710 continuation, not the 3009 header-building one', async () => {
+    const res = await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
+
+    expect(res.data.next_action).toBe(AgentPaymentNextAction.SignAndSubmitPayment)
+    expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign')
+    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_generic_7710' })
+    // The agent must be told to say the scheme back on submit — the header is
+    // assembled by Haven on this path, never by haven_x402_sign_header.
+    expect(res.data.reason).toContain("settlement_scheme: 'erc7710'")
+    expect(res.data.reason).toContain('Do NOT call haven_x402_sign_header')
+  })
+
+  it('the optional-cap nudge still fires on the erc7710 branch', async () => {
+    const res = await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
+    expect(res.data.cap_warning).toBeTruthy()
+  })
+
+  /**
+   * #2051 in miniature, fixed for THIS branch only.
+   *
+   * `payment_required` is merchant-controlled input. Because #1453 made the two
+   * option selectors mutually exclusive, a cap compared against the standard
+   * entry says nothing about the erc7710 entry the branch actually authorizes —
+   * so a merchant could advertise a cheap standard price beside an expensive
+   * erc7710 one and walk straight through a user-stated spending limit. That is
+   * a bypass an attacker chooses to trigger, not a guard that merely fails to
+   * fire, which is why it is proven in both directions here.
+   */
+  describe('the cap binds the option that is ACTUALLY authorized', () => {
+    it('REFUSES when the erc7710 entry exceeds the cap, though the standard entry does not', async () => {
+      // 2 USDC cap. Standard entry 1.50 (under), erc7710 entry 2.50 (over).
+      // Pre-#2041-review this returned a signable child for 2.50 USDC.
+      const payload = await rawQuotePay(
+        ERC7710_PAYMENT_REQUIRED,
+        DELEGATION_AGENT,
+        true,
+        { max_amount_human: '2' },
+      )
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+      // The cap is PRE-network on this branch too: nothing was authorized.
+      expect(calls.find((c) => new URL(c.url).pathname === '/x402')).toBeUndefined()
+    })
+
+    it('POSITIVE CONTROL — an IN-cap erc7710 payment still succeeds', async () => {
+      // Same fixture, same branch, cap raised above the erc7710 entry. Proves
+      // the fix refuses the right thing rather than refusing everything.
+      const res = await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
+        max_amount_human: '3',
+      })
+
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(authorizeBody().amount).toBe(ERC7710_ATOMIC)
+    })
+
+    it('the atomic spelling of the cap binds the erc7710 entry too', async () => {
+      const payload = await rawQuotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
+        max_amount: STANDARD_ATOMIC, // exactly the standard entry's price
+      })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+    })
+
+    it('does NOT over-bind: a cheap erc7710 entry is payable under a cap the standard entry exceeds', async () => {
+      // The mirror defect, found by the re-review. Before the reordering the
+      // pre-network check refused this outright with
+      //   "Authorized amount 3000000 exceeds max_amount_human 1 USDC"
+      // — a refusal citing an amount that was never going to be authorized. It
+      // failed SAFE, which is exactly why it could ship unnoticed; it also hit
+      // the recipient-pinned population this issue exists to unblock, since
+      // they are the ones on the erc7710 branch.
+      const res = await quotePay(CHEAP_ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
+        max_amount_human: '1',
+      })
+
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(authorizeBody().amount).toBe(CHEAP_ERC7710_ATOMIC)
+    })
+
+    it('the atomic spelling does not over-bind either', async () => {
+      const res = await quotePay(CHEAP_ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
+        max_amount: CHEAP_ERC7710_ATOMIC, // exactly the erc7710 price
+      })
+
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(authorizeBody().amount).toBe(CHEAP_ERC7710_ATOMIC)
+    })
+
+    it('POSITIVE CONTROL — the same fixture on a LEGACY rail IS refused, because there the expensive entry is the authorized one', async () => {
+      // The control that keeps the fix honest: "do not over-bind" must not
+      // decay into "do not bind". Same payment_required, same cap; only the
+      // rail differs, and with it which entry is authorized.
+      const payload = await rawQuotePay(
+        CHEAP_ERC7710_PAYMENT_REQUIRED,
+        LEGACY_AGENT,
+        false,
+        { max_amount_human: '1' },
+      )
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+      expect(calls.find((c) => new URL(c.url).pathname === '/x402')).toBeUndefined()
+    })
+
+    it('POSITIVE CONTROL — the 3009 branch keeps capping against the standard entry', async () => {
+      // The same cap that refuses above must still ALLOW the bridge, because
+      // there the standard entry IS the authorized one. A fix that simply
+      // capped harder everywhere would break this.
+      const res = await quotePay(PAYMENT_REQUIRED, LEGACY_AGENT, false, {
+        max_amount_human: '2',
+      })
+
+      expect(res.data.payment_id).toBe('pay_x402')
+      expect(authorizeBody().settlementScheme).toBe('eip3009')
+    })
+  })
+
+  /**
+   * A merchant advertising ONLY erc7710 is payable now, so a CAPPED call must
+   * not be refused as "no payment option Haven can settle" while the same call
+   * uncapped succeeds — stating a spending limit must never be the thing that
+   * breaks a purchase.
+   */
+  describe('a merchant advertising ONLY erc7710', () => {
+    it('is payable with a cap that covers it', async () => {
+      const res = await quotePay(ERC7710_ONLY_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
+        max_amount_human: '3',
+      })
+
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(authorizeBody().amount).toBe(ERC7710_ATOMIC)
+    })
+
+    it('still REFUSES a cap it exceeds — the widened guard did not disable the cap', async () => {
+      const payload = await rawQuotePay(
+        ERC7710_ONLY_PAYMENT_REQUIRED,
+        DELEGATION_AGENT,
+        true,
+        { max_amount_human: '1' },
+      )
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+      expect(calls.find((c) => new URL(c.url).pathname === '/x402')).toBeUndefined()
+    })
+
+    it('is still refused on a LEGACY rail, which genuinely cannot settle it', async () => {
+      const payload = await rawQuotePay(ERC7710_ONLY_PAYMENT_REQUIRED, LEGACY_AGENT, false, {
+        max_amount_human: '3',
+      })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.message).toContain('No compatible payment option')
+    })
+  })
+
+  /**
+   * The backend has supported replay dedup on this branch all along — the
+   * lookup runs before the funding-shape branch and the erc7710 insert carries
+   * `conflictTarget: 'x402_idempotency_key'`. It was never invoked, because the
+   * SDK options bag had no way to say the key. A retried call therefore minted
+   * a second INDEPENDENTLY SIGNABLE settlement child for one purchase, and on
+   * this scheme the signed artifact is spend authority, not a funding step.
+   */
+  describe('idempotency on the erc7710 branch', () => {
+    it('sends the caller idempotency_key on the authorize, so a retry can replay', async () => {
+      await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
+        idempotency_key: 'x402:generic-7710:abc',
+      })
+
+      expect(authorizeBody().idempotencyKey).toBe('x402:generic-7710:abc')
+    })
+
+    it('sends the SAME key on a repeated call, which is what makes the replay one purchase', async () => {
+      const seen: unknown[] = []
+      for (let i = 0; i < 2; i++) {
+        calls = []
+        await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
+          idempotency_key: 'x402:generic-7710:abc',
+        })
+        seen.push(authorizeBody().idempotencyKey)
+      }
+      expect(seen).toEqual(['x402:generic-7710:abc', 'x402:generic-7710:abc'])
+    })
+
+    it('omits the field entirely when the caller gave no key, keeping the old request shape', async () => {
+      await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
+      expect(authorizeBody()).not.toHaveProperty('idempotencyKey')
+    })
+  })
+
+  /**
+   * A recipient-PINNED budget cannot fund the delegate EOA, so 3009-mode is
+   * structurally impossible for it (owner decision 2026-07-15) and the backend
+   * answers 403. Before #2041 that was the ONLY answer a pinned agent could get
+   * from this tool — for EVERY merchant, including one advertising erc7710 —
+   * because the generic path never asked for anything else.
+   */
+  describe('recipient-pinned budgets', () => {
+    const PINNED_403 = {
+      status: 403,
+      body: {
+        error:
+          'Agent has no delegation able to fund EIP-3009 settlement for USDC. ' +
+          '3009-mode needs an open (unpinned) budget delegation — merchant-pinned budgets settle via erc7710 only.',
+      },
+    }
+
+    it('still refuses with the existing 403 at a 3009-only merchant', async () => {
+      stubFetch({
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': PINNED_403,
+      })
+      const payload = await handlers().haven_pay_x402_quote({
+        payment_required: PAYMENT_REQUIRED,
+      })
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.message).toContain('erc7710 only')
+      expect(authorizeBody().settlementScheme).toBe('eip3009')
+    })
+
+    it('reaches the scheme it CAN settle at an erc7710 merchant, instead of that 403', async () => {
+      // The severity correction this issue understated: a pinned agent could
+      // not pay ANY merchant through this tool, not merely pay them
+      // sub-optimally.
+      const res = await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(authorizeBody().settlementScheme).toBe('erc7710')
+    })
+  })
+})
+
+/**
+ * #2041 — haven_submit's erc7710 branch: the generic path's settle leg.
+ *
+ * On 3009 the signature funds the delegate EOA and a funding transaction has
+ * to confirm. Here the signature IS the settlement child: it goes to
+ * POST /x402/:id/settle and Haven hands back the assembled merchant header.
+ */
+describe('haven_submit — erc7710 settle (#2041)', () => {
+  const SIG = '0x' + '44'.repeat(65)
+
+  it('exchanges the signed child for the merchant header, with NO funding relay', async () => {
+    stubFetch({
+      'POST /x402/pay_generic_7710/settle': {
+        status: 200,
+        body: { payment_header: 'HEADER_FROM_HAVEN' },
+      },
+    })
+    const res = ok(
+      await handlers().haven_submit({
+        payment_id: 'pay_generic_7710',
+        signature: SIG,
+        settlement_scheme: 'erc7710',
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.settlement_scheme).toBe('erc7710')
+    expect(res.data.payment_header).toBe('HEADER_FROM_HAVEN')
+    expect(res.data.funding_tx_hash).toBeNull()
+    // erc7710 has no Haven-submitted transaction, so there is no hash to fake.
+    expect(res.data.tx_hash).toBeNull()
+    expect(res.data.next_action).toBe(AgentPaymentNextAction.RetryOriginalX402Request)
+
+    // The signature went to settle, NOT to the funding relay.
+    expect(calls.find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG })
+    expect(calls.find((c) => c.url.includes('/sign'))).toBeUndefined()
+  })
+
+  it('POSITIVE CONTROL — omitting settlement_scheme still relays a FUNDING signature, unchanged', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': {
+        status: 200,
+        body: { status: 'confirmed', tx_hash: '0xfunding_tx' },
+      },
+    })
+    const res = ok(
+      await handlers().haven_submit({ payment_id: 'pay_x402', signature: SIG }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.status).toBe('confirmed')
+    expect(res.data.tx_hash).toBe('0xfunding_tx')
+    // The pre-#2041 shape exactly: no scheme marker, no header.
+    expect(res.data.settlement_scheme).toBeUndefined()
+    expect(res.data.payment_header).toBeUndefined()
+    expect(calls.find((c) => c.url.includes('/settle'))).toBeUndefined()
+    expect(calls.find((c) => c.url.includes('/sign'))).toBeDefined()
+  })
+
+  it('maps an EXPIRED settlement child to the structured window-expired refusal', async () => {
+    // The child's window is the shortest in the system, so this is MORE likely
+    // on this scheme than on the bridge — leaving it as a raw API error was the
+    // wrong asymmetry.
+    stubFetch({
+      'POST /x402/pay_expired_child/settle': {
+        status: 410,
+        body: { error: 'Settlement child expired before it could be redeemed' },
+      },
+      'GET /machine-payments/pay_expired_child/status': {
+        status: 200,
+        body: {
+          payment_id: 'pay_expired_child',
+          kind: 'payment_intent',
+          rail: 'x402',
+          status: 'expired',
+          phase: 'expired',
+          next_action: 'request_again_if_user_still_wants_it',
+          amount: '2.50',
+          token: 'USDC',
+          resource_url: 'http://merchant.test/paid',
+          merchant_address: '0xMerchant',
+          tx_hash: null,
+          expires_at: '2000-01-01T00:00:00.000Z',
+          chain_id: 8453,
+          message: 'The payment expired before it was completed.',
+          idempotency_key: 'idem-7710',
+        },
+      },
+    })
+
+    const payload = await handlers().haven_submit({
+      payment_id: 'pay_expired_child',
+      signature: SIG,
+      settlement_scheme: 'erc7710',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.PaymentWindowExpired)
+    expect(payload.next_action).toBe(AgentPaymentNextAction.PaymentWindowExpired)
+    expect(payload.idempotency_key).toBe('idem-7710')
+    expect(payload.retry_with_new_quote).toBe(true)
+  })
+
+  it("an explicit 'eip3009' behaves identically to omitting it", async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': {
+        status: 200,
+        body: { status: 'confirmed', tx_hash: '0xfunding_tx' },
+      },
+    })
+    const res = ok(
+      await handlers().haven_submit({
+        payment_id: 'pay_x402',
+        signature: SIG,
+        settlement_scheme: 'eip3009',
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.status).toBe('confirmed')
+    expect(res.data.settlement_scheme).toBeUndefined()
+    expect(calls.find((c) => c.url.includes('/settle'))).toBeUndefined()
+  })
+})
+
+/**
+ * #2051 — the spending cap must bind the option that is ACTUALLY authorized.
+ *
+ * #1453 made `selectStandardPaymentOption` and `selectErc7710PaymentOption`
+ * mutually exclusive by construction. The cap was asserted against the first
+ * while `prepareX402Erc7710` independently re-selected and authorized the
+ * second, and nothing tied their amounts together. `payment_required` is
+ * MERCHANT-CONTROLLED, so that is not a guard that merely fails to bind — it
+ * is one the merchant can STEER: advertise a cheap standard entry beside an
+ * expensive erc7710 entry and the cap passes against the cheap one while the
+ * expensive one is sent. Measured live at 900 USDC authorized against a
+ * 1 USDC cap, with the response reporting 1 USDC.
+ *
+ * Two directions, both tested, because fixing only the dangerous one leaves
+ * the mirror-image bug (proved live on #2052): an EXPENSIVE standard entry
+ * beside a CHEAP erc7710 entry was wrongly REFUSED, citing an amount that was
+ * never going to be authorized. Fail-safe, but it defeats the purpose of the
+ * cap working. The rule is: check the cap ONCE, against whichever option the
+ * scheme selector actually returned.
+ *
+ * The fixtures below give the two entries GENUINELY DIFFERENT amounts. The
+ * #1456/#1547-era fixtures spread the standard entry into the erc7710 one, so
+ * both carried the identical `1000000` — that construction is precisely why a
+ * green suite could not see this.
+ */
+describe('#2051 — cap binds the authorized option', () => {
+  const FACILITATORS = ['0x4444444444444444444444444444444444444444']
+  const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+  const LEGACY_AGENT = { ...AGENT_RESPONSE, execution_rail: 'legacy' }
+  const CHILD = {
+    payment_id: 'pay_7710',
+    status: 'pending_signature',
+    sign_data: {
+      hash: '0x' + '11'.repeat(32),
+      signature_scheme: 'eip712_delegation',
+      typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+    },
+  }
+
+  /** Two payable Base-USDC entries that differ in amount and in the erc7710 tag. */
+  function merchant(standardAtomic: string, erc7710Atomic: string | null) {
+    const base = PAYMENT_REQUIRED.accepts[0]
+    return {
+      ...PAYMENT_REQUIRED,
+      accepts: [
+        { ...base, amount: standardAtomic, maxAmountRequired: standardAtomic },
+        ...(erc7710Atomic === null
+          ? []
+          : [
+              {
+                ...base,
+                amount: erc7710Atomic,
+                maxAmountRequired: erc7710Atomic,
+                extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: FACILITATORS },
+              },
+            ]),
+      ],
+    }
+  }
+
+  /** The authorize request body — assert on what was SENT, never on call counts. */
+  function x402Body() {
+    const call = calls.find((c) => new URL(c.url).pathname === '/x402')
+    if (!call) return undefined
+    const raw = call.body
+    return (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, any>
+  }
+
+  const CATALOG_ENTRY = {
+    id: 'cat_1',
+    name: 'CloudNest 50GB',
+    description: 'Cloud storage tier',
+    category: 'compute',
+    resource_url: 'http://merchant.test/mcp',
+    rail: 'x402',
+    protocol: 'mcp',
+    tool_name: 'create_text',
+    tool_arguments: { prompt: 'Hello' },
+    price_display: '$1.50 USDC',
+    price_atomic: '1500000',
+    asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+    network: 'eip155:8453',
+    status: 'active',
+    verified_at: '2026-06-16T08:50:39.772Z',
+  }
+
+  function allowances(remaining: string, rail: 'legacy' | 'delegation') {
+    return {
+      agent_id: 'agt_1',
+      safe_address: '0xSafe',
+      delegate_address: '0xDelegate',
+      chain_id: 8453,
+      allowances: [
+        {
+          id: rail === 'delegation' ? 'delegation-1' : 'allowance-1',
+          token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+          token_symbol: 'USDC',
+          allowance_amount: '5.000000',
+          reset_period_min: 1440,
+          onchain: { amount: '5000000', spent: '0', remaining, is_active: true },
+        },
+      ],
+    }
+  }
+
+  describe('haven_pay_mcp_tool', () => {
+    async function pay(
+      pr: unknown,
+      agent: Record<string, unknown>,
+      cap: Record<string, string>,
+      erc7710Intent = false,
+    ) {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
+        },
+        'GET /machine-payments/agent': { status: 200, body: agent },
+        'POST /x402': { status: 201, body: erc7710Intent ? CHILD : X402_INTENT_RESPONSE },
+      })
+      return handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        ...cap,
+      })
+    }
+
+    it('THE EXPLOIT: refuses an over-cap erc7710 entry advertised beside an under-cap standard entry', async () => {
+      // 1 USDC standard (passes the cap) + 900 USDC erc7710 (the one actually sent).
+      // erc7710Intent: true — the merchant/backend stubs are the SUCCESSFUL
+      // ones, so an unfixed build does not merely error here, it SUCCEEDS at
+      // 900000000 with the response reporting 1000000. The refusal below is
+      // therefore the fix's doing and nothing else's.
+      const res = await pay(
+        merchant('1000000', '900000000'),
+        DELEGATION_AGENT,
+        { max_amount_human: '1' },
+        true,
+      )
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('PRICE_EXCEEDS_MAX')
+      // Refused BEFORE the authorize: no settlement child was ever minted.
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('THE MIRROR: allows a cheap erc7710 entry advertised beside an over-cap standard entry', async () => {
+      // 3 USDC standard (over the 1 USDC cap) + 0.50 USDC erc7710 (what is sent).
+      // Refusing here would cite an amount that was never going to be authorized.
+      const res = ok<Record<string, any>>(
+        await pay(merchant('3000000', '500000'), DELEGATION_AGENT, { max_amount_human: '1' }, true),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()?.amount).toBe('500000')
+      expect(x402Body()?.settlementScheme).toBe('erc7710')
+    })
+
+    it('reports amount_atomic as the amount ACTUALLY authorized on the erc7710 branch', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('1000000', '2500000'), DELEGATION_AGENT, { max_amount_human: '5' }, true),
+      )
+      expect(x402Body()?.amount).toBe('2500000')
+      expect(res.data.amount_atomic).toBe('2500000')
+      expect(res.data.amount).toBe('2.5')
+      // agent_summary is what an agent surfaces to the user and logs as its
+      // receipt. The first mutation sweep found it UNPINNED — reverting it
+      // alone to `quote.amountAtomic` survived a green suite, which is the
+      // same "invisible to the tests" property the whole defect had.
+      expect(res.data.agent_summary).toMatchObject({
+        amount_atomic: '2500000',
+        amount: '2.5',
+        token: 'USDC',
+      })
+    })
+
+    it('reports amount_atomic as the amount ACTUALLY authorized on the 3009 branch', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('1000000', '2500000'), LEGACY_AGENT, { max_amount_human: '5' }),
+      )
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(x402Body()?.settlementScheme).toBe('eip3009')
+      expect(x402Body()?.amount).toBe('1000000')
+    })
+
+    it('the same fixture still REFUSES on a legacy account, where the expensive entry IS the authorized one', async () => {
+      // The mirror test must not be read as "3 USDC is always fine now". On a
+      // legacy-rail account the erc7710 entry is unreachable, the 3 USDC
+      // standard entry is what would be authorized, and the cap must bite.
+      const res = await pay(merchant('3000000', '500000'), LEGACY_AGENT, { max_amount_human: '1' })
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('PRICE_EXCEEDS_MAX')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('positive control: an in-cap erc7710 payment still succeeds', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('1000000', '900000'), DELEGATION_AGENT, { max_amount_human: '1' }, true),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()?.amount).toBe('900000')
+    })
+
+    it('positive control: a 3009-only merchant still bridges on a delegation account', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('1000000', null), DELEGATION_AGENT, { max_amount_human: '2' }),
+      )
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(x402Body()?.settlementScheme).toBe('eip3009')
+      expect(x402Body()?.amount).toBe('1000000')
+    })
+
+    it('positive control: an UNCAPPED call is still refused before any network call', async () => {
+      const res = await pay(merchant('1000000', '900000000'), DELEGATION_AGENT, {})
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('INVALID_INPUT')
+      expect(calls).toHaveLength(0)
+    })
+  })
+
+  describe('haven_prepare_catalog_purchase', () => {
+    async function prepare(
+      pr: unknown,
+      agent: Record<string, unknown>,
+      cap: Record<string, string>,
+      opts: { erc7710Intent?: boolean; remaining?: string } = {},
+    ) {
+      const rail =
+        (agent as { execution_rail?: string }).execution_rail === 'delegation'
+          ? 'delegation'
+          : 'legacy'
+      stubFetch({
+        'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY },
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
+        },
+        'POST /x402': { status: 201, body: opts.erc7710Intent ? CHILD : X402_INTENT_RESPONSE },
+        'GET /machine-payments/agent': { status: 200, body: agent },
+        'GET /machine-payments/allowances': {
+          status: 200,
+          body: allowances(opts.remaining ?? '5000000000', rail),
+        },
+      })
+      return handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', ...cap })
+    }
+
+    it('THE EXPLOIT: refuses an over-cap erc7710 entry advertised beside an under-cap standard entry', async () => {
+      // erc7710Intent: true — see the sibling case: an unfixed build SUCCEEDS
+      // here at 900000000 rather than erroring for an unrelated reason.
+      const res = await prepare(
+        merchant('1000000', '900000000'),
+        DELEGATION_AGENT,
+        { max_amount_human: '1' },
+        { erc7710Intent: true },
+      )
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('PRICE_EXCEEDS_MAX')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('THE MIRROR: allows a cheap erc7710 entry advertised beside an over-cap standard entry', async () => {
+      const res = ok<Record<string, any>>(
+        await prepare(merchant('3000000', '500000'), DELEGATION_AGENT, { max_amount_human: '1' }, {
+          erc7710Intent: true,
+        }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()?.amount).toBe('500000')
+    })
+
+    it('reports amount_atomic as the amount ACTUALLY authorized on the erc7710 branch', async () => {
+      const res = ok<Record<string, any>>(
+        await prepare(merchant('1000000', '2500000'), DELEGATION_AGENT, { max_amount_human: '5' }, {
+          erc7710Intent: true,
+        }),
+      )
+      expect(x402Body()?.amount).toBe('2500000')
+      expect(res.data.amount_atomic).toBe('2500000')
+      expect(res.data.amount).toBe('2.5')
+      // agent_summary is what an agent surfaces to the user and logs as its
+      // receipt. The first mutation sweep found it UNPINNED — reverting it
+      // alone to `quote.amountAtomic` survived a green suite, which is the
+      // same "invisible to the tests" property the whole defect had.
+      expect(res.data.agent_summary).toMatchObject({
+        amount_atomic: '2500000',
+        amount: '2.5',
+        token: 'USDC',
+      })
+    })
+
+    it('the delegation BUDGET pre-check also reads the authorized option, not the cheap standard one', async () => {
+      // Same steer, aimed at the other client-side guard on this path: a
+      // 0.50 USDC standard entry would sail past a 1 USDC remaining budget
+      // while the 900 USDC erc7710 entry is what gets authorized.
+      const res = await prepare(
+        merchant('500000', '900000000'),
+        DELEGATION_AGENT,
+        { max_amount_human: '1000' },
+        { remaining: '1000000', erc7710Intent: true },
+      )
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('DELEGATION_BUDGET_EXCEEDED')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('positive control: an in-cap erc7710 purchase still succeeds, with the catalog fields kept', async () => {
+      const res = ok<Record<string, any>>(
+        await prepare(merchant('1000000', '900000'), DELEGATION_AGENT, { max_amount_human: '1' }, {
+          erc7710Intent: true,
+        }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(res.data.catalog_id).toBe('cat_1')
+      expect(res.data.allowance).toMatchObject({ rail: 'delegation', sufficient: true })
+      expect(x402Body()?.amount).toBe('900000')
+    })
+
+    it('positive control: a 3009-only merchant still bridges on a delegation account', async () => {
+      const res = ok<Record<string, any>>(
+        await prepare(merchant('1000000', null), DELEGATION_AGENT, { max_amount_human: '2' }),
+      )
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(x402Body()?.settlementScheme).toBe('eip3009')
+    })
+
+    it('positive control: an UNCAPPED call is still refused before any network call', async () => {
+      const res = await prepare(merchant('1000000', '900000000'), DELEGATION_AGENT, {})
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('INVALID_INPUT')
+      expect(calls).toHaveLength(0)
+    })
+  })
+})
+
+/**
+ * #2054 — an erc7710-ONLY merchant is reachable through the two MCP purchase
+ * tools, and unreachability is refused for the REAL reason.
+ *
+ * `buildX402Quote` was standard-anchored: it threw "no compatible payment
+ * option" whenever `selectStandardPaymentOption` found nothing, so a merchant
+ * advertising ONLY an erc7710-tagged entry — the PREFERRED scheme on the
+ * delegation rail (#1450) — was refused before scheme selection ever saw it.
+ * The quote now falls back to describing the erc7710 entry, and the tools
+ * refuse a null scheme selection with the real reason (the ACCOUNT's rail)
+ * instead of falling through to a message that blames the merchant.
+ *
+ * Fixture discipline (#2051's lesson): the erc7710-only entry carries
+ * 2 500 000 — an amount NOTHING else in this file's default fixtures carries
+ * (PAYMENT_REQUIRED's standard entry is 1 000 000 / 1 500 000, the catalog's
+ * indicative price is 1 500 000) — so an assertion on it cannot be satisfied
+ * by an inherited number.
+ */
+describe('#2054 — erc7710-only merchants', () => {
+  const FACILITATOR = '0x4444444444444444444444444444444444444444'
+  const ERC7710_ONLY_ATOMIC = '2500000' // 2.50 USDC — unique to this suite by design
+  const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+  const LEGACY_AGENT = { ...AGENT_RESPONSE, execution_rail: 'legacy' }
+
+  /** A merchant advertising erc7710 and NOTHING else — no standard entry at all. */
+  const ERC7710_ONLY_PR = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: ERC7710_ONLY_ATOMIC,
+        maxAmountRequired: ERC7710_ONLY_ATOMIC,
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR] },
+      },
+    ],
+  }
+
+  /** Negative control: one entry, payable by NEITHER selector (unknown asset). */
+  const NOTHING_SETTLEABLE_PR = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        asset: '0x0000000000000000000000000000000000000001',
+      },
+    ],
+  }
+
+  const CHILD = {
+    payment_id: 'pay_7710_only',
+    status: 'pending_signature',
+    sign_data: {
+      hash: '0x' + '22'.repeat(32),
+      signature_scheme: 'eip712_delegation',
+      typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+    },
+  }
+
+  function x402Body() {
+    const call = calls.find((c) => new URL(c.url).pathname === '/x402')
+    if (!call) return undefined
+    const raw = call.body
+    return (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, any>
+  }
+
+  describe('haven_pay_mcp_tool', () => {
+    async function pay(
+      pr: unknown,
+      agentRoute: RouteDefinition,
+      cap: Record<string, string>,
+    ) {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
+        },
+        'GET /machine-payments/agent': agentRoute,
+        'POST /x402': { status: 201, body: CHILD },
+      })
+      return handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        ...cap,
+      })
+    }
+
+    it('delegation rail: prepares DIRECT settlement and reports the erc7710 amount end-to-end', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(ERC7710_ONLY_PR, { status: 200, body: DELEGATION_AGENT }, { max_amount_human: '3' }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(res.data.settlement).toMatchObject({ scheme: 'erc7710', funding_leg: false })
+      // The authorize carries the erc7710 entry's OWN amount and scheme.
+      expect(x402Body()?.amount).toBe(ERC7710_ONLY_ATOMIC)
+      expect(x402Body()?.settlementScheme).toBe('erc7710')
+      expect(x402Body()?.facilitatorAddresses).toEqual([FACILITATOR])
+      // The response reports what was actually authorized — top level AND the
+      // summary an agent surfaces to the user (#2051's misreport pins).
+      expect(res.data.amount_atomic).toBe(ERC7710_ONLY_ATOMIC)
+      expect(res.data.amount).toBe('2.5')
+      expect(res.data.agent_summary).toMatchObject({
+        amount_atomic: ERC7710_ONLY_ATOMIC,
+        amount: '2.5',
+        token: 'USDC',
+      })
+    })
+
+    it('a stated cap UNDER the erc7710 price refuses PRICE_EXCEEDS_MAX before any authorize', async () => {
+      const res = await pay(
+        ERC7710_ONLY_PR,
+        { status: 200, body: DELEGATION_AGENT },
+        { max_amount_human: '1' },
+      )
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('PRICE_EXCEEDS_MAX')
+      expect((res as { message?: string }).message).toContain('max_amount_human 1 USDC')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('a stated cap OVER the erc7710 price still succeeds — the cap binds, it does not block', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(ERC7710_ONLY_PR, { status: 200, body: DELEGATION_AGENT }, { max_amount: ERC7710_ONLY_ATOMIC }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()?.amount).toBe(ERC7710_ONLY_ATOMIC)
+    })
+
+    it('LEGACY rail: refuses with the rail as the reason, not "no compatible payment option"', async () => {
+      const res = await pay(
+        ERC7710_ONLY_PR,
+        { status: 200, body: LEGACY_AGENT },
+        { max_amount_human: '3' },
+      )
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('ERC7710_RAIL_REQUIRED')
+      const message = (res as { message?: string }).message ?? ''
+      expect(message).toContain('delegation-rail')
+      expect(message).toContain("'legacy' rail")
+      expect(message).not.toContain('No compatible payment option')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('a FAILED agent read refuses rather than guessing a rail it could not see', async () => {
+      const res = await pay(ERC7710_ONLY_PR, { status: 500, body: {} }, { max_amount_human: '3' })
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('ERC7710_RAIL_REQUIRED')
+      expect((res as { message?: string }).message).toContain('could not be read')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('negative control: a merchant with NOTHING settleable still refuses as before', async () => {
+      const res = await pay(
+        NOTHING_SETTLEABLE_PR,
+        { status: 200, body: DELEGATION_AGENT },
+        { max_amount_human: '3' },
+      )
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+      expect(x402Body()).toBeUndefined()
+    })
+  })
+
+  describe('haven_prepare_catalog_purchase', () => {
+    const CATALOG_ENTRY = {
+      id: 'cat_1',
+      name: 'CloudNest 50GB',
+      description: 'Cloud storage tier',
+      category: 'compute',
+      resource_url: 'http://merchant.test/mcp',
+      rail: 'x402',
+      protocol: 'mcp',
+      tool_name: 'create_text',
+      tool_arguments: { prompt: 'Hello' },
+      price_display: '$1.50 USDC',
+      price_atomic: '1500000',
+      asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+      network: 'eip155:8453',
+      status: 'active',
+      verified_at: '2026-06-16T08:50:39.772Z',
+    }
+
+    function allowances(remaining: string, rail: 'legacy' | 'delegation') {
+      return {
+        agent_id: 'agt_1',
+        safe_address: '0xSafe',
+        delegate_address: '0xDelegate',
+        chain_id: 8453,
+        allowances: [
+          {
+            id: rail === 'delegation' ? 'delegation-1' : 'allowance-1',
+            token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+            token_symbol: 'USDC',
+            allowance_amount: '5.000000',
+            reset_period_min: 1440,
+            onchain: { amount: '5000000', spent: '0', remaining, is_active: true },
+          },
+        ],
+      }
+    }
+
+    async function prepare(
+      pr: unknown,
+      agent: Record<string, unknown>,
+      cap: Record<string, string>,
+      opts: { remaining?: string } = {},
+    ) {
+      const rail =
+        (agent as { execution_rail?: string }).execution_rail === 'delegation'
+          ? 'delegation'
+          : 'legacy'
+      stubFetch({
+        'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY },
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
+        },
+        'POST /x402': { status: 201, body: CHILD },
+        'GET /machine-payments/agent': { status: 200, body: agent },
+        'GET /machine-payments/allowances': {
+          status: 200,
+          body: allowances(opts.remaining ?? '5000000000', rail as 'legacy' | 'delegation'),
+        },
+      })
+      return handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', ...cap })
+    }
+
+    it('delegation rail: prepares DIRECT settlement with the catalog fields and allowance block kept', async () => {
+      const res = ok<Record<string, any>>(
+        await prepare(ERC7710_ONLY_PR, DELEGATION_AGENT, { max_amount_human: '3' }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(res.data.catalog_id).toBe('cat_1')
+      expect(res.data.allowance).toMatchObject({ rail: 'delegation', sufficient: true })
+      expect(x402Body()?.amount).toBe(ERC7710_ONLY_ATOMIC)
+      expect(x402Body()?.settlementScheme).toBe('erc7710')
+      expect(res.data.amount_atomic).toBe(ERC7710_ONLY_ATOMIC)
+      expect(res.data.amount).toBe('2.5')
+      expect(res.data.agent_summary).toMatchObject({
+        amount_atomic: ERC7710_ONLY_ATOMIC,
+        amount: '2.5',
+        token: 'USDC',
+      })
+    })
+
+    it('a stated cap UNDER the erc7710 price refuses PRICE_EXCEEDS_MAX before any authorize', async () => {
+      const res = await prepare(ERC7710_ONLY_PR, DELEGATION_AGENT, { max_amount_human: '1' })
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('PRICE_EXCEEDS_MAX')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('the delegation BUDGET pre-check reads the erc7710 amount on this newly reachable path', async () => {
+      const res = await prepare(ERC7710_ONLY_PR, DELEGATION_AGENT, { max_amount_human: '3' }, {
+        remaining: '1000000', // under the 2.50 the erc7710 entry authorizes
+      })
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('DELEGATION_BUDGET_EXCEEDED')
+      expect((res as { message?: string }).message).toContain(ERC7710_ONLY_ATOMIC)
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('LEGACY rail: refuses with the rail as the reason, not "no compatible payment option"', async () => {
+      const res = await prepare(ERC7710_ONLY_PR, LEGACY_AGENT, { max_amount_human: '3' })
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe('ERC7710_RAIL_REQUIRED')
+      expect((res as { message?: string }).message).not.toContain('No compatible payment option')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('negative control: a merchant with NOTHING settleable still refuses as before', async () => {
+      const res = await prepare(NOTHING_SETTLEABLE_PR, DELEGATION_AGENT, { max_amount_human: '3' })
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+      expect(x402Body()).toBeUndefined()
+    })
+  })
+
+  describe('haven_quote_mcp_tool', () => {
+    async function quoteTool(pr: unknown) {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
+        },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+      })
+      return handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      })
+    }
+
+    it('quotes an erc7710-only merchant and says so, instead of refusing it as incompatible', async () => {
+      const res = ok<Record<string, any>>(await quoteTool(ERC7710_ONLY_PR))
+      expect(res.data.amount_atomic).toBe(ERC7710_ONLY_ATOMIC)
+      expect(res.data.accepted_scheme).toBe('erc7710')
+      expect(res.data.erc7710_only).toBe(true)
+    })
+
+    it('a standard quote is labeled standard and carries no erc7710_only flag', async () => {
+      const res = ok<Record<string, any>>(await quoteTool(PAYMENT_REQUIRED))
+      expect(res.data.accepted_scheme).toBe('standard')
+      expect(res.data.erc7710_only).toBeUndefined()
+      // Unchanged: the standard entry's own amount, not this suite's.
+      expect(res.data.amount_atomic).toBe('1500000')
+    })
+
+    it('negative control: a merchant with NOTHING settleable is still refused at the quote', async () => {
+      // This is the pin that keeps `buildX402Quote`'s fallback honest: a
+      // mutation that falls back to ANY accepts[] entry (rather than the
+      // erc7710 selector's) would happily quote this unpayable merchant.
+      const res = await quoteTool(NOTHING_SETTLEABLE_PR)
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+    })
+  })
+})
+
+describe('#2145: the hosted resume description gates on the live retry trigger', () => {
+  /**
+   * `RESUME_X402_DESCRIPTION` in this file is a hand-built string literal, not
+   * an entry of the SDK's shared `toolDescriptions` object — so the regression
+   * guard in `packages/sdk/src/tool-descriptions.test.ts` never scanned it.
+   *
+   * #2145 gave `retry_original_x402_request` a real producer
+   * (agent-payment-status.ts emits it when the funding leg confirmed but no
+   * merchant response was ever recorded). `haven_resume_x402_payment`'s
+   * description must name it as the gate, and no hosted description should
+   * still claim the trigger is unreachable.
+   *
+   * Scans the exported record, so a newly registered hosted tool is covered
+   * without anyone remembering to extend this list.
+   */
+  it('haven_resume_x402_payment names retry_original_x402_request as its gate; nothing claims it is unreachable', () => {
+    const entries = Object.entries(toolDescriptions)
+
+    // Non-vacuity: an empty record would satisfy every assertion below.
+    expect(entries.length).toBeGreaterThan(0)
+
+    expect(toolDescriptions.haven_resume_x402_payment).toContain(
+      'nextAction=retry_original_x402_request',
+    )
+
+    for (const [name, description] of entries) {
+      const lower = description.toLowerCase()
+      expect(
+        lower,
+        `${name} must not claim retry_original_x402_request is unreachable — #2145 gave it a producer`,
+      ).not.toContain('not currently reachable')
+      expect(
+        lower,
+        `${name} must not claim nothing emits a resume trigger — #2145 gave it a producer`,
+      ).not.toContain('nothing emits')
+    }
   })
 })

@@ -17,12 +17,27 @@ export function transactionTitle(tx: AggregatedTransaction): string {
   if (sourceTitle && tx.agentName) return `${sourceTitle} by ${tx.agentName}`
   if (sourceTitle) return sourceTitle
   if (tx.agentName) return `Agent payment by ${tx.agentName}`
-  return 'Payment sent by you'
+  // "Payment sent by you" is reserved for human-initiated payments; a row
+  // with no human marker renders neutral copy — the Initiator field carries
+  // the attribution state (#2097).
+  if (tx.initiatedBy === 'human') return 'Payment sent by you'
+  return 'Payment sent'
 }
 
+/**
+ * Who initiated the row (#2097). "You" is reserved for human-initiated
+ * payments (`initiatedBy === 'human'`); agent rows render the agent identity;
+ * inbound rows carry no initiator; and missing attribution renders as
+ * explicit "Unknown" — never "You".
+ */
 export function transactionInitiator(tx: AggregatedTransaction): string {
-  if (isDelegateSweep(tx)) return tx.agentName ?? 'Agent'
-  return tx.agentName ?? (tx.direction === 'in' ? '' : 'You')
+  // Delegate sweeps are agent-attributed regardless of direction — they read
+  // as inbound rows (funds recovered TO the Haven wallet), so the sweep check
+  // must precede the direction check.
+  if (isDelegateSweep(tx)) return tx.agentName ?? 'Unknown'
+  if (tx.direction === 'in') return ''
+  if (tx.initiatedBy === 'human') return 'You'
+  return tx.agentName ?? 'Unknown'
 }
 
 export function transactionStatus(
@@ -72,4 +87,21 @@ function counterpartyLabel(
   const contactName = resolveAddress?.(address)
 
   return safeName ?? contactName ?? truncate(address)
+}
+
+/**
+ * Display label for the on-chain settlement scheme (epic #1704, #1707).
+ * EIP-3009 is the delegate-signed transferWithAuthorization fallback;
+ * ERC-7710 is smart-account redemption. Technical-but-calm per
+ * `docs/product/copy-guidelines.md`. Null-in, null-out: an x402 row without
+ * a recorded scheme renders nothing — never a guessed value. Kept separate
+ * from `source` (protocol) and `execution_rail` (account architecture), which
+ * are different axes; do not merge them in copy or naming.
+ */
+export function settlementSchemeLabel(
+  scheme: AggregatedTransaction['settlementScheme'],
+): 'EIP-3009' | 'ERC-7710' | null {
+  if (scheme === 'eip3009') return 'EIP-3009'
+  if (scheme === 'erc7710') return 'ERC-7710'
+  return null
 }

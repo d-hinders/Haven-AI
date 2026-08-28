@@ -140,6 +140,10 @@ Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../
 
 1. Review the complete candidate change against `origin/dev`, including staged changes, unstaged tracked changes, and untracked files. If review happens after committing, inspect `git diff origin/dev...HEAD` and separately inspect any later working-tree changes. Never use a committed range that omits the current candidate diff. Use the reviewer role from [haven-agent-workflow](../haven-agent-workflow/SKILL.md); delegate to an independent reviewer when supported, otherwise perform a distinct findings-first review pass. **For `area:frontend` diffs, run a second, rendered pass** with the [design-reviewer role](../haven-agent-workflow/references/design-reviewer.md) (`haven-design-reviewer`) over the #896 screenshots — code review and visual review are complementary, and a finding from either trips the frontend merge gate (see [`frontend.md`](../../../docs/contributing/ship-playbooks/frontend.md) §5–6).
 2. Apply clear, scoped blocking and should-fix findings, then rerun affected checks.
+   **A fixed finding is not a cleared finding until the same reviewer says so.** Re-run the
+   pass that raised it over the *fixed* diff — for `haven-design-reviewer`, over freshly
+   captured screenshots of the changed surface, not the ones the finding was raised on.
+   The author asserting "addressed" is not a reviewer verdict and never substitutes for one.
 3. Ask the user before applying ambiguous architectural, product, security, money-movement, authorization, or schema findings.
 4. Record applied and deferred findings with reasons. When a deferred finding is filed
    as its own issue **and must land before something already queued**, write
@@ -183,7 +187,9 @@ Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../
    - intentionally excluded work;
    - generated-artifact and handoff impact;
    - CASP/MiCA status when applicable;
-   - review findings and resolution;
+   - review findings and resolution, including the **named verdict line for every pass**
+     (`haven-reviewer: passed | skipped because ___`, and on `area:frontend` the same for
+     `haven-design-reviewer`) — an unfilled line blocks the merge gate below;
    - merge readiness: CI, local checks, review status, risk, why safe, residual risk, and merge order.
 7. Include `Closes #<issue>`.
 8. Monitor pull-request activity when the client supports it.
@@ -209,9 +215,14 @@ you need the reasoning. Never edit one without the other — CI will not let you
   both are registered in `index.ts` today. A parenthetical that reads as an
   exclusion is worse than an omission, because nobody re-checks it — #1892.);
 - `modules/x402/`, `modules/mpp/`, `domain/payment-token.ts`,
-  `domain/payment-coverage.ts`, `domain/machine-payment-lifecycle.ts`, or
-  `rails/allowance-module.ts`;
-- `rails/execution-rail.ts` (the rail seam) and `rails/allowance-nonce-coordinator.ts`;
+  `domain/machine-payment-lifecycle.ts`, or `rails/allowance-module.ts`
+  (#1987 deleted the off-chain coverage-arithmetic module and the
+  allowance-nonce coordinator with the AllowanceModule rail, so both are gone
+  from this list — a glob naming a file that no longer exists guards nothing,
+  and the "no phantom globs" assertion in `scripts/ci/money-path.test.mjs`
+  fails CI on it. `rails/allowance-module.ts` STAYS: that file survives as
+  reads-only);
+- `rails/execution-rail.ts` (the rail seam);
 - `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`,
   `rails/hybrid-account-config.ts`, `rails/hybrid-signer-actions.ts`,
   `rails/hybrid-transfers.ts`, `routes/agent-delegations.ts`, or
@@ -232,19 +243,32 @@ you need the reasoning. Never edit one without the other — CI will not let you
   review, which found the delegate balance monitor unlisted while its equally
   read-only sibling `infra/relayer-balance-monitor.ts` was matched by prefix accident —
   the two even share an alert channel);
-- `routes/safe-exec.ts`, `routes/approvals.ts`, or `routes/hybrid-accounts.ts`
-  (user-signed execution, the approval queue, account provisioning);
-- `packages/sdk/src/signer.ts` (signing schemes are spend authority);
+- `routes/safe-exec.ts` or `routes/hybrid-accounts.ts`
+  (user-signed execution and account provisioning; the approval queue's route
+  file was deleted with its table by #2055, so its glob left the perimeter
+  rather than being repointed — the code is dead, not moved);
+- `packages/sdk/src/signer.ts` and `packages/signer/` (signing schemes are spend
+  authority — the SDK entry point was listed; the edge-signer package that
+  actually holds the delegate key material was on no list at all, and is the
+  stronger case of the two — #1896);
+- `packages/core/src/machine-payment-lifecycle.ts` (the machine-payment domain
+  actually lives here since #987 — the `domain/machine-payment-lifecycle.ts` line
+  above guards the backend re-export shim, not the code — #1905);
 - `middleware/agentAuth.ts`;
 - `db/migrations/`;
 - the safeguard's own control surface — `scripts/release-bump.mjs`,
   `scripts/ci/qa-freshness.mjs`, `scripts/ci/money-path.test.mjs`,
   `scripts/ci/money-path-restatement-scan.mjs`, `.github/CODEOWNERS`,
   `.github/money-path-globs.json`, `.github/workflows/publish.yml`,
-  `.github/workflows/dev-gate.yml`, `.github/workflows/qa-dev.yml`. These are
+  `.github/workflows/dev-gate.yml`, `.github/workflows/qa-dev.yml`,
+  `packages/frontend/src/lib/signer.ts`, `packages/frontend/src/hooks/useAgentRekey.ts`. These are
   `controlGlobs` in the JSON: labelled money-path so a PR weakening the gate gets
   this playbook and a human, but excluded from the freshness re-run, because
-  re-running the money-flow harness proves nothing about a CI config change.
+  re-running the money-flow harness proves nothing about a CI config change —
+  and the two frontend paths are the same call: the harness exercises the
+  deployed backend, not the client, so a QA re-run would prove nothing about a
+  change to which signer signs a spend-authority action, but a human should read
+  it — #1903.
 
 The label matters because money-sensitive changes do not always touch listed files
 (a new signing scheme, a new rail); the file list matters because a diff can be
@@ -286,10 +310,34 @@ review confirms zero behavioral change — say so explicitly in the PR.
 
 Classification drives the **playbook and the testing bar**, not a merge pause. A money-path diff still loads `money.md`, still needs characterization tests before existing behavior changes, and still states its classification in the pull-request body.
 
+**Before arming anything, the reviewer verdict has to be written down.** Do not enable
+auto-merge while a pull request leaves either verdict line unfilled:
+
+- `haven-reviewer:` — on every pull request;
+- `haven-design-reviewer:` — on every pull request too, where `n/a (not area:frontend)`
+  is the fill for a diff that does not need the rendered pass.
+
+A filled `skipped because <reason>` is enough to proceed, a blank is not. The point is
+that a skipped pass leaves a trace a human can argue with, not that skipping is
+forbidden; `AGENTS.md` § *Run `haven-reviewer` on every pull request* is why the default
+is "ran".
+
+**Name the design pass explicitly, because the pause rule below cannot stand in for it.**
+That rule triggers on a *finding*, and a pass that never ran produces none — so a
+frontend pull request whose `haven-reviewer:` line is filled and whose
+`haven-design-reviewer:` line is simply absent sails through a finding-triggered gate
+having had no rendered review at all. That is the same "nothing records whether it ran"
+gap this check exists to close, one pass over.
+
 Route the merge:
 
 - **Migration:** leave the pull request for independent code-owner approval and merge (`.github/CODEOWNERS`). The author's own approval does not satisfy it.
-- **Frontend UI:** if either review pass flags a UX, copy, or design-system concern, ask the user before enabling auto-merge.
+- **Frontend UI:** a UX, copy, or design-system finding from either review pass pauses
+  auto-merge. Clearing it does **not** need a second human ack (#1968): fix the finding,
+  re-run the pass that raised it over fresh rendered evidence, and a clean re-review
+  re-arms auto-merge on its own. Ask the user in the three cases a re-review does not
+  cover — the re-review raises a **new** finding, the finding is being **deferred or
+  disputed** rather than fixed, or there is no re-review at all.
 - **Everything else, money-path included:** after local gates pass and independent review has no blocking or should-fix findings, enable squash auto-merge — `gh pr merge <pr> --auto --squash --delete-branch` right after opening; do not sit in a poll loop waiting.
 
 Merge method, stated once because the two rules cross-contaminate: **feature → dev
@@ -309,7 +357,28 @@ check list.
 
 Never bypass required checks. Diagnose CI failures, fix them, push, and re-arm auto-merge only when appropriate.
 
-**Merged ≠ all green.** Auto-merge waits only for the checks the rulesets *require*; a workflow-blocking job outside that list (see the ruleset inventory in [autonomous-pr-loop.md](../../../docs/contributing/autonomous-pr-loop.md)) can still be running — or red — when the merge lands. Before reporting the PR shipped, confirm the blocking jobs' conclusions on the **head SHA** (`gh api repos/<o>/<r>/commits/<sha>/check-runs`), not just the PR's merged state. A red post-merge job is your failure to hand off: fix or revert before taking new work.
+**Merged ≠ all green.** Auto-merge waits only for the checks the rulesets *require*; a workflow-blocking job outside that list (see the ruleset inventory in [autonomous-pr-loop.md](../../../docs/contributing/autonomous-pr-loop.md)) can still be running — or red — when the merge lands. Before reporting the PR shipped, confirm the blocking jobs' conclusions on the commit that **actually merged**, not just the PR's merged state. A red post-merge job is your failure to hand off: fix or revert before taking new work.
+
+**Re-read the head SHA at verification time. Never reuse one you captured earlier ([#2116](https://github.com/d-hinders/Haven-AI/issues/2116)).** The shortest correct form is the tool, which takes a PR *number* and no SHA — there is no argument through which a stale one can enter:
+
+```bash
+node scripts/ci/verify-merged-head.mjs <pr>     # add --expect=<sha> to test a SHA you already have
+```
+
+By hand it is two calls, and the order is the whole point:
+
+```bash
+SHA=$(gh pr view <pr> --json headRefOid -q .headRefOid)   # read AFTER the merge, not before
+gh api repos/<o>/<r>/commits/"$SHA"/check-runs
+```
+
+A PR's head SHA is not stable between opening and merging. Four routes move it, and **only the first involves auto-merge**: GitHub's own *update branch* when auto-merge is armed and the base moves; `gh pr update-branch` to clear `BEHIND`; merging `dev` in to clear `DIRTY`; and any push after you last looked. This skill instructs the middle two itself, so **a session that never arms auto-merge is fully exposed** — that is the common route here, not the exotic one. Re-reading covers all four at once, because it asks what merged rather than what you were watching. It survives `--delete-branch`: `headRefOid` stays on the PR record after the branch is gone.
+
+**Do not substitute the merge commit for it.** Tempting, since a merge commit cannot go stale — but feature → `dev` is a **squash**, so the merge commit has exactly one parent and there is no second parent to recover the head from, and its own check runs are the push-to-`dev` run: a different, smaller set (16 on #2114 against the PR head's 23, with every PR-only gate — both coupling gates, contract-doc, copy lint — absent). Read it to ask "is `dev` green now"; it does not answer "did this PR's blocking jobs pass on what landed".
+
+**A `cancelled` conclusion is the concurrency guard working — neither a failure nor a pass.** `.github/workflows/ci.yml` sets `concurrency: <workflow>-<pr>` with `cancel-in-progress: true`, so a newer run for the same PR cancels the older one. Cancelled runs on the SHA you are reading almost always mean you are reading a **superseded** SHA; `gh run list --commit <sha>` shows whether a newer run exists. Never fold `cancelled` into "nothing failed" — that is the false-GREEN direction of this defect, and it is the one that hands off a broken `dev` while the session believes it verified.
+
+> **Worked example — PR #2114, 2026-08-27.** Head at open `bcc23cb5`; an unrelated PR merged to `dev`; the branch was updated to `af36577f`, whose CI run cancelled the old one. The PR merged on `af36577f`'s green checks. `check-runs` on the captured `bcc23cb5`: **1 failure + 5 cancelled**. On the re-read `af36577f`: **23/23 success**. Here the stale read produced a false RED — five minutes of investigation. Reverse which run went red and the identical mechanism produces a false GREEN, silently.
 
 ### Waiting on CI — mechanics
 

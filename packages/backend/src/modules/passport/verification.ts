@@ -59,17 +59,50 @@ export type VerificationResult =
 /**
  * The enforced-controls summary — booleans only.
  *
- * `policyEnforcedOnchain` is the claim that actually matters to a merchant and
- * it is true on both live rails: the delegation rail's caveat enforcers revert
- * during gas estimation, and the legacy rail's AllowanceModule enforces the
- * per-token allowance in the Safe. Neither is an off-chain rules DSL, which is
- * precisely what "governed" means at L0.
+ * `policyEnforcedOnchain` is the claim that actually matters to a merchant, and
+ * it is true on the **delegation rail only**: the caveat enforcers revert
+ * during gas estimation, which is not an off-chain rules DSL — precisely what
+ * "governed" means at L0.
+ *
+ * It is **false on both retired rails**, and that is a claim about Haven's
+ * live authority rather than about what is still deployed on-chain. A legacy
+ * account may well still have a real AllowanceModule allowance sitting in its
+ * Safe, but under epic #1440 every agent payment entry point answers HTTP 410
+ * (#1986) — there is no spend for a contract to govern, so telling a merchant
+ * the agent's spending is contract-enforced would assert a live control that
+ * cannot be exercised. The session rail is retired the same way (#834).
+ *
+ * **This function's behaviour is unchanged by #2110.** It previously compared
+ * against a second, shorter rail string, and the docblock above it claimed the
+ * result was "true on both live rails". It never was: the column's CHECK
+ * domain is `allowance_module | session_key | delegation` (migration 041), so
+ * that comparison matched nothing and its branch never fired. Production has
+ * always emitted `false` for the legacy rail. The dead comparison is gone and
+ * the comment now matches the code; the wire is identical either way, and
+ * `__tests__/passport-controls-rail.test.ts` pins that across the whole domain.
  */
 function controlsOf(row: VerificationRow): ControlSummary | null {
   if (!row.execution_rail) return null
+  // #2138 considered adding the `account_type === 'delegator_hybrid'` OR-arm
+  // here, to match the ISSUANCE allowlist in
+  // `domain/passport-issuance-rail.ts`, and declined. Recorded here so the
+  // next reader does not re-derive it:
+  //
+  // `rail` above passes `execution_rail` through VERBATIM — it reports the raw
+  // column, not a derived eligibility judgement — and `policyEnforcedOnchain`
+  // is currently a function of that same raw value, so the two fields agree by
+  // construction. Adding the OR-arm would DECOUPLE them: a divergent row could
+  // then read `rail: 'allowance_module'` beside `policyEnforcedOnchain: true`,
+  // a receipt contradicting itself in one document. That is worse than the
+  // narrower rule, not more honest.
+  //
+  // "May Haven mint a fresh credential for this account" (issuance) and "what
+  // does this attestation's rail field actually claim" (verification) are
+  // different questions. Inert either way today — both markers move together
+  // in live data — which is why this is a deliberate boundary, not a bug.
   return {
     rail: row.execution_rail,
-    policyEnforcedOnchain: row.execution_rail === 'delegation' || row.execution_rail === 'allowance',
+    policyEnforcedOnchain: row.execution_rail === 'delegation',
     treasuryBound: row.safe_address !== null,
   }
 }

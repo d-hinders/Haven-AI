@@ -19,7 +19,8 @@ vi.mock('../../db.js', () => ({
 }))
 
 // Avoid pulling chain/ethers deploy machinery into this route test.
-vi.mock('../../modules/accounts/index.js', () => ({ relaySafeDeploy: vi.fn() }))
+// #1988 deleted `relaySafeDeploy`; the route no longer imports the accounts
+// module, so there is nothing left to mock.
 
 import userSafesRoutes from '../user-safes.js'
 

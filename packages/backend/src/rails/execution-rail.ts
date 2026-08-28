@@ -1,19 +1,41 @@
 /**
- * Execution-rail seam (epic #733 → retirement #834 → one-gate #993).
+ * Execution-rail seam (epic #733 → retirement #834 → one-gate #993 →
+ * Safe-rail retirement #1986).
  *
- * TWO rails are live: the legacy AllowanceModule rail (import-only, existing
- * Safes) and the delegation rail (the base for new accounts, epic #821). The
- * session-key rail (ERC-4337 Safe7579 + Smart Sessions) is RETIRED outright
- * (#834): its machinery is deleted, and any account or intent still marked
- * `session_key` gets HTTP 410 — fail-closed, nothing written — on every
- * agent-payment ENTRY point (/payments, /payments/:id/sign, MPP authorize +
- * replay, /machine-payments/send, x402 authorize). Queued approvals are NOT
- * a residual (investigated on #1121): approval execution is an OWNER-signed
- * Safe transaction built by the dashboard — owner authority, not the
- * retired rail's agent authority, so the seam is rightly not consulted
- * there. The typed seam itself stays for
- * reversibility (the #834 owner decision); what #993 removed is the four
- * scattered copies of the retirement gate, not the seam.
+ * **ONE rail is live: the delegation rail** (epic #821). Both other rails are
+ * retired tombstones that coexist here:
+ *
+ * - the session-key rail (ERC-4337 Safe7579 + Smart Sessions), retired by
+ *   #834 — its machinery is deleted, and any account or intent still marked
+ *   `session_key` gets HTTP 410;
+ * - the legacy AllowanceModule / Safe rail, retired by **#1986** (epic
+ *   #1440 slice 3, owner decision 2026-08-14, phasing approved 2026-08-24) —
+ *   its machinery is still here (deletion is #1987/#1988), but no account
+ *   can reach it: `execution_rail='allowance_module'` (and the LEFT-JOIN
+ *   `null` that resolves to it) gets HTTP 410 too.
+ *
+ * Both refusals are fail-closed, nothing written, on every agent-payment
+ * ENTRY point (/payments, /payments/:id/sign, MPP authorize + replay,
+ * /machine-payments/send, x402 authorize).
+ *
+ * **Queued approvals — the one place #1986 goes further than #834.** The
+ * #1121 investigation concluded the seam is rightly not consulted on
+ * approval execution, because that is an OWNER-signed Safe transaction built
+ * by the dashboard: owner authority, not the retired rail's agent authority,
+ * and #834 left the queue alone on that reasoning. It still holds for the
+ * *authority* question — Haven cannot stop an owner signing their own Safe
+ * transaction, and `POST /safe/exec` deliberately stays open because
+ * approver management (#1229 recovery) rides on it. What changed is the
+ * *scope*: #834 retired one rail among several that fed the queue, whereas
+ * #1986 retires the only rail that ever fed it, so leaving `/approvals/:id/
+ * approve` open would leave Haven manufacturing executable Safe payment
+ * transactions for a rail it has declared gone. The queue therefore stays
+ * READABLE and REJECTABLE and stops being APPROVABLE — the #1328 mpp_demo
+ * shape exactly.
+ *
+ * The typed seam itself stays for reversibility (the #834 owner decision,
+ * restated for Safe in #1440); what #993 removed is the four scattered
+ * copies of the retirement gate, not the seam.
  *
  * Retirement is decided HERE, once: `resolveExecutionRail` returns
  * `retired_session` for any session-marked account (no chain allowlist, no
@@ -36,8 +58,9 @@ export interface ExecutionRailState {
 }
 
 export type ExecutionRailDecision =
-  | { rail: 'allowance_module' }
+  | { rail: 'delegation' }
   | { rail: 'retired_session' }
+  | { rail: 'retired_allowance' }
 
 /**
  * The pure routing decision. A session-marked account is retired, full stop —
@@ -45,15 +68,52 @@ export type ExecutionRailDecision =
  * account silently fall through to the legacy rail, which post-retirement
  * just deferred the refusal to a confusing 403; the honest answer is the 410
  * with re-onboarding instructions.
+ *
+ * **#1986 removed `allowance_module` from this union entirely.** There is no
+ * longer a "route this to the AllowanceModule" answer to give: every spend on
+ * that rail is retired. The union's shape is the guard — a call site that
+ * used to fall through the `retired_session` check into legacy execution now
+ * has to say what it does with `retired_allowance`, and the compiler names
+ * every one of them.
+ *
+ * Note what the fall-through covers. `user_safes.execution_rail` is
+ * `NOT NULL DEFAULT 'allowance_module'` (migration 036) with a CHECK over
+ * exactly three values (migration 041), so `null` here means only one thing:
+ * the LEFT JOIN in `FIND_EXECUTION_RAIL_FOR_AGENT_SQL` found no Safe row.
+ * That case was documented as "→ legacy (fail-closed)". Post-#1986 the same
+ * fall-through is *actually* fail-closed, which is why the guard is written
+ * as "anything that is not delegation and not session" rather than as a
+ * literal `=== 'allowance_module'` test: a scope read from the issue title
+ * would have closed the string and left the null.
  */
 export function resolveExecutionRail(state: ExecutionRailState): ExecutionRailDecision {
   if (state.safeExecutionRail === 'session_key') return { rail: 'retired_session' }
-  return { rail: 'allowance_module' }
+  if (state.safeExecutionRail === 'delegation') return { rail: 'delegation' }
+  return { rail: 'retired_allowance' }
 }
 
 /** An intent's pinned rail, resolved through the same retirement seam. */
 export function isRetiredRailIntent(executionRail: string | null | undefined): boolean {
   return executionRail === 'session_key'
+}
+
+/**
+ * An intent pinned to the retired AllowanceModule rail (#1986).
+ *
+ * Same negative shape, and for the same reason, as `resolveExecutionRail`'s
+ * fall-through: `payment_intents.execution_rail` is NULLABLE (migration 036)
+ * and every legacy insert leaves it unset, so the population this has to
+ * catch is mostly `null`, not the literal `'allowance_module'`. The one rail
+ * that must NOT match is `delegation`, which `insertDelegationIntent` and
+ * `modules/x402/delegation-authorize.ts` both pin explicitly — that pin is
+ * what makes the negative safe, and the positive control in
+ * `routes/__tests__/allowance-rail-retired.test.ts` is what proves it.
+ *
+ * `session_key` is excluded so the #834 tombstone keeps producing its own
+ * message; both retirements coexist on the seam.
+ */
+export function isRetiredAllowanceIntent(executionRail: string | null | undefined): boolean {
+  return executionRail !== 'delegation' && executionRail !== 'session_key'
 }
 
 /**
@@ -109,6 +169,55 @@ export function sessionRailRetired(kind: 'account' | 'intent'): { statusCode: 41
           ? 'The session rail is retired — re-onboard this account on the delegation rail ' +
             '(POST /accounts/hybrid, then grant a budget) to keep paying.'
           : 'The session rail is retired — this intent can no longer execute. ' +
+            'Re-onboard the account on the delegation rail and authorize again.',
+    },
+  }
+}
+
+/**
+ * The ONE producer of the AllowanceModule-rail refusal (#1986, epic #1440
+ * slice 3) — the #834/#993 pattern applied to the legacy rail.
+ *
+ * Fail-closed contract, identical to `sessionRailRetired`: callers return
+ * this VERBATIM with **nothing written** — no intent row, no approval row,
+ * no funnel event, no relayer spend, no status flip.
+ *
+ * 410 rather than 403/404 for the same reason as #834 and #1328: a
+ * permanently-gone flow must not read as a policy failure the caller can
+ * retry out of, nor as a transient routing error.
+ *
+ * `'approval'` is the queued-approval case (historical: #2055 dropped the
+ * `approval_requests` table outright). Every such row was
+ * a legacy-rail artifact — the delegation rail has no approval queue at all
+ * (its budget is enforced on-chain by the caveat enforcers), and all three
+ * inserts (`insertPaymentApproval` / `insertSendApproval` /
+ * `insertMachineApproval`) sit on legacy code paths — so a queued approval
+ * can no longer become actionable.
+ */
+/**
+ * #2085: the `'approval'` variant is gone. It had **zero** production callers
+ * — only `'account'` and `'intent'` are ever passed — and its message had
+ * become false: it promised the queued approval "stays readable, and it can
+ * still be rejected", while `/approvals` is deregistered (404, not 410) and
+ * migration 070 dropped the table. A refusal nothing can reach, describing a
+ * capability nothing has.
+ *
+ * The rail SEAM itself is untouched and stays, per CLAUDE.md, for
+ * reversibility — this removes one dead branch inside it, not the seam.
+ */
+export function allowanceModuleRailRetired(kind: 'account' | 'intent'): {
+  statusCode: 410
+  body: { error: string }
+} {
+  const REONBOARD =
+    'Re-onboard this account on the delegation rail (POST /accounts/hybrid, then grant a budget) to keep paying.'
+  return {
+    statusCode: 410,
+    body: {
+      error:
+        kind === 'account'
+          ? `The Safe rail is retired — this account can no longer pay. ${REONBOARD}`
+          : 'The Safe rail is retired — this payment can no longer execute. ' +
             'Re-onboard the account on the delegation rail and authorize again.',
     },
   }

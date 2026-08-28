@@ -10,7 +10,7 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-08-19" # #1607: Known CI flake signatures section added (rerun-once policy; ship-next points here). Prior: #1341: re-verified loop stop and issue-readiness conditions after ship-next gained #1289 active-claim coordination
+last-verified: "2026-08-25" # #2004: § "Known CI flake signatures" re-read and the Base Sepolia RPC entry extended — the backend test job now reaches that endpoint itself (the executable proof of CASP Red Line #4 `eth_call`s the deployed caveat enforcers), and it FAILS rather than skips when the endpoint is unreachable in CI, so this signature can now redden a backend-only PR and not just `qa-dev`. The entry names the transport-vs-policy distinction and the `HAVEN_ENFORCER_PROBE_RPC_URL` override. Scope: that section only; the ruleset inventory, the money-path safety model and § "Merge policy A" were NOT re-verified in this pass. Prior: #1968: §"Merge policy A" re-read — the frontend bullet's "pauses for the user" is now "pauses", with clearing delegated to a clean re-review rather than a human ack, and a new bullet makes an unfilled `haven-reviewer:` verdict line a bar to arming auto-merge at all. The section's own safety claim is "CI + haven-reviewer", which a silently skipped pass makes false with nothing to read it off. The ruleset inventory and the money-path safety model were not re-verified in this pass. Prior: #1607: Known CI flake signatures section added (rerun-once policy; ship-next points here). Prior: #1341: re-verified loop stop and issue-readiness conditions after ship-next gained #1289 active-claim coordination
 ---
 
 # Autonomous PR loop
@@ -134,8 +134,17 @@ PR go through before handing it the whole queue.
   blocking/should-fix findings**. For a **frontend (`area:frontend`)** PR there is
   one addition (see [`ship-playbooks/frontend.md`](ship-playbooks/frontend.md)):
   if the design-review / haven-reviewer UI pass flags a UX, copy, or
-  design-system issue (even a nit-level one), the loop **pauses for the user**
-  even if CI is green — UX is a human call.
+  design-system issue (even a nit-level one), the loop **pauses** even if CI is
+  green. Clearing that pause is the reviewer's call, not the user's (#1968) —
+  fix, re-capture the screenshots, re-run the pass that raised it, and a clean
+  re-review re-arms auto-merge unattended. It escalates to the user only when
+  the re-review raises a NEW finding, when the finding is deferred or disputed
+  rather than fixed, or when there is no re-review at all.
+- Auto-merge is not armed at all until the PR body carries a **named verdict
+  line for each review pass** — `haven-reviewer: passed | skipped because ___`
+  (#1968). A filled skip proceeds; a blank one does not. The loop's whole safety
+  claim below is "CI + haven-reviewer", and a silently skipped pass is that
+  claim being false with nothing to read it off.
 - A **money-path** PR (x402 / payments / machine-payments / payment-coverage /
   allowance-module / agentAuth / release tooling) auto-merges on the same terms
   (#1024). The label still selects `money.md` and its characterization-test
@@ -389,6 +398,19 @@ least twice.
   or stale-nonce reads from the public Base Sepolia endpoint fail a leg that
   passes on rerun. Stability-gate reruns rather than chasing the payment code
   (the 2026-08-12 promotion lesson).
+
+  **#2004 widened where this signature can appear.** The backend test job now
+  reaches Base Sepolia too: `non-custody-onchain-enforcer.contract.test.ts` is
+  the executable proof of CASP Red Line #4 and `eth_call`s the deployed caveat
+  enforcers. It **fails the run** when the endpoint is unreachable in CI rather
+  than skipping — a green run that quietly dropped a regulatory proof is the
+  worse outcome — so this is the one flake signature that can redden a
+  backend-only PR. Its failure message says in words that it is a **transport
+  failure, not a policy failure**; read that line before diagnosing, because an
+  unreachable RPC says nothing about whether the enforcers refuse an
+  out-of-policy redemption. One rerun, as above. If it recurs, point
+  `HAVEN_ENFORCER_PROBE_RPC_URL` at a reliable Base Sepolia endpoint rather
+  than weakening the gate.
 
 ## What stays manual (by design)
 

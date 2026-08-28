@@ -42,7 +42,9 @@ import type {
   HavenAllowanceSummary,
   PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
+  CatalogSubmissionAccepted,
   HavenCatalogEntry,
+  HavenCatalogSubmission,
   RawCatalogEntry,
   AgentPaymentWarning,
 } from './types.js'
@@ -93,6 +95,7 @@ import {
   chainIdOrNull,
   decimalFromUsdcAtomic,
   explorerUrlOrEmpty,
+  noCompatiblePaymentOptionError,
   requestInitFromSnapshot,
   sameAddress,
   snapshotX402Request,
@@ -152,6 +155,9 @@ function mapCatalogEntry(entry: RawCatalogEntry): HavenCatalogEntry {
     network: entry.network,
     status: entry.status,
     verifiedAt: entry.verified_at,
+    source: entry.source,
+    domainVerified: entry.domain_verified,
+    verifiedPayable: entry.verified_payable,
   }
 }
 
@@ -339,11 +345,7 @@ export class HavenClient {
   ): Promise<X402Intent> {
     const option = selectStandardPaymentOption(paymentRequired.accepts)
     if (!option) {
-      throw new HavenApiError(
-        'No compatible payment option found in x402 requirements. ' +
-          'Haven supports standard x402 exact payments on Base USDC.',
-        400,
-      )
+      throw noCompatiblePaymentOptionError(paymentRequired.accepts)
     }
 
     // The funding transfer tops up the agent's delegate EOA. With no local key
@@ -687,14 +689,25 @@ export class HavenClient {
   }
 
   /**
-   * Discover payable services from Haven's curated merchant catalog.
+   * Discover payable services from Haven's merchant catalog (epic #1717).
    *
    * Read-only: returns catalog entries (price, rail, protocol) so an agent
    * can choose a service and pay it with the regular payment tools in the
    * same session. Never creates payments or signatures.
    */
   async discoverTools(
-    options: { category?: string; search?: string; rail?: 'x402' | 'mpp' } = {},
+    options: {
+      category?: string
+      search?: string
+      rail?: 'x402' | 'mpp'
+      /**
+       * Filter on the entry's provenance (epic #1717): `'verified'` returns
+       * only self-submitted, domain-verified, probe-verified directory
+       * entries; `'operator'` only the operator-curated ones; `'any'` (the
+       * default) returns the merged listing.
+       */
+      verified?: 'any' | 'verified' | 'operator'
+    } = {},
   ): Promise<HavenCatalogEntry[]> {
     const params = new URLSearchParams()
     if (options.category) params.set('category', options.category)
@@ -702,7 +715,54 @@ export class HavenClient {
     if (options.rail) params.set('rail', options.rail)
     const query = params.size > 0 ? `?${params.toString()}` : ''
     const raw = await this.get<{ entries: RawCatalogEntry[] }>(`/catalog${query}`)
-    return raw.entries.map(mapCatalogEntry)
+    let entries = raw.entries.map(mapCatalogEntry)
+    if (options.verified === 'verified') entries = entries.filter((e) => e.source === 'ingestion')
+    if (options.verified === 'operator') entries = entries.filter((e) => e.source === 'operator')
+    return entries
+  }
+
+  /**
+   * Submit a merchant's payable (x402/MCP) endpoint to the Verified Payable
+   * Directory (epic #1717, #1716). Queue-only: writes a submission row and
+   * returns the id + verify_token. The request path makes no outbound
+   * request; domain-ownership proof and the read-only quote probe run later
+   * on the leader-locked monitor. Ownership proof is ALWAYS required before
+   * any listing — this method cannot skip it. `website` is a honeypot field
+   * that bots fill; leave it unset.
+   */
+  async submitCatalogEntry(
+    resourceUrl: string,
+    options: { website?: string } = {},
+  ): Promise<HavenCatalogSubmission> {
+    const accepted = await this.post<CatalogSubmissionAccepted>('/catalog/submit', {
+      resource_url: resourceUrl,
+      ...(options.website ? { website: options.website } : {}),
+    })
+    return {
+      id: accepted.id,
+      verifyToken: accepted.verify_token,
+      status: accepted.status,
+    }
+  }
+
+  /**
+   * Fetch one submission's coarse status by id (epic #1717, #1716). Public
+   * and read-only. While the submission can still prove ownership the
+   * response carries the exact well-known / DNS-TXT `instructions`; the
+   * verify token is never returned here.
+   */
+  async getCatalogSubmissionStatus(
+    id: string,
+  ): Promise<{
+    id: string
+    status: 'submitted' | 'ownership_verified' | 'verified_payable' | 'failed' | 'delisted'
+    instructions?: {
+      expires_at: string
+      well_known: { url: string; content: string; instruction: string }
+      dns_txt: { name: string; value: string; instruction: string }
+    } | null
+  }> {
+    return this.get(`/catalog/submit/${encodeURIComponent(id)}`)
   }
 
   /**
@@ -795,11 +855,7 @@ export class HavenClient {
     // 1. Select best payment option
     const option = selectStandardPaymentOption(paymentRequired.accepts)
     if (!option) {
-      throw new HavenApiError(
-        'No compatible payment option found in x402 requirements. ' +
-        'Haven supports standard x402 exact payments on Base USDC.',
-        400,
-      )
+      throw noCompatiblePaymentOptionError(paymentRequired.accepts)
     }
 
     const idempotencyKey = options.idempotencyKey ?? buildX402IdempotencyKey(paymentRequired, option)
@@ -967,6 +1023,12 @@ export class HavenClient {
        * (#1307).
        */
       mcpCallContext?: X402McpCallContext
+      /**
+       * #2041: replay key, as `createX402Intent` already takes one. Without it
+       * a retried authorize mints a second signable settlement child instead
+       * of replaying the first.
+       */
+      idempotencyKey?: string
     } = {},
   ): Promise<{
     paymentId: string
@@ -999,11 +1061,7 @@ export class HavenClient {
 
     const option = selectStandardPaymentOption(input.paymentRequired.accepts)
     if (!option) {
-      throw new HavenApiError(
-        'No compatible payment option found in x402 requirements. ' +
-        'Haven supports standard x402 exact payments on Base USDC.',
-        400,
-      )
+      throw noCompatiblePaymentOptionError(input.paymentRequired.accepts)
     }
 
     const idempotencyKey = input.idempotencyKey ?? buildX402IdempotencyKey(input.paymentRequired, option)
@@ -1280,11 +1338,36 @@ export class HavenClient {
         })
       }
     } else {
-      if (!input.noFundingLeg && fundingTxHash) {
+      // #2092: the evidence anchor is scheme-dependent, and skipping it on
+      // erc7710 (#1508) left a whole settlement scheme with no
+      // `machine_payment_evidence` row — and therefore invisible to the Fortnox
+      // reporting feed, `GET /receipts`, transaction history, and the
+      // merchant-receipt capture on the very next line (which 404s without an
+      // evidence row). The #1508 reasoning — "evidence's consumer is
+      // funding-leg reconciliation, and this rail has no funding leg" — was
+      // true about #713 and incomplete about everything else evidence feeds.
+      //
+      // On the funding-leg path the anchor is Haven's funding transaction; on
+      // erc7710 it is the MERCHANT's settlement transaction, which the merchant
+      // just handed us in `PAYMENT-RESPONSE`. Both are reported through the
+      // same call, so the backend and every consumer keep one code path. The
+      // backend verifies the erc7710 hash on-chain before it confirms anything
+      // (#2092), so reporting it is a claim, not an authority.
+      const evidenceTxHash = input.noFundingLeg
+        ? (settlement.settlementTxHash ?? undefined)
+        : (fundingTxHash ?? undefined)
+      // #2117: when the merchant returned no settlement transaction there is
+      // simply nothing to report, and inventing an anchor client-side is what
+      // the backend's on-chain verification exists to prevent. That gap is
+      // closed SERVER-side instead, by the passive settlement sweep
+      // (`modules/x402/settlement-sweeper.ts`), which finds the settlement by
+      // this payment's own intent-unique delegation child. Do not "fix" this
+      // branch by fabricating a hash.
+      if (evidenceTxHash) {
         await this.merchantCompletion.reportEvidence({
           paymentId: evidenceContext.paymentId,
           rail: 'x402',
-          txHash: fundingTxHash,
+          txHash: evidenceTxHash,
           resourceUrl: evidenceContext.resourceUrl,
           merchantStatus: surfaced.status,
           paymentProofHeaderName: 'X-PAYMENT',

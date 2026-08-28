@@ -41,10 +41,6 @@ import {
   MARK_OUTBOUND_TX_REPLACED_SQL,
 } from '../src/infra/repositories/outbound-txs.js'
 import {
-  FIND_ALLOWANCE_NONCE_WATERMARK_SQL,
-  UPSERT_ALLOWANCE_NONCE_WATERMARK_SQL,
-} from '../src/infra/repositories/allowance-nonce-watermarks.js'
-import {
   GET_RECORDED_FEE_SQL,
   INSERT_PAYMENT_FEE_SQL,
 } from '../src/infra/repositories/payment-fees.js'
@@ -86,7 +82,6 @@ import {
 } from '../src/infra/repositories/agent-passports.js'
 import {
   CANCEL_SETUP_SQL,
-  COPY_SETUP_ALLOWANCES_SQL,
   FIND_ACTIVE_AGENT_BY_DELEGATE_SQL,
   FIND_DEFAULT_USER_SAFE_SQL,
   ACTIVATE_AGENT_SQL,
@@ -112,7 +107,6 @@ import {
 import {
   AGENT_HAS_LIVE_DELEGATIONS_SQL,
   ARCHIVE_AGENT_SQL,
-  DELETE_AGENT_ALLOWANCE_SQL,
   UNARCHIVE_AGENT_SQL,
   FIND_AGENT_FOR_USER_ALL_STATUSES_SQL,
   FIND_AGENT_ID_FOR_USER_SQL,
@@ -122,23 +116,16 @@ import {
   FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
   FIND_SAFE_INFO_SQL,
   FIND_USER_SAFE_ID_FOR_USER_SQL,
-  INSERT_AGENT_ALLOWANCE_SQL,
   INSERT_AGENT_WITH_KEY_SQL,
   LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL,
-  LIST_ALLOWANCES_FOR_AGENTS_SQL,
-  LIST_ALLOWANCES_FOR_AGENT_SQL,
-  LIST_ALLOWANCES_FOR_AGENT_UNORDERED_SQL,
   PAUSE_AGENT_SQL,
   RESUME_AGENT_SQL,
   REVOKE_AGENT_SQL,
   ROTATE_AGENT_API_KEY_SQL,
   UPDATE_AGENT_PROFILE_SQL,
-  UPSERT_AGENT_ALLOWANCE_SQL,
 } from '../src/infra/repositories/agents.js'
 import {
   FIND_AGENT_DELEGATE_ADDRESS_SQL,
-  FIND_TOKEN_ALLOWANCE_AMOUNT_SQL,
-  LIST_ALLOWANCE_CONFIG_FOR_AGENT_SQL,
   AGENT_BY_API_KEY_SQL,
   TOUCH_AGENT_LAST_SEEN_SQL,
 } from '../src/infra/repositories/agents.js'
@@ -174,17 +161,6 @@ import {
   RELEASE_SUBMITTED_CLAIM_SQL,
 } from '../src/infra/repositories/payment-intents.js'
 import {
-  EXPIRE_OVERDUE_APPROVAL_SQL,
-  FIND_APPROVAL_STATUS_ROW_SQL,
-  FIND_MACHINE_APPROVAL_BY_KEY_OR_CHALLENGE_SQL,
-  FIND_SEND_APPROVAL_BY_KEY_SQL,
-  FIND_X402_APPROVAL_BY_KEY_SQL,
-  INSERT_MACHINE_APPROVAL_SQL,
-  INSERT_PAYMENT_APPROVAL_SQL,
-  INSERT_SEND_APPROVAL_SQL,
-  COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL,
-} from '../src/infra/repositories/approval-requests.js'
-import {
   CONFIRM_X402_INTENT_SQL,
   COUNT_RECENT_X402_INTENTS_SQL,
   FAIL_X402_INTENT_SQL,
@@ -197,16 +173,12 @@ import {
   REFRESH_STALE_X402_INTENT_SQL,
 } from '../src/infra/repositories/x402-authorizations.js'
 import {
-  ATTACH_EVIDENCE_FOR_APPROVAL_SQL,
   ATTACH_EVIDENCE_FOR_INTENT_SQL,
   CLAIM_PREPARED_SWEEP_SQL,
   EXPIRE_PREPARED_SWEEP_SQL,
-  FIND_APPROVAL_FOR_EVIDENCE_SQL,
   FIND_EVIDENCE_ANCHOR_FOR_AGENT_SQL,
   FIND_INTENT_EVIDENCE_SOURCE_SQL,
   FIND_INTENT_FOR_EVIDENCE_SQL,
-  FIND_RECONCILIATION_APPROVAL_SQL,
-  FIND_RECONCILIATION_EVENT_FOR_APPROVAL_SQL,
   FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL,
   FIND_RECONCILIATION_INTENT_SQL,
   FIND_SWEEP_BY_ID_SQL,
@@ -220,12 +192,9 @@ import {
   MARK_SWEEP_FAILED_SQL,
   MARK_SWEEP_SUBMITTED_SQL,
   RELEASE_SWEEP_CLAIM_SQL,
-  RESOLVE_RECONCILIATION_FOR_APPROVAL_SQL,
   RESOLVE_RECONCILIATION_FOR_INTENT_SQL,
   RESOLVE_STRANDED_EVENTS_FOR_AGENT_SQL,
-  UPSERT_EVIDENCE_BASE_FOR_APPROVAL_SQL,
   UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL,
-  UPSERT_RECONCILIATION_EVENT_FOR_APPROVAL_SQL,
   UPSERT_RECONCILIATION_EVENT_FOR_INTENT_SQL,
   LOAD_RECEIPT_UNDERLAG_SOURCE_SQL,
 } from '../src/infra/repositories/machine-payments.js'
@@ -237,18 +206,10 @@ import {
 import {
   CLEAR_DEFAULT_SAFES_FOR_USER_SQL,
   CLEAR_LEGACY_USER_SAFE_ADDRESS_SQL,
-  COUNT_SAFES_FOR_USER_SQL,
-  DELETE_APPROVER_METADATA_SQL,
   DELETE_USER_SAFE_SQL,
   FIND_OLDEST_SAFE_FOR_USER_SQL,
   FIND_OWNED_SAFE_ADDRESS_SQL,
   FIND_OWNED_SAFE_DEFAULT_FLAG_SQL,
-  FIND_OWNED_SAFE_SQL,
-  FIND_SAFE_ID_BY_ADDRESS_AND_CHAIN_SQL,
-  INSERT_USER_SAFE_SQL,
-  LINK_DEFAULT_USER_SAFE_SQL,
-  LIST_APPROVER_METADATA_FOR_SAFE_SQL,
-  LIST_KNOWN_APPROVERS_FOR_USER_SQL,
   LIST_SAFES_FOR_USER_SQL,
   LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL,
   ORPHAN_AGENTS_FOR_SAFE_SQL,
@@ -257,7 +218,6 @@ import {
   RENAME_SAFE_FOR_USER_SQL,
   SET_LEGACY_USER_SAFE_ADDRESS_SQL,
   SET_SAFE_DEFAULT_SQL,
-  UPSERT_APPROVER_METADATA_SQL,
   FIND_HYBRID_OWNER_SAFE_ROW_SQL,
   FIND_OWNED_SAFE_WITH_TYPE_ANY_CHAIN_SQL,
   FIND_OWNED_SAFE_WITH_TYPE_FOR_CHAIN_SQL,
@@ -265,8 +225,6 @@ import {
   LIST_SESSION_SAFES_FOR_USER_SQL,
 } from '../src/infra/repositories/user-safes.js'
 import {
-  FIND_APPROVAL_REQUEST_AGENT_MATCHES_SQL,
-  FIND_CONFIRMED_X402_APPROVAL_REQUESTS_SQL,
   FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL,
   FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL,
   FIND_MACHINE_PAYMENT_EVIDENCE_DETAIL_SQL,
@@ -277,6 +235,22 @@ import {
   LIST_BASIC_SAFES_FOR_USER_SQL,
 } from '../src/infra/repositories/transaction-history.js'
 import {
+  COUNT_PENDING_CATALOG_SUBMISSIONS_SQL,
+  FIND_PENDING_CATALOG_SUBMISSION_BY_HOST_SQL,
+  INSERT_CATALOG_SUBMISSION_SQL,
+  LIST_SUBMITTED_CATALOG_SUBMISSIONS_SQL,
+  LIST_OWNERSHIP_VERIFIED_CATALOG_SUBMISSIONS_SQL,
+  LIST_VERIFIED_CATALOG_SUBMISSIONS_DUE_SQL,
+  MARK_CATALOG_SUBMISSION_OWNERSHIP_VERIFIED_SQL,
+  MARK_CATALOG_SUBMISSION_VERIFIED_PAYABLE_SQL,
+  INCREMENT_CATALOG_SUBMISSION_FAILURES_SQL,
+  MARK_CATALOG_SUBMISSION_FAILED_SQL,
+  COUNT_STUCK_CATALOG_SUBMISSIONS_SQL,
+  DELETE_TERMINAL_CATALOG_SUBMISSIONS_BEFORE_SQL,
+  GET_CATALOG_SUBMISSION_SQL,
+  LIST_VERIFIED_CATALOG_SUBMISSIONS_SQL,
+} from '../src/infra/repositories/catalog-submissions.js'
+import {
   FIND_CURRENCY_PREFERENCE_SQL,
   FIND_USER_CREDENTIALS_BY_EMAIL_SQL,
   FIND_USER_ID_BY_EMAIL_SQL,
@@ -284,7 +258,6 @@ import {
   INSERT_USER_SQL,
   UPDATE_CURRENCY_PREFERENCE_SQL,
   UPDATE_USER_NAME_SQL,
-  UPDATE_USER_SAFE_ADDRESS_SQL,
   UPDATE_USER_WALLET_ADDRESS_SQL,
 } from '../src/infra/repositories/users.js'
 import {
@@ -297,16 +270,11 @@ import {
   HAS_FIRST_AGENT_PAYMENT_SQL,
   INSERT_PORTFOLIO_SNAPSHOT_SQL,
   LIST_DASHBOARD_AGENTS_SQL,
-  LIST_DASHBOARD_ALLOWANCES_SQL,
   LIST_DASHBOARD_SAFES_SQL,
-  SUM_MONTHLY_APPROVAL_SPEND_SQL,
   SUM_MONTHLY_PAYMENT_SPEND_SQL,
 } from '../src/infra/repositories/dashboard.js'
 import {
-  COUNT_PENDING_APPROVALS_FOR_AGENT_SQL,
-  LIST_AGENT_APPROVALS_SQL,
   LIST_AGENT_PAYMENTS_SQL,
-  LIST_FEED_APPROVALS_SQL,
   LIST_FEED_PAYMENTS_SQL,
   SUM_AGENT_SPEND_ALL_TIME_SQL,
   SUM_AGENT_SPEND_TODAY_SQL,
@@ -348,7 +316,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'setup: insert allowance', sql: INSERT_SETUP_ALLOWANCE_SQL },
   { name: 'setup: update connector metadata', sql: UPDATE_CONNECTOR_METADATA_SQL },
   { name: 'setup: insert pending agent on register', sql: INSERT_AGENT_SQL },
-  { name: 'setup: copy setup allowances to agent', sql: COPY_SETUP_ALLOWANCES_SQL },
   { name: 'setup: mark registered (token consumed)', sql: MARK_SETUP_REGISTERED_SQL },
   { name: 'setup: merge install status', sql: MERGE_INSTALL_STATUS_SQL },
   { name: 'setup: apply approval state', sql: UPDATE_APPROVAL_STATE_SQL },
@@ -360,9 +327,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: list for user, ALL statuses (#1069)', sql: LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL },
   { name: 'agents: find for user, ALL statuses (#1069)', sql: FIND_AGENT_FOR_USER_ALL_STATUSES_SQL },
   { name: 'agents: delegate-balance read (status-agnostic, #1403)', sql: FIND_DELEGATE_AGENT_FOR_USER_SQL },
-  { name: 'agents: allowances for many agents', sql: LIST_ALLOWANCES_FOR_AGENTS_SQL },
-  { name: 'agents: allowances for one agent (ordered)', sql: LIST_ALLOWANCES_FOR_AGENT_SQL },
-  { name: 'agents: allowances for one agent (PUT path, unordered)', sql: LIST_ALLOWANCES_FOR_AGENT_UNORDERED_SQL },
   { name: 'agents: safe ownership check on create', sql: FIND_USER_SAFE_ID_FOR_USER_SQL },
   { name: 'agents: default safe fallback on create', sql: FIND_DEFAULT_USER_SAFE_ID_SQL },
   { name: 'agents: duplicate-delegate pre-check', sql: FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL },
@@ -370,7 +334,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: id+status gate (tenant-scoped)', sql: FIND_AGENT_ID_STATUS_FOR_USER_SQL },
   { name: 'agents: insert with API key', sql: INSERT_AGENT_WITH_KEY_SQL },
   { name: 'agents: safe info inside create tx', sql: FIND_SAFE_INFO_SQL },
-  { name: 'agents: insert allowance inside create tx', sql: INSERT_AGENT_ALLOWANCE_SQL },
   { name: 'agents: profile update (CTE, tenant-scoped)', sql: UPDATE_AGENT_PROFILE_SQL },
   { name: 'agents: archive revoked agent (#1401)', sql: ARCHIVE_AGENT_SQL },
   { name: 'agents: live-delegation guard for archive (#1436)', sql: AGENT_HAS_LIVE_DELEGATIONS_SQL },
@@ -379,17 +342,14 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: rotate API key', sql: ROTATE_AGENT_API_KEY_SQL },
   { name: 'agents: pause', sql: PAUSE_AGENT_SQL },
   { name: 'agents: resume', sql: RESUME_AGENT_SQL },
-  { name: 'agents: allowance upsert (mirror row)', sql: UPSERT_AGENT_ALLOWANCE_SQL },
-  { name: 'agents: allowance delete', sql: DELETE_AGENT_ALLOWANCE_SQL },
   // User-safes aggregate (#988). IMPORTED from the repository — verbatim from
-  // routes/user-safes.ts.
+  // routes/user-safes.ts. Nine statements left with #1988 (epic #1440): the
+  // four approver-metadata ones, the three import-path writes/reads, and the
+  // two lookups only the deleted handlers used. What remains is the surviving
+  // CRUD surface — list, rename, re-default, unlink — plus the owner directory.
   { name: 'user-safes: list for user', sql: LIST_SAFES_FOR_USER_SQL },
-  { name: 'user-safes: duplicate check by address+chain', sql: FIND_SAFE_ID_BY_ADDRESS_AND_CHAIN_SQL },
-  { name: 'user-safes: count for first-safe default rule', sql: COUNT_SAFES_FOR_USER_SQL },
   { name: 'user-safes: ownership check (id+address)', sql: FIND_OWNED_SAFE_ADDRESS_SQL },
   { name: 'user-safes: ownership check (id+is_default)', sql: FIND_OWNED_SAFE_DEFAULT_FLAG_SQL },
-  { name: 'user-safes: ownership check (id+address+chain)', sql: FIND_OWNED_SAFE_SQL },
-  { name: 'user-safes: import insert', sql: INSERT_USER_SAFE_SQL },
   { name: 'user-safes: legacy users.safe_address mirror', sql: SET_LEGACY_USER_SAFE_ADDRESS_SQL },
   { name: 'user-safes: legacy users.safe_address clear', sql: CLEAR_LEGACY_USER_SAFE_ADDRESS_SQL },
   { name: 'user-safes: rename (tenant-scoped)', sql: RENAME_SAFE_FOR_USER_SQL },
@@ -400,17 +360,11 @@ const QUERIES: SmokeQuery[] = [
   { name: 'user-safes: delete row', sql: DELETE_USER_SAFE_SQL },
   { name: 'user-safes: oldest remaining safe for promotion', sql: FIND_OLDEST_SAFE_FOR_USER_SQL },
   { name: 'user-safes: promote safe to default in delete tx', sql: PROMOTE_SAFE_TO_DEFAULT_SQL },
-  { name: 'user-safes: known approvers across safes', sql: LIST_KNOWN_APPROVERS_FOR_USER_SQL },
-  { name: 'user-safes: approver metadata for safe', sql: LIST_APPROVER_METADATA_FOR_SAFE_SQL },
-  { name: 'user-safes: approver metadata upsert (expression conflict target)', sql: UPSERT_APPROVER_METADATA_SQL },
-  { name: 'user-safes: approver metadata delete', sql: DELETE_APPROVER_METADATA_SQL },
   { name: 'user-safes: owner-directory list (account_type)', sql: LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL },
-  { name: 'user-safes: idempotent link from PUT /user/safe', sql: LINK_DEFAULT_USER_SAFE_SQL },
   // Users aggregate (#1167). IMPORTED from the repository — verbatim from
   // routes/user.ts.
   { name: 'users: update display name', sql: UPDATE_USER_NAME_SQL },
   { name: 'users: update connected wallet address', sql: UPDATE_USER_WALLET_ADDRESS_SQL },
-  { name: 'users: update legacy safe_address mirror', sql: UPDATE_USER_SAFE_ADDRESS_SQL },
   { name: 'users: read currency preference', sql: FIND_CURRENCY_PREFERENCE_SQL },
   { name: 'users: update currency preference', sql: UPDATE_CURRENCY_PREFERENCE_SQL },
   // Signup/login (#1180). IMPORTED — verbatim from routes/auth.ts. These are
@@ -421,11 +375,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'auth: login credentials read by email', sql: FIND_USER_CREDENTIALS_BY_EMAIL_SQL },
   { name: 'auth: /me profile read by id', sql: FIND_USER_PROFILE_BY_ID_SQL },
   { name: 'auth: session safes payload (carries account_type, #1069)', sql: LIST_SESSION_SAFES_FOR_USER_SQL },
-  // Cross-replica allowance-nonce watermark (#718). The GREATEST upsert is the
-  // monotonicity guarantee — a schema change that broke it would silently
-  // re-open the stale-nonce window.
-  { name: 'nonce: raise the allowance watermark (GREATEST upsert)', sql: UPSERT_ALLOWANCE_NONCE_WATERMARK_SQL },
-  { name: 'nonce: read the allowance watermark', sql: FIND_ALLOWANCE_NONCE_WATERMARK_SQL },
   { name: 'outbound: enqueue a tx', sql: ENQUEUE_OUTBOUND_TX_SQL },
   { name: 'outbound: claim next per chain', sql: CLAIM_NEXT_OUTBOUND_TX_SQL },
   { name: 'outbound: mark broadcast', sql: MARK_OUTBOUND_TX_BROADCAST_SQL },
@@ -444,26 +393,20 @@ const QUERIES: SmokeQuery[] = [
   { name: 'dashboard: account list', sql: LIST_DASHBOARD_SAFES_SQL },
   { name: 'dashboard: agent preview (safe join)', sql: LIST_DASHBOARD_AGENTS_SQL },
   { name: 'dashboard: first-agent-payment milestone', sql: HAS_FIRST_AGENT_PAYMENT_SQL },
-  { name: 'dashboard: legacy allowance mirror for agents', sql: LIST_DASHBOARD_ALLOWANCES_SQL },
   { name: 'dashboard: portfolio snapshots for today+yesterday', sql: FIND_PORTFOLIO_SNAPSHOTS_SQL },
   { name: 'dashboard: portfolio snapshot upsert', sql: INSERT_PORTFOLIO_SNAPSHOT_SQL },
   { name: 'dashboard: month-to-date payment spend', sql: SUM_MONTHLY_PAYMENT_SPEND_SQL },
-  { name: 'dashboard: month-to-date approval spend', sql: SUM_MONTHLY_APPROVAL_SPEND_SQL },
   // Agent-activity read model (#1167). IMPORTED — verbatim from
   // routes/agent-activity.ts. The four-table payment/approval joins are the
   // highest-value additions in this block: they reach machine_payment_evidence
   // and machine_payment_reconciliation_events, which no other smoke query
   // touches from this angle.
   { name: 'agent-activity: single-agent payments (evidence joins)', sql: LIST_AGENT_PAYMENTS_SQL },
-  { name: 'agent-activity: single-agent approvals (evidence joins)', sql: LIST_AGENT_APPROVALS_SQL },
   { name: 'agent-activity: feed payments (evidence joins)', sql: LIST_FEED_PAYMENTS_SQL },
-  { name: 'agent-activity: feed approvals (evidence joins)', sql: LIST_FEED_APPROVALS_SQL },
   { name: 'agent-activity: spend all time', sql: SUM_AGENT_SPEND_ALL_TIME_SQL },
   { name: 'agent-activity: spend today', sql: SUM_AGENT_SPEND_TODAY_SQL },
   { name: 'agent-activity: spend this week', sql: SUM_AGENT_SPEND_WEEK_SQL },
-  { name: 'agent-activity: pending approvals for agent', sql: COUNT_PENDING_APPROVALS_FOR_AGENT_SQL },
   // One statement, two surfaces (#1179) — the dashboard and the activity feed.
-  { name: 'approvals: actionable count for user', sql: COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL },
   { name: 'agent-tool-invocations: read for agent', sql: LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL },
   { name: 'agent-tool-invocations: read for agent set', sql: LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL },
   { name: 'agents: name map for activity feed', sql: LIST_AGENT_NAMES_FOR_USER_SQL },
@@ -705,15 +648,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'intents: machine one-shot fail', sql: FAIL_MACHINE_INTENT_SQL },
   { name: 'intents: status projection with funded-but-unsettled join', sql: FIND_INTENT_STATUS_ROW_SQL },
   { name: 'intents: settled receipt row (evidence join)', sql: FIND_SETTLED_PAYMENT_RECEIPT_SQL },
-  // approval_requests aggregate:
-  { name: 'approvals: direct-payment over-allowance insert', sql: INSERT_PAYMENT_APPROVAL_SQL },
-  { name: 'approvals: /send over-allowance insert (send key)', sql: INSERT_SEND_APPROVAL_SQL },
-  { name: 'approvals: machine insert with ON CONFLICT arbiter', sql: INSERT_MACHINE_APPROVAL_SQL },
-  { name: 'approvals: /send idempotency replay lookup', sql: FIND_SEND_APPROVAL_BY_KEY_SQL },
-  { name: 'approvals: x402 idempotency lookup', sql: FIND_X402_APPROVAL_BY_KEY_SQL },
-  { name: 'approvals: machine key/challenge idempotency lookup', sql: FIND_MACHINE_APPROVAL_BY_KEY_OR_CHALLENGE_SQL },
-  { name: 'approvals: lazy expire before status read', sql: EXPIRE_OVERDUE_APPROVAL_SQL },
-  { name: 'approvals: status projection', sql: FIND_APPROVAL_STATUS_ROW_SQL },
   // x402 authorization lifecycle:
   { name: 'x402: hourly cap config read (#961)', sql: GET_MAX_X402_PER_HOUR_SQL },
   { name: 'x402: hourly cap usage count (#961)', sql: COUNT_RECENT_X402_INTENTS_SQL },
@@ -726,22 +660,15 @@ const QUERIES: SmokeQuery[] = [
   { name: 'x402: settle flip to submitted (#976 ordering)', sql: MARK_INTENT_SUBMITTED_FOR_SETTLEMENT_SQL },
   // machine-payment evidence / reconciliation / sweeps / merchant receipts:
   { name: 'evidence: base upsert anchored on intent', sql: UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL },
-  { name: 'evidence: base upsert anchored on approval', sql: UPSERT_EVIDENCE_BASE_FOR_APPROVAL_SQL },
   { name: 'evidence: intent source read (optional agent scope)', sql: FIND_INTENT_EVIDENCE_SOURCE_SQL },
   { name: 'evidence: intent source read (agent-scoped)', sql: FIND_INTENT_FOR_EVIDENCE_SQL },
-  { name: 'evidence: approval source read (agent-scoped)', sql: FIND_APPROVAL_FOR_EVIDENCE_SQL },
   { name: 'evidence: proof attach on intent', sql: ATTACH_EVIDENCE_FOR_INTENT_SQL },
-  { name: 'evidence: proof attach on approval', sql: ATTACH_EVIDENCE_FOR_APPROVAL_SQL },
   { name: 'evidence: receipts list with settlement-scheme join (#1063)', sql: LIST_EVIDENCE_RECEIPTS_SQL },
   { name: 'evidence: intent settlement-fields echo (#1118)', sql: GET_INTENT_SETTLEMENT_FIELDS_SQL },
   { name: 'reconciliation: intent lookup', sql: FIND_RECONCILIATION_INTENT_SQL },
-  { name: 'reconciliation: approval lookup', sql: FIND_RECONCILIATION_APPROVAL_SQL },
   { name: 'reconciliation: event upsert keyed on intent', sql: UPSERT_RECONCILIATION_EVENT_FOR_INTENT_SQL },
-  { name: 'reconciliation: event upsert keyed on approval', sql: UPSERT_RECONCILIATION_EVENT_FOR_APPROVAL_SQL },
   { name: 'reconciliation: event reload keyed on intent', sql: FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL },
-  { name: 'reconciliation: event reload keyed on approval', sql: FIND_RECONCILIATION_EVENT_FOR_APPROVAL_SQL },
   { name: 'reconciliation: resolve on settle proof (intent)', sql: RESOLVE_RECONCILIATION_FOR_INTENT_SQL },
-  { name: 'reconciliation: resolve on settle proof (approval)', sql: RESOLVE_RECONCILIATION_FOR_APPROVAL_SQL },
   { name: 'reconciliation: resolve stranded flags after sweep', sql: RESOLVE_STRANDED_EVENTS_FOR_AGENT_SQL },
   { name: 'sweeps: prepared insert', sql: INSERT_PREPARED_SWEEP_SQL },
   { name: 'sweeps: find by nonce (tenant-scoped)', sql: FIND_SWEEP_BY_NONCE_SQL },
@@ -755,26 +682,37 @@ const QUERIES: SmokeQuery[] = [
   { name: 'merchant receipts: first-write-wins insert (#956)', sql: INSERT_MERCHANT_RECEIPT_SQL },
   { name: 'merchant receipts: read by evidence id', sql: GET_MERCHANT_RECEIPT_SQL },
   // agents-aggregate money-path reads:
-  { name: 'agents: token allowance policy gate', sql: FIND_TOKEN_ALLOWANCE_AMOUNT_SQL },
-  { name: 'agents: /allowances config projection', sql: LIST_ALLOWANCE_CONFIG_FOR_AGENT_SQL },
   { name: 'agents: delegate address for residue check (#716)', sql: FIND_AGENT_DELEGATE_ADDRESS_SQL },
   // account entitlements:
   { name: 'entitlements: has (unrevoked) check', sql: HAS_ENTITLEMENT_SQL },
   { name: 'entitlements: grant upsert', sql: GRANT_ENTITLEMENT_SQL },
   { name: 'entitlements: revoke', sql: REVOKE_ENTITLEMENT_SQL },
   // ── Transaction-history read model (#992). All the joins here reach into
-  // money-path tables (payment_intents, approval_requests, delegate_sweeps,
+  // money-path tables (payment_intents, delegate_sweeps,
   // machine_payment_evidence) even though the route itself is read-only.
+  // `approval_requests` left this list with the table itself (#2055).
   { name: 'tx-history: basic safes list driving aggregation', sql: LIST_BASIC_SAFES_FOR_USER_SQL },
   { name: 'tx-history: agent picklist for /filters', sql: LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL },
   { name: 'tx-history: Safe ownership, any chain', sql: FIND_SAFE_OWNERSHIP_ANY_CHAIN_SQL },
   { name: 'tx-history: Safe ownership, pinned chain', sql: FIND_SAFE_OWNERSHIP_FOR_CHAIN_SQL },
   { name: 'tx-history: payment_intents agent attribution', sql: FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL },
-  { name: 'tx-history: approval_requests agent attribution', sql: FIND_APPROVAL_REQUEST_AGENT_MATCHES_SQL },
   { name: 'tx-history: delegate_sweeps agent attribution', sql: FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL },
   { name: 'tx-history: confirmed x402 payment_intents funding', sql: FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL },
-  { name: 'tx-history: confirmed x402 approval_requests funding', sql: FIND_CONFIRMED_X402_APPROVAL_REQUESTS_SQL },
   { name: 'tx-history: machine-payment evidence detail', sql: FIND_MACHINE_PAYMENT_EVIDENCE_DETAIL_SQL },
+  { name: 'catalog-submissions: insert with pending-host dedupe', sql: INSERT_CATALOG_SUBMISSION_SQL },
+  { name: 'catalog-submissions: pending row by host (no-op path)', sql: FIND_PENDING_CATALOG_SUBMISSION_BY_HOST_SQL },
+  { name: 'catalog-submissions: pending queue count (429 cap)', sql: COUNT_PENDING_CATALOG_SUBMISSIONS_SQL },
+  { name: 'catalog-lifecycle: submitted rows for ownership stage', sql: LIST_SUBMITTED_CATALOG_SUBMISSIONS_SQL },
+  { name: 'catalog-lifecycle: ownership-verified rows for probe', sql: LIST_OWNERSHIP_VERIFIED_CATALOG_SUBMISSIONS_SQL },
+  { name: 'catalog-lifecycle: verified rows due for recheck', sql: LIST_VERIFIED_CATALOG_SUBMISSIONS_DUE_SQL },
+  { name: 'catalog-lifecycle: submitted -> ownership_verified', sql: MARK_CATALOG_SUBMISSION_OWNERSHIP_VERIFIED_SQL },
+  { name: 'catalog-lifecycle: -> verified_payable with metadata', sql: MARK_CATALOG_SUBMISSION_VERIFIED_PAYABLE_SQL },
+  { name: 'catalog-lifecycle: increment consecutive failures', sql: INCREMENT_CATALOG_SUBMISSION_FAILURES_SQL },
+  { name: 'catalog-lifecycle: -> failed', sql: MARK_CATALOG_SUBMISSION_FAILED_SQL },
+  { name: 'catalog-lifecycle: stuck submitted count', sql: COUNT_STUCK_CATALOG_SUBMISSIONS_SQL },
+  { name: 'catalog-lifecycle: purge terminal rows past TTL', sql: DELETE_TERMINAL_CATALOG_SUBMISSIONS_BEFORE_SQL },
+  { name: 'catalog-status: submission by id', sql: GET_CATALOG_SUBMISSION_SQL },
+  { name: 'catalog-listing: verified ingestion rows', sql: LIST_VERIFIED_CATALOG_SUBMISSIONS_SQL },
 ]
 
 async function main(): Promise<void> {

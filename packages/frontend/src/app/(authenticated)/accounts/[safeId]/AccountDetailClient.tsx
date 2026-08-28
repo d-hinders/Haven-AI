@@ -16,10 +16,10 @@ import { useContacts } from '@/hooks/useContacts'
 import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useUserSafes } from '@/hooks/useUserSafes'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
-import SendModal from '@/components/SendModal'
 import DelegationSendModal from '@/components/DelegationSendModal'
 import AccountSignersCard from '@/components/AccountSignersCard'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
+import RetiredRailNotice, { type RetiredRailOwnerAccess } from '@/components/RetiredRailNotice'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -110,6 +110,64 @@ function agentAccessSummary(agent: Agent, chainId: number | null): string {
   return `${agentBudgetSummary(agent, chainId)} · ${formatAgentLastActivity(agent.mcp_last_seen_at)}`
 }
 
+type ApproverType = 'passkey' | 'wallet' | 'unknown'
+
+const APPROVER_TYPE_LABEL: Record<ApproverType, string> = {
+  passkey: 'Passkey',
+  wallet: 'Wallet',
+  unknown: 'Unknown',
+}
+
+/**
+ * Shown as VISIBLE text under the list whenever any owner is 'unknown', not as
+ * a tooltip. Two reasons, and the second is the load-bearing one:
+ *
+ * 1. `design-review.md:108` — tooltips "do not hide essential instructions".
+ *    Without this sentence, `Unknown` is an unexplained gap on a list a user
+ *    may be auditing to decide whether they still control the account.
+ * 2. `Tooltip` cannot carry it. Its bubble is `whitespace-nowrap` with no
+ *    max-width (`Tooltip.tsx:96`), so a sentence renders as one unwrapped bar
+ *    far wider than a 390px viewport; and its `onFocus`/`onBlur` never fire,
+ *    because the wrapper is a plain `<span>` and `StatusBadge` is a
+ *    non-focusable `<span>` too, so the copy would be unreachable by touch
+ *    AND by keyboard. Every other `Tooltip` caller passes a short address or
+ *    name, which is why neither limit has bitten before. Both are shared-
+ *    primitive debt filed separately rather than fixed under a badge issue.
+ */
+const UNKNOWN_APPROVER_NOTE =
+  'Unknown means Haven holds no record identifying that approver — it could be a passkey enrolled outside Haven, a rotated one, or a wallet. The label reports what Haven knows, not what the approver is.'
+
+/**
+ * #2017: classify one on-chain Safe owner for the Approvers badge, from
+ * POSITIVE evidence only.
+ *
+ * The predicate this replaced was `passkeyAddresses.has(owner) ? 'Passkey' :
+ * 'Wallet'`, which reasons from ABSENCE. `passkeyAddresses` is Haven's current
+ * live record of enrolled passkeys for THIS Safe on THIS chain — it is not
+ * ground truth about the on-chain owner set. An owner is missing from it when
+ * enrolment was revoked or rotated, when the passkey list is stale or still
+ * loading, or when the owner was added outside Haven. `POST /safe/exec`
+ * deliberately authorises a backup passkey Haven holds no binding row for
+ * against the Safe's live owner list, so "no passkey row" means the fast-path
+ * binding is absent, not that the owner is a wallet.
+ *
+ * The only positive evidence Haven has for 'wallet' is the user's OWN
+ * `wallet_address` — the owner directory (`useOwnerDirectory`) carries aliases
+ * and account membership, not an owner TYPE, so it cannot supply one.
+ * Everything else is 'unknown', and the badge then says so rather than
+ * guessing. This mirrors `retiredRailOwnerAccess` below, so the file has one
+ * rule about owner identity instead of two.
+ */
+function classifyApprover(
+  normalizedOwner: string,
+  passkeyAddresses: ReadonlySet<string>,
+  knownWalletOwner: string | null | undefined,
+): ApproverType {
+  if (passkeyAddresses.has(normalizedOwner)) return 'passkey'
+  if (knownWalletOwner && normalizedOwner === knownWalletOwner) return 'wallet'
+  return 'unknown'
+}
+
 export default function AccountDetailClient() {
   const params = useParams()
   const router = useRouter()
@@ -165,6 +223,32 @@ export default function AccountDetailClient() {
     // details 500s and pollutes every console session on the default rail.
     // The signer set (Backup & recovery card) is that rail's approval story.
   } = useSafeDetails(safe?.account_type === 'delegator_hybrid' ? null : safeAddress, { chainId })
+
+  // #1989: what a legacy account's owner can still DO about their funds
+  // depends on whether any owner is a WALLET, and BOTH branches require
+  // POSITIVE evidence. The obvious predicate — "some owner is not a passkey we
+  // know about, therefore a wallet" — reasons from ABSENCE, and its failure
+  // mode is the one that hurts: `POST /safe/exec` deliberately authorises a
+  // backup passkey that Haven holds no binding row for (that is the #1229 fast
+  // path being absent, not the passkey being absent), so an owner Haven cannot
+  // identify is NOT evidence of a wallet. Reading it as one would tell a
+  // passkey-only owner to go and sign at Safe's interface, which cannot help
+  // them, about funds they may not otherwise be able to reach.
+  //
+  // So: a known wallet owner proves 'wallet'. Every owner being a known passkey
+  // proves 'passkey-only'. Anything else — an owner we cannot classify, or a
+  // still-loading/failed owner read — is 'unknown', and the notice then claims
+  // nothing about how to reach the funds. The asymmetry is deliberate: being
+  // wrongly told to contact Haven costs a message, being wrongly told to use
+  // Safe's interface costs trust at the worst possible moment.
+  const knownWalletOwner = user?.wallet_address?.toLowerCase()
+  const retiredRailOwnerAccess: RetiredRailOwnerAccess = !details
+    ? 'unknown'
+    : details.owners.some((owner) => owner.toLowerCase() === knownWalletOwner)
+      ? 'wallet'
+      : details.owners.every((owner) => passkeyAddresses.has(owner.toLowerCase()))
+        ? 'passkey-only'
+        : 'unknown'
 
   const {
     totalUsd,
@@ -266,12 +350,17 @@ export default function AccountDetailClient() {
             <StatusBadge>{chain.name}</StatusBadge>
             {safeAddress && (
               <>
-                {/* Send exists on BOTH rails now (#1083): Safe accounts get
-                    the Safe transaction modal, delegation accounts the
-                    sponsored owner-send. */}
-                <Button onClick={() => setSendOpen(true)}>
-                  Send
-                </Button>
+                {/* #1083 gave Send to BOTH rails. #1989 (epic #1440) took it
+                    back off the legacy Safe rail: that path signed a Safe
+                    transaction through `SendModal`, which is deleted with the
+                    rail. Delegation accounts keep the sponsored owner-send.
+                    Hidden rather than disabled, per #1079 — a legacy account
+                    stays fully readable and simply offers no spend action. */}
+                {safe.account_type === 'delegator_hybrid' ? (
+                  <Button onClick={() => setSendOpen(true)}>
+                    Send
+                  </Button>
+                ) : null}
                 <Button variant="ghost" onClick={() => setReceiveOpen(true)}>
                   Receive
                 </Button>
@@ -313,6 +402,10 @@ export default function AccountDetailClient() {
           </div>
         }
       />
+
+      {safe.account_type !== 'delegator_hybrid' ? (
+        <RetiredRailNotice ownerAccess={retiredRailOwnerAccess} />
+      ) : null}
 
       <Card hover={false} elevation="raised" className="overflow-hidden">
         <Card.Header padding="none" className="px-5 py-5 sm:px-6">
@@ -540,7 +633,12 @@ export default function AccountDetailClient() {
                 const normalizedOwner = owner.toLowerCase()
                 const isYou =
                   user?.wallet_address?.toLowerCase() === normalizedOwner || passkeyAddresses.has(normalizedOwner)
-                const approverType = passkeyAddresses.has(normalizedOwner) ? 'Passkey' : 'Wallet'
+                // #2017: positive evidence only — see `classifyApprover`.
+                const approverType = classifyApprover(
+                  normalizedOwner,
+                  passkeyAddresses,
+                  knownWalletOwner,
+                )
                 const ownerAlias = getOwnerAlias(owner)
                 return (
                   <div
@@ -567,7 +665,7 @@ export default function AccountDetailClient() {
                     )}
                     <CopyButton text={owner} />
                     <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', owner)} label="Open approver externally" />
-                    <StatusBadge>{approverType}</StatusBadge>
+                    <StatusBadge>{APPROVER_TYPE_LABEL[approverType]}</StatusBadge>
                     {isYou && (
                       <StatusBadge tone="brand">You</StatusBadge>
                     )}
@@ -575,6 +673,15 @@ export default function AccountDetailClient() {
                 )
               })}
             </div>
+            {details.owners.some(
+              (owner) =>
+                classifyApprover(owner.toLowerCase(), passkeyAddresses, knownWalletOwner) ===
+                'unknown',
+            ) && (
+              <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                {UNKNOWN_APPROVER_NOTE}
+              </p>
+            )}
           </div>
         )}
 
@@ -644,23 +751,6 @@ export default function AccountDetailClient() {
           accountAddress={safeAddress}
           chainId={chainId}
           onSent={handleSendSuccess}
-        />
-      )}
-      {sendOpen && safeAddress && safe.account_type !== 'delegator_hybrid' && (
-        <SendModal
-          open
-          onClose={() => setSendOpen(false)}
-          safeAddress={safeAddress}
-          safeName={safe.name}
-          safeDetails={details}
-          balances={balances}
-          onSuccess={handleSendSuccess}
-          contacts={contacts}
-          contactsError={contactsError}
-          resolveAddress={resolveAddress}
-          chainId={chainId}
-          contextLoading={detailsLoading}
-          contextError={detailsError}
         />
       )}
       <ReceiveFundsModal

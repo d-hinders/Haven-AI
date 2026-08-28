@@ -91,13 +91,18 @@ authorization = post_haven(authorize_path, {
   "idempotencyKey": f"python-openapi:{payment_required['resource']['url']}",
 })
 
-if authorization.get("status") == "pending_approval":
+# A payment outside the agent's on-chain budget is DECLINED before any money
+# moves — /x402/authorize answers 403 delegation_budget_exceeded and no intent
+# row is created. There is no approval queue to wait on, so there is nothing to
+# poll: raise the budget in Haven and run this again.
+if not authorization.get("sign_data"):
   print(json.dumps({
-    "payment_id": authorization["payment_id"],
+    "status": authorization.get("status"),
+    "payment_id": authorization.get("payment_id"),
     "next_action": authorization.get("next_action"),
     "message": authorization.get("message"),
   }, indent=2))
-  sys.exit("Payment is waiting for approval in Haven. Re-run after approval and use /payments/{id}/resume_state.")
+  sys.exit("Haven returned no signing payload for this payment — nothing to sign and nothing queued.")
 
 sign_hash = authorization["sign_data"]["hash"]
 signature = sign_raw_hash(sign_hash, DELEGATE_KEY)

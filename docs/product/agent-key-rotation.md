@@ -12,7 +12,7 @@ covers:
   - packages/connect/src/args.ts
   - packages/connect/src/storage.ts
   - packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx
-last-verified: "2026-08-24" # Promotion review: corrected the dashboard walkthrough's stale boundary warning to match #1849 — an expired remainder is dropped and, while the recurring grant remains active, the full current-period budget is issued. Clarified #1699 applies revoke-and-reissue only to an anchored attestation while standing remains unchanged, and #1868 recovery depends on the stage where the flow stopped. Prior: #1849: "What carries over" gains the boundary-crossing edge — a re-key started in one budget period and finished in the next drops the stale carry and hands you the full budget for the period you are actually in. Prior: #1702: written against epic #1694 as merged — #1698 (backend stages), #1699 (passport re-anchor), #1700 (connect --rekey), #1701's shipped half (dashboard).
+last-verified: "2026-08-25" # #1868: abandon-and-restart is now a recovery, not a write-off — the step-2 callout and the doctor section's "no spend authority" paragraph both updated: a fresh re-key inherits the abandoned attempt's frozen remainder and boundary, unless a new budget was granted in between (then it starts clean, deliberately). The rest of the walkthrough was re-read against the diff and stands. Prior: Promotion review: corrected the dashboard walkthrough's stale boundary warning to match #1849 — an expired remainder is dropped and, while the recurring grant remains active, the full current-period budget is issued. Clarified #1699 applies revoke-and-reissue only to an anchored attestation while standing remains unchanged, and #1868 recovery depends on the stage where the flow stopped. Prior: #1849: "What carries over" gains the boundary-crossing edge — a re-key started in one budget period and finished in the next drops the stale carry and hands you the full budget for the period you are actually in. Prior: #1702: written against epic #1694 as merged — #1698 (backend stages), #1699 (passport re-anchor), #1700 (connect --rekey), #1701's shipped half (dashboard).
 ---
 
 # Replacing an agent's signing key
@@ -143,8 +143,12 @@ it shows a **new API key, once**. Copy it.
 > before you finish, the expired remainder is dropped; any recurring budget that is
 > still active continues from its original boundary. Crossing a boundary no longer
 > leaves a fresh period at zero ([#1849](https://github.com/d-hinders/Haven-AI/issues/1849)),
-> but abandoning after the revoke can still leave the agent without spend authority
-> ([#1868](https://github.com/d-hinders/Haven-AI/issues/1868)).
+> and abandoning after the revoke no longer forfeits the budget: the agent still
+> cannot pay until a re-key finishes, but starting a fresh one picks up the frozen
+> remainder and boundary from the abandoned attempt
+> ([#1868](https://github.com/d-hinders/Haven-AI/issues/1868)) — provided you did not
+> grant the agent a new budget in between, in which case the fresh re-key starts
+> clean and you re-grant by hand.
 
 **3. Back on the machine**
 
@@ -199,9 +203,15 @@ Haven already reports the address this machine generated, the re-key completed a
 the local half is outstanding — run `--rekey-finish`. Otherwise the machine cannot see
 whether the on-chain revoke on the agent page already ran. If it did not, closing the
 re-key costs nothing. If it did, the agent's old delegations are revoked and no new ones
-were issued, so it has **no spend authority until you re-grant it**
-([#1868](https://github.com/d-hinders/Haven-AI/issues/1868)) — and nothing on this
-machine records that. Check the agent page before assuming the harmless reading.
+were issued, so it has **no spend authority until a re-key finishes** — and nothing on
+this machine records that. Check the agent page before assuming the harmless reading.
+This state is recoverable without a manual re-grant: abandon the parked re-key and
+start a fresh one, and the new attempt inherits the frozen remainder and period
+boundary from the abandoned one ([#1868](https://github.com/d-hinders/Haven-AI/issues/1868)).
+The one case that starts clean instead is having granted the agent a new budget after
+the abandoned revoke — then the old remainder is not re-issued, on purpose, because
+stacking it on top of a budget already spent in the same period would exceed what you
+originally granted.
 
 ## Limits
 

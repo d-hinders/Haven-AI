@@ -82,7 +82,7 @@
  * registers per test, AFTER `mockHavenApi`, so Playwright matches it first, and
  * every other route is handed back with `route.fallback()` — which DEFERS to
  * the next matching handler rather than fulfilling, so the shared fixture still
- * serves auth, balances and approvals, unmodified and unaware.
+ * serves auth and balances, unmodified and unaware.
  *
  * ── Desktop captures, 390px geometry, no mobile baseline ─────────────────────
  *
@@ -97,7 +97,26 @@
  * about.
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { mockHavenApi, seedAuthenticatedSession, testAgent } from './fixtures/haven-api'
+import { resolveToken } from '@haven_ai/core'
+import {
+  mockHavenApi,
+  seedAuthenticatedSession,
+  testAgent,
+  testSafe,
+  testSafeAddress,
+} from './fixtures/haven-api'
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — plain .mjs. The ABI-level chain fixture the SCREENSHOT harness
+// already runs on (#1935/#1971), reused rather than re-cut. #1930 extracted it
+// out of `screenshot.mjs` into a module that imports nothing but viem and the
+// shared chain registry, precisely so this spec can load it: a second
+// hand-written encoder for the same four reads would drift SILENTLY, because a
+// wrong encoding is swallowed by `useOnChainAllowances` into an empty map and
+// renders as a plausible empty card.
+import {
+  FIXTURE_BLOCK_TIMESTAMP,
+  makeAllowanceChainFixture,
+} from '../scripts/allowance-chain-fixture.mjs'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, shared with
 // the screenshot script and the other two pixel gates so all of them render at
@@ -179,6 +198,271 @@ async function seedPanel(page: Page, seed: { agents: ReadonlyArray<Record<string
     }
     await route.fallback()
   })
+}
+
+/**
+ * ── The on-chain seam, and why #1930's fourth surface is reachable now ───────
+ *
+ * `UnmanagedDelegateCard` is the one surface in this family that no `/api/*`
+ * body of any shape can put on screen. Its input is `unmanagedDelegates`
+ * (`useAgentPanelState.ts:261-271`) — the set difference between the delegates
+ * the AllowanceModule reports ON-CHAIN and the delegates Haven's own `/agents`
+ * knows about. The left-hand side comes from `useOnChainAllowances`, which is
+ * viem reading the module through `usePublicClient`.
+ *
+ * #1930 recorded this as "`page.route` does not intercept RPC calls at all, so
+ * this is a capture-plumbing gap". **That reason is wrong, and it is worth
+ * saying why rather than quietly deleting it.** viem's transport for every
+ * chain Haven offers is `fallback()` over plain `http(url)` endpoints
+ * (`lib/wagmi.ts`), so a chain read leaves the browser as an ordinary JSON-RPC
+ * POST — the same kind of request Playwright routes for `/api/*`. Nothing about
+ * RPC is out of `page.route`'s reach; the harness simply had no answerer.
+ * #1935 built one for the screenshot harness and #1971 made it the default
+ * there, which is what turned a plausible-sounding judgment into a checkable
+ * one.
+ *
+ * The second half of #1930's judgment was load-bearing in a way its author
+ * could not have known: before #1971, `lib/wagmi.ts` registered a transport for
+ * 8453 only, `@wagmi/core`'s `getClient` CATCHES `ChainNotConfiguredError`, and
+ * eleven call sites — `useAgentPanelState:39` among them — took `undefined` and
+ * returned at their first line. Any read of "what a fixture can drive" made in
+ * that window was made against a defect.
+ *
+ * So the seam is the SAME one, not a second implementation:
+ * `makeAllowanceChainFixture` from the screenshot harness, which encodes the
+ * four reads `useOnChainAllowances` actually makes and unwraps the Multicall3
+ * `aggregate3` the app really sends. Every line between the wire and the pixel
+ * is production code — viem encodes, the fixture answers ABI-encoded return
+ * data, viem decodes, the hook maps, the card renders. Nothing is handed to a
+ * component by hand.
+ */
+
+/** A delegate the module reports and `/agents` does not — the whole product state. */
+const UNMANAGED_DELEGATE = '0x4444444444444444444444444444444444444444'
+/**
+ * The revoke control's accessible name speaks the TRUNCATED address (the
+ * card's rendered `Address` form), derived here independently rather than
+ * imported from the component's own helper — the assertion should not be
+ * able to re-derive its expectation from the code under test.
+ */
+const UNMANAGED_DELEGATE_SHORT = `${UNMANAGED_DELEGATE.slice(0, 6)}…${UNMANAGED_DELEGATE.slice(-4)}`
+
+/**
+ * The unmanaged delegate's on-chain budget.
+ *
+ * Deliberately NOT the same numbers as `testAgent`'s API allowance. This card's
+ * defining property is that its budget has no Haven-side counterpart, and a row
+ * that happened to match the managed agent's would photograph a coincidence.
+ */
+/**
+ * Resolved from the shared registry rather than pasted, and asserted rather
+ * than `!`-ed: `resolveToken` returns `undefined` for a symbol a chain does not
+ * carry, and an `undefined` token address would flow all the way into the ABI
+ * encoder and surface as an unrelated decode failure.
+ */
+const UNMANAGED_TOKEN = resolveToken(testSafe.chain_id, 'USDC')
+// `address` is nullable because the registry also describes NATIVE tokens. The
+// AllowanceModule reads this fixture answers are ERC-20 reads keyed by a real
+// contract address, so a null here is a fixture that cannot work — caught at
+// load rather than surfacing as an unrelated ABI decode failure mid-render.
+if (!UNMANAGED_TOKEN?.address) {
+  throw new Error(
+    `visual gate: chain ${testSafe.chain_id} carries no ERC-20 USDC in the shared registry`,
+  )
+}
+const UNMANAGED_TOKEN_ADDRESS = UNMANAGED_TOKEN.address
+
+const UNMANAGED_RESET_MIN = 1440
+
+/**
+ * Anchored INSIDE the current period, and that is the whole reason this
+ * constant exists (#1930, design review).
+ *
+ * The fixture's `lastResetMin` defaults to 0, which is unboundedly far in the
+ * past, so `computeEffectiveAllowance` reports `isResetPending` and zeroes
+ * effective spend (`lib/allowance-math.ts:60-71`). The card then renders
+ * "200.00 / 200.00 remaining per day" over an `AllowanceBar` whose fill segment
+ * is ZERO WIDTH — a capture that shows the bar's track and never its fill.
+ *
+ * That is exactly the shape this spec family keeps having to catch: a
+ * plausible, well-formed PNG of the wrong thing. The fill is the one part of
+ * this row whose colour has to hold up against the card's `--v2-warning-soft`
+ * ground, and a bar that never paints it cannot show a regression in it.
+ *
+ * Six hours back on a daily period puts the row at 45/200 spent — a partial
+ * fill — and is still deterministic, because it is derived from the fixture's
+ * own fixed block timestamp rather than from the wall clock.
+ *
+ * EVERY line of the resulting capture is now chain-derived, and the one that
+ * was not is worth recording because the baseline moved when it was fixed.
+ * `AllowanceBar` decided the reset from `chainTimeSec` but formatted the
+ * countdown beneath it from `Date.now()` — filed as #1995, fixed by threading
+ * the same `nowSec` into the formatter. Two corrections to what this comment
+ * said before: the call site binds `agent-panel/agent-display.tsx`'s
+ * `timeUntil`, NOT `lib/format.ts`'s (two same-named helpers; a grep for
+ * `timeUntil` cannot say which one a call site resolves to), and its cliff
+ * string is therefore `now`, not `expired`.
+ *
+ * The concrete consequence for this baseline: the row used to render
+ * "Resets in now" — the terminal value, because `FIXTURE_BLOCK_TIMESTAMP` is
+ * permanently in the past — beside a bar drawn from a decision that the reset
+ * had NOT happened. It now renders "Resets in 18h 0m", which is what six hours
+ * into a daily period actually leaves. The string is still pinned, and now for
+ * a better reason: it is a function of the fixture block and the row alone, so
+ * advancing the fixture block no longer moves it in a way the wall clock
+ * decides.
+ */
+const UNMANAGED_LAST_RESET_MIN = Math.floor(FIXTURE_BLOCK_TIMESTAMP / 60) - 360
+
+const UNMANAGED_ROWS = [
+  {
+    token: UNMANAGED_TOKEN_ADDRESS,
+    amount: 200_000000n,
+    spent: 45_000000n,
+    resetTimeMin: UNMANAGED_RESET_MIN,
+    lastResetMin: UNMANAGED_LAST_RESET_MIN,
+  },
+] as const
+
+const answerUnmanagedChainRead = makeAllowanceChainFixture({
+  chainId: testSafe.chain_id,
+  safeAddress: testSafeAddress,
+  delegates: [UNMANAGED_DELEGATE],
+  rows: UNMANAGED_ROWS,
+}) as (method: string, params: unknown[]) => unknown
+
+/** What a run learned about the chain traffic it served. */
+interface ChainWatch {
+  /** Reads the app actually issued. Zero is FATAL — see below. */
+  observed: string[]
+  /** Reads this fixture had no answer for. */
+  gaps: string[]
+}
+
+/**
+ * Answer the app's JSON-RPC over `page.route`, and MEASURE what was asked.
+ *
+ * Registered last, so Playwright matches it before `seedPanel`'s and
+ * `mockHavenApi`'s handlers; anything that is not a JSON-RPC envelope is handed
+ * straight back with `route.fallback()`, which DEFERS rather than fulfilling, so
+ * pages, `/_next` assets and every `/api/*` route are served exactly as before.
+ * The body is parsed before the request is claimed, so an unrelated POST to some
+ * other host cannot be swallowed here.
+ *
+ * The two counters are the point, and they catch opposite failures:
+ *
+ * - `gaps` is "the app asked and this fixture had no answer". Left unmeasured
+ *   that is invisible, because `useOnChainAllowances` swallows a failed read
+ *   into an empty map (`useOnChainAllowances.ts:136-139` logs and moves on) and
+ *   the panel renders its EMPTY branch. That is a well-formed, entirely wrong
+ *   capture: the empty state of the very surface the test exists to show.
+ * - `observed` is "the app asked at all". This is the failure that hid #1971 for
+ *   the whole life of the screenshot harness, and it produces NO request to be
+ *   missing from `gaps` — `usePublicClient` returns `undefined`, the consumer
+ *   returns at its first line, nothing throws and nothing is logged. A test that
+ *   only checked `gaps` would call that a clean run.
+ *
+ * Both are asserted in the test rather than here, so the failure names the
+ * capture it belongs to.
+ */
+async function seedChain(
+  page: Page,
+  answer: (method: string, params: unknown[]) => unknown,
+): Promise<ChainWatch> {
+  const watch: ChainWatch = { observed: [], gaps: [] }
+
+  await page.route('**/*', async (route) => {
+    const request = route.request()
+    if (request.method() !== 'POST') return route.fallback()
+
+    let payload: unknown
+    try {
+      payload = request.postDataJSON()
+    } catch {
+      return route.fallback()
+    }
+
+    const batched = Array.isArray(payload)
+    const calls = (batched ? payload : [payload]) as Array<{
+      jsonrpc?: string
+      id?: unknown
+      method?: unknown
+      params?: unknown[]
+    }>
+    if (calls.length === 0) return route.fallback()
+    const isRpc = (c: (typeof calls)[number]) =>
+      Boolean(c) && c.jsonrpc === '2.0' && typeof c.method === 'string'
+    if (!calls.every(isRpc)) return route.fallback()
+
+    // Recorded BEFORE any answer is computed: the question is whether the app
+    // ASKED, not whether we could reply.
+    for (const call of calls) watch.observed.push(String(call.method))
+
+    const answers = calls.map((call) => {
+      const method = String(call.method)
+      let result: unknown
+      try {
+        result = answer(method, call.params ?? [])
+      } catch (err) {
+        // A throw from the fixture is a FIXTURE bug and must not read like a
+        // chain that declined — same bucket, different sentence.
+        watch.gaps.push(`${method}: the fixture threw — ${String(err)}`)
+        return { jsonrpc: '2.0', id: call.id ?? null, error: { code: -32000, message: 'fixture threw' } }
+      }
+      if (result === undefined) {
+        watch.gaps.push(`${method}: no answer was declared for this read`)
+        return {
+          jsonrpc: '2.0',
+          id: call.id ?? null,
+          error: { code: -32601, message: `no answer for ${method}` },
+        }
+      }
+      return { jsonrpc: '2.0', id: call.id ?? null, result }
+    })
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(batched ? answers : answers[0]),
+    })
+  })
+
+  return watch
+}
+
+/**
+ * The chain traffic was real, complete, and served entirely from this fixture.
+ *
+ * Asserted immediately before the capture for the same reason `expectNoSkeletons`
+ * is: a PNG taken while either of these is false looks exactly like a PNG taken
+ * while both are true.
+ */
+async function expectChainServed(watch: ChainWatch, label: string) {
+  // Polled, and asserted BEFORE anything about the card. The reads are async
+  // and complete independently of whether the card ends up on screen, so this
+  // does not need the card as a proxy for "the fetch finished" — and it must
+  // not use one. Measured (#1930): when a read goes unanswered,
+  // `getAllAllowances` throws, `useOnChainAllowances` catches it into an empty
+  // allowance list, and `unmanagedDelegates` then DROPS the delegate outright
+  // — `.filter((d) => d.allowances.length > 0)` (`useAgentPanelState.ts:270`).
+  // There is no card left to be missing a budget. Asserted AFTER the card
+  // locator, this guard never fires at all and the run reports "card not
+  // found", pointing at the component rather than at the read that failed.
+  await expect
+    .poll(() => watch.observed.length, {
+      message:
+        `${label}: the app issued NO chain read at all. That is the #1971 shape — ` +
+        `\`getClient\` catches ChainNotConfiguredError and returns undefined, so ` +
+        `\`usePublicClient\` is undefined and every consumer returns at its first ` +
+        `line, silently. Check that testSafe.chain_id is registered in lib/wagmi.ts.`,
+    })
+    .toBeGreaterThan(0)
+  expect(
+    watch.gaps,
+    `${label}: the app issued chain reads this fixture could not answer. ` +
+      `useOnChainAllowances swallows a failed read into an EMPTY map, so the ` +
+      `capture would be a photograph of the empty branch rather than of this card.`,
+  ).toEqual([])
 }
 
 /**
@@ -482,31 +766,117 @@ test.describe('agent panel empty states and card banners', () => {
   })
 
   /**
-   * `AgentPanel`'s FOURTH EmptyState — "Create a Haven account to manage
-   * agents" (`AgentPanel.tsx:36-44`) — is deliberately NOT captured here,
-   * because this run could not reach it and the reason turned out to be a
-   * product fact rather than a fixture problem.
+   * ── The three surfaces that are STILL unreachable (#1930) ──────────────────
    *
-   * The branch is `!safeAddress`, and `safeAddress` is
-   * `activeSafe?.safe_address` where `activeSafe` is `resolveActiveSafe(safes)`
-   * — which returns `null` only for an EMPTY `safes` array
-   * (`AuthContext.tsx:75-87`). But `ProtectedRoute` gets there first: on a user
-   * with no safes it `router.replace('/onboarding')` AND renders `null` while
-   * it does (`ProtectedRoute.tsx:21-27, 41`). Seeding `safes: []` produced a
-   * blank page with no `AgentPanel` on it at all, which is what sent this
-   * looking at the guard.
+   * #1930 recorded four surfaces this spec could not reach. Three of them are
+   * re-derived below against `dev` AFTER #1979/#1971 — the defect that made
+   * `usePublicClient` `undefined` on one of Haven's two chains, and therefore
+   * made every earlier reachability judgment suspect — and after #1972/#1935
+   * gave the harness a way to answer chain reads at all. The fourth,
+   * `UnmanagedDelegateCard`, turned out to be reachable and is captured above.
    *
-   * There is one gap in the guard — `hasSafe` is
-   * `user.safes?.length > 0 || user.safe_address`, so a LEGACY user carrying
-   * `safe_address` without any `user_safes` row would pass the guard and then
-   * hit this branch. Whether the backend still produces that shape is not
-   * something this issue established, so the branch is left uncaptured and
-   * reported rather than photographed on a guess: a capture of a state the
-   * product cannot reach is the exact failure #1924 was filed to stop, and
-   * "probably reachable" is not the standard this file is holding everything
-   * else to.
+   * They are reported rather than synthesised, per
+   * `docs/contributing/ship-playbooks/frontend.md` §4: a fixture that reaches a
+   * state the product cannot is worse than no capture, because it is green
+   * forever about something no user can see.
    *
-   * Filed with the other out-of-reach surfaces rather than left as a silence.
+   * ── 1. `AgentPanel`'s no-account EmptyState — PERMANENTLY unreachable ──────
+   *
+   * "Create a Haven account to manage agents" (`AgentPanel.tsx:36-44`) is gated
+   * on `!safeAddress`, and `safeAddress` is `activeSafe?.safe_address` where
+   * `activeSafe` is `resolveActiveSafe(safes)` — null only for an EMPTY `safes`
+   * array (`AuthContext.tsx:75-87`). `ProtectedRoute` gets there first: a user
+   * with no safes is `router.replace('/onboarding')`d and renders `null` in the
+   * meantime (`ProtectedRoute.tsx:21-27, 41`).
+   *
+   * #1930 left ONE hole in that argument open, and it is closed here rather
+   * than restated. The guard is `hasSafe = user.safes?.length > 0 ||
+   * user.safe_address` (`ProtectedRoute.tsx:27`), so a LEGACY user carrying
+   * `users.safe_address` with zero `user_safes` rows would pass the guard and
+   * then hit this branch. That shape turns out to be one the backend maintains
+   * an invariant against, on every path that writes either side:
+   *
+   *   - migration `000_initial` BACKFILLS `user_safes` from every non-null
+   *     `users.safe_address`;
+   *   - `users.safe_address` is written only when the FIRST safe is inserted,
+   *     which is also the one marked default
+   *     (`routes/user-safes.ts:122-135`, `isFirst`);
+   *   - unlinking the LAST safe CLEARS the mirror in the same transaction
+   *     (`CLEAR_LEGACY_USER_SAFE_ADDRESS_SQL`, `deleteSafeForUser`,
+   *     `infra/repositories/user-safes.ts:301-324`), and unlinking a non-last
+   *     default re-points it at the promoted safe;
+   *   - `/auth/me` returns every `user_safes` row for the user, unfiltered by
+   *     chain or anything else (`LIST_SESSION_SAFES_FOR_USER_SQL`).
+   *
+   * ONE residual path survives that reading, found by independent review and
+   * recorded here rather than rounded off. `PUT /user/safe`
+   * (`routes/user.ts:152-174`) writes the same two sides with **two
+   * un-transacted `pool.query` calls in sequence** — the legacy mirror first,
+   * the `user_safes` row second. A crash between them commits exactly the
+   * shape the paragraph above says cannot exist. It has no frontend caller
+   * (the dashboard uses `POST /user/safes`), so no user reaches it through the
+   * product, and the window is a torn write rather than a state the backend
+   * intends — but "the backend cannot emit this" is stronger than the evidence
+   * supports, and the honest claim is that it cannot emit it *by design*.
+   *
+   * Filed as #1994 rather than fixed here: wrapping a route's writes in a
+   * transaction is a behaviour change on the account-linking path, which is
+   * not a test PR's to make.
+   *
+   * The conclusion is unchanged either way. A capture of this branch would be
+   * a photograph of a torn write, not of a screen the product puts anyone on,
+   * and #1924's rule is about what the PRODUCT can reach.
+   *
+   * ── 2. The finalizing / finalize-timeout EmptyStates — behind a signature ──
+   *
+   * Both (`AgentPanel.tsx:109-144`) are driven by `finalizingAgent` /
+   * `finalizeTimedOut`, which only `pollForNewAgent` sets
+   * (`useAgentPanelState.ts:152-196`) — and it is reached from exactly two
+   * places. `handleSetupUpdated` is `ConnectAgentModal`'s `onSetupUpdated`; the
+   * only two call sites that pass a NON-NULL `delegateAddress` (the poll
+   * returns early without either flag when the delegate is absent,
+   * `useAgentPanelState.ts:159-166`) are
+   * `useAgentConnectionSetup.ts:733` and `:744`:
+   *
+   *   - `:733` is after `executeAgentSetup({ signer, publicClient, ... })` — a
+   *     real Safe transaction signed by a real wallet;
+   *   - `:744` is `handleDelegationApproved`, which reads as pure API until it
+   *     is traced back: it is `DelegationApprovalStep`'s `onApproved`, called
+   *     only from `confirmWithHaven` (`DelegationApprovalStep.tsx:83-96`),
+   *     which runs only after `BudgetGrantAction`'s `grant(input)` returns
+   *     `ok` (`BudgetGrantAction.tsx:79-83`) — and `grant` is
+   *     `useDelegationBudget`, i.e. a WebAuthn passkey assertion or
+   *     `walletClient.signTypedData` (`useDelegationBudget.ts:114-126`).
+   *
+   * The second entry point, `retryFinalizePoll`, is rendered only INSIDE the
+   * timeout EmptyState's own "Check again" button — reaching it requires the
+   * state it produces. Neither leg moved with #1971 or #1935: both are wallet
+   * signatures, which no `page.route` fixture can supply.
+   *
+   * ── 3. `ErrorBoundary`'s fallback — behind a contract the backend keeps ────
+   *
+   * `ErrorBoundary` wraps every authenticated route
+   * (`app/(authenticated)/layout.tsx:55`) and renders its fallback only when a
+   * descendant THROWS during render. #1930 recorded the only unguarded accesses
+   * as `agent.allowances`; today there are three more, all created by the same
+   * mechanism and all closed by the same fact:
+   *
+   *   - `custody/page.tsx:88` — `getChainConfig(safe.chain_id).name`
+   *   - `EditAgentModal.tsx:91` — `getChainTokens(chainId)`
+   *   - `agent-display.tsx:28` — `getChainTokens(chainId)` via `AllowanceBar`
+   *
+   * Each throws on a chain id the shared registry does not carry. The backend
+   * rejects one at the door on both write paths — `isSupportedChain` at
+   * `routes/user-safes.ts:89` (deploy) and `:111` (import) — and no chain has
+   * been removed from `CHAIN_REGISTRY`, so stored rows on Gnosis (100) are
+   * still resolvable. A fixture COULD emit `chain_id: 999` and redden the
+   * screen, and that is precisely the capture this file must not take.
+   *
+   * `ErrorBoundary` is the costliest of the three to leave uncovered — it is
+   * exercised by no other spec, and its entire job is to display failures that
+   * are by definition unplanned — so #1930 keeps it as the priority and names
+   * the direction: a dedicated dev-only throw trigger, which is a product
+   * change and not this spec's to make.
    */
 
   // ── AgentCard warning banners ─────────────────────────────────────────────
@@ -625,6 +995,177 @@ test.describe('agent panel empty states and card banners', () => {
     })
   }
 
+  // ── UnmanagedDelegateCard — the chain-fed surface (#1930) ─────────────────
+  //
+  // The card locator is the heading's fifth ancestor, and that is this file's
+  // established idiom (`empty` and `banner` above are the same shape) rather
+  // than a shortcut: `UnmanagedDelegateCard` carries no role and no
+  // `aria-label`, so its only semantic handle is its heading. Walking to the
+  // root by structure keeps the capture off the class strings this gate is
+  // under contract to police (#1811/#1820). #1980 is the open owner decision
+  // about this card's affordances — this test photographs what exists and
+  // changes nothing about it.
+  function unmanagedCard(page: Page) {
+    return page
+      .getByRole('heading', { name: 'Unmanaged Delegate' })
+      .locator('xpath=../../../../..')
+  }
+
+  /**
+   * Assert the card's full rendered content, including the budget row the CHAIN
+   * seeded.
+   *
+   * The budget assertion is the "seeding a state is not rendering the branch"
+   * rule (#1873) applied to a fixture that is two layers deeper than an API
+   * body. `getDelegates` returning an address proves nothing about whether
+   * `getTokens` and `getTokenAllowance` were answered, decoded and mapped —
+   * `UnmanagedDelegateCard` renders its whole `Agent budget` block behind
+   * `allowances.length > 0` (`UnmanagedDelegateCard.tsx:78`), so a card whose
+   * allowance reads failed renders a perfectly plausible header-and-address
+   * card with the budget silently absent.
+   *
+   * The heading and the chip are asserted as an exact pair for the same reason
+   * `expectCardBanners` is exact: the `pendingHavenSetup` branch of this
+   * component is STRUCTURALLY IDENTICAL — same markup, same slots — and differs
+   * only in tone, icon and these two strings ("Finishing agent setup" /
+   * "confirming"). A `toBeVisible()` on the address block would pass on either,
+   * and the two captures would be silent near-duplicates.
+   */
+  async function expectUnmanagedCard(card: Locator, label: string) {
+    // The card's heading SET, not "the heading I located it by is present" —
+    // the latter cannot fail, because `card` is built by walking up from that
+    // exact heading and the caller has already asserted it resolves
+    // (independent review, #1930). Asserting the set has real discriminating
+    // power: a second heading appearing inside this card fails here.
+    const headings = await card
+      .getByRole('heading')
+      .evaluateAll((els) => els.map((el) => el.textContent?.trim() ?? ''))
+    expect(
+      headings,
+      `${label}: this is not the heading set the card is supposed to render`,
+    ).toEqual(['Unmanaged Delegate'])
+    await expect(
+      card.getByText('network only', { exact: true }),
+      `${label}: this is the pendingHavenSetup branch, not the unmanaged one`,
+    ).toHaveCount(1)
+    await expect(card).toContainText('This delegate was set up outside Haven')
+
+    // Existence FIRST, as its own assertion with its own sentence. Reading the
+    // symbols straight off a locator that resolves to nothing does redden — but
+    // it reddens as a bare 60s `locator.evaluate` timeout, which says nothing
+    // about what went wrong. Measured, not predicted: suppressing this block in
+    // `UnmanagedDelegateCard` produced exactly that, and the diagnosis it costs
+    // is the whole reason these messages are written.
+    const budget = card.locator('text=Agent budget').locator('xpath=..')
+    await expect(
+      budget,
+      `${label}: the card rendered with NO on-chain budget block. The delegate ` +
+        `came from getDelegates, but the rows come from getTokens + ` +
+        `getTokenAllowance — a card with no budget is what an unanswered ` +
+        `allowance read looks like, and it photographs perfectly happily.`,
+    ).toHaveCount(1)
+
+    const budgetSymbols = await budget.evaluate((el) =>
+      Array.from(el.querySelectorAll('span, p'))
+        .map((n) => n.textContent?.trim() ?? '')
+        .filter((t) => /^[A-Z]{2,6}$/.test(t)),
+    )
+    expect(
+      budgetSymbols,
+      `${label}: the budget block rendered but carries no token symbol — the ` +
+        `rows did not survive decoding.`,
+    ).toContain('USDC')
+
+    // The bar's FILL, not just its track. `AllowanceBar` paints the spent
+    // portion as a nested element inside the track, and a reset-pending row
+    // paints it at zero width — which photographs as a perfectly tidy empty
+    // bar. Asserting a fill wider than 0 and narrower than the track is what
+    // makes this capture evidence about the fill colour rather than about the
+    // container it sits in (#1930, design review).
+    const fill = await budget.evaluate((el) => {
+      const bars = Array.from(el.querySelectorAll('div')).filter((d) => {
+        const parent = d.parentElement
+        if (!parent) return false
+        return (
+          d.getBoundingClientRect().width > 0 &&
+          d.getBoundingClientRect().width < parent.getBoundingClientRect().width &&
+          getComputedStyle(d).backgroundColor !== getComputedStyle(parent).backgroundColor
+        )
+      })
+      return bars.length
+    })
+    expect(
+      fill,
+      `${label}: no partially-filled bar segment inside the budget block. A ` +
+        `reset-pending row renders the track with a ZERO-WIDTH fill, so this ` +
+        `capture would show the bar's container and never the fill colour it ` +
+        `exists to prove. Check UNMANAGED_LAST_RESET_MIN.`,
+    ).toBeGreaterThan(0)
+
+    // #1980: the card answers "how do I stop this authority" with a control,
+    // not a copy button. /custody's "Revoke an agent — or an unmanaged
+    // delegate — on-chain from Agents" copy points HERE, so a card without
+    // this control makes that copy a lie again.
+    await expect(
+      card.getByRole('button', { name: `Revoke delegate ${UNMANAGED_DELEGATE_SHORT}` }),
+      `${label}: the revoke affordance is missing — this card shows live ` +
+        `spending authority and must answer how the user stops it (#1980).`,
+    ).toBeVisible()
+  }
+
+  test('agent panel unmanaged delegate — set up outside Haven', async ({ page }) => {
+    // No managed agent at all, so the on-chain delegate is unmanaged by set
+    // difference rather than by a field. `unmanagedDelegates.length > 0` is
+    // also what keeps the panel off its "No agents yet" empty state
+    // (`AgentPanel.tsx:147-151`), so this fixture cannot be confused with that
+    // one — the two branches are mutually exclusive in the product.
+    await seedPanel(page, { agents: [] })
+    const chain = await seedChain(page, answerUnmanagedChainRead)
+    await gotoDesktop(page, '/agents')
+
+    // BEFORE the card is looked for. See `expectChainServed` — an unanswered
+    // read removes the card ENTIRELY rather than emptying it, so every
+    // assertion below this line would report "card not found" for a fault that
+    // is actually in the chain fixture.
+    await expectChainServed(chain, 'UnmanagedDelegateCard · network only')
+
+    const card = unmanagedCard(page)
+    await expect(card).toHaveCount(1)
+    await expectUnmanagedCard(card, 'UnmanagedDelegateCard · network only')
+    // The empty state and this card are mutually exclusive branches of the same
+    // `agents.length === 0` fixture. Pinning the negative is what stops a
+    // regression that renders BOTH from photographing as if only this one ran.
+    await expect(page.getByRole('heading', { name: 'No agents yet' })).toHaveCount(0)
+
+    await expectNoSkeletons(card, 'UnmanagedDelegateCard · network only')
+    await expect(card).toHaveScreenshot('unmanaged-delegate-card-desktop.png', SNAPSHOT_OPTIONS)
+  })
+
+  test('unmanaged delegate revoke goes through the confirm pattern (#1980)', async ({ page }) => {
+    await seedPanel(page, { agents: [] })
+    const chain = await seedChain(page, answerUnmanagedChainRead)
+    await gotoDesktop(page, '/agents')
+    await expectChainServed(chain, 'UnmanagedDelegateCard · revoke confirm')
+
+    const card = unmanagedCard(page)
+    await expect(card).toHaveCount(1)
+
+    // The affordance, then the established destructive-confirm pattern: the
+    // button alone commits NOTHING — the dialog stands between the click and
+    // the Safe transaction, exactly as AgentCard's revoke does.
+    await card.getByRole('button', { name: `Revoke delegate ${UNMANAGED_DELEGATE_SHORT}` }).click()
+    await expect(page.getByText('Revoke this delegate?')).toBeVisible()
+    // Money copy, not decoration: the dialog names the authority being
+    // removed and that the user approves the update.
+    await expect(page.getByText(/Revoking removes its network spending authority/)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Revoke delegate', exact: true })).toBeVisible()
+
+    // Cancel: the card is still there, no state changed, no tx was attempted.
+    await page.getByRole('button', { name: 'Cancel' }).click()
+    await expect(page.getByText('Revoke this delegate?')).toHaveCount(0)
+    await expect(card).toHaveCount(1)
+  })
+
   // ── 390px — GEOMETRY ONLY, deliberately no capture ────────────────────────
   //
   // #1797's rule (see the header). Checked FIRST during development rather
@@ -674,5 +1215,31 @@ test.describe('agent panel empty states and card banners', () => {
 
     const overflow = await empty.evaluate((el) => el.scrollWidth - el.clientWidth)
     expect(overflow, `the empty state overflowed at ${MOBILE.width}px`).toBe(0)
+  })
+
+  test('the unmanaged delegate card does not overflow at 390px', async ({ page }) => {
+    if (!MOBILE) throw new Error('visual gate: no viewport below the desktop breakpoint')
+
+    await seedPanel(page, { agents: [] })
+    const chain = await seedChain(page, answerUnmanagedChainRead)
+    await page.setViewportSize({ width: MOBILE.width, height: MOBILE.height })
+    await page.goto('/agents')
+    await settle(page)
+
+    await expectChainServed(chain, 'UnmanagedDelegateCard · network only @ 390px')
+
+    const card = unmanagedCard(page)
+    await expect(card).toHaveCount(1)
+    // Re-asserted at this width rather than assumed from the desktop test: the
+    // budget block is the widest thing in the card and it is the part fed by
+    // the chain, so a 390px run that lost it would otherwise report a clean
+    // zero-overflow on a card that is narrow because it is empty.
+    await expectUnmanagedCard(card, 'UnmanagedDelegateCard · network only @ 390px')
+
+    const overflow = await card.evaluate((el) => el.scrollWidth - el.clientWidth)
+    expect(
+      overflow,
+      `the unmanaged delegate card overflowed at ${MOBILE.width}px`,
+    ).toBe(0)
   })
 })

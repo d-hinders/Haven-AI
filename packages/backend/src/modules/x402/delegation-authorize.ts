@@ -3,9 +3,12 @@
  * settlement. Extracted verbatim from `routes/x402.ts`'s authorize handler:
  * scheme routing (#946), the #961 hardening (hourly cap, one-shot refusal,
  * idempotent replay), the EIP-3009 funding-leg fallback, and erc7710
- * settlement-child construction. Behavior and ordering are unchanged from the
- * pre-#996 route.
+ * settlement-child construction. Behavior and ordering were unchanged from the
+ * pre-#996 route until #2082 added the erc7710 remaining-budget pre-check —
+ * the one deliberate behavioural difference, and a refusal that arrives
+ * earlier rather than a refusal that did not exist (see its comment below).
  */
+import { randomUUID } from 'node:crypto'
 import { signX402ExpectedContext, x402PayerContextFields, x402PayerWireFields } from '../../infra/chain/x402-binding-signer.js'
 import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
@@ -19,6 +22,13 @@ import {
 } from './x402-delegation.js'
 import { serializeUserOp } from '../../rails/execution-rail.js'
 import { insertMachineIntent as createPaymentIntent } from '../../infra/repositories/payment-intents.js'
+import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
+import {
+  AgentPaymentNextAction,
+  AgentPaymentPhase,
+  AgentPaymentRail,
+} from '../../domain/agent-payment-taxonomy.js'
+import { formatTokenValue } from '../../domain/tokens.js'
 import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
@@ -260,6 +270,114 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
   if (!budget) {
     return { code: 403, body: { error: `Agent has no active budget delegation for ${tokenConfig.symbol} to this merchant` } }
   }
+
+  // ── #2082: fail-fast remaining-budget pre-check ──────────────────────────
+  //
+  // What this is NOT: a security boundary. The `ERC20PeriodTransferEnforcer`
+  // in the budget delegation's caveat stack remains the gate, and it reverts
+  // an over-budget redemption whether or not this read happened. Nothing below
+  // widens what the chain will allow — it can only refuse earlier.
+  //
+  // What it IS: the missing half of an invariant the other two entry points
+  // already keep. `POST /payments` and the EIP-3009 funding shape both prepare
+  // a redemption at authorize, so the enforcer refuses during gas estimation
+  // and the caller gets a 502 with nothing written. This branch prepares
+  // nothing — it re-delegates a narrowed child and hands it back — so an
+  // over-budget request used to come back 201 `pending_signature` WITH
+  // `sign_data`, and the refusal only arrived four round trips later, after
+  // the agent had signed, settled, and retried the merchant (#1993, measured
+  // live against dev 2026-08-25). #1450 made erc7710 the PREFERRED scheme, so
+  // the one path most payments take was the one that refused latest.
+  //
+  // FAIL OPEN, deliberately. `readRemainingBudget` reports `fromChain: false`
+  // when the enforcer read failed or the delegation carries no period caveat
+  // this reader can speak for; in both cases the number is a fallback, and
+  // refusing a possibly-fundable payment on a degraded RPC read would turn a
+  // transient outage into a stopped agent — the same posture as #1145's
+  // fallback and #1319's `remaining_is_from_chain` honesty flag. Belt and
+  // braces, THREE ways: the fallback we pass is the requested amount, so even
+  // a caller that dropped the `fromChain` guard could only ever compare
+  // `amount < amount` and proceed; and the call is wrapped, so a reader that
+  // rejects instead of catching (it catches today — this guards the SEAM, not
+  // the current implementation) degrades to the same fallback rather than
+  // becoming a new way for authorize to 500 on a fundable payment.
+  //
+  // The PARSE is inside the guard with the read, not after it. `BigInt()`
+  // throws on a malformed string, so a reader that ever returned one would
+  // turn a fundable payment into a 500 — the one outcome this whole block is
+  // supposed to be incapable of. `null` means "no usable number", which reads
+  // the same as a degraded read everywhere below.
+  let remainingAtomic: bigint | null = null
+  try {
+    const read = await readRemainingBudget(
+      agent.chain_id,
+      budget.delegation_json,
+      amountRaw.toString(),
+    )
+    remainingAtomic = read.fromChain ? BigInt(read.remainingAtomic) : null
+  } catch {
+    remainingAtomic = null
+  }
+  // `<`, never `<=`: spending the exact remainder is what the chain allows, and
+  // refusing it would strand the last payment of every period behind a refusal
+  // the enforcer would not have made.
+  if (remainingAtomic !== null && remainingAtomic < amountRaw) {
+    const shortfallAtomic = amountRaw - remainingAtomic
+    const remainingHuman = formatTokenValue(remainingAtomic.toString(), tokenConfig.decimals)
+    const shortfallHuman = formatTokenValue(shortfallAtomic.toString(), tokenConfig.decimals)
+    // 403 and not 502: the sibling refusal directly above ("no active budget
+    // delegation") is the same family — spend authority the agent does not
+    // have — and the hosted MCP's guided pre-check already answers 403
+    // `DELEGATION_BUDGET_EXCEEDED` for this exact condition (#1306). A 502
+    // would say "upstream failed", which is what the 3009 branch genuinely
+    // means and this branch genuinely does not. The taxonomy fields are what
+    // make it actionable: MCP's `normalizeError` reads `phase`/`next_action`
+    // straight off the body, so an agent is told to ask its owner to raise
+    // the budget rather than to retry.
+    return {
+      code: 403,
+      body: {
+        error:
+          `This x402 payment of ${amountHuman} ${tokenConfig.symbol} exceeds the agent's remaining ` +
+          `budget for this period (${remainingHuman} ${tokenConfig.symbol}, short by ${shortfallHuman}). ` +
+          'There is no approval queue on the delegation rail — an over-budget redemption reverts ' +
+          'on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
+        error_code: 'delegation_budget_exceeded',
+        phase: AgentPaymentPhase.InsufficientFunds,
+        next_action: AgentPaymentNextAction.FundSafeOrRaiseAllowance,
+        rail: AgentPaymentRail.X402,
+        chain_id: agent.chain_id,
+        token: tokenConfig.symbol,
+        asset: tokenAddress,
+        network,
+        amount: amountHuman,
+        amount_atomic: amountRaw.toString(),
+        remaining: remainingHuman,
+        remaining_atomic: remainingAtomic.toString(),
+        shortfall: shortfallHuman,
+        shortfall_atomic: shortfallAtomic.toString(),
+        resource_url: url,
+        merchant_address: payTo.toLowerCase(),
+      },
+    }
+  }
+
+  // #2094: the intent id is generated HERE, before the child is built, and
+  // handed to the insert below as an explicit primary key.
+  //
+  // The ordering is the whole point. The settlement child is salted from the
+  // intent id (`settlementSalt`), so the id has to exist before the child
+  // does — letting Postgres' `gen_random_uuid()` default supply it would leave
+  // the child unable to name the row that stores it. A v4 UUID from
+  // `node:crypto` is the same value space the column default produces, so
+  // nothing downstream can tell the two sources apart.
+  //
+  // When the insert below loses the idempotency race it returns null and this
+  // id is simply discarded along with the child built from it — the winner's
+  // own child is replayed out of `prepared_user_op` (`delegationReplay`), so a
+  // discarded id can never be the one a settlement is attributed to.
+  const intentId = randomUUID()
+
   let built
   let delegateAccountAddress
   try {
@@ -268,6 +386,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     })
     built = buildSettlementDelegation({
       chainId: agent.chain_id,
+      // #2094: salts the child, making its hash unique to THIS intent.
+      intentId,
       delegateAccountAddress: delegateAccountAddress as `0x${string}`,
       budgetDelegation: JSON.parse(budget.delegation_json),
       asset: tokenAddress as `0x${string}`,
@@ -326,6 +446,9 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
   }
 
   const intent = await createPaymentIntent({
+    // #2094: the pre-generated id, so the stored row IS the one the child's
+    // salt names. Anything else silently un-attributes the settlement.
+    id: intentId,
     agent,
     rail: 'x402',
     payTo,

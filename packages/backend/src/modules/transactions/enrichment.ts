@@ -5,7 +5,6 @@
  */
 import { machinePaymentLifecycle } from '../../domain/machine-payment-lifecycle.js'
 import {
-  findApprovalRequestAgentMatches,
   findDelegateSweepAgentMatches,
   findPaymentIntentAgentMatches,
 } from '../../infra/repositories/transaction-history.js'
@@ -41,6 +40,7 @@ export async function enrichTransactionsWithAgents(
         paymentAttentionReason: string | null
         activityType?: 'delegate_sweep'
         amountSek: string | null
+        settlementScheme?: string | null
       }
     >()
     for (const row of piRows) {
@@ -66,34 +66,7 @@ export async function enrichTransactionsWithAgents(
       )
     }
 
-    const approvalRows = await findApprovalRequestAgentMatches(txHashes, userId, safeIds)
-
-    for (const row of approvalRows) {
-      const identityKey = paymentAgentIdentityKey(
-        row.tx_hash,
-        row.safe_id,
-        row.chain_id,
-      )
-      if (agentByTransactionIdentity.has(identityKey)) continue
-      const proofStatus = row.payment_proof_status ?? 'payment_confirmed'
-      const lifecycle = machinePaymentLifecycle({
-        rail: row.source,
-        paymentProofStatus: proofStatus,
-        reconciliationEventType: row.payment_reconciliation_event_type,
-      })
-      agentByTransactionIdentity.set(identityKey, {
-        id: row.agent_id,
-        name: row.agent_name,
-        source: row.source,
-        resourceUrl: row.payment_resource_url,
-        merchantAddress: row.merchant_address,
-        paymentId: row.id,
-        paymentProofStatus: proofStatus,
-        paymentFlowStatus: lifecycle.paymentFlowStatus,
-        paymentAttentionReason: lifecycle.paymentAttentionReason,
-        amountSek: row.amount_sek,
-      })
-    }
+    // #2055: the approval_requests attribution pass is gone with the table.
 
     const sweepRows = await findDelegateSweepAgentMatches(txHashes, userId, safeIds)
 
@@ -120,9 +93,16 @@ export async function enrichTransactionsWithAgents(
       const agent = agentByTransactionIdentity.get(
         paymentAgentIdentityKey(tx.hash, tx.safeId, tx.chainId),
       )
+      // #2097: the initiator record follows the EFFECTIVE attribution — an
+      // agent matched here, or one already on the row (confirmed x402 rows
+      // arrive pre-attributed from `mergeX402Transactions`), makes the row
+      // 'agent'. An outbound row that stays unattributed is a raw transfer
+      // with no matched intent — 'unknown'. Inbound rows carry no initiator
+      // record (undefined).
+      const attributedAgentId = agent?.id ?? tx.agentId
       return {
         ...tx,
-        agentId: agent?.id ?? tx.agentId,
+        agentId: attributedAgentId,
         agentName: agent?.name ?? tx.agentName,
         source: agent?.source ?? tx.source,
         x402ResourceUrl: agent?.resourceUrl ?? tx.x402ResourceUrl,
@@ -133,9 +113,22 @@ export async function enrichTransactionsWithAgents(
         paymentAttentionReason: agent?.paymentAttentionReason ?? tx.paymentAttentionReason,
         activityType: agent?.activityType ?? tx.activityType,
         amountSek: agent?.amountSek ?? tx.amountSek,
+        settlementScheme: agent?.settlementScheme ?? tx.settlementScheme,
+        initiatedBy: attributedAgentId
+          ? 'agent'
+          : tx.direction === 'out'
+            ? 'unknown'
+            : undefined,
       }
     })
   } catch {
+    // #2097: on any DB/repo failure the rows are returned UNMODIFIED — a
+    // matched agent keeps its agentId/agentName but no `initiatedBy`
+    // classification is stamped. Deliberate and fail-soft: the frontend's
+    // initiator helper degrades to explicit 'Unknown' on a missing record,
+    // never 'You', so an enrichment outage cannot falsely claim a human
+    // initiator. The trade is that unknown-vs-agent goes unreported here;
+    // keep the two in agreement if this path ever gets a logger.
     return transactions
   }
 }

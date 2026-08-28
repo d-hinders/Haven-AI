@@ -3,8 +3,7 @@ owner: "@d-hinders"
 status: research
 covers:
   - packages/sdk/src/signer.ts
-  - packages/qa-agent/src/pilot/session-rail.ts
-last-verified: "2026-07-12"
+last-verified: "2026-08-27" # #2087: dropped the `packages/qa-agent/src/pilot/session-rail.ts` covers glob — that pilot script was deleted with the rest of the retired-rail pilot set, so the glob resolved to no files and the front-matter validator failed. A glob naming a deleted path silently stops mapping anything, which makes a doc look better-covered than it is (#1813's precedent). The code did not move, it is gone, so the glob is removed rather than repointed. `packages/sdk/src/signer.ts` still resolves and keeps this doc mapped. Front-matter only — the body is unchanged historical record (superseded by #834) and was not re-verified. Prior: none — this doc carried a bare date with no verification note before now.
 ---
 
 > **Superseded (#834, 2026-07-12):** the session rail this report piloted is

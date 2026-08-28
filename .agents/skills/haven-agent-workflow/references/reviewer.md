@@ -34,7 +34,7 @@ Recurring traps to check:
 - Async and modal UX: primary CTA hierarchy matches the useful next action, disabled labels do not flicker while loading, required actions are not hidden below unnecessary scroll, and close/backdrop/Escape behavior is safe.
 - Signer Readiness Gates: wallet/passkey approval gates match the actual signer hook. A connected `address` or `isConnected` value alone is not EOA readiness when the action needs `walletClient`, and blocked states keep `WalletButton` or passkey recovery guidance visible.
 - Recipient and form behavior: autocomplete or saved-recipient helpers do not hijack typing, duplicate checks have server support or API errors, and chain/network context appears before money moves.
-- Shared UI: repeated transaction movement, status, money summary, or row presentation is factored or intentionally kept in sync across dashboard, account detail, agent detail, transactions, approvals, and design-system examples.
+- Shared UI: repeated transaction movement, status, money summary, or row presentation is factored or intentionally kept in sync across dashboard, account detail, agent detail, transactions, and design-system examples.
 - Multi-Entrypoint Parity: payment, x402/MPP, MCP, SDK, direct API, and demo entrypoints share validated state or have parity tests.
 - Credential And Modal Lifecycle: one-time credentials clear correctly, in-flight modal flags reset on reopen, generated snippets refresh after rotation or revocation, and stale plaintext cannot reappear.
 - Identifier Entropy: displayed key prefixes, setup tokens, invoice numbers, nonces, and visual identifiers are long enough for their population and have duplicate handling where needed.

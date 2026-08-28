@@ -19,7 +19,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Select } from '@/components/ui/Select'
 import { Textarea } from '@/components/ui/Textarea'
-import { Table } from '@/components/ui/Table'
+import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { StepProgress } from '@/components/ui/StepProgress'
 import { CodeBlock } from '@/components/ui/CodeBlock'
@@ -34,6 +34,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+import { WalletPopover } from '@/components/WalletButton'
 import {
   AgentBudgetCard,
   Address,
@@ -71,6 +72,11 @@ const modalInfoPages: InfoPage[] = [
     ),
   },
 ]
+
+/** Deterministic demo values for the wallet-menu signing-credential states (#1952). */
+const DS_HYBRID_ACCOUNT = '0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3'
+const DS_PASSKEY_KEY_ID = '0x1111111111111111111111111111111111111111111111111111111111111111'
+const NOOP = () => {}
 
 function Section({
   title,
@@ -422,7 +428,7 @@ export default function DesignSystemPage() {
             </p>
             <div className="mt-5 flex flex-wrap items-center gap-2">
               <StatusBadge tone="success">Received</StatusBadge>
-              <StatusBadge tone="warning">Needs approval</StatusBadge>
+              <StatusBadge tone="warning">Needs attention</StatusBadge>
               <StatusBadge tone="danger">Failed</StatusBadge>
               <StatusBadge tone="brand">Connected</StatusBadge>
               <StatusBadge>Draft</StatusBadge>
@@ -487,7 +493,7 @@ export default function DesignSystemPage() {
             <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-brand)]">Anchor</p>
             <p className="mt-2 text-sm font-semibold text-[var(--v2-ink)]">Secondary focal point</p>
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-              Use for the second-most-important surface on a page (pending approvals, agent status). Cooler off-white background, brand-tinted hairline.
+              Use for the second-most-important surface on a page (recoverable funds, agent status). Cooler off-white background, brand-tinted hairline.
             </p>
           </Card>
 
@@ -576,18 +582,22 @@ export default function DesignSystemPage() {
         title="Layering — the z-index scale"
         description="Every stacking layer has a named token in globals.css. Reach for a token, never a fresh number: two independently chosen values (a z-[100] top bar over a z-[60] navigation toggle) left the mobile sidebar toggle painted and hit-tested under the top bar on every authenticated route, and a third ad-hoc number is how that recurs. Tiers are spaced by 10 so a genuinely new layer lands between two without renumbering."
       >
-        {/* `collapseBelowMd={false}` + `overflow-x-auto`: Table.Head hides the
-            header below md on the assumption that mobile rows carry their own
-            labels. These rows are a bare token, a bare integer and a
+        {/* `collapseWhenNarrow={false}` + `overflow-x-auto`: Table.Head hides
+            the header while the container is narrow on the assumption that
+            those rows carry their own labels. These rows are a bare token, a bare integer and a
             description — nothing self-labelling — so at 390px the table would
             otherwise open on "--v2-z-content / 10 / …" with no way to tell
             which column is which. This is exactly the case the primitive's own
             docstring names, and it is paired with the horizontal scroll that
-            docstring asks for. */}
+            docstring asks for. The primitive's inline-size container sits
+            between the wrapper and this deliberately `min-w-[560px]` table
+            and does NOT defeat the scroll — measured at 390px: the table
+            still lays out at 560px, the wrapper still reports scrollWidth
+            560 / clientWidth 340, and scrollLeft reaches 220 (#1999). */}
         <Card hover={false} className="overflow-hidden">
           <div className="overflow-x-auto">
           <Table className="min-w-[560px]">
-            <Table.Head collapseBelowMd={false}>
+            <Table.Head collapseWhenNarrow={false}>
               <tr>
                 <Table.HeaderCell align="left">Token</Table.HeaderCell>
                 <Table.HeaderCell align="left">Value</Table.HeaderCell>
@@ -727,8 +737,8 @@ export default function DesignSystemPage() {
             </dl>
           </Card.Section>
           <Card.Section className="mt-5 pt-5">
-            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Approvers</p>
-            <p className="mt-2 text-sm text-[var(--v2-ink-2)]">2 of 3 approvers required</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Approval methods</p>
+            <p className="mt-2 text-sm text-[var(--v2-ink-2)]">2 passkeys can approve actions</p>
           </Card.Section>
         </Card>
         <p className="text-xs text-[var(--v2-ink-3)]">
@@ -761,7 +771,7 @@ export default function DesignSystemPage() {
             leading={<DotIcon />}
             leadingTone="warning"
             title="Research assistant"
-            subtitle="Needs approval · 2 pending"
+            subtitle="No budget left · resets tomorrow"
             trailing={<StatusBadge tone="warning">Review</StatusBadge>}
             accent
             href="#"
@@ -973,21 +983,21 @@ export default function DesignSystemPage() {
             icon={<DotIcon />}
             tone="brand"
             title="No agents yet"
-            body="Create an agent to give it a budget and rules. Haven asks for approval when it tries to spend more."
+            body="Create an agent to give it a budget and rules. The budget is enforced on-chain, so the agent cannot spend past it."
             action={<Button size="sm">Create agent</Button>}
           />
           <EmptyState
             icon={<DotIcon />}
             tone="warning"
             title="One agent needs attention"
-            body="A scheduled payment is above its remaining budget. Approve or reject it before it expires."
-            action={<Button size="sm" variant="ghost">Open approvals</Button>}
+            body="This agent has spent its whole budget. Raise the budget, or its requests stay declined until the period resets."
+            action={<Button size="sm" variant="ghost">Open agent</Button>}
           />
           <EmptyState
             icon={<DotIcon />}
             tone="success"
             title="You're all caught up"
-            body="No pending approvals. Agents will keep working within their budgets."
+            body="Nothing needs your attention. Agents keep working within their budgets."
           />
         </div>
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
@@ -1053,7 +1063,7 @@ export default function DesignSystemPage() {
             status="Ready to review"
           >
             <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
-              Requests above the remaining daily budget will wait for your approval.
+              Requests above the remaining daily budget are declined before any money moves.
             </p>
           </AgentBudgetCard>
 
@@ -1085,21 +1095,22 @@ export default function DesignSystemPage() {
               {
                 label: 'Budget',
                 value: '250 USDC per day',
-                helper: 'Haven asks for approval when a request is above the remaining budget.',
+                helper: 'Requests above the remaining budget are declined on-chain.',
               },
             ]}
           />
         </div>
 
         <div className="grid gap-5 lg:grid-cols-2">
-          <ApprovalRequiredBanner tone="neutral">
-            Agents can still initiate payments above the remaining budget, but you approve them manually before any money moves.
+          <ApprovalRequiredBanner title="The budget is the rule" tone="neutral">
+            Payments above the remaining budget are declined before any money moves. Raise the
+            budget if the agent needs more room.
           </ApprovalRequiredBanner>
           <RiskExplainer
             items={[
               'The agent can make payments automatically while it stays within the budget.',
               'You can pause or revoke the agent from its detail page.',
-              'Haven asks for approval before requests above the remaining budget are paid.',
+              'Requests above the remaining budget are declined — nothing is paid past the rules you set.',
             ]}
           />
         </div>
@@ -1128,67 +1139,17 @@ export default function DesignSystemPage() {
         </div>
       </Section>
 
-      <Section
-        title="Approvals and pending actions"
-        description="Approval requests lead with the money, show who asked, and make the wallet-to-recipient path readable before the user approves or rejects."
-      >
-        <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
-          <Card hover={false} className="overflow-hidden border-warning/25">
-            <Card.Header>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <StatusBadge tone="warning">Needs approval</StatusBadge>
-                  <StatusBadge>x402 payment</StatusBadge>
-                </div>
-                <span className="text-xs text-[var(--v2-ink-3)]">Expires in 1 hour</span>
-              </div>
-            </Card.Header>
-            <div className="space-y-5 p-5">
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.9fr)]">
-                <div>
-                  <p className="text-xs font-medium text-[var(--v2-ink-3)]">Payment request</p>
-                  <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
-                    48.00 USDC
-                  </p>
-                  <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-                    Research assistant asked to send this payment. Nothing moves until you approve it.
-                  </p>
-                </div>
-                <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
-                  <TransactionMovement from="Operating wallet" to="api.vendor.com" />
-                  <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Agent</dt>
-                      <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Research assistant</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
-                      <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Base</dd>
-                    </div>
-                  </dl>
-                </div>
-              </div>
-              <ApprovalRequiredBanner title="Approval required" tone="neutral" density="compact">
-                This payment is above the remaining agent budget.
-              </ApprovalRequiredBanner>
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button variant="ghost" size="sm">Reject</Button>
-                <Button size="sm">Approve payment</Button>
-              </div>
-            </div>
-          </Card>
-
-          <div className="space-y-4">
-            <ApprovalRequiredBanner title="Approved, not sent yet" tone="neutral" density="compact">
-              This request was approved but still needs to be completed before the payment is sent.
-            </ApprovalRequiredBanner>
-            <EmptyState
-              title="No payments need approval"
-              body="When an agent asks to spend above its budget, the request will appear here before any money moves."
-            />
-          </div>
-        </div>
-      </Section>
+      {/*
+        There is deliberately NO "Approvals and pending actions" section here
+        (#1947). It showcased the approve/reject queue screen that #1989
+        deleted from the product: on the delegation rail — the only live rail
+        (rails/execution-rail.ts) — budget, recipient and expiry are enforced
+        on-chain by caveat enforcers during prepare, so an out-of-policy
+        payment is declined before any state is written (routes/payments.ts).
+        Nothing queues, so there is nothing to approve. The retired screen's
+        money-first structure survives as prior art in
+        docs/product/screen-recipes.md ("Approve Payment — RETIRED").
+      */}
 
       <Section
         title="ApprovalRequiredBanner — the tone ladder"
@@ -1197,7 +1158,8 @@ export default function DesignSystemPage() {
         <div className="max-w-2xl space-y-5">
           <div>
             <ApprovalRequiredBanner title="You stay in control" tone="neutral">
-              Anything above the remaining budget waits for your approval before it is paid.
+              Anything above the remaining budget is declined before it is paid. Nothing waits on
+              you.
             </ApprovalRequiredBanner>
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
               <span className="font-semibold text-[var(--v2-ink-2)]">neutral</span> — states a fact the
@@ -1207,8 +1169,7 @@ export default function DesignSystemPage() {
 
           <div>
             <ApprovalRequiredBanner title="This agent has no budget left" tone="warning">
-              Its next request will wait for your approval until you raise the budget or the period
-              resets.
+              Its next request will be declined until you raise the budget or the period resets.
             </ApprovalRequiredBanner>
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
               <span className="font-semibold text-[var(--v2-ink-2)]">warning</span> — the default. Something
@@ -1239,7 +1200,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Manual payment review"
-        description="Manual sends use the same money-first review structure as approvals: amount first, then the wallet-to-recipient path and approval context."
+        description="Manual sends lead with the money: amount first, then the wallet-to-recipient path and how you approve the send."
       >
         <Card hover={false} className="max-w-xl p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1385,11 +1346,11 @@ export default function DesignSystemPage() {
             />
             <TransactionActivityRow
               direction="out"
-              title="Approval request"
+              title="x402 payment"
               description={<MovementExample from="Research assistant" to="Cloud vendor" />}
               value="320.00"
               asset="USDC"
-              status="Needs approval"
+              status="Needs attention"
               statusTone="warning"
             />
             <TransactionActivityRow
@@ -1408,7 +1369,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Transaction history"
-        description="Tables render through the Table primitive: Table.Head (collapses below md, optional sticky), Table.HeaderCell (srLabel for icon columns, hideBelowMd for the responsive-collapse pattern), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
+        description="Tables render through the Table primitive: Table.Head (collapses when narrow, optional sticky), Table.HeaderCell (srLabel for icon columns, revealAt for container-keyed collapse), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
       >
         <Card hover={false} className="overflow-hidden">
           <Table>
@@ -1416,9 +1377,79 @@ export default function DesignSystemPage() {
               <tr>
                 <Table.HeaderCell srLabel="Direction" className="w-10" />
                 <Table.HeaderCell align="left">Activity</Table.HeaderCell>
-                <Table.HeaderCell align="left" hideBelowMd>Initiator</Table.HeaderCell>
-                <Table.HeaderCell align="left" hideBelowMd>From / To</Table.HeaderCell>
-                <Table.SortableHeaderCell label="Date" direction="desc" onSort={() => toast.info('Sorts the loaded set')} hideBelowMd />
+                {/* Initiator and Date reveal at the `xl` CONTAINER stage
+                    (974px), not the `md` one (718px) — #1827, re-keyed onto
+                    the container by #1999.
+                    MEASURED, Failed row title measure / lines / row height on
+                    the seven-columns-at-`md` layout this replaced: 71.1px / 5
+                    / 156 at 768px, 82.5px / 4 / 132 at 800px, 118px / 3 / 92
+                    at 900px, then 71.1px / 5 / 156 AGAIN at 1024px. The
+                    repeat is the whole point: TWO things step at `lg` and
+                    both take width — `Sidebar.tsx` goes `fixed` ->
+                    `lg:static` at `w-[240px]` (border-box, so its 1px
+                    `border-r` is INSIDE the 240, measured: `main` is 784px at
+                    a 1024px viewport), AND the authenticated layout's `main`
+                    steps `p-6` -> `lg:p-8`, which is 16px more across the
+                    pair. 240 + 16 = 256px handed back in one breakpoint.
+                    (#1827 wrote 241 + 16 = 257 here. The conclusion was
+                    right and the number was not; corrected from a direct
+                    reading of the sidebar box.) So the content available to
+                    this table is a SAWTOOTH in viewport width:
+
+                      viewport   390  767  768  900  1023  1024  1279  1280
+                      container  340  717  718  850   973   718   973   974
+
+                    which is why the stages are CONTAINER queries now. A
+                    container query does NOT make the second stage
+                    unnecessary — the container really is 718px at a 1024px
+                    viewport, so a single-stage reveal starves the title there
+                    exactly as before. What it removes is the need to
+                    rediscover the sawtooth to pick the viewport that clears
+                    both teeth: 974px is simply the width at which seven
+                    columns fit.
+                    Pinning the `md`+ columns the way `TransactionsTable` does
+                    was tried during #1774 and is NOT the answer — it grew
+                    desktop rows 85px -> 133px, because a 140px `From / To`
+                    wraps this showcase's longer names.
+                    What the two deferred columns cost is NOT the same, and
+                    the difference is worth naming rather than smoothing over.
+                    The DATE is not dropped at any width — it rides under the
+                    Amount until the `xl` stage, the same place the narrow
+                    layout puts it, and it is hidden by
+                    `tableHideFromClass('xl')` so it can never disagree with
+                    the column it stands in for. The INITIATOR genuinely is
+                    dropped between the two stages. For two of the three demo
+                    rows that costs nothing visible, because the title already
+                    says it ("x402 payment BY RESEARCH ASSISTANT"); for the
+                    first row it is a real loss — a human-initiated payment's
+                    initiator ("You") rests on the cell, and nothing else on
+                    the row says so. That is an acceptable trade here (the
+                    narrow layout drops the initiator outright) but it IS a
+                    loss, and a showcase whose job is to teach the collapse
+                    pattern should not claim otherwise. The first demo row is
+                    deliberately a HUMAN-initiated payment (#2097: 'You' is
+                    reserved for `initiatedBy: 'human'`; agent rows carry the
+                    agent name) — the only shape for which the initiator cell
+                    may read 'You'.
+                    WHY THE DATE IS NOT HANDED BACK EARLIER. It was MEASURED,
+                    not judged: restoring the Date column at a 973px container
+                    (a 1024px viewport is 718px, but 1023px and 1279px are
+                    both 973px) put the Failed row back to 109.9px across
+                    THREE lines in a 108px row at 1024px under the old
+                    viewport keying, because 1024px is the bottom tooth. The
+                    container query answers the same question directly: 973px
+                    is one pixel short of the stage, 974px clears it.
+                    After: 141.7px / 2 / 100 at 768px and 1024px; 1280px is
+                    unchanged to the pixel, so no visual baseline moves.
+                    Gated by geometry in `e2e/transaction-title-measure.spec.ts`
+                    (the pixel gate renders 1280 and 390 only, so it cannot
+                    see any width this is about) and by
+                    `e2e/table-container-collapse.spec.ts`, which resizes the
+                    CONTAINER at a fixed viewport — the only assertion that
+                    can tell a container query from a viewport one. */}
+                <Table.HeaderCell align="left" revealAt="xl">Initiator</Table.HeaderCell>
+                <Table.HeaderCell align="left" revealAt="md">From / To</Table.HeaderCell>
+                <Table.SortableHeaderCell label="Date" direction="desc" onSort={() => toast.info('Sorts the loaded set')} revealAt="xl" />
                 <Table.SortableHeaderCell label="Amount" direction={null} onSort={() => toast.info('Sorts the loaded set')} align="right" />
                 <Table.HeaderCell srLabel="External details" className="w-8" />
               </tr>
@@ -1426,13 +1457,13 @@ export default function DesignSystemPage() {
             <Table.Body>
               {[
                 {
-                  title: 'Received payment',
-                  from: 'Acme Operations',
-                  to: 'Operating wallet',
+                  title: 'Payment sent',
+                  from: 'Operating wallet',
+                  to: 'Acme Operations',
                   initiator: 'You',
                   date: '12m ago',
                   value: '500.00',
-                  direction: 'in' as const,
+                  direction: 'out' as const,
                   failed: false,
                 },
                 {
@@ -1520,24 +1551,24 @@ export default function DesignSystemPage() {
                       </p>
                       {row.failed ? <StatusBadge tone="danger">Failed</StatusBadge> : null}
                     </div>
-                    <div className="mt-1 md:hidden">
+                    <div className={`mt-1 ${tableHideFromClass('md')}`}>
                       <TransactionMovement from={row.from} to={row.to} />
                     </div>
                   </td>
-                  <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-2)] md:table-cell">
+                  <td className={`px-4 py-4 align-middle text-sm text-[var(--v2-ink-2)] ${tableColumnClass('xl')}`}>
                     {row.initiator}
                   </td>
-                  <td className="hidden px-4 py-4 align-middle md:table-cell">
+                  <td className={`px-4 py-4 align-middle ${tableColumnClass('md')}`}>
                     <TransactionMovement from={row.from} to={row.to} />
                   </td>
-                  <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] md:table-cell">
+                  <td className={`px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] ${tableColumnClass('xl')}`}>
                     {row.date}
                   </td>
                   <td className="w-[110px] px-2 py-4 align-middle text-right md:w-auto md:px-4">
                     <p>
                       <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
                     </p>
-                    <p className="mt-1 text-xs text-[var(--v2-ink-3)] md:hidden">{row.date}</p>
+                    <p className={`mt-1 text-xs text-[var(--v2-ink-3)] ${tableHideFromClass('xl')}`}>{row.date}</p>
                   </td>
                   <td className="w-8 px-2 py-4 align-middle text-right md:w-auto md:px-4">
                     <ExternalDetailsLink href="#" />
@@ -1570,7 +1601,7 @@ export default function DesignSystemPage() {
             {
               label: 'Budget',
               value: '250 USDC per day',
-              helper: 'Payments within budget can run automatically. Larger payments need your manual approval.',
+              helper: 'Payments within budget run automatically. Larger payments are declined by the agent rules.',
             },
           ]}
           footer={
@@ -1606,7 +1637,23 @@ export default function DesignSystemPage() {
                 className="mb-2 flex items-start gap-2 text-xs text-[var(--v2-ink-3)]"
               >
                 <Icon icon={Info} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-                <span>Connect a wallet to update this agent budget.</span>
+                <span>Connect the account&apos;s owner wallet to update this agent budget.</span>
+              </p>
+              <div className="flex gap-3">
+                <Button variant="ghost" className="flex-1">Back</Button>
+                <Button disabled className="flex-1">Update budget</Button>
+              </div>
+            </div>
+            <div>
+              <p
+                role="status"
+                className="mb-2 flex items-start gap-2 text-xs text-[var(--v2-ink-3)]"
+              >
+                <Icon icon={Info} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+                <span>
+                  Connected wallet 0x9999…9999 is not this account&apos;s owner. Switch to the
+                  owner wallet 0xeeee…eeee to continue.
+                </span>
               </p>
               <div className="flex gap-3">
                 <Button variant="ghost" className="flex-1">Back</Button>
@@ -1617,7 +1664,12 @@ export default function DesignSystemPage() {
               <span className="font-medium text-[var(--v2-ink-2)]">Pattern:</span> caption above, disabled
               primary button below. For a network-mismatch the same caption sits above a ghost{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1">Switch wallet to {'{chain}'}</code>{' '}
-              button (white background, brand focus ring) instead of the primary action.
+              button (white background, brand focus ring) instead of the primary action. A wallet
+              that is connected but is not the account&apos;s owner gets the second caption
+              (`wrong_wallet` in `useSafeOperationGate`, #2073): it names both addresses, because
+              &quot;connect a wallet&quot; would send the user back to the wallet they already
+              connected. The header wallet pill renders the matching &quot;Wrong wallet&quot;
+              state in the same case.
             </p>
           </div>
         </Card>
@@ -1775,7 +1827,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Mobile density"
-        description="Cards should stack cleanly and keep the money and approval boundary visible on narrow screens."
+        description="Cards should stack cleanly and keep the money and budget boundary visible on narrow screens."
       >
         <div className="max-w-sm rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
           <div className="space-y-3">
@@ -1787,8 +1839,109 @@ export default function DesignSystemPage() {
               statusTone="success"
             />
             <ApprovalRequiredBanner title="You stay in control" tone="neutral">
-              Anything above 75 USDC waits for your manual approval before it is paid.
+              Anything above 75 USDC is declined before it is paid, and you can pause or revoke
+              this agent at any time.
             </ApprovalRequiredBanner>
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Signing credential (wallet menu)"
+        description="Which passkey is about to sign, as the wallet menu states it. Two states, because they are two different facts: a credential this device's marker matched, and the passkeys[0] fallback used when no enrolled passkey carries this device's marker. The fallback is deliberate and load-bearing — see delegation-rail-security-model.md §6 — and until #1952 the menu rendered NOTHING in that case, going silent in exactly the case where the credential was chosen by array position."
+      >
+        {/*
+          Rendered with props forced, as every gallery state is — and since
+          #1969 (owner decision 2026-08-26) the fallback state is ALSO a
+          reachable production render: `useActiveSigner` resolves a
+          `delegator_passkey` for any non-empty hydrated signer set, so a
+          marker-less user reaches it through ordinary hydration. The
+          app-state proof lives in `e2e/wallet-signer-offering.spec.ts`; this
+          showcase keeps both states side by side under the blocking pixel
+          gate so their designed difference stays photographed.
+        */}
+        {/*
+          Each cell is `min-h-[290px]` wrapping a `relative h-0` positioning
+          parent, and that is load-bearing rather than arbitrary: the popover is
+          `absolute right-0 top-full`, so it hangs BELOW its parent — under the
+          trigger button, in the real call site. A parent WITH a height pushes it
+          that far down again, out of this Section and over the next one.
+
+          Stated precisely, because an earlier version of this note overstated
+          it: at `h-[260px]` the popovers still PAINTED, so a full-page capture
+          showed two plausible-looking cards and no gate failed — they were
+          simply 260px from the heading that describes them, sitting in someone
+          else's section. `h-0` puts them back under their own heading; the outer
+          `min-h` reserves the space they no longer take in flow.
+        */}
+        <div className="grid gap-5 lg:grid-cols-2">
+          {/*
+            `inert` + `aria-hidden`: these are static ILLUSTRATIONS of a
+            popover, not live overlays. THIS wrapper is what keeps them out
+            of the accessibility tree and out of the tab order. The
+            `presentational` prop below is a SEPARATE mechanism doing a
+            SEPARATE job — keep both; neither is redundant because the other
+            exists.
+
+            Which does what, and the measurements behind that claim, are
+            recorded ONCE — on the `presentational` prop's doc-comment in
+            `components/WalletButton.tsx` (#1982). Read it there. It is not
+            restated here on purpose: four synchronised copies of the same
+            paragraph is the rot surface #1982 existed to remove.
+          */}
+          <div className="min-h-[290px]">
+            <div inert aria-hidden="true" className="relative h-0 w-72">
+            <WalletPopover
+              primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
+              signingWith={{
+                label: 'Passkey \u00b7 added March 3, 2026',
+                keyId: DS_PASSKEY_KEY_ID,
+                onThisDevice: true,
+              }}
+              presentational
+              open
+              onClose={NOOP}
+              onSwitchWallet={NOOP}
+              onConnectWallet={NOOP}
+              hasConnectedWallet={false}
+              switching={false}
+              anchorRef={{ current: null }}
+            />
+            </div>
+          </div>
+          {/*
+            `inert` + `aria-hidden`: these are static ILLUSTRATIONS of a
+            popover, not live overlays. THIS wrapper is what keeps them out
+            of the accessibility tree and out of the tab order. The
+            `presentational` prop below is a SEPARATE mechanism doing a
+            SEPARATE job — keep both; neither is redundant because the other
+            exists.
+
+            Which does what, and the measurements behind that claim, are
+            recorded ONCE — on the `presentational` prop's doc-comment in
+            `components/WalletButton.tsx` (#1982). Read it there. It is not
+            restated here on purpose: four synchronised copies of the same
+            paragraph is the rot surface #1982 existed to remove.
+          */}
+          <div className="min-h-[290px]">
+            <div inert aria-hidden="true" className="relative h-0 w-72">
+            <WalletPopover
+              primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
+              signingWith={{
+                label: 'Passkey \u00b7 added March 3, 2026',
+                keyId: DS_PASSKEY_KEY_ID,
+                onThisDevice: false,
+              }}
+              presentational
+              open
+              onClose={NOOP}
+              onSwitchWallet={NOOP}
+              onConnectWallet={NOOP}
+              hasConnectedWallet={false}
+              switching={false}
+              anchorRef={{ current: null }}
+            />
+            </div>
           </div>
         </div>
       </Section>
@@ -1823,7 +1976,7 @@ export default function DesignSystemPage() {
         <div className="space-y-3">
           <p>
             Confirm the agent budget before connecting your agent. Requests above the remaining
-            budget will wait for approval.
+            budget are declined automatically.
           </p>
           <p>
             The agent can spend up to the budget you set here, from this Haven wallet only. It
@@ -1842,8 +1995,8 @@ export default function DesignSystemPage() {
             amount, and the rule that allowed it.
           </p>
           <p>
-            Requests above the remaining budget are not refused outright — they wait for you to
-            approve or reject them, and nothing moves until you decide.
+            Requests above the remaining budget are declined outright — the budget you approve
+            here is enforced on-chain, and nothing above it can be paid.
           </p>
         </div>
       </Modal>

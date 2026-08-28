@@ -9,15 +9,21 @@ import {
   type RefObject,
 } from 'react'
 import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit'
-import { TriangleAlert, Wallet } from 'lucide-react'
+import { Info, TriangleAlert, Wallet } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useAccount, useDisconnect } from 'wagmi'
 import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
-import { useActiveSigner, hybridPasskeyOnDevice } from '@/lib/signer'
+import {
+  useActiveSigner,
+  hybridPasskeyToSignWith,
+  hasPasskeyCredentialOnDevice,
+  credentialIdFromKeyId,
+} from '@/lib/signer'
 import { passkeyRowLabel } from '@/lib/passkeyLabels'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { truncateAddress } from '@/components/haven'
 
@@ -136,9 +142,129 @@ interface PopoverProps {
    * passkeys are raw P256 coordinates on the account contract and have no
    * on-chain address of their own; showing the treasury address here implied
    * the credential owned it.
+   *
+   * #1952: `onThisDevice` is NOT decoration. It separates two different facts
+   * that used to share one rendering — and, worse, used to share it with
+   * "nothing at all". "Signing with X" (this device's marker picked X) and
+   * "no passkey is registered here, so X is what will be offered" are not the
+   * same statement to a user about to authorise a spend, so they do not get
+   * the same words.
+   *
+   * ── Tone: NEUTRAL, decided rather than defaulted (#1952, cf. #1937) ───────
+   *
+   * No semantic token. There is no `--v2-info` family to reach for, and
+   * `--v2-warning` is scoped in `design-system.md` to "402 Payment Required,
+   * pending review" — spending amber here would both misuse it and train users
+   * to ignore it. Nothing has failed and nothing is blocked: the marker is a
+   * LOCAL hint, so a miss costs a ceremony the authenticator resolves from its
+   * own credential lookup (delegation-rail-security-model.md §6). The weight
+   * this state needs is carried structurally — a rule, an icon, a named fact —
+   * which is what makes it legible without making it alarming.
+   *
+   * **#1937 is the same question for a different fact and this does not
+   * prejudge it.** There the fact is UNKNOWN (a failed read leaves the recovery
+   * posture unreadable); here it is fully KNOWN and merely not preferred. An
+   * unknown safety-relevant fact has a strictly better claim on a tone than a
+   * known one does, so: if #1937 resolves to neutral, this must stay neutral
+   * for consistency; if #1937 resolves to toned, this may still stay neutral,
+   * because "we know exactly which key and it was picked by position" is not
+   * the same as "we cannot tell you". The one outcome this rules out is toning
+   * THIS louder than #1937's.
+   *
+   * The #1097 "passkey may be on another device" hints in `AccountSignersCard`
+   * and `DelegationSendModal` are the nearest shipped precedent and are plain
+   * muted text — but they are deliberately NOT leaned on as the argument. Their
+   * fact is mild friction with the RIGHT credential (a device hop); this one is
+   * a credential chosen by array position and never verified as the user's.
+   * Those differ in kind, which is why this state gets a marker they do not.
+   *
+   * **`onThisDevice: false` is LIVE, user-visible behaviour since #1969**
+   * (owner decision 2026-08-26). `useActiveSigner` now resolves a
+   * `delegator_passkey` for any non-empty hydrated signer set, mirroring
+   * `pickSigningPath`'s precedence, so the marker-less user reaches this
+   * rendering for real — the state this block was built ahead of. Rendered
+   * evidence lives in `e2e/wallet-signer-offering.spec.ts`, which drives the
+   * app into the marker-less state through the real hydration path rather
+   * than forced props.
    */
-  signingWith?: { label: string; keyId: string }
+  signingWith?: { label: string; keyId: string; onThisDevice: boolean }
   unavailablePasskey?: boolean
+  /**
+   * #2073: the connected wallet is not this account's named owner. When set
+   * (the owner's truncated address), the popover explains the mismatch in the
+   * same quiet slot `unavailablePasskey` uses — the popover is the "Wrong
+   * wallet" pill's landing surface, and without this line it rendered
+   * pixel-identical to the healthy connected state (the design-review
+   * finding on this issue): a red pill whose menu gave no reason.
+   */
+  wrongWalletOwner?: string
+  /**
+   * Render as a static ILLUSTRATION rather than a live overlay (#1952).
+   *
+   * `/design-system` shows this popover's two signing-credential states side by
+   * side, permanently open. A showcase copy is not a dialog.
+   *
+   * ## What the role swap actually buys — corrected and measured (#1982)
+   *
+   * This block is the SINGLE account of the two-mechanism story. The showcase's
+   * wrapper comments in `app/(authenticated)/design-system/page.tsx` and the
+   * guard test's header point here rather than restating it: #1982 was a stale
+   * comment, and four synchronised copies of the correction would rebuild the
+   * same rot surface it removed. Correct it here; leave the pointers alone.
+   *
+   * NOT screen-reader exposure, which is what this comment used to claim. Both
+   * demos sit inside a `<div inert aria-hidden="true">` wrapper, and
+   * `aria-hidden` on an ancestor drops the entire subtree from the
+   * accessibility tree regardless of any descendant's role. Measured, not
+   * reasoned: with this swap reverted to a bare `role="dialog"` the page held
+   * three dialog nodes, and Playwright's accessibility-tree-mediated
+   * `getByRole('dialog')` still resolved to exactly one — no strict-mode
+   * violation in any of the four tests. The WRAPPER is what keeps these
+   * illustrations out of the accessibility tree; `inert` additionally keeps
+   * their Copy/Switch buttons out of the tab order.
+   *
+   * The one currently-live effect is narrower, and worth naming exactly.
+   * `e2e/modal-scroll-cue.spec.ts` (#1893) asks DOCUMENT-WIDE for the Modal
+   * under test with a raw `document.querySelector('[role="dialog"]')`. That
+   * query is not accessibility-tree-mediated, so no `aria-hidden` or `inert`
+   * wrapper can redirect it, and the showcase sits ABOVE the Modal demo in DOM
+   * order — it would be the node returned. On the same revert exactly one named
+   * assertion went red: `expect(geometry.wrapperContainsBody).toBe(true)`, in the
+   * test named `the scroll box is the body, not the role="dialog" wrapper`.
+   * That one, and no other.
+   *
+   * ## Why `group` specifically, and why it stays
+   *
+   * `group` describes what this node IS — a labelled cluster of address text
+   * and buttons — so it is the honest role for something that must not read as
+   * a dialog. Do not "simplify" it to `presentation`/`none`, which would
+   * additionally suppress the grouping semantics of the nested content, nor to
+   * `img`, which would misdescribe structured content as a flat image.
+   *
+   * Do NOT read it as a safety net that would let the `inert`/`aria-hidden`
+   * wrapper be dropped. An earlier revision of this comment called it "defense
+   * in depth"; the design pass on #1982 was right that this overclaims, so it
+   * is stated the other way round. Remove that wrapper and this subtree
+   * re-enters the accessibility tree as a labelled "Wallet menu" whose
+   * Copy/Switch handlers are `NOOP` — a silently broken control group, and a
+   * WORSE trap than three dialogs, because three simultaneous dialogs is a
+   * detectable anomaly and a plausible-looking dead menu is not. The wrapper is
+   * load-bearing on its own terms; this role is not a substitute for it.
+   *
+   * Product call sites never pass it, so the real popover keeps full dialog
+   * semantics — and that is ENFORCED, not merely requested (#1975).
+   * `__tests__/wallet-popover-presentational-guard.test.ts` fails if any call
+   * site outside `app/(authenticated)/design-system/` passes this prop, if one
+   * of `WalletButton`'s own popovers passes it, or if the default below is
+   * flipped to `true`. Do not silence an accessibility complaint on a real
+   * surface by reaching for it: the guard will refuse, which is the point.
+   *
+   * It refuses the CARELESS route, not every route — a `{...spread}` or a
+   * renamed import is invisible to a text scan. That limit is enumerated in
+   * the guard file's own "What this guard cannot see" section; read it there
+   * before concluding the confinement is airtight.
+   */
+  presentational?: boolean
   open: boolean
   onClose: () => void
   /**
@@ -155,11 +281,23 @@ interface PopoverProps {
   anchorRef: RefObject<HTMLButtonElement | null>
 }
 
-function WalletPopover({
+/**
+ * Exported ONLY so `/design-system` can render its states directly (#1952).
+ *
+ * `WalletButton` remains the sole product call site. The reason for the export
+ * is that the fallback state is unreachable through any app-state fixture —
+ * `useActiveSigner` gates the Hybrid branch on a device-marker match — so the
+ * only way to put the two renderings under the blocking pixel gate is to render
+ * the component with the props forced, the way the primitive gallery already
+ * photographs states no user flow reaches.
+ */
+export function WalletPopover({
   primary,
   secondary,
   signingWith,
   unavailablePasskey = false,
+  wrongWalletOwner,
+  presentational = false,
   open,
   onClose,
   onSwitchWallet,
@@ -251,7 +389,7 @@ function WalletPopover({
   return (
     <div
       ref={popoverRef}
-      role="dialog"
+      role={presentational ? 'group' : 'dialog'}
       aria-label="Wallet menu"
       className="absolute right-0 top-full mt-2 w-72 z-50 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-xl shadow-modal overflow-hidden"
     >
@@ -261,14 +399,53 @@ function WalletPopover({
             This account uses a passkey that is not available here.
           </p>
         )}
+        {wrongWalletOwner && (
+          // #2073: same quiet slot as the passkey note above. The mismatch is
+          // named HERE because this popover is where the "Wrong wallet" pill
+          // lands — the action-area caption is scoped to a gated action, and
+          // a page without one would otherwise offer a red pill whose menu
+          // looks exactly like the healthy state.
+          <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
+            This is not the wallet that controls this account. Switch to the
+            account&apos;s wallet {wrongWalletOwner} to approve actions.
+          </p>
+        )}
         {renderAddressSection(primary)}
         {signingWith ? (
-          <div className="py-2">
+          // #1952: the fallback carries a DESIGNED marker — a left rule and an
+          // icon-led label — not a longer sentence. An earlier revision changed
+          // only the eyebrow string, and the design pass measured that the
+          // distinction then rested on incidental text wrap: at `w-72` minus
+          // `p-4` the content box is 256px, so a 54-character `text-xs` eyebrow
+          // happened to run to two lines while "Signing with" did not. That is
+          // a coincidence of string length, and it also pushed the bold
+          // credential name — the fact that matters most — into the middle of
+          // two muted paragraphs. The rule and the icon are independent of copy
+          // length, and keeping the "Signing with" eyebrow identical in both
+          // states preserves the hierarchy the name sits in.
+          <div
+            className={
+              signingWith.onThisDevice
+                ? 'py-2'
+                : 'my-1 border-l-2 border-[var(--v2-border-strong)] py-2 pl-3'
+            }
+          >
+            {signingWith.onThisDevice ? null : (
+              <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--v2-ink-2)]">
+                <Icon icon={Info} className="h-3.5 w-3.5 flex-shrink-0" />
+                No passkey enrolled on this device
+              </p>
+            )}
             <p className="text-xs text-[var(--v2-ink-muted)]">Signing with</p>
             <p className="text-sm font-medium text-[var(--v2-ink)]">{signingWith.label}</p>
             <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">
               {truncateAddress(signingWith.keyId)}
             </p>
+            {signingWith.onThisDevice ? null : (
+              <p className="mt-1.5 text-xs text-[var(--v2-ink-3)]">
+                Your browser may ask you to choose a different one.
+              </p>
+            )}
           </div>
         ) : null}
         {secondary && renderAddressSection(secondary, true)}
@@ -339,6 +516,15 @@ export default function WalletButton() {
   const { getOwnerAlias } = useOwnerDirectory()
   const activeSafeAddress = activeSafe?.safe_address as Address | undefined
   const activeSigner = useActiveSigner({
+    safeAddress: activeSafeAddress,
+    chainId: activeSafe?.chain_id,
+  })
+  // #2073: the same gate the action areas consult, so the header pill and the
+  // disabled action below it agree about whether a USEFUL wallet is connected.
+  // Before this, a hybrid account with the wrong wallet connected rendered a
+  // normal connected pill up here while the action area said to connect the
+  // owner wallet — the two surfaces silently disagreed.
+  const operationGate = useSafeOperationGate({
     safeAddress: activeSafeAddress,
     chainId: activeSafe?.chain_id,
   })
@@ -482,18 +668,33 @@ export default function WalletButton() {
 
         if (delegatorSigner) {
           const accountAlias = getOwnerAlias(delegatorSigner.accountAddress)
-          // #1126/#1679: name the enrolled-on-this-device credential the same
-          // way AccountSignersCard does — "Passkey · added {date}", never a
-          // platform brand or a positional label. No address: Hybrid passkeys
-          // have none.
-          const onDeviceKey = hybridPasskeyOnDevice(delegatorSigner.signers)
-          const keyIndex = onDeviceKey
-            ? delegatorSigner.signers.passkeys.findIndex((pk) => pk.key_id === onDeviceKey.key_id)
+          // #1126/#1679: name the credential the same way AccountSignersCard
+          // does — "Passkey · added {date}", never a platform brand or a
+          // positional label. No address: Hybrid passkeys have none.
+          //
+          // #1952: ask `hybridPasskeyToSignWith` — the SAME selector
+          // `delegationPasskeySigner` signs through (#1933) — rather than
+          // `hybridPasskeyOnDevice`. That was the root cause here, not the
+          // rendering: two call sites into one rule, and only the signing one
+          // knew about the `passkeys[0]` fallback. Display therefore went
+          // SILENT in exactly the case where an arbitrary credential was about
+          // to sign. Going through the selector means the two cannot drift.
+          //
+          // Whether the marker matched is then a question about the credential
+          // this popover is naming, not a second copy of the selection rule:
+          // the selector only reaches its fallback when nothing carried a
+          // marker, so a chosen key with no marker IS the fallback case.
+          const signKey = hybridPasskeyToSignWith(delegatorSigner.signers)
+          const keyIndex = signKey
+            ? delegatorSigner.signers.passkeys.findIndex((pk) => pk.key_id === signKey.key_id)
             : -1
-          const signingWith = onDeviceKey
+          // `undefined` only for an empty signer set — there is no credential
+          // to name, and nothing can sign.
+          const signingWith = signKey
             ? {
-                label: passkeyRowLabel(onDeviceKey.created_at, keyIndex),
-                keyId: onDeviceKey.key_id,
+                label: passkeyRowLabel(signKey.created_at, keyIndex),
+                keyId: signKey.key_id,
+                onThisDevice: hasPasskeyCredentialOnDevice(credentialIdFromKeyId(signKey.key_id)),
               }
             : undefined
           const connectedWallet =
@@ -589,6 +790,18 @@ export default function WalletButton() {
         // so the two cannot drift once the label stops rendering below `sm`.
         const walletLabel = accountAlias ?? account.ensName ?? truncateAddress(account.address)
 
+        // #2073: a connected wallet that is not the hybrid account's named
+        // owner gets the "Wrong network" treatment — same danger-soft pill,
+        // same icon — because it is the same class of state: connected, but
+        // not usable for this account. Unlike Wrong network the click opens
+        // the normal popover rather than a modal, because the fix (Switch
+        // wallet) already lives there.
+        const wrongWallet = operationGate.kind === 'wrong_wallet'
+        // One expression for the visible label AND the accessible name, per
+        // the #1803 rule above — the wrong-wallet pill must SAY so, not just
+        // tint, or the state is invisible to a screen reader.
+        const pillLabel = wrongWallet ? 'Wrong wallet' : walletLabel
+
         return (
           <div className="relative">
             <button
@@ -597,11 +810,17 @@ export default function WalletButton() {
               onClick={() => setPopoverOpen((v) => !v)}
               aria-haspopup="dialog"
               aria-expanded={popoverOpen}
-              aria-label={walletLabel}
-              title={walletLabel}
-              className={`flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
+              aria-label={pillLabel}
+              title={pillLabel}
+              className={
+                wrongWallet
+                  ? `flex items-center gap-2 text-sm font-medium bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] border border-danger/25 hover:border-danger/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`
+                  : `flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`
+              }
             >
-              {account.ensAvatar ? (
+              {wrongWallet ? (
+                <Icon icon={TriangleAlert} className="h-4 w-4 shrink-0" />
+              ) : account.ensAvatar ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={account.ensAvatar}
@@ -611,8 +830,8 @@ export default function WalletButton() {
               ) : (
                 <AddressAvatar address={account.address} />
               )}
-              <span className={`${LABEL_BELOW_SM} ${accountAlias ? '' : 'font-mono'}`}>
-                {walletLabel}
+              <span className={`${LABEL_BELOW_SM} ${accountAlias || wrongWallet ? '' : 'font-mono'}`}>
+                {pillLabel}
               </span>
             </button>
 
@@ -624,6 +843,11 @@ export default function WalletButton() {
                 displayName: accountAlias ?? account.ensName,
               }}
               unavailablePasskey={passkeyUnavailableOnDevice}
+              wrongWalletOwner={
+                wrongWallet && operationGate.kind === 'wrong_wallet'
+                  ? truncateAddress(operationGate.ownerAddress)
+                  : undefined
+              }
               open={popoverOpen}
               onClose={() => setPopoverOpen(false)}
               onSwitchWallet={handleSwitchWallet}

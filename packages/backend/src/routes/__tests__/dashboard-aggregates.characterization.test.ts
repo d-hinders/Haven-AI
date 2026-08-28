@@ -9,11 +9,16 @@
  *  - the daily snapshot UPSERT is conditional — it must NOT run when today's
  *    row already exists;
  *  - the day-over-day change is read from YESTERDAY's snapshot row;
- *  - month-to-date spend sums the payment and approval aggregates together,
- *    including the fiat-fallback branch for rows with no stored usd/eur value;
+ *  - month-to-date spend sums the payment aggregate alone (the approval
+ *    aggregate is gone, #2055), including the fiat-fallback branch for rows
+ *    with no stored usd/eur value;
  *  - the allowance read is SKIPPED entirely when the user has no agents.
  *
  * Written against the UNCHANGED route and passing before the extraction.
+ * #2055 (epic #1440, #2021 readability waiver): `approval_requests` is
+ * dropped — the approval-spend branch and `status IN ('pending','approved')`
+ * actionable-count query this file used to stub are gone from the route, so
+ * their stubs are removed rather than left dead.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
@@ -75,10 +80,8 @@ function snapshotDate(offsetDays = 0): string {
 function installQueryMock(overrides: {
   safes?: unknown[]
   agents?: unknown[]
-  allowances?: unknown[]
   snapshots?: unknown[]
   paymentSpend?: unknown[]
-  approvalSpend?: unknown[]
 } = {}) {
   mockQuery.mockImplementation((sql: string) => {
     if (sql.includes('AS has_first_agent_payment')) {
@@ -90,26 +93,20 @@ function installQueryMock(overrides: {
     if (sql.includes('FROM agents a')) {
       return Promise.resolve({ rows: overrides.agents ?? [] })
     }
-    if (sql.includes("status IN ('pending', 'approved')")) {
-      return Promise.resolve({ rows: [{ count: '0' }] })
-    }
-    if (sql.includes('FROM agent_allowances')) {
-      return Promise.resolve({ rows: overrides.allowances ?? [] })
-    }
+    // #2020: no `FROM agent_allowances` branch — the dashboard never issues
+    // that query any more (legacy agents get `[]`, delegation agents derive
+    // from `agent_delegations`), so there is nothing left to stub here.
     if (sql.includes('FROM user_daily_portfolio_snapshots')) {
       return Promise.resolve({ rows: overrides.snapshots ?? [] })
     }
     if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) {
       return Promise.resolve({ rows: [] })
     }
-    // Both month-to-date aggregates end in GROUP BY token_symbol; they are told
-    // apart by their source table (checked AFTER has_first_agent_payment, which
-    // names both tables).
+    // #2055: month-to-date spend is payment_intents alone — the
+    // approval_requests GROUP BY token_symbol branch this dispatcher used to
+    // route separately is gone with the query it stubbed.
     if (sql.includes('GROUP BY token_symbol') && sql.includes('FROM payment_intents')) {
       return Promise.resolve({ rows: overrides.paymentSpend ?? [] })
-    }
-    if (sql.includes('GROUP BY token_symbol') && sql.includes('FROM approval_requests')) {
-      return Promise.resolve({ rows: overrides.approvalSpend ?? [] })
     }
     throw new Error(`Unexpected query: ${sql}`)
   })
@@ -237,20 +234,20 @@ describe('dashboard aggregates (characterization, #1167)', () => {
   })
 
   describe('month-to-date agent spend', () => {
-    it('sums the payment and approval aggregates into one total', async () => {
+    // #2055: was "sums the payment and approval aggregates into one total" —
+    // the approval aggregate is gone with `approval_requests`, so the total
+    // is the payment aggregate alone.
+    it('sums the payment aggregate alone — the approval aggregate is gone (#2055)', async () => {
       installQueryMock({
         paymentSpend: [
           { token_symbol: 'USDC', usd_sum: '10', eur_sum: '9', fallback_amount: '0' },
-        ],
-        approvalSpend: [
-          { token_symbol: 'USDC', usd_sum: '5', eur_sum: '4', fallback_amount: '0' },
         ],
       })
 
       const body = (await getOverview()).json()
 
-      expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(15, 10)
-      expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(13, 10)
+      expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(10, 10)
+      expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(9, 10)
       expect(fiatMocks.getFiatValuesForTokenAmount).not.toHaveBeenCalled()
     })
 
@@ -269,7 +266,7 @@ describe('dashboard aggregates (characterization, #1167)', () => {
       expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(1.8, 10)
     })
 
-    it('scopes both month-to-date aggregates to the authenticated user', async () => {
+    it('scopes the month-to-date aggregate to the authenticated user', async () => {
       installQueryMock({})
 
       await getOverview()
@@ -279,36 +276,28 @@ describe('dashboard aggregates (characterization, #1167)', () => {
           String(sql).includes('GROUP BY token_symbol') &&
           String(sql).includes('FROM payment_intents'),
       )
-      const approvalSpend = mockQuery.mock.calls.find(
-        ([sql]) =>
-          String(sql).includes('GROUP BY token_symbol') &&
-          String(sql).includes('FROM approval_requests'),
-      )
       expect(paymentSpend?.[1]).toEqual(['user-1'])
-      expect(approvalSpend?.[1]).toEqual(['user-1'])
+      // #2055: there is no second (approval) aggregate to scope any more.
+      expect(
+        mockQuery.mock.calls.some(([sql]) => /approval_requests/i.test(String(sql))),
+      ).toBe(false)
     })
   })
 
   describe('agent allowances', () => {
-    it('maps legacy-rail allowance rows onto their agent', async () => {
+    // #2020 (epic #1440), reversing the byte-identical mirror pin this
+    // replaces: the Safe rail is retired and `agent_allowances` is never
+    // queried by the dashboard any more, so a legacy (non-delegator_hybrid)
+    // agent reports NO allowance entries rather than mapping the mirror rows.
+    it('legacy agents get [] allowances — the mirror is retired and never queried', async () => {
       installQueryMock({
         agents: [AGENT],
-        allowances: [
-          {
-            agent_id: AGENT.id,
-            token_symbol: 'USDC',
-            allowance_amount: '500.000000',
-            reset_period_min: 1440,
-          },
-        ],
       })
 
       const body = (await getOverview()).json()
 
-      expect(body.agents[0].allowances).toEqual([
-        { tokenSymbol: 'USDC', allowanceAmount: '500.000000', resetPeriodMin: 1440 },
-      ])
-      expect(callsMatching('FROM agent_allowances')[0][1]).toEqual([[AGENT.id]])
+      expect(body.agents[0].allowances).toEqual([])
+      expect(callsMatching('FROM agent_allowances')).toHaveLength(0)
     })
 
     it('skips the allowance read entirely when the user has no agents', async () => {

@@ -864,6 +864,79 @@ describe('x402 helpers', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('#2054: the key-holding pay path refuses an erc7710-ONLY merchant naming the tag, not the asset', async () => {
+    // buildX402Quote now DESCRIBES an erc7710-only merchant (the hosted tools
+    // can pay it), so this path's refusal is the one a local caller hits AFTER
+    // a successful quote — it must name the settlement scheme as the reason
+    // instead of implying Base USDC is the limit. Behavior is unchanged: it
+    // still refuses before any funding, because an EIP-3009 path cannot
+    // settle an erc7710-only merchant.
+    const erc7710OnlyPaymentRequired: X402PaymentRequired = {
+      ...paymentRequired,
+      accepts: [{
+        ...accepted,
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: ['0x' + '44'.repeat(20)] },
+      }],
+    }
+
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(erc7710OnlyPaymentRequired), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const err = await haven.fetch(paymentRequired.resource.url).then(
+      () => { throw new Error('expected the erc7710-only merchant to be refused on this path') },
+      (e: unknown) => e as Error,
+    )
+    expect(err.message).toContain('No compatible payment option found')
+    expect(err.message).toContain("extra.assetTransferMethod: 'erc7710'")
+    expect(err.message).toContain('settlement scheme')
+    // Refused before any funding call: the merchant 402 was the only fetch.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('#2054: buildX402Quote describes an erc7710-only merchant instead of refusing it', async () => {
+    const { buildX402Quote } = await import('./x402-protocol.js')
+    const erc7710Entry = {
+      ...accepted,
+      amount: '2500000',
+      maxAmountRequired: '2500000',
+      extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: ['0x' + '44'.repeat(20)] },
+    }
+    const quote = buildX402Quote(
+      { ...paymentRequired, accepts: [erc7710Entry] },
+      { url: paymentRequired.resource.url, method: 'GET', headers: [], body: undefined },
+    )
+    expect(quote.acceptedScheme).toBe('erc7710')
+    expect(quote.accepted).toEqual(erc7710Entry)
+    expect(quote.amountAtomic).toBe('2500000')
+
+    // A standard entry present ⇒ still preferred and labeled standard.
+    const standardQuote = buildX402Quote(paymentRequired, {
+      url: paymentRequired.resource.url, method: 'GET', headers: [], body: undefined,
+    })
+    expect(standardQuote.acceptedScheme).toBe('standard')
+
+    // Nothing payable of either kind ⇒ the pre-existing refusal, unchanged.
+    expect(() =>
+      buildX402Quote(
+        {
+          ...paymentRequired,
+          accepts: [{ ...accepted, asset: '0x0000000000000000000000000000000000000001' }],
+        },
+        { url: paymentRequired.resource.url, method: 'GET', headers: [], body: undefined },
+      ),
+    ).toThrow('No compatible payment option found')
+  })
+
   it('surfaces x402 approval queues as structured payment state', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

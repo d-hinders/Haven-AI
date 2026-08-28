@@ -19,7 +19,6 @@ covers:
   - packages/backend/src/modules/reporting/fortnox-connection.ts
   - packages/backend/src/rails/**
   - packages/backend/src/infra/repositories/payment-intents.ts
-  - packages/backend/src/infra/repositories/approval-requests.ts
   - packages/backend/src/infra/repositories/x402-authorizations.ts
   - packages/backend/src/infra/repositories/machine-payments.ts
   - packages/backend/src/infra/repositories/account-entitlements.ts
@@ -27,13 +26,13 @@ covers:
   - packages/backend/src/modules/accounting/accounting-entry.ts
   - packages/backend/src/modules/catalog/catalog-discovery.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
-  - packages/backend/src/domain/payment-coverage.ts
   - packages/backend/src/domain/machine-payment-lifecycle.ts
+  - packages/core/src/machine-payment-lifecycle.ts
+  - packages/signer/**
   - packages/backend/src/infra/relayer*.ts
   - packages/backend/src/infra/outbound-*.ts
   - packages/backend/src/infra/delegate-*.ts
   - packages/backend/src/modules/reporting/**
-  - packages/backend/src/modules/accounts/safe-deployer.ts
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/middleware/reportingFeed.ts
@@ -44,7 +43,6 @@ covers:
   - packages/backend/src/routes/safe-deploy.ts
   - packages/backend/src/routes/user-safes.ts
   - packages/backend/src/routes/safe-exec.ts
-  - packages/backend/src/routes/approvals.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts
@@ -53,7 +51,6 @@ covers:
   - packages/frontend/src/app/(authenticated)/accounting/**
   - packages/frontend/src/app/(authenticated)/reporting/**
   - packages/frontend/src/components/AddFundsModal.tsx
-  - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/frontend/src/components/UsingYourAgentInfo.tsx
   - packages/sdk/src/**
   - packages/cli/src/**
@@ -66,7 +63,7 @@ covers:
   - .github/workflows/publish.yml
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-22" # chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
+last-verified: "2026-08-26" # chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -97,7 +94,7 @@ References:
 
 ## One-Line Engineering Principle
 
-Haven may help users and agents prepare, validate, and relay Safe transactions, but Haven must never become the party that holds keys, controls funds, authorises transfers, expands permissions, or makes discretionary financial decisions.
+Haven may help users and agents prepare, validate, and relay smart-account operations — owner-signed delegations and account operations, agent-signed redemptions — but Haven must never become the party that holds keys, controls funds, authorises transfers, expands permissions, or makes discretionary financial decisions.
 
 ## Core Design Principle
 
@@ -105,7 +102,7 @@ Haven should never be the party that holds funds, holds keys, controls access, m
 
 Haven may provide:
 
-- UI for configuring user-controlled Safe permissions.
+- UI for configuring user-controlled account permissions (owner-signed budget delegations).
 - Transaction construction from explicit user, agent, or protocol instructions.
 - Optional pre-checks that mirror on-chain rules.
 - Non-discretionary relay of independently valid signed transactions.
@@ -116,15 +113,17 @@ Payment authority must always come from external signatures and the applicable
 on-chain controls:
 
 ```text
-Safe-originated funding
-  -> user-controlled Safe
-  + user-approved transaction or agent-signed module call
-  + on-chain Safe module or guard constraints
+Delegation-rail spend (the only live rail — epic #1440)
+  -> user-controlled smart account (Hybrid DeleGator)
+  + owner-signed budget delegation (period budget, optional recipient pin, expiry)
+  + agent-signed redemption
+  + on-chain caveat enforcement by the DelegationManager
 
-Standard x402 delegate-to-merchant payment
+x402 delegate-to-merchant leg (EIP-3009 bridge, #946)
   -> agent-held delegate key
   + exact authenticated merchant/amount/asset/network/resource context
   + delegate's available token balance
+    (put there only by redeeming the same owner-signed budget delegation)
 ```
 
 The source of payment authority must never be:
@@ -142,8 +141,8 @@ Haven backend
 > the agent's delegate EOA by redeeming the same budget delegation (authority
 > = the caveat stack, at the funding hop; agent-signed sponsored UserOp), and
 > the merchant leg is then the standard agent-signed EIP-3009 transfer bound
-> to the exact authenticated payment context — the same shape as the legacy
-> rail's merchant leg described above. In both schemes Haven prepares and
+> to the exact authenticated payment context — the x402 delegate-to-merchant
+> leg described above. In both schemes Haven prepares and
 > relays only; no leg is authorised by Haven policy alone. Recipient-pinned
 > budgets cannot fund the EOA and are therefore erc7710-only — the fallback
 > never weakens an on-chain pin. Since #1058 the settlement child can also be
@@ -166,14 +165,19 @@ Haven backend
 > (429 on over-cap, spend recorded per agent/user for attribution) — an
 > availability control on the shared gas sponsor, deliberately fail-open on
 > database errors because it gates gas, never funds.
-> Since #993 the retired session rail's fail-closed refusal (HTTP 410,
+> Since #993 a retired rail's fail-closed refusal (HTTP 410,
 > nothing written) is decided and produced in ONE place
 > (`rails/execution-rail.ts`), and enforced at every agent-payment entry point
 > (/payments, sign, MPP authorize + replay, /machine-payments/send, x402
 > authorize) regardless of the account's permission/chain configuration.
-> Queued-approval completion is not a gap (#1121, investigated): the
-> dashboard executes an OWNER-signed Safe transaction — owner authority,
-> outside any agent rail — so the seam is rightly not consulted there.
+> Since #1986 (epic #1440) that covers BOTH retired rails — the session rail
+> (#834) and the legacy Safe AllowanceModule rail — so the delegation rail is
+> the only rail that can spend. The #1121 queued-approval carve-out is
+> history: #1986 closed the approval queue's approvable path (the only rail
+> that ever fed the queue was being retired, so leaving it approvable would
+> have left Haven manufacturing executable payment transactions for a rail it
+> had declared gone), and #2055 dropped the `approval_requests` table itself
+> under the recorded #2021 owner decision.
 > Since #1130 a valid key on a `pending_approval` agent gets a NAMED
 > `403 agent_pending_approval` with the required action, instead of the
 > false `401 Invalid or revoked API key` — the authentication gate stays a
@@ -233,7 +237,7 @@ Haven backend
 
 Preserve these facts as non-negotiable implementation invariants:
 
-- User treasury funds are held in the user's Safe. An agent-held delegate EOA may also have a pre-existing, newly funded, or residual balance used for a standard x402 merchant payment; Haven controls neither account.
+- User treasury funds are held in the user's smart account — a Hybrid DeleGator on the live delegation rail; retired-rail Safes remain user-owned and readable. An agent-held delegate EOA may also hold a transient balance used for an EIP-3009 x402 merchant payment; Haven controls neither account.
 - Haven never holds user private keys, agent private keys, or seed phrases.
   Passkey-owned delegation-rail accounts store only PUBLIC key material
   (`hybrid_account_passkeys`: credential id + P256 x/y coordinates) — the
@@ -241,19 +245,23 @@ Preserve these facts as non-negotiable implementation invariants:
   grant no signing or spending authority.
 - Haven never operates an unrestricted server-side signer.
 - Haven cannot unilaterally move funds.
-- Haven cannot bypass Safe owners, Safe modules, Safe guards, or on-chain constraints.
-- Agent spend authority is created or changed only through Safe transactions approved by the user.
-- Safe-originated agent funding flows through Safe's Allowance Module, a user-approved Safe transaction, or an equivalent on-chain control. A standard x402 merchant leg is a separate agent-signed transfer from the delegate's available balance, bound to the exact authenticated payment context; it is not itself a Safe module call.
-- Allowance limits are enforced on-chain, not only by Haven.
-- Agent-initiated transactions, including the standard x402 merchant leg, are signed by an agent private key held by the agent or user, not by Haven.
+- Haven cannot bypass the account's signers, the DelegationManager's caveat enforcers, or any other on-chain constraint — and holds no code path to the account's UUPS upgrade authority (security model invariant 11).
+- Agent spend authority is created or changed only through delegations signed by the account owner.
+- Every account-originated transfer is a redemption of an owner-signed delegation, enforced by the caveat stack during execution. An EIP-3009 x402 merchant leg is a separate agent-signed transfer from the delegate's available balance, bound to the exact authenticated payment context; the funding that put that balance there was itself a delegation redemption.
+- Budget, recipient and expiry limits are enforced on-chain by the caveat enforcers, not only by Haven.
+- Agent-initiated transactions, including the EIP-3009 x402 merchant leg, are signed by an agent private key held by the agent or user, not by Haven.
 - Haven may relay execution, but authority comes from the user or agent signature and the controls applicable to that leg, never from Haven authentication or database policy alone.
-- Users can access their Safe through other Safe-compatible UIs.
+- Users can enumerate and revoke every authority on their account, and recover control of the account itself, without Haven — the demonstrated exit story ([`docs/exit/README.md`](../exit/README.md)).
 - Users can revoke or modify agent authority independently of Haven.
-- Haven cannot block users from transacting with their Safe outside Haven.
+- Haven cannot block users from transacting with their account outside Haven.
 
 **Delegation-rail x402 signing is local-signer-only (owner decision, 2026-08-06, #1138).** The hosted/edge keyless path never signs an account UserOp: on this rail the agent's signature is produced by the local signer holding the delegate key, exactly as invariant "signed by an agent private key held by the agent or user, not by Haven" requires. Haven's role is limited to *declaring* what is to be signed — an expected context it signs with a dedicated binding key — which the signer verifies before signing and can refuse. Because the account validates EIP-712 typed data rather than the bare ERC-4337 hash, that declaration commits to the typed data's digest (expected context v2); the signer re-derives the digest from the payload it actually signs and refuses any mismatch, so Haven cannot substitute a different operation behind a correctly-signed declaration. The refusal extends to declarations the signer does not *understand*: an expected-context version outside the set that signer supports is rejected before any content check (#1143, `SUPPORTED_X402_EXPECTED_VERSIONS`), so a newer backend cannot obtain a signature by declaring a context whose rules the signer cannot evaluate — the same property, applied to the version field itself. Since #1155 the signer also *advertises* that supported set at its MCP `initialize` handshake, so an agent can spot the skew before it quotes. That advertisement is metadata — version numbers, no key material and no authority — and it is advisory by decision: it adds no refusal to the payment path, and the signing-time refusal above remains the control. This is a boundary, not a staging decision: teaching the hosted signer to sign account UserOps would put Haven in the signing path and is out of scope by construction.
 
-**Delegation rail (epic #821, dark-launched 2026-07):** a second account type (MetaMask Hybrid DeleGator) is being introduced with the same custody posture — every invariant above maps one-to-one per [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md) (§2, implemented as CI checks in #831). Two Safe-specific formulations generalise rather than weaken: "Safe-compatible UIs" becomes the independent exit path (#832, now DEMONSTRABLE — live-verified enumerate + owner-signed revoke with no Haven involvement; see [`docs/exit/README.md`](../exit/README.md)), and "Safe transactions approved by the user" becomes owner-signed delegations. The payment path (#829) moves funds ONLY via the agent's owner-signed delegation, redeemed through audited enforcers that carry the budget, recipient and expiry on-chain; Haven relays sponsored operations and signs nothing (invariants 5-d/7-d/11/12 in CI).
+**Delegation rail (epic #821) — the only live rail (epic #1440, 2026-08):** the MetaMask Hybrid DeleGator account type carries every invariant above one-to-one per [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md) (§2, implemented as CI checks in #831). Two formerly Safe-specific formulations generalised rather than weakened: "Safe-compatible UIs" became the independent exit path (#832, DEMONSTRABLE — live-verified enumerate + owner-signed revoke with no Haven involvement; see [`docs/exit/README.md`](../exit/README.md)), and "Safe transactions approved by the user" became owner-signed delegations. The payment path (#829) moves funds ONLY via the agent's owner-signed delegation, redeemed through audited enforcers that carry the budget, recipient and expiry on-chain; Haven relays sponsored operations and signs nothing (invariants 5-d/7-d/11/12 in CI).
+
+**The legacy Safe AllowanceModule rail is RETIRED (epic #1440, owner decision 2026-08-14, phasing approved 2026-08-24).** #1984 closed the inflow (no Safe can be deployed or imported — the routes answer 410 tombstones), #1986 fail-closed every agent spend path (`execution_rail='allowance_module'` → HTTP 410, nothing written, same seam as the #834 session-rail retirement), #1987/#1988/#1989 deleted the execution machinery (the spend path, the nonce coordinator, the deploy/exec bodies, the legacy frontend surfaces), and #2020 retired the allowance read/report surface. What survives is deliberate and narrow: existing Safe accounts stay user-owned and readable, `POST /safe/exec` stays open for OWNER-signed execution relayed for gas (owner authority, not a policy rail — it also carries #1229 passkey recovery), and `rails/allowance-module.ts` survives as shared reads only, with no code path able to execute an AllowanceModule spend. Where this document names Safe mechanics below, it is describing that retired baseline or the surviving owner-signed remnant, never a live agent-spend control.
+
+**Disclosed custody artifact — four relayer-owned dust Safes (#1985, owner-accepted 2026-08-26).** The custody claims above carry one bounded, deliberately disclosed exception rather than an asserted purity: the production relayer key is an on-chain owner of four retired test Safes on Base mainnet holding ~$0.14 USDC in total (largest single balance 0.109114 USDC; the two Safes with the AllowanceModule still enabled bound delegate-extractable value at $0.02). These are Haven-deployed test Safes, not traced to any external holder (the #1985 re-verification's on-chain reads show all four owned solely by the relayer, apart from the externally-owned population the epic #1440 census recorded), and the wind-down originally scoped in #1985 was waived by owner decision: no transaction is worth more than the dust it would move. Full addresses, per-Safe balances and per-delegate allowance state are recorded in [#1985's closing evidence comment](https://github.com/d-hinders/Haven-AI/issues/1985#issuecomment-5421759537); the Gnosis pilot import named there is externally owned and is not a Haven custody surface. Anything that would grow this set — a new relayer-owned account, or funding one of these — is a feature-review trigger, not routine.
 
 Any feature that weakens one of these assumptions needs legal and product review before implementation.
 
@@ -265,17 +273,17 @@ Do not build these features without separate legal and product review.
 
 Never implement:
 
-- Server-side custody of Safe owner keys.
+- Server-side custody of account owner keys (DeleGator signer or Safe owner alike).
 - Encrypted user private keys stored by Haven, even if encrypted at rest.
 - Seed phrase backup or recovery controlled by Haven.
 - Key export/import flows where the Haven backend can access key material.
-- Recovery where Haven can regain access to a user's Safe without user-controlled authentication or signing.
+- Recovery where Haven can regain access to a user's account without user-controlled authentication or signing.
 
 Preferred pattern:
 
 - User keys remain in the user's wallet, passkey stack, hardware device, or security environment.
 - Haven stores the public passkey credential ID, P-256 public-key coordinates, and optional raw attestation for future verification. Current enrollment does not cryptographically verify that attestation. Authentication flows may verify assertions and signatures, and Haven may receive signed transaction payloads, but it never receives passkey private material.
-- Recovery uses Safe-native recovery, additional owners, guardians, or other user-controlled mechanisms.
+- Recovery uses the account's own signer set: a backup passkey or EOA, enrolled and removed only by signatures from EXISTING signers, never by Haven (security model §6). A single-signer account has no recovery, is permitted (#1153), and gets a recommendation rather than a gate.
 
 ### 2. Server-Side Agent Key Custody
 
@@ -285,13 +293,13 @@ Never implement:
 - Agent private keys stored in the Haven database.
 - Agent private keys encrypted with a Haven-managed key.
 - Hosted agent wallet functionality.
-- Any flow where Haven can sign an Allowance Module transfer on behalf of an agent.
+- Any flow where Haven can sign a delegation redemption on behalf of an agent.
 
 Preferred pattern:
 
 - Agent keys are generated and held by the user or agent runtime.
-- Haven may help the user register an agent public key or spender address with the Safe.
-- The agent signs payment requests or module transactions externally.
+- Haven may help the user grant an agent's delegate address an owner-signed budget delegation.
+- The agent signs payment requests and redemptions externally.
 - Haven verifies signatures and relays only if the transaction is independently valid.
 
 ### 3. API Credential As Payment Instrument
@@ -300,7 +308,7 @@ Never implement:
 
 - API key alone can trigger payment.
 - Bearer token alone can authorise transfer.
-- `agent_secret` is sufficient to spend from a Safe.
+- `agent_secret` is sufficient to spend from an account.
 - Haven database policy is the only thing preventing spend.
 - Haven backend converts an API-authenticated request into a signed transfer using Haven-controlled authority.
 
@@ -321,8 +329,32 @@ Never implement:
 Preferred pattern:
 
 - Haven may mirror policies off-chain for UX and pre-validation.
-- Safe-originated funding must still be constrained by Safe modules, Safe guards, user-approved Safe transactions, or equivalent on-chain controls. A delegate-to-merchant x402 transfer must be externally signed and bound to the exact authenticated payment context rather than authorised by Haven policy alone.
-- If a policy cannot be enforced on-chain, treat it as advisory and require manual user approval for execution.
+- Every account-originated spend must still be constrained by the delegation's on-chain caveat enforcers (period budget, recipient pin, expiry) — over-budget does not queue, it REVERTS, because the delegation rail has no approval queue. A delegate-to-merchant x402 transfer must be externally signed and bound to the exact authenticated payment context rather than authorised by Haven policy alone.
+- If a policy cannot be enforced on-chain, treat it as advisory pre-validation that may only NARROW what Haven constructs (the per-purchase `max_amount` cap is the model) — never as a gate whose passing authorises execution.
+
+**Executable proof (#2004).** This red line is asserted on every pull request by two
+complementary suites, and the split between them is the point — neither is sufficient
+alone:
+
+| suite | what it proves |
+|---|---|
+| `packages/backend/src/routes/__tests__/non-custody-onchain-gate.contract.test.ts` | Haven performs **no** off-chain spend arithmetic on the delegation rail — the legacy coverage functions are not even *bound* into `routes/payments.ts` — and a refusal from the chain is forwarded verbatim with nothing written |
+| `packages/backend/src/routes/__tests__/non-custody-onchain-enforcer.contract.test.ts` | the **deployed** caveat enforcers at Haven's pinned addresses actually refuse: an over-budget redemption, a wrong-recipient redemption against a pinned delegation, and an expired delegation each revert on-chain on terms produced by Haven's own caveat compiler, each paired with an in-policy positive control on the same enforcer |
+
+The second suite is testnet-only and key-less: it `eth_call`s each enforcer's
+`beforeHook`, so nothing is signed, funded or broadcast, and it refuses any chain id
+but Base Sepolia. Until #2004 it did not exist, and the first suite's own header said
+so — the delegation rail moved the final gate into Solidity, which removed the
+arithmetic a unit test could check without replacing it with anything a unit test
+could reach.
+
+**Still not proven in-repo, and stated rather than implied:** that the
+DelegationManager executes the full caveat stack, in order, during a real
+`redeemDelegations`. That needs a funded testnet delegator account and a signature —
+operator-held keys, outside an automated suite. The evidence for it today is #1450's
+mainnet canary, which settled real value through this exact stack, and the #820 Base
+Sepolia matrix. Treat "we rely on audited MetaMask contracts, exercised live" as the
+standing claim for that remainder, not "we prove it on every PR".
 
 ### 5. Discretionary Transfer Authority
 
@@ -354,7 +386,7 @@ Never implement without review:
 
 Preferred pattern:
 
-- Keep MVP flows to direct transfers from user-controlled Safes.
+- Keep MVP flows to direct transfers from user-controlled accounts.
 - If swaps or ramps are added later, use licensed partners and run a separate regulatory review.
 
 ### 7. Advice, Yield, Or Portfolio Management
@@ -446,16 +478,16 @@ Preferred pattern:
 Never implement:
 
 - Lock-in where users can only transact through Haven.
-- Safe setup where Haven is required to revoke agents.
-- Safe setup where Haven is required to recover the account.
-- Safe setup where Haven controls essential modules.
-- Backend dependency that prevents users from accessing or managing their Safe elsewhere.
+- Account setup where Haven is required to revoke agents.
+- Account setup where Haven is required to recover the account.
+- Account setup where Haven controls the account's signer set or its UUPS upgrade path.
+- Backend dependency that prevents users from accessing or managing their account elsewhere.
 
 Preferred pattern:
 
-- Users can access their Safe through alternative Safe-compatible UIs.
-- Users can revoke agent spend authority on-chain.
-- Users can remove modules or guards according to Safe rules.
+- Users can enumerate and revoke delegations, and manage signers, without Haven — the #832 exit story (a statically hostable exit page, plus the documented block-explorer path against the DelegationManager ABI).
+- Users can revoke agent spend authority on-chain (`disableDelegation`, one call, works on any delegation the user can reconstruct).
+- Users can rotate or remove account signers under the account's own rules; Haven can neither perform nor veto a signer change.
 - Haven is replaceable infrastructure, not the account controller.
 
 ## Required Architecture Patterns
@@ -473,19 +505,19 @@ Authorisation examples:
 
 - User signature.
 - Agent-held private key signature.
-- Safe owner approval.
-- Safe module permission.
-- On-chain allowance.
+- Account owner signature.
+- Owner-signed delegation.
+- On-chain caveat-enforced budget.
 
 Implementation rule:
 
-> A request is not executable merely because it is authenticated. It must be independently authorised by a user-held or agent-held key. Safe-originated funding must also satisfy on-chain Safe constraints; a standard x402 merchant leg must match the authenticated exact payment context.
+> A request is not executable merely because it is authenticated. It must be independently authorised by a user-held or agent-held key. A delegation-rail spend must also survive the on-chain caveat enforcers; an EIP-3009 x402 merchant leg must match the authenticated exact payment context.
 
 Where the signed payload is fully reconstructable server-side, "authorised by an agent-held key" must be **verified, not assumed**. On the delegation rail's erc7710 settlement (`POST /x402/:id/settle`), Haven recovers the signer from the child delegation's EIP-712 typed data and refuses a signature that is not the agent's registered delegate key — with a `400` raised *before* the intent status changes, so a mis-signed request leaves the intent re-signable instead of consuming it (#1061). A shape check alone (`0x…`-prefixed hex) is not authorisation.
 
-Where the payload is not fully known server-side (the AllowanceModule path in `payments.ts`), authority still rests with the on-chain check on the relayed transaction; the difference is stated so the weaker case is not mistaken for the stronger one.
+The weaker variant of this rule — the retired AllowanceModule path, where the signed payload was not fully known server-side and authority rested only with the on-chain check on the relayed transaction — is retired with its rail (#1986/#1987). It is recorded here so the distinction is not re-imported: a live path whose payload Haven constructs must verify the signer, per the rule above.
 
-### Use On-Chain Enforcement Wherever Safe Authority Is Exercised
+### Use On-Chain Enforcement Wherever Account Authority Is Exercised
 
 Haven can pre-check:
 
@@ -497,29 +529,27 @@ Haven can pre-check:
 - Protocol type.
 - Transaction metadata.
 
-The final gate for Safe-originated funding should be:
+The final gate for an account-originated spend is:
 
-- Safe owners.
-- Safe module.
-- Safe guard.
-- Allowance Module.
-- On-chain spender limits.
+- The account's own signers.
+- The DelegationManager and its caveat enforcers — period budget, recipient pin, expiry ([executable proof under Red Line #4](#4-off-chain-only-spend-control)).
+- Token-contract authorization rules.
 
-For a standard x402 delegate-to-merchant leg, the final gates are the agent-held
+For an EIP-3009 x402 delegate-to-merchant leg, the final gates are the agent-held
 delegate signature, token-contract authorization rules, and exact authenticated
 merchant, amount, asset, network, resource, and expiry context.
 
 Implementation rule:
 
-> If Haven's backend and database disappeared, the user's Safe permissions and restrictions should still be understandable, revocable, and enforceable on-chain.
+> If Haven's backend and database disappeared, the user's account permissions and restrictions should still be understandable, revocable, and enforceable on-chain.
 
-**The agent-facing spend-authority report is rail-aware and grants nothing (#1135).** `GET /machine-payments/allowances` — the endpoint behind the SDK's readiness signal — is a read/reporting mirror per rail: on the legacy rail it reads the live AllowanceModule state on-chain; on the delegation rail it derives remaining budget from the agent's own active, owner-signed delegations (the same #1090 derivation the dashboard uses, so the two surfaces cannot disagree); a retired session-rail account gets the #993 fail-closed 410 rather than a state read. Enforcement is unchanged by this endpoint on every rail — the AllowanceModule and the delegation caveats remain the gates, and an over-budget delegation redemption reverts on-chain rather than being queued by Haven.
+**The agent-facing spend-authority report is rail-aware and grants nothing (#1135).** `GET /machine-payments/allowances` — the endpoint behind the SDK's readiness signal — is a read/reporting mirror: on the delegation rail it derives remaining budget from the agent's own active, owner-signed delegations (the same #1090 derivation the dashboard uses, so the two surfaces cannot disagree), with `remaining` read from the ERC20PeriodTransferEnforcer's own storage (#1145). BOTH retired rails — session (#834/#993) and AllowanceModule (#2020, reversing #1986's leave-it-readable decision by recorded owner call) — get the fail-closed 410 rather than a state read. Enforcement is unchanged by this endpoint — the delegation caveats remain the gate, and an over-budget redemption reverts on-chain rather than being queued by Haven.
 
 ### Make All Agent Authority User-Approved
 
 Agent authority should only be created through:
 
-- A user signature that is itself the authority: a Safe transaction signed by the user or Safe owner on the legacy rail, or an owner-signed delegation on the delegation rail (the generalisation recorded above under "Hard Architecture Invariants").
+- A user signature that is itself the authority: an owner-signed delegation. (On the retired AllowanceModule rail this was a user-signed Safe transaction — the generalisation recorded above under "Hard Architecture Invariants".)
 - Clear UI explaining spender, token, amount, reset period, expiry, and revocation.
 - On-chain registration of the relevant spender or agent authority.
 - Audit log of user consent.
@@ -528,9 +558,9 @@ Implementation rule:
 
 > Haven must not silently create or expand an agent's authority.
 
-**The dashboard's signing surfaces are rail-honest (#1079).** The signer layer types the two authorities apart: a Safe transaction can only be signed by a `SafeCapableSigner` (EOA or Safe passkey), never by a Hybrid account's passkey — the compiler enforces the exclusion at every Safe-shaped call site (send, approval execution, owner changes, AllowanceModule edits), and Safe-only controls are hidden on delegation accounts rather than dead-ending at a signer they cannot use. This is a UI/type-layer hardening only; the on-chain authority model above is unchanged.
+**The dashboard's signing surfaces are rail-honest (#1079).** The signer layer types the two authorities apart: a Safe transaction can only be signed by a `SafeCapableSigner` (EOA or Safe passkey), never by a Hybrid account's passkey — the compiler enforces the exclusion at every remaining Safe-shaped call site, and Safe-only controls are hidden on delegation accounts rather than dead-ending at a signer they cannot use. #1989 has since deleted most legacy Safe surfaces outright; the type-level exclusion remains for the owner-signed remnant (`/safe/exec`-backed account management). This is a UI/type-layer hardening only; the on-chain authority model above is unchanged.
 
-**Where a setup flow marks an agent approved, Haven verifies the authority rather than accepting the client's word for it.** Both connect-setup approval routes work this way (`routes/agent-connection-setups.ts`): the legacy `wallet-approval` reads the live AllowanceModule state on-chain, and the delegation rail's `budget-approval` reads the agent's own active, owner-signed delegations. The latter takes an empty request body precisely so that no amount, recipient, or hash a caller supplies can influence the outcome, and it refuses when the signed budget's amount or period differs from the one the user reviewed. A pinned recipient is accepted where the reviewed budget was unpinned, because that is strictly narrower authority than the user approved (#1073). (#985 moved this route's SQL into `infra/repositories/agent-connection-setups.ts`; the verification itself — reading live AllowanceModule state, and reading the agent's own active owner-signed delegations — still runs in the route and is unchanged. The approval write is now one locked, guarded function, so the checks and the write it protects cannot be run apart.) Since #1074 a delegation-rail setup also refuses more than one allowance at CREATE — a multi-allowance setup could never satisfy this verification (only the first budget is ever granted), and a clean 400 with the remedy beats a permanently unapprovable setup; fail-closed either way.
+**Where a setup flow marks an agent approved, Haven verifies the authority rather than accepting the client's word for it.** Both connect-setup approval routes work this way (`routes/agent-connection-setups.ts`): the delegation rail's `budget-approval` reads the agent's own active, owner-signed delegations, and the residual legacy `wallet-approval` reads the live AllowanceModule state on-chain (a verification read for retired-rail accounts only — the rail it approves can no longer spend, #1986). The latter takes an empty request body precisely so that no amount, recipient, or hash a caller supplies can influence the outcome, and it refuses when the signed budget's amount or period differs from the one the user reviewed. A pinned recipient is accepted where the reviewed budget was unpinned, because that is strictly narrower authority than the user approved (#1073). (#985 moved this route's SQL into `infra/repositories/agent-connection-setups.ts`; the verification itself — reading live AllowanceModule state, and reading the agent's own active owner-signed delegations — still runs in the route and is unchanged. The approval write is now one locked, guarded function, so the checks and the write it protects cannot be run apart.) Since #1074 a delegation-rail setup also refuses more than one allowance at CREATE — a multi-allowance setup could never satisfy this verification (only the first budget is ever granted), and a clean 400 with the remedy beats a permanently unapprovable setup; fail-closed either way.
 
 **Connection setup never hands out another environment's hosted MCP endpoint (#1129).** The production hosted MCP URL is served as a built-in default only when the backend's own resolved public URL is the production host; any other deployment must set `HAVEN_HOSTED_MCP_URL` explicitly, or `/resolve` and `/register` refuse with an explicit configuration error naming the variable — raised before any state is written, so a misconfigured environment can neither consume the client's one-shot setup token nor leave a registration half-created, and an agent's credentials are never pointed at a different environment's backend. Fail-closed, same as the authority checks above.
 
@@ -580,7 +610,7 @@ Haven relay must not:
 
 Server key roles must remain narrow and distinct:
 
-- `RELAYER_PRIVATE_KEY` and per-chain `RELAYER_PRIVATE_KEY_<chainId>` keys fund gas and submit delegate-signed Allowance Module calls. A relayer key does not supply the delegate signature and cannot authorise a payment by itself.
+- `RELAYER_PRIVATE_KEY` and per-chain `RELAYER_PRIVATE_KEY_<chainId>` keys fund gas and submit operations that are signed, or bounded, elsewhere: owner-signed Safe executions (`/safe/exec` — legacy account management and #1229 recovery), counterfactual DeleGator deployments (#860 — deploying an account grants no authority over it), and delegate-signed sweep transfers. A relayer key never supplies a spend signature and cannot authorise a payment by itself. (It also carries the disclosed #1985 dust-Safe ownership artifact recorded under Hard Architecture Invariants.)
 - `X402_BINDING_PRIVATE_KEY` signs the exact expected x402 authorization context, including the corresponding sweep context. It authenticates Haven-provided context; it does not sign the payment or spend funds.
 - The relayer additionally signs **L0 agent passport attestations** as *issuer* (epic #970). That is governance metadata, not spend authority: the transaction targets the pinned EAS contract, carries `value: 0`, encodes no transfer, and involves no user key, delegation, or allowance. It is triggered by the owner opting in — never by a payment — so it sits outside the payment paths entirely. The owner opts in from two entry points that run the identical eligibility check and fire-and-forget issuance path: `POST /agents`' `issue_passport` flag, and (#1072) an `issue_passport` flag recorded on the Connect Agent 2 setup at creation and acted on once `POST /agent-connection-setups/register` has created the agent row. Neither path can make issuance block, delay, or roll back agent creation/registration.
 - `PASSPORT_RECEIPT_SIGNING_KEY` signs merchant-facing verification receipts. Its address is published for pinning, it asserts only an agent's governance standing, and it is refused at boot if it matches the relayer key.
@@ -593,7 +623,7 @@ Transaction construction should be based on:
 
 - Agent or user signed intent.
 - Protocol challenge.
-- Configured Safe/module state.
+- The account's configured on-chain delegation state.
 - Explicit user-approved settings.
 
 Avoid:
@@ -613,10 +643,10 @@ The codebase should make it easy to prove:
 - Haven has no signer capable of spending user funds.
 - Agent keys are not stored by Haven.
 - All executable transfers require external signatures.
-- On-chain Safe/module limits constrain Safe-originated funding; external signatures and exact authenticated context constrain the standard x402 merchant leg.
+- On-chain caveat enforcers constrain every delegation redemption; external signatures and exact authenticated context constrain the EIP-3009 x402 merchant leg.
 - Users can revoke permissions outside Haven.
 
-Add comments, docs, tests, and PR notes around these points when touching payment, agent authority, relaying, Safe setup, SDK, or demo payment flows.
+Add comments, docs, tests, and PR notes around these points when touching payment, agent authority, relaying, account setup, SDK, or demo payment flows.
 
 ## Feature Review Triggers
 
@@ -639,25 +669,26 @@ Escalate for legal and product review if a proposal or PR introduces any of the 
 - Personalised financial recommendations.
 - Automated asset allocation.
 - Optimise payment route logic.
-- Any ability for Haven to expand, override, or bypass Safe module constraints.
-- Any user lock-in that prevents Safe access outside Haven.
+- Any ability for Haven to expand, override, or bypass on-chain delegation constraints.
+- Any user lock-in that prevents account access outside Haven.
+- Any growth of the disclosed #1985 relayer-owned Safe set — a new relayer-owned account, or funding an existing one.
 
 ## Third-Party On-Ramp Integration
 
 Haven's "Add funds" feature embeds a link to a licensed third-party on-ramp provider (currently Coinbase Onramp). The regulatory position is as follows:
 
-**Haven's role:** UI only. Haven constructs a provider URL containing the user's Safe address as the fixed destination. Haven never receives, holds, transmits, or processes fiat funds or crypto-assets at any point in the flow.
+**Haven's role:** UI only. Haven constructs a provider URL containing the user's account address as the fixed destination. Haven never receives, holds, transmits, or processes fiat funds or crypto-assets at any point in the flow.
 
-**Provider's role:** The third-party provider (Coinbase) handles KYC/AML, fiat custody during purchase, fiat-to-crypto conversion, and direct settlement of USDC to the user's Safe address on-chain.
+**Provider's role:** The third-party provider (Coinbase) handles KYC/AML, fiat custody during purchase, fiat-to-crypto conversion, and direct settlement of USDC to the user's account address on-chain.
 
 **Why this does not create a Haven CASP exposure:**
 - Haven does not participate in the fiat leg, the conversion, or the settlement.
 - Haven does not receive any fees, spreads, or commissions from the provider for routing users (if a referral programme is used, re-evaluate this claim).
-- USDC settles directly to the user's Safe — Haven never holds it in transit.
+- USDC settles directly to the user's account — Haven never holds it in transit.
 - The user contracts directly with the provider; Haven is the referring product, not a party to the purchase.
 
 **Constraints that must be maintained to preserve this position:**
-- The Safe address must be the non-editable destination inside the widget context; Haven must never allow a user to redirect the destination to an arbitrary address through Haven-controlled UI.
+- The user's account address must be the non-editable destination inside the widget context; Haven must never allow a user to redirect the destination to an arbitrary address through Haven-controlled UI.
 - Haven must not co-mingle on-ramp proceeds with Haven-controlled funds.
 - If a revenue-share or referral arrangement with the provider is introduced, obtain a separate legal review before enabling it.
 - If Haven ever pre-funds purchases (e.g., instant availability before on-chain settlement), this becomes a credit or payment service — do not implement without a separate regulatory review.
@@ -670,7 +701,7 @@ Haven's "Add funds" feature embeds a link to a licensed third-party on-ramp prov
 > schema in CI via `db-schema-smoke` — a schema/query drift on the money path
 > now fails the build instead of 500ing in production.
 
-Before merging any payment-related, agent-authority, Safe, SDK, x402/MPP, or relayer change, verify:
+Before merging any payment-related, agent-authority, account, SDK, x402/MPP, or relayer change, verify:
 
 - [ ] Haven does not store user private keys.
 - [ ] Haven does not store agent private keys.
@@ -678,28 +709,28 @@ Before merging any payment-related, agent-authority, Safe, SDK, x402/MPP, or rel
 - [ ] Haven does not operate a server-side signer that can spend user funds.
 - [ ] API keys cannot authorise payments by themselves.
 - [ ] Every automated payment requires an agent-held or user-held key signature.
-- [ ] Every Safe-originated automated funding transfer is constrained by Safe Allowance Module or equivalent on-chain control; any standard x402 merchant leg carries the agent-held delegate signature and matches exact authenticated payment context.
+- [ ] Every automated spend redeems an owner-signed delegation constrained by the on-chain caveat enforcers; any EIP-3009 x402 merchant leg carries the agent-held delegate signature and matches exact authenticated payment context.
 - [ ] Haven database policy is not the only spend control.
-- [ ] A user signature establishes or modifies agent authority — a user-approved Safe transaction on the legacy rail, an owner-signed delegation on the delegation rail.
+- [ ] A user signature establishes or modifies agent authority — an owner-signed delegation.
 - [ ] Users can revoke agent authority on-chain.
-- [ ] Users can access their Safe through another UI.
+- [ ] Users can enumerate and revoke authority on their account without Haven (the exit story).
 - [ ] Haven cannot block or freeze user funds.
-- [ ] Haven cannot expand agent allowances without user approval.
+- [ ] Haven cannot expand an agent's budget without an owner signature.
 - [ ] Haven cannot change recipient, amount, token, route, or timing after signature.
 - [ ] Haven does not perform swaps, ramps, fiat payments, card issuing, yield, advice, or merchant settlement.
-- [ ] Logs clearly show user or agent signature, Safe/module state, transaction hash, and relay status.
+- [ ] Logs clearly show user or agent signature, on-chain policy state, transaction hash, and relay status.
 - [ ] Product copy does not say Haven holds, manages, transfers, or controls user funds.
 
 ## Product Copy Rules
 
 Use wording like:
 
-- Haven helps you configure agent spending limits on your Safe.
+- Haven helps you configure agent spending limits on your account.
 - Agents can request payments within user-approved on-chain limits.
-- Safe funding is signed by your agent key and constrained by your Safe; a standard x402 merchant payment is separately signed by the same agent-held key from its available balance and bound to the exact payment context.
-- Haven relays policy-limited Safe transactions.
+- Payments are signed by your agent's key and constrained by the budget you signed; an EIP-3009 x402 merchant payment is separately signed by the same agent-held key from its available balance and bound to the exact payment context.
+- Haven relays policy-limited account operations.
 - Haven cannot move funds outside the limits you approve.
-- You can revoke agent access through your Safe.
+- You can revoke agent access yourself, on-chain, without Haven.
 
 Avoid wording like:
 
@@ -714,31 +745,33 @@ Avoid wording like:
 - Haven gave you the private key.
 - Haven signs and settles the payment.
 
-Known compliance gap: `UsingYourAgentInfo.tsx` still uses both of the final two
-phrases above. Do not copy that wording into new surfaces; update that component
-in a product-copy change before treating the covered UI as compliant with this
-rule.
+Known compliance gap: `UsingYourAgentInfo.tsx` still uses "Haven signs and
+settles the payment" (the "gave you the private key" phrase is gone). Do not
+copy that wording into new surfaces; update that component in a product-copy
+change (#2063 is in flight on it) before treating the covered UI as compliant
+with this rule.
 
 ## Preferred Architecture Summary
 
 ```text
 User funds
-  -> held in user-controlled Safe
+  -> held in the user's smart account (Hybrid DeleGator)
+  -> retired-rail Safes remain user-owned and readable
 
-Delegate balance
+Delegate balance (EIP-3009 bridge only)
   -> held in agent-controlled EOA, never by Haven
-  -> may be pre-existing, newly funded from the Safe, or residual
+  -> transient: funded by redeeming the budget delegation, swept back when stranded
 
 User authority
-  -> Safe owner wallet/passkey
-  -> user signs Safe transactions
+  -> account owner passkey or EOA
+  -> owner signs delegations, signer changes, and account operations
 
 Agent authority
-  -> user-approved Safe Allowance Module permission
+  -> owner-signed budget delegation (period budget, optional recipient pin, expiry)
   -> agent-held or user-held private key
-  -> on-chain limits
-  -> Safe-originated funding follows on-chain Safe constraints
-  -> standard x402 merchant leg is exact-context-bound and spends delegate balance
+  -> enforced on-chain by the DelegationManager's caveat enforcers
+  -> over-budget or out-of-policy redemption REVERTS; nothing queues
+  -> EIP-3009 x402 merchant leg is exact-context-bound and spends delegate balance
 
 Haven role
   -> UI

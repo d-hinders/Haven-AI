@@ -60,7 +60,7 @@ export default function DashboardOnboardingGuide({
           <div>
             <p className="text-sm font-semibold text-[var(--v2-ink)]">Setup complete</p>
             <p className="text-xs text-[var(--v2-ink-2)]">
-              Your agents are live. Keep an eye on approvals and recent activity below.
+              Your agents are live. Keep an eye on their recent activity below.
             </p>
           </div>
         </div>

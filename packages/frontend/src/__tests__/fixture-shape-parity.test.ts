@@ -13,7 +13,6 @@ import {
   FIXTURE_USER,
   FIXTURE_SAFE,
   FIXTURE_AGENTS,
-  FIXTURE_APPROVALS,
   FIXTURE_OVERVIEW,
   FIXTURE_TXS,
 } from '../../scripts/screenshot.mjs'
@@ -21,7 +20,6 @@ import {
   testUser,
   testSafe,
   testAgent,
-  testApproval,
   dashboardOverview,
   dashboardTransaction,
 } from '../../e2e/fixtures/haven-api'
@@ -56,11 +54,10 @@ describe('fixture shape parity (screenshot dataset ↔ e2e dataset)', () => {
     expect(keysOf(withAllowance!.allowances[0])).toEqual(keysOf(testAgent.allowances[0]))
   })
 
-  it('approvals carry every field the e2e approval has', () => {
-    // tx_hash/reviewed_at are nullable response fields the e2e mock models —
-    // the screenshot approval must not silently drop fields like these.
-    for (const appr of FIXTURE_APPROVALS) expectKeySuperset(appr, testApproval, 'approval')
-  })
+  // The approvals parity case went with both fixtures (#1993): #1989 deleted
+  // the route and #2055 deregistered the endpoint, so the two mocks had
+  // nothing left to agree ABOUT. Parity between two mocks of a dead endpoint
+  // is the purest form of a test that cannot fail usefully.
 
   it('dashboard overview + transactions align structurally', () => {
     expect(keysOf(FIXTURE_OVERVIEW)).toEqual(keysOf(dashboardOverview))

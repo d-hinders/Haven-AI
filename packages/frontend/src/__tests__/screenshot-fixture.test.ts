@@ -3,27 +3,25 @@ import { afterEach, describe, expect, it } from 'vitest'
 // @ts-ignore — plain .mjs script; typed via the cast below
 import {
   fixtureFor,
+  FIXTURE_AGENTS,
   SEED_STORAGE_KEYS,
   FIXTURE_EMPTY_FALLBACK,
   SCENARIOS,
   ScenarioHttpError,
 } from '../../scripts/screenshot.mjs'
 import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
-import { getStoredPasskeySigner, passkeyStorageKey } from '../lib/signer'
 import {
   isMcpToolCallActivityItem,
   isPaymentActivityItem,
   type ActivityItem,
+  type PaymentActivityItem,
 } from '../hooks/useAgentActivity'
+import { machinePaymentLifecycle } from '@haven_ai/core'
 
 const fx = fixtureFor as (apiPath: string, mode?: string) => Record<string, unknown> | null
 
 type ScenarioShape = {
   api: (apiPath: string, method: string) => Record<string, unknown> | undefined
-}
-/** A scenario that also seeds device-local state before app code runs (#1856). */
-type SeedingScenarioShape = ScenarioShape & {
-  seed: () => Record<string, string> | undefined
 }
 /** A scenario that shoots one surface at several states (#1725). */
 type StagedScenarioShape = ScenarioShape & {
@@ -32,7 +30,6 @@ type StagedScenarioShape = ScenarioShape & {
 }
 /** Kept in step with FIXTURE_SAFE in screenshot.mjs. */
 const FIXTURE_SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
-const FIXTURE_CHAIN_ID = 84532
 /** Kept in step with the scenario's own constant in screenshot.mjs. */
 const SETUP_ID = 'setup-screenshot'
 /** Likewise FIXTURE_SAFE.id — the legacy scenario must reuse the same account. */
@@ -62,8 +59,10 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
   })
 
   it('regression-locks the shapes that crashed routes (timeAgo/timeUntil inputs)', () => {
-    const approvals = fx('/approvals?status=all') as { approvals: { expires_at: string; created_at: string }[] }
-    expect(approvals.approvals[0].expires_at).toBeTruthy() // ApprovalCard: timeUntil(expires_at)
+    // The `ApprovalCard: timeUntil(expires_at)` lock that stood here went with
+    // its subject (#1993): #1989 deleted the card and the route, #2055
+    // deregistered the endpoint, and #1993 removed the fixture. A shape lock on
+    // a component nobody renders cannot regression-lock anything.
     // SafeCard: timeAgo(safe.created_at) — served via /auth/me + /user/safes in the
     // script itself; asserted here through the agents' safe linkage staying non-null.
     const agents = fx('/agents') as { agents: { safe_id: string }[] }
@@ -76,8 +75,65 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
   })
 
   it('unkeyed endpoints fall through (null → generic empty shape)', () => {
-    expect(fx('/agents/agent-1/delegations')).toBeNull()
+    // #2106 moved `/agents/:id/delegations` OUT of this list — it is keyed
+    // now (see the delegation-rail case below), so it can no longer stand as
+    // this assertion's example of an unkeyed path. The rule being pinned is
+    // unchanged; only the specimen moved.
     expect(fx('/reporting/summary')).toBeNull()
+    expect(fx('/contacts/ct-1/history')).toBeNull()
+  })
+
+  // #2106: `/custody` renders a delegation-rail account's real spend
+  // authority from this endpoint. Both recipient states are seeded on
+  // purpose — a PINNED recipient (an AllowedCalldataEnforcer caveat) and an
+  // open one — because the page presents them differently and a fixture with
+  // only one of them cannot evidence that.
+  describe('delegation budgets (#2106)', () => {
+    it('keys the delegations endpoint for the fixture agents', () => {
+      const pinned = fx('/agents/agent-research/delegations') as {
+        delegations: { recipient_address: string | null; status: string; budget_atomic: string }[]
+      }
+      expect(pinned.delegations).toHaveLength(1)
+      expect(pinned.delegations[0].status).toBe('active')
+      expect(pinned.delegations[0].recipient_address).toMatch(/^0x/)
+
+      // The open-recipient budget sits on `agent-retired`, not `agent-ops`:
+      // `agent-ops` is `account_type: null` (legacy Safe rail) and a legacy
+      // agent cannot hold a delegation at all. A fixture that gave it one
+      // would photograph a combination the product cannot produce.
+      const open = fx('/agents/agent-retired/delegations') as {
+        delegations: { recipient_address: string | null }[]
+      }
+      expect(open.delegations[0].recipient_address).toBeNull()
+    })
+
+    it('never gives a legacy-rail agent a delegation', () => {
+      const legacy = FIXTURE_AGENTS.find((a) => a.id === 'agent-ops')
+      expect(legacy?.account_type).toBeNull()
+      expect(fx('/agents/agent-ops/delegations')).toEqual({ delegations: [] })
+    })
+
+    it('projects `allowances` from the delegation for every delegation-rail agent', () => {
+      // `AgentDetailClient` derives DelegationBudgetCard's token list from
+      // `allowances`; an agent with a delegation but an empty projection
+      // renders raw atomic units ("250000000 per week"). On the real rail
+      // `deriveDelegationAllowances` fills it, so the fixture must too.
+      for (const agent of FIXTURE_AGENTS.filter((a) => a.account_type === 'delegator_hybrid')) {
+        const res = fx(`/agents/${agent.id}/delegations`) as {
+          delegations: { budget_atomic: string }[]
+        }
+        if (res.delegations.length === 0) continue
+        expect(agent.allowances.length).toBeGreaterThan(0)
+      }
+    })
+
+    it('serves an empty list — never null — for an agent with no budget', () => {
+      // Falling through to the generic shape would be wrong here: the generic
+      // fallback's `delegations: []` happens to match, but keying it means the
+      // harness answers the same shape whether or not the id is known, which
+      // is what stops an unseeded agent rendering a crashed card.
+      expect(fx('/agents/agent-nobody/delegations')).toEqual({ delegations: [] })
+    })
   })
 
   // #1075: /agents/[agentId] rendered nothing under the harness because
@@ -130,6 +186,128 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       }
       const times = activity.map((i) => Date.parse(i.created_at))
       expect(times).toEqual([...times].sort((a, b) => b - a))
+    })
+
+    /**
+     * #2120 — the evidence pipeline must not photograph an approval state.
+     *
+     * These seeds are the input to every `npm run screenshot` capture, which
+     * is what the design-review pass judges. Seeding a state the backend
+     * cannot produce does not make weak evidence — it makes evidence of
+     * something that never happens, which a reviewer then signs off on.
+     * Everything asserted here is pinned to a hardcoded backend value, named
+     * beside it, so this stays a comparison rather than a preference.
+     */
+    describe('no approval state is seeded into the evidence (#2120)', () => {
+      it('mirrors the routes that hardcode every approval count to 0', () => {
+        // routes/dashboard.ts:84 — `const actionableApprovals = 0`, mirrored
+        // into `pendingApprovals` on the same response.
+        expect(fx('/dashboard/overview')).toMatchObject({
+          actionableApprovals: 0,
+          pendingApprovals: 0,
+        })
+        // routes/agent-activity.ts:129 and :242 — `const pendingApprovals = 0`.
+        expect(fx('/agent-activity/agent-research/stats')).toMatchObject({
+          pending_approvals: 0,
+        })
+        expect(fx('/agent-activity/feed')).toMatchObject({ pending_approvals: 0 })
+      })
+
+      it('seeds no approval activity row on any keyed activity endpoint', () => {
+        // #2055 removed the approval entries from both activity builders, so
+        // `type: 'approval'` is not an emittable row kind — and with it went
+        // the only path to an approval status on a row.
+        const feeds = [
+          fx('/agent-activity/agent-research/activity'),
+          fx('/agent-activity/agent-ops/activity'),
+          fx('/agent-activity/feed'),
+        ] as { activity: ActivityItem[] }[]
+        const rows = feeds.flatMap((f) => f.activity)
+        expect(rows.length).toBeGreaterThan(0) // positive control: not vacuous
+        expect(rows.map((r) => r.type).filter((t) => t !== 'payment' && t !== 'mcp_tool_call')).toEqual([])
+        for (const row of rows.filter(isPaymentActivityItem)) {
+          // The exact statuses the retired queue used to mint.
+          expect([row.id, row.status as string]).not.toEqual([
+            row.id,
+            expect.stringMatching(/^(pending|pending_approval|approved|proposed|rejected|executed)$/),
+          ])
+        }
+      })
+    })
+
+    /**
+     * #2126 — same defect class as #2120, in the payment-flow-status subsystem.
+     *
+     * `payment_flow_status` / `payment_attention_reason` are DERIVED per row by
+     * the backend (`routes/agent-activity.ts:50-55` and `:182-187` call
+     * `machinePaymentLifecycle` and spread its two outputs), never read from a
+     * column. A seed that restates them by hand is asserting a derivation
+     * output — and can therefore state one the derivation would never produce
+     * from the same row's inputs. So do not restate: re-derive with the SHARED
+     * function and compare.
+     */
+    describe('every seeded payment flow status is what the derivation returns (#2126)', () => {
+      /** Rows are the route's OUTPUT shape, so pick the derivation's inputs back out of it. */
+      const derive = (row: PaymentActivityItem) =>
+        machinePaymentLifecycle({
+          rail: row.source,
+          paymentStatus: row.status,
+          paymentProofStatus: row.payment_proof_status,
+          // The reconciliation event is an input the route reads from its own
+          // query and never echoes; the emitted `payment_attention_reason` is
+          // the only trace of it, and the two unions share their single member.
+          // If `MachinePaymentAttentionReason` ever gains a member whose name
+          // is NOT the reconciliation event that produces it, this round-trip
+          // stops being an identity and needs an explicit map instead.
+          reconciliationEventType: row.payment_attention_reason,
+        })
+
+      const seededPaymentRows = () => {
+        const feeds = [
+          fx('/agent-activity/agent-research/activity'),
+          fx('/agent-activity/agent-ops/activity'),
+          fx('/agent-activity/feed'),
+        ] as { activity: ActivityItem[] }[]
+        return feeds.flatMap((f) => f.activity).filter(isPaymentActivityItem)
+      }
+
+      it('derives, rather than restates, payment_flow_status on every seeded row', () => {
+        const rows = seededPaymentRows()
+        expect(rows.length).toBeGreaterThan(0) // positive control: not vacuous
+        for (const row of rows) {
+          const lifecycle = derive(row)
+          expect([row.id, row.payment_flow_status ?? null]).toEqual([
+            row.id,
+            lifecycle.paymentFlowStatus,
+          ])
+          expect([row.id, row.payment_attention_reason ?? null]).toEqual([
+            row.id,
+            lifecycle.paymentAttentionReason,
+          ])
+        }
+      })
+
+      it('seeds only a proof status the evidence writer can construct', () => {
+        // `payment_proof_status` is `machine_payment_evidence.proof_status`
+        // (`infra/repositories/agent-activity.ts:99`, `:164`). Its whole domain
+        // is `PaymentProofStatus` — `modules/mpp/evidence.ts:38-41` — with
+        // `payment_confirmed` the column default (migration 014). 'verified',
+        // which pay-1 carried, is not a member and no write site emits it.
+        const CONSTRUCTIBLE = [
+          'payment_confirmed',
+          'merchant_response_observed',
+          'protocol_receipt_attached',
+        ]
+        const rows = seededPaymentRows()
+        expect(rows.length).toBeGreaterThan(0) // positive control: not vacuous
+        for (const row of rows) {
+          if (row.payment_proof_status == null) continue
+          expect([row.id, row.payment_proof_status]).toEqual([
+            row.id,
+            expect.stringMatching(new RegExp(`^(${CONSTRUCTIBLE.join('|')})$`)),
+          ])
+        }
+      })
     })
 
     it('carries `activity` in the generic empty fallback', () => {
@@ -435,102 +613,53 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       })
     })
 
-    // #1856: the send-review capture — the first `TransactionMovement`
-    // consumer reached by driving a gate rather than by a URL. Its fixture
-    // contract is one field wider than the others', because one of its two
-    // overrides lives in localStorage rather than in an API answer.
-    describe('send-review (#1856)', () => {
-      // Narrowed from the shared shape rather than casting the whole registry:
-      // `seed` is optional across scenarios (only this one needs it), so a
-      // registry-wide cast would claim every entry has one.
-      const sendReview = (SCENARIOS as Record<string, ScenarioShape>)[
-        'send-review'
-      ] as SeedingScenarioShape
+    /**
+     * #1989: the legacy-account capture. Its whole value is that it differs
+     * from the shared fixture in exactly ONE field, so the contract worth
+     * pinning is that difference and nothing else — a scenario that quietly
+     * rebuilt the account would capture a different account and still look
+     * right.
+     */
+    describe('retired-rail-account (#1989)', () => {
+      const legacy = (SCENARIOS as Record<string, ScenarioShape>)['retired-rail-account']
 
-      it('seeds a passkey record the REAL parser accepts, under the key the app computes', () => {
-        // The whole capture hangs on this. `SendModal.tsx:821` disables
-        // Continue while `signingUnavailable`, and `useSafeOperationGate` only
-        // leaves that state when `getStoredPasskeySigner` returns a signer —
-        // so the seed is asserted against the parser ITSELF, not against a
-        // hand-copied shape. A schema bump (`PASSKEY_SCHEMA_VERSION`, a new
-        // required field, a tightened regex) fails here, loudly, instead of
-        // silently un-reaching the review step months later.
-        const seeded = sendReview.seed() as Record<string, string>
-        const key = passkeyStorageKey(FIXTURE_SAFE_ADDRESS, FIXTURE_CHAIN_ID)
-        expect(Object.keys(seeded)).toEqual([key])
-
-        window.localStorage.clear()
-        // Paired evidence, in the order that makes it evidence: the parser
-        // must say NO before the seed and YES after it. Asserting only the
-        // second half would pass against a parser that accepts anything.
-        expect(
-          getStoredPasskeySigner({ safeAddress: FIXTURE_SAFE_ADDRESS, chainId: FIXTURE_CHAIN_ID }),
-        ).toBeNull()
-
-        for (const [k, v] of Object.entries(seeded)) window.localStorage.setItem(k, v)
-        const signer = getStoredPasskeySigner({
-          safeAddress: FIXTURE_SAFE_ADDRESS,
-          chainId: FIXTURE_CHAIN_ID,
-        })
-        // `toEqual` against a shape DERIVED from the seed, not `toMatchObject`
-        // against a couple of hand-copied fields: the claim being made is that
-        // the parser round-trips every field the seed writes, and a partial
-        // matcher would let `credentialId` or the public-key pair drift out of
-        // the seed without reddening anything.
-        //
-        // `type: 'passkey'` is the one field with no counterpart in the seed,
-        // and it is not incidental — it is what makes the captured screen say
-        // "Approve with · Device approval" and "fees are paid by Haven", which
-        // is the copy a passkey user actually reads. An `eoa` signer would
-        // render a different screen under the same filename.
-        const record = JSON.parse(seeded[key]) as {
-          address: string
-          credentialId: string
-          publicKey: { x: string; y: string }
-          chainId: number
+      it('puts the SHARED fixture account on the legacy rail, changing only account_type', () => {
+        const me = legacy.api('/auth/me', 'GET') as {
+          email: string
+          safes: Array<Record<string, unknown>>
         }
-        expect(record.chainId).toBe(FIXTURE_CHAIN_ID)
-        expect(signer).toEqual({
-          type: 'passkey',
-          address: record.address,
-          credentialId: record.credentialId,
-          publicKey: record.publicKey,
-          chainId: record.chainId,
-        })
-        window.localStorage.clear()
-      })
-
-      it('puts the account on the Safe rail — the same override as the funding pair', () => {
-        // Not about signing: the dashboard hero hides Send entirely when no
-        // Safe-rail account exists (`DashboardClient.tsx:907`), so without this
-        // the run never opens the modal at all. Both safe endpoints agree, for
-        // the same reason the #1844/#1852 pairs do.
-        for (const endpoint of ['/auth/me', '/user/safes']) {
-          const res = sendReview.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
-          expect(res.safes).toHaveLength(1)
-          expect(res.safes[0]).not.toHaveProperty('account_type')
-          expect(res.safes[0].chain_id).toBe(FIXTURE_CHAIN_ID)
+        const list = legacy.api('/user/safes', 'GET') as {
+          safes: Array<Record<string, unknown>>
         }
-      })
 
-      it('pins threshold 1 rather than inheriting the empty fallback by accident', () => {
-        // The generic empty fallback is TRUTHY, so `!safeDetails` passes and
-        // Continue enables without this key — but `threshold` would then read
-        // `undefined ?? 1`. A threshold of 2 renders an extra "will wait for
-        // approval" banner on the very screen under capture, so the layout
-        // would depend on an accident rather than on a stated fixture.
-        const details = sendReview.api(`/safe/${FIXTURE_SAFE_ADDRESS}/details`, 'GET') as {
-          threshold: number
-          owners: string[]
-        }
-        expect(details.threshold).toBe(1)
-        expect(details.owners).toHaveLength(1)
+        // Both readers must agree. `AccountDetailClient` resolves the account
+        // from AuthContext, but a disagreeing /user/safes would make the
+        // capture depend on which one won.
+        expect(me.safes[0].account_type).toBe('safe')
+        expect(list.safes[0].account_type).toBe('safe')
+
+        // Same account, not a lookalike — the id is what the capture navigates
+        // to, so a drifted id would 404 into "Account not found" and the
+        // scenario's own absence check would pass for the wrong reason.
+        expect(me.safes[0].id).toBe(FIXTURE_SAFE_ID)
+        expect(me.email).toBe('fixture@haven.test')
+
+        // And ONLY account_type differs. Asserted positively so this fails if
+        // the scenario starts rebuilding the fixture instead of spreading it.
+        expect(me.safes[0].safe_address).toBe(FIXTURE_SAFE_ADDRESS)
+        expect(me.safes[0].is_default).toBe(true)
       })
 
       it('leaves every other endpoint to the shared fixture', () => {
-        expect(sendReview.api('/agents', 'GET')).toBeUndefined()
-        expect(sendReview.api('/balances/0x1111', 'GET')).toBeUndefined()
+        expect(legacy.api('/agents', 'GET')).toBeUndefined()
+        expect(legacy.api(`/balances/${FIXTURE_SAFE_ADDRESS}`, 'GET')).toBeUndefined()
       })
     })
+
+    // The 'send-review' (#1856) fixture contract was asserted here. Both the
+    // scenario and its subject (`SendModal`) are deleted by #1989 (epic #1440),
+    // so the assertions went with them rather than being repointed — a fixture
+    // contract for a scenario that no longer exists is the definition of a
+    // guard over the empty set.
   })
 })

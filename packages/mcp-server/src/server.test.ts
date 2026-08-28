@@ -57,6 +57,7 @@ describe('buildHostedMcpServer', () => {
         'haven_resume_x402_payment',
         'haven_send',
         'haven_submit',
+        'haven_submit_catalog_entry',
         'haven_sweep_delegate',
       ].sort(),
     )
@@ -236,7 +237,16 @@ describe('buildHostedMcpServer', () => {
     expect(instructions).toContain('next_tool')
     expect(instructions).toContain('next_arguments')
     expect(instructions).toContain('payment_id')
-    expect(instructions).toContain('pending_approval')
+    // #2101: the instructions must NOT tell a model to branch on
+    // `pending_approval`. No live rail mints it (410 on the legacy rail per
+    // #1986; 403/502 at prepare on the delegation rail; `approval_requests`
+    // dropped by #2055), so the old line sent agents to wait for an approval
+    // that never arrives. The replacement states the decline and the general
+    // unrecognised-status stop rule instead.
+    expect(instructions).not.toContain('pending_approval')
+    expect(instructions).toContain('declined before any money moves')
+    expect(instructions).toContain('holds no approval queue')
+    expect(instructions).toContain('any status you do not recognise')
     expect(instructions).toContain('safe_to_continue')
     expect(instructions).toContain('never holds keys')
 

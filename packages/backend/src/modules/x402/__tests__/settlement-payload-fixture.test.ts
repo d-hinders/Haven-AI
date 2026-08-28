@@ -44,6 +44,9 @@ function buildSamePayload() {
 
   return buildSettlementDelegation({
     chainId: 84532,
+    // #2094: any fixed id — the fixture compares SHAPE, and the salt this
+    // derives is a message VALUE, which this test deliberately does not assert.
+    intentId: '00000000-0000-4000-8000-000000000452',
     delegateAccountAddress: '0x1111111111111111111111111111111111111111',
     budgetDelegation,
     asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',

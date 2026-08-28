@@ -9,9 +9,11 @@
  * not bind, which is the failure #1670 set out to avoid in the first place.
  *
  * Postgres rather than Redis: no new infrastructure, and this is already the
- * house pattern for process-local state that breaks under replicas — see
- * `allowance_nonce_watermarks` (#692/#1196) and the leader lock. It brings the
- * same two obligations, both honoured below.
+ * house pattern for process-local state that breaks under replicas — see the
+ * leader lock, and the #692/#1196 allowance-nonce watermark that first
+ * established it (that table went with the Safe rail in #2084; the pattern is
+ * documented in `docs/operations/backend-scaling.md`). It brings the same two
+ * obligations, both honoured below.
  *
  * **Fail-open, and bounded.** A database error, or a query slow enough to miss
  * the deadline, falls back to this instance's in-process count — the pre-#1680
@@ -47,8 +49,8 @@ import {
 
 /**
  * How long to wait for the shared count before giving up and using the local
- * one. Matches the allowance-nonce coordinator's bound (#718) and the reason
- * is identical: a rejection is the easy failure, a query that is slow but
+ * one. Matches the bound the allowance-nonce coordinator carried (#718;
+ * deleted with its rail by #1987) and the reason is identical: a rejection is the easy failure, a query that is slow but
  * never settles is the one that would actually hang a request — and neither
  * the pool (no `statement_timeout`) nor Fastify (no request timeout) would
  * stop it.

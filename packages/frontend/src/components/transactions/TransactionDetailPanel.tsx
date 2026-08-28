@@ -9,6 +9,8 @@ import { truncate } from '@/lib/format'
 import { parseX402Hostname } from '@/lib/transaction-labels'
 import {
   isDelegateSweep,
+  settlementSchemeLabel,
+  transactionInitiator,
   transactionStatus,
   transactionTitle,
 } from '@/lib/transaction-presentation'
@@ -166,6 +168,9 @@ export default function TransactionDetailPanel({
           <DetailRow label="Amount" value={`${tx.valueFormatted} ${tx.asset}`} />
           {tx.paymentId ? <DetailRow label="Payment ID" value={<span className="v2-tabular">{truncate(tx.paymentId)}</span>} /> : null}
           {tx.paymentProofStatus ? <DetailRow label="Proof" value={tx.paymentProofStatus} /> : null}
+          {tx.settlementScheme ? (
+            <DetailRow label="Settlement" value={settlementSchemeLabel(tx.settlementScheme)} />
+          ) : null}
         </Section>
       ) : null}
 
@@ -182,7 +187,9 @@ export default function TransactionDetailPanel({
         <Section title="Transfer">
           <DetailRow label="To" value={addr(tx.to)} />
           <DetailRow label="Amount" value={`${tx.valueFormatted} ${tx.asset}`} />
-          <DetailRow label="Initiator" value={tx.agentName ?? 'You'} />
+          {/* Shared with the table column: human-initiated → "You", agent rows →
+              agent identity, missing attribution → explicit "Unknown" (#2097). */}
+          <DetailRow label="Initiator" value={transactionInitiator(tx)} />
         </Section>
       ) : null}
 

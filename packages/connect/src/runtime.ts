@@ -9,7 +9,7 @@ import {
   hashAgentApiKey,
   type LocalDelegateKey,
 } from './key.js'
-import { redactSecrets, shortAddress } from './redact.js'
+import { redactForAutomation, redactSecrets, shortAddress } from './redact.js'
 import { assertValidServerSlug, serverNamesFor } from './server-names.js'
 import {
   assertServerSlugAvailable,
@@ -24,13 +24,13 @@ import {
   supportsLocalMcp,
   type RuntimeInstallResult,
 } from './runtime-install.js'
-import { normalizeRuntime, resolveRuntimeSelection, runtimeProfile, runtimeVerificationInstruction, RUNTIME_FLAG_VALUES, type RuntimeId, type RuntimeProfile } from './runtime-registry.js'
+import { normalizeRuntime, resolveRuntimeSelection, runtimeProfile, runtimeVerificationInstruction, RUNTIME_FLAG_VALUES, RUNTIME_FLAG_VALUE_LIST, type RuntimeId, type RuntimeProfile } from './runtime-registry.js'
 import { ConnectError } from './connect-error.js'
 import { resolveRuntimeByInstalledClientPrompt } from './installed-clients.js'
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
-export const CONNECTOR_VERSION = '0.1.30-alpha.0'
+export const CONNECTOR_VERSION = '0.1.31-alpha.0'
 
 export interface ConnectOptions {
   setupToken: string
@@ -97,7 +97,20 @@ export interface ConnectOutcome {
   }
   delegate_address?: string
   setup_challenge_expires_at?: string
-  error?: { code: string; next_action: string }
+  /**
+   * #2091, additive within schema_version 1: `message` is the redacted human
+   * refusal (automation used to get code + next_action and nothing to act
+   * on), and `allowed_runtimes` carries the valid `--runtime` retry values on
+   * runtime-selection refusals — the list the backend's setup prompt requires
+   * a retry to be drawn from, which `--json` previously discarded with the
+   * prose.
+   */
+  error?: {
+    code: string
+    next_action: string
+    message?: string
+    allowed_runtimes?: readonly string[]
+  }
 }
 
 export interface ConnectDeps {
@@ -187,6 +200,13 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
         'not one of those, use --runtime other, which stores the credentials and prints the manual MCP steps. ' +
         'Nothing was written and the Haven setup token is still unused.',
       'rerun_connect_with_explicit_runtime',
+      // #2091: the values must ride structurally too. The backend's setup
+      // prompt permits a retry only with "one of the values that refusal
+      // lists" — and --json discards prose, so a prose-only list deadlocked
+      // every automation run in an undetected runtime (Codex in the field:
+      // npx needs network, Codex runs network commands unsandboxed, and the
+      // unsandboxed path carries none of the CODEX_* detection vars).
+      { allowedRuntimes: RUNTIME_FLAG_VALUE_LIST },
     )
   }
   const runtime = selection.runtime
@@ -216,11 +236,16 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   }
 
   log('Warming up your connection to Haven…')
-  const setup = await api.resolveSetup({
-    setupToken: options.setupToken,
-    connectorVersion,
-    runtime,
-  })
+  let setup: ResolvedSetup
+  try {
+    setup = await api.resolveSetup({
+      setupToken: options.setupToken,
+      connectorVersion,
+      runtime,
+    })
+  } catch (err) {
+    throw deadSetupTokenError(err) ?? err
+  }
   assertSetupChallengeIsUsable(setup.challenge.expires_at)
   printSetupSummary(setup, log)
 
@@ -271,6 +296,12 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
       installCapabilities,
     })
   } catch (err) {
+    // #2091 review: the token can die HERE too — register happens after
+    // runtime detection, key generation, and any interactive prompt, well
+    // inside the 30-minute TTL race — and the backend's 410 wording carries
+    // no "challenge" for the legacy regex below to catch.
+    const dead = deadSetupTokenError(err)
+    if (dead) throw dead
     if (isExpiredSetupChallenge(err)) {
       throw new Error(
         'The Haven setup challenge expired while connecting. Return to Haven, start a fresh connection, and run its new Connect command. Do not reuse or paste credentials.',
@@ -522,13 +553,18 @@ function runtimeSelectionPrompt(
 }
 
 /**
- * A deliberately terse failure record: error messages can contain server or
- * filesystem detail, while this public contract must remain safe to serialize.
+ * The failure record for the `--json` contract.
  *
  * #1719: a `ConnectError` carries its own code and next action, so it is read
  * rather than guessed. The regex ladder below survives only for the refusals
  * that are still plain `Error`s — every new failure mode joins the vocabulary
  * instead of joining that ladder.
+ *
+ * #2091: the record now carries the redacted message rather than omitting it.
+ * The old stance — terse because "messages can contain server or filesystem
+ * detail" — left automation with a code and nothing to act on; the field
+ * failure was a Codex agent staring at `connect_failed` with, in its own
+ * words, "no additional safe error detail". Sanitize, don't silence.
  */
 export function failedConnectOutcome(runtimeHint: string | undefined, error: unknown): ConnectOutcome {
   const message = error instanceof Error ? error.message : ''
@@ -565,7 +601,19 @@ export function failedConnectOutcome(runtimeHint: string | undefined, error: unk
       tools: ['haven_get_agent', 'haven_get_allowances'] as const,
       instruction: 'After a successful setup and activation, verify only with haven_get_agent and haven_get_allowances.',
     },
-    error: { code, next_action: nextAction },
+    error: {
+      code,
+      next_action: nextAction,
+      // Only a ConnectError's message enters the JSON record: the vocabulary's
+      // prose is connector-authored and safe to serialize, while a plain
+      // Error can carry arbitrary server or filesystem detail (that stance is
+      // pinned by test). Redaction stays on as belt-and-braces; plain-Error
+      // runs still get their redacted message on stderr via the CLI mirror.
+      ...(error instanceof ConnectError && message ? { message: redactForAutomation(message) } : {}),
+      ...(error instanceof ConnectError && error.details.allowedRuntimes
+        ? { allowed_runtimes: error.details.allowedRuntimes }
+        : {}),
+    },
   }
 }
 
@@ -590,19 +638,36 @@ function assertSetupChallengeIsUsable(expiresAt: string): void {
   )
 }
 
+/**
+ * #2091: a dead setup token is a first-class verdict, not `connect_failed`.
+ * The backend answers 410 "Setup token expired" (30-minute TTL) and 401
+ * "Invalid setup token" (no matching setup at all — a mistyped or garbled
+ * token reads the same as a purged one); neither wording matched the legacy
+ * expiry regexes, so a --json run degraded to the generic code with no usable
+ * next action — per #1719, the failure mode joins the ConnectError vocabulary
+ * instead of that ladder. Checked at BOTH token-bearing calls (resolve and
+ * register): the token can expire in the gap between them, since register
+ * runs after runtime detection, key generation, and any interactive prompt.
+ * Returns null for anything that is not this verdict.
+ */
+function deadSetupTokenError(err: unknown): ConnectError | null {
+  if (!(err instanceof ConnectRequestError) || (err.status !== 410 && err.status !== 401)) return null
+  return new ConnectError(
+    'setup_challenge_expired_or_invalid',
+    'This Haven setup token is expired or invalid — tokens are single-use and expire 30 minutes after ' +
+      'the dashboard issues them, and a mistyped token reads the same way. Return to Haven, start a ' +
+      'fresh connection, and run its new Connect command. No local credentials were written.',
+    'return_to_haven_for_fresh_setup',
+  )
+}
+
 function isExpiredSetupChallenge(err: unknown): boolean {
   return err instanceof Error && /(?:setup )?challenge.*expir|expir.*(?:setup )?challenge/i.test(err.message)
 }
 
 function secureLogger(log: (message: string) => void, redactPaths = false): (message: string) => void {
   return (message) => {
-    let safe = redactSecrets(message)
-    if (redactPaths) {
-      safe = safe
-        .replace(/(?:~|\/)[^\s`"']*\/(?:identity|signer|agent)\.json\b/g, '[credential-file-redacted]')
-        .replace(/(?:~|\/)[^\s`"']*\/\.env\b/g, '[credential-env-redacted]')
-    }
-    log(safe)
+    log(redactPaths ? redactForAutomation(message) : redactSecrets(message))
   }
 }
 

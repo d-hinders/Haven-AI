@@ -6,12 +6,10 @@ covers:
   - docs/product/design-system.md
   - docs/product/copy-guidelines.md
   - docs/regulatory/casp-risk-guardrails.md
-  - packages/frontend/src/components/SendModal.tsx
   - packages/frontend/src/components/ReceiveFundsModal.tsx
   - packages/frontend/src/components/AddFundsModal.tsx
   - packages/frontend/src/components/ConnectAgentModal.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
-  - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
   - packages/frontend/src/components/haven/**
   - packages/frontend/src/components/transactions/TransactionsTable.tsx
@@ -24,7 +22,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-08-23" # #1701: adds the Replace An Agent Signing Key recipe — the point-of-no-return gate (name the irreversible step before it is taken, require an acknowledgement that names the consequence, say stopping is free up to the line, remove backdrop/Escape/close past it), tone escalation reserved for that step, and refuse-before-the-gate. Only the new recipe written; the existing recipes on this page were not re-read. Prior: #1852: the Receive Funds recipe's unresolved-network rule now names the QR code and the explorer link explicitly (a receive surface withholds them together with the address, or it is still instructing), adds the required-but-non-promising next action, and pins the account name as the one thing that stays. The unconditional "keep raw address visible" bullet is now conditioned on a confirmed network — it contradicted the #1844 bullet directly above it. Only the Receive Funds recipe re-read. Prior: #1844: the Receive Funds recipe gains the unresolved-network rule — a funding surface that cannot confirm the account's network names none, withholds the address and the on-ramp, and says so, rather than defaulting to Base mainnet. Only that recipe re-read. Prior: #1720: the Connect And Approve recipe no longer pairs a SELECTED runtime — the picker is gone and one setup prompt serves every environment; the bounded-wait step now points at the connector's output, which can refuse locally without Haven ever hearing about it. Other recipes on this page not re-read. Prior: #1684: the approval screen names the gate ONCE — the `Approve agent budget` card heading is gone on both rails, leaving the modal subtitle `Approve the agent budget`; the one-gate-one-name sequence and its per-viewport rule updated to match. Body re-read against the connect-agent components. Prior: #1572 named the gate `agent budget` end to end (recipe titles, primary actions, the one-gate-one-name rule); #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
+last-verified: "2026-08-27" # #2097: the transaction-copy bullet in the Transaction History / terminology section — `Payment sent by you` is now human-initiated-only per the initiator-semantics invariant; the neutral `Payment sent` covers unattributed rows. Scope: that one line; no other recipe re-read. Prior: #1947: Agent Activity and Policy Violation recipes de-queued — "queued requests"/"required approval"/"blocked or queued" restated as declined-by-the-rules, the `Approval request` row-copy example replaced with `x402 payment`, and Policy Violation now states there is no queued state to present (rails/execution-rail.ts: the delegation rail is the only live rail; routes/payments.ts declines out-of-policy requests during prepare). Scope: those two recipes only; the Approve-Payment RETIRED block untouched. Prior: #1992: the money-and-risk bullet told designers to state a per-rail over-budget behaviour — "queued for approval on legacy Safe accounts". That branch does not exist: the approval queue died with the Safe rail (#1986/#1987), and a legacy account cannot mint a payment intent at all (HTTP 410), so there is no over-budget state for it to reach. Scope: that bullet; the rest of the agent-budget recipe was re-read and unchanged, and #1989's own corrections to the Approve-Payment recipe stand. Prior: #1989: the "Approve Payment" recipe documented `ApprovalQueue` / the `/approvals` route, both deleted here (and 410 server-side since #1986). No screen matches it on either rail. Marked RETIRED with the recipe kept verbatim in a details block, because its two-leg x402 money-and-risk guidance is the only written record of that presentation and the #946 bridge reintroduces a funding leg. Also dropped "and approvers" from the Account Detail advanced-details bullet, noting that `AccountSignersCard` is a different concept and not a substitute. Scope: those two places. Prior: #1701: adds the Replace An Agent Signing Key recipe — the point-of-no-return gate (name the irreversible step before it is taken, require an acknowledgement that names the consequence, say stopping is free up to the line, remove backdrop/Escape/close past it), tone escalation reserved for that step, and refuse-before-the-gate. Only the new recipe written; the existing recipes on this page were not re-read. Prior: #1852: the Receive Funds recipe's unresolved-network rule now names the QR code and the explorer link explicitly (a receive surface withholds them together with the address, or it is still instructing), adds the required-but-non-promising next action, and pins the account name as the one thing that stays. The unconditional "keep raw address visible" bullet is now conditioned on a confirmed network — it contradicted the #1844 bullet directly above it. Only the Receive Funds recipe re-read. Prior: #1844: the Receive Funds recipe gains the unresolved-network rule — a funding surface that cannot confirm the account's network names none, withholds the address and the on-ramp, and says so, rather than defaulting to Base mainnet. Only that recipe re-read. Prior: #1720: the Connect And Approve recipe no longer pairs a SELECTED runtime — the picker is gone and one setup prompt serves every environment; the bounded-wait step now points at the connector's output, which can refuse locally without Haven ever hearing about it. Other recipes on this page not re-read. Prior: #1684: the approval screen names the gate ONCE — the `Approve agent budget` card heading is gone on both rails, leaving the modal subtitle `Approve the agent budget`; the one-gate-one-name sequence and its per-viewport rule updated to match. Body re-read against the connect-agent components. Prior: #1572 named the gate `agent budget` end to end (recipe titles, primary actions, the one-gate-one-name rule); #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
 ---
 
 # Haven Screen Recipes
@@ -100,8 +98,9 @@ Structure:
 Money and risk clarity:
 - Show the selected Haven wallet before the user reviews.
 - Show the budget amount with token and reset period together, for example `250 USDC per day`.
-- State the over-budget behaviour for the account's rail: queued for approval
-  on legacy Safe accounts, refused on-chain on delegation accounts.
+- State the over-budget behaviour: **refused on-chain**. There is no queued-for-approval
+  branch to describe — the approval queue died with the Safe rail (#1440), and a legacy
+  Safe account cannot create a payment at all (HTTP 410).
 - Do not say `AllowanceModule`, `delegate`, `policy engine`, or `session key` in primary UI.
 
 States:
@@ -255,7 +254,30 @@ Money and risk clarity:
 - Keep contacts network-neutral in the POC; the Send flow must clearly show the network chosen by the selected Haven wallet before money moves.
 - Use `recipient address`, `wallet address`, and `Haven account`; avoid `Ethereum address` in primary product copy unless the network context specifically requires it.
 
-## Approve Payment
+## Approve Payment — RETIRED, kept as history
+
+**Do not build against this recipe.** The approval queue was a legacy Safe /
+AllowanceModule concept: a payment above the agent's remaining on-chain
+allowance was queued for the owner. The delegation rail has no equivalent — it
+enforces budget, recipient and expiry on-chain during gas estimation, so an
+over-budget payment reverts instead of queueing.
+
+The rail is retired ([#1440](https://github.com/d-hinders/Haven-AI/issues/1440)):
+`POST /approvals/:id/approve` and `/proposed` answer HTTP 410
+([#1986](https://github.com/d-hinders/Haven-AI/issues/1986)), and
+[#1989](https://github.com/d-hinders/Haven-AI/issues/1989) deleted the screen —
+`ApprovalQueue`, the `/approvals` route, the sidebar entry, the notification
+bell and the dashboard's approvals attention row are all gone. No screen in the
+product matches this recipe on either rail.
+
+It is kept rather than deleted for one reason: the *money-and-risk* guidance
+below is the only written record of how Haven presented a two-leg x402 payment
+to a human, and the #946 EIP-3009 bridge reintroduces a bounded funding leg on
+the delegation rail. If a human-facing surface for that ever ships, this is the
+prior art — not a pattern to copy wholesale.
+
+<details>
+<summary>The retired recipe, verbatim</summary>
 
 Use when a payment request needs human approval.
 
@@ -279,9 +301,11 @@ Money and risk clarity:
   wallet may hold recoverable funds.
 - Include externally verifiable transaction links after execution, not before they exist.
 
+</details>
+
 ## Agent Activity
 
-Use for recent payments, queued requests, and agent events.
+Use for recent payments, declined requests, and agent events.
 
 Structure:
 1. Header with agent name and current status.
@@ -290,26 +314,29 @@ Structure:
 4. Empty state with the next useful action.
 
 Money and risk clarity:
-- Each row should show amount, token, direction/status, and whether it was automatic or required approval.
+- Each row should show amount, token, direction/status, and whether it ran automatically or was declined by the agent rules.
 - Technical hashes stay in detail surfaces.
 - Use a card/compact `TransactionsTable` when the agent history needs semantic
   columns, sorting, or pagination. Use `TransactionActivityRow` for a short,
-  non-sortable preview. Lead with `Agent payment`, `Approval request`, `Payment
+  non-sortable preview. Lead with `Agent payment`, `x402 payment`, `Payment
   rejected`, or similar human event copy, not a raw recipient address.
 - Put recipient, source, and links in row metadata or detail actions.
 
 ## Policy Violation
 
-Use when an agent request is blocked or queued because it exceeds rules.
+Use when an agent request is declined because it exceeds rules. There is no
+queued state to present: the rules are enforced on-chain, so an out-of-policy
+request is declined before any money moves, and the user's lever is the budget,
+not a pending decision.
 
 Structure:
 1. Status banner with calm, specific copy.
 2. Summary of the requested payment.
 3. Explanation of which agent rule stopped automatic payment.
-4. Primary action based on the surface: `Review request`, `Adjust agent budget`, or `Reject`.
+4. Primary action based on the surface: `Adjust agent budget` or `Open agent`.
 
 Money and risk clarity:
-- Do not imply Haven failed. Say the request needs review or was blocked by the rules.
+- Do not imply Haven failed. Say the request was declined by the rules the user set.
 - State what the agent can still do.
 
 ## Transaction History
@@ -328,7 +355,7 @@ Money and risk clarity:
 - Use external links for details, but do not make hashes the primary labels.
 - Use `TransactionActivityRow` for short non-sortable previews such as
   Dashboard. Use card/compact `TransactionsTable` for scoped sortable histories.
-- Use `Payment sent by you`, `Received payment`, and `Agent payment by [agent name]` before using technical transaction language.
+- Use `Payment sent` (neutral), `Received payment`, and `Agent payment by [agent name]` before using technical transaction language. `Payment sent by you` is reserved for human-initiated payments only (#2097); a transaction with no attribution renders as `Payment sent` with an explicit unknown initiator — never `You`.
 - For x402 payments, collapse the internal Safe-to-agent funding step into one merchant-facing row such as `x402 payment by [agent name]`.
 - Show the money path as a compact `From [wallet/counterparty] -> To [wallet/counterparty]` line instead of repeating wallet, initiator, and counterparty in a separate metadata row.
 - Keep amount in its own cell; date and the external-details link are separate
@@ -347,9 +374,13 @@ Structure:
 2. Balance card.
 3. Agent access or budgets connected to this account.
 4. Scoped transaction history.
-5. Advanced details section for Haven wallet address, explorer link, required
-   approval threshold, and approvers. Show modules only if a real advanced
-   module-management surface exists.
+5. Advanced details section for Haven wallet address, explorer link and
+   required approval threshold. Show modules only if a real advanced
+   module-management surface exists. (An approver list belonged here until
+   [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) deleted the
+   Approvers surface. The delegation rail's `AccountSignersCard` is a different
+   concept — the account's signer set, not a Safe owner threshold — and is not
+   a substitute for it.)
 
 Money and risk clarity:
 - Primary UX uses `Haven account` or `Haven wallet`.

@@ -25,14 +25,17 @@ describe('RecoveryNudge (#889)', () => {
     expect(screen.queryByText('Add a backup soon')).toBeNull()
   })
 
-  it('sends legacy passkey-Safe users to Approvers, not Backup & recovery (#1229)', () => {
-    // The risk is identical on both rails; only the destination differs, and
-    // "Backup & recovery" does not exist on a Safe account — naming it there
-    // would send the user looking for a screen they cannot reach.
-    render(<RecoveryNudge rail="safe" />)
+  /**
+   * #1229's `rail="safe"` variant is DELETED (#1989, epic #1440) along with the
+   * Approvers surface it pointed at. Asserted positively — the component names
+   * the ONE destination it has — rather than as `queryByText('Approvers')`
+   * being null, which would pass just as happily against a blank render.
+   */
+  it('names Backup & recovery as the only destination, with no rail fork', () => {
+    render(<RecoveryNudge />)
     expect(screen.getByText('Add a backup soon')).toBeTruthy()
-    expect(screen.getByText('Approvers')).toBeTruthy()
-    expect(screen.queryByText('Backup & recovery')).toBeNull()
+    expect(screen.getByText('Backup & recovery')).toBeTruthy()
+    expect(screen.queryByText('Approvers')).toBeNull()
   })
 
   it('links to the recovery docs', () => {

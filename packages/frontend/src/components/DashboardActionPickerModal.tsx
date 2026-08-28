@@ -10,7 +10,7 @@ import type { UserSafe } from '@/context/AuthContext'
 
 interface Props {
   open: boolean
-  action: 'send' | 'receive' | 'add-funds'
+  action: 'receive' | 'add-funds'
   safes: UserSafe[]
   onClose: () => void
   onSelect: (safeId: string) => void
@@ -29,12 +29,12 @@ export default function DashboardActionPickerModal({
 
   if (!open) return null
 
+  // 'send' was removed with the legacy Safe send flow (#1989, epic #1440) —
+  // the dashboard no longer offers an owner-send affordance on any rail.
   const title =
-    action === 'send'
-      ? 'Choose account to send from'
-      : action === 'receive'
-        ? 'Choose account to receive into'
-        : 'Choose account to add funds to'
+    action === 'receive'
+      ? 'Choose account to receive into'
+      : 'Choose account to add funds to'
 
   return (
     <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">

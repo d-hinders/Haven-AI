@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import x402Routes from '../x402.js'
+import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
 
 const { mockQuery, allowanceMocks, fiatMocks, evidenceMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -21,14 +22,6 @@ const { mockQuery, allowanceMocks, fiatMocks, evidenceMocks } = vi.hoisted(() =>
   },
 }))
 
-// The allowance-nonce coordinator (#718) rides a shared Postgres watermark
-// along with every legacy-rail authorize; it is fail-open and orthogonal to
-// what these tests assert, so stub the repository rather than answer its
-// query through the content-dispatch stub below.
-vi.mock('../../infra/repositories/allowance-nonce-watermarks.js', () => ({
-  findAllowanceNonceWatermark: async () => null,
-  raiseAllowanceNonceWatermark: async () => {},
-}))
 vi.mock('../../db.js', () => ({
   default: {
     query: (...args: unknown[]) => mockQuery(...args),
@@ -193,6 +186,14 @@ const approvalRoute = (row: Record<string, unknown> | null): DbRoute => [
   () => ({ rows: row ? [row] : [] }),
 ]
 
+// Most of the cases below characterize `runLegacyAuthorize`, the legacy
+// Safe/AllowanceModule x402 funding leg. That rail is retired by #1986
+// (epic #1440 slice 3): `AGENT` here carries no `execution_rail`, which
+// resolves through the LEFT-JOIN `null` fall-through to `retired_allowance`,
+// so every one of those cases now gets HTTP 410 fail-closed, nothing written,
+// before `runLegacyAuthorize` (or the delegation branch) ever runs. Converted
+// in place rather than deleted, per #1986; `modules/x402/legacy-authorize.ts`
+// and these cases are scheduled for deletion in #1987.
 describe('x402 routes', () => {
   let app: FastifyInstance
 
@@ -332,51 +333,17 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(201)
-    const body = response.json()
-    expect(body).toMatchObject({
-      payment_id: PAYMENT_ID,
-      status: 'pending_signature',
-      chain_id: 8453,
-      to: AGENT.delegate_address.toLowerCase(),
-      merchant_to: MERCHANT.toLowerCase(),
-      x402_expected_auth: {
-        version: 1,
-        message: expect.stringContaining('Haven x402 expected context v1'),
-        signature: expect.stringMatching(/^0x[0-9a-f]{130}$/i),
-        signer: expect.stringMatching(/^0x[0-9a-f]{40}$/i),
-      },
-      sign_data: {
-        hash: SIGN_HASH,
-        components: {
-          safe: AGENT.safe_address,
-          token: USDC,
-          to: AGENT.delegate_address.toLowerCase(),
-          amount: '20000',
-          nonce: 7,
-        },
-      },
-    })
-    expect(body.x402_expected_auth.message).toContain('"expiresAt":"2026-05-10T20:00:00.000Z"')
+    // #1986: the legacy AllowanceModule x402 flow is retired — the account
+    // never reaches funding-intent creation, and nothing about the merchant
+    // or the sign-hash gets computed or written.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
 
-    expect(allowanceMocks.generateTransferHash).toHaveBeenCalledWith(
-      8453,
-      AGENT.safe_address,
-      USDC,
-      AGENT.delegate_address,
-      20000n,
-      '0x0000000000000000000000000000000000000000',
-      0n,
-      7,
-    )
+    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
 
-    // The write carries the merchant and idempotency identity — HANDLER
-    // concern (which write was requested); column presence and ON CONFLICT
-    // semantics are the repository's, proven on the real harness.
+    // No intent row was written for a rail that is gone.
     const insert = findCall(/INSERT INTO payment_intents/)
-    expect(insert).toBeDefined()
-    expect(insert!.params).toContain(MERCHANT.toLowerCase())
-    expect(insert!.params).toContain('x402:test')
+    expect(insert).toBeUndefined()
   })
 
   it('persists mcpCallContext into the legacy-rail intent metadata (#1307 write path)', async () => {
@@ -414,20 +381,12 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(201)
-    // Review finding on #1316: the stored context is what the settle leg
-    // rehydrates — prove the legacy write branch actually persists it.
+    // #1986: the legacy write branch this pinned no longer runs — the
+    // account is refused before mcpCallContext is ever persisted anywhere.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
     const insert = findCall(/INSERT INTO payment_intents/)
-    const metadataParam = insert!.params.find(
-      (p) => typeof p === 'string' && p.includes('mcp_call_context'),
-    ) as string
-    expect(metadataParam).toBeDefined()
-    const metadata = JSON.parse(metadataParam)
-    expect(metadata.mcp_call_context).toMatchObject({
-      merchantUrl: 'https://mcp.soundside.ai/mcp',
-      toolName: 'buy_track',
-      arguments: { id: '42' },
-    })
+    expect(insert).toBeUndefined()
   })
 
   it('executes at the exact allowance boundary (amount == remaining, zero delegate balance)', async () => {
@@ -457,12 +416,11 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(201)
-    expect(response.json()).toMatchObject({ status: 'pending_signature' })
-    expect(allowanceMocks.generateTransferHash).toHaveBeenCalledWith(
-      8453, AGENT.safe_address, USDC, AGENT.delegate_address, 20000n,
-      '0x0000000000000000000000000000000000000000', 0n, 7,
-    )
+    // #1986: the allowance-boundary arithmetic this pinned never runs — the
+    // account is refused fail-closed before any coverage decision is made.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
   })
 
   it('records one-shot x402 signatures without marking the payment submitted before execution', async () => {
@@ -498,41 +456,26 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(201)
-    expect(response.json()).toMatchObject({
-      success: true,
-      payment_id: PAYMENT_ID,
-      status: 'confirmed',
-      tx_hash: TX_HASH,
-    })
+    // #1986: the one-shot sign-then-execute ordering this pinned never runs —
+    // fail-closed refuses the account before the signature is ever recorded,
+    // so no ordering guarantee is even meaningful here anymore.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
 
-    // The one-shot ordering invariant: the signature is durably recorded
-    // BEFORE on-chain execution runs, so a crash mid-flight cannot strand
-    // the intent (see the route's comment on why status never flips to
-    // 'submitted' here). What the guarded UPDATE's WHERE clause enforces is
-    // proven in x402-authorizations.test.ts; the property this test owns is
-    // ordering and the exact values written.
     const signatureUpdate = findCall(/SET signature = \$1, signed_at = NOW\(\)/)
-    expect(signatureUpdate).toBeDefined()
-    expect(signatureUpdate!.params).toEqual(['0xsig', PAYMENT_ID, AGENT.id])
-    const signatureCallIndex = mockQuery.mock.calls.findIndex(([sql]) =>
-      typeof sql === 'string' && /SET signature = \$1, signed_at = NOW\(\)/.test(sql),
-    )
-    const executionOrder = allowanceMocks.executeAllowanceTransfer.mock.invocationCallOrder[0]
-    expect(mockQuery.mock.invocationCallOrder[signatureCallIndex]).toBeLessThan(executionOrder)
+    expect(signatureUpdate).toBeUndefined()
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
 
     const confirmedUpdate = findCall(/SET status = 'confirmed'/)
-    expect(confirmedUpdate!.params).toEqual([TX_HASH, PAYMENT_ID, 0.02, 0.02, AGENT.id])
-    expect(evidenceMocks.tryRecordMachinePaymentEvidenceBaseById).toHaveBeenCalledWith(
-      PAYMENT_ID,
-      AGENT.id,
-      expect.anything(),
-    )
+    expect(confirmedUpdate).toBeUndefined()
+    expect(evidenceMocks.tryRecordMachinePaymentEvidenceBaseById).not.toHaveBeenCalled()
   })
 
-  // #716 (epic #713): the funding leg must move EXACTLY the challenge amount —
-  // no padding or buffer may sneak between the request, the stored intent, and
-  // the on-chain transfer.
+  // #716 (epic #713) characterized the funding leg moving EXACTLY the
+  // challenge amount — no padding or buffer between the request, the stored
+  // intent, and the on-chain transfer. #1986 retires the funding leg itself:
+  // the invariant is now strictly stronger — the delegate is never funded at
+  // all, for any amount, on this rail.
   it('funds the delegate with EXACTLY the challenge amount (#716 invariant)', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
@@ -566,14 +509,15 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(201)
-    // The hash the delegate signs and the executed transfer both carry the
-    // exact atomic amount from the challenge:
-    expect(allowanceMocks.generateTransferHash.mock.calls[0][4]).toBe(20000n)
-    expect(allowanceMocks.executeAllowanceTransfer.mock.calls[0][4]).toBe(20000n)
-    // The stored intent records the same number:
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    // The delegate is never funded at all — no hash generated, no transfer
+    // executed, for any amount, on the retired rail.
+    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
+    // No intent row was written either.
     const insert = findCall(/INSERT INTO payment_intents/)
-    expect(insert!.params).toContain('20000')
+    expect(insert).toBeUndefined()
   })
 
   it('rejects an idempotency replay whose amount differs from the stored intent (#716 guard)', async () => {
@@ -604,8 +548,12 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(409)
-    expect(response.json().error).toContain('stored 20000, requested 30000')
+    // #1986: the mismatched-replay 409 this guard characterized never fires —
+    // fail-closed refuses the account before the stored intent is ever
+    // reloaded or compared. Same refusal reached from different setup, which
+    // is what fail-closed means.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
@@ -639,15 +587,15 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(502)
-    expect(response.json()).toMatchObject({
-      payment_id: PAYMENT_ID,
-      status: 'failed',
-      error: 'On-chain execution failed',
-    })
+    // #1986: the relayer failure this pinned never has a chance to happen —
+    // the account is refused before execution is attempted at all, so no
+    // intent ever reaches (or needs) a terminal 'failed' state.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
 
     const failedUpdate = findCall(/SET status = 'failed'/)
-    expect(failedUpdate!.params).toEqual(['relayer unavailable', PAYMENT_ID, AGENT.id])
+    expect(failedUpdate).toBeUndefined()
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
     expect(evidenceMocks.tryRecordMachinePaymentEvidenceBaseById).not.toHaveBeenCalled()
   })
 
@@ -684,13 +632,14 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(409)
+    // #1986: the terminal-state race this pinned can no longer happen — the
+    // account is refused before execution runs, so `executeAllowanceTransfer`
+    // is never called at all (strictly stronger than "called once").
+    expect(response.statusCode).toBe(410)
     expect(response.json()).toMatchObject({
-      payment_id: PAYMENT_ID,
-      status: 'confirmed',
-      error: 'Payment intent changed after on-chain execution',
+      error: allowanceModuleRailRetired('account').body.error,
     })
-    expect(allowanceMocks.executeAllowanceTransfer).toHaveBeenCalledOnce()
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
     expect(evidenceMocks.tryRecordMachinePaymentEvidenceBaseById).not.toHaveBeenCalled()
   })
 
@@ -836,14 +785,11 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({
-      payment_id: PAYMENT_ID,
-      status: 'pending_signature',
-      to: AGENT.delegate_address.toLowerCase(),
-      merchant_to: MERCHANT.toLowerCase(),
-      sign_data: { hash: SIGN_HASH },
-    })
+    // #1986: the duplicate-idempotency-key reuse this pinned never runs — the
+    // stored pending intent is never even looked up, because fail-closed
+    // refuses the account first.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
     expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
   })
 
@@ -887,19 +833,13 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(200)
-    const body = response.json()
-    expect(body.status).toBe('pending_signature')
-    expect(body.expires_at).toBe('2026-05-10T20:10:00.000Z')
-    expect(body.x402_expected_auth.message).toContain('"expiresAt":"2026-05-10T20:10:00.000Z"')
-    expect(body.sign_data).toMatchObject({
-      hash: SIGN_HASH,
-      components: { nonce: 7 },
-    })
+    // #1986: the expired-intent refresh this pinned never runs — the account
+    // is refused fail-closed before the expired pending intent is even
+    // looked up, so no refresh write is ever requested.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
     expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
-    // The refresh write was requested — its guard conditions are proven on
-    // the real harness (x402-authorizations.test.ts).
-    expect(findCall(/SET allowance_nonce = \$1/)).toBeDefined()
+    expect(findCall(/SET allowance_nonce = \$1/)).toBeUndefined()
   })
 
   it('refreshes stale sign data when a duplicate pending intent has an old allowance nonce', async () => {
@@ -934,26 +874,13 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(200)
-    const body = response.json()
-    expect(body.expires_at).toBe('2026-05-10T20:10:00.000Z')
-    expect(body.x402_expected_auth.message).toContain('"expiresAt":"2026-05-10T20:10:00.000Z"')
-    expect(body.sign_data).toMatchObject({
-      hash: refreshedHash,
-      components: { nonce: 8 },
-    })
-    expect(allowanceMocks.generateTransferHash).toHaveBeenCalledWith(
-      8453,
-      AGENT.safe_address,
-      USDC,
-      AGENT.delegate_address.toLowerCase(),
-      20000n,
-      '0x0000000000000000000000000000000000000000',
-      0n,
-      8,
-    )
-    const refresh_ = findCall(/SET allowance_nonce = \$1/)
-    expect(refresh_!.params).toEqual([8, refreshedHash, PAYMENT_ID, AGENT.id])
+    // #1986: the stale-nonce sign-data refresh this pinned never runs — the
+    // account is refused before the duplicate intent's nonce is even
+    // compared, so no refreshed hash is ever generated or written.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    expect(findCall(/SET allowance_nonce = \$1/)).toBeUndefined()
   })
 
   it('reloads rail-scoped existing x402 intents after insert idempotency conflicts', async () => {
@@ -983,12 +910,12 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(201)
-    expect(response.json()).toMatchObject({
-      payment_id: PAYMENT_ID,
-      status: 'pending_signature',
-      sign_data: { hash: SIGN_HASH },
-    })
+    // #1986: the insert-conflict reload this pinned never runs — the account
+    // is refused before the payment_intents INSERT is ever attempted, so
+    // there is no conflict to reload from.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    expect(findCall(/INSERT INTO payment_intents/)).toBeUndefined()
   })
 
   it('queues over-allowance x402 payments once with rail metadata', async () => {
@@ -1021,43 +948,14 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(202)
-    expect(response.json()).toMatchObject({
-      payment_id: 'approval-123',
-      status: 'pending_approval',
-      phase: 'user_approval_required',
-      next_action: 'wait_for_user_approval',
-      remaining: '0.01',
-      requested: '0.02',
-      token: 'USDC',
-      rail: 'x402',
-      resource_url: 'https://mcp.soundside.ai/mcp',
-      merchant_address: MERCHANT.toLowerCase(),
-      chain_id: 8453,
-      amount_atomic: '20000',
-      asset: USDC,
-      network: 'base',
-      idempotency_key: 'x402:approval',
-      challenge_id: null,
-      x402: {
-        amount_atomic: '20000',
-        asset: USDC,
-        network: 'base',
-        resource_url: 'https://mcp.soundside.ai/mcp',
-        merchant_address: MERCHANT.toLowerCase(),
-        idempotency_key: 'x402:approval',
-      },
-    })
+    // #1986: the over-allowance approval queue this pinned never gets a
+    // chance to run — fail-closed refuses the account before the coverage
+    // decision, so no approval_requests row is ever queued.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
 
     const insert = findCall(/INSERT INTO approval_requests/)
-    expect(insert!.params).toContain('https://mcp.soundside.ai/mcp')
-    expect(insert!.params).toContain(MERCHANT.toLowerCase())
-    expect(insert!.params).toContain('x402:approval')
-    // The request's category must be threaded into machine_metadata — this is
-    // the handler's mapping, not the database's, so it is proven here.
-    expect(insert!.params).toContain(
-      JSON.stringify({ protocol: 'x402', network: 'base', category: 'data', description: null })
-    )
+    expect(insert).toBeUndefined()
   })
 
   it('returns 422 insufficient_funds when delegate balance + remaining allowance cannot cover the amount', async () => {
@@ -1088,49 +986,19 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(422)
+    // #1986: the insufficient-funds pre-flight this pinned never runs — the
+    // account is refused before the delegate-balance read the check depends
+    // on, so this is now the SAME fail-closed refusal, reached from
+    // different setup — that is what fail-closed means.
+    expect(response.statusCode).toBe(410)
     const body = response.json()
-    expect(body).toMatchObject({
-      error_code: 'insufficient_funds',
-      phase: 'insufficient_funds',
-      next_action: 'fund_safe_or_raise_allowance',
-      rail: 'x402',
-      chain_id: 8453,
-      token: 'USDC',
-      asset: USDC,
-      network: 'base',
-      amount: '0.02',
-      amount_atomic: '20000',
-      delegate_balance: '0.0',
-      delegate_balance_atomic: '0',
-      remaining_allowance: '0.005',
-      remaining_allowance_atomic: '5000',
-      shortfall: '0.015',
-      shortfall_atomic: '15000',
-      resource_url: 'https://mcp.soundside.ai/mcp',
-      merchant_address: MERCHANT.toLowerCase(),
-    })
-    // Delegate / Safe addresses must NOT be echoed back. Agents already know
-    // both from the credential they hold; surfacing them in a structured
-    // pre-flight error widens the surveillance surface for the hot-wallet
-    // delegate EOA for no agent-side benefit.
-    expect(body).not.toHaveProperty('delegate_address')
-    expect(body).not.toHaveProperty('safe_address')
-    expect(body.error).toMatch(/Insufficient funds/i)
-    expect(body.error).toContain('USDC')
+    expect(body.error).toBe(allowanceModuleRailRetired('account').body.error)
 
-    // Critical: no payment intent or approval row was written. The pre-flight
-    // must short-circuit BEFORE any state-creating DB write — the user can
-    // retry after funding without an idempotency conflict.
+    // Critical: no payment intent or approval row was written.
     expect(sqlCalls().some((c) => /INSERT INTO (payment_intents|approval_requests)/.test(c.sql))).toBe(false)
 
-    // The pre-flight read happened on the (chain, delegate, token) tuple
-    // before the over-budget approval-queue path would have run.
-    expect(allowanceMocks.getTokenBalance).toHaveBeenCalledWith(
-      AGENT.chain_id,
-      AGENT.delegate_address,
-      USDC,
-    )
+    // The pre-flight balance read never happens either — refused before it.
+    expect(allowanceMocks.getTokenBalance).not.toHaveBeenCalled()
   })
 
   it('returns 422 insufficient_funds when delegate balance + remaining is just short of the amount', async () => {
@@ -1158,11 +1026,11 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(422)
-    expect(response.json()).toMatchObject({
-      error_code: 'insufficient_funds',
-      shortfall_atomic: '1',
-    })
+    // #1986: the strict-boundary shortfall arithmetic this pinned never runs
+    // — the same fail-closed refusal fires first, from a different setup.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    expect(allowanceMocks.getTokenBalance).not.toHaveBeenCalled()
   })
 
   it('falls through pre-flight when delegate balance covers the allowance gap', async () => {
@@ -1195,14 +1063,12 @@ describe('x402 routes', () => {
       },
     })
 
-    // The existing over-budget logic still treats remaining<amount as
-    // approval-required (queues for user approval). The pre-flight check is
-    // narrower than that: it only short-circuits the unrecoverable case.
-    expect(response.statusCode).toBe(202)
-    expect(response.json()).toMatchObject({
-      payment_id: 'approval-balance-only',
-      status: 'pending_approval',
-    })
+    // #1986: the "balance covers the gap" fall-through this pinned never
+    // runs — the account is refused before the coverage decision, so no
+    // approval row is ever queued regardless of how much the delegate holds.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    expect(findCall(/INSERT INTO approval_requests/)).toBeUndefined()
   })
 
   it('returns 502 when the delegate balance read itself fails (RPC outage)', async () => {
@@ -1230,8 +1096,11 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(502)
-    expect(response.json().error).toBe('Failed to read delegate token balance')
+    // #1986: the RPC-outage 502 this pinned never fires — the account is
+    // refused fail-closed before the delegate-balance read is even attempted.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    expect(allowanceMocks.getTokenBalance).not.toHaveBeenCalled()
   })
 
   it('returns an existing pending approval for duplicate over-allowance idempotency keys', async () => {
@@ -1256,31 +1125,12 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(202)
-    expect(response.json()).toMatchObject({
-      payment_id: 'approval-123',
-      kind: 'approval_request',
-      status: 'pending',
-      phase: 'user_approval_required',
-      next_action: 'wait_for_user_approval',
-      amount: '0.02',
-      token: 'USDC',
-      rail: 'x402',
-      resource_url: 'https://mcp.soundside.ai/mcp',
-      merchant_address: MERCHANT.toLowerCase(),
-      amount_atomic: '20000',
-      asset: USDC,
-      network: 'base',
-      idempotency_key: 'x402:approval',
-      x402: {
-        amount_atomic: '20000',
-        asset: USDC,
-        network: 'base',
-        resource_url: 'https://mcp.soundside.ai/mcp',
-        merchant_address: MERCHANT.toLowerCase(),
-        idempotency_key: 'x402:approval',
-      },
-    })
+    // #1986: the existing-pending-approval reuse this pinned never runs —
+    // fail-closed refuses the account before the approval lookup even fires,
+    // so the queued row (an artifact from before the rail was retired) is
+    // never surfaced.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
     // Confirms the short-circuit happened BEFORE any allowance read.
     expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
   })
@@ -1307,21 +1157,12 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({
-      payment_id: 'approval-123',
-      kind: 'approval_request',
-      status: 'executed',
-      phase: 'funding_sent',
-      next_action: 'retry_original_x402_request',
-      rail: 'x402',
-      resource_url: 'https://mcp.soundside.ai/mcp',
-      merchant_address: MERCHANT.toLowerCase(),
-      amount_atomic: '20000',
-      asset: USDC,
-      network: 'base',
-      idempotency_key: 'x402:approval',
-    })
+    // #1986: the "already executed, retry the original request" reply this
+    // pinned never runs — fail-closed refuses the account before the
+    // approval lookup, so an executed legacy approval can no longer be
+    // surfaced through this entry point either.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
     expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
   })
 
@@ -1365,19 +1206,13 @@ describe('x402 routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(202)
-    expect(response.json()).toMatchObject({
-      payment_id: 'approval-123',
-      status: 'pending_approval',
-      remaining: '0.01',
-      rail: 'x402',
-      resource_url: 'https://mcp.soundside.ai/mcp',
-      merchant_address: MERCHANT.toLowerCase(),
-      amount_atomic: '20000',
-      asset: USDC,
-      network: 'base',
-      idempotency_key: 'x402:approval',
-    })
-    expect(approvalReads).toBe(2)
+    // #1986: the idempotency-conflict-reload race this pinned never runs —
+    // fail-closed refuses the account before the approval lookup fires even
+    // once, so the ON CONFLICT race it characterized cannot happen on the
+    // retired rail.
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    expect(approvalReads).toBe(0)
+    expect(findCall(/INSERT INTO approval_requests/)).toBeUndefined()
   })
 })

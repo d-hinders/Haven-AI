@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import {
+  settlementSchemeLabel,
   transactionInitiator,
   transactionMovement,
   transactionStatus,
@@ -57,5 +58,58 @@ describe('transaction presentation', () => {
     expect(transactionTitle(incoming)).toBe('Received payment')
     expect(transactionInitiator(incoming)).toBe('')
     expect(transactionStatus(incoming)).toBeNull()
+  })
+
+  // #2097 — initiator attribution is scheme-agnostic and explicit. "You" is
+  // reserved for human-initiated rows; agent rows render the agent identity;
+  // missing attribution renders as "Unknown", never "You".
+  it('attributes an eip3009 x402 row to its agent — never "You"', () => {
+    const row = tx({
+      direction: 'out',
+      source: 'x402',
+      settlementScheme: 'eip3009',
+      initiatedBy: 'agent',
+      agentName: 'Research assistant',
+    })
+
+    expect(transactionInitiator(row)).toBe('Research assistant')
+    expect(transactionInitiator(row)).not.toBe('You')
+    expect(transactionTitle(row)).toBe('x402 payment by Research assistant')
+  })
+
+  it('attributes an erc7710 x402 row to its agent — never "You"', () => {
+    const row = tx({
+      direction: 'out',
+      source: 'x402',
+      settlementScheme: 'erc7710',
+      initiatedBy: 'agent',
+      agentName: 'Research assistant',
+    })
+
+    expect(transactionInitiator(row)).toBe('Research assistant')
+    expect(transactionInitiator(row)).not.toBe('You')
+    expect(transactionTitle(row)).toBe('x402 payment by Research assistant')
+  })
+
+  it('renders "You" only for human-initiated rows', () => {
+    const row = tx({ direction: 'out', source: 'direct', initiatedBy: 'human' })
+
+    expect(transactionInitiator(row)).toBe('You')
+    expect(transactionTitle(row)).toBe('Payment sent by you')
+  })
+
+  it('renders explicit "Unknown" for outbound rows with missing attribution — never "You"', () => {
+    const row = tx({ direction: 'out', source: 'direct', agentName: undefined })
+
+    expect(transactionInitiator(row)).toBe('Unknown')
+    expect(transactionInitiator(row)).not.toBe('You')
+    expect(transactionTitle(row)).toBe('Payment sent')
+  })
+
+  it('maps the settlement scheme to its display label, null-in null-out', () => {
+    expect(settlementSchemeLabel('eip3009')).toBe('EIP-3009')
+    expect(settlementSchemeLabel('erc7710')).toBe('ERC-7710')
+    expect(settlementSchemeLabel(null)).toBeNull()
+    expect(settlementSchemeLabel(undefined)).toBeNull()
   })
 })

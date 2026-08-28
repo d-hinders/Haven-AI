@@ -23,8 +23,6 @@
  *   deliberate `MachinePaymentRail` member that is NOT evidence-eligible, so
  *   this set is narrower than "every mpp/x402 rail" on purpose.
  */
-import type { MachinePaymentRail } from './types.js'
-
 // ── Response-shape dispatch (was lib/machine-payments.ts's isMppRail) ───────
 
 export function isMppRail(rail: string | null | undefined): boolean {
@@ -36,16 +34,14 @@ interface MachineMetadata {
   description?: unknown
 }
 
-export interface MachineRailContext {
-  resourceUrl: string | null
-  merchantAddress: string | null
-  amountAtomic: string | null
-  asset: string | null
-  network: string | null
-  description: string | null
-  idempotencyKey: string | null
-  challengeId: string | null
-}
+// #1987 (epic #1440): `MachineRailContext`, `machineRailFields` and
+// `approvalReasonFor` are gone with `modules/mpp/authorize.ts` — the legacy
+// MPP AllowanceModule orchestration was their ONLY consumer, and it had no
+// production caller left once #1328 stubbed `POST /machine-payments/authorize`
+// and #1986 410'd the rail beneath it. `isMppRail`, `metadataObject`,
+// `nullableString` and `isProtocolPaymentRail` STAY: they are read by
+// `modules/payments/agent-payment-status.ts`, which serves the payment-status
+// surface the epic keeps readable.
 
 export function metadataObject(value: unknown): MachineMetadata {
   if (!value) return {}
@@ -73,49 +69,6 @@ export function nullableString(value: unknown): string | null {
  * the top-level fields (agent SDKs read either shape); x402 does not (its own
  * module shapes its own `.x402` block independently). Was `machineRailFields`.
  */
-export function machineRailFields(rail: string | null | undefined, context: MachineRailContext) {
-  const base = {
-    amount_atomic: context.amountAtomic,
-    asset: context.asset,
-    network: context.network,
-    description: context.description,
-    idempotency_key: context.idempotencyKey,
-  }
-
-  if (!isMppRail(rail)) return base
-
-  return {
-    ...base,
-    mpp: {
-      ...base,
-      resource_url: context.resourceUrl,
-      merchant_address: context.merchantAddress,
-      challenge_id: context.challengeId,
-    },
-  }
-}
-
-/**
- * Per-protocol approval-queue reason text. Was the inline `rail === 'x402'
- * ? ... : ...` ternary in `authorizeMachinePayment`.
- */
-export function approvalReasonFor(
-  rail: MachinePaymentRail,
-  fields: {
-    resourceUrl: string
-    merchantPayTo: string | null
-    category?: string
-    amountHuman: string
-    tokenSymbol: string
-    remainingHuman: string
-  },
-): string {
-  const merchantPart = fields.merchantPayTo ? ` to merchant ${fields.merchantPayTo}` : ''
-  const overLimit = `exceeds remaining allowance (${fields.amountHuman} ${fields.tokenSymbol} requested, ${fields.remainingHuman} available)`
-  return rail === 'x402'
-    ? `x402 payment for ${fields.resourceUrl}${merchantPart}${fields.category ? ` (${fields.category})` : ''} — ${overLimit}`
-    : `Machine payment demo for ${fields.resourceUrl}${merchantPart} — ${overLimit}`
-}
 
 // ── Evidence-eligibility gate (was lib/machine-payment-evidence.ts) ─────────
 

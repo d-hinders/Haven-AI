@@ -102,8 +102,14 @@ export const dashboardOverview = {
     successfulTransactions: 3,
     activeAccounts: 1,
   },
-  actionableApprovals: 1,
-  pendingApprovals: 1,
+  // #2120: 0, matching `routes/dashboard.ts:84`, which hardcodes both to 0 —
+  // the approval queue died with the AllowanceModule rail and its table is
+  // dropped (#2055). A seeded 1 fabricated a count no backend can emit. The
+  // "no approvals affordance" absence assertions keep their teeth in
+  // `DashboardClient.test.tsx`, which feeds the component a non-zero value
+  // deliberately, as a labelled adversarial probe rather than a shared seed.
+  actionableApprovals: 0,
+  pendingApprovals: 0,
   onboardingProgress: {
     hasFirstAgentPayment: true,
   },
@@ -125,27 +131,6 @@ export const dashboardOverview = {
     },
   ],
   transactions: [dashboardTransaction],
-}
-
-export const testApproval = {
-  id: 'approval-e2e',
-  agent_id: testAgent.id,
-  agent_name: testAgent.name,
-  safe_address: testSafeAddress,
-  chain_id: 8453,
-  token_symbol: 'USDC',
-  token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
-  to_address: testRecipientAddress,
-  amount_raw: '12500000',
-  amount_human: '12.50',
-  reason: 'Buy the requested research report.',
-  source: 'x402',
-  x402_resource_url: 'https://research.example/report',
-  status: 'pending',
-  tx_hash: null,
-  reviewed_at: null,
-  created_at: '2026-05-03T12:00:00.000Z',
-  expires_at: '2026-05-04T12:00:00.000Z',
 }
 
 type JsonValue = Record<string, unknown> | unknown[]
@@ -283,7 +268,11 @@ export async function mockHavenApi(page: Page) {
           restart_required: true,
           probe_result: 'local_stdio_mcp_ready',
         },
-        approval: { status: 'pending_approval', safe_tx_hash: null, tx_hash: null },
+        // #2120: `approval.status` is `agent_connection_setups.approval_status`,
+        // which the backend only ever writes as 'not_started' | 'submitted' |
+        // 'proposed' | 'confirmed'. 'pending_approval' is the AGENT status and
+        // was never a value of this field.
+        approval: { status: 'not_started', safe_tx_hash: null, tx_hash: null },
       })
       return
     }
@@ -381,16 +370,9 @@ export async function mockHavenApi(page: Page) {
       return
     }
 
-    if (method === 'GET' && path === '/approvals') {
-      await fulfillJson(route, {
-        approvals: [testApproval],
-        // Dashboard reads actionable_count first, while older callers may
-        // still fall back to pending_count.
-        actionable_count: 1,
-        pending_count: 1,
-      })
-      return
-    }
+    // No `/approvals` handler: #1989 deleted the route and #2055 deregistered
+    // the backend endpoint. A mock for a dead endpoint intercepts nothing and
+    // reads as coverage of a flow that cannot happen (#1993).
 
     if (method === 'GET' && path === '/user/owners') {
       await fulfillJson(route, {

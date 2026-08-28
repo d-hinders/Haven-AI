@@ -1,23 +1,41 @@
 /**
- * AllowanceModule contract interaction for the Haven backend.
+ * AllowanceModule contract bindings for the Haven backend — READS ONLY.
  *
- * Provides on-chain reads (allowance state, transfer hash generation),
- * signature verification, and transaction execution via relayer.
+ * **The execution half is deleted (#1987, epic #1440 slice 4.)** The Safe /
+ * AllowanceModule rail is retired: #1986 made every agent-payment entry point
+ * fail closed with HTTP 410, and this slice removed the code those entry
+ * points used to reach — `executeAllowanceTransfer`, `generateTransferHash`
+ * and `recoverSigner`, together with the `executeAllowanceTransfer` ABI
+ * fragment and the relayer spend-guard / send-lock / allowance-nonce wiring
+ * they needed. Nothing in this module can move a token any more.
+ *
+ * **Why the file survives rather than going with the rail.** Three of its
+ * exports are not AllowanceModule code at all — `getProvider` and
+ * `getRelayerWallet` are one-line delegations to `infra/relayer.ts` (#1533,
+ * one nonce view per chain) and `getTokenBalance` is a generic native/ERC-20
+ * balance read. They are shared with machinery the owner decision in #834
+ * keeps alive while any funding-leg rail lives: sweep, the delegate-balance
+ * monitor, and the #946 EIP-3009 bridge. Deliberately NOT re-homed here: that
+ * is a refactor of live shared infrastructure, not a deletion, and it does
+ * not belong in a money-path deletion slice. It is residue for #1993 once the
+ * remaining read consumers go with #1989/#1992.
+ *
+ * The two remaining CONTRACT reads are live on purpose, not oversight:
+ * `getTokenAllowance` and `getTokensForDelegate` back the one surface still
+ * standing — `routes/agent-connection-setups.ts`'s legacy wallet-approval
+ * authority check. Reads only; neither can spend. #2020 deleted the other
+ * pair (`getLatestBlockTimeSec`, `computeEffectiveAllowance`) with their last
+ * consumer: `GET /machine-payments/allowances` now answers 410 on this rail
+ * (the recorded owner reversal of #1986's left-readable decision), so the
+ * off-chain reset-arithmetic mirror — and the LP-1 differential loop that
+ * guarded it — retired together.
  *
  * All functions accept a chainId to select the correct RPC and contract addresses.
  */
 
-import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, type RelayerAttribution } from '../infra/relayer-spend-guard.js'
 import { ethers } from 'ethers'
-import { config } from '../config.js'
 import { getChain } from '../domain/chains.js'
-import { recordAllowanceNonce } from './allowance-nonce-coordinator.js'
-import {
-  withRelayerSendLock,
-  getRelayerFeeOverrides,
-  getRelayer,
-  getProvider as getRelayerProvider,
-} from '../infra/relayer.js'
+import { getRelayer, getProvider as getRelayerProvider } from '../infra/relayer.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -28,8 +46,6 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 const ALLOWANCE_MODULE_ABI = [
   'function getTokenAllowance(address safe, address delegate, address token) view returns (uint256[5])',
   'function getTokens(address safe, address delegate) view returns (address[])',
-  'function generateTransferHash(address safe, address token, address to, uint96 amount, address paymentToken, uint96 payment, uint16 nonce) view returns (bytes32)',
-  'function executeAllowanceTransfer(address safe, address token, address payable to, uint96 amount, address paymentToken, uint96 payment, address delegate, bytes signature)',
 ]
 
 // Minimal ABI for the pre-flight balance read. Pulled out of any
@@ -48,11 +64,6 @@ export interface AllowanceInfo {
   nonce: number
 }
 
-export interface EffectiveAllowance {
-  remaining: bigint
-  effectiveSpent: bigint
-  isResetPending: boolean
-}
 
 // ── Provider / Relayer Setup — DELEGATED, deliberately (#1533) ────
 //
@@ -76,13 +87,15 @@ export function getRelayerWallet(chainId: number): ethers.Wallet {
   return getRelayer(chainId)
 }
 
-function getContract(chainId: number, signerOrProvider?: ethers.Signer | ethers.Provider) {
+/**
+ * #1987: the optional `signerOrProvider` parameter went with
+ * `executeAllowanceTransfer` — it existed only so the relayer wallet could be
+ * bound for a WRITE. Every remaining caller is a read, so the provider is no
+ * longer a choice.
+ */
+function getContract(chainId: number) {
   const chain = getChain(chainId)
-  return new ethers.Contract(
-    chain.contracts.allowanceModule,
-    ALLOWANCE_MODULE_ABI,
-    signerOrProvider ?? getProvider(chainId),
-  )
+  return new ethers.Contract(chain.contracts.allowanceModule, ALLOWANCE_MODULE_ABI, getProvider(chainId))
 }
 
 // ── Read Functions ────────────────────────────────────────────────
@@ -133,23 +146,6 @@ export async function getTokenBalance(
 }
 
 /**
- * Read the latest block timestamp (seconds) for a chain.
- *
- * This is the clock source for allowance reset decisions: it mirrors the
- * `block.timestamp` the AllowanceModule will see when it applies its reset
- * branch, unlike the relayer's wall clock (`Date.now()`) which can drift from
- * chain time and flip the routing decision near a reset boundary.
- */
-export async function getLatestBlockTimeSec(chainId: number): Promise<number> {
-  const provider = getProvider(chainId)
-  const block = await provider.getBlock('latest')
-  if (!block) {
-    throw new Error('Failed to read latest block for allowance reset timing')
-  }
-  return Number(block.timestamp)
-}
-
-/**
  * Read every token slot configured for a delegate on a Safe.
  */
 export async function getTokensForDelegate(
@@ -160,161 +156,4 @@ export async function getTokensForDelegate(
   const contract = getContract(chainId)
   const result: string[] = await contract.getTokens(safe, delegate)
   return result
-}
-
-/**
- * Compute effective remaining allowance accounting for the AllowanceModule's
- * reset logic.
- *
- * `nowSec` MUST be chain time — a block `timestamp` in seconds, e.g. from
- * `getLatestBlockTimeSec` — NOT the relayer's wall clock. The on-chain reset
- * branch keys off `block.timestamp`; deciding auto-execute-vs-queue against
- * `Date.now()` lets server clock skew flip the decision near a reset boundary
- * (skew ahead → false auto-execute → on-chain revert; skew behind → a valid
- * in-budget payment is needlessly queued).
- */
-export function computeEffectiveAllowance(
-  info: AllowanceInfo,
-  nowSec: number,
-): EffectiveAllowance {
-  if (info.resetTimeMin === 0) {
-    const remaining = info.amount > info.spent ? info.amount - info.spent : 0n
-    return { remaining, effectiveSpent: info.spent, isResetPending: false }
-  }
-
-  const lastResetSec = info.lastResetMin * 60
-  const resetPeriodSec = info.resetTimeMin * 60
-
-  if (nowSec >= lastResetSec + resetPeriodSec) {
-    return { remaining: info.amount, effectiveSpent: 0n, isResetPending: true }
-  }
-
-  const remaining = info.amount > info.spent ? info.amount - info.spent : 0n
-  return { remaining, effectiveSpent: info.spent, isResetPending: false }
-}
-
-// ── Hash & Signature ──────────────────────────────────────────────
-
-/**
- * Call the on-chain generateTransferHash view function.
- */
-export async function generateTransferHash(
-  chainId: number,
-  safe: string,
-  token: string,
-  to: string,
-  amount: bigint,
-  paymentToken: string,
-  payment: bigint,
-  nonce: number,
-): Promise<string> {
-  const contract = getContract(chainId)
-  return contract.generateTransferHash(
-    safe,
-    token,
-    to,
-    amount,
-    paymentToken,
-    payment,
-    nonce,
-  )
-}
-
-/**
- * Recover the signer address from a raw ECDSA signature over a hash.
- */
-export function recoverSigner(hash: string, signature: string): string {
-  return ethers.recoverAddress(hash, signature)
-}
-
-// ── Transaction Execution ─────────────────────────────────────────
-
-/**
- * Execute an allowance transfer via the relayer wallet.
- * The relayer pays gas; the delegate's signature authorises the transfer.
- */
-export async function executeAllowanceTransfer(
-  chainId: number,
-  safe: string,
-  token: string,
-  to: string,
-  amount: bigint,
-  paymentToken: string,
-  payment: bigint,
-  delegate: string,
-  signature: string,
-  /** #717: who this transfer is billed to (relayer gas budget + attribution). */
-  attribution?: RelayerAttribution,
-): Promise<{ txHash: string }> {
-  // #717: budget check before any relayer work — over-cap throws
-  // RelayerBudgetExceededError (routes map it to 429).
-  await assertRelayerBudget('allowance_transfer', attribution ?? {})
-  const relayer = getRelayerWallet(chainId)
-  const contract = getContract(chainId, relayer)
-  const args = [safe, token, to, amount, paymentToken, payment, delegate, signature] as const
-
-  // Preflight (#692): a stale allowance nonce — the signature was built against a
-  // nonce a prior transfer already consumed (cross-RPC propagation) — makes
-  // executeAllowanceTransfer revert with no reason. Static-call first so a doomed
-  // transfer never lands or burns gas. This turns a masked "On-chain execution
-  // failed" into a clear, retry-safe error: nothing was submitted, so re-reading
-  // the nonce and re-signing cannot double-spend.
-  try {
-    await contract.executeAllowanceTransfer.staticCall(...args)
-  } catch {
-    throw new Error(
-      'Allowance transfer would revert before submission — likely a stale allowance ' +
-        'nonce; re-read the allowance and re-sign before retrying.',
-    )
-  }
-
-  const provider = relayer.provider
-  if (!provider) {
-    throw new Error(`Relayer provider not configured for chain ${chainId}`)
-  }
-
-  // Broadcast under the per-chain send lock so concurrent transfers can't
-  // populate the same relayer EOA nonce (#692/#718). Explicit fee headroom so
-  // a base-fee spike can't strand the tx and block the nonce lane. The
-  // confirmation wait below stays OUTSIDE the lock — only the nonce-read→
-  // broadcast window is exclusive.
-  // #717: the attempt row lands BEFORE broadcast so concurrent bursts see
-  // each other in the count; the receipt stamps it below.
-  const spendId = await recordRelayerSpend({
-    operation: 'allowance_transfer',
-    chainId,
-    agentId: attribution?.agentId,
-    userId: attribution?.userId,
-  })
-  const tx = await withRelayerSendLock(chainId, async () => {
-    const feeOverrides = await getRelayerFeeOverrides(provider)
-    return contract.executeAllowanceTransfer(...args, feeOverrides)
-  })
-
-  // tx.wait() can return null on a lagging RPC even when the tx confirmed (#690);
-  // poll by hash with a timeout, then assert it didn't revert. The nonce is then
-  // confirmed-visible on this provider for the next transfer's read.
-  const receipt = await provider.waitForTransaction(tx.hash, 1, 90_000)
-  await finishRelayerSpend(spendId, {
-    txHash: tx.hash,
-    gasUsed: receipt ? BigInt(receipt.gasUsed.toString()) : null,
-    effectiveGasPrice: receipt?.gasPrice != null ? BigInt(receipt.gasPrice.toString()) : null,
-  })
-  if (!receipt) {
-    throw new Error(`Allowance transfer ${tx.hash} not confirmed within 90s`)
-  }
-  if (receipt.status === 0) {
-    throw new Error(`Allowance transfer ${tx.hash} reverted`)
-  }
-
-  // Record the post-transfer nonce so the next build for this delegate waits for
-  // it to be visible before signing, avoiding the stale-nonce race (#692).
-  // Best-effort — never fail a confirmed transfer over the bookkeeping read.
-  try {
-    const { nonce } = await getTokenAllowance(chainId, safe, delegate, token)
-    recordAllowanceNonce(chainId, safe, delegate, token, nonce)
-  } catch {
-    // The preflight + retry still cover a stale next-read.
-  }
-  return { txHash: tx.hash }
 }

@@ -17,8 +17,11 @@
  * Convention — see `README.md` in this directory. Executor last, defaulting to
  * the pool; tenant scope (`agentId`) required; SQL in exported constants so
  * `scripts/db-schema-smoke.ts` can PREPARE it by import. The statements that
- * interpolate a reference/conflict column do so through a two-value union
- * mapped to exported concrete constants — never raw input.
+ * interpolate a reference column do so through a single-valued literal type
+ * mapped to exported concrete constants — never raw input. (#2118 narrowed
+ * that from a two-value union when the approval-anchored writes were
+ * deleted; the interpolation seam stays, so a second anchor could only ever
+ * be added back as a type, not as a caller-supplied string.)
  *
  * **The SQL here is verbatim from the call sites.**
  */
@@ -28,14 +31,13 @@ import { type Executor, type QueryRow } from '../transaction.js'
 
 export type { Executor }
 
-export type EvidenceReferenceColumn = 'payment_intent_id' | 'approval_request_id'
-
 // ── Evidence base upsert (lib/machine-payment-evidence.ts) ───────────────────
 
 /**
- * Parameterised by its conflict clause so the intent- and approval-anchored
- * writes cannot drift; the concrete statements are the exported constants
- * below. FX columns COALESCE so book-time values freeze at settlement.
+ * FX columns COALESCE so book-time values freeze at settlement.
+ *
+ * #2118: this was parameterised so the intent- and approval-anchored writes
+ * could not drift. Only the intent-anchored write survives.
  */
 function evidenceBaseUpsertSql(conflictClause: string): string {
   return `INSERT INTO machine_payment_evidence (
@@ -78,14 +80,15 @@ function evidenceBaseUpsertSql(conflictClause: string): string {
 export const UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL = evidenceBaseUpsertSql(
   'ON CONFLICT (payment_intent_id)',
 )
-export const UPSERT_EVIDENCE_BASE_FOR_APPROVAL_SQL = evidenceBaseUpsertSql(
-  'ON CONFLICT (approval_request_id) WHERE approval_request_id IS NOT NULL',
-)
 
 export interface EvidenceBaseInput {
-  referenceColumn: EvidenceReferenceColumn
   paymentIntentId: string | null
-  approvalRequestId: string | null
+  /**
+   * #2118: pinned to `null`. The COLUMN survives and historical rows still
+   * carry values (migration 070), but no NEW evidence row can be anchored to
+   * an approval — the type, not a convention, is what makes that impossible.
+   */
+  approvalRequestId: null
   agentId: string
   userId: string
   rail: string
@@ -113,11 +116,7 @@ export async function upsertEvidenceBase(
   input: EvidenceBaseInput,
   db: Executor = pool,
 ): Promise<void> {
-  const sql =
-    input.referenceColumn === 'payment_intent_id'
-      ? UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL
-      : UPSERT_EVIDENCE_BASE_FOR_APPROVAL_SQL
-  await db.query(sql, [
+  await db.query(UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL, [
     input.paymentIntentId,
     input.approvalRequestId,
     input.agentId,
@@ -152,6 +151,9 @@ export const FIND_INTENT_EVIDENCE_SOURCE_SQL = `SELECT 'payment_intent'::TEXT AS
             x402_resource_url, x402_merchant_address, x402_idempotency_key,
             payment_rail, payment_resource_url, merchant_address,
             machine_challenge_id, machine_idempotency_key, machine_metadata,
+            execution_rail,
+            delegation_hash,
+            created_at,
             confirmed_at
      FROM payment_intents
      WHERE id = $1
@@ -159,7 +161,14 @@ export const FIND_INTENT_EVIDENCE_SOURCE_SQL = `SELECT 'payment_intent'::TEXT AS
      LIMIT 1`
 
 export interface EvidenceSourceRow {
-  kind: 'payment_intent' | 'approval_request'
+  /**
+   * #2085: narrowed to the literal this query actually selects
+   * (`'payment_intent'::TEXT AS kind`, FROM `payment_intents`). #2055 dropped
+   * `approval_requests`, so no sibling read can widen it again without a
+   * migration. Pinned by
+   * `infra/repositories/__tests__/approval-kind-unconstructible.test.ts`.
+   */
+  kind: 'payment_intent'
   id: string
   agent_id: string
   user_id: string
@@ -182,6 +191,17 @@ export interface EvidenceSourceRow {
   machine_challenge_id: string | null
   machine_idempotency_key: string | null
   machine_metadata: Record<string, unknown> | string | null
+  /** #2092: the rail the intent was authorized on — the erc7710 completion seam's guard. */
+  execution_rail: string | null
+  /**
+   * #2094: the settlement child's hash. Intent-unique since the child is
+   * salted from the intent id, so the completion seam can bind the reported
+   * settlement to THIS payment via the DelegationManager's own
+   * `RedeemedDelegation` log instead of to its transfer shape alone.
+   */
+  delegation_hash: string | null
+  /** #2092: authorize time — the origin of the erc7710 settlement window. */
+  created_at: string | null
   confirmed_at: string | null
 }
 
@@ -208,19 +228,11 @@ export const FIND_INTENT_FOR_EVIDENCE_SQL = `SELECT 'payment_intent'::TEXT AS ki
             x402_resource_url, x402_merchant_address, x402_idempotency_key,
             payment_rail, payment_resource_url, merchant_address,
             machine_challenge_id, machine_idempotency_key, machine_metadata,
+            execution_rail,
+            delegation_hash,
+            created_at,
             confirmed_at
      FROM payment_intents
-     WHERE id = $1 AND agent_id = $2
-     LIMIT 1`
-
-export const FIND_APPROVAL_FOR_EVIDENCE_SQL = `SELECT 'approval_request'::TEXT AS kind,
-            id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-            to_address, amount_raw, amount_human, tx_hash, status, source,
-            x402_resource_url, NULL::TEXT AS x402_merchant_address, NULL::TEXT AS x402_idempotency_key,
-            payment_rail, payment_resource_url, merchant_address,
-            machine_challenge_id, machine_idempotency_key, machine_metadata,
-            executed_at AS confirmed_at
-     FROM approval_requests
      WHERE id = $1 AND agent_id = $2
      LIMIT 1`
 
@@ -236,21 +248,32 @@ export async function findIntentForEvidenceScoped(
   return result.rows[0] ?? null
 }
 
-export async function findApprovalForEvidenceScoped(
-  paymentId: string,
-  agentId: string,
-  db: Executor = pool,
-): Promise<EvidenceSourceRow | null> {
-  const result = await db.query<EvidenceSourceRow>(FIND_APPROVAL_FOR_EVIDENCE_SQL, [
-    paymentId,
-    agentId,
-  ])
-  return result.rows[0] ?? null
-}
+// #2055: `FIND_APPROVAL_FOR_EVIDENCE_SQL` / `findApprovalForEvidenceScoped`
+// are gone with `approval_requests`. This note used to add that the evidence
+// WRITE variants keyed on `approval_request_id` STAY, because the column
+// survives the drop — true when it was written, and false as of #2118 below.
+// The column's survival is still the reason the READ path stays; it stopped
+// being a reason to keep the writes once nothing could reach them.
+//
+// #2118: the approval-keyed evidence/reconciliation WRITE builders that used
+// to live here are DELETED. They were fully unreachable after #2085 — every
+// caller resolved its reference column through `referenceColumnForPayment`
+// (`modules/mpp/evidence.ts`) or the inlined literal in `reconciliation.ts`,
+// and both always answered `'payment_intent_id'`. The removal is pinned by
+// `__tests__/approval-reference-unreachable.test.ts`, which proves the write
+// path unreachable AND the read path intact, on the real-DB harness.
+//
+// What deliberately SURVIVES, and why the deletion stops exactly here: the
+// `approval_request_id` COLUMN and every READ of it. Migration 070 dropped
+// `approval_requests` with CASCADE precisely so historical evidence and
+// reconciliation rows would keep their values, and `mapEvidence` uses the
+// column as those rows' only `payment_id` anchor — reachable today through
+// `GET /receipts`. Removing the column or the fallback returns
+// `payment_id: null` for every pre-#2055 receipt; the test asserts exactly that.
 
 // ── Evidence attach (proof upgrade, lib/machine-payment-evidence.ts) ─────────
 
-function evidenceAttachSql(referenceColumn: EvidenceReferenceColumn): string {
+function evidenceAttachSql(referenceColumn: 'payment_intent_id'): string {
   return `UPDATE machine_payment_evidence
      SET proof_status = CASE
            WHEN $3 = 'protocol_receipt_attached' THEN $3
@@ -272,10 +295,8 @@ function evidenceAttachSql(referenceColumn: EvidenceReferenceColumn): string {
 }
 
 export const ATTACH_EVIDENCE_FOR_INTENT_SQL = evidenceAttachSql('payment_intent_id')
-export const ATTACH_EVIDENCE_FOR_APPROVAL_SQL = evidenceAttachSql('approval_request_id')
 
 export interface AttachEvidenceParams {
-  referenceColumn: EvidenceReferenceColumn
   paymentId: string
   agentId: string
   proofStatus: string
@@ -293,11 +314,7 @@ export async function attachEvidenceProof<R extends QueryRow>(
   input: AttachEvidenceParams,
   db: Executor = pool,
 ): Promise<R | null> {
-  const sql =
-    input.referenceColumn === 'payment_intent_id'
-      ? ATTACH_EVIDENCE_FOR_INTENT_SQL
-      : ATTACH_EVIDENCE_FOR_APPROVAL_SQL
-  const result = await db.query<R>(sql, [
+  const result = await db.query<R>(ATTACH_EVIDENCE_FOR_INTENT_SQL, [
     input.paymentId,
     input.agentId,
     input.proofStatus,
@@ -355,7 +372,14 @@ export async function getIntentSettlementFields(
 
 export interface ReconciliationPaymentRow {
   id: string
-  kind: 'payment_intent' | 'approval_request'
+  /**
+   * #2085: narrowed to the literal this query actually selects
+   * (`'payment_intent'::TEXT AS kind`, FROM `payment_intents`). #2055 dropped
+   * `approval_requests`, so no sibling read can widen it again without a
+   * migration. Pinned by
+   * `infra/repositories/__tests__/approval-kind-unconstructible.test.ts`.
+   */
+  kind: 'payment_intent'
   user_id: string
   tx_hash: string | null
   status: string
@@ -379,15 +403,6 @@ export const FIND_RECONCILIATION_INTENT_SQL = `SELECT 'payment_intent'::TEXT AS 
        WHERE id = $1 AND agent_id = $2
        LIMIT 1`
 
-export const FIND_RECONCILIATION_APPROVAL_SQL = `SELECT 'approval_request'::TEXT AS kind,
-                id, user_id, tx_hash, status, payment_rail, source,
-                payment_resource_url, x402_resource_url,
-                merchant_address, NULL::TEXT AS x402_merchant_address,
-                machine_challenge_id, machine_idempotency_key, NULL::TEXT AS x402_idempotency_key
-         FROM approval_requests
-         WHERE id = $1 AND agent_id = $2
-         LIMIT 1`
-
 export async function findReconciliationIntent(
   paymentId: string,
   agentId: string,
@@ -400,19 +415,10 @@ export async function findReconciliationIntent(
   return result.rows[0] ?? null
 }
 
-export async function findReconciliationApproval(
-  paymentId: string,
-  agentId: string,
-  db: Executor = pool,
-): Promise<ReconciliationPaymentRow | null> {
-  const result = await db.query<ReconciliationPaymentRow>(FIND_RECONCILIATION_APPROVAL_SQL, [
-    paymentId,
-    agentId,
-  ])
-  return result.rows[0] ?? null
-}
+// #2055: `FIND_RECONCILIATION_APPROVAL_SQL` / `findReconciliationApproval`
+// are gone with `approval_requests` (see the evidence-read note above).
 
-function reconciliationEventUpsertSql(conflictColumn: EvidenceReferenceColumn): string {
+function reconciliationEventUpsertSql(conflictColumn: 'payment_intent_id'): string {
   return `INSERT INTO machine_payment_reconciliation_events (
         agent_id, user_id, payment_intent_id, approval_request_id, rail, event_type, tx_hash,
         resource_url, merchant_address, machine_challenge_id, machine_idempotency_key,
@@ -436,8 +442,6 @@ function reconciliationEventUpsertSql(conflictColumn: EvidenceReferenceColumn): 
 
 export const UPSERT_RECONCILIATION_EVENT_FOR_INTENT_SQL =
   reconciliationEventUpsertSql('payment_intent_id')
-export const UPSERT_RECONCILIATION_EVENT_FOR_APPROVAL_SQL =
-  reconciliationEventUpsertSql('approval_request_id')
 
 export interface ReconciliationEventRow {
   id: string
@@ -446,11 +450,11 @@ export interface ReconciliationEventRow {
 }
 
 export interface UpsertReconciliationEventInput {
-  conflictColumn: EvidenceReferenceColumn
   agentId: string
   userId: string
   paymentIntentId: string | null
-  approvalRequestId: string | null
+  /** #2118: pinned to `null` — see `EvidenceBaseInput.approvalRequestId`. */
+  approvalRequestId: null
   rail: string
   eventType: string
   txHash: string
@@ -471,11 +475,7 @@ export async function upsertReconciliationEvent(
   input: UpsertReconciliationEventInput,
   db: Executor = pool,
 ): Promise<ReconciliationEventRow | null> {
-  const sql =
-    input.conflictColumn === 'approval_request_id'
-      ? UPSERT_RECONCILIATION_EVENT_FOR_APPROVAL_SQL
-      : UPSERT_RECONCILIATION_EVENT_FOR_INTENT_SQL
-  const result = await db.query<ReconciliationEventRow>(sql, [
+  const result = await db.query<ReconciliationEventRow>(UPSERT_RECONCILIATION_EVENT_FOR_INTENT_SQL, [
     input.agentId,
     input.userId,
     input.paymentIntentId,
@@ -493,7 +493,7 @@ export async function upsertReconciliationEvent(
   return result.rows[0] ?? null
 }
 
-function reconciliationEventFindSql(conflictColumn: EvidenceReferenceColumn): string {
+function reconciliationEventFindSql(conflictColumn: 'payment_intent_id'): string {
   return `SELECT id, status, created_at
          FROM machine_payment_reconciliation_events
          WHERE ${conflictColumn} = $1
@@ -504,25 +504,21 @@ function reconciliationEventFindSql(conflictColumn: EvidenceReferenceColumn): st
 
 export const FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL =
   reconciliationEventFindSql('payment_intent_id')
-export const FIND_RECONCILIATION_EVENT_FOR_APPROVAL_SQL =
-  reconciliationEventFindSql('approval_request_id')
 
 export async function findReconciliationEvent(
-  conflictColumn: EvidenceReferenceColumn,
   paymentId: string,
   agentId: string,
   eventType: string,
   db: Executor = pool,
 ): Promise<ReconciliationEventRow | null> {
-  const sql =
-    conflictColumn === 'approval_request_id'
-      ? FIND_RECONCILIATION_EVENT_FOR_APPROVAL_SQL
-      : FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL
-  const result = await db.query<ReconciliationEventRow>(sql, [paymentId, agentId, eventType])
+  const result = await db.query<ReconciliationEventRow>(
+    FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL,
+    [paymentId, agentId, eventType],
+  )
   return result.rows[0] ?? null
 }
 
-function resolveReconciliationForPaymentSql(referenceColumn: EvidenceReferenceColumn): string {
+function resolveReconciliationForPaymentSql(referenceColumn: 'payment_intent_id'): string {
   return `UPDATE machine_payment_reconciliation_events
        SET status = 'resolved',
            updated_at = NOW()
@@ -534,21 +530,14 @@ function resolveReconciliationForPaymentSql(referenceColumn: EvidenceReferenceCo
 
 export const RESOLVE_RECONCILIATION_FOR_INTENT_SQL =
   resolveReconciliationForPaymentSql('payment_intent_id')
-export const RESOLVE_RECONCILIATION_FOR_APPROVAL_SQL =
-  resolveReconciliationForPaymentSql('approval_request_id')
 
 /** A settle proof arrived for this payment — close its stranded-funds flag. */
 export async function resolveReconciliationForPayment(
-  referenceColumn: EvidenceReferenceColumn,
   paymentId: string,
   agentId: string,
   db: Executor = pool,
 ): Promise<void> {
-  const sql =
-    referenceColumn === 'approval_request_id'
-      ? RESOLVE_RECONCILIATION_FOR_APPROVAL_SQL
-      : RESOLVE_RECONCILIATION_FOR_INTENT_SQL
-  await db.query(sql, [paymentId, agentId])
+  await db.query(RESOLVE_RECONCILIATION_FOR_INTENT_SQL, [paymentId, agentId])
 }
 
 export const RESOLVE_STRANDED_EVENTS_FOR_AGENT_SQL = `UPDATE machine_payment_reconciliation_events
@@ -733,12 +722,14 @@ export async function markSweepSubmitted(
 
 // ── Merchant receipts (#956, lib/merchant-receipt.ts) ────────────────────────
 
+// #2055: the `approval_requests` join half is gone with the table —
+// approval-anchored evidence rows keep their column value but are no longer
+// reachable through this lookup (queue-history readability waived, #2021).
 export const FIND_EVIDENCE_ANCHOR_FOR_AGENT_SQL = `SELECT mpe.id, mpe.user_id
      FROM machine_payment_evidence mpe
-     LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
-     LEFT JOIN approval_requests ar ON ar.id = mpe.approval_request_id
-     WHERE COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT) = $1
-       AND COALESCE(pi.agent_id, ar.agent_id) = $2`
+     JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
+     WHERE mpe.payment_intent_id = $1
+       AND pi.agent_id = $2`
 
 export interface EvidenceAnchorRow {
   id: string
@@ -747,7 +738,7 @@ export interface EvidenceAnchorRow {
 
 /**
  * The evidence row is the anchor (#498's receiptRef) — agent-scoped via the
- * intent/approval join so an agent can only annotate its own payments.
+ * intent join so an agent can only annotate its own payments.
  */
 export async function findEvidenceAnchorForAgent(
   paymentId: string,

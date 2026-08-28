@@ -56,15 +56,18 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_pay_mcp_tool` | merchant MCP quote probe + `POST /x402` | no — edge signs |
 | `haven_settle_mcp_tool` | `POST /payments/:id/sign`, then merchant MCP endpoint + evidence/reconciliation APIs | no — relays signed artifacts |
 | `haven_complete_mcp_tool` | merchant MCP endpoint + evidence/reconciliation APIs | no — relays signed header |
-| `haven_discover_tools` | `GET /catalog` | no |
+| `haven_discover_tools` | `GET /catalog` (badge fields + `verified` filter, epic #1717) | no |
+| `haven_submit_catalog_entry` | `POST /catalog/submit` (queue-only; ownership proof + quote probe required before listing) | no |
 | `haven_get_payment_status` | `GET /machine-payments/:id/status` | no |
 | `haven_get_resume_state` | `GET /machine-payments/:id/status` as resume state | no |
 | `haven_list_receipts` | `GET /machine-payments/receipts` | no |
 | `haven_sweep_delegate` | gasless stranded-funds sweep prepare/submit | no — relays signed sweep |
 
-`haven_pay` returns `{ payment_id, payload_hash, expires_at }` in-budget, or
-`{ status: "pending_approval", payload_hash: null }` when the amount exceeds the
-on-chain allowance (nothing to sign; the user approves in Haven).
+`haven_pay` returns `{ payment_id, payload_hash, expires_at }` in-budget. A
+payment outside the agent's on-chain budget, recipient pin or expiry is declined
+during prepare — before any money moves and before there is anything to sign.
+Haven holds no approval queue, so nothing is held back for a human to sign off
+later.
 
 ### x402 paid MCP tool flow
 

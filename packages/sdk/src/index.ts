@@ -50,7 +50,6 @@ export type {
   PaymentResult,
   PaymentFee,
   PaymentStatus,
-  PendingApproval,
   PaymentStatusResult,
   PaymentNextAction,
   PaymentPhase,
@@ -88,6 +87,8 @@ export type {
   SweepEntry,
   SweepConfirmation,
   HavenCatalogEntry,
+  HavenCatalogSubmission,
+  CatalogSubmissionAccepted,
 } from './types.js'
 
 export type { ClaudeTool, OpenAITool } from './tools.js'

@@ -165,7 +165,11 @@ describe('useSafeOperationGate', () => {
     expect(result.current).toEqual({ kind: 'ready' })
   })
 
-  it('hybrid account: passkey_on_other_device when signers exist but none is on this device', () => {
+  it('hybrid account: READY when signers exist but none is on this device (#1969 — cross-device ceremony is a working path)', () => {
+    // Pre-#1969 this returned passkey_on_other_device, which consumers treat
+    // as BLOCKED (isOnchainActionBlocked) — a false blocker (#1097) for a set
+    // that signs via the cross-device ceremony. The availability hint lives
+    // next to the working actions, not in this gate.
     mockHybridAuth()
     setStoredHybridSigners(HYBRID_SIGNERS)
 
@@ -173,7 +177,84 @@ describe('useSafeOperationGate', () => {
       useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
-    expect(result.current).toEqual({ kind: 'passkey_on_other_device' })
+    expect(result.current).toEqual({ kind: 'ready' })
+  })
+
+  it('hybrid account: owner-only set is READY when the connected wallet IS the named owner (#2068)', () => {
+    mockHybridAuth()
+    setStoredHybridSigners({ ...HYBRID_SIGNERS, owner_address: EOA_ADDRESS, passkeys: [] })
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
+    mockUseWalletClient.mockReturnValue({ data: { type: 'walletClient' } })
+
+    const { result } = renderHook(() =>
+      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current).toEqual({ kind: 'ready' })
+  })
+
+  it('hybrid account: owner-only set is WRONG_WALLET for an UNRELATED connected wallet, never ready (#2068/#2073)', () => {
+    // #2068 proved this state must not be `ready`; #2073 gives it its own
+    // identity. Both facts are asserted: the exact kind AND the addresses a
+    // consumer needs to name the mismatch.
+    mockHybridAuth()
+    setStoredHybridSigners({
+      ...HYBRID_SIGNERS,
+      owner_address: '0x2222222222222222222222222222222222222222',
+      passkeys: [],
+    })
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS }) // Y ≠ X
+    mockUseWalletClient.mockReturnValue({ data: { type: 'walletClient' } })
+
+    const { result } = renderHook(() =>
+      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current).toEqual({
+      kind: 'wrong_wallet',
+      connectedAddress: EOA_ADDRESS,
+      ownerAddress: '0x2222222222222222222222222222222222222222',
+    })
+  })
+
+  it('hybrid account: wrong_wallet is keyed on the ADDRESS alone — walletClient not required (#2073)', () => {
+    // The mismatch is true whatever chain the wrong wallet sits on, and
+    // switching networks would not make a non-owner wallet the owner — so the
+    // state must not degrade to no_signer while walletClient is unready.
+    mockHybridAuth()
+    setStoredHybridSigners({
+      ...HYBRID_SIGNERS,
+      owner_address: '0x2222222222222222222222222222222222222222',
+      passkeys: [],
+    })
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
+    mockUseWalletClient.mockReturnValue({ data: undefined })
+
+    const { result } = renderHook(() =>
+      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current.kind).toBe('wrong_wallet')
+  })
+
+  it('hybrid account: the OWNER connected with an unready walletClient stays no_signer, never wrong_wallet (#2073)', () => {
+    // Positive control for the address compare: the named owner on the wrong
+    // network is a network problem, not a wrong wallet — the wrong-chain copy
+    // downstream keys on no_signer.
+    mockHybridAuth()
+    setStoredHybridSigners({
+      ...HYBRID_SIGNERS,
+      owner_address: EOA_ADDRESS,
+      passkeys: [],
+    })
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
+    mockUseWalletClient.mockReturnValue({ data: undefined })
+
+    const { result } = renderHook(() =>
+      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current).toEqual({ kind: 'no_signer' })
   })
 
   it('hybrid account: no_signer when no signer set is known — even with a wallet connected', () => {

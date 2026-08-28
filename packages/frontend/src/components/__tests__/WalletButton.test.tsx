@@ -38,8 +38,13 @@ const mocks = vi.hoisted(() => ({
   openConnectModalHook: vi.fn(),
   useOwnerDirectory: vi.fn(),
   useActiveSigner: vi.fn(),
+  useSafeOperationGate: vi.fn(),
   useAuth: vi.fn(),
   writeText: vi.fn(),
+}))
+
+vi.mock('@/hooks/useSafeOperationGate', () => ({
+  useSafeOperationGate: (args: unknown) => mocks.useSafeOperationGate(args),
 }))
 
 vi.mock('@rainbow-me/rainbowkit', () => ({
@@ -117,6 +122,7 @@ describe('WalletButton', () => {
       getOwnerAlias: vi.fn(() => null),
     })
     mocks.useActiveSigner.mockReturnValue(null)
+    mocks.useSafeOperationGate.mockReturnValue({ kind: 'no_signer' })
 
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -245,6 +251,60 @@ describe('WalletButton', () => {
     expect(screen.getByText('Connected wallet')).toBeInTheDocument()
     expect(screen.getAllByText('0x5555…5555')).toHaveLength(2)
     expect(screen.getByRole('button', { name: 'Switch wallet' })).toBeInTheDocument()
+  })
+
+  it('renders the WRONG WALLET pill when the gate says the connected wallet is not the account owner (#2073)', () => {
+    setConnectedWallet()
+    mocks.useSafeOperationGate.mockReturnValue({
+      kind: 'wrong_wallet',
+      connectedAddress: EOA_ADDRESS,
+      ownerAddress: '0x2222222222222222222222222222222222222222',
+    })
+
+    render(<WalletButton />)
+
+    // The pill NAMES the state — visible label and accessible name are the
+    // same expression, so both are asserted through the role query. The
+    // normal connected-address pill must not render: that silent "everything
+    // is fine" pill beside a blocked action area is the #2073 defect.
+    const pill = screen.getByRole('button', { name: 'Wrong wallet' })
+    expect(pill).toBeInTheDocument()
+    expect(pill).toHaveTextContent('Wrong wallet')
+    expect(screen.queryByRole('button', { name: '0x5555…5555' })).not.toBeInTheDocument()
+
+    // The fix lives one click away: the popover with Switch wallet — and the
+    // popover NAMES the mismatch (design-review finding on #2073: without
+    // this line it rendered pixel-identical to the healthy connected state).
+    fireEvent.click(pill)
+    expect(screen.getByRole('dialog', { name: 'Wallet menu' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Switch wallet' })).toBeInTheDocument()
+    expect(
+      screen.getByText(/This is not the wallet that controls this account/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/0x2222…2222/)).toBeInTheDocument()
+  })
+
+  it('positive control: the healthy connected popover never renders the wrong-wallet note (#2073)', () => {
+    setConnectedWallet()
+    mocks.useSafeOperationGate.mockReturnValue({ kind: 'ready' })
+
+    render(<WalletButton />)
+
+    fireEvent.click(screen.getByRole('button', { name: '0x5555…5555' }))
+    expect(screen.getByRole('dialog', { name: 'Wallet menu' })).toBeInTheDocument()
+    expect(
+      screen.queryByText(/This is not the wallet that controls this account/),
+    ).not.toBeInTheDocument()
+  })
+
+  it('positive control: a connected wallet with a non-wrong-wallet gate keeps the normal address pill (#2073)', () => {
+    setConnectedWallet()
+    mocks.useSafeOperationGate.mockReturnValue({ kind: 'ready' })
+
+    render(<WalletButton />)
+
+    expect(screen.getByRole('button', { name: '0x5555…5555' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Wrong wallet' })).not.toBeInTheDocument()
   })
 
   it('uses an owner alias for the connected wallet label and dropdown', () => {
@@ -451,6 +511,124 @@ describe('WalletButton', () => {
     expect(within(dialog).getByText('Passkey · added May 10, 2026')).toBeInTheDocument()
     // The block identifies the credential by truncated key id, never an address:
     expect(within(dialog).getByText('0x2222…2222')).toBeInTheDocument()
+    // #1952: the matched rendering must NOT carry the fallback's words, or the
+    // two facts are indistinguishable in the direction that matters least
+    // visibly — a positive-only assertion on 'Signing with' would pass against
+    // BOTH renderings, since the fallback eyebrow contains that substring.
+    expect(
+      within(dialog).queryByText('No passkey enrolled on this device'),
+    ).not.toBeInTheDocument()
+    expect(
+      within(dialog).queryByText('Your browser may ask you to choose a different one.'),
+    ).not.toBeInTheDocument()
     window.localStorage.removeItem('haven_passkey_device_' + credentialIdFromKeyId(KEY_B))
+  })
+
+  /**
+   * #1952 — the state the popover used to render as NOTHING.
+   *
+   * The defect was an inversion: `WalletButton` drove the block from
+   * `hybridPasskeyOnDevice`, which returns `null` when no enrolled passkey
+   * carries this device's marker, so `signingWith` went `undefined` and the
+   * whole section vanished. That is precisely when signing falls back to
+   * `passkeys[0]` — an arbitrary credential chosen by POSITION. The UI named
+   * the credential when the choice was unambiguous and went silent when it was
+   * arbitrary, on an authority-bearing action.
+   *
+   * The fix is a routing change, not a copy change: display now asks
+   * `hybridPasskeyToSignWith` — the same selector `delegationPasskeySigner`
+   * signs through (#1933) — so display and signing cannot name different keys.
+   *
+   * ── What these tests do and do not prove ────────────────────────────────
+   *
+   * They prove the COMPONENT's contract, because they hand `WalletButton` a
+   * `delegator_passkey` through the mocked `useActiveSigner` directly. Since
+   * #1969 (owner decision 2026-08-26) this is ALSO a reachable production
+   * state: the real `useActiveSigner` resolves a `delegator_passkey` for any
+   * non-empty hydrated signer set, so a marker-less user reaches this render
+   * through the ordinary hydration path. The reachable-state proof lives in
+   * `e2e/wallet-signer-offering.spec.ts`, which drives a real browser into
+   * both states without mocking the hook; these unit tests keep pinning the
+   * component's rendering contract in isolation.
+   */
+  it('Hybrid dropdown: names the passkeys[0] fallback and says it IS a fallback (#1952)', () => {
+    const KEY_A = '0x' + '11'.repeat(32)
+    const KEY_B = '0x' + '22'.repeat(32)
+    const ACCOUNT = '0x' + 'aa'.repeat(20)
+    // No device marker for EITHER key — the case the old code rendered blank.
+    mocks.useActiveSigner.mockReturnValue({
+      type: 'delegator_passkey',
+      accountAddress: ACCOUNT,
+      chainId: 84532,
+      signers: {
+        account_address: ACCOUNT,
+        chain_id: 84532,
+        owner_address: null,
+        passkeys: [
+          { key_id: KEY_A, x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+          { key_id: KEY_B, x: '0x3', y: '0x4', created_at: '2026-05-10T09:00:00.000Z' },
+        ],
+      },
+    })
+
+    render(<WalletButton />)
+    fireEvent.click(screen.getByRole('button', { name: 'Passkey' }))
+    const dialog = screen.getByRole('dialog', { name: 'Wallet menu' })
+
+    // The credential is NAMED rather than hidden, and it is the one signing
+    // will actually use — passkeys[0], not the second key.
+    const marker = within(dialog).getByText('No passkey enrolled on this device')
+    expect(marker).toBeInTheDocument()
+    expect(within(dialog).getByText('Signing with')).toBeInTheDocument()
+    expect(within(dialog).getByText('Passkey · added March 3, 2026')).toBeInTheDocument()
+    expect(within(dialog).getByText('0x1111…1111')).toBeInTheDocument()
+    expect(
+      within(dialog).getByText('Your browser may ask you to choose a different one.'),
+    ).toBeInTheDocument()
+
+    // The marker must be a DESIGNED one, not a longer sentence: the design pass
+    // measured that an eyebrow-only distinction rested on incidental text wrap
+    // at 288px. Assert the structural half — the left rule — so a revision that
+    // keeps the words and drops the treatment fails here rather than passing as
+    // "the copy is still there". The icon is asserted as a rendered svg for the
+    // same reason.
+    const block = marker.closest('div')
+    expect(block?.className).toContain('border-l-2')
+    expect(marker.querySelector('svg')).not.toBeNull()
+    // The second key is not the one signing: naming it here would be the same
+    // defect wearing different copy.
+    expect(within(dialog).queryByText('0x2222…2222')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Passkey · added May 10, 2026')).not.toBeInTheDocument()
+  })
+
+  it('Hybrid dropdown: names no credential when the signer set is empty (#1952)', () => {
+    const ACCOUNT = '0x' + 'aa'.repeat(20)
+    mocks.useActiveSigner.mockReturnValue({
+      type: 'delegator_passkey',
+      accountAddress: ACCOUNT,
+      chainId: 84532,
+      signers: {
+        account_address: ACCOUNT,
+        chain_id: 84532,
+        owner_address: null,
+        passkeys: [],
+      },
+    })
+
+    render(<WalletButton />)
+    fireEvent.click(screen.getByRole('button', { name: 'Passkey' }))
+    const dialog = screen.getByRole('dialog', { name: 'Wallet menu' })
+
+    // Nothing can sign, so there is no credential to name — and the fallback
+    // copy must not claim one. This is the ONLY case where silence is correct,
+    // which is why it is pinned: it is what stops the fix from being written as
+    // "always render something".
+    expect(within(dialog).queryByText('Signing with')).not.toBeInTheDocument()
+    expect(
+      within(dialog).queryByText('No passkey enrolled on this device'),
+    ).not.toBeInTheDocument()
+    expect(
+      within(dialog).queryByText('Your browser may ask you to choose a different one.'),
+    ).not.toBeInTheDocument()
   })
 })

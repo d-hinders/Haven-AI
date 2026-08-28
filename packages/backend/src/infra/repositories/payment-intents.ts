@@ -287,6 +287,7 @@ function machineIntentInsertSql(
   conflictColumn: 'machine_idempotency_key' | 'x402_idempotency_key',
 ): string {
   return `INSERT INTO payment_intents (
+      id,
       agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
       to_address, amount_raw, amount_human, delegate_address,
       allowance_nonce, sign_hash, status, source, x402_resource_url, x402_category,
@@ -295,7 +296,13 @@ function machineIntentInsertSql(
       machine_idempotency_key, machine_metadata,
       execution_rail, session_permission_id, session_user_op,
       delegation_hash, budget_delegation_hash, prepared_user_op, expires_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+    ) VALUES (
+      -- #2094: an explicit id when the caller needs the row's identity BEFORE
+      -- the insert (the erc7710 settlement child is salted from it); NULL
+      -- falls through to the column's own gen_random_uuid() default, which is
+      -- what every other caller still gets.
+      COALESCE($30::uuid, gen_random_uuid()),
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
       'pending_signature', $13, $14, $15, $16, $17,
       $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, NOW() + interval '10 minutes')
     ON CONFLICT (agent_id, ${conflictColumn})
@@ -309,6 +316,14 @@ export const INSERT_MACHINE_INTENT_MACHINE_KEY_SQL = machineIntentInsertSql('mac
 export const INSERT_MACHINE_INTENT_X402_KEY_SQL = machineIntentInsertSql('x402_idempotency_key')
 
 export interface NewMachineIntent {
+  /**
+   * #2094: an explicit primary key, for the one caller that must know the
+   * intent's identity before the row exists — the erc7710 authorize salts its
+   * settlement child from this id, so the child and the row that stores it are
+   * one thing. Omit it everywhere else and the column default supplies a
+   * `gen_random_uuid()` exactly as before.
+   */
+  id?: string
   agent: { id: string; user_id: string; safe_address: string; chain_id: number; delegate_address: string }
   rail: string
   payTo: string
@@ -346,7 +361,7 @@ export async function insertMachineIntent(
   db: Executor = pool,
 ): Promise<PaymentIntentRow | null> {
   const {
-    agent, rail, payTo, tokenSymbol, tokenAddress, amountRaw, amountHuman,
+    id, agent, rail, payTo, tokenSymbol, tokenAddress, amountRaw, amountHuman,
     allowanceNonce, signHash, resourceUrl, category, merchantAddress,
     challengeId, idempotencyKey, metadata,
     executionRail, sessionPermissionId, sessionUserOp,
@@ -368,6 +383,7 @@ export async function insertMachineIntent(
     idempotencyKey ?? null, metadata != null ? JSON.stringify(metadata) : null,
     executionRail ?? null, sessionPermissionId ?? null, sessionUserOp ?? null,
     delegationHash ?? null, budgetDelegationHash ?? null, preparedUserOp ?? null,
+    id ?? null,
   ])
   return result.rows[0] ?? null
 }
@@ -432,21 +448,6 @@ export const FIND_MACHINE_INTENT_BY_KEY_OR_CHALLENGE_SQL = `SELECT *
      ORDER BY created_at DESC
      LIMIT 1`
 
-export async function findMachineIntentByKeyOrChallenge(
-  agentId: string,
-  idempotencyKey: string | null,
-  challengeId: string | null,
-  rail: string,
-  db: Executor = pool,
-): Promise<PaymentIntentRow | null> {
-  const result = await db.query<PaymentIntentRow>(FIND_MACHINE_INTENT_BY_KEY_OR_CHALLENGE_SQL, [
-    agentId,
-    idempotencyKey,
-    challengeId,
-    rail,
-  ])
-  return result.rows[0] ?? null
-}
 
 // ── Status transitions (each carries its guard in its WHERE clause) ─────────
 
@@ -656,26 +657,6 @@ export const RECORD_MACHINE_INTENT_SIGNATURE_SQL = `UPDATE payment_intents
        AND tx_hash IS NULL
      RETURNING id`
 
-/**
- * One-shot mode records the signature WITHOUT claiming to 'submitted' — the
- * intent stays 'pending_signature' until execution succeeds, so a crash
- * between here and the RPC call cannot strand it (see the caller's comment).
- */
-export async function recordMachineIntentSignature(
-  signature: string,
-  intentId: string,
-  agentId: string,
-  rail: string,
-  db: Executor = pool,
-): Promise<boolean> {
-  const result = await db.query<{ id: string }>(RECORD_MACHINE_INTENT_SIGNATURE_SQL, [
-    signature,
-    intentId,
-    agentId,
-    rail,
-  ])
-  return result.rows.length > 0
-}
 
 export const CONFIRM_MACHINE_INTENT_SQL = `UPDATE payment_intents
        SET status = 'confirmed',
@@ -691,28 +672,6 @@ export const CONFIRM_MACHINE_INTENT_SQL = `UPDATE payment_intents
          AND tx_hash IS NULL
        RETURNING id`
 
-/** One-shot confirm: 'pending_signature' → 'confirmed' in one guarded write. */
-export async function confirmMachineIntent(
-  input: {
-    txHash: string
-    intentId: string
-    usdValue: number | string | null
-    eurValue: number | string | null
-    agentId: string
-    rail: string
-  },
-  db: Executor = pool,
-): Promise<boolean> {
-  const result = await db.query<{ id: string }>(CONFIRM_MACHINE_INTENT_SQL, [
-    input.txHash,
-    input.intentId,
-    input.usdValue,
-    input.eurValue,
-    input.agentId,
-    input.rail,
-  ])
-  return result.rows.length > 0
-}
 
 export const FAIL_MACHINE_INTENT_SQL = `UPDATE payment_intents
        SET status = 'failed', error_message = $1
@@ -722,24 +681,19 @@ export const FAIL_MACHINE_INTENT_SQL = `UPDATE payment_intents
          AND status = 'pending_signature'
          AND tx_hash IS NULL`
 
-export async function failMachineIntent(
-  errorMessage: string,
-  intentId: string,
-  agentId: string,
-  rail: string,
-  db: Executor = pool,
-): Promise<void> {
-  await db.query(FAIL_MACHINE_INTENT_SQL, [errorMessage, intentId, agentId, rail])
-}
 
 // ── Status projection (lib/agent-payment-status.ts) ──────────────────────────
 
 export const FIND_INTENT_STATUS_ROW_SQL = `SELECT pi.id, pi.chain_id, pi.token_symbol, pi.token_address, pi.amount_human, pi.amount_raw,
-            pi.status, pi.tx_hash, pi.expires_at, pi.delegate_address,
+            pi.status, pi.tx_hash, pi.expires_at, pi.delegate_address, pi.confirmed_at,
             pi.source, pi.payment_rail, pi.payment_resource_url, pi.x402_resource_url,
             pi.merchant_address, pi.x402_merchant_address, pi.x402_idempotency_key,
             pi.machine_challenge_id, pi.machine_idempotency_key, pi.machine_metadata,
-            (mpre.id IS NOT NULL) AS funded_but_unsettled
+            (mpre.id IS NOT NULL) AS funded_but_unsettled,
+            EXISTS (SELECT 1 FROM machine_payment_evidence mpe
+                    WHERE mpe.payment_intent_id = pi.id
+                      AND mpe.proof_status IN ('merchant_response_observed', 'protocol_receipt_attached'))
+              AS merchant_leg_reported
      FROM payment_intents pi
      LEFT JOIN machine_payment_reconciliation_events mpre
        ON mpre.payment_intent_id = pi.id
@@ -769,8 +723,19 @@ export interface PaymentIntentStatusRow {
   machine_challenge_id: string | null
   machine_idempotency_key: string | null
   machine_metadata: unknown
+  /** When the funding leg confirmed on-chain; null before confirmation. */
+  confirmed_at: string | null
   /** True when an open merchant_retry_rejected_after_payment reconciliation event exists. */
   funded_but_unsettled: boolean
+  /**
+   * #2145: true when a machine_payment_evidence row records a merchant
+   * response ('merchant_response_observed' or 'protocol_receipt_attached').
+   * The base row the backend writes at funding-confirm keeps
+   * 'payment_confirmed', so this is specifically the CLIENT-UPGRADED state —
+   * false means the merchant leg was never reported, whether or not the base
+   * row exists.
+   */
+  merchant_leg_reported: boolean
 }
 
 export async function findIntentStatusRow(
@@ -824,3 +789,51 @@ export async function findSettledPaymentReceiptRow(
   ])
   return result.rows[0] ?? null
 }
+
+/**
+ * Read back a machine intent by idempotency key or challenge id.
+ *
+ * #1987 kept this while deleting its siblings, and the distinction is the
+ * point: `modules/mpp/authorize.ts` was its only PRODUCTION caller and is gone,
+ * but it is the READ half of `insertMachineIntent`'s ON CONFLICT DO NOTHING
+ * replay contract — and `insertMachineIntent` is LIVE, used by
+ * `modules/x402/delegation-authorize.ts`. `__tests__/payment-intents.test.ts`
+ * proves that contract on the real-Postgres harness (epic #1219): the replay
+ * returns null and the caller reloads the winner, which cannot be asserted
+ * without this reader. Deleting it would have forced weakening a live money-path
+ * test to make a deletion look tidier.
+ */
+export async function findMachineIntentByKeyOrChallenge(
+  agentId: string,
+  idempotencyKey: string | null,
+  challengeId: string | null,
+  rail: string,
+  db: Executor = pool,
+): Promise<PaymentIntentRow | null> {
+  const result = await db.query<PaymentIntentRow>(FIND_MACHINE_INTENT_BY_KEY_OR_CHALLENGE_SQL, [
+    agentId,
+    idempotencyKey,
+    challengeId,
+    rail,
+  ])
+  return result.rows[0] ?? null
+}
+
+// #1987 (epic #1440): `recordMachineIntentSignature`, `confirmMachineIntent`
+// and `failMachineIntent` are DELETED. All three were called only from
+// `modules/mpp/authorize.ts`, which this slice removed with the legacy MPP
+// AllowanceModule orchestration — verified against `origin/dev`, where it was
+// the sole caller of each. `haven-reviewer` raised them as under-deletion and
+// was right: "the repository layer is shared" is not a reason to keep a
+// function with no callers at all. It also listed
+// `findMachineIntentByKeyOrChallenge` — that one is KEPT, for the reason given
+// on it above; enumerating consumers rather than trusting the list is what
+// separated the two.
+//
+// Deliberately NOT removed here, and handed to #1990 as one unit: the three
+// (`insertPaymentApproval`, `insertSendApproval`, `insertMachineApproval`). They
+// are equally uncalled now, but they are a cluster #1990 retires together with
+// the table itself, and `rails/execution-rail.ts` names all three by hand in the
+// prose that justifies #1986's approval 410 — removing one of three named
+// siblings would require editing the rail seam, which this diff keeps
+// byte-identical to `dev` on purpose.

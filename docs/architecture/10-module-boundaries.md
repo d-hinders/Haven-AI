@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-08-23" # #1712: `infra/http/` is a new KIND of infra — an SSRF-guarded outbound reader for untrusted, submitter-chosen hosts — and both enumerations of what infra/ holds (Target structure, and the "what belongs where" table) listed only repositories/chain clients/relayer/explorers, so each was incomplete rather than wrong. Both corrected, and the "rules 2 and 5 still await the `http/` directory" note disambiguated: that is the TOP-LEVEL routes directory, which still does not exist, not `infra/http/`, which now does — a reader skimming for "has http/ landed" would otherwise conflate them. Only the infra/ enumerations and that note were re-read; the dependency rules were NOT re-verified in this pass (they are unaffected — `npm run lint:deps` passes with zero violations and no new waiver). Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-27" # #2138: rule 3 gains a RECORDED EXCEPTION rather than a correction. `domain/passport-issuance-rail.ts` returns a SQL predicate string for `infra/repositories/agent-passports.ts` to interpolate, which the rule's prose ("no SQL string outside infra/repositories/") forbids and neither of its mechanical forms catches (`pg-only-in-infra` bans imports; the inline-SQL gauge counts `.query(` call sites) — so the doc's own "the lint config is authoritative" clause resolves it as permitted, and leaving that unwritten would be the kind of silent divergence this page exists to prevent. Noted under the security-properties section, where rule 3's meaning is already elaborated, together with why the tenant-isolation rationale does not reach it. Scope: that note only; the dependency rules, the enforcement table and the inline-SQL gauge were NOT re-measured in this pass (`npm run lint:deps` passes, and this diff adds no `.query(` call site). Prior: #2055: the inline-SQL gauge row re-measured against dep-lint (49 sites / 11 files; stale at 68/14 since the epic-#1440 deletions) — the ceiling and method are unchanged. Prior: #1714 (epic #1717): `modules/catalog/lifecycle.ts` joined the catalogue module (index.ts re-exports it), importing the catalog-submissions infra repository and the ownership/probe modules — inside the module's own boundary, no new cross-module edges, so the dependency rules were not re-verified in this pass (`npm run lint:deps` runs below); `index.ts` gained the `catalogIngest` leader-locked monitor, the same runIfLeader shape every other monitor here uses. The `infra/http/` note below is untouched — this slice added no new infra kind. Prior: #1712: `infra/http/` is a new KIND of infra — an SSRF-guarded outbound reader for untrusted, submitter-chosen hosts — and both enumerations of what infra/ holds (Target structure, and the "what belongs where" table) listed only repositories/chain clients/relayer/explorers, so each was incomplete rather than wrong. Both corrected, and the "rules 2 and 5 still await the `http/` directory" note disambiguated: that is the TOP-LEVEL routes directory, which still does not exist, not `infra/http/`, which now does — a reader skimming for "has http/ landed" would otherwise conflate them. Only the infra/ enumerations and that note were re-read; the dependency rules were NOT re-verified in this pass (they are unaffected — `npm run lint:deps` passes with zero violations and no new waiver). Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Module Boundaries
@@ -177,6 +177,26 @@ relaxed with an argument; a cycle is a defect regardless of intent.
   those amounts are payments. Confining them behind a port means substitutions
   are testable in one place instead of ten route files.
 
+**Rule 3's SQL-string clause has one recorded exception** ([#2138](https://github.com/d-hinders/Haven-AI/issues/2138)).
+`domain/passport-issuance-rail.ts` exports `passportIssuableRailSql(alias)`, which
+*returns* a SQL predicate for `infra/repositories/agent-passports.ts` to interpolate.
+It reaches no database — no `pg` import, no `.query(` call site — so neither
+mechanical form of the rule fires, and the "lint config is authoritative" clause
+above resolves it as permitted. It is written down anyway, because the prose says
+*no SQL string*, and an unrecorded divergence from a normative rule is worse than a
+stated one.
+
+Why it sits in `domain/` at all: the rule it encodes — passport issuance is
+delegation-rail only — has to hold in two languages at once, a SQL predicate for the
+retry sweep's join and a TypeScript predicate for the route and `issuePassport`.
+Splitting those across layers is precisely how they drift apart; a real-DB test
+varies both axes and fails if they ever disagree. The tenant-isolation rationale
+does not reach it either: the predicate carries no user scoping and takes no user
+input, its one parameter being a table alias validated against `^[a-z_][a-z0-9_]*$`
+before interpolation. Contrast `execution-rail.ts`, kept OUT of `domain/` because it
+genuinely *reached the database* — that is the line, and this stays on the pure side
+of it.
+
 ## Enforcement: absolute, with inline waivers
 
 Conventions decay. Boundaries survive only when CI fails on violation.
@@ -243,7 +263,7 @@ Achieved state as of 2026-08-07 (#999, the epic's closing issue):
 |---|---|
 | `lib/` layout | Gone (#998) — every former file lives in `platform/`, `domain/`, `infra/`, `rails/`, or a `modules/**` directory, each `modules/**` directory with a public `index.ts` |
 | Largest route | `routes/agent-connection-setups.ts`, 1246 lines (`routes/x402.ts` split by #996, `routes/machine-payments.ts` split into `modules/mpp/` by #997); further route slimming is post-epic work |
-| Inline SQL call sites | 68 `.query(` call sites across 14 production files outside `db/`, `db.ts` and `infra/repositories/` — gauged on every lint run and capped by the shrink-only ceiling (#1166). Was 108 across 18 files; #1167 emptied `routes/user.ts`, `routes/dashboard.ts` and `routes/agent-activity.ts`, #1180 `routes/auth.ts` |
+| Inline SQL call sites | 49 `.query(` call sites across 11 production files outside `db/`, `db.ts` and `infra/repositories/` — gauged on every lint run (`node scripts/dep-lint.mjs`, re-measured 2026-08-25 for #2055) and capped by the shrink-only ceiling of 68 (#1166). Was 108 across 18 files; #1167 emptied `routes/user.ts`, `routes/dashboard.ts` and `routes/agent-activity.ts`, #1180 `routes/auth.ts`; the epic-#1440 deletions (incl. #2055 removing `routes/approvals.ts`) account for the rest |
 | Chain SDK imported in `routes/` | **0** (#994 — `ChainClient` port + `@haven_ai/core` amount helpers) |
 | Rail branching outside the seam | The retirement gate is decided ONCE, in `rails/execution-rail.ts` (#993); outside migrations, no non-test file but the seam itself mentions `session_key` |
 | Boundary enforcement | `npm run lint:deps`, blocking, **0 baseline entries — the baseline file and its ratchet machinery are deleted**; 13 deliberate `pg-only-in-infra` exceptions carry inline `dep-lint-exempt` waivers, each printed with its reason (16 until #1167 retired three) |

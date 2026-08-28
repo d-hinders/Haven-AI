@@ -173,6 +173,22 @@ describe('payment result mappers', () => {
 })
 
 describe('raw payment state mapping', () => {
+  it('#2145: executed is fail-closed — stop, never a retry instruction', () => {
+    // `executed` was the last #2101 sibling still mapped to
+    // retry_original_x402_request. It was an `approval_requests` status
+    // (table dropped, #2055) and cannot be constructed as a
+    // payment_intents.status, so a retry instruction here pointed at a state
+    // nothing can mint. The reachable retry producer is the backend's
+    // funded-but-undelivered projection, which arrives via `next_action`.
+    const state = paymentStateFromRaw('x402 payment', {
+      payment_id: 'ar_2',
+      status: 'executed',
+    } as RawX402AuthorizeResponse)
+    expect(state?.nextAction).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(state?.message).toMatch(/Do not retry/)
+    expect(state?.message).toMatch(/review this payment in Haven/)
+  })
+
   it('normalizes pending and preserves top-level-before-protocol field precedence', () => {
     const raw: RawX402AuthorizeResponse = {
       payment_id: 'ar_1',
@@ -199,7 +215,11 @@ describe('raw payment state mapping', () => {
       rail: 'direct',
       status: 'pending_approval',
       phase: AgentPaymentPhase.UserApprovalRequired,
-      nextAction: AgentPaymentNextAction.WaitForUserApproval,
+      // #2101: STOP, not wait. The phase is a retained descriptive label; the
+      // nextAction is the field agents follow FIRST, and no approval can ever
+      // arrive to end a wait (410 on the legacy rail per #1986; 403/502 at
+      // prepare on the delegation rail; `approval_requests` dropped by #2055).
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
       amount: '2.50',
       token: '',
       resourceUrl: null,
@@ -207,7 +227,11 @@ describe('raw payment state mapping', () => {
       txHash: null,
       expiresAt: '',
       chainId: 0,
-      message: 'x402 payment is above the remaining agent budget and is waiting for user approval in Haven (payment_id: ar_1).',
+      // #2101: the minted message must NOT promise an approval that will never
+      // arrive — no live rail queues a payment (410 on the legacy rail, #1986;
+      // 403/502 at prepare on the delegation rail; `approval_requests` dropped
+      // by #2055). The fail-closed branch stays, but it tells the agent to stop.
+      message: "x402 payment is not payable: it is outside the agent's on-chain budget and no approval is pending (payment_id: ar_1). Ask the user to grant or raise the budget in Haven.",
       amountAtomic: '2500000',
       asset: 'top-asset',
       network: 'eip155:8453',
@@ -310,7 +334,8 @@ describe('raw payment state mapping', () => {
     expect(caught).toBeInstanceOf(HavenApiError)
     expect(caught).not.toBeInstanceOf(HavenPaymentStateError)
     expect(caught).toMatchObject({
-      message: 'Payment exceeds the on-chain allowance and was queued for owner approval (payment_id: ).',
+      // #2101: declined, not queued — see the note above.
+      message: "Payment exceeds the agent's on-chain budget and was declined; no approval is pending and none will arrive (payment_id: ).",
       statusCode: 202,
       body: raw,
     })

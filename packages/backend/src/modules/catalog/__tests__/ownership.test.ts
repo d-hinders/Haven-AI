@@ -13,6 +13,7 @@
  * Pure-unit by construction: the guarded reader and the DNS resolver are both
  * injected, so no network and no database are touched.
  */
+import { createHmac } from 'node:crypto'
 import { describe, it, expect, vi } from 'vitest'
 import {
   OWNERSHIP_PAYLOAD_PREFIX,
@@ -31,7 +32,7 @@ import {
   wellKnownUrl,
   type OwnershipClaim,
 } from '../ownership.js'
-import type { SafeFetchResult } from '../../../infra/http/ssrf-guard.js'
+import { assertSafeUrl, type SafeFetchResult } from '../../../infra/http/ssrf-guard.js'
 
 const SECRET = 'test-ownership-secret-not-a-real-key'
 const ISSUED_AT = new Date('2026-08-23T12:00:00.000Z')
@@ -46,7 +47,10 @@ const CLAIM: OwnershipClaim = {
 
 /** A guarded reader that serves `body` at the well-known URL. */
 function serving(body: string): (url: string) => Promise<SafeFetchResult> {
-  return async (url) => ({ ok: true, status: 200, body, finalUrl: url })
+  // `headers` became part of the guarded response with #1713 (MCP session id
+  // + the `payment-required` challenge header); the ownership proof reads none
+  // of them, so an empty record is the honest fixture.
+  return async (url) => ({ ok: true, status: 200, body, headers: {}, finalUrl: url })
 }
 
 const serving404: (url: string) => Promise<SafeFetchResult> = async () => ({
@@ -188,6 +192,146 @@ describe('hostname grammar backstop', () => {
     expect(result).toMatchObject({ ok: false, reason: 'invalid_hostname' })
     expect(fetchText).not.toHaveBeenCalled()
     expect(resolveTxt).not.toHaveBeenCalled()
+  })
+})
+
+describe('IP-literal hostnames are refused at CLAIM level, not only at URL level (#1959)', () => {
+  /**
+   * The gap this block pins. `isValidHostname`'s URL round-trip catches every
+   * host the parser REWRITES; an already-canonical dotted-decimal IPv4 is not
+   * rewritten, so it survived. The well-known path still refused it — via
+   * `assertSafeUrl`, one layer down — but `dnsTxtName` builds no URL, so the
+   * DNS-TXT path had no equivalent refusal and could reach `ok: true`.
+   *
+   * These names are load-bearing; a mutation must show up unambiguously:
+   *
+   *   'the DNS-TXT path refuses an IP-literal host that would OTHERWISE verify'
+   *   'refuses a canonical dotted-decimal IPv4 host, which the URL round-trip does NOT catch'
+   */
+  const ipClaim: OwnershipClaim = { ...CLAIM, hostname: '1.2.3.4' }
+
+  it('refuses a canonical dotted-decimal IPv4 host, which the URL round-trip does NOT catch', () => {
+    // Both halves matter. The first shows WHY the round-trip cannot cover this
+    // case; without it the second is just an assertion with no explanation.
+    expect(new URL('https://1.2.3.4/x').hostname).toBe('1.2.3.4')
+    expect(isValidHostname('1.2.3.4')).toBe(false)
+  })
+
+  it.each(['1.2.3.4', '93.184.216.34', '127.0.0.1', '169.254.169.254', '10.0.0.7', '0.0.0.0'])(
+    'refuses the IP literal %s as an ownership claim',
+    (host) => {
+      expect(isValidHostname(host)).toBe(false)
+    },
+  )
+
+  /**
+   * The proof this module now REFUSES to derive, derived independently.
+   *
+   * `expectedProofPayload(ipClaim, …)` throws — that is the fix. So the only
+   * way to build the input that would have verified is to recompute the MAC
+   * here, from the format the module docstring specifies. The duplication is
+   * the point of the test, not an accident of it: without it the "decisive"
+   * assertion below only proves the resolver was not called, which a rig
+   * holding a proof bound to a DIFFERENT hostname would satisfy for the wrong
+   * reason. (It did, on the first draft, and the mutation run caught it.)
+   */
+  function proofPayloadForIpClaim(): string {
+    const message = ['haven-domain-ownership', 'v1', ipClaim.submissionId, '1.2.3.4', ipClaim.verifyToken].join('\n')
+    const mac = createHmac('sha256', SECRET).update(message, 'utf8').digest('base64url')
+    return `${OWNERSHIP_PAYLOAD_PREFIX}v1.${ipClaim.submissionId}.${mac}`
+  }
+
+  it('the DNS-TXT path refuses an IP-literal host that would OTHERWISE verify', async () => {
+    // The decisive test, and the one the whole issue is about. The resolver is
+    // rigged to answer with a CORRECT, claim-bound proof for THIS exact claim,
+    // and the well-known path is rigged to fail — so the only thing standing
+    // between this claim and `ok: true, method: 'dns-txt'` is the claim-level
+    // refusal. Deleting that refusal makes this go green in the worst way, and
+    // that is exactly what the mutation run must show.
+    const fetchText = vi.fn(serving404)
+    const resolveTxt = vi.fn(async () => [[proofPayloadForIpClaim()]])
+
+    const result = await verifyDomainOwnership(ipClaim, SECRET, { fetchText, resolveTxt, now: NOW })
+
+    expect(result).toMatchObject({ ok: false, reason: 'invalid_hostname' })
+    expect(resolveTxt).not.toHaveBeenCalled()
+    expect(fetchText).not.toHaveBeenCalled()
+  })
+
+  it('the rig is REAL — the same proof verifies for the same claim on a domain host', async () => {
+    // Guards the guard's evidence. If this ever fails, the test above stopped
+    // proving anything: its resolver answer would be a proof that could not
+    // have verified anyway, and the refusal would be unfalsifiable.
+    const domainClaim = { ...CLAIM, hostname: 'shop.example.com' }
+    const message = ['haven-domain-ownership', 'v1', domainClaim.submissionId, 'shop.example.com', domainClaim.verifyToken].join('\n')
+    const mac = createHmac('sha256', SECRET).update(message, 'utf8').digest('base64url')
+    const payload = `${OWNERSHIP_PAYLOAD_PREFIX}v1.${domainClaim.submissionId}.${mac}`
+    expect(payload).toBe(expectedProofPayload(domainClaim, SECRET))
+
+    const result = await verifyDomainOwnership(domainClaim, SECRET, {
+      fetchText: serving404,
+      resolveTxt: async () => [[payload]],
+      now: NOW,
+    })
+    expect(result).toMatchObject({ ok: true, method: 'dns-txt' })
+  })
+
+  it('says WHY in the detail, so the verdict is not indistinguishable from a typo', () => {
+    // `reason` is deliberately not a new enum member (#1711's status route
+    // would have to learn a value meaning the same thing); the detail carries
+    // the distinction instead.
+    return verifyDomainOwnership(ipClaim, SECRET, {
+      fetchText: vi.fn(serving404),
+      resolveTxt: vi.fn(noTxt),
+      now: NOW,
+    }).then((result) => {
+      expect(result).toMatchObject({ ok: false, reason: 'invalid_hostname' })
+      expect((result as { detail: string }).detail).toContain('IP literal')
+      expect((result as { detail: string }).detail).toContain('public-unicast')
+    })
+  })
+
+  it('refuses to build the DNS TXT name for an IP-literal host', () => {
+    // `dnsTxtName` is an exported entry point of its own — a neighbouring
+    // slice can reach the DNS path without going through verifyDomainOwnership.
+    expect(() => dnsTxtName(ipClaim)).toThrow()
+  })
+
+  it('refuses to derive a proof, build a URL, or issue instructions for an IP-literal host', () => {
+    expect(() => deriveOwnershipProof(ipClaim, SECRET)).toThrow()
+    expect(() => wellKnownUrl(ipClaim)).toThrow()
+    expect(() => ownershipInstructions(ipClaim, SECRET)).toThrow()
+  })
+
+  it('agrees with assertSafeUrl on every literal — one predicate, both paths', () => {
+    // The asymmetry itself, pinned. Before #1959 the right-hand column was
+    // `true` for canonical IPv4 while the left refused: the module's rule was
+    // a property of one path. This test fails if they ever diverge again.
+    for (const host of ['1.2.3.4', '93.184.216.34', '127.0.0.1', '169.254.169.254']) {
+      expect(assertSafeUrl(`https://${host}/x`)).toMatchObject({ ok: false, reason: 'host_not_public' })
+      expect(isValidHostname(host)).toBe(false)
+    }
+  })
+
+  it('still accepts a real domain whose labels merely LOOK numeric', async () => {
+    // The positive control. A guard that refuses everything is not a guard,
+    // and "four numeric labels" is not the rule — "parses as an address" is.
+    expect(isValidHostname('1.2.3.4.example.com')).toBe(true)
+    expect(isValidHostname('shop.example.com')).toBe(true)
+    // Not `1.2.3.4.5` — that one is refused, and NOT by this rule: WHATWG
+    // tries an IPv4 parse on any all-numeric final label, fails on five parts,
+    // and `new URL` throws, so the round-trip check already had it. Asserting
+    // it here would credit the new guard with a refusal it does not make.
+
+    // And it still verifies end to end, through the path the refusal guards.
+    const claim = { ...CLAIM, hostname: '1.2.3.4.example.com' }
+    const payload = expectedProofPayload(claim, SECRET)
+    const result = await verifyDomainOwnership(claim, SECRET, {
+      fetchText: serving404,
+      resolveTxt: async () => [[payload]],
+      now: NOW,
+    })
+    expect(result).toMatchObject({ ok: true, method: 'dns-txt' })
   })
 })
 

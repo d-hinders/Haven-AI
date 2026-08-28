@@ -11,15 +11,15 @@ import {
   findIntentStatusRow,
   type PaymentIntentStatusRow,
 } from '../../infra/repositories/payment-intents.js'
-import {
-  expireOverdueApproval,
-  findApprovalStatusRow,
-  type ApprovalStatusRow,
-} from '../../infra/repositories/approval-requests.js'
 import { type AgentContext } from '../../middleware/agentAuth.js'
 import { quoteFee } from '../fee/index.js'
 
-export type AgentPaymentKind = 'payment_intent' | 'approval_request'
+/**
+ * #2085: narrowed — this module constructs `'payment_intent'` and nothing
+ * else, and no read can supply another value (see
+ * `infra/repositories/__tests__/approval-kind-unconstructible.test.ts`).
+ */
+export type AgentPaymentKind = 'payment_intent'
 
 /**
  * Platform fee surfaced on a machine-payment status (#386 — no silent
@@ -297,44 +297,32 @@ function railContext(input: {
   return {}
 }
 
-function messageForRail(
-  rail: string,
-  status: string,
-  fallback: string,
-): string {
-  if (rail === AgentPaymentRail.X402) {
-    if (status === 'pending') {
-      return 'This x402 funding payment is waiting for user approval in Haven. Do not start a new merchant session or create another payment; poll this payment id and resume the original x402 request after approval.'
-    }
-    if (status === 'approved') {
-      return 'The user approved this x402 funding request, but the funding payment has not been sent yet. Keep the original merchant session and poll this payment id.'
-    }
-    if (status === 'proposed') {
-      return 'The x402 funding payment was submitted and is waiting for the remaining account approvals. Keep the original merchant session and poll this payment id.'
-    }
-    if (status === 'executed') {
-      return 'The user completed the Haven funding payment. Resume this payment id and retry the original x402 request with the merchant payment header; do not create a new merchant session.'
-    }
-    return fallback
-  }
-
-  if (isMppRail(rail)) {
-    if (status === 'pending') {
-      return 'This MPP payment is waiting for user approval in Haven. Do not start a new challenge or create another payment; poll this payment id and resume the original MPP request after approval.'
-    }
-    if (status === 'approved') {
-      return 'The user approved this MPP payment request, but the funding payment has not been sent yet. Keep the original challenge and poll this payment id.'
-    }
-    if (status === 'proposed') {
-      return 'The MPP payment was submitted and is waiting for the remaining account approvals. Keep the original challenge and poll this payment id.'
-    }
-    if (status === 'executed') {
-      return 'The user completed the Haven payment. Resume this payment id and retry the original MPP request with the machine payment proof; do not create a new challenge.'
-    }
-  }
-
-  return fallback
-}
+// #2115: `messageForRail` is DELETED, not reworded. It overrode the payment
+// intent's own message on the x402 and MPP rails for four statuses —
+// `pending`, `approved`, `proposed`, `executed` — and all four are
+// unconstructible on this path.
+//
+// The proof, in one line: this module reads `payment_intents` and nothing else
+// (`findIntentStatusRow`; the `approval_requests` fallback died with #2055),
+// and every write to `payment_intents.status` in the repository layer sets one
+// of five literals — `pending_signature` (the four INSERTs in
+// `infra/repositories/payment-intents.ts`), `submitted`, `confirmed`,
+// `expired`, `failed` (the UPDATEs there and in `x402-authorizations.ts` /
+// `agent-rekeys.ts`). The four overridden statuses were `approval_requests`
+// statuses, fed here by `approvalState`, which #2055 deleted with the table.
+// Pinned by `__tests__/status-domain.test.ts` on the real-DB harness.
+//
+// Why it mattered more than the average dead branch: `GET /payments/:id` is
+// the endpoint an agent calls to decide what to do next, and the SDK passes
+// `message`/`next_action` straight through (`mapPaymentStatusResult` in
+// `packages/sdk/src/payment-mappers.ts`) — so the backend's string wins over
+// every client-side correction #2113 made. Those strings told an agent, in the
+// imperative, to hold the merchant session open and poll for an approval that
+// no live rail can produce: the legacy AllowanceModule rail answers 410 at
+// every agent-payment entry point (#1986, `rails/execution-rail.ts`), and the
+// delegation rail declines an out-of-policy payment at prepare with nothing
+// written (`routes/payments.ts` 403/502; `modules/x402/delegation-authorize.ts`
+// 403 `delegation_budget_exceeded`, #2082).
 
 function paymentIntentState(status: string): {
   phase: AgentPaymentPhaseValue
@@ -377,76 +365,125 @@ function paymentIntentState(status: string): {
     }
   }
 
+  // #2115: the catch-all, retained FAIL-CLOSED. The five branches above are
+  // the whole reachable status domain (see the `messageForRail` deletion note
+  // and `__tests__/status-domain.test.ts`), so nothing live lands here — but
+  // if a status this module does not recognise is ever read back, the honest
+  // verdict is STOP, not poll. It used to answer `check_status_later`, which
+  // is a poll instruction for a row nothing can transition; that is the same
+  // defect #2101/PR #2113 fixed one layer up in the SDK's
+  // `nextActionForStatus`, and the backend's own `next_action` overrides the
+  // SDK's, so the fix has to be made here too. `phase` is deliberately left at
+  // `payment_submitted`: it is the least-wrong member of a closed wire enum
+  // for a state that cannot occur, and `next_action` is the field the agent
+  // contract says to follow first.
   return {
     phase: AgentPaymentPhase.PaymentSubmitted,
-    nextAction: AgentPaymentNextAction.CheckStatusLater,
-    message: `The payment is ${status}.`,
+    nextAction: AgentPaymentNextAction.StopAndTellUser,
+    message: `This payment is in an unrecognised state ("${status}") that no live Haven rail produces. Do not poll or retry it — tell the user to review this payment in Haven.`,
   }
 }
 
-function approvalState(status: string): {
+// #2055: `approvalState` died with the approval_requests fallback — every
+// status this module reports is a payment intent now.
+
+/**
+ * #2145: how long after the funding leg confirms before a missing merchant
+ * report means "the agent is gone" rather than "the agent is mid-retry".
+ *
+ * A live agent retries the merchant within seconds of the funding
+ * confirmation; inside this window the status must not instruct a concurrent
+ * second retry. The figure mirrors the delegate-balance monitor's
+ * IN_FLIGHT_WINDOW_MIN (`infra/delegate-balance-monitor.ts`), which encodes
+ * the same judgement about the same interval from the operator side.
+ */
+export const MERCHANT_REPORT_GRACE_MIN = 15
+
+/** `machine_metadata.settlement_scheme`, parsed the way `settlement-observed.ts` does. */
+function settlementSchemeOf(machineMetadata: unknown): string | null {
+  if (!machineMetadata) return null
+  let metadata: Record<string, unknown> | null = null
+  if (typeof machineMetadata === 'string') {
+    try {
+      metadata = JSON.parse(machineMetadata) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  } else {
+    metadata = machineMetadata as Record<string, unknown>
+  }
+  const scheme = metadata?.settlement_scheme
+  return typeof scheme === 'string' ? scheme : null
+}
+
+/**
+ * #2145: the phase/next_action/message for a payment-intent row, including
+ * the two funded-but-unsettled overrides of the plain status mapping.
+ *
+ * On the EIP-3009 bridge, `confirmed` means the FUNDING leg confirmed — value
+ * left the treasury and sits on the delegate EOA — and says nothing about the
+ * merchant. Two evidence states distinguish what happened next:
+ *
+ * 1. **Merchant rejected the retry** (client-reported open
+ *    `merchant_retry_rejected_after_payment` event) → the retry was tried and
+ *    refused; the remedy is reclaiming the funds (`sweep_stranded_funds`).
+ * 2. **Merchant leg never reported** (no evidence row upgraded past the
+ *    server-written `payment_confirmed` base, and the grace window has
+ *    passed) → the agent died between funding and retry — the #2145 crash
+ *    shape. The payment is still deliverable: the delegate holds the funds
+ *    and the resume call re-signs a fresh EIP-3009 header locally, so the
+ *    remedy is `retry_original_x402_request`. If that retry is then rejected,
+ *    the SDK records the rejection and this same function flips the answer to
+ *    case 1 — the two states are self-consistent, with no time-based expiry
+ *    policy invented here.
+ *
+ * Derived entirely from evidence Haven holds server-side: case 2 must fire
+ * for an agent that never came back, which is exactly what a client-written
+ * signal cannot provide. Scoped to `settlement_scheme === 'eip3009'`: on
+ * erc7710 there is no funding leg and `confirmed` IS merchant settlement, and
+ * an intent with no scheme metadata fails closed to the plain mapping.
+ *
+ * The residual ambiguity is a delivered payment whose evidence upgrade never
+ * reached Haven (the attach is best-effort): that payment reads as case 2 and
+ * is told to retry a merchant that was already paid. That is the safe side —
+ * x402 merchants answer a re-request of a settled purchase idempotently
+ * (#1519) — and the alternative (treating missing evidence as delivered) is
+ * the #2145 bug itself.
+ */
+function intentStateFor(payment: PaymentIntentStatusRow): {
   phase: AgentPaymentPhaseValue
   nextAction: AgentPaymentNextActionValue
   message: string
 } {
-  if (status === 'pending') {
+  if (payment.status === 'confirmed' && payment.funded_but_unsettled) {
     return {
-      phase: AgentPaymentPhase.UserApprovalRequired,
-      nextAction: AgentPaymentNextAction.WaitForUserApproval,
-      message: 'This payment is above the remaining agent budget and is waiting for user approval in Haven.',
+      phase: AgentPaymentPhase.FundedButUnsettled,
+      nextAction: AgentPaymentNextAction.SweepStrandedFunds,
+      message: "Haven's funding leg confirmed but the merchant rejected the payment retry. The delegate wallet may hold stranded funds — tell the user to review this payment in Haven.",
     }
   }
-  if (status === 'approved') {
+  if (
+    payment.status === 'confirmed' &&
+    railFor(payment) === AgentPaymentRail.X402 &&
+    settlementSchemeOf(payment.machine_metadata) === 'eip3009' &&
+    !payment.merchant_leg_reported &&
+    payment.confirmed_at !== null &&
+    Date.now() - new Date(payment.confirmed_at).getTime() >= MERCHANT_REPORT_GRACE_MIN * 60_000
+  ) {
     return {
-      phase: AgentPaymentPhase.UserExecutionRequired,
-      nextAction: AgentPaymentNextAction.WaitForUserToCompletePayment,
-      message: 'The user approved this request, but the funding payment has not been sent yet.',
-    }
-  }
-  if (status === 'proposed') {
-    return {
-      phase: AgentPaymentPhase.WaitingForAdditionalApprovals,
-      nextAction: AgentPaymentNextAction.WaitForUserApproval,
-      message: 'The funding payment was submitted and is waiting for the remaining account approvals.',
-    }
-  }
-  if (status === 'executed') {
-    return {
-      phase: AgentPaymentPhase.FundingSent,
+      phase: AgentPaymentPhase.FundedButUnsettled,
       nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
-      message: 'The user completed the funding payment. Retry the original x402 request so the agent can send the merchant payment header.',
+      message: "Haven's funding leg confirmed but no merchant response was ever recorded — the merchant has likely not been paid. Resume this payment to retry the original request; do not start a new payment for the same purchase.",
     }
   }
-  if (status === 'rejected') {
-    return {
-      phase: AgentPaymentPhase.Rejected,
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
-      message: 'The user rejected this payment request.',
-    }
-  }
-  if (status === 'expired') {
-    return {
-      phase: AgentPaymentPhase.Expired,
-      nextAction: AgentPaymentNextAction.RequestAgainIfUserStillWantsIt,
-      message: 'The approval request expired before it was completed.',
-    }
-  }
-
-  return {
-    phase: AgentPaymentPhase.UserApprovalRequired,
-    nextAction: AgentPaymentNextAction.CheckStatusLater,
-    message: `The approval request is ${status}.`,
-  }
+  return paymentIntentState(payment.status)
 }
 
 export function agentPaymentStatusHttpCode(status: AgentPaymentStatus): number {
-  if (status.kind === 'approval_request') {
-    if (status.status === 'pending' || status.status === 'approved' || status.status === 'proposed') return 202
-    if (status.status === 'executed') return 200
-    if (status.status === 'rejected') return 409
-    if (status.status === 'expired') return 410
-  }
-
+  // #2085: the `kind === 'approval_request'` block that stood here mapped the
+  // queue's statuses (202/200/409/410). It was unreachable — the comment four
+  // lines above already said every status this module reports is a payment
+  // intent — so removing it changes no response.
   if (status.status === 'confirmed') return 200
   if (status.status === 'pending_signature' || status.status === 'submitted') return 409
   if (status.status === 'expired') return 410
@@ -647,13 +684,7 @@ export async function getAgentPaymentStatus(
 
   const payment: PaymentIntentStatusRow | null = await findIntentStatusRow(paymentId, agent.id)
   if (payment) {
-    const state = payment.funded_but_unsettled && payment.status === 'confirmed'
-      ? {
-          phase: AgentPaymentPhase.FundedButUnsettled,
-          nextAction: AgentPaymentNextAction.SweepStrandedFunds,
-          message: "Haven's funding leg confirmed but the merchant rejected the payment retry. The delegate wallet may hold stranded funds — tell the user to review this payment in Haven.",
-        }
-      : paymentIntentState(payment.status)
+    const state = intentStateFor(payment)
     const rail = railFor(payment)
     const resourceUrl = payment.payment_resource_url ?? payment.x402_resource_url
     const merchantAddress = payment.merchant_address ?? payment.x402_merchant_address
@@ -672,7 +703,7 @@ export async function getAgentPaymentStatus(
       tx_hash: payment.tx_hash,
       expires_at: payment.expires_at,
       chain_id: payment.chain_id,
-      message: messageForRail(rail, payment.status, state.message),
+      message: state.message,
       fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
       ...railContext({
         rail,
@@ -687,39 +718,8 @@ export async function getAgentPaymentStatus(
     }
   }
 
-  await expireOverdueApproval(paymentId, agent.id)
-
-  const approval: ApprovalStatusRow | null = await findApprovalStatusRow(paymentId, agent.id)
-  if (!approval) return null
-
-  const state = approvalState(approval.status)
-  const rail = railFor(approval)
-  const resourceUrl = approval.payment_resource_url ?? approval.x402_resource_url
-  return {
-    payment_id: approval.id,
-    kind: 'approval_request',
-    rail,
-    status: approval.status,
-    phase: state.phase,
-    next_action: state.nextAction,
-    amount: approval.amount_human,
-    token: approval.token_symbol,
-    resource_url: resourceUrl,
-    merchant_address: approval.merchant_address,
-    tx_hash: approval.tx_hash,
-    expires_at: approval.expires_at,
-    chain_id: approval.chain_id,
-    message: messageForRail(rail, approval.status, state.message),
-    fee: statusFee({ paymentId: approval.id, rail, amountRaw: approval.amount_raw, token: approval.token_symbol, userId: agent.user_id }),
-    ...railContext({
-      rail,
-      amountRaw: approval.amount_raw,
-      tokenAddress: approval.token_address,
-      resourceUrl,
-      merchantAddress: approval.merchant_address,
-      idempotencyKey: approval.machine_idempotency_key,
-      challengeId: approval.machine_challenge_id,
-      machineMetadata: approval.machine_metadata,
-    }),
-  }
+  // #2055: the approval_requests fallback that stood here is gone — the table
+  // is dropped and queue history is waived (owner decision on #2021). An id
+  // that is not a payment intent is now simply unknown.
+  return null
 }

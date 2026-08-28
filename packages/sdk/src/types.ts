@@ -459,6 +459,17 @@ export interface X402Quote {
   idempotencyKey: string
   paymentRequired: X402PaymentRequired
   accepted: X402PaymentOption
+  /**
+   * #2054: which selector produced `accepted`, and therefore which entry every
+   * amount on this quote describes. `'standard'` is the untagged,
+   * EIP-3009-settleable entry; `'erc7710'` means the merchant advertises NO
+   * standard entry, so the quote describes its erc7710 one — settleable only
+   * from a delegation-rail account, a fact the quote layer cannot see (the
+   * rail is a property of the ACCOUNT, not of the 402). This field is
+   * descriptive: the actual settlement scheme is still chosen later, with the
+   * rail in hand, by `selectX402SettlementScheme`.
+   */
+  acceptedScheme: 'standard' | 'erc7710'
   request: X402RequestSnapshot
   mcpTransport?: X402McpTransport
   resourceUrl: string
@@ -829,33 +840,40 @@ export const AgentPaymentPhase = {
   PaymentSubmitted: 'payment_submitted',
   /** The direct payment is confirmed; the agent does not need to do more for this payment id. */
   PaymentConfirmed: 'payment_confirmed',
-  /** The payment needs wallet owner approval in Haven before it can continue. */
+  /**
+   * #2115: RETIRED wire value — no live rail produces it. It described the
+   * Safe rail's approval queue, which no longer exists. Kept so a stored value
+   * still typechecks; see `AgentPaymentPhaseDescriptions` below for the
+   * agent-visible wording, which this comment used to contradict.
+   */
   UserApprovalRequired: 'user_approval_required',
-  /** The wallet owner approved the request and still needs to complete the funding payment. */
+  /** #2115: RETIRED wire value — no live rail produces it. Stop and tell the user. */
   UserExecutionRequired: 'user_execution_required',
-  /** The funding payment was proposed and is waiting for the remaining account approvals. */
+  /** #2115: RETIRED wire value — no live rail produces it. Stop and tell the user. */
   WaitingForAdditionalApprovals: 'waiting_for_additional_approvals',
   /** The Haven funding leg was sent; the agent can continue the merchant/protocol leg. */
   FundingSent: 'funding_sent',
-  /** The wallet owner rejected the request; the agent should stop and tell the user. */
+  /** The payment was rejected and cannot proceed; the agent should stop and tell the user. */
   Rejected: 'rejected',
-  /** The payment or approval request expired before completion. */
+  /** The payment expired before completion. */
   Expired: 'expired',
   /** Haven could not complete the payment; the agent should stop and surface the failure. */
   Failed: 'failed',
   /**
    * Pre-flight check determined the delegate's existing balance plus the
-   * remaining on-chain allowance cannot cover the requested amount, so no
-   * payment intent was created. Distinct from `UserApprovalRequired`: there
-   * is no approval that would fix this — the originating Safe needs more
-   * funds or the agent's per-token allowance needs to be raised first.
+   * remaining on-chain budget cannot cover the requested amount, so no
+   * payment intent was created. The account must be funded or the agent's
+   * budget raised before retrying — #2115: the old wording contrasted this
+   * with `UserApprovalRequired` as if that were a live alternative, and named
+   * the retired rail's Safe and per-token allowance as the fix.
    */
   InsufficientFunds: 'insufficient_funds',
   /**
-   * Haven's funding leg (Safe → delegate) confirmed on-chain, but the
-   * merchant rejected the x402 retry. The delegate wallet may hold stranded
-   * USDC that was never settled to the merchant. The agent should stop, tell
-   * the user, and wait for the sweep flow to reclaim the funds.
+   * Haven's funding leg (account → delegate, the #946 EIP-3009 bridge)
+   * confirmed on-chain, but the merchant rejected the x402 retry. The delegate
+   * wallet may hold stranded USDC that was never settled to the merchant. The
+   * agent should stop, tell the user, and wait for the sweep flow to reclaim
+   * the funds.
    */
   FundedButUnsettled: 'funded_but_unsettled',
 } as const
@@ -869,9 +887,12 @@ export const AgentPaymentNextAction = {
   CheckStatusLater: 'check_status_later',
   /** No further agent action is required for this payment id. */
   None: 'none',
-  /** Wait for the wallet owner to approve or reject the request in Haven. */
+  /**
+   * #2115: RETIRED wire value — no live rail produces it and nothing maps to
+   * it. Stop and tell the user rather than polling; no approval will arrive.
+   */
   WaitForUserApproval: 'wait_for_user_approval',
-  /** Wait for the wallet owner to finish sending the approved funding payment. */
+  /** #2115: RETIRED wire value — no live rail produces it. Stop and tell the user rather than polling. */
   WaitForUserToCompletePayment: 'wait_for_user_to_complete_payment',
   /** Resume this payment id and retry the original x402 request with the merchant payment header. */
   RetryOriginalX402Request: 'retry_original_x402_request',
@@ -998,36 +1019,36 @@ export const AgentPaymentPhaseDescriptions: Record<AgentPaymentPhase, string> = 
   [AgentPaymentPhase.AgentSignatureRequired]: 'The agent must sign and submit the prepared payment before Haven can relay it.',
   [AgentPaymentPhase.PaymentSubmitted]: 'Haven has received the signed payment and the agent should poll for confirmation.',
   [AgentPaymentPhase.PaymentConfirmed]: 'The direct payment is confirmed; the agent does not need to do more for this payment id.',
-  [AgentPaymentPhase.UserApprovalRequired]: 'The payment needs wallet owner approval in Haven before it can continue.',
-  [AgentPaymentPhase.UserExecutionRequired]: 'The wallet owner approved the request and still needs to complete the funding payment.',
-  [AgentPaymentPhase.WaitingForAdditionalApprovals]: 'The funding payment was proposed and is waiting for the remaining account approvals.',
+  [AgentPaymentPhase.UserApprovalRequired]: 'Retired wire value: no live rail produces it. It described the Safe rail\'s approval queue, which no longer exists — an out-of-policy payment is declined before any money moves. If it is ever seen, stop and tell the user; no approval is pending.',
+  [AgentPaymentPhase.UserExecutionRequired]: 'Retired wire value: no live rail produces it. Stop and tell the user.',
+  [AgentPaymentPhase.WaitingForAdditionalApprovals]: 'Retired wire value: no live rail produces it. Stop and tell the user.',
   [AgentPaymentPhase.FundingSent]: 'The Haven funding leg was sent; the agent can continue the merchant/protocol leg.',
-  [AgentPaymentPhase.Rejected]: 'The wallet owner rejected the request; the agent should stop and tell the user.',
-  [AgentPaymentPhase.Expired]: 'The payment or approval request expired before completion.',
+  [AgentPaymentPhase.Rejected]: 'The payment was rejected and cannot proceed; the agent should stop and tell the user.',
+  [AgentPaymentPhase.Expired]: 'The payment expired before completion.',
   [AgentPaymentPhase.Failed]: 'Haven could not complete the payment; the agent should stop and surface the failure.',
   [AgentPaymentPhase.InsufficientFunds]:
-    'Pre-flight check determined the delegate balance plus the remaining on-chain allowance cannot cover the requested amount, so no payment was created. The originating Safe must be funded or the agent allowance raised before retrying.',
+    'Pre-flight check determined the delegate balance plus the remaining on-chain budget cannot cover the requested amount, so no payment was created. The account must be funded or the agent budget raised before retrying.',
   [AgentPaymentPhase.FundedButUnsettled]:
-    "Haven's funding leg confirmed on-chain but the merchant rejected the x402 retry. The delegate wallet may hold stranded funds. The agent should stop and wait for the wallet owner to sweep the stranded funds back to the Safe.",
+    "Haven's funding leg confirmed on-chain but the merchant rejected the x402 retry. The delegate wallet may hold stranded funds. The agent should stop and wait for the wallet owner to sweep the stranded funds back to the account.",
 }
 
 export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, string> = {
   [AgentPaymentNextAction.SignAndSubmitPayment]: 'Sign with the delegate key and submit the payment to Haven.',
   [AgentPaymentNextAction.CheckStatusLater]: 'Poll getPaymentStatus later using this payment id.',
   [AgentPaymentNextAction.None]: 'No further agent action is required for this payment id.',
-  [AgentPaymentNextAction.WaitForUserApproval]: 'Wait for the wallet owner to approve or reject the request in Haven.',
-  [AgentPaymentNextAction.WaitForUserToCompletePayment]: 'Wait for the wallet owner to finish sending the approved funding payment.',
+  [AgentPaymentNextAction.WaitForUserApproval]: 'Retired wire value: no live rail produces it, and nothing maps to it. It described a per-payment approval queue that no longer exists. If it is ever seen, stop and tell the user rather than polling — no approval will arrive.',
+  [AgentPaymentNextAction.WaitForUserToCompletePayment]: 'Retired wire value: no live rail produces it. Stop and tell the user rather than polling.',
   [AgentPaymentNextAction.RetryOriginalX402Request]: 'Resume this payment id and retry the original x402 request with the merchant payment header.',
   [AgentPaymentNextAction.StopAndTellUser]: 'Stop retrying this payment and tell the user what happened.',
   [AgentPaymentNextAction.RequestAgainIfUserStillWantsIt]: 'Ask again only if the user still wants the payment after expiry.',
   [AgentPaymentNextAction.PaymentWindowExpired]:
     'The x402 funding/quote window expired. Re-quote with the same idempotency key before asking the signer to build a merchant payment header again.',
   [AgentPaymentNextAction.FundSafeOrRaiseAllowance]:
-    'Stop and tell the user that the originating Safe needs to be funded or the agent allowance raised before the payment can succeed.',
+    'Stop and tell the user that the account needs to be funded or the agent budget raised before the payment can succeed.',
   [AgentPaymentNextAction.RetryWithExplicitContext]:
     'Retry the same tool call, this time passing merchant_url, tool_name, arguments, and mcp_transport explicitly — the server had no stored context to rehydrate for this payment id.',
   [AgentPaymentNextAction.SweepStrandedFunds]:
-    'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating Safe.',
+    'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating account.',
 }
 
 export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode, string> = {
@@ -1160,7 +1181,7 @@ export interface AgentPaymentSummary {
 }
 
 export const AgentPaymentRailDescriptions: Record<AgentPaymentRail, string> = {
-  [AgentPaymentRail.Direct]: 'Standard Haven payment from the user-controlled Safe through an approved delegate allowance.',
+  [AgentPaymentRail.Direct]: 'Standard Haven payment from the user-controlled account, redeeming the agent\'s on-chain budget delegation.',
   [AgentPaymentRail.X402]: 'x402 HTTP 402 payment flow with a Haven funding leg and merchant retry leg.',
   [AgentPaymentRail.Mpp]: 'Categorical MPP rail value used as a resume-state discriminator. Response bodies carry a granular mpp_* value instead.',
   [AgentPaymentRail.MppDemo]: 'Haven internal MPP demo rail. Not for production traffic.',
@@ -1242,14 +1263,37 @@ export interface PaymentStatusResult {
   }
 }
 
-export interface PendingApproval extends PaymentStatusResult {
-  kind: 'approval_request'
-  status: 'pending_approval' | 'pending' | string
-  phase: typeof AgentPaymentPhase.UserApprovalRequired
-  nextAction: typeof AgentPaymentNextAction.WaitForUserApproval
-  requested?: string
-  remaining?: string | null
-}
+// ── PendingApproval (REMOVED, #2115) ────────────────────────────────────────
+//
+// `export interface PendingApproval extends PaymentStatusResult` stood here
+// with `nextAction: typeof AgentPaymentNextAction.WaitForUserApproval`. It is
+// REMOVED rather than retained-with-a-note, and the distinction from #2113's
+// retention decision is the point:
+//
+// - #2113 retained the `isPendingApproval` BRANCHES in both MCP runtimes and
+//   the `pending` / `pending_approval` arms of `nextActionForStatus` here in
+//   the SDK. Those are runtime code that still does useful work if a
+//   pre-retirement row is ever read back — it answers `stop_and_tell_user`.
+//   Retaining them is fail-closed.
+// - This was not runtime code. It was a TYPE asserting that a result with
+//   `nextAction === 'wait_for_user_approval'` exists to be narrowed to. After
+//   #2113 nothing in the SDK maps any status to `WaitForUserApproval`
+//   (`nextActionForStatus` in `payment-state.ts`; zero non-test emissions
+//   repo-wide), so no value the SDK produces can inhabit it. A consumer who
+//   writes against it has written unreachable code with no runtime signal —
+//   retaining it is not fail-closed, it is a promise the type system repeats.
+//
+// Its wire twin is already gone: #2105/PR #2112 deleted the `PendingApproval`
+// and `X402PendingApproval` schemas from `packages/backend/src/openapi/spec.ts`
+// outright (pinned by `spec.test.ts`), so the contract of record no longer
+// describes this shape on any response. This hand-written twin was what was
+// left, flagged on #1289 by that session.
+//
+// `PaymentStateKind` keeps `'approval_request'` and `AgentPaymentNextAction`
+// keeps `WaitForUserApproval` — both are retained wire values carrying the
+// #2055-style "Retired wire value" descriptions, and both are still reachable
+// from raw server data. What is gone is the interface that promised a
+// well-formed result of that shape.
 
 
 /** @internal */
@@ -1505,7 +1549,7 @@ export interface RawHavenPaymentReceipt {
 }
 
 /** @internal */
-/** One payable service in Haven's curated merchant catalog. */
+/** One payable service in Haven's merchant catalog (epic #1717). */
 export interface HavenCatalogEntry {
   id: string
   name: string
@@ -1522,6 +1566,16 @@ export interface HavenCatalogEntry {
   network: string | null
   status: 'active' | 'degraded' | 'delisted'
   verifiedAt: string | null
+  /**
+   * Where the entry came from. `operator` = curated in migrations/scripts
+   * (the operator vouches; no verification badges). `ingestion` = submitted
+   * through the Verified Payable Directory and passed domain-ownership proof
+   * plus the read-only quote probe.
+   */
+  source: 'operator' | 'ingestion'
+  /** True only for `ingestion` entries. See the epic's trust claim (never merchant honesty or quality). */
+  domainVerified: boolean
+  verifiedPayable: boolean
 }
 
 /** @internal */
@@ -1541,6 +1595,9 @@ export interface RawCatalogEntry {
   network: string | null
   status: 'active' | 'degraded' | 'delisted'
   verified_at: string | null
+  source: 'operator' | 'ingestion'
+  domain_verified: boolean
+  verified_payable: boolean
 }
 
 export interface RawHavenPaymentReceiptsResponse {
@@ -1548,6 +1605,20 @@ export interface RawHavenPaymentReceiptsResponse {
 }
 
 /** @internal */
+/** Wire shape of POST /catalog/submit (#1717, #1716). */
+export interface CatalogSubmissionAccepted {
+  id: string
+  verify_token: string
+  status: 'submitted' | 'ownership_verified' | 'verified_payable'
+}
+
+/** @internal Client-facing submission handle. */
+export interface HavenCatalogSubmission {
+  id: string
+  verifyToken: string
+  status: 'submitted' | 'ownership_verified' | 'verified_payable'
+}
+
 export interface RawX402StateContext {
   amount_atomic?: string | null
   asset?: string | null

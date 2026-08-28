@@ -2,13 +2,25 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
-import type { ApprovalStatus, PaymentStatus } from '@/lib/payment-status'
+import type { PaymentStatus } from '@/lib/payment-status'
 
-type ActivityStatus = ApprovalStatus | PaymentStatus
+/**
+ * #2120: was `ApprovalStatus | PaymentStatus`. The approval half is gone with
+ * the queue — see the decision note in `lib/payment-status.ts`.
+ */
+type ActivityStatus = PaymentStatus
 
-/** Payment / approval rows — money-movement events that fit the transactions table. */
+/**
+ * Payment rows — money-movement events that fit the transactions table.
+ *
+ * #2120: `type` was `'payment' | 'approval'`. Since #2055 the activity routes
+ * build their list from `payment_intents` + MCP tool invocations only; the
+ * `approval_requests` entries went with the table (migration 070), so no
+ * backend can emit an `'approval'` row. Narrowed so a fixture cannot mint one
+ * either — `screenshot-fixture.test.ts` reads this discriminator.
+ */
 export interface PaymentActivityItem {
-  type: 'payment' | 'approval'
+  type: 'payment'
   id: string
   agent_id?: string
   agent_name?: string
@@ -58,7 +70,7 @@ export interface McpToolCallActivityItem {
 export type ActivityItem = PaymentActivityItem | McpToolCallActivityItem
 
 export function isPaymentActivityItem(item: ActivityItem): item is PaymentActivityItem {
-  return item.type === 'payment' || item.type === 'approval'
+  return item.type === 'payment'
 }
 
 export function isMcpToolCallActivityItem(item: ActivityItem): item is McpToolCallActivityItem {

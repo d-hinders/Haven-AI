@@ -253,6 +253,8 @@ export default function AgentPanel() {
               chainTimeSec={panel.chainTimeSec}
               chainId={chainId}
               pendingHavenSetup={panel.isPendingHavenSetup(d.address)}
+              onRevoke={() => panel.handleRevokeUnmanaged(d.address)}
+              revoking={panel.busyAgentId === d.address && panel.busyAction === 'revoke'}
             />
           ))}
         </div>

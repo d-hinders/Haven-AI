@@ -54,25 +54,18 @@ async function seedIntent(agentId: string, userId: string): Promise<string> {
   return r.rows[0].id
 }
 
-async function seedApproval(agentId: string, userId: string): Promise<string> {
-  const r = await db.query<{ id: string }>(
-    `INSERT INTO approval_requests
-       (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
-        amount_raw, amount_human, status, expires_at)
-     VALUES ($1, $2, $3, 'USDC', $4, $5, '100000', '0.10', 'executed',
-             NOW() + interval '1 hour')
-     RETURNING id`,
-    [agentId, userId, ADDR('f1'), ADDR('0e'), ADDR('aa')],
-  )
-  return r.rows[0].id
-}
+// #2118: `fakeApprovalId()` was removed with the one test that used it. The
+// note that stood here explained why an approval-anchored WRITE could be
+// exercised without a live `approval_requests` row; there is no such write
+// any more. The surviving fact — the column outlives the dropped table as a
+// plain unconstrained UUID (migration 070's CASCADE) — is asserted in
+// `approval-reference-unreachable.test.ts`, on the READ side where it matters.
 
 function evidenceInput(
   agent: { agentId: string; userId: string },
   overrides: Partial<EvidenceBaseInput> = {},
 ): EvidenceBaseInput {
   return {
-    referenceColumn: 'payment_intent_id',
     paymentIntentId: null,
     approvalRequestId: null,
     agentId: agent.agentId,
@@ -150,23 +143,15 @@ describeDb('machine-payments repository (#1224)', () => {
     expect(rows[0].challenge_payload).toEqual({ first: true })
   })
 
-  it('the approval-anchored upsert dedupes on its own partial unique index', async () => {
-    const agent = await seedAgent()
-    const approvalId = await seedApproval(agent.agentId, agent.userId)
-    const input = evidenceInput(agent, {
-      referenceColumn: 'approval_request_id',
-      approvalRequestId: approvalId,
-    })
-    await upsertEvidenceBase(input)
-    await upsertEvidenceBase({ ...input, txHash: `0x${'C'.repeat(64)}` })
-
-    const rows = await db.query(
-      `SELECT tx_hash FROM machine_payment_evidence WHERE approval_request_id = $1`,
-      [approvalId],
-    )
-    expect(rows.rows).toHaveLength(1)
-    expect(rows.rows[0].tx_hash).toBe(`0x${'c'.repeat(64)}`)
-  })
+  // #2118: 'the approval-anchored upsert dedupes on its own partial unique
+  // index' was DELETED here, not skipped. It exercised
+  // `UPSERT_EVIDENCE_BASE_FOR_APPROVAL_SQL`, which no longer exists — the test
+  // lost its subject rather than its relevance, which is the only reason a
+  // deletion is the right move. The partial unique index it covered is still
+  // on the table and still protects the historical rows; what is gone is
+  // Haven's ability to write a NEW row through it. That the write path is
+  // unreachable, and that every READ of `approval_request_id` still works, is
+  // pinned in `approval-reference-unreachable.test.ts`.
 
   // ── Proof attach: sticky terminal status ───────────────────────────────
 
@@ -176,7 +161,6 @@ describeDb('machine-payments repository (#1224)', () => {
     await upsertEvidenceBase(evidenceInput(agent, { paymentIntentId: intentId }))
 
     const attached = await attachEvidenceProof({
-      referenceColumn: 'payment_intent_id',
       paymentId: intentId,
       agentId: agent.agentId,
       proofStatus: 'protocol_receipt_attached',
@@ -192,7 +176,6 @@ describeDb('machine-payments repository (#1224)', () => {
     expect(attached).not.toBeNull()
 
     const downgraded = await attachEvidenceProof({
-      referenceColumn: 'payment_intent_id',
       paymentId: intentId,
       agentId: agent.agentId,
       proofStatus: 'payment_proof_attached', // lesser status must NOT win
@@ -217,7 +200,6 @@ describeDb('machine-payments repository (#1224)', () => {
     await upsertEvidenceBase(evidenceInput(agent, { paymentIntentId: intentId }))
 
     const result = await attachEvidenceProof({
-      referenceColumn: 'payment_intent_id',
       paymentId: intentId,
       agentId: other.agentId,
       proofStatus: 'payment_proof_attached',
@@ -268,7 +250,7 @@ describeDb('machine-payments repository (#1224)', () => {
     expect(count.rows[0].n).toBe(1)
 
     // Resolve it; a further replay must NOT re-open a resolved flag.
-    await resolveReconciliationForPayment('payment_intent_id', intentId, agent.agentId)
+    await resolveReconciliationForPayment(intentId, agent.agentId)
     const afterResolve = await upsertReconciliationEvent({ ...base, reason: 'third' })
     expect(afterResolve).toBeNull()
     const status = await db.query<{ status: string; reason: string }>(

@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
   - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
-last-verified: "2026-08-23" # #1699: new section "Re-anchoring after a re-key" — an EAS attestation is immutable and its first field is the delegate EOA, so a re-key leaves the live attestation naming a RETIRED key (#1847) and re-key now retires and reissues it. Three claims in the body were stale and are corrected against the code, not merely appended to: the `anchor` enumeration was missing `re_anchoring`; "runs retryPendingPassports(), then reconcilePendingRevocations(), then logs listStuckRevocations()" now omitted two phases; and "each of the three phases" was already wrong at three and is now five. Re-read the revocation and sweep sections in full against `modules/passport/**` and `index.ts` — every other claim stands, including the no-terminal-failed-state rule, which the re-anchor path inherits by sharing `retireAttestationOnChain`. Scope: revocation/sweep/anchor-state sections; the schema, binding, assurance-ladder and receipt sections were not re-tested. Prior: #1758: "no terminal failed revocation state" needed something able to observe agreement, and the only observer was unreachable — a revoke that mines after its bounded wait leaves `revocation_status` permanently `pending`. A new section records what CLOSES a revocation: the attestation's revoked bit read at a settled block, its evidence pointer from the durable outbound record, and the #1743 time question left open. Prior: #1745: the SECOND limit on "recovered, never re-minted" is closed — a null receipt no longer presumes dropped; a re-mint needs positive evidence the prior tx can never mine (its nonce consumed by something else). The bounded-stall argument and the still-open time question (#1743) are recorded rather than implied. The first limit (hash-keyed recovery) stands. Prior: #1742: the sweep's phase isolation protects against a THROW, not a hang — `revokeOnChain`'s bare `tx.wait()` could park the revocation phase and the stuck-revoke alarm downstream of it indefinitely. The wait is now bounded; the retry/backoff model, the no-terminal-failed-state rule and the verifier precedence are unchanged. Prior: #1735: the "recovered, never re-minted" claim is qualified — recovery is keyed off the persisted tx hash (hence the bump-worker exclusion) and presumes a null receipt means dropped, so a fee-stuck anchor can still re-mint (#1745). Anchor wait disposition on expiry recorded. Rest of the anchoring/revocation prose re-read against the code and unchanged.
+last-verified: "2026-08-27" # #2138: issuance is now delegation-rail only (owner decision 2026-08-27), and this doc — the technical contract for the surface — did not say so. The Issuance section gains the allowlist rule, the per-entry-point refusal shape (409 on the dedicated route, silent skip on the two fire-and-forget paths), and the two consequences: an already-anchored legacy passport is LEFT ALONE rather than revoked, and §2's zero-address sentinel is now unreachable through issuance. Retry discipline gains the matching listRetryable exclusion and why it is needed (without it a permanently-refused row alarms an operator). Scope: the Issuance and Retry-discipline sections; the schema, binding, anchoring, revocation and receipt sections were NOT re-verified in this pass. Prior: #2110: the "minimal disclosure" section listed `rail`/`policyEnforcedOnchain`/`treasuryBound` by name and said nothing about their values. It now states that `policyEnforcedOnchain` is true on the delegation rail ONLY — false on both retired rails, because a legacy account may still hold a real on-chain allowance while every payment entry point answers 410, so no live spend exists for a contract to govern. The rail value domain is deliberately NOT re-typed here: it points at the CHECK constraint and the `openapi/spec.ts` enum #2110 added, so this doc cannot become a hand-copied fourth source. Scope: that one paragraph in "Minimal disclosure"; the schema, binding, anchoring, revocation and receipt sections were NOT re-verified in this pass. Prior: #1847: recovered anchors are now attributed from the mined transaction's own calldata, never the fresh claim — the one path where `agent_eoa` could lie and blind the stale-anchor invariant permanently (recovery crossing a completed re-key). New prose in the re-anchoring section: the attribution rule, and why an abandoned/in-flight re-key is deliberately NOT a re-anchor case. Scope: the retry-discipline and re-anchoring sections re-read against `issuance.ts`/`attestation.ts`/`reanchor.ts` as changed; schema/binding/receipt sections untouched. Prior: #1992: "legacy/import-only agents" -> "legacy-rail agents". Import is not a live path on that rail (#1984 410s it), so "import-only" names a mode that no longer exists. Scope: that one sentence. Prior: #1699: new section "Re-anchoring after a re-key" — an EAS attestation is immutable and its first field is the delegate EOA, so a re-key leaves the live attestation naming a RETIRED key (#1847) and re-key now retires and reissues it. Three claims in the body were stale and are corrected against the code, not merely appended to: the `anchor` enumeration was missing `re_anchoring`; "runs retryPendingPassports(), then reconcilePendingRevocations(), then logs listStuckRevocations()" now omitted two phases; and "each of the three phases" was already wrong at three and is now five. Re-read the revocation and sweep sections in full against `modules/passport/**` and `index.ts` — every other claim stands, including the no-terminal-failed-state rule, which the re-anchor path inherits by sharing `retireAttestationOnChain`. Scope: revocation/sweep/anchor-state sections; the schema, binding, assurance-ladder and receipt sections were not re-tested. Prior: #1758: "no terminal failed revocation state" needed something able to observe agreement, and the only observer was unreachable — a revoke that mines after its bounded wait leaves `revocation_status` permanently `pending`. A new section records what CLOSES a revocation: the attestation's revoked bit read at a settled block, its evidence pointer from the durable outbound record, and the #1743 time question left open. Prior: #1745: the SECOND limit on "recovered, never re-minted" is closed — a null receipt no longer presumes dropped; a re-mint needs positive evidence the prior tx can never mine (its nonce consumed by something else). The bounded-stall argument and the still-open time question (#1743) are recorded rather than implied. The first limit (hash-keyed recovery) stands. Prior: #1742: the sweep's phase isolation protects against a THROW, not a hang — `revokeOnChain`'s bare `tx.wait()` could park the revocation phase and the stuck-revoke alarm downstream of it indefinitely. The wait is now bounded; the retry/backoff model, the no-terminal-failed-state rule and the verifier precedence are unchanged. Prior: #1735: the "recovered, never re-minted" claim is qualified — recovery is keyed off the persisted tx hash (hence the bump-worker exclusion) and presumes a null receipt means dropped, so a fee-stuck anchor can still re-mint (#1745). Anchor wait disposition on expiry recorded. Rest of the anchoring/revocation prose re-read against the code and unchanged.
 ---
 
 # L0 Agent Passport — EAS schema
@@ -89,7 +89,7 @@ So the verifier ([#974](https://github.com/d-hinders/Haven-AI/issues/974)) maps
 *either* bound address to the same passport.
 
 `agentEoa` is the **required** one because it is universal — every agent has a
-delegate address, including legacy/import-only agents that have nothing else.
+delegate address, including legacy-rail agents that have nothing else.
 The smart account is derived from it and exists only on the delegation rail.
 (This is reversed from the epic's initial suggestion; the data model decided it.)
 
@@ -118,6 +118,30 @@ credential — and an agent with no passport row is the normal case, behaving
 exactly as before this shipped. Each passport is an attestation the relayer
 pays gas for, and opt-in lets the owner choose what goes on-chain (the graph
 note above).
+
+**Issuance is delegation-rail only** (#2138, epic #1440; owner decision
+2026-08-27: *"we should not support issuance on legacy rails"*). An account
+qualifies on `execution_rail = 'delegation'` **or**
+`account_type = 'delegator_hybrid'` — the same pair §2 already treats as one
+question when deciding whether to derive the agent's smart account. Everything
+else is refused: the retired AllowanceModule and Smart Sessions rails cannot
+transact at all, so there is no spending for a contract to govern and a passport
+would attest a control that cannot be exercised. It is an **allowlist**, so a
+future rail is refused until it opts in.
+
+`POST /agents/:id/passport` answers **409** with the rail named. The two
+fire-and-forget entry points — `issue_passport` at agent creation, and the
+connect-setup register path — skip silently, because a passport that cannot be
+issued must never fail the agent creation it is attached to.
+
+Two consequences worth stating rather than leaving to be rediscovered. **A
+passport issued on a legacy account before that gate is left alone**, not
+revoked — `issuePassport`'s idempotent early return sends an already-anchored
+row home before the gate runs, and its control summary reports
+`policyEnforcedOnchain: false`, which was always the honest answer for it. And
+**the zero-address sentinel of §2 is now unreachable through issuance**: every
+account that would bind it — one with no derivable smart account — is refused
+above it. The branch is retained as defence rather than removed.
 
 The EAS write is **async, best-effort and retryable** — recorded synchronously
 (the POST returns 202), anchored fire-and-forget. A failed, slow, or unfunded
@@ -179,9 +203,13 @@ target and the zero value). Non-custody is unaffected; see the
 
 Issuance retries mirror the revocation side: the due-list applies a capped
 exponential backoff (30s doubling to 1h, computed from `updated_at +
-backoff(attempts)` — no schema change) and **excludes revoked agents**, so a
-struggling row costs at most ~24 attempts/day and a revoked agent's pending
-row simply stops being due. Rows past the attention threshold (10 attempts —
+backoff(attempts)` — no schema change) and **excludes revoked agents and
+legacy-rail accounts** (#2138), so a struggling row costs at most ~24
+attempts/day, and a row that can never succeed simply stops being due. The
+second exclusion exists for the same reason as the first: the gate above
+refuses these accounts on every tick, so without it the row would fail forever,
+climb past the attention threshold and alarm an operator about a refusal that
+is working as designed. Rows past the attention threshold (10 attempts —
 hours of failing) are counted and logged by the sweep as an operational
 alarm rather than churning silently.
 
@@ -338,6 +366,42 @@ unconditional caller, so it was left intact and a second gate written beside it
 keyed on `<> 'revoked'` plus the stale-anchor predicate. The two are mutually
 exclusive by construction, so an agent revoked mid-re-anchor moves between the
 queues rather than racing inside one.
+
+**A recovered anchor is attributed from the transaction's own bytes, never
+from fresh facts ([#1847](https://github.com/d-hinders/Haven-AI/issues/1847)).**
+The invariant above compares two database columns, so it is only as honest as
+what `markAnchored` writes into `agent_eoa`. The mint path writes the claim it
+just attested — trivially the truth. The #1043 recovery path is the one place
+they can diverge: the recovered transaction was built from the facts of its
+day, and a re-key can complete between its broadcast and its receipt being
+read (exactly the "attest lands late" race #1743's lane cancel documents).
+Writing the *fresh* claim there would set `agent_eoa = delegate_address` for an
+attestation that names the retired key — the stale-anchor predicate false
+forever, the sweep and its alarm both blind, and every verifier receipt built
+from the row describing bytes that are not on-chain. So
+`recoverAnchorFromReceipt` decodes `agentEoa`/`smartAccount` out of the mined
+calldata (a fee bump re-broadcasts the same bytes, so the decode holds for a
+bumped hash too) and issuance records those; when they disagree with the
+current key, the row simply enters the re-anchor queue above and heals on the
+next tick. If the transaction body cannot be fetched, recovery throws — a
+retryable failure — rather than attribute the anchor from facts the chain does
+not hold.
+
+**An abandoned (or merely in-flight) re-key is NOT a re-anchor case, on
+purpose.** `agents.delegate_address` rotates only inside `completeRekey`'s
+transaction, so until a re-key completes, the anchored attestation still names
+the agent's canonical current key — the invariant is false and nothing here
+touches the row. That is correct, not a gap: past the revoke the agent's spend
+authority is empty (the abandon response says so:
+`agent_has_no_authority: true`), but the passport attests governance, never
+spend authority, and re-anchoring onto a replacement key that never activated
+would bind a credential to authority that does not exist. The state resolves
+the way the re-key itself resolves: completion (direct, or a successor
+adopting the abandoned carry, #1868) rotates the column and the invariant
+fires; an owner revoke moves the row to the revocation queue. An agent left
+abandoned indefinitely keeps an accurate attestation for a key with nothing
+granted to it — the same shape as a passported agent that was never granted a
+budget.
 
 A stale anchor left unreconciled past the threshold is its own operational
 incident, distinct from a stuck revoke — see
@@ -663,6 +727,17 @@ on-chain), and a boolean control summary — `rail`, `policyEnforcedOnchain`,
 `treasuryBound`. It carries **no** owner identity, budget amounts, balances,
 counterparties, or treasury address. A merchant needs to know an agent is
 governed, not how much its owner lets it spend.
+
+`rail` is the account's `execution_rail` verbatim, and `policyEnforcedOnchain`
+is **true only on the delegation rail** — false on both retired rails, because
+a legacy account may still hold a real on-chain allowance but every agent
+payment entry point answers 410 (#1440/#1986), so there is no live spend for a
+contract to govern. The authoritative value domain is the column's CHECK
+constraint, published as an `enum` on `controls.rail` in
+[`openapi/spec.ts`](../../packages/backend/src/openapi/spec.ts) and pinned to
+that migration by `modules/passport/__tests__/passport-controls-rail.test.ts`
+(#2110) — deliberately **not** re-typed here, so this doc cannot become a
+hand-copied fourth source that drifts the way the spec description did.
 
 ### Perimeter
 

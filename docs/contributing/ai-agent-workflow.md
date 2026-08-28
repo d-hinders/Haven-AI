@@ -10,7 +10,7 @@ covers:
   - AGENTS.md
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/ai-review-patterns.md
-last-verified: "2026-08-21" # the independent reviewer pass is now unconditional and route-independent (owner decision 2026-08-21): "owning an equivalent review yourself" no longer reads as licence to self-review. The no-check-for-workflow property is unchanged — the new gate asks whether review happened, never which route ran.
+last-verified: "2026-08-24" # #1968: the PR-report list's "review status" item now names the per-pass verdict line, matching the PR template's Review Status section. The `haven-reviewer`-on-every-PR rule at §"Captain Self-Check Preflight" was read and is unchanged — this adds where the verdict is recorded, not whether the pass is required. Nothing else in this file re-verified. Prior: the independent reviewer pass is now unconditional and route-independent (owner decision 2026-08-21): "owning an equivalent review yourself" no longer reads as licence to self-review. The no-check-for-workflow property is unchanged — the new gate asks whether review happened, never which route ran.
 ---
 
 # Haven AI Agent Workflow
@@ -144,7 +144,11 @@ Every non-trivial PR should end with a concise closeout:
 - generated artifact and credential-handoff impact
 - CASP/MiCA guardrail status when relevant
 - what was intentionally left out
-- review status
+- review status, written as a **named verdict line per pass** — `haven-reviewer: passed |
+  skipped because ___`, and the same for `haven-design-reviewer` on `area:frontend`
+  ([#1968](https://github.com/d-hinders/Haven-AI/issues/1968)). The rule above binds either
+  way; the line is what makes a skip visible, and `ship-next` will not arm auto-merge
+  without it
 - merge-readiness report
 
 Use this merge-readiness format:
@@ -416,7 +420,11 @@ Before calling the PR ready, include:
 - generated artifact and credential handoff impact
 - CASP/MiCA guardrail status when relevant
 - what was intentionally left out
-- review status
+- review status, written as a **named verdict line per pass** — `haven-reviewer: passed |
+  skipped because ___`, and the same for `haven-design-reviewer` on `area:frontend`
+  ([#1968](https://github.com/d-hinders/Haven-AI/issues/1968)). The rule above binds either
+  way; the line is what makes a skip visible, and `ship-next` will not arm auto-merge
+  without it
 - merge-readiness report with risk level, residual risk, and recommended merge order if multiple PRs are open
 ```
 

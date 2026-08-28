@@ -1836,52 +1836,52 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-describe('#2131: the local MCP tool descriptions and README carry no dead resume trigger', () => {
+describe('#2145: the local MCP tool descriptions and README present the resume trigger as live', () => {
   /**
    * The local MCP package has its OWN `toolDescriptions` record — a third
-   * agent-facing description surface beside the SDK's and the hosted server's.
-   * It is clean today, and this guard is what keeps it that way: #2131 removed
-   * `retry_original_x402_request` from nine agent-facing sites, and the reason
-   * it reached nine was that nothing scanned for it.
+   * agent-facing description surface beside the SDK's and the hosted server's,
+   * though `haven_resume_x402_payment` here is composed directly from the
+   * SDK's shared `resumeX402` fragment (see `tools.ts`), so it inherits the
+   * shared-source fix automatically.
    *
-   * Nothing emits that value — the backend's `paymentIntentState` never returns
-   * it, and the SDK's `executed` mapping reads a status the backend cannot
-   * construct since #2055 dropped `approval_requests`. #2145 tracks giving it a
-   * reachable producer; delete both assertions when it does.
+   * #2145 gave `retry_original_x402_request` a real producer
+   * (agent-payment-status.ts emits it when the funding leg confirmed but no
+   * merchant response was ever recorded). This guard pins that no local
+   * description still claims the trigger is unreachable, and that the resume
+   * description names it as the gate.
    */
-  it('no local tool description advertises retry_original_x402_request', () => {
+  it('haven_resume_x402_payment names retry_original_x402_request as its gate; nothing claims it is unreachable', () => {
     const entries = Object.entries(toolDescriptions)
 
     // Non-vacuity: an empty record would satisfy every assertion below.
     expect(entries.length).toBeGreaterThan(0)
 
+    expect(toolDescriptions.haven_resume_x402_payment).toContain(
+      'nextAction=retry_original_x402_request',
+    )
+
     for (const [name, description] of entries) {
+      const lower = description.toLowerCase()
       expect(
-        description,
-        `${name} must not advertise retry_original_x402_request — nothing emits it (see #2145)`,
-      ).not.toContain('retry_original_x402_request')
+        lower,
+        `${name} must not claim retry_original_x402_request is unreachable — #2145 gave it a producer`,
+      ).not.toContain('not currently reachable')
+      expect(
+        lower,
+        `${name} must not claim nothing emits a resume trigger — #2145 gave it a producer`,
+      ).not.toContain('nothing emits')
     }
   })
 
-  it('the shipped README does not tell an operator to act on it either', () => {
+  it('the shipped README tells an operator to gate on the live trigger, not to expect it never to fire', () => {
     // Same treatment and same reasoning as the README guard in `consent.test.ts`:
     // this file is shipped on npm, nothing renders it, and #2086 already proved
     // it drifts silently when only the code is checked.
     const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
 
-    // The real protection: no verbatim mention at all. This README has no
-    // legitimate use of the value, unlike the SDK's, so a blanket check is
-    // available here and is the strongest form.
-    expect(readme).not.toContain('retry_original_x402_request')
-
-    // The positive half asserts the replacement claim is still THERE, so the
-    // section cannot be quietly deleted back to silence. Whitespace-tolerant
-    // deliberately: the first version matched `'not\n   currently reachable'`
-    // verbatim, and haven-reviewer showed that re-wrapping the identical
-    // sentence at a different column — a prettier run, a line-length lint, any
-    // cosmetic reflow — failed it. A guard that cries drift over a line break
-    // costs a debugging cycle and teaches people to distrust it.
     expect(readme).toContain('haven_resume_x402_payment')
-    expect(readme).toMatch(/is not\s+currently reachable/)
+    expect(readme).toContain("nextAction: 'retry_original_x402_request'")
+    expect(readme.toLowerCase()).not.toMatch(/is not\s+currently reachable/)
+    expect(readme.toLowerCase()).not.toContain('nothing emits')
   })
 })

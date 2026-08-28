@@ -324,16 +324,16 @@ import {
                                 │ payment_confirmed (✔)   │
                                 └─────────────────────────┘
 
-  (EIP-3009 bridge only — RETIRED BRANCH, drawn as the record of what the
-   legacy rail did. Nothing reaches it: `funding_sent` and `executed` are both
-   projections of the payment status `executed`, which was an `approval_requests`
-   status and became unconstructible when #2055 dropped that table. See the
-   `retry_original_x402_request` row below.)
+  (EIP-3009 bridge only. `funding_sent` is Haven's funding leg confirming —
+   value left the treasury and sits on the delegate EOA. `executed` is the
+   agent's own merchant retry succeeding; Haven has no phase for the merchant
+   leg itself. See the `retry_original_x402_request` row below.)
                                 ┌───────────────────────┐
                                 │ funding_sent          │
                                 └──────────┬────────────┘
-                                                     │ retry_original_x402_request (x402)
-                                                     │ none (direct)
+                                                     │ retry_original_x402_request (x402, after the
+                                                     │   merchant-report grace window — #2145)
+                                                     │ none (direct / erc7710)
                                                      ▼
                                           ┌───────────────────────┐
                                           │ executed (✔)          │
@@ -375,7 +375,7 @@ The merchant settlement leg of x402 (and the MPP retry) is the agent's own reque
 | `none` | Stop polling; no more action is needed for this payment id. |
 | `wait_for_user_approval` | **No longer produced — nothing maps to it.** Retired with the Safe rail's approval queue; kept in the exported enum for wire compatibility. The SDK's own status mapping now answers `stop_and_tell_user` for the statuses that used to yield this. |
 | `wait_for_user_to_complete_payment` | **No longer produced — nothing maps to it.** Same retirement as above. |
-| `retry_original_x402_request` | **No longer produced — nothing maps to it.** It was emitted only for the payment status `executed`, which was an `approval_requests` status and became unconstructible when #2055 dropped that table. Kept in the exported enum for wire compatibility, and `resumeX402Payment()` still requires it, so that helper cannot currently complete. Restart-resume for an interrupted x402 payment is tracked as a gap, not a removed feature. |
+| `retry_original_x402_request` | Haven's funding leg confirmed but no merchant response was ever recorded — most often because the process crashed between the funding confirmation and the merchant retry (a 15-minute grace window applies before this fires; a client-reported merchant rejection instead yields `sweep_stranded_funds`). Call `resumeX402Payment()` with the preserved `resumeState`, or rehydrate it first with `getResumeState(payment_id)`. Do not start a new payment for the same purchase. |
 | `stop_and_tell_user` | Stop retrying and tell the user the payment failed or was rejected. |
 | `request_again_if_user_still_wants_it` | The request expired; ask again only if the user still wants the payment. |
 | `payment_window_expired` | The x402 funding/quote window expired. Re-quote the same paid MCP tool call with the same `idempotency_key`, then sign the fresh `payload_hash`. |
@@ -420,16 +420,19 @@ Resume was triggered by *funding confirmation*, not by an approval, and applied
 only to the EIP-3009 bridge — erc7710 direct settlement has no funding leg and
 nothing to resume.
 
-> **Resume is not currently available.** Its trigger,
-> `nextAction: 'retry_original_x402_request'`, has no producer (see the table
-> above), and `resumeX402Payment()` throws rather than guessing — so a payment
-> interrupted between the funding leg and the merchant retry cannot be completed
-> through this helper today. The helper, its guard and the enum member are all
-> retained deliberately; what is missing is a reachable trigger, not the flow.
+> **Resume is reachable again (#2145).** If the agent process crashes after
+> Haven's funding leg confirms but before the merchant retry is recorded, a
+> later `getPaymentStatus(payment_id)` reports
+> `nextAction: 'retry_original_x402_request'` — Haven's funding confirmed but
+> the merchant has likely not been paid. Gate on that structured field, not on
+> message prose: call `resumeX402Payment()` with the preserved `resumeState`, or
+> rehydrate it first via `getResumeState(payment_id)`. Any other `nextAction`
+> means the payment is not ready to resume — do not call it speculatively.
 >
 > Meanwhile: the `payX402*` helpers perform the merchant retry themselves, so
-> the ordinary path never needs resume. If a call was interrupted, read
-> `getPaymentStatus(payment_id)` and report what it says — do not pay again.
+> the ordinary in-flight path never needs resume. Only reach for
+> `resumeX402Payment()` after seeing the trigger on a later status check —
+> never speculatively, and never as a substitute for a fresh payment.
 
 When the agent used `quoteX402()` / `payX402Quote()`, the thrown
 `HavenPaymentStateError` includes a serializable `resumeState`. Persist it with

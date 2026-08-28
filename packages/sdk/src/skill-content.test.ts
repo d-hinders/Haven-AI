@@ -16,13 +16,12 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('haven_quote_x402')
     expect(HAVEN_SKILL_MD).toContain('haven_pay_x402_quote')
     expect(HAVEN_SKILL_MD).toContain('haven_get_payment_status')
-    // #2131: was `toContain('retry_original_x402_request')`. Nothing emits that
-    // value, so this assertion required the skill to keep telling agents to
-    // wait on a signal that never arrives. Inverted to a negative, matching the
-    // `pending_approval` treatment in the sibling bundle test. Re-allow when
-    // #2145 gives it a producer.
-    expect(HAVEN_SKILL_MD).not.toContain('retry_original_x402_request')
-    expect(HAVEN_SKILL_MD).toContain('no resume signal to wait for')
+    // #2145 gave the backend a real producer for this trigger
+    // (agent-payment-status.ts emits it when the funding leg confirmed but no
+    // merchant response was ever recorded). The skill must tell the agent to
+    // gate on the structured field rather than claim the trigger is dead.
+    expect(HAVEN_SKILL_MD).toContain("nextAction: 'retry_original_x402_request'")
+    expect(HAVEN_SKILL_MD).toContain('instead of paying again')
     expect(HAVEN_SKILL_MD).toContain('mcp_transport')
     expect(HAVEN_SKILL_MD).toContain('expires_at')
     expect(HAVEN_SKILL_MD).toContain('mcp__haven__haven_pay_mcp_tool')

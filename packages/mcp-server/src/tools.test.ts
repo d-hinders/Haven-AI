@@ -5905,35 +5905,41 @@ describe('#2054 — erc7710-only merchants', () => {
   })
 })
 
-describe('#2131: the hosted tool descriptions carry no dead resume trigger', () => {
+describe('#2145: the hosted resume description gates on the live retry trigger', () => {
   /**
    * `RESUME_X402_DESCRIPTION` in this file is a hand-built string literal, not
    * an entry of the SDK's shared `toolDescriptions` object — so the regression
    * guard in `packages/sdk/src/tool-descriptions.test.ts` never scanned it.
-   * haven-reviewer proved the gap by mutation: reintroducing
-   * `nextAction=retry_original_x402_request` here left all 291 tests green.
    *
-   * Nothing emits that value (the backend's `paymentIntentState` never returns
-   * it, and the SDK's `executed` mapping reads a status the backend cannot
-   * construct since #2055), so advertising it tells an agent to gate on a
-   * signal that never arrives — which is what #2131 removed from nine agent-facing sites.
+   * #2145 gave `retry_original_x402_request` a real producer
+   * (agent-payment-status.ts emits it when the funding leg confirmed but no
+   * merchant response was ever recorded). `haven_resume_x402_payment`'s
+   * description must name it as the gate, and no hosted description should
+   * still claim the trigger is unreachable.
    *
    * Scans the exported record, so a newly registered hosted tool is covered
    * without anyone remembering to extend this list.
-   *
-   * DELETE when #2145 gives the value a reachable producer.
    */
-  it('no hosted tool description advertises retry_original_x402_request', () => {
+  it('haven_resume_x402_payment names retry_original_x402_request as its gate; nothing claims it is unreachable', () => {
     const entries = Object.entries(toolDescriptions)
 
     // Non-vacuity: an empty record would satisfy every assertion below.
     expect(entries.length).toBeGreaterThan(0)
 
+    expect(toolDescriptions.haven_resume_x402_payment).toContain(
+      'nextAction=retry_original_x402_request',
+    )
+
     for (const [name, description] of entries) {
+      const lower = description.toLowerCase()
       expect(
-        description,
-        `${name} must not advertise retry_original_x402_request — nothing emits it (see #2145)`,
-      ).not.toContain('retry_original_x402_request')
+        lower,
+        `${name} must not claim retry_original_x402_request is unreachable — #2145 gave it a producer`,
+      ).not.toContain('not currently reachable')
+      expect(
+        lower,
+        `${name} must not claim nothing emits a resume trigger — #2145 gave it a producer`,
+      ).not.toContain('nothing emits')
     }
   })
 })

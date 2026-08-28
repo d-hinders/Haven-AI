@@ -167,15 +167,16 @@ const AUTHORIZE_X402_DESCRIPTION =
   'A payment outside the on-chain budget is declined before any money moves — report the decline and ask the user to raise the budget in Haven; do not loop retries and do not wait for an approval, because none is queued. Preserve the original merchant/MCP session and x402 details. ' +
   'Use the returned payment_header as the X-PAYMENT header on the retry request when doing a manual HTTP retry.'
 
-// #2131: this tool is retained and registered, but it is NOT currently reachable —
-// nothing emits the `retry_original_x402_request` state its guard requires, so every
-// call reports a conflict. The guard stays fail-closed on purpose; #2145 is what gives
-// it a producer. The description tells an agent what to do meanwhile rather than
-// pretending the capability was never intended.
+// #2145: the backend now emits nextAction=retry_original_x402_request from
+// GET /payments/:id (agent-payment-status.ts) when the funding leg confirmed
+// but no merchant response was ever recorded — the crash-recovery case, after
+// a 15-minute grace window. This tool's gate requires that exact nextAction,
+// so it is reachable again on purpose; the description tells an agent to gate
+// on the structured field rather than call this speculatively.
 const RESUME_X402_DESCRIPTION =
   sharedDescriptions.resumeX402.summary + ' ' +
-  'Not currently reachable: Haven emits no payment state marking a payment ready to resume, so this call reports a conflict instead of retrying. ' +
-  'If a paid request was interrupted after Haven authorized it, read get_payment_status and tell the user what it reports — do not pay again.'
+  'Only call this after get_payment_status reports nextAction=retry_original_x402_request — that means Haven\'s funding leg confirmed but no merchant response was ever recorded (typically a crash between funding and the merchant retry). ' +
+  'Any other nextAction reports a conflict instead of retrying — do not call this speculatively, and do not pay again.'
 
 const SWEEP_DELEGATE_DESCRIPTION = composeDescription(sharedDescriptions.sweep_delegate)
 

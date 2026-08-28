@@ -25,6 +25,18 @@ export interface ConnectErrorDetails {
    * from automation.
    */
   allowedRuntimes?: readonly string[]
+  /**
+   * What the #1719 installed-client scan found on this machine (#2174), when
+   * the refusal is `runtime_undetermined`. `installedClients` is ordered
+   * likeliest-first; `suggestedRuntime` appears only when one candidate is
+   * unambiguously top.
+   *
+   * A HINT, never a decision. The scan populates choices and never selects —
+   * carrying it here does not let the connector proceed on it, and the retry
+   * stays the agent's explicit `--runtime <name>`.
+   */
+  installedClients?: readonly string[]
+  suggestedRuntime?: string
 }
 
 export class ConnectError extends Error {

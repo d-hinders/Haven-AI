@@ -28,7 +28,12 @@ import {
 } from './runtime-install.js'
 import { normalizeRuntime, resolveRuntimeSelection, runtimeProfile, runtimeVerificationInstruction, RUNTIME_FLAG_VALUES, RUNTIME_FLAG_VALUE_LIST, type RuntimeId, type RuntimeProfile } from './runtime-registry.js'
 import { ConnectError } from './connect-error.js'
-import { resolveRuntimeByInstalledClientPrompt } from './installed-clients.js'
+import {
+  installedClientHint,
+  resolveRuntimeByInstalledClientPrompt,
+  scanInstalledClients,
+  type InstalledClientHint,
+} from './installed-clients.js'
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
@@ -135,6 +140,21 @@ export interface ConnectOutcome {
     next_action: string
     message?: string
     allowed_runtimes?: readonly string[]
+    /**
+     * #2174, additive within schema_version 1. What the installed-client scan
+     * found on THIS machine, narrowing a `runtime_undetermined` retry from the
+     * nine-value `allowed_runtimes` menu to what is actually here.
+     *
+     * A hint an agent may echo back as `--runtime`, never a selection: the
+     * outcome stays `failed` with `rerun_connect_with_explicit_runtime`, and
+     * the connector never proceeds on it (#1719's populates-never-selects
+     * invariant). Absent when the scan found nothing OR could not run —
+     * both are honestly "no finding"; neither is a claim the machine is bare.
+     * `suggested_runtime` appears only when one candidate is unambiguously
+     * top, so it is never the winner of an arbitrary tiebreak.
+     */
+    installed_clients?: readonly string[]
+    suggested_runtime?: string
   }
 }
 
@@ -162,6 +182,13 @@ export interface ConnectDeps {
    * that a broken record write never fails a completed setup.
    */
   writeOutcomeRecord?: typeof writeConnectOutcomeRecord
+  /**
+   * Overridable so the #2174 refusal hint is testable without depending on
+   * which agent clients happen to be installed on the machine running the
+   * suite — and so a THROWING scan can be injected to prove the refusal
+   * degrades to its un-hinted shape.
+   */
+  scanInstalledClients?: typeof scanInstalledClients
 }
 
 export interface ConnectResult {
@@ -311,6 +338,7 @@ async function executeConnect(
     promptForRuntime: runtimeSelectionPrompt(options, deps),
   })
   if (!selection.runtime) {
+    const hint = await installedClientHintFor(deps)
     throw new ConnectError(
       'runtime_undetermined',
       'Could not determine the agent runtime: nothing was detected in this environment and no --runtime was given. ' +
@@ -318,6 +346,7 @@ async function executeConnect(
         `--runtime <name>, naming the harness you are running in — one of: ${RUNTIME_FLAG_VALUES} ` +
         '(the aliases cowork, codex and openclaw are accepted too). Do not guess: if your harness is ' +
         'not one of those, use --runtime other, which stores the credentials and prints the manual MCP steps. ' +
+        installedClientProse(hint) +
         'Nothing was written and the Haven setup token is still unused.',
       'rerun_connect_with_explicit_runtime',
       // #2091: the values must ride structurally too. The backend's setup
@@ -326,7 +355,12 @@ async function executeConnect(
       // every automation run in an undetected runtime (Codex in the field:
       // npx needs network, Codex runs network commands unsandboxed, and the
       // unsandboxed path carries none of the CODEX_* detection vars).
-      { allowedRuntimes: RUNTIME_FLAG_VALUE_LIST },
+      //
+      // #2174: the list alone still leaves the retry a nine-value guess. The
+      // scan below narrows it to what is actually on this machine — as a
+      // HINT. It does not select, and this stays a refusal: see
+      // `installedClientHint`.
+      { allowedRuntimes: RUNTIME_FLAG_VALUE_LIST, ...hint },
     )
   }
   const runtime = selection.runtime
@@ -687,6 +721,47 @@ export function completionOutcome(input: {
 }
 
 /**
+ * The installed-client scan, as a hint on the `runtime_undetermined` refusal
+ * (#2174).
+ *
+ * Best-effort and read-only: `scanInstalledClients` does filesystem existence
+ * checks and nothing else, and this runs at a point where no setup token has
+ * been resolved and no key or credential exists. A scan that throws degrades
+ * to the un-hinted refusal rather than replacing a precise refusal with a
+ * filesystem error — the caller's problem is still "name your runtime", and
+ * an `EACCES` on someone's home directory must not bury that.
+ *
+ * Returns `{}` rather than an empty list when the scan found nothing, so the
+ * refusal carries no `installed_clients` key at all: "the scan found none" and
+ * "the scan could not run" are both honestly represented by absence, whereas
+ * an empty array would assert a finding neither case made.
+ */
+async function installedClientHintFor(deps: ConnectDeps): Promise<Partial<InstalledClientHint>> {
+  try {
+    const candidates = await (deps.scanInstalledClients ?? scanInstalledClients)({ env: deps.env })
+    const hint = installedClientHint(candidates)
+    return hint.installedClients.length > 0 ? hint : {}
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * The same finding in the prose channel, so the human and machine refusals
+ * cannot say different things about the same machine. Phrased as evidence
+ * ("Haven can see …"), never as an instruction to use it: the retry is still
+ * the agent's explicit choice.
+ */
+function installedClientProse(hint: Partial<InstalledClientHint>): string {
+  const found = hint.installedClients ?? []
+  if (found.length === 0) return ''
+  const suggestion = hint.suggestedRuntime
+    ? ` The likeliest is ${hint.suggestedRuntime}, but Haven will not choose for you — pass it yourself if it is right.`
+    : ' Haven will not choose between them for you.'
+  return `Haven can see these agent clients installed here, likeliest first: ${found.join(', ')}.${suggestion} `
+}
+
+/**
  * The prompt rung's gate (#1719), in one place so the two conditions that
  * SKIP it cannot drift apart: a run that is not interactive (`--json`, a
  * library embedding) and a run whose stdin is not a terminal (CI, a pipe).
@@ -765,6 +840,12 @@ export function failedConnectOutcome(runtimeHint: string | undefined, error: unk
       ...(error instanceof ConnectError && message ? { message: redactForAutomation(message) } : {}),
       ...(error instanceof ConnectError && error.details.allowedRuntimes
         ? { allowed_runtimes: error.details.allowedRuntimes }
+        : {}),
+      ...(error instanceof ConnectError && error.details.installedClients?.length
+        ? { installed_clients: error.details.installedClients }
+        : {}),
+      ...(error instanceof ConnectError && error.details.suggestedRuntime
+        ? { suggested_runtime: error.details.suggestedRuntime }
         : {}),
     },
   }

@@ -361,3 +361,43 @@ describe('the --json outcome carries the recovery fields (#2173)', () => {
     }
   })
 })
+
+// #2174: the hint has to survive the --json serialization boundary, which is
+// the only channel an automating agent reads.
+describe('the --json refusal carries the installed-client hint (#2174)', () => {
+  it('emits installed_clients and suggested_runtime while staying a refusal', async () => {
+    const stdout: string[] = []
+    const spy = vi.spyOn(runtime, 'runConnect').mockRejectedValue(
+      new ConnectError(
+        'runtime_undetermined',
+        'could not determine the agent runtime',
+        'rerun_connect_with_explicit_runtime',
+        {
+          allowedRuntimes: ['claude-code', 'codex-cli', 'other'],
+          installedClients: ['codex-cli', 'claude-code'],
+          suggestedRuntime: 'codex-cli',
+        },
+      ),
+    )
+    try {
+      const exitCode = await runCli(
+        ['--setup', 'hv_setup_x', '--api', 'https://api.haven.example', '--json'],
+        { stdout: (message) => stdout.push(message), stderr: () => undefined },
+      )
+
+      // Non-zero and `failed`: a hint never turns a refusal into a success.
+      expect(exitCode).toBe(1)
+      expect(JSON.parse(stdout[0])).toMatchObject({
+        outcome: 'failed',
+        next_action: 'rerun_connect_with_explicit_runtime',
+        error: {
+          code: 'runtime_undetermined',
+          installed_clients: ['codex-cli', 'claude-code'],
+          suggested_runtime: 'codex-cli',
+        },
+      })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})

@@ -334,4 +334,30 @@ describe('the --json outcome carries the recovery fields (#2173)', () => {
       spy.mockRestore()
     }
   })
+  // The line this issue actually changed in cli.ts. Re-deriving the failure
+  // record from `parsed.options.runtime` would print the raw `--runtime` hint
+  // while the recovery file holds the runtime detection resolved (#1672) —
+  // one run, two records, which is exactly what the file must never do.
+  it("prints the run's own failure record rather than re-deriving one from the hint", async () => {
+    const stdout: string[] = []
+    const failure = new ConnectError('probe_failed', 'The MCP probe did not answer.', 'rerun_connect')
+    const runSpy = vi.spyOn(runtime, 'runConnect').mockRejectedValue(failure)
+    const recordSpy = vi.spyOn(runtime, 'failureOutcomeFor').mockReturnValue({
+      schema_version: 1,
+      outcome: 'failed',
+      runtime: 'claude-code',
+    } as never)
+    try {
+      const exitCode = await runCli(
+        ['--setup', 'hv_setup_x', '--api', 'https://api.haven.example', '--runtime', 'cursor', '--json'],
+        { stdout: (message) => stdout.push(message), stderr: () => undefined },
+      )
+      expect(exitCode).toBe(1)
+      expect(recordSpy).toHaveBeenCalledWith('cursor', failure)
+      expect(JSON.parse(stdout[0])).toMatchObject({ outcome: 'failed', runtime: 'claude-code' })
+    } finally {
+      recordSpy.mockRestore()
+      runSpy.mockRestore()
+    }
+  })
 })

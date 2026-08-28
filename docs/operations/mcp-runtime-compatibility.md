@@ -511,9 +511,10 @@ diagnostic that needs the full public identifier, use the owner-only, non-secret
 
 ### The hosted MCP endpoint is not the `--api` backend URL (#2173)
 
-`hosted_mcp_url` is the endpoint Connect actually wrote into the runtime's MCP
-config, and it is **deliberately a different deployment** from the backend URL
-passed as `--api`: the hosted MCP server runs on its own service. A caller that
+`hosted_mcp_url` is the endpoint Connect wired this run up to — written into
+the runtime's MCP config, or, on a manual runtime Connect cannot configure,
+printed as the endpoint to enter by hand. It is **deliberately a different
+deployment** from the backend URL passed as `--api`: the hosted MCP server runs on its own service. A caller that
 compares the two and finds them different is looking at intended topology, not
 an environment mismatch — which is exactly how a field run read it before the
 field existed, because the wired endpoint appeared nowhere in the outcome. The

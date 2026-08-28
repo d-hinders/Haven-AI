@@ -104,8 +104,10 @@ export interface ConnectOutcome {
    * run and absent on `failedConnectOutcome`, which by construction has
    * neither a registration nor a credential scan behind it.
    *
-   * `hosted_mcp_url` is the endpoint Connect actually wrote into the runtime's
-   * MCP config. It is deliberately NOT the `--api` backend URL: the hosted MCP
+   * `hosted_mcp_url` is the endpoint Connect wired this run up to — written
+   * into the runtime's MCP config, or, on a manual runtime that Connect cannot
+   * configure, printed as the endpoint to enter by hand. It is deliberately
+   * NOT the `--api` backend URL: the hosted MCP
    * server is a separate deployment, and an automation caller comparing the
    * two used to read that intentional topology as an environment mismatch. It
    * is non-secret — the same string already sits in the user's own config file
@@ -190,14 +192,48 @@ interface ConnectRunTrace {
   runtime?: string
 }
 
+/**
+ * The failure record a run already built, keyed on the error it threw (#2173).
+ *
+ * The run knows the RESOLVED runtime; a caller reconstructing the record from
+ * the same error knows only the raw `--runtime` hint, and detection can
+ * override that hint (#1672). Without this, one failed run could persist
+ * `runtime: claude-code` to the recovery file and print `runtime: cursor` on
+ * stdout — two records for one run, which is precisely the "the file is
+ * exactly what was emitted" guarantee the recovery file rests on.
+ *
+ * A WeakMap rather than a property on the error: nothing is mutated, nothing
+ * can be serialized into a message by accident, and the entry dies with the
+ * error it describes.
+ */
+const failureOutcomesByError = new WeakMap<object, ConnectOutcome>()
+
+/**
+ * The failure record for an error thrown by `runConnect` — the run's own, when
+ * it built one, and a freshly derived record otherwise (a rejection that never
+ * entered the run at all, such as an argument-parse refusal, or an injected
+ * one in a test).
+ */
+export function failureOutcomeFor(runtimeHint: string | undefined, error: unknown): ConnectOutcome {
+  if (error !== null && typeof error === 'object') {
+    const recorded = failureOutcomesByError.get(error)
+    if (recorded) return recorded
+  }
+  return failedConnectOutcome(runtimeHint, error)
+}
+
 export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}): Promise<ConnectResult> {
   const trace: ConnectRunTrace = {}
   try {
     return await executeConnect(options, deps, trace)
   } catch (err) {
-    if (trace.directory) {
-      await recordConnectOutcome(deps, trace.directory, failedConnectOutcome(trace.runtime ?? options.runtime, err))
-    }
+    // Built ONCE, from the resolved runtime, then both persisted and handed to
+    // the caller — so the file and the stdout line can never disagree. Derived
+    // even when there is no directory to write into: the caller still prints
+    // it, and the resolved runtime is the true answer either way.
+    const outcome = failedConnectOutcome(trace.runtime ?? options.runtime, err)
+    if (err !== null && typeof err === 'object') failureOutcomesByError.set(err, outcome)
+    if (trace.directory) await recordConnectOutcome(deps, trace.directory, outcome)
     throw err
   }
 }

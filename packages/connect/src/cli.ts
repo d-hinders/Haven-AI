@@ -3,7 +3,7 @@
 import { realpathSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { helpText, parseArgs } from './args.js'
-import { failedConnectOutcome, runConnect } from './runtime.js'
+import { failedConnectOutcome, failureOutcomeFor, runConnect } from './runtime.js'
 import { redactForAutomation, redactSecrets } from './redact.js'
 
 export interface CliIo {
@@ -223,7 +223,11 @@ export async function runCli(
       // redaction bar as those progress lines and the JSON message field:
       // redactForAutomation, which also masks credential-file paths.
       io.stderr(`${redactForAutomation(err instanceof Error ? err.message : String(err))}\n`)
-      io.stdout(`${JSON.stringify(failedConnectOutcome(parsed.options.runtime, err))}\n`)
+      // #2173: the run's OWN record when it built one, so the object printed
+      // here is byte-identical to the one persisted to `last-connect-outcome.json`.
+      // Re-deriving it from the raw `--runtime` hint would report the hint,
+      // not the runtime detection actually resolved (#1672).
+      io.stdout(`${JSON.stringify(failureOutcomeFor(parsed.options.runtime, err))}\n`)
     } else {
       io.stderr(`${redactSecrets(err instanceof Error ? err.message : String(err))}\n`)
     }

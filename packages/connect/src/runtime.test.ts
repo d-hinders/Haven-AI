@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { ConnectRequestError } from './api.js'
 import type { ConnectApiClient, ConnectorStatusResponse, RegisterSetupInput, UpdateInstallStatusInput } from './api.js'
 import { delegateKeyFromPrivateKey } from './key.js'
-import { completionHandoffLines, failedConnectOutcome, runConnect, waitForBudgetApproval } from './runtime.js'
+import { completionHandoffLines, failedConnectOutcome, failureOutcomeFor, runConnect, waitForBudgetApproval } from './runtime.js'
 import type { ConnectDeps } from './runtime.js'
 import { CONNECT_OUTCOME_FILENAME } from './storage.js'
 import { ConnectError } from './connect-error.js'
@@ -2201,6 +2201,57 @@ describe('runConnect terminal outcome record (#2173)', () => {
       outcome: 'failed',
       error: { code: 'probe_failed' },
     })
+  })
+
+  it('persists the RESOLVED runtime, not the raw hint detection overrode', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+
+    // Detection overrides an explicit --runtime hint (#1672). One failed run
+    // must not produce two records — `cursor` on stdout and `claude-code` in
+    // the file — because the recovery file's whole promise is that it holds
+    // exactly what was emitted.
+    const error = await expectRejection(runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: API_BASE_URL,
+      runtime: 'cursor',
+      credentialsDir: root,
+      waitForApproval: false,
+    }, {
+      api: outcomeApi(),
+      nodeVersion: SUPPORTED_NODE,
+      env: { CLAUDECODE: '1' },
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => AGENT_API_KEY,
+      preflightStorage: vi.fn(async () => root),
+      writeCredentials: credentialWriter(root),
+      installRuntime: vi.fn(async () => {
+        throw new ConnectError('probe_failed', 'The MCP probe did not answer.', 'rerun_connect')
+      }),
+      log: () => undefined,
+    }))
+
+    const record = await readRecord(root)
+    expect(record).toMatchObject({ outcome: 'failed', runtime: 'claude-code' })
+    // And the caller is handed that same record rather than re-deriving one
+    // from the hint it passed in.
+    expect(failureOutcomeFor('cursor', error)).toEqual(record)
+  })
+
+  it('rethrows the original error unchanged when the record write fails on a failed run', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+    const cause = new ConnectError('probe_failed', 'The MCP probe did not answer.', 'rerun_connect')
+
+    const error = await expectRejection(runInto(root, {
+      installRuntime: vi.fn(async () => {
+        throw cause
+      }),
+      writeOutcomeRecord: vi.fn(async () => {
+        throw new Error('EROFS: read-only file system')
+      }),
+    }))
+
+    // A broken recovery write must never replace the reason the run failed.
+    expect(error).toBe(cause)
   })
 
   it('writes no record for a refusal that happens before any credentials exist', async () => {

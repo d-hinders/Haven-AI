@@ -14,6 +14,7 @@ export {
   runConnect,
   completionOutcome,
   failedConnectOutcome,
+  failureOutcomeFor,
   CONNECTOR_VERSION,
   CONNECT_OUTCOME_SCHEMA_VERSION,
   type ConnectDeps,

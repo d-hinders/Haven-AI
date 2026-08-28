@@ -152,6 +152,11 @@ Publishing happens on the `dev → main` promotion. **Follow
 sequence, the BEHIND/sync-back rule, and why both merge with a merge commit
 rather than a squash. Do not restate it; read it.
 
+Since #2165 the merge-method half is enforced by the `Dev gate` ruleset rather
+than by you remembering it: a PR based on `main` can only be merge-merged. Treat
+a squash or rebase button appearing there as a sign the rule has been dropped,
+not as permission.
+
 What it leaves to you:
 
 - It calls the promotion a human step; it does not say whose. **Confirm the user

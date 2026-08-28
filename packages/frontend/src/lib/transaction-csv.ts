@@ -18,7 +18,14 @@ export interface TransactionCsvLookups {
   resolveName: (address: string, chainId: number) => string | null
 }
 
-/** Column order is the public contract of the export — do not reorder casually. */
+/**
+ * Column order is the public contract of the export — do not reorder casually.
+ * New columns append at the end so existing indices stay stable. `initiator`
+ * (added #2097) carries the raw attribution enum from the unified schema —
+ * `human` | `agent` | `unknown` — empty for inbound rows and for rows the
+ * backend did not attribute; it intentionally never carries the display
+ * string "You" so the export stays unambiguous for accountants.
+ */
 const COLUMNS = [
   'date',
   'type',
@@ -35,6 +42,7 @@ const COLUMNS = [
   'chain_id',
   'amount_sek',
   'fee_sek',
+  'initiator',
 ] as const
 
 function rowType(tx: AggregatedTransaction): string {
@@ -92,6 +100,7 @@ export function transactionsToCsv(
       chain_id: String(tx.chainId),
       amount_sek: tx.amountSek ?? '',
       fee_sek: '',
+      initiator: tx.initiatedBy ?? '',
     }
     lines.push(COLUMNS.map((col) => csvField(record[col])).join(','))
   }

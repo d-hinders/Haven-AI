@@ -10,8 +10,26 @@ import type { StatusTone } from '@/components/ui/StatusBadge'
  * state) that extend the wire shapes rather than replacing them.
  */
 
+/**
+ * Who initiated a transaction (#2097). `'agent'` = agent-initiated (always
+ * carries `agentName` too); `'human'` = user/dashboard-initiated (reserved —
+ * nothing sets it today); `'unknown'` = outbound raw transfer with no agent
+ * attribution. Direction `'in'` rows carry no `initiatedBy`.
+ *
+ * Declared here as a frontend-only extension because the OpenAPI field lands
+ * in the same PR (#2097): the generated wire type in `@haven_ai/core`
+ * (`packages/core/src/api-types.ts`, regenerated from the backend spec via
+ * `npm run generate:api-types`) gains the same optional field. This keeps the
+ * UI compiling before that regeneration lands, and stays consistent after it.
+ * Rendering contract: "You" / "Payment sent by you" is RESERVED for `'human'`;
+ * a missing value renders as explicit "Unknown" — never "You".
+ */
+type TransactionInitiator = 'agent' | 'human' | 'unknown'
+
 /** Per-Safe page item (`GET /transactions/{safeAddress}`) — no Safe scope. */
-export type Transaction = ApiSchema<'TransactionBase'>
+export type Transaction = ApiSchema<'TransactionBase'> & {
+  initiatedBy?: TransactionInitiator
+}
 
 /**
  * Aggregated-feed item plus the frontend-only presentation overrides used by
@@ -19,6 +37,17 @@ export type Transaction = ApiSchema<'TransactionBase'>
  * same primitive. Wire fields come from the generated `Transaction` schema.
  */
 export interface AggregatedTransaction extends ApiSchema<'Transaction'> {
+  /**
+   * Who initiated the payment (#2097). `'agent'` → agent-initiated (always
+   * accompanied by `agentName`); `'human'` → user/dashboard-initiated
+   * (reserved — nothing sets it today); `'unknown'` → outbound raw transfer
+   * with no agent attribution. Direction `'in'` rows carry no `initiatedBy`.
+   * Rendering contract: "You" / "Payment sent by you" is RESERVED for
+   * `'human'`; a missing value renders as explicit "Unknown" — never "You".
+   * Frontend-only extension of the wire schema (see `Transaction`) — the
+   * backend spec adds the field in the same PR (#2097).
+   */
+  initiatedBy?: TransactionInitiator
   /**
    * Optional status pill rendered inline beside the activity title. When set
    * it takes precedence over the default `isError` → "Failed" badge. Used by

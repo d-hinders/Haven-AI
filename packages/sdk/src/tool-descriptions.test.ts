@@ -258,17 +258,40 @@ describe('#2131: the shipped SDK README does not advertise the dead resume trigg
     //    a contributor tightening the table's prose — so it was worth closing
     //    rather than documenting.
     //
-    //    A markdown table row is one line; everything else is its paragraph.
-    //    Blockquote markers are stripped so a `> ` cannot split a paragraph,
-    //    and each unit's whitespace is collapsed so a line wrap cannot hide
-    //    anything inside it.
+    //    A unit is a table row, a list item, or a paragraph — whichever the
+    //    mention sits in. Blockquote markers are stripped so a `> ` cannot
+    //    split a paragraph, and each unit's whitespace is collapsed so a line
+    //    wrap cannot hide anything inside it.
+    //
+    //    List items are split for the same reason table rows are, and the
+    //    reason is a hole haven-reviewer found after the table fix landed:
+    //
+    //      - Retirement note: **no longer produced — nothing maps to it.**
+    //      - Action: call `resumeX402Payment()` when you see
+    //        `nextAction: 'retry_original_x402_request'`.
+    //
+    //    Adjacent bullets have no blank line between them, so they merged into
+    //    one paragraph and the first vouched for the second. A before/after
+    //    bullet pair is an ordinary README shape, so this needed no rhetoric
+    //    either — the same bar that made the table case worth fixing.
+    //
+    //    A continuation line (no marker of its own) stays with its item, so
+    //    wrapping a bullet does not split it.
     const prose = readme.replace(/```[\s\S]*?```/g, ' ')
+    const STARTS_UNIT = /^\s*(\||[-*+]\s|\d+[.)]\s)/
     const units: string[] = []
     for (const block of prose.split(/\n\s*\n/)) {
       const stripped = block.replace(/^\s*>\s?/gm, '')
-      // Table rows stand alone; a sibling row must not vouch for this one.
-      if (/^\s*\|/m.test(stripped)) units.push(...stripped.split('\n'))
-      else units.push(stripped)
+      let current = ''
+      for (const line of stripped.split('\n')) {
+        if (STARTS_UNIT.test(line)) {
+          if (current) units.push(current)
+          current = line
+        } else {
+          current = current ? `${current}\n${line}` : line
+        }
+      }
+      if (current) units.push(current)
     }
 
     const RETIRED = /no longer produced|not currently (available|reachable)|has no producer|nothing maps to it|nothing emits/i
@@ -278,7 +301,7 @@ describe('#2131: the shipped SDK README does not advertise the dead resume trigg
 
     expect(
       unframed,
-      `every prose mention of ${LITERAL} must carry retirement framing in its OWN table row or paragraph — a neighbour's framing does not vouch for it`,
+      `every prose mention of ${LITERAL} must carry retirement framing in its OWN table row, list item or paragraph — a neighbour's framing does not vouch for it`,
     ).toEqual([])
 
     // WHAT THIS DOES NOT CATCH — one class, stated at its real size, because

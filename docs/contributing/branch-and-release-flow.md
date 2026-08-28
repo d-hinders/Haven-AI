@@ -7,7 +7,7 @@ covers:
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
   - .github/workflows/publish.yml
-last-verified: "2026-08-16" # #1500: Branch-lifetime section added; the #1335/#1336 sync-back rule (dev re-absorbs main's merge commit post-promotion) still holds
+last-verified: "2026-08-28" # #2165: the never-squash promotion rule is now ENFORCED by the `Dev gate` ruleset (`allowed_merge_methods: ["merge"]` on any PR based on `main`), not left to the reader — it was prose-only and #2161 was squash-merged by a UI default. Section gains the enforcement note, the `hotfix/* → main` answer (branch rulesets gate the ref written to, so head-branch names do not matter) and why `dev` deliberately keeps squash. The rest of the section was re-read against the live rulesets: the BEHIND/sync-back rule and the `-s ours` recovery pointer still hold, and #2162 exercised the sync-back end to end. Prior: #1500: Branch-lifetime section added; the #1335/#1336 sync-back rule (dev re-absorbs main's merge commit post-promotion) still holds
 ---
 
 # Branch & release flow
@@ -137,6 +137,36 @@ Promotions merge with a **merge commit**, never squash: a squashed promotion
 leaves `main` with a history-less copy of the batch, and the next promotion
 conflicts en masse once `dev` has refactored any of those files (#1152 → #1172;
 repaired by the `-s ours` reconcile merge #1173).
+
+**Enforced, not remembered ([#2165](https://github.com/d-hinders/Haven-AI/issues/2165)).**
+The `Dev gate` ruleset carries a `pull_request` rule with
+`allowed_merge_methods: ["merge"]`, so GitHub offers only *Create a merge commit*
+on a PR whose base is `main`; squash and rebase are refused by the UI and the API
+alike. If you find yourself wondering why the other two buttons are missing, this
+is why — and if they reappear, the rule has been dropped from the ruleset and
+should be restored, exactly as [`CODEOWNERS`](../../.github/CODEOWNERS) says of
+`qa-freshness`.
+
+This was prose only until 2026-08-28, and prose lost: the `0.1.31-alpha.0`
+promotion (#2161) went in as a squash because the merge button defaulted to it
+and nobody changed it. #2162 repaired the ancestry with an ordinary merge, which
+worked **only because `dev` had not moved yet** — the trees were still identical,
+so no `-s ours` reconcile was needed. Caught a few commits later it would have
+been #1173 again. A rule that has to be re-derived at the moment of action, on
+the repository's rarest and highest-consequence merge, through a UI whose default
+is sticky and wrong, is not a rule.
+
+Two consequences worth stating, because both are easy to get backwards:
+
+- **`hotfix/* → main` is covered too.** A branch ruleset gates the ref being
+  *written to*, so the head branch's name is irrelevant — every PR based on
+  `main` gets the same restriction.
+- **PRs into `dev` are untouched.** `dev`'s ruleset still allows all three
+  methods, deliberately: **feature and release PRs into `dev` are squash-merged**.
+  The two rules are exact opposites, which is why the restriction lives in
+  `Dev gate` (which targets `refs/heads/main` alone) rather than in
+  `Haven automerge rules` (which covers both branches, and would have forced
+  merge commits onto `dev` as well).
 
 **After every promotion, sync `main`'s merge commit back into `dev`.** The
 `main` ruleset enforces strict up-to-date status checks, so the NEXT promotion

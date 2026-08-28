@@ -203,7 +203,12 @@ describe('buildHandoff — paid API support', () => {
     const { markdown } = buildHandoff(BASE_INPUT)
     expect(markdown).toContain('HavenApiError')
     expect(markdown).toContain('get_payment_status')
-    expect(markdown).toContain('retry_original_x402_request')
+    // #2145 gave the backend a real producer for this trigger
+    // (agent-payment-status.ts emits it when the funding leg confirmed but no
+    // merchant response was ever recorded). The handoff doc must gate on the
+    // structured field rather than claim the trigger is dead.
+    expect(markdown).toContain("nextAction: 'retry_original_x402_request'")
+    expect(markdown).toContain('resumeX402Payment()')
     expect(markdown).toMatch(/Do not rewrite the SDK/i)
     expect(markdown).toMatch(/start a new merchant\s+session/i)
     expect(markdown).toMatch(/in a tight loop/i)

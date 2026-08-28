@@ -685,11 +685,15 @@ export const FAIL_MACHINE_INTENT_SQL = `UPDATE payment_intents
 // ── Status projection (lib/agent-payment-status.ts) ──────────────────────────
 
 export const FIND_INTENT_STATUS_ROW_SQL = `SELECT pi.id, pi.chain_id, pi.token_symbol, pi.token_address, pi.amount_human, pi.amount_raw,
-            pi.status, pi.tx_hash, pi.expires_at, pi.delegate_address,
+            pi.status, pi.tx_hash, pi.expires_at, pi.delegate_address, pi.confirmed_at,
             pi.source, pi.payment_rail, pi.payment_resource_url, pi.x402_resource_url,
             pi.merchant_address, pi.x402_merchant_address, pi.x402_idempotency_key,
             pi.machine_challenge_id, pi.machine_idempotency_key, pi.machine_metadata,
-            (mpre.id IS NOT NULL) AS funded_but_unsettled
+            (mpre.id IS NOT NULL) AS funded_but_unsettled,
+            EXISTS (SELECT 1 FROM machine_payment_evidence mpe
+                    WHERE mpe.payment_intent_id = pi.id
+                      AND mpe.proof_status IN ('merchant_response_observed', 'protocol_receipt_attached'))
+              AS merchant_leg_reported
      FROM payment_intents pi
      LEFT JOIN machine_payment_reconciliation_events mpre
        ON mpre.payment_intent_id = pi.id
@@ -719,8 +723,19 @@ export interface PaymentIntentStatusRow {
   machine_challenge_id: string | null
   machine_idempotency_key: string | null
   machine_metadata: unknown
+  /** When the funding leg confirmed on-chain; null before confirmation. */
+  confirmed_at: string | null
   /** True when an open merchant_retry_rejected_after_payment reconciliation event exists. */
   funded_but_unsettled: boolean
+  /**
+   * #2145: true when a machine_payment_evidence row records a merchant
+   * response ('merchant_response_observed' or 'protocol_receipt_attached').
+   * The base row the backend writes at funding-confirm keeps
+   * 'payment_confirmed', so this is specifically the CLIENT-UPGRADED state —
+   * false means the merchant leg was never reported, whether or not the base
+   * row exists.
+   */
+  merchant_leg_reported: boolean
 }
 
 export async function findIntentStatusRow(

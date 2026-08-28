@@ -164,13 +164,19 @@ const AUTHORIZE_X402_DESCRIPTION =
   'In this SDK tool set, the allowance lookup tool is get_allowances. ' +
   'When a paid API returns x402 payment requirements, use this tool to sign with the agent-owned delegate key; funding, when the scheme needs it, is redeemed from the agent budget delegation and is bounded by it. ' +
   'Haven relays signed transactions only; the agent key authorizes payment and on-chain limits enforce spend. ' +
-  'A payment outside the on-chain budget is declined before any money moves — report the decline and ask the user to raise the budget in Haven; do not loop retries and do not wait for an approval, because none is queued. Preserve the original merchant/MCP session and x402 details, and use resume_x402_payment only when next_action is retry_original_x402_request. ' +
+  'A payment outside the on-chain budget is declined before any money moves — report the decline and ask the user to raise the budget in Haven; do not loop retries and do not wait for an approval, because none is queued. Preserve the original merchant/MCP session and x402 details. ' +
   'Use the returned payment_header as the X-PAYMENT header on the retry request when doing a manual HTTP retry.'
 
+// #2145: the backend now emits nextAction=retry_original_x402_request from
+// GET /payments/:id (agent-payment-status.ts) when the funding leg confirmed
+// but no merchant response was ever recorded — the crash-recovery case, after
+// a 15-minute grace window. This tool's gate requires that exact nextAction,
+// so it is reachable again on purpose; the description tells an agent to gate
+// on the structured field rather than call this speculatively.
 const RESUME_X402_DESCRIPTION =
   sharedDescriptions.resumeX402.summary + ' ' +
-  'Use this only after get_payment_status returns next_action=retry_original_x402_request. ' +
-  'It checks the authorized payment, validates the original x402 details, and returns a merchant X-PAYMENT header without creating a new payment or merchant session.'
+  'Only call this after get_payment_status reports nextAction=retry_original_x402_request — that means Haven\'s funding leg confirmed but no merchant response was ever recorded (typically a crash between funding and the merchant retry). ' +
+  'Any other nextAction reports a conflict instead of retrying — do not call this speculatively, and do not pay again.'
 
 const SWEEP_DELEGATE_DESCRIPTION = composeDescription(sharedDescriptions.sweep_delegate)
 

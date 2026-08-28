@@ -92,9 +92,14 @@ describe('generic skill', () => {
     expect(skill).toContain('haven_quote_x402')
     expect(skill).toContain('haven_pay_x402_quote')
     expect(skill).toContain('haven_get_payment_status')
-    expect(skill).toContain('retry_original_x402_request')
     expect(skill).toContain('declined before any money moves')
     expect(skill).not.toContain('pending_approval')
+    // #2145 gave the backend a real producer for this trigger
+    // (agent-payment-status.ts emits it when the funding leg confirmed but no
+    // merchant response was ever recorded). The skill must gate on the
+    // structured field rather than claim the trigger is dead.
+    expect(skill).toContain("nextAction: 'retry_original_x402_request'")
+    expect(skill).toContain('instead of paying again')
     expect(skill).toContain('expires_at')
     expect(skill).toContain('mcp__haven__haven_pay_mcp_tool')
     expect(skill).toContain('mcp__haven-signer__haven_sign_x402')

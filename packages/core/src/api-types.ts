@@ -1864,7 +1864,7 @@ export type paths = {
         put?: never;
         /**
          * Authorize an x402 funding payment.
-         * @description Creates or executes the Haven side of an x402 merchant request. Haven relays only independently signed payloads; it does not sign on behalf of the agent. The scheme follows the payTo shape: a merchant payTo builds an erc7710 settlement child delegation and settles account→merchant directly with NO funding leg; the EIP-3009 bridge (agent-EOA payTo + merchantPayTo) is the fallback and is the only shape that still funds anything. #2105: there is no approval branch — spend authority is the agent's budget delegation, refused up front with 403 when the amount exceeds the live remaining budget (#2082) and enforced on-chain by the caveat enforcers at redemption. Preserve the original merchant session and resume once next_action is retry_original_x402_request.
+         * @description Creates or executes the Haven side of an x402 merchant request. Haven relays only independently signed payloads; it does not sign on behalf of the agent. The scheme follows the payTo shape: a merchant payTo builds an erc7710 settlement child delegation and settles account→merchant directly with NO funding leg; the EIP-3009 bridge (agent-EOA payTo + merchantPayTo) is the fallback and is the only shape that still funds anything. #2105: there is no approval branch — spend authority is the agent's budget delegation, refused up front with 403 when the amount exceeds the live remaining budget (#2082) and enforced on-chain by the caveat enforcers at redemption. Preserve the original merchant session and the x402 details. The client performs the merchant retry itself; nothing mid-flow waits for a resume signal. #2145: if the process dies after the funding leg confirms, a later GET /machine-payments/:id/status reports next_action retry_original_x402_request (funding confirmed, no merchant response ever recorded) — resume that payment instead of authorizing a new one.
          */
         post: operations["authorizeX402Payment"];
         delete?: never;
@@ -1997,7 +1997,10 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** Fetch x402 or MPP payment/approval state. */
+        /**
+         * Fetch x402 or MPP payment/approval state.
+         * @description Branch on next_action, never on message prose. #2145: a confirmed x402 EIP-3009 payment whose merchant leg was never reported (the agent died between the funding confirmation and the merchant retry) answers phase funded_but_unsettled with next_action retry_original_x402_request — resume that payment rather than starting a new one. A client-reported merchant rejection answers sweep_stranded_funds instead.
+         */
         get: operations["getMachinePaymentStatus"];
         put?: never;
         post?: never;

@@ -8,9 +8,12 @@ import { ethers } from 'ethers'
 import {
   checkMerchantSettlement,
   checkDelegateResidual,
+  checkDelegationTreasury,
+  TREASURY_RUN_COST_ATOMIC,
   runPreflight,
   formatPreflight,
 } from './preflight.js'
+import type { HavenApi } from './haven-api.js'
 import type { QaConfig } from '../config.js'
 
 const MERCHANT = 'https://merchant.example'
@@ -106,6 +109,92 @@ describe('checkDelegateResidual', () => {
   })
 })
 
+const TREASURY = '0x9a4c2b7e1d0f3a85c6e4b21d9f0ae873c5d1b042'
+
+/** An agent-identity API stub — these tests are about the check, not HavenApi. */
+function agentApi(response: { ok: boolean; status: number; data: { safe_address?: string } }): Pick<HavenApi, 'getAgent'> {
+  return { getAgent: async () => response }
+}
+
+describe('checkDelegationTreasury', () => {
+  it('passes a funded treasury and states headroom in legs', async () => {
+    const check = await checkDelegationTreasury(
+      agentApi({ ok: true, status: 200, data: { safe_address: TREASURY } }),
+      providerWithUsdc(900_000n), // 0.9 USDC — the provisioning balance
+    )
+    expect(check.ok).toBe(true)
+    expect(check.address).toBe(TREASURY)
+    expect(check.balance).toBe('0.9 USDC')
+    expect(check.headroom).toBe('~900 leg(s)')
+    expect(check.detail).toBeUndefined()
+  })
+
+  it('BLOCKS on the #2074 shape — an empty treasury names itself, its token, and the remedy', async () => {
+    const check = await checkDelegationTreasury(
+      agentApi({ ok: true, status: 200, data: { safe_address: TREASURY } }),
+      providerWithUsdc(0n),
+    )
+    expect(check.ok).toBe(false)
+    expect(check.address).toBe(TREASURY)
+    expect(check.balance).toBe('0.0 USDC')
+    // The detail must be actionable without opening anything else: the token
+    // contract, "any source works", and the failure it prevents.
+    expect(check.detail).toContain('0x036CbD53842c5426634e7929541eC2318f3dCF7e')
+    expect(check.detail).toMatch(/any source/)
+    expect(check.detail).toMatch(/transfer amount exceeds balance/)
+  })
+
+  it('blocks just below a full run cost and passes at exactly it', async () => {
+    const below = await checkDelegationTreasury(
+      agentApi({ ok: true, status: 200, data: { safe_address: TREASURY } }),
+      providerWithUsdc(TREASURY_RUN_COST_ATOMIC - 1n),
+    )
+    expect(below.ok).toBe(false)
+    const at = await checkDelegationTreasury(
+      agentApi({ ok: true, status: 200, data: { safe_address: TREASURY } }),
+      providerWithUsdc(TREASURY_RUN_COST_ATOMIC),
+    )
+    expect(at.ok).toBe(true)
+  })
+
+  it('is UNKNOWN, not failed, on a non-200 from the identity endpoint', async () => {
+    const check = await checkDelegationTreasury(
+      agentApi({ ok: false, status: 503, data: {} }),
+      providerWithUsdc(0n),
+    )
+    expect(check.ok).toBeNull()
+    expect(check.detail).toMatch(/HTTP 503/)
+  })
+
+  it('is UNKNOWN when the identity carries no safe_address', async () => {
+    const check = await checkDelegationTreasury(
+      agentApi({ ok: true, status: 200, data: {} }),
+      providerWithUsdc(0n),
+    )
+    expect(check.ok).toBeNull()
+    expect(check.detail).toMatch(/safe_address/)
+  })
+
+  it('is UNKNOWN when the API is unreachable — never a thrown error', async () => {
+    const check = await checkDelegationTreasury(
+      { getAgent: async () => { throw new Error('ECONNREFUSED') } },
+      providerWithUsdc(0n),
+    )
+    expect(check.ok).toBeNull()
+    expect(check.detail).toMatch(/ECONNREFUSED/)
+  })
+
+  it('is UNKNOWN when the RPC balance read fails', async () => {
+    const failingProvider = { call: async () => { throw new Error('rpc timeout') } } as unknown as ethers.Provider
+    const check = await checkDelegationTreasury(
+      agentApi({ ok: true, status: 200, data: { safe_address: TREASURY } }),
+      failingProvider,
+    )
+    expect(check.ok).toBeNull()
+    expect(check.detail).toMatch(/rpc timeout/)
+  })
+})
+
 describe('runPreflight', () => {
   it('blocks the run when any resource is definitively below floor', async () => {
     const result = await runPreflight(
@@ -130,6 +219,23 @@ describe('runPreflight', () => {
   it('skips the merchant check entirely when no merchant is configured', async () => {
     const result = await runPreflight(baseCfg, { provider: providerWithUsdc(0n) })
     expect(result.checks.some((c) => c.name.includes('merchant'))).toBe(false)
+  })
+
+  it('skips the treasury check when no delegation agent key is configured', async () => {
+    const result = await runPreflight(baseCfg, { provider: providerWithUsdc(0n) })
+    expect(result.checks.some((c) => c.name.includes('treasury'))).toBe(false)
+  })
+
+  it('covers — and blocks on — the treasury when the delegation identity is configured', async () => {
+    const result = await runPreflight(
+      { ...baseCfg, delegationAgentApiKey: 'qa_key' },
+      {
+        provider: providerWithUsdc(0n),
+        api: agentApi({ ok: true, status: 200, data: { safe_address: TREASURY } }),
+      },
+    )
+    expect(result.checks.filter((c) => c.name.includes('treasury'))).toHaveLength(1)
+    expect(result.blocked).toBe(true)
   })
 
   it('covers the delegation-rail delegate when that identity is configured', async () => {

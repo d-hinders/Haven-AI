@@ -157,11 +157,16 @@ export class X402FundingLeg {
     //   1. `success` + `tx_hash` — the delegation rail's confirmed-intent
     //      replay (`modules/x402/replay.ts`). Reached only by an idempotency
     //      collision; the caller did not ask for THIS payment.
-    //   2. `nextAction: retry_original_x402_request` — the legacy rail's
-    //      approval-queue replay (`modules/x402/legacy-authorize.ts` returns
-    //      `getAgentPaymentStatus`'s body, which carries no `success` field
-    //      at all). This is the DOCUMENTED post-approval retry loop, so the
-    //      caller is deliberately resuming a payment they know about.
+    //   2. `nextAction: retry_original_x402_request` — RETIRED PRODUCER
+    //      (#2131). This was the legacy rail's approval-queue replay:
+    //      `modules/x402/legacy-authorize.ts` returned `getAgentPaymentStatus`'s
+    //      body, which carries no `success` field at all, and that was the
+    //      DOCUMENTED post-approval retry loop. #1987 deleted that module and
+    //      #2055 dropped the `approval_requests` table behind it, so nothing
+    //      emits this value on any rail today (#2145 tracks giving it a live
+    //      producer). The branch is KEPT fail-closed rather than removed: it
+    //      costs nothing, and deleting a guard because its input is currently
+    //      unreachable is how the input comes back unguarded.
     //
     // In both, "executed" means the FUNDING leg executed, which is ambiguous:
     //

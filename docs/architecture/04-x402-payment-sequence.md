@@ -748,6 +748,10 @@ otherwise. That value now has exactly one producer, and it is server-side:
    leg confirming and its own merchant retry, value sits on the delegate EOA,
    and the merchant was never paid. Before #2145 this exact state answered
    `next_action: none` — *"The payment is confirmed."*
+   The #2159 QA deployment may set `MERCHANT_REPORT_GRACE_MIN_OVERRIDE=0` only
+   when it serves **only Base Sepolia** (`HAVEN_DEPLOY_CHAIN_IDS=84532`); startup
+   refuses that override on mainnet, mixed, or unbounded deployments, so the
+   production 15-minute protection cannot be shortened accidentally.
 2. The derivation is entirely from evidence Haven holds server-side
    (`merchant_leg_reported` in the status projection SQL,
    [`infra/repositories/payment-intents.ts`](../../packages/backend/src/infra/repositories/payment-intents.ts))

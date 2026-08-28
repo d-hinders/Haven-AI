@@ -483,10 +483,16 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'settlement_scheme "erc7710" returns the payment_header directly. No funding leg on that path.',
 ].join(' ')
 
+// #2131: retained and registered, but NOT currently reachable — the gate in the
+// handler below requires nextAction=retry_original_x402_request and nothing emits it,
+// so every call reports a conflict. Guard kept fail-closed deliberately; #2145 is what
+// gives it a producer.
 const RESUME_X402_DESCRIPTION = [
   'Resume an authorized x402 payment: retrieve the signing context so the signer can rebuild the',
-  'X-PAYMENT header and the agent can retry the merchant. Use after haven_get_payment_status returns',
-  'nextAction=retry_original_x402_request. Pass resume_state or payment_id.',
+  'X-PAYMENT header and the agent can retry the merchant.',
+  'NOT currently reachable: Haven emits no payment state marking a payment ready to resume, so this',
+  'reports a conflict instead of returning context. If a paid request was interrupted after Haven',
+  'authorized it, read haven_get_payment_status and tell the user what it reports — do not pay again.',
   'Returns { payment_id, payment_required, x402 } in the haven_pay_x402_quote shape — next is',
   'haven_x402_sign_header (or haven_sign first, to re-derive a binding lost across a signer restart).',
   'Carries no signer_compatibility of its own; an incompatible signer refuses at signing time.',
@@ -1919,11 +1925,22 @@ export function createToolHandlers(
     },
 
     haven_resume_x402_payment: async (input) => {
-      // #2041: this tool is the funding-resume flow, and it is structurally
-      // unreachable for an erc7710 intent rather than broken for one. Its gate
-      // below requires nextAction === 'retry_original_x402_request', which the
-      // backend emits for exactly one state — status 'executed', meaning "the
-      // funding payment completed" (agent-payment-status.ts). erc7710 has no
+      // #2131 AMENDS #2041: this tool is now unreachable on EVERY rail, not
+      // just for an erc7710 intent. The gate below requires
+      // nextAction === 'retry_original_x402_request', and NOTHING emits it —
+      // `paymentIntentState` (agent-payment-status.ts) has five reachable
+      // branches plus a fail-closed catch-all and never returns it, while the
+      // SDK's `executed` → retry mapping (payment-state.ts) reads a status the
+      // backend cannot produce ('executed' was an `approval_requests` status;
+      // #2055 dropped the table). #2145 tracks restoring a live producer.
+      //
+      // The #2041 reasoning below is retained because it is still true and is
+      // the narrower case — it explains why erc7710 could not reach the gate
+      // even while the legacy producer existed:
+      //
+      // #2041: its gate required a state the backend then emitted for exactly
+      // one status — 'executed', meaning "the funding payment completed"
+      // (agent-payment-status.ts, before #2055). erc7710 has no
       // funding payment, a successful settle leaves the intent at 'submitted'
       // (#1508), and an over-budget erc7710 authorize now refuses HTTP 403
       // delegation_budget_exceeded before an intent row is even created

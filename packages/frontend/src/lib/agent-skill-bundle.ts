@@ -152,8 +152,8 @@ merchant leg for you.
 recipient, amount, and token for a plain transfer. For an arbitrary,
 non-MCP x402 paywall: \`mcp__haven__haven_quote_x402\` to get a quote, then
 \`mcp__haven__haven_pay_x402_quote\` — follow the result's guidance fields
-first, sign in the local Haven signer, and retry the original request only
-when the result says \`retry_original_x402_request\`.
+first and sign in the local Haven signer. The pay tool performs the merchant
+retry itself; there is no resume signal to wait for.
 
 **Catalog tool arguments:** when \`haven_discover_tools\` returns
 \`tool_arguments\`, pass that object unchanged as the pay tool's

@@ -4691,8 +4691,10 @@ export const openapiSpec = {
           'still funds anything. #2105: there is no approval branch — spend authority is the ' +
           'agent\'s budget delegation, refused up front with 403 when the amount exceeds the live ' +
           'remaining budget (#2082) and enforced on-chain by the caveat enforcers at redemption. ' +
-          'Preserve the original merchant session and resume once next_action is ' +
-          'retry_original_x402_request.',
+          'Preserve the original merchant session and the x402 details. #2131: this ' +
+          'said to "resume once next_action is retry_original_x402_request" — nothing ' +
+          'emits that value, so the instruction could never be satisfied. The client ' +
+          'performs the merchant retry itself; there is no resume signal to wait for.',
         security: [{ AgentApiKey: [] }],
         requestBody: {
           required: true,

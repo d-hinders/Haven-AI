@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient, toolDescriptions as sharedDescriptions } from '@haven_ai/sdk'
 import { createToolHandlers, toolDescriptions } from './tools.js'
+import { readFileSync } from 'node:fs'
 
 const delegateKey = '0x59c6995e998f97a5a0044966f09453843a4bba3e18a70e0614612ece7c1e4568'
 const delegateAddress = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'
@@ -1834,3 +1835,53 @@ function jsonResponse(body: unknown, status = 200): Response {
     headers: { 'Content-Type': 'application/json' },
   })
 }
+
+describe('#2131: the local MCP tool descriptions and README carry no dead resume trigger', () => {
+  /**
+   * The local MCP package has its OWN `toolDescriptions` record — a third
+   * agent-facing description surface beside the SDK's and the hosted server's.
+   * It is clean today, and this guard is what keeps it that way: #2131 removed
+   * `retry_original_x402_request` from nine agent-facing sites, and the reason
+   * it reached nine was that nothing scanned for it.
+   *
+   * Nothing emits that value — the backend's `paymentIntentState` never returns
+   * it, and the SDK's `executed` mapping reads a status the backend cannot
+   * construct since #2055 dropped `approval_requests`. #2145 tracks giving it a
+   * reachable producer; delete both assertions when it does.
+   */
+  it('no local tool description advertises retry_original_x402_request', () => {
+    const entries = Object.entries(toolDescriptions)
+
+    // Non-vacuity: an empty record would satisfy every assertion below.
+    expect(entries.length).toBeGreaterThan(0)
+
+    for (const [name, description] of entries) {
+      expect(
+        description,
+        `${name} must not advertise retry_original_x402_request — nothing emits it (see #2145)`,
+      ).not.toContain('retry_original_x402_request')
+    }
+  })
+
+  it('the shipped README does not tell an operator to act on it either', () => {
+    // Same treatment and same reasoning as the README guard in `consent.test.ts`:
+    // this file is shipped on npm, nothing renders it, and #2086 already proved
+    // it drifts silently when only the code is checked.
+    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
+
+    // The real protection: no verbatim mention at all. This README has no
+    // legitimate use of the value, unlike the SDK's, so a blanket check is
+    // available here and is the strongest form.
+    expect(readme).not.toContain('retry_original_x402_request')
+
+    // The positive half asserts the replacement claim is still THERE, so the
+    // section cannot be quietly deleted back to silence. Whitespace-tolerant
+    // deliberately: the first version matched `'not\n   currently reachable'`
+    // verbatim, and haven-reviewer showed that re-wrapping the identical
+    // sentence at a different column — a prettier run, a line-length lint, any
+    // cosmetic reflow — failed it. A guard that cries drift over a line break
+    // costs a debugging cycle and teaches people to distrust it.
+    expect(readme).toContain('haven_resume_x402_payment')
+    expect(readme).toMatch(/is not\s+currently reachable/)
+  })
+})

@@ -31,7 +31,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-27" # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-28" # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -759,8 +759,44 @@ above in any case. So the guard has no route by which it can pass.
 So do not document or build a resume loop as a live recovery step. The code is
 retained fail-closed — it refuses rather than proceeding — and the honest
 reading is that x402 resume has no reachable trigger since the approval queue
-was removed. Restoring one on the delegation rail is a design question this doc
-does not answer; it is not a stale sentence to correct.
+was removed.
+
+**The design question this section previously declined to answer is now
+answered** ([#2131](https://github.com/d-hinders/Haven-AI/issues/2131)), and the
+answer split into two:
+
+- **The advertisement was removed** (#2131). Nine live agent-facing sites — six
+  tool descriptions plus the three artifacts handed to an agent at connect time
+  (`HAVEN_SKILL_MD`, the dashboard skill bundle, the agent handoff) — told an
+  agent to wait on or gate on this value. Four tests *required* them to, so the
+  guidance was enforced rather than merely stale. All now describe what an agent
+  should actually do; the guard, the gate and the enum member are retained
+  unchanged.
+- **The capability is a tracked gap, not a removed feature**
+  ([#2145](https://github.com/d-hinders/Haven-AI/issues/2145)). Restoring a
+  trigger matters more than it looks: an agent that dies between the funding leg
+  confirming and the merchant retry leaves a payment reporting `next_action:
+  none` — *"The payment is confirmed"* — while value sits on the delegate EOA
+  and the merchant was never paid. The `sweep_stranded_funds` override exists
+  but is gated on a reconciliation event whose only producer is client-side
+  (`packages/sdk/src/merchant-completion.ts`), written when the agent retries
+  and is rejected — so it cannot fire for an agent that never came back.
+
+One correction to point 3 above: `'executed'` is not merely unreachable on the
+status route, it cannot be constructed at all. It was an `approval_requests`
+status and #2055 dropped that table, so the SDK's `executed` →
+`retry_original_x402_request` mapping reads a value the backend cannot produce —
+the value is unreachable on the pay/sign response path as well as on the status
+route.
+
+Stated that way deliberately. An earlier draft of this paragraph said
+`'executed'` "does not appear anywhere in backend production code", which is
+false: `packages/core/src/machine-payment-lifecycle.ts` compares against it in a
+live, backend-called branch. That branch is *vacuous* — the five-literal status
+domain proved above means nothing ever satisfies it — so the conclusion holds,
+but the sentence did not. It was written from a grep of `packages/backend/src`
+and generalised to code the grep never covered; the shared kernel is consumed by
+the backend but does not live there. Caught by `haven-doc-reviewer` on #2131.
 
 ## Which Address A Merchant Sees, And Mapping It Back (#1472)
 

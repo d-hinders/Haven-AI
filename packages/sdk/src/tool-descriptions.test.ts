@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { composeDescription, toolDescriptions } from './tool-descriptions.js'
+import { AgentPaymentNextAction } from './types.js'
+import { readFileSync } from 'node:fs'
 
 describe('shared Haven tool descriptions', () => {
   it('routes allowance and budget questions to the allowance lookup', () => {
@@ -93,15 +95,63 @@ describe('shared Haven tool descriptions', () => {
   it('teaches agents to read the structured nextAction on payment tools, not memorise tool names', () => {
     // Each payment tool's nextActionGuidance must reference the structured
     // nextAction enum the agent will see on the response, so the agent
-    // branches on machine-readable data instead of prose. We anchor on the
-    // x402 retry action; presence of that string in the composed description
-    // means the description is doing the right thing.
+    // branches on machine-readable data instead of prose.
+    //
+    // #2131 REWROTE THIS ASSERTION, and the reason is the point. It used to
+    // anchor on the literal `nextAction=retry_original_x402_request`. The
+    // intent was right; the anchor died. Nothing emits that value — the
+    // backend's `paymentIntentState` never returns it, and the SDK's
+    // `executed` mapping reads a status the backend cannot produce since
+    // #2055 dropped `approval_requests`. So this test REQUIRED the
+    // descriptions to keep telling agents to wait on a signal that never
+    // arrives: the stale guidance was enforced, not merely un-noticed.
+    //
+    // The lesson is not "pick a better literal" — any single value can die
+    // the same way. Anchor on the SHAPE (a structured nextAction is
+    // referenced) and require the referenced value to be a declared member of
+    // the taxonomy, so a typo or a deleted enum member still fails, without
+    // hard-coding one value's fate into the test.
+    const declared = new Set<string>(Object.values(AgentPaymentNextAction))
+
     for (const key of ['payX402', 'payX402OneShot'] as const) {
       const desc = composeDescription(toolDescriptions[key])
+      // Character class includes digits: `retry_original_x402_request` is today the
+      // ONLY taxonomy value containing one, so `[a-z_]+` alone would truncate it to
+      // `retry_original_x` — still failing the membership check, but by accident
+      // rather than by design, and silently wrong for any future value with a digit.
+      const referenced = [...desc.matchAll(/nextAction=([a-z0-9_]+)/g)].map((m) => m[1])
+
       expect(
-        desc,
-        `${key} should reference nextAction=retry_original_x402_request so the agent reads the structured field`,
-      ).toContain('nextAction=retry_original_x402_request')
+        referenced,
+        `${key} should reference at least one structured nextAction=<value> so the agent reads the machine-readable field instead of prose`,
+      ).not.toHaveLength(0)
+
+      for (const value of referenced) {
+        expect(
+          declared,
+          `${key} references nextAction=${value}, which is not a member of AgentPaymentNextAction`,
+        ).toContain(value)
+      }
+    }
+  })
+
+  it('#2131: no tool description advertises the x402 resume trigger while nothing emits it', () => {
+    // The regression guard for #2131 itself. `retry_original_x402_request` is
+    // a declared enum member with NO producer: the backend never emits it, and
+    // the SDK's `executed` mapping reads a status that cannot occur. A
+    // description naming it tells an agent to wait for, or gate on, a signal
+    // that never arrives — which is how nine live agent-facing sites came to
+    // carry it.
+    //
+    // DELETE THIS TEST when #2145 gives the value a reachable producer. Until
+    // then, re-advertising it is a regression, and the previous version of the
+    // test above shows it is one that can be introduced by a well-meant
+    // assertion rather than by careless prose.
+    for (const [key, entry] of Object.entries(toolDescriptions)) {
+      expect(
+        composeDescription(entry),
+        `${key} must not advertise retry_original_x402_request — nothing emits it (see #2145)`,
+      ).not.toContain('retry_original_x402_request')
     }
   })
 
@@ -139,5 +189,151 @@ describe('shared Haven tool descriptions', () => {
     expect(desc).toContain('product name, category, or description term')
     expect(desc).toContain('NOT authoritative')
     expect(desc).toContain('Never creates a payment, signature, or approval')
+  })
+})
+
+describe('#2131: the shipped SDK README does not advertise the dead resume trigger', () => {
+  /**
+   * `packages/sdk` ships README.md on npm, and its next-action table and resume
+   * section are integrator-facing copy that nothing renders — so it drifts
+   * silently. Precedent for guarding it this way: `packages/mcp/src/consent.test.ts`
+   * pins two load-bearing README sentences after #2086 found that README still
+   * showing retired AllowanceModule copy long after the renderer moved on
+   * ("Nothing checked it, so nothing said so").
+   *
+   * That is this PR's failure mode exactly, so the READMEs get the same
+   * treatment as the code. Pinning the load-bearing CLAIMS, not whole
+   * paragraphs: the point is that the README must not present the trigger as
+   * live, while still being allowed to document it as retired.
+   */
+  it('presents retry_original_x402_request only as retired, never as a live trigger', () => {
+    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
+
+    // INVERTED, and the inversion is the lesson. Two earlier versions of this
+    // guard asserted the ABSENCE of something that reads like an instruction —
+    // first two exact sentences, then "no line names the value and also says
+    // 'call'". haven-reviewer defeated both with realistic prose in this file's
+    // own house style: a same-line synonym ("invoke"), and the word "call"
+    // split across a line wrap at ~80 cols. Enumerating action verbs is an
+    // unbounded synonym problem, and the wrap point is a formatting accident.
+    //
+    // So assert a POSITIVE property instead: every mention of the value sits in
+    // retirement framing, and there are no mentions beyond the known ones. An
+    // instruction has to name the value verbatim for a reader to act on it —
+    // there is no rephrase-and-still-be-a-trap move — so a new advertisement
+    // must add an occurrence, which the count pins, and must sit in framing it
+    // cannot honestly claim.
+    const LITERAL = 'retry_original_x402_request'
+
+    // 0. The retirement framing EXISTS. Restored after the inversion dropped
+    //    it: without this, deleting the unavailability note wholesale leaves a
+    //    README that mentions the value only in a table row and still passes,
+    //    because the checks below only constrain mentions that remain. Found by
+    //    mutating this guard rather than by reading it — the same way its two
+    //    predecessors were found wanting.
+    expect(readme).toContain('**No longer produced — nothing maps to it.**')
+    expect(readme).toMatch(/Resume is not\s+currently available/)
+
+    // 1. Count pin, over the whole file including the state diagram. Any NEW
+    //    mention fails here regardless of how it is worded or wrapped.
+    //    If you legitimately restructured this README, update the count in the
+    //    same commit and satisfy yourself the new mentions are retirement
+    //    framing, not instructions.
+    const total = readme.split(LITERAL).length - 1
+    expect(
+      total,
+      `expected at most 4 mentions of ${LITERAL} in the SDK README (2 in the retired state diagram, the retired next-action table row, the unavailability note) — a new one is a re-advertisement unless proven otherwise (see #2145)`,
+    ).toBeLessThanOrEqual(4)
+
+    // 2. Every PROSE mention sits in retirement framing IN ITS OWN structural
+    //    unit. Fenced blocks are excluded: the state diagram's labels are drawn
+    //    art under their own RETIRED BRANCH banner.
+    //
+    //    Scoped to the unit, not a character window, and that is the fix for a
+    //    hole haven-reviewer found in the windowed version: deleting this row's
+    //    own retirement clause passed, because two unrelated sibling rows
+    //    (`wait_for_user_approval`, `wait_for_user_to_complete_payment`) carry
+    //    the identical bolded phrase two lines above and satisfied a ±260-char
+    //    window by pure table adjacency. That evasion needs no rhetoric — just
+    //    a contributor tightening the table's prose — so it was worth closing
+    //    rather than documenting.
+    //
+    //    A unit is a table row, a list item, or a paragraph — whichever the
+    //    mention sits in. Blockquote markers are stripped so a `> ` cannot
+    //    split a paragraph, and each unit's whitespace is collapsed so a line
+    //    wrap cannot hide anything inside it.
+    //
+    //    List items are split for the same reason table rows are, and the
+    //    reason is a hole haven-reviewer found after the table fix landed:
+    //
+    //      - Retirement note: **no longer produced — nothing maps to it.**
+    //      - Action: call `resumeX402Payment()` when you see
+    //        `nextAction: 'retry_original_x402_request'`.
+    //
+    //    Adjacent bullets have no blank line between them, so they merged into
+    //    one paragraph and the first vouched for the second. A before/after
+    //    bullet pair is an ordinary README shape, so this needed no rhetoric
+    //    either — the same bar that made the table case worth fixing.
+    //
+    //    A continuation line (no marker of its own) stays with its item, so
+    //    wrapping a bullet does not split it.
+    const prose = readme.replace(/```[\s\S]*?```/g, ' ')
+    const STARTS_UNIT = /^\s*(\||[-*+]\s|\d+[.)]\s)/
+    const units: string[] = []
+    for (const block of prose.split(/\n\s*\n/)) {
+      const stripped = block.replace(/^\s*>\s?/gm, '')
+      let current = ''
+      for (const line of stripped.split('\n')) {
+        if (STARTS_UNIT.test(line)) {
+          if (current) units.push(current)
+          current = line
+        } else {
+          current = current ? `${current}\n${line}` : line
+        }
+      }
+      if (current) units.push(current)
+    }
+
+    const RETIRED = /no longer produced|not currently (available|reachable)|has no producer|nothing maps to it|nothing emits/i
+    const unframed = units
+      .map((u) => u.replace(/\s+/g, ' ').trim())
+      .filter((u) => u.includes(LITERAL) && !RETIRED.test(u))
+
+    expect(
+      unframed,
+      `every prose mention of ${LITERAL} must carry retirement framing in its OWN table row, list item or paragraph — a neighbour's framing does not vouch for it`,
+    ).toEqual([])
+
+    // WHAT THIS DOES NOT CATCH — one class, stated at its real size, because
+    // every earlier version of this guard failed for claiming completeness and
+    // a flattering understatement would be the same mistake in better clothes.
+    //
+    // REVERSAL IN PLACE. The framing check tests whether a retirement phrase is
+    // present in the unit — it cannot tell "X is true" from "X was true, and no
+    // longer is". Rewriting this row to "**No longer produced — nothing maps to
+    // it.** That was true through the last release; as of this build it fires
+    // again, so resume immediately" keeps the count at 4, keeps the retirement
+    // phrase verbatim in its own unit, and PASSES. Verified, not reasoned about.
+    //
+    // That also proves the exact-phrase pins two versions of this guard used
+    // would not have helped: the mutation preserves them word for word and
+    // appends a supersession clause.
+    //
+    // Accepted rather than chased, and this is the resting point. Detecting
+    // reversal cues ("as of", "now", "that's changed", "update:") is the same
+    // unbounded-vocabulary problem that defeated the verb list, one level up.
+    // At some point that is true of any assertion over freeform markdown.
+    //
+    // What IS caught, and is the threat that has actually occurred on this
+    // repo: a lazy re-advertisement. A new mention anywhere (count), a mention
+    // carrying no retirement framing of its own (unit scoping), and deletion of
+    // the retirement claims wholesale (step 0) all fail. A neighbour's framing
+    // does not vouch for a mention — that hole was open in the windowed version
+    // and was closed rather than documented, because reaching it needed no
+    // rhetoric at all, just a contributor tightening the table's prose.
+    //
+    // A deliberate rewrite arguing the value is live again defeats this test.
+    // The human reviewing that diff is the control there, and unlike the
+    // accidental case, that diff reads as what it is.
   })
 })

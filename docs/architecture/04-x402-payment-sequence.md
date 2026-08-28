@@ -717,7 +717,7 @@ freshness.
 > an integrator, not a record of a flow. What replaces it below is the state of
 > the two things that were never approval-specific, stated separately because
 > they differ: context rehydration, which is live, and the resume call itself,
-> which is retained but has no reachable trigger.
+> which since #2145 has a reachable, server-derived trigger.
 
 **What is live: rehydrating stored context.** If the process restarted and only
 the payment id remains, call `getResumeState(paymentId)` to rehydrate Haven's
@@ -729,74 +729,67 @@ fresh MCP transport session; callers do not need to preserve the old session
 id. Local MCP normalizes most fields to camelCase while retaining
 `resume_state`; backend HTTP responses use snake_case.
 
-**What is retained but currently unreachable: the resume CALL.**
+**What is live since #2145: the resume CALL, with a reachable trigger.**
 `resumeX402Payment` / `haven_resume_x402_payment` (and `resumeAuthorizedX402`
 beneath them) are gated by `assertCanResumeX402`
 ([`packages/sdk/src/x402-protocol.ts`](../../packages/sdk/src/x402-protocol.ts)),
 which hard-requires `nextAction === retry_original_x402_request` and throws
-otherwise. **Nothing emits that value today**, and the path is short enough to
-state exactly:
+otherwise. That value now has exactly one producer, and it is server-side:
 
-1. `resumeAuthorizedX402` reads the status through `getPaymentStatus`, which
-   calls **`GET /machine-payments/:id/status`** — not `GET /payments/:id`,
-   whose response shape carries no `next_action` field at all and so cannot
-   feed this guard.
-2. That response is mapped by `mapPaymentStatusResult`
-   ([`packages/sdk/src/payment-mappers.ts`](../../packages/sdk/src/payment-mappers.ts)),
-   which is a **plain pass-through** — `nextAction: raw.next_action`, with no
-   client-side fallback. The guard therefore reads the backend's value verbatim.
-3. The backend emits `next_action` for the five reachable `payment_intents`
-   statuses and never emits `retry_original_x402_request`. The literal exists
-   only as an enum member in `domain/agent-payment-taxonomy.ts` and in an
-   OpenAPI description; nothing mints it.
+1. The backend's status projection
+   ([`modules/payments/agent-payment-status.ts`](../../packages/backend/src/modules/payments/agent-payment-status.ts),
+   `intentStateFor`) answers `phase: funded_but_unsettled`, `next_action:
+   retry_original_x402_request` for a **confirmed x402 EIP-3009 intent whose
+   merchant leg was never reported** — no
+   `machine_payment_evidence` row upgraded past the server-written
+   `payment_confirmed` base — once a grace window
+   (`MERCHANT_REPORT_GRACE_MIN`, 15 minutes after the funding confirmation)
+   has passed. This is the crash shape: the agent died between the funding
+   leg confirming and its own merchant retry, value sits on the delegate EOA,
+   and the merchant was never paid. Before #2145 this exact state answered
+   `next_action: none` — *"The payment is confirmed."*
+2. The derivation is entirely from evidence Haven holds server-side
+   (`merchant_leg_reported` in the status projection SQL,
+   [`infra/repositories/payment-intents.ts`](../../packages/backend/src/infra/repositories/payment-intents.ts))
+   — deliberately **not** from the client-written
+   `merchant_retry_rejected_after_payment` reconciliation event, whose only
+   producer is an agent that survived to report its own failure. That event
+   still has its own meaning: when it exists, the retry was **tried and
+   refused**, and the answer is `sweep_stranded_funds` instead. The two
+   states are self-consistent — a resumed retry that the merchant rejects is
+   recorded by the SDK and flips the answer from retry to sweep.
+3. The consuming path is unchanged from what #2131 verified:
+   `resumeAuthorizedX402` reads **`GET /machine-payments/:id/status`**, and
+   `mapPaymentStatusResult`
+   ([`packages/sdk/src/payment-mappers.ts`](../../packages/sdk/src/payment-mappers.ts))
+   passes `next_action` through verbatim, so the guard reads the backend's
+   verdict directly.
 
-The SDK *does* map `executed` → `retry_original_x402_request` in
-`nextActionForStatus`, but that function is reached only through
-`paymentStateFromRaw`, which is typed to authorize/sign responses rather than
-this status route — and `executed` is one of the four unconstructible statuses
-above in any case. So the guard has no route by which it can pass.
+Scope worth stating: the trigger fires only for `settlement_scheme:
+'eip3009'`. On erc7710 there is no funding leg — `confirmed` *is* merchant
+settlement — and an intent with no scheme metadata fails closed to the plain
+`confirmed` answer. The residual ambiguity is a delivered payment whose
+best-effort evidence upgrade never reached Haven: it reads as undelivered and
+is told to retry a merchant that was already paid, which is the safe side —
+x402 merchants answer a re-request of a settled purchase idempotently
+(#1519).
 
-So do not document or build a resume loop as a live recovery step. The code is
-retained fail-closed — it refuses rather than proceeding — and the honest
-reading is that x402 resume has no reachable trigger since the approval queue
-was removed.
-
-**The design question this section previously declined to answer is now
-answered** ([#2131](https://github.com/d-hinders/Haven-AI/issues/2131)), and the
-answer split into two:
-
-- **The advertisement was removed** (#2131). Nine live agent-facing sites — six
-  tool descriptions plus the three artifacts handed to an agent at connect time
-  (`HAVEN_SKILL_MD`, the dashboard skill bundle, the agent handoff) — told an
-  agent to wait on or gate on this value. Four tests *required* them to, so the
-  guidance was enforced rather than merely stale. All now describe what an agent
-  should actually do; the guard, the gate and the enum member are retained
-  unchanged.
-- **The capability is a tracked gap, not a removed feature**
-  ([#2145](https://github.com/d-hinders/Haven-AI/issues/2145)). Restoring a
-  trigger matters more than it looks: an agent that dies between the funding leg
-  confirming and the merchant retry leaves a payment reporting `next_action:
-  none` — *"The payment is confirmed"* — while value sits on the delegate EOA
-  and the merchant was never paid. The `sweep_stranded_funds` override exists
-  but is gated on a reconciliation event whose only producer is client-side
-  (`packages/sdk/src/merchant-completion.ts`), written when the agent retries
-  and is rejected — so it cannot fire for an agent that never came back.
-
-One correction to point 3 above: `'executed'` is not merely unreachable on the
-status route, it cannot be constructed at all. It was an `approval_requests`
-status and #2055 dropped that table, so the SDK's `executed` →
-`retry_original_x402_request` mapping reads a value the backend cannot produce —
-the value is unreachable on the pay/sign response path as well as on the status
-route.
-
-Stated that way deliberately. An earlier draft of this paragraph said
-`'executed'` "does not appear anywhere in backend production code", which is
-false: `packages/core/src/machine-payment-lifecycle.ts` compares against it in a
-live, backend-called branch. That branch is *vacuous* — the five-literal status
-domain proved above means nothing ever satisfies it — so the conclusion holds,
-but the sentence did not. It was written from a grep of `packages/backend/src`
-and generalised to code the grep never covered; the shared kernel is consumed by
-the backend but does not live there. Caught by `haven-doc-reviewer` on #2131.
+**Historical record (#2131/#2145), kept because both states shipped.** From
+the approval queue's removal (#2055) until #2145, this value had **no
+producer at all**: the backend never emitted it, and the SDK's only mapping
+to it — `executed` → `retry_original_x402_request` in `nextActionForStatus`
+— read a status that cannot be constructed (`executed` was an
+`approval_requests` status; the table is dropped). Thirteen agent-facing
+sites nonetheless instructed agents to gate on it, which #2131 removed; with
+the producer now real, those sites advertise the trigger again, accurately.
+#2145 also resolved the `executed` mapping itself the way #2101 treated its
+siblings: fail-closed to `stop_and_tell_user`, because the reachable
+producer is the backend projection arriving via `next_action`, never a
+client-side status fallback. (An earlier draft of the #2131 analysis said
+`'executed'` "does not appear anywhere in backend production code", which
+was false — `packages/core/src/machine-payment-lifecycle.ts` compares
+against it in a live, vacuous branch; caught by `haven-doc-reviewer` on
+#2131 and kept here as a scope-of-grep lesson.)
 
 ## Which Address A Merchant Sees, And Mapping It Back (#1472)
 
@@ -826,7 +819,7 @@ print — which is exactly why the API-side mapping exists.
 | Agent action after funding | None for direct confirmed payment | Retry original merchant/resource request |
 | Header sent to merchant | None | `X-PAYMENT` |
 | Payment authority | Delegate signature + on-chain allowance | Same for funding leg; EIP-3009 signature for merchant leg |
-| Restart recovery | Fetch payment status | Rehydrate stored x402 context by payment id (`getResumeState`); the resume CALL has no reachable trigger — see [Resuming An Authorized Payment](#resuming-an-authorized-payment) |
+| Restart recovery | Fetch payment status | Rehydrate stored x402 context by payment id (`getResumeState`); resume when status answers `retry_original_x402_request` (#2145) — see [Resuming An Authorized Payment](#resuming-an-authorized-payment) |
 
 The `payment_intents` INSERTs are the SAME
 rail-agnostic `infra/repositories/` writers the mpp module uses for its own

@@ -140,7 +140,11 @@ recipient, amount, and token for a plain transfer. For an arbitrary,
 non-MCP x402 paywall: \`mcp__haven__haven_quote_x402\` to get a quote, then
 \`mcp__haven__haven_pay_x402_quote\` — follow the result's guidance fields
 first and sign in the local Haven signer. The pay tool performs the merchant
-retry itself; there is no resume signal to wait for.
+retry itself, so do not wait on a signal while it runs. If the process
+crashes after payment, a later \`mcp__haven__haven_get_payment_status\` call
+may report \`nextAction: 'retry_original_x402_request'\` — only then call
+\`mcp__haven__haven_resume_x402_payment\` with the preserved resume state or
+payment id, instead of paying again.
 
 **Catalog tool arguments:** when \`haven_discover_tools\` returns
 \`tool_arguments\`, pass that object unchanged as the pay tool's

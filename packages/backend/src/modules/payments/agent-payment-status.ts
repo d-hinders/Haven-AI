@@ -387,6 +387,98 @@ function paymentIntentState(status: string): {
 // #2055: `approvalState` died with the approval_requests fallback — every
 // status this module reports is a payment intent now.
 
+/**
+ * #2145: how long after the funding leg confirms before a missing merchant
+ * report means "the agent is gone" rather than "the agent is mid-retry".
+ *
+ * A live agent retries the merchant within seconds of the funding
+ * confirmation; inside this window the status must not instruct a concurrent
+ * second retry. The figure mirrors the delegate-balance monitor's
+ * IN_FLIGHT_WINDOW_MIN (`infra/delegate-balance-monitor.ts`), which encodes
+ * the same judgement about the same interval from the operator side.
+ */
+export const MERCHANT_REPORT_GRACE_MIN = 15
+
+/** `machine_metadata.settlement_scheme`, parsed the way `settlement-observed.ts` does. */
+function settlementSchemeOf(machineMetadata: unknown): string | null {
+  if (!machineMetadata) return null
+  let metadata: Record<string, unknown> | null = null
+  if (typeof machineMetadata === 'string') {
+    try {
+      metadata = JSON.parse(machineMetadata) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  } else {
+    metadata = machineMetadata as Record<string, unknown>
+  }
+  const scheme = metadata?.settlement_scheme
+  return typeof scheme === 'string' ? scheme : null
+}
+
+/**
+ * #2145: the phase/next_action/message for a payment-intent row, including
+ * the two funded-but-unsettled overrides of the plain status mapping.
+ *
+ * On the EIP-3009 bridge, `confirmed` means the FUNDING leg confirmed — value
+ * left the treasury and sits on the delegate EOA — and says nothing about the
+ * merchant. Two evidence states distinguish what happened next:
+ *
+ * 1. **Merchant rejected the retry** (client-reported open
+ *    `merchant_retry_rejected_after_payment` event) → the retry was tried and
+ *    refused; the remedy is reclaiming the funds (`sweep_stranded_funds`).
+ * 2. **Merchant leg never reported** (no evidence row upgraded past the
+ *    server-written `payment_confirmed` base, and the grace window has
+ *    passed) → the agent died between funding and retry — the #2145 crash
+ *    shape. The payment is still deliverable: the delegate holds the funds
+ *    and the resume call re-signs a fresh EIP-3009 header locally, so the
+ *    remedy is `retry_original_x402_request`. If that retry is then rejected,
+ *    the SDK records the rejection and this same function flips the answer to
+ *    case 1 — the two states are self-consistent, with no time-based expiry
+ *    policy invented here.
+ *
+ * Derived entirely from evidence Haven holds server-side: case 2 must fire
+ * for an agent that never came back, which is exactly what a client-written
+ * signal cannot provide. Scoped to `settlement_scheme === 'eip3009'`: on
+ * erc7710 there is no funding leg and `confirmed` IS merchant settlement, and
+ * an intent with no scheme metadata fails closed to the plain mapping.
+ *
+ * The residual ambiguity is a delivered payment whose evidence upgrade never
+ * reached Haven (the attach is best-effort): that payment reads as case 2 and
+ * is told to retry a merchant that was already paid. That is the safe side —
+ * x402 merchants answer a re-request of a settled purchase idempotently
+ * (#1519) — and the alternative (treating missing evidence as delivered) is
+ * the #2145 bug itself.
+ */
+function intentStateFor(payment: PaymentIntentStatusRow): {
+  phase: AgentPaymentPhaseValue
+  nextAction: AgentPaymentNextActionValue
+  message: string
+} {
+  if (payment.status === 'confirmed' && payment.funded_but_unsettled) {
+    return {
+      phase: AgentPaymentPhase.FundedButUnsettled,
+      nextAction: AgentPaymentNextAction.SweepStrandedFunds,
+      message: "Haven's funding leg confirmed but the merchant rejected the payment retry. The delegate wallet may hold stranded funds — tell the user to review this payment in Haven.",
+    }
+  }
+  if (
+    payment.status === 'confirmed' &&
+    railFor(payment) === AgentPaymentRail.X402 &&
+    settlementSchemeOf(payment.machine_metadata) === 'eip3009' &&
+    !payment.merchant_leg_reported &&
+    payment.confirmed_at !== null &&
+    Date.now() - new Date(payment.confirmed_at).getTime() >= MERCHANT_REPORT_GRACE_MIN * 60_000
+  ) {
+    return {
+      phase: AgentPaymentPhase.FundedButUnsettled,
+      nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
+      message: "Haven's funding leg confirmed but no merchant response was ever recorded — the merchant has likely not been paid. Resume this payment to retry the original request; do not start a new payment for the same purchase.",
+    }
+  }
+  return paymentIntentState(payment.status)
+}
+
 export function agentPaymentStatusHttpCode(status: AgentPaymentStatus): number {
   // #2085: the `kind === 'approval_request'` block that stood here mapped the
   // queue's statuses (202/200/409/410). It was unreachable — the comment four
@@ -592,13 +684,7 @@ export async function getAgentPaymentStatus(
 
   const payment: PaymentIntentStatusRow | null = await findIntentStatusRow(paymentId, agent.id)
   if (payment) {
-    const state = payment.funded_but_unsettled && payment.status === 'confirmed'
-      ? {
-          phase: AgentPaymentPhase.FundedButUnsettled,
-          nextAction: AgentPaymentNextAction.SweepStrandedFunds,
-          message: "Haven's funding leg confirmed but the merchant rejected the payment retry. The delegate wallet may hold stranded funds — tell the user to review this payment in Haven.",
-        }
-      : paymentIntentState(payment.status)
+    const state = intentStateFor(payment)
     const rail = railFor(payment)
     const resourceUrl = payment.payment_resource_url ?? payment.x402_resource_url
     const merchantAddress = payment.merchant_address ?? payment.x402_merchant_address

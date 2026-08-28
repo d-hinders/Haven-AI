@@ -4691,10 +4691,12 @@ export const openapiSpec = {
           'still funds anything. #2105: there is no approval branch — spend authority is the ' +
           'agent\'s budget delegation, refused up front with 403 when the amount exceeds the live ' +
           'remaining budget (#2082) and enforced on-chain by the caveat enforcers at redemption. ' +
-          'Preserve the original merchant session and the x402 details. #2131: this ' +
-          'said to "resume once next_action is retry_original_x402_request" — nothing ' +
-          'emits that value, so the instruction could never be satisfied. The client ' +
-          'performs the merchant retry itself; there is no resume signal to wait for.',
+          'Preserve the original merchant session and the x402 details. The client ' +
+          'performs the merchant retry itself; nothing mid-flow waits for a resume ' +
+          'signal. #2145: if the process dies after the funding leg confirms, a later ' +
+          'GET /machine-payments/:id/status reports next_action ' +
+          'retry_original_x402_request (funding confirmed, no merchant response ever ' +
+          'recorded) — resume that payment instead of authorizing a new one.',
         security: [{ AgentApiKey: [] }],
         requestBody: {
           required: true,
@@ -4930,6 +4932,12 @@ export const openapiSpec = {
         tags: ['Machine payments'],
         operationId: 'getMachinePaymentStatus',
         summary: 'Fetch x402 or MPP payment/approval state.',
+        description:
+          'Branch on next_action, never on message prose. #2145: a confirmed x402 EIP-3009 ' +
+          'payment whose merchant leg was never reported (the agent died between the funding ' +
+          'confirmation and the merchant retry) answers phase funded_but_unsettled with ' +
+          'next_action retry_original_x402_request — resume that payment rather than starting a ' +
+          'new one. A client-reported merchant rejection answers sweep_stranded_funds instead.',
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/PaymentId' }],
         responses: {

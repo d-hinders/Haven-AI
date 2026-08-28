@@ -2237,6 +2237,37 @@ describe('runConnect terminal outcome record (#2173)', () => {
     expect(failureOutcomeFor('cursor', error)).toEqual(record)
   })
 
+  it('reports the resolved runtime even when the failure never reached a directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+    const api = outcomeApi()
+    api.registerSetup = vi.fn(async () => {
+      throw new ConnectError('registration_failed', 'Haven did not answer.', 'rerun_connect')
+    })
+
+    // The sub-case between the two boundaries: runtime selection resolved, so
+    // the record must report `claude-code` rather than the `cursor` hint — but
+    // no credentials were written, so nothing is persisted.
+    const error = await expectRejection(runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: API_BASE_URL,
+      runtime: 'cursor',
+      credentialsDir: root,
+      waitForApproval: false,
+    }, {
+      api,
+      nodeVersion: SUPPORTED_NODE,
+      env: { CLAUDECODE: '1' },
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => AGENT_API_KEY,
+      preflightStorage: vi.fn(async () => root),
+      writeCredentials: credentialWriter(root),
+      log: () => undefined,
+    }))
+
+    expect(failureOutcomeFor('cursor', error)).toMatchObject({ outcome: 'failed', runtime: 'claude-code' })
+    await expect(readRecord(root)).rejects.toThrow()
+  })
+
   it('rethrows the original error unchanged when the record write fails on a failed run', async () => {
     const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
     const cause = new ConnectError('probe_failed', 'The MCP probe did not answer.', 'rerun_connect')

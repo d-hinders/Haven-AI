@@ -49,13 +49,15 @@ The default Hermes home is `~/.hermes`. If `HERMES_HOME` is set, use that direct
 
    Delete the assignment line only. Preserve unrelated dotenv entries, and never copy the key into a command, issue, or chat.
 
-4. Tombstone every Haven credential directory before removing its key material. For each directory under `~/.haven/agents/` that the reset retires, run:
+4. Tombstone every Haven credential directory before removing its key material. **Enumerate the directories — do not build a path from an agent id.** `ls ~/.haven/agents` lists them, and `--doctor --json` reports each one's `directory`. A named agent lives at its wiring **slug**, which never equals its agent id ([#1696](https://github.com/d-hinders/Haven-AI/issues/1696)); a path built from an id simply does not exist for it, and the command refuses with `tombstone_directory_not_found` rather than retiring anything. For each real directory, run:
 
    ```bash
-   npx @haven_ai/connect@alpha --tombstone ~/.haven/agents/<agent-id> --reason "haven-reset"
+   npx @haven_ai/connect@alpha --tombstone <directory> --reason "haven-reset" --json
    ```
 
-   Only after that command succeeds, delete the directory's `identity.json`, `signer.json`, `signer-runtime.json`, and other runtime/key files. Preserve `bin/haven-signer.mjs` and `TOMBSTONE.json`: a process started before the reset may still invoke that old path, and the tombstone names the retired agent instead of masking the failure as a closed connection. A tombstone does not revoke an agent; revoke it on the Haven agent page if its authority must end.
+   **Check the result before deleting anything.** Success is exit 0 with `{"tombstoned": true, …}` on stdout; a refusal is exit 1 with `{"tombstoned": false, "error": {"code": …}}` on stdout and the prose on stderr. Confirm `TOMBSTONE.json` is present in the directory (`test -f <directory>/TOMBSTONE.json`). Do not proceed on the absence of visible output — a harness that stopped reading the stream sees the same nothing either way ([#2175](https://github.com/d-hinders/Haven-AI/issues/2175)).
+
+   Only after that verification, delete the directory's `identity.json`, `signer.json`, `signer-runtime.json`, and other runtime/key files. Preserve `bin/haven-signer.mjs` and `TOMBSTONE.json`: a process started before the reset may still invoke that old path, and the tombstone names the retired agent instead of masking the failure as a closed connection. A tombstone does not revoke an agent; revoke it on the Haven agent page if its authority must end.
 
 5. Restart **every** long-lived Hermes host that could have loaded the former configuration. Start a new session for a normal Hermes session. In Hermes Gateway, run `/restart` instead. Restarting one session or one Gateway is not evidence that the machine is clean: each gateway, TUI worker, editor, or other long-lived host keeps the MCP wiring snapshot it had at startup and can be parked on a different retired agent.
 

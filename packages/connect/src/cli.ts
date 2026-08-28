@@ -81,7 +81,38 @@ export async function runCli(
       }
       return 0
     } catch (err) {
-      io.stderr(`${redactSecrets(err instanceof Error ? err.message : String(err))}\n`)
+      // #2175: stdout carried NOTHING here on failure, while the main connect
+      // path has emitted a JSON failure record since #2091. A `--json` caller
+      // parsing stdout therefore could not tell a refused retirement from a
+      // completed one — which is exactly how a field reset reported "the
+      // tombstone command did not create TOMBSTONE.json" with no error in
+      // hand. Same discipline as that path: stdout stays one pure-JSON line
+      // and the prose is mirrored to stderr rather than being its only copy.
+      const { isConnectError } = await import('./connect-error.js')
+      const message = err instanceof Error ? err.message : String(err)
+      io.stderr(`${redactSecrets(message)}\n`)
+      if (parsed.json) {
+        io.stdout(
+          `${redactSecrets(JSON.stringify({
+            tombstoned: false,
+            error: {
+              code: isConnectError(err) ? err.code : 'tombstone_failed',
+              next_action: isConnectError(err)
+                ? err.nextAction
+                : 'review_the_error_and_retry_with_a_valid_agent_directory',
+              // Only a ConnectError's message enters the JSON record, exactly
+              // as `failedConnectOutcome` gates it: that prose is
+              // connector-authored, while a plain Error here is an unguarded
+              // fs failure (EACCES, ENOSPC, a read-only ~/.haven) whose raw OS
+              // message can carry arbitrary local path detail. The directory
+              // guard is not the only thing that can throw — the mkdir/chmod/
+              // writeFile calls after it are all bare. stderr still carries the
+              // full prose for a human; stdout keeps the same bar as #2091.
+              ...(isConnectError(err) && message ? { message } : {}),
+            },
+          }))}\n`,
+        )
+      }
       return 1
     }
   }

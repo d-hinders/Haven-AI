@@ -47,10 +47,12 @@ export {
 } from './runtime-registry.js'
 export { ConnectError, isConnectError } from './connect-error.js'
 export {
+  installedClientHint,
   promptForInstalledClient,
   resolveRuntimeByInstalledClientPrompt,
   scanInstalledClients,
   type InstalledClientCandidate,
+  type InstalledClientHint,
   type PromptIo,
   type ScanInstalledClientsOptions,
 } from './installed-clients.js'

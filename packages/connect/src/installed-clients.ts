@@ -166,6 +166,53 @@ export async function scanInstalledClients(
   })
 }
 
+/**
+ * The scan's findings as DATA, for the `--json` refusal (#2174).
+ *
+ * The interactive prompt is deliberately omitted under `--json`, which threw
+ * this signal away exactly where it was most useful: an agent retrying a
+ * `runtime_undetermined` refusal picked from a nine-value menu on
+ * self-knowledge alone, while the connector already knew which client configs
+ * exist on the machine.
+ *
+ * Property 2 above is preserved verbatim and is the reason this returns a
+ * HINT rather than a runtime: the caller still has to refuse. Finding exactly
+ * one installed app tells you what exists, not where the user wants their
+ * agent to run, and the cost of being wrong is an API key and a delegate key
+ * written into an app they do not use.
+ */
+export interface InstalledClientHint {
+  /** Runtime ids the scan found, likeliest first. */
+  installedClients: readonly RuntimeId[]
+  /**
+   * The top hit, and only when it is unambiguously top — see
+   * `installedClientHint`. A value an agent may echo back as `--runtime`;
+   * never a selection the connector makes for it.
+   */
+  suggestedRuntime?: RuntimeId
+}
+
+/**
+ * A suggestion is offered only when the scan's own ranking makes one candidate
+ * CLEARLY first: a lone candidate, or a live MCP config file outranking
+ * everything else, which is the one tier difference the scan treats as
+ * evidence. Two candidates in the same tier are separated only by `SCAN_ORDER`
+ * — a fixed preference, not a fact about this machine — so suggesting the
+ * winner of that tiebreak would dress an arbitrary choice as a finding.
+ */
+export function installedClientHint(
+  candidates: readonly InstalledClientCandidate[],
+): InstalledClientHint {
+  const installedClients = candidates.map((candidate) => candidate.runtime)
+  const [first, second] = candidates
+  if (!first) return { installedClients }
+  const clearlyFirst = !second
+    || (first.evidence === 'config-file' && second.evidence !== 'config-file')
+  return clearlyFirst
+    ? { installedClients, suggestedRuntime: first.runtime }
+    : { installedClients }
+}
+
 export interface PromptIo {
   write: (text: string) => void
   /** Resolves the typed line, or `null` on EOF / Ctrl-C. */

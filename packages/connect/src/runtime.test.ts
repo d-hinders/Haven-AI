@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { ConnectRequestError } from './api.js'
 import type { ConnectApiClient, ConnectorStatusResponse, RegisterSetupInput, UpdateInstallStatusInput } from './api.js'
 import { delegateKeyFromPrivateKey } from './key.js'
+import type { InstalledClientCandidate } from './installed-clients.js'
 import { completionHandoffLines, failedConnectOutcome, failureOutcomeFor, runConnect, waitForBudgetApproval } from './runtime.js'
 import type { ConnectDeps } from './runtime.js'
 import { CONNECT_OUTCOME_FILENAME } from './storage.js'
@@ -480,6 +481,11 @@ describe('runConnect', () => {
         writeCredentials: vi.fn(),
         installRuntime: vi.fn(),
         generateKey: vi.fn(),
+        // #2174: the refusal now scans for installed clients. Stubbed empty
+        // by default so these assertions describe the connector rather than
+        // whichever agent apps happen to sit in the home directory of the
+        // machine running the suite; the hint's own tests override it.
+        scanInstalledClients: vi.fn(async () => []),
       }
     }
 
@@ -2305,5 +2311,138 @@ describe('runConnect terminal outcome record (#2173)', () => {
 
     expect((error as ConnectError).code).toBe('runtime_undetermined')
     expect(writeOutcomeRecord).not.toHaveBeenCalled()
+  })
+})
+
+// #2174: the refusal now narrows the retry from the nine-value allowed_runtimes
+// menu to what is actually installed here — as a HINT. The load-bearing
+// assertion in every case below is that it is still a REFUSAL.
+describe('runtime_undetermined installed-client hint (#2174)', () => {
+  function scanStub(candidates: Array<[InstalledClientCandidate['runtime'], InstalledClientCandidate['evidence']]>) {
+    return vi.fn(async () => candidates.map(([runtime, evidence]) => ({
+      runtime, label: runtime, detail: 'x', configPath: null, evidence,
+    })))
+  }
+
+  /**
+   * Local twin of the resolution suite's spies — that one is scoped to its own
+   * describe. Every collaborator is stubbed, so reaching ANY of them is itself
+   * the failure these tests are looking for.
+   */
+  function refusalSpies() {
+    return {
+      api: {
+        resolveSetup: vi.fn(),
+        registerSetup: vi.fn(),
+        updateInstallStatus: vi.fn(),
+        getConnectorStatus: vi.fn(),
+        getAgentIdentity: vi.fn(),
+      } as unknown as ConnectApiClient,
+      preflightStorage: vi.fn(),
+      writeCredentials: vi.fn(),
+      installRuntime: vi.fn(),
+      generateKey: vi.fn(),
+    }
+  }
+
+  async function refuse(scanInstalledClients: ConnectDeps['scanInstalledClients']) {
+    const spies = refusalSpies()
+    const error = await expectRejection(runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+    }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {}, scanInstalledClients }))
+    return { error: error as ConnectError, spies }
+  }
+
+  it('carries the found clients and a clear suggestion into the --json record', async () => {
+    const { error } = await refuse(scanStub([['codex-cli', 'config-file'], ['claude-code', 'client-directory']]))
+
+    expect(failedConnectOutcome(undefined, error).error).toMatchObject({
+      code: 'runtime_undetermined',
+      installed_clients: ['codex-cli', 'claude-code'],
+      suggested_runtime: 'codex-cli',
+    })
+  })
+
+  it('stays a REFUSAL even when exactly one client is installed', async () => {
+    // The #1719 invariant, at the point it would be cheapest to break: an
+    // installed app says what EXISTS, not where the user wants their agent to
+    // run. A single hit must not become an implicit selection.
+    const { error, spies } = await refuse(scanStub([['cursor', 'config-file']]))
+    const outcome = failedConnectOutcome(undefined, error)
+
+    expect(outcome.outcome).toBe('failed')
+    expect(outcome.next_action).toBe('rerun_connect_with_explicit_runtime')
+    expect(outcome.error?.suggested_runtime).toBe('cursor')
+    expect(error.details.suggestedRuntime).toBe('cursor')
+    // Nothing proceeded on the hint: no setup resolved, no key, no credentials.
+    expect(spies.api.resolveSetup).not.toHaveBeenCalled()
+    expect(spies.generateKey).not.toHaveBeenCalled()
+    expect(spies.writeCredentials).not.toHaveBeenCalled()
+  })
+
+  it('omits suggested_runtime when the top two candidates tie', async () => {
+    const { error } = await refuse(scanStub([['claude-code', 'config-file'], ['cursor', 'config-file']]))
+    const record = failedConnectOutcome(undefined, error).error
+
+    expect(record?.installed_clients).toEqual(['claude-code', 'cursor'])
+    expect(record?.suggested_runtime).toBeUndefined()
+  })
+
+  it('names the found clients in the prose channel too', async () => {
+    const { error } = await refuse(scanStub([['codex-cli', 'config-file'], ['hermes', 'client-directory']]))
+
+    expect(error.message).toContain('codex-cli, hermes')
+    // Evidence, never an instruction — the connector does not tell the agent
+    // to use the suggestion, it tells it that it will not choose.
+    expect(error.message).toContain('Haven will not choose for you')
+    expect(error.message).toContain('setup token is still unused')
+  })
+
+  it('degrades to the un-hinted refusal when the scan finds nothing', async () => {
+    const { error } = await refuse(scanStub([]))
+    const record = failedConnectOutcome(undefined, error).error
+
+    expect(record?.code).toBe('runtime_undetermined')
+    expect(record?.allowed_runtimes).toEqual(RUNTIME_FLAG_VALUE_LIST)
+    // Absent, not an empty array: "found none" and "could not run" are both
+    // honestly no-finding, and [] would assert one neither case made.
+    expect(record).not.toHaveProperty('installed_clients')
+    expect(record).not.toHaveProperty('suggested_runtime')
+    // Asserted on `details` as well as on the serialized record, because the
+    // absence is guarded in BOTH layers and `details` is public API. Pinning
+    // only the outer one lets the inner guard rot silently.
+    expect(error.details.installedClients).toBeUndefined()
+  })
+
+  it('degrades to the un-hinted refusal when the scan throws', async () => {
+    const { error } = await refuse(vi.fn(async () => {
+      throw new Error('EACCES: permission denied, access \'/home/x/.claude\'')
+    }))
+    const record = failedConnectOutcome(undefined, error).error
+
+    // The caller's problem is still "name your runtime"; a filesystem error
+    // must not replace a precise refusal, nor leak into it.
+    expect(record?.code).toBe('runtime_undetermined')
+    expect(record).not.toHaveProperty('installed_clients')
+    expect(JSON.stringify(record)).not.toContain('EACCES')
+  })
+
+  it('leaves runtime_unrecognized alone — the hint is for the nothing-known case', async () => {
+    const spies = refusalSpies()
+    const error = await expectRejection(runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+      runtimeForce: 'not-a-runtime',
+    }, {
+      ...spies,
+      nodeVersion: SUPPORTED_NODE,
+      env: {},
+      scanInstalledClients: scanStub([['cursor', 'config-file']]),
+    }))
+
+    expect((error as ConnectError).code).toBe('runtime_force_unrecognized')
+    expect((error as ConnectError).details.installedClients).toBeUndefined()
+    expect(failedConnectOutcome(undefined, error).error).not.toHaveProperty('installed_clients')
   })
 })

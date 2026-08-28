@@ -193,23 +193,30 @@ export interface InstalledClientHint {
 }
 
 /**
- * A suggestion is offered only when the scan's own ranking makes one candidate
- * CLEARLY first: a lone candidate, or a live MCP config file outranking
- * everything else, which is the one tier difference the scan treats as
- * evidence. Two candidates in the same tier are separated only by `SCAN_ORDER`
- * — a fixed preference, not a fact about this machine — so suggesting the
- * winner of that tiebreak would dress an arbitrary choice as a finding.
+ * A suggestion is offered only when one candidate is CLEARLY first: a lone
+ * candidate, or a single live MCP config file among bare client directories —
+ * the one tier difference the scan treats as evidence. Candidates within a
+ * tier are separated only by `SCAN_ORDER`, a fixed preference rather than a
+ * fact about this machine, so suggesting the winner of that tiebreak would
+ * dress an arbitrary choice as a finding.
+ *
+ * The suggestion is derived from the WHOLE array rather than from the first
+ * two entries, so it does not depend on the caller having sorted anything.
+ * This is exported, and an unsorted list reaching a positional rule would
+ * yield a quietly wrong suggestion — never a selection, since only the caller
+ * can act on it, but wrong is still wrong. `installedClients` preserves the
+ * order it was given, which for `scanInstalledClients` is likeliest-first.
  */
 export function installedClientHint(
   candidates: readonly InstalledClientCandidate[],
 ): InstalledClientHint {
   const installedClients = candidates.map((candidate) => candidate.runtime)
-  const [first, second] = candidates
-  if (!first) return { installedClients }
-  const clearlyFirst = !second
-    || (first.evidence === 'config-file' && second.evidence !== 'config-file')
-  return clearlyFirst
-    ? { installedClients, suggestedRuntime: first.runtime }
+  if (candidates.length === 1) {
+    return { installedClients, suggestedRuntime: candidates[0].runtime }
+  }
+  const configured = candidates.filter((candidate) => candidate.evidence === 'config-file')
+  return configured.length === 1
+    ? { installedClients, suggestedRuntime: configured[0].runtime }
     : { installedClients }
 }
 

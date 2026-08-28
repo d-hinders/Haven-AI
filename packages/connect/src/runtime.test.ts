@@ -2373,6 +2373,7 @@ describe('runtime_undetermined installed-client hint (#2174)', () => {
 
     expect(outcome.outcome).toBe('failed')
     expect(outcome.next_action).toBe('rerun_connect_with_explicit_runtime')
+    expect(outcome.error?.installed_clients).toEqual(['cursor'])
     expect(outcome.error?.suggested_runtime).toBe('cursor')
     expect(error.details.suggestedRuntime).toBe('cursor')
     // Nothing proceeded on the hint: no setup resolved, no key, no credentials.
@@ -2397,6 +2398,16 @@ describe('runtime_undetermined installed-client hint (#2174)', () => {
     // to use the suggestion, it tells it that it will not choose.
     expect(error.message).toContain('Haven will not choose for you')
     expect(error.message).toContain('setup token is still unused')
+  })
+
+  it('says it will not choose between tied clients, in the prose channel too', async () => {
+    const { error } = await refuse(scanStub([['claude-code', 'config-file'], ['cursor', 'config-file']]))
+
+    expect(error.message).toContain('claude-code, cursor')
+    // The tie branch has its own wording, and it is the one that must not
+    // read as a recommendation — there is nothing to recommend.
+    expect(error.message).toContain('Haven will not choose between them for you')
+    expect(error.message).not.toContain('The likeliest is')
   })
 
   it('degrades to the un-hinted refusal when the scan finds nothing', async () => {

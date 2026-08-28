@@ -219,6 +219,31 @@ describe('installedClientHint (#2174)', () => {
     expect(hint.suggestedRuntime).toBeUndefined()
   })
 
+  it('picks the single configured client out of an UNSORTED list', () => {
+    // The rule reads the whole array, not the first two entries: this is an
+    // exported function, and a caller that has not sorted its candidates must
+    // not get a quietly wrong suggestion.
+    const hint = installedClientHint([
+      candidate('claude-code', 'client-directory'),
+      candidate('hermes', 'client-directory'),
+      candidate('codex-cli', 'config-file'),
+    ])
+
+    expect(hint.suggestedRuntime).toBe('codex-cli')
+    // The list itself keeps the order it was given.
+    expect(hint.installedClients).toEqual(['claude-code', 'hermes', 'codex-cli'])
+  })
+
+  it('suggests nothing when two configured clients tie anywhere in the list', () => {
+    const hint = installedClientHint([
+      candidate('cursor', 'config-file'),
+      candidate('claude-code', 'client-directory'),
+      candidate('hermes', 'config-file'),
+    ])
+
+    expect(hint.suggestedRuntime).toBeUndefined()
+  })
+
   it('suggests nothing when two bare client directories tie', () => {
     const hint = installedClientHint([
       candidate('claude-code', 'client-directory'),

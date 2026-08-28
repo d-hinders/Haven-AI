@@ -30,7 +30,17 @@ Use this procedure only when the active client is Claude Code and the user expli
 1. Inspect `~/.claude.json` and confirm no key under `mcpServers` matches `haven` case-insensitively.
 2. Inspect the repository `.mcp.json` when present and confirm its `mcpServers` contains no Haven entry.
 3. If a stale hand-edited entry remains, restore safety by removing only that verified Haven entry from the corresponding backed-up config structure, then inspect both files again.
-4. Confirm `~/.haven` is absent.
+4. Confirm `~/.haven` holds no live credential material — `identity.json`,
+   `signer.json` and runtime files gone from every agent directory. A retired
+   directory that still holds `bin/haven-signer.mjs` and `TOMBSTONE.json` is
+   **correct, not residue**: `SKILL.md` *Required Sequence* step 4 preserves it
+   deliberately so a stale long-lived host can name the agent it is parked on.
+   `npx @haven_ai/connect@alpha --doctor --runtime claude-code` reports such a
+   directory as `retired`; that is a clean result. Do **not** delete `~/.haven`
+   outright to make this check read "absent" — that destroys the diagnosis this
+   reset exists to leave behind ([#2175](https://github.com/d-hinders/Haven-AI/issues/2175)).
+   Full absence is correct only after the user confirms every long-lived host
+   has restarted, per step 4's own condition.
 5. Confirm `claude mcp list` has no Haven row.
 6. Report every backup path, removed entry and scope, both config-scan results, credential-directory result, and list result.
 

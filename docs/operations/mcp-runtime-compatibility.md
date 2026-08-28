@@ -1016,8 +1016,8 @@ what each server's instructions say and why they differ in length.
   to show for it, having built the path from an agent id. The reset skill now
   enumerates directories and verifies the result before deleting key material.
   The sibling subcommands (`--rekey`, `--doctor`, `--unwire`) still write only
-  to stderr on failure; that gap is tracked separately and is **not** fixed
-  here.
+  to stderr on failure; that gap is [#2184](https://github.com/d-hinders/Haven-AI/issues/2184)
+  and is **not** fixed here.
 - **`--rekey` / `--rekey-finish` (#1700):** replaces an agent's signing key on
   the machine that runs it. **Two phases, because the owner's dashboard sits
   between them** — every backend re-key route is owner-authenticated and

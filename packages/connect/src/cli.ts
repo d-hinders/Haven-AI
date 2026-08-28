@@ -100,7 +100,15 @@ export async function runCli(
               next_action: isConnectError(err)
                 ? err.nextAction
                 : 'review_the_error_and_retry_with_a_valid_agent_directory',
-              message,
+              // Only a ConnectError's message enters the JSON record, exactly
+              // as `failedConnectOutcome` gates it: that prose is
+              // connector-authored, while a plain Error here is an unguarded
+              // fs failure (EACCES, ENOSPC, a read-only ~/.haven) whose raw OS
+              // message can carry arbitrary local path detail. The directory
+              // guard is not the only thing that can throw — the mkdir/chmod/
+              // writeFile calls after it are all bare. stderr still carries the
+              // full prose for a human; stdout keeps the same bar as #2091.
+              ...(isConnectError(err) && message ? { message } : {}),
             },
           }))}\n`,
         )

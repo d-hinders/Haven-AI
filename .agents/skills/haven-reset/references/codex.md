@@ -30,7 +30,17 @@ Haven's connector writes Codex MCP configuration to `~/.codex/config.toml`. Curr
 ## Verify
 
 1. Confirm `~/.codex/config.toml` has no `[mcp_servers.haven]`, `[mcp_servers.haven_signer]`, stale `[mcp_servers.haven-signer]`, or descendant table.
-2. Confirm `~/.haven` is absent.
+2. Confirm `~/.haven` holds no live credential material — `identity.json`,
+   `signer.json` and runtime files gone from every agent directory. A retired
+   directory that still holds `bin/haven-signer.mjs` and `TOMBSTONE.json` is
+   **correct, not residue**: `SKILL.md` *Required Sequence* step 4 preserves it
+   deliberately so a stale long-lived host can name the agent it is parked on.
+   `npx @haven_ai/connect@alpha --doctor --runtime codex` reports such a
+   directory as `retired`; that is a clean result. Do **not** delete `~/.haven`
+   outright to make this check read "absent" — that destroys the diagnosis this
+   reset exists to leave behind ([#2175](https://github.com/d-hinders/Haven-AI/issues/2175)).
+   Full absence is correct only after the user confirms every long-lived host
+   has restarted, per step 4's own condition.
 3. Confirm `codex mcp list` has no Haven row.
 4. Report the backup path, removed entries, credential-directory result, user-config scan, project-config scan, and list result.
 

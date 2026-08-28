@@ -93,7 +93,7 @@ minutes. Two rules follow:
 2. **Tombstone a directory before (or instead of) deleting it:**
 
    ```
-   npx @haven_ai/connect@alpha --tombstone ~/.haven/agents/<id> --reason "superseded"
+   npx @haven_ai/connect@alpha --tombstone ~/.haven/agents/<directory> --reason "superseded" --json
    ```
 
    This replaces the directory's signer wrapper with a diagnostic that logs the
@@ -103,6 +103,18 @@ minutes. Two rules follow:
    agent on the Haven agent page yourself. Delete the tombstone only once every
    long-lived host has been restarted.
 
+   **Pass a real DIRECTORY, not an agent id.** A named agent lives at its wiring
+   slug, which never equals its agent id — so `~/.haven/agents/<agent-id>` does
+   not exist for one, and the command refuses with
+   `tombstone_directory_not_found` having retired nothing. List `~/.haven/agents`
+   or read the `directory` values out of `--doctor --json`.
+
+   Under `--json`, success is `{"tombstoned": true, …}` on stdout with exit 0,
+   and a refusal is `{"tombstoned": false, "error": {"code", "next_action"}}`
+   with exit 1 — so check the result rather than assuming silence means success
+   (#2175). The `message` field is present only for connector-authored refusals;
+   an unexpected filesystem error keeps its raw text on stderr alone.
+
 ### Unwiring an agent (`--unwire`, #2169)
 
 Connect has always been able to *write* a pair into a runtime config and never
@@ -111,7 +123,7 @@ Hermes) the `MCP_HAVEN_API_KEY` dotenv line behind, and the runtime quoted as
 one agent while signing as another. `--unwire` is the erase half:
 
 ```
-npx @haven_ai/connect@alpha --unwire ~/.haven/agents/<id> [--reason "..."]
+npx @haven_ai/connect@alpha --unwire ~/.haven/agents/<directory> [--reason "..."]
 npx @haven_ai/connect@alpha --unwire --name research [--reason "..."]
 ```
 

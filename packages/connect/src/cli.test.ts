@@ -272,6 +272,35 @@ describe('--tombstone (#1681)', () => {
     expect(stderr.join('')).toMatch(/Not a directory/)
   })
 
+  // #2175 review: the directory guard is not the only thing that can throw —
+  // every mkdir/chmod/writeFile after it is bare, and a bare Error's raw OS
+  // message can carry arbitrary local path detail. stdout must hold the same
+  // line #2091 drew for the main connect path: connector-authored prose only.
+  it('--json withholds the message for a non-ConnectError failure, keeping it on stderr', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'haven-cli-tombstone-unwritable-'))
+    const dir = join(tempDir, 'agent-blocked')
+    await mkdir(dir, { recursive: true })
+    // Fail one of the writes AFTER the directory guard passes, the way a
+    // read-only ~/.haven or a full disk would. A plain FILE where `bin/` must
+    // be makes `mkdir` throw for any user — a permission bit would not, since
+    // CI and this container run as root.
+    await writeFile(join(dir, 'bin'), 'not a directory')
+    const stdout: string[] = []
+    const stderr: string[] = []
+
+    const exitCode = await runCli(['--tombstone', dir, '--json'], {
+      stdout: (m) => stdout.push(m), stderr: (m) => stderr.push(m),
+    })
+
+    expect(exitCode).toBe(1)
+    const record = JSON.parse(stdout[0])
+    expect(record).toMatchObject({ tombstoned: false, error: { code: 'tombstone_failed' } })
+    // The raw OS message is withheld from the machine channel...
+    expect(record.error).not.toHaveProperty('message')
+    // ...and still reaches the human one in full.
+    expect(stderr.join('')).toMatch(/EEXIST|ENOTDIR|not a directory/i)
+  })
+
   it('a directory with unreadable identity is still retired, named unknown', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'haven-cli-tombstone-bare-'))
     const dir = join(tempDir, 'mystery')

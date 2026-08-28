@@ -23,7 +23,10 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
-import { confirmObservedSettlement } from '../../../infra/repositories/x402-authorizations.js'
+import {
+  confirmObservedSettlement,
+  findSweepableErc7710Intents,
+} from '../../../infra/repositories/x402-authorizations.js'
 import { up, down, version } from '../072_payment_intents_settlement_indexes.js'
 
 const TX_HASH_INDEX = 'idx_payment_intents_tx_hash_lower'
@@ -186,6 +189,39 @@ describeDb('migration 072: payment_intents settlement indexes (#2095)', () => {
     await up(db as never)
 
     expect(withIndex).toEqual({ replayed: false, fresh: true })
+    expect(withoutIndex).toEqual(withIndex)
+  })
+
+  it("the sweeper selects the SAME candidates whether the index is present or absent", async () => {
+    // The sibling of the test above, for the OTHER query this migration
+    // indexes. Reviewer finding (#2095, nice-to-have): the no-behaviour-change
+    // claim was proven by execution for the replay guard and merely argued
+    // for the sweeper. Both are now proven the same way.
+    async function candidates(): Promise<string[]> {
+      const rows = await findSweepableErc7710Intents(0, 24 * 60 * 60, 200)
+      return rows.map((r) => r.id).sort()
+    }
+
+    await resetDb()
+    await up(db as never)
+    const open = await seedIntent(null)
+    // A control that must NOT be swept: identical in every respect the sweep
+    // filters on EXCEPT that it already carries a hash. Without it, a sweeper
+    // returning nothing at all would "match". `delegation_hash` is set on
+    // both — it is a hard requirement of the candidate query, so leaving it
+    // NULL on the control would have excluded it for the wrong reason.
+    const settled = await seedIntent(`0x${'c'.repeat(64)}`)
+    await db.query(`UPDATE payment_intents SET delegation_hash = $1 WHERE id = ANY($2::uuid[])`, [
+      `0x${'e'.repeat(64)}`,
+      [open.id, settled.id],
+    ])
+
+    const withIndex = await candidates()
+    await down(db as never)
+    const withoutIndex = await candidates()
+    await up(db as never)
+
+    expect(withIndex).toEqual([open.id])
     expect(withoutIndex).toEqual(withIndex)
   })
 })

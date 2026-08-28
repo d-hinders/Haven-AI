@@ -16,6 +16,7 @@
  * REJECT. A check that can only say yes is what this whole family of issues
  * has been about.
  */
+import net from 'node:net'
 import { describe, expect, it, vi } from 'vitest'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs, the capture harness
@@ -24,6 +25,7 @@ import {
   READINESS_DEFAULTS,
   describeReadinessFailure,
   formatRunResult,
+  probeAnsweringIsBounded,
   readinessBudgetProblems,
   resolveReadinessBudgets,
   waitForServer,
@@ -228,6 +230,33 @@ describe('waitForServer', () => {
     const progress = log.mock.calls.flat().filter((l) => /still compiling/.test(String(l)))
     expect(progress.length, 'silence for two minutes is indistinguishable from a hang').toBeGreaterThan(3)
     expect(String(progress[0])).toMatch(/not a hang/)
+  })
+})
+
+describe('the REAL answering probe is time-bounded', () => {
+  /**
+   * The one assertion in this file that refuses a stand-in, and the reason is
+   * the bug it was written for. Every `waitForServer` test above injects a
+   * `probeAnswering` that throws instantly — so the progress assertion passed
+   * while the shipped code sat silent for the entire compile, because a `fetch`
+   * to a mid-compile Next dev server neither fails nor returns: it HANGS. The
+   * fake was more cooperative than reality. This drives the real probe against
+   * a socket that behaves the way a compiling server behaves.
+   */
+  it('gives up on a socket that accepts and then never answers', async () => {
+    const server = net.createServer(() => {
+      /* accept the connection and say nothing, forever — a compiling `next dev` */
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as net.AddressInfo
+    try {
+      const result = await probeAnsweringIsBounded(`http://127.0.0.1:${port}`, 700)
+      expect(result.threw, 'an unbounded probe parks the readiness loop for the whole compile').toBe(true)
+      // Generous upper bound: the assertion is "bounded", not "bounded to the ms".
+      expect(result.elapsedMs).toBeLessThan(5_000)
+    } finally {
+      server.close()
+    }
   })
 })
 

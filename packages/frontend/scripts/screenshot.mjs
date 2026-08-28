@@ -895,9 +895,45 @@ function probeListeningDefault(url, timeoutMs = 2000) {
   })
 }
 
-async function probeAnsweringDefault(url, signal) {
-  const res = await fetch(url, { redirect: 'manual', signal })
+/**
+ * Ask the server for an answer, but only for `timeoutMs`.
+ *
+ * The bound is not politeness, it is what makes progress reporting possible.
+ * A `fetch` to a Next dev server that is mid-compile does not fail and does not
+ * return — it HANGS until the compile finishes. An unbounded call therefore
+ * parks the readiness loop inside one await for the entire compile, so nothing
+ * ticks, nothing re-checks the socket, and the run is silent for five minutes:
+ * exactly the "is it working or is it hung?" ambiguity #2108 is about, faithfully
+ * reproduced by the code meant to remove it.
+ *
+ * Caught by running it, NOT by the unit tests — the injected `probeAnswering`
+ * in `capture-readiness.test.ts` threw instantly, so the fake was more
+ * cooperative than the real thing and the progress assertion passed against a
+ * loop that could not tick in production. Hence `probeAnsweringIsBounded` below,
+ * which tests the real probe rather than a stand-in.
+ *
+ * Re-requesting a route that is still compiling is safe: Next dev dedupes
+ * compilation per route, so each attempt joins the same in-flight build.
+ */
+async function probeAnsweringDefault(url, timeoutMs = 10_000) {
+  const res = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) })
   return res.status
+}
+
+/**
+ * Does the real answering probe give up in bounded time? Exported so the guard
+ * can assert it against a socket that accepts and then says nothing forever —
+ * the shape a compiling `next dev` presents. A progress ticker downstream of an
+ * unbounded await is a ticker that never ticks.
+ */
+export async function probeAnsweringIsBounded(url, timeoutMs) {
+  const startedAt = Date.now()
+  try {
+    await probeAnsweringDefault(url, timeoutMs)
+    return { threw: false, elapsedMs: Date.now() - startedAt }
+  } catch {
+    return { threw: true, elapsedMs: Date.now() - startedAt }
+  }
 }
 
 /**

@@ -32,7 +32,8 @@
  *   to get subtly wrong.
  */
 
-import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { redactSecrets } from './redact.js'
 
@@ -55,6 +56,58 @@ export interface WriteTombstoneInput {
   replacedBy?: string
   /** Injectable for tests; defaults to now. */
   retiredAt?: string
+  /** Root for the SURVIVING mirror record; defaults to ~/.haven/tombstones. */
+  tombstonesDir?: string
+}
+
+/**
+ * Where tombstone records survive OUTSIDE the retired agent directory.
+ *
+ * A tombstone written only inside the per-agent dir dies the moment that dir
+ * is deleted — and the whole point of a tombstone is to keep speaking for an
+ * OLD, possibly already-removed path. The mirror is keyed by agent id (the
+ * durable identity; dirs may be uuid- or slug-named) so `--doctor` and humans
+ * can always find WHO was retired and WHY even after `~/.haven/agents/<id>`
+ * is long gone. Same redaction as the in-place record; no key material.
+ * (#1681 review follow-up: the tombstone must live outside the per-agent tree
+ * to survive a reset.)
+ */
+export function defaultTombstonesDir(baseDir?: string): string {
+  return join(baseDir ?? join(homedir(), '.haven'), 'tombstones')
+}
+
+const MIRROR_MODE = 0o600
+
+/**
+ * Every tombstone record mirrored under the tombstones root — INCLUDING
+ * retirees whose credential directory has since been deleted, which is the
+ * case the in-place record cannot cover. Non-throwing: a missing or
+ * unreadable record file is skipped, like every other enumeration path.
+ */
+export async function readTombstoneRecords(
+  tombstonesDir?: string,
+): Promise<Array<TombstoneInfo & { recordPath: string }>> {
+  const root = tombstonesDir ?? defaultTombstonesDir()
+  let entries: string[] = []
+  try {
+    entries = await readdir(root)
+  } catch {
+    return []
+  }
+  const records: Array<TombstoneInfo & { recordPath: string }> = []
+  for (const entry of entries) {
+    if (!entry.endsWith('.json')) continue
+    const recordPath = join(root, entry)
+    try {
+      const parsed = JSON.parse(await readFile(recordPath, 'utf8')) as TombstoneInfo
+      if (typeof parsed?.agent_id === 'string') {
+        records.push({ ...parsed, recordPath })
+      }
+    } catch {
+      // unreadable record — skip; the in-place copy (if any) still speaks
+    }
+  }
+  return records
 }
 
 /** The marker string hosts and humans can grep their MCP stderr logs for. */
@@ -91,11 +144,18 @@ function tombstoneScript(info: TombstoneInfo): string {
 }
 
 /**
- * Replace the directory's signer wrapper with a tombstone and record the
- * retirement in TOMBSTONE.json. Key files are not touched. Idempotent — a
- * re-run overwrites the tombstone with the same content shape.
+ * Replace the directory's signer wrapper with a tombstone, record the
+ * retirement in TOMBSTONE.json, and MIRROR the record under the tombstones
+ * root so it survives the directory's later deletion. Key files are not
+ * touched. Idempotent — a re-run overwrites the tombstone with the same
+ * content shape.
+ *
+ * Returns the tombstone info plus the MIRROR path (`recordPath`), so callers
+ * can point at the record that outlives the directory.
  */
-export async function writeAgentTombstone(input: WriteTombstoneInput): Promise<TombstoneInfo> {
+export async function writeAgentTombstone(
+  input: WriteTombstoneInput,
+): Promise<TombstoneInfo & { recordPath: string }> {
   // The directory must already exist: a mistyped path would otherwise be
   // silently created and reported as a successful retirement. (#1681 review)
   const dirStat = await stat(input.directory).catch(() => null)
@@ -117,8 +177,18 @@ export async function writeAgentTombstone(input: WriteTombstoneInput): Promise<T
   const wrapperPath = join(binDir, 'haven-signer.mjs')
   await writeFile(wrapperPath, tombstoneScript(info), 'utf8')
   await chmod(wrapperPath, 0o755)
-  await writeFile(join(input.directory, TOMBSTONE_FILENAME), JSON.stringify(info, null, 2) + '\n', 'utf8')
-  return info
+  const record = JSON.stringify(info, null, 2) + '\n'
+  await writeFile(join(input.directory, TOMBSTONE_FILENAME), record, 'utf8')
+  // Surviving mirror (#1681 follow-up): keyed by agent id, OUTSIDE the dir, so
+  // a retirement flow that then deletes the agent directory cannot silence
+  // the diagnosis. Same redaction; no key material. Collisions (same agent id
+  // tombstoned twice) overwrite — latest retirement wins, in-place records
+  // remain authoritative.
+  const root = input.tombstonesDir ?? defaultTombstonesDir()
+  await mkdir(root, { recursive: true, mode: 0o700 })
+  const recordPath = join(root, `${info.agent_id}.json`)
+  await writeFile(recordPath, record, { mode: MIRROR_MODE })
+  return { ...info, recordPath }
 }
 
 /** The tombstone record for a directory, or null when it is not tombstoned. */

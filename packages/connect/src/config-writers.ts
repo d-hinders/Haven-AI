@@ -289,6 +289,146 @@ function isAmbiguousHermesEnvLine(line: string, envKey: string): boolean {
   return new RegExp(`^\\s*(?:export[ \\t]+)?${envKey}\\b`).test(line)
 }
 
+/**
+ * Remove one agent's managed pair from Hermes's YAML configuration,
+ * byte-preserving every other line (#2169). The mirror of `mergeHermesYaml`.
+ *
+ * Returns the input unchanged when the pair is not present. Throws
+ * `UnreadableRuntimeConfigError` when the file cannot be safely parsed, so a
+ * caller can report it as a hand-fixable problem instead of writing over it.
+ */
+export function removeHermesYaml(
+  existingYaml: string | null,
+  names: ServerNames,
+  configPath?: string,
+): string {
+  if (!existingYaml?.trim()) return existingYaml ?? ''
+  const doc = parseDocument(existingYaml, { keepSourceTokens: true })
+  if (doc.errors.length > 0 || !isMap(doc.contents)) {
+    throw new UnreadableRuntimeConfigError(configPath ?? 'the Hermes config', 'it is not a YAML object')
+  }
+  const mcpPair = doc.contents.items.find((item) => item.key?.toString() === 'mcp_servers')
+  if (!mcpPair || !isMap(mcpPair.value)) return existingYaml
+
+  const toRemove = mcpPair.value.items.filter((item) => {
+    const name = item.key?.toString()
+    return name === names.hosted || name === names.signer
+  })
+  if (toRemove.length === 0) return existingYaml
+  if (toRemove.length !== mcpPair.value.items.length && toRemove.some((item) => !item.key?.range || !item.value?.range)) {
+    // A sibling entry we would have to splice around lacks source ranges —
+    // refuse rather than risk corrupting someone else's pair.
+    throw new UnreadableRuntimeConfigError(configPath ?? 'the Hermes config', 'an MCP server entry cannot be safely removed')
+  }
+
+  let out = existingYaml
+  // Splice from the bottom up so earlier offsets stay valid.
+  const ranges: Array<[number, number]> = toRemove.map((item) => {
+    const keyStart = item.key!.range![0]
+    const valueEnd = item.value!.range![1]
+    const lineStart = existingYaml.lastIndexOf('\n', keyStart - 1) + 1
+    let end = valueEnd
+    if (existingYaml.slice(end).startsWith('\r\n')) end += 2
+    else if (existingYaml[end] === '\n') end += 1
+    return [lineStart, end] as [number, number]
+  })
+  ranges.sort((a, b) => b[0] - a[0])
+  for (const [start, end] of ranges) out = out.slice(0, start) + out.slice(end)
+
+  // If mcp_servers now holds nothing, drop the key itself so the config does
+  // not carry an empty managed map.
+  if (toRemove.length === mcpPair.value.items.length) {
+    const reparsed = parseDocument(out, { keepSourceTokens: true })
+    if (!reparsed.errors.length && isMap(reparsed.contents)) {
+      const pair = reparsed.contents.items.find((item) => item.key?.toString() === 'mcp_servers')
+      if (pair && pair.key?.range && pair.value?.range) {
+        const keyStart = pair.key.range[0]
+        const valueEnd = pair.value.range[1]
+        const lineStart = out.lastIndexOf('\n', keyStart - 1) + 1
+        let end = valueEnd
+        if (out.slice(end).startsWith('\r\n')) end += 2
+        else if (out[end] === '\n') end += 1
+        out = out.slice(0, lineStart) + out.slice(end)
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * Remove one pair's API-key assignment from Hermes's dotenv file,
+ * byte-preserving every other line (#2169). The mirror of `mergeHermesEnv`.
+ *
+ * Returns the input unchanged when the key is absent. Refuses when the managed
+ * key is ambiguous, matching `mergeHermesEnv`'s discipline — never rewrite a
+ * line it cannot positively identify as ours.
+ */
+export function removeHermesEnv(existingEnv: string | null, envKey: string): string {
+  if (!existingEnv) return ''
+  const lineEnding = existingEnv.includes('\r\n') ? '\r\n' : '\n'
+  const hasTrailingNewline = /\r?\n$/.test(existingEnv)
+  const lines = existingEnv.split(/\r?\n/)
+  if (hasTrailingNewline) lines.pop()
+
+  let removed = 0
+  const kept = lines.filter((line) => {
+    if (isHermesEnvAssignment(line, envKey)) {
+      removed += 1
+      return false
+    }
+    if (isAmbiguousHermesEnvLine(line, envKey)) {
+      throw new Error('Hermes environment contains an ambiguous managed key')
+    }
+    return true
+  })
+  if (removed === 0) return existingEnv
+  const joined = kept.join(lineEnding)
+  return hasTrailingNewline ? `${joined}${lineEnding}` : joined
+}
+
+/**
+ * Remove one agent's hosted + signer entries from a JSON MCP config (Cursor,
+ * VS Code, VS Code Insiders, Claude Desktop). The mirror of
+ * `mergeJsonMcpConfig`; deletes only the owned names and re-serializes with
+ * the writer's own 2-space style.
+ */
+export function removeJsonMcpConfig(
+  existingJson: string | null,
+  serverRoot: 'mcpServers' | 'servers',
+  names: ServerNames,
+  configPath?: string,
+): string {
+  if (!existingJson?.trim()) return existingJson ?? ''
+  const config = parseJsonObject(existingJson, configPath) as Record<string, unknown>
+  const root = config[serverRoot]
+  if (!root || typeof root !== 'object' || Array.isArray(root)) return existingJson
+  const servers = root as Record<string, unknown>
+  let removed = false
+  for (const name of [names.hosted, names.signer]) {
+    if (name in servers) {
+      delete servers[name]
+      removed = true
+    }
+  }
+  if (!removed) return existingJson
+  if (Object.keys(servers).length === 0) delete config[serverRoot]
+  return `${JSON.stringify(config, null, 2)}\n`
+}
+
+/**
+ * Remove one agent's Codex TOML tables. The mirror of `mergeCodexToml` /
+ * `mergeCodexTomlHosted`, which already remove-then-append — this is the
+ * remove half alone.
+ */
+export function removeCodexToml(existingToml: string, names: ServerNames): string {
+  let next = removeTomlTableTree(
+    removeTomlTableTree(existingToml, `mcp_servers.${names.codexHosted}`),
+    `mcp_servers.${names.codexSigner}`,
+  )
+  return next
+}
+
+
 function appendHermesMcpServers(source: string, servers: Record<string, unknown>): string {
   const documentEnd = /(?:^|\n)[ \t]*\.\.\.[ \t]*(?:#[^\n]*)?\r?\n?$/.exec(source)
   if (documentEnd) {

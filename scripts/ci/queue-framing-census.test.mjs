@@ -336,6 +336,14 @@ test('POSITIVE CONTROL: the scanner does not flag the corrected replacement pros
   }
 })
 
+test('POSITIVE CONTROL: the live agent lifecycle pending_approval status is not a payment queue claim', () => {
+  assert.deepEqual(
+    findQueueClaims("agents.status = 'pending_approval'"),
+    [],
+    'the live agent lifecycle vocabulary must stay outside the payment-queue phrase list',
+  )
+})
+
 test('POSITIVE CONTROL: markdown headings and star-bullets are not stripped away', () => {
   // The source-file stripper blanks `# …` and `* …` lines. In a README those are
   // a heading and a bullet, so running it there would silently hide a claim.

@@ -225,6 +225,15 @@ describe('#2131: the shipped SDK README does not advertise the dead resume trigg
     // cannot honestly claim.
     const LITERAL = 'retry_original_x402_request'
 
+    // 0. The retirement framing EXISTS. Restored after the inversion dropped
+    //    it: without this, deleting the unavailability note wholesale leaves a
+    //    README that mentions the value only in a table row and still passes,
+    //    because the checks below only constrain mentions that remain. Found by
+    //    mutating this guard rather than by reading it — the same way its two
+    //    predecessors were found wanting.
+    expect(readme).toContain('**No longer produced — nothing maps to it.**')
+    expect(readme).toMatch(/Resume is not\s+currently available/)
+
     // 1. Count pin, over the whole file including the state diagram. Any NEW
     //    mention fails here regardless of how it is worded or wrapped.
     //    If you legitimately restructured this README, update the count in the
@@ -233,8 +242,8 @@ describe('#2131: the shipped SDK README does not advertise the dead resume trigg
     const total = readme.split(LITERAL).length - 1
     expect(
       total,
-      `expected exactly 4 mentions of ${LITERAL} in the SDK README (2 in the retired state diagram, the retired next-action table row, the unavailability note) — a new one is a re-advertisement unless proven otherwise (see #2145)`,
-    ).toBe(4)
+      `expected at most 4 mentions of ${LITERAL} in the SDK README (2 in the retired state diagram, the retired next-action table row, the unavailability note) — a new one is a re-advertisement unless proven otherwise (see #2145)`,
+    ).toBeLessThanOrEqual(4)
 
     // 2. Every PROSE mention sits in retirement framing. Fenced blocks are
     //    excluded: the state diagram's labels are drawn art, and the block
@@ -257,17 +266,39 @@ describe('#2131: the shipped SDK README does not advertise the dead resume trigg
       `every prose mention of ${LITERAL} must sit in retirement framing — an unframed mention reads as a live instruction`,
     ).toEqual([])
 
-    // WHAT THIS DOES NOT CATCH, stated because over-claiming is how the two
-    // previous versions of this guard failed. An instruction that refers to the
-    // value by PRONOUN — "when that next action appears, invoke the resume
-    // helper" — adds no occurrence and names nothing, so both checks above pass.
-    // Verified, not assumed: that exact insertion passes today.
+    // WHAT THIS DOES NOT CATCH — stated at its real size, because every previous
+    // version of this guard failed for claiming completeness, and a third
+    // under-statement would be the same mistake in a better disguise.
     //
-    // That residue is accepted rather than chased. No assertion over prose can
-    // catch every misleading rephrasing, and the two attempts that tried
-    // (matching sentences, then matching verbs) failed precisely because they
-    // claimed to. What is bounded is the case that matters: a reader can only
-    // ACT on the value by naming it verbatim, and every verbatim mention is now
-    // pinned by count and required to sit in retirement framing.
+    // Two demonstrated holes, both verified rather than reasoned about:
+    //
+    //   1. PRONOUN. "When that next action appears, invoke the resume helper"
+    //      adds no occurrence and names nothing, so both checks pass.
+    //   2. REVERSAL IN PLACE, and this is the bigger one. The framing check
+    //      tests whether a retirement phrase is PRESENT nearby — it cannot tell
+    //      "X is true" from "X was true, and no longer is". Editing the retired
+    //      table row in place to "**No longer produced — nothing maps to it.**
+    //      That was true through the last release; as of this build it fires
+    //      again, so resume immediately" keeps the count at 4, keeps the
+    //      retirement phrase verbatim, and passes. Widening or narrowing the
+    //      260-char window does nothing: the reversal sits adjacent, not
+    //      distant.
+    //
+    // Hole 2 also proves the pre-inversion exact-phrase pins would not have
+    // helped — that mutation preserves them verbatim and appends a supersession
+    // clause.
+    //
+    // The residue is ACCEPTED, not chased, and this is the resting point.
+    // Detecting reversal cues ("as of", "now", "that's changed", "update:") is
+    // the same unbounded-vocabulary problem that defeated the two earlier
+    // versions, one level up. At some point this is true of any assertion over
+    // freeform markdown, and pretending otherwise has been the actual repeated
+    // defect here — not any particular regex.
+    //
+    // What IS bounded, and is the threat that has actually occurred: a lazy
+    // re-advertisement. A new tool description or README line that names the
+    // value, or a mention sitting in no retirement framing at all, fails. A
+    // deliberate rewrite that argues the value is live again does not, and a
+    // human reviewing that diff is the control, not this test.
   })
 })

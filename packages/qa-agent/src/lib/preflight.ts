@@ -26,6 +26,7 @@
 
 import { ethers } from 'ethers'
 import { BASE_SEPOLIA_RPC, SEPOLIA_USDC, ERC20_BALANCE_ABI, USDC_DECIMALS } from './chain.js'
+import { HavenApi } from './haven-api.js'
 import type { QaConfig } from '../config.js'
 
 /** One resource the run consumes, and whether it can still be consumed. */
@@ -156,6 +157,73 @@ export async function checkDelegateResidual(
   }
 }
 
+/**
+ * What one full run costs the treasury, atomic USDC units.
+ *
+ * Derived, not invented: ~12 legs at 0.001 USDC each, plus the
+ * `delegation-lifecycle` scenario's 0.002 USDC grant spend. Below this the run
+ * CANNOT succeed — kept as a named constant so the next leg added to the
+ * harness has one number to bump, next to the derivation it must keep true.
+ */
+export const TREASURY_RUN_COST_ATOMIC = 12n * 1_000n + 2_000n
+
+/** The typical single leg's spend (0.001 USDC), for stating headroom in work. */
+const PER_LEG_ATOMIC = 1_000n
+
+/**
+ * The delegation treasury's USDC — the account every payment scenario spends
+ * from, and the one resource the harness OWNS that was missing until #2081.
+ *
+ * On #2074 (2026-08-26) the treasury was empty: every leg failed with an
+ * on-chain `ERC20: transfer amount exceeds balance` raised AFTER the caveat
+ * enforcer approved, so nothing in the output named the account or the reason,
+ * and diagnosis took hand-decoding a failing UserOperation's calldata. This
+ * one `balanceOf` prints the cause at the top of that run.
+ *
+ * This check BLOCKS below {@link TREASURY_RUN_COST_ATOMIC} — deliberately on
+ * the merchant-gas side of the block-vs-report line, not the delegate-residual
+ * side: below a run's cost the run cannot succeed, so every downstream failure
+ * is noise about this number. (The residual is informational because dust is
+ * expected; an empty treasury is never expected.)
+ *
+ * The address is derived the way the scenarios derive it — `GET
+ * /machine-payments/agent` → `safe_address` — never restated in config (design
+ * rule 1 above).
+ */
+export async function checkDelegationTreasury(
+  api: Pick<HavenApi, 'getAgent'>,
+  provider: ethers.Provider,
+): Promise<ResourceCheck> {
+  const name = 'delegation treasury (USDC)'
+  try {
+    const { ok, status, data } = await api.getAgent()
+    if (!ok) {
+      return { name, balance: '—', ok: null, detail: `GET /machine-payments/agent returned HTTP ${status}` }
+    }
+    if (!data.safe_address) {
+      return { name, balance: '—', ok: null, detail: 'agent identity carries no safe_address' }
+    }
+    const usdc = new ethers.Contract(SEPOLIA_USDC, [...ERC20_BALANCE_ABI], provider)
+    const raw: bigint = await usdc.balanceOf(data.safe_address)
+    const funded = raw >= TREASURY_RUN_COST_ATOMIC
+    return {
+      name,
+      address: data.safe_address,
+      balance: `${ethers.formatUnits(raw, USDC_DECIMALS)} USDC`,
+      headroom: `~${raw / PER_LEG_ATOMIC} leg(s)`,
+      ok: funded,
+      detail: funded
+        ? undefined
+        : `below the ~${ethers.formatUnits(TREASURY_RUN_COST_ATOMIC, USDC_DECIMALS)} USDC a full run ` +
+          `spends — send Base Sepolia USDC (${SEPOLIA_USDC}) to this address from any source ` +
+          '(docs/operations/agent-qa.md § Top-up), or every payment leg fails on-chain with ' +
+          '`ERC20: transfer amount exceeds balance` after the enforcer approves (the #2074 outage)',
+    }
+  } catch (error) {
+    return { name, balance: '—', ok: null, detail: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 /** Render the checks as a block a human can act on without opening anything else. */
 export function formatPreflight(result: PreflightResult): string {
   const lines = ['preflight — resources this run consumes:']
@@ -176,7 +244,7 @@ export function formatPreflight(result: PreflightResult): string {
  */
 export async function runPreflight(
   cfg: QaConfig,
-  deps: { fetchImpl?: typeof fetch; provider?: ethers.Provider } = {},
+  deps: { fetchImpl?: typeof fetch; provider?: ethers.Provider; api?: Pick<HavenApi, 'getAgent'> } = {},
 ): Promise<PreflightResult> {
   const fetchImpl = deps.fetchImpl ?? fetch
   const provider = deps.provider ?? new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC)
@@ -184,6 +252,10 @@ export async function runPreflight(
 
   if (cfg.demoMerchantUrl) {
     checks.push(await checkMerchantSettlement(cfg.demoMerchantUrl, fetchImpl))
+  }
+  if (cfg.delegationAgentApiKey) {
+    const api = deps.api ?? new HavenApi(cfg, cfg.delegationAgentApiKey)
+    checks.push(await checkDelegationTreasury(api, provider))
   }
   if (cfg.delegationDelegateKey) {
     checks.push(await checkDelegateResidual('delegation', cfg.delegationDelegateKey, provider))

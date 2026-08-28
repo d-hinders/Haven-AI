@@ -70,9 +70,13 @@ export async function runCli(
             'agent page if you have not already.\n',
         )
         io.stdout(
+          `A surviving tombstone record was mirrored to ${redactSecrets(info.recordPath)}\n`,
+        )
+        io.stdout(
           'Restart EVERY long-lived MCP host (gateway, TUI workers, editors): each holds the ' +
             'wiring snapshot from its own start time, and the tombstone only speaks when a stale ' +
-            'host next probes the old path.\n',
+            'host next probes the old path. The mirrored record keeps this retirement observable ' +
+            'even after the agent directory itself is deleted.\n',
         )
       }
       return 0

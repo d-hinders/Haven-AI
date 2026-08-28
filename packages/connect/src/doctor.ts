@@ -44,7 +44,7 @@ import {
 import { runtimeConfigPathFor, writeRuntimeConfig } from './config-writers.js'
 import { restartRequiredForRuntime, type RuntimeId } from './runtime-registry.js'
 import { getLocalSignerConsentStatus } from './signer-consent.js'
-import { TOMBSTONE_FILENAME, readAgentTombstone } from './tombstone.js'
+import { TOMBSTONE_FILENAME, readAgentTombstone, readTombstoneRecords } from './tombstone.js'
 import { serverNamesFor, type ServerNames } from './server-names.js'
 import { REKEY_PENDING_FILENAME, inspectRekeyPending, type RekeyPendingStatus } from './storage.js'
 import { shortAddress } from './redact.js'
@@ -885,6 +885,24 @@ export async function runDoctor(
     if (revoked.length > 0) parts.push(`already revoked: ${revoked.join(', ')}`)
     if (retired.length > 0) parts.push(`tombstoned (keys removed): ${retired.join(', ')}`)
     if (unverifiable.length > 0) parts.push(`could not verify: ${unverifiable.join(', ')}`)
+    // #<new>: mirrored tombstone records whose credential directory is GONE.
+    // A retirement flow (or a full ~/.haven/agents wipe) deleted the dir, but
+    // the mirror keeps the retirement observable. Informational only — a
+    // record with no dir holds no key and can never spend, so it never fails
+    // this check. Reads the SAME home the doctor scans (deps.homeDir), never
+    // the ambient process home — an explicit --credentials-dir run must not
+    // consult the machine-wide default root (REGRESSION B2 discipline).
+    const knownIds = new Set([...inventory].map((e) => e.agentId ?? basename(e.directory)))
+    const ghostRecords = (await readTombstoneRecords(join(homeDir, '.haven', 'tombstones'))).filter(
+      (rec) => !knownIds.has(rec.agent_id),
+    )
+    if (ghostRecords.length > 0) {
+      parts.push(
+        `retired records (dir removed): ${ghostRecords
+          .map((rec) => `${rec.agent_id} (${rec.reason})`)
+          .join(', ')}`,
+      )
+    }
     // #1697: a WIRED sibling is a legitimately live agent, not a superseded
     // one — several agents may share a runtime now. Only unwired credential
     // dirs make the check fail.

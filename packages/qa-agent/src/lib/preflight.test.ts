@@ -93,6 +93,14 @@ describe('checkMerchantSettlement', () => {
   })
 })
 
+describe('TREASURY_RUN_COST_ATOMIC', () => {
+  it('includes the funded-but-undelivered crash/resume leg', () => {
+    // 0.010 direct settle + seven 0.001 settling merchant legs (including
+    // #2159) + 0.006 fresh-agent funding + 0.004 lifecycle net funding.
+    expect(TREASURY_RUN_COST_ATOMIC).toBe(27_000n)
+  })
+})
+
 describe('checkDelegateResidual', () => {
   it('reports a clean delegate without comment', async () => {
     const check = await checkDelegateResidual('legacy', KEY, providerWithUsdc(0n))

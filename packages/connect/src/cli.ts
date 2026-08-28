@@ -85,6 +85,75 @@ export async function runCli(
       return 1
     }
   }
+  if (parsed.unwire) {
+    // #2169: tombstone-first removal of ONE agent's wiring from every runtime
+    // config it appears in + the Hermes dotenv key. Refuses — never guesses —
+    // when the bare pair is provably another agent's.
+    const { unwireAgent } = await import('./unwire.js')
+    const { homedir } = await import('node:os')
+    const { join } = await import('node:path')
+    const homeDir = homedir()
+    const root = parsed.options.credentialsDir ?? join(homeDir, '.haven', 'agents')
+    const directory =
+      parsed.unwireDir ?? (parsed.options.serverName ? join(root, parsed.options.serverName) : root)
+    try {
+      const result = await unwireAgent({
+        directory,
+        slug: parsed.options.serverName,
+        reason: parsed.unwire.reason,
+        replacedBy: parsed.unwire.replacedBy,
+        homeDir,
+      })
+      const failures = result.runtimes.filter((r) => r.status === 'refused' || r.status === 'unreadable')
+      if (parsed.json) {
+        io.stdout(
+          `${redactSecrets(
+            JSON.stringify({
+              unwired: true,
+              agent_id: result.agentId,
+              slug: result.slug ?? null,
+              directory: result.directory,
+              tombstoned: result.tombstoned,
+              runtimes: result.runtimes.map((r) => ({
+                runtime: r.runtime,
+                label: r.label,
+                status: r.status,
+                ...(r.detail ? { detail: r.detail } : {}),
+              })),
+            }),
+          )}\n`,
+        )
+      } else {
+        io.stdout(redactSecrets(`Unwired agent ${result.agentId} at ${result.directory}.\n`))
+        io.stdout(
+          result.tombstoned
+            ? '  · Tombstoned first: any long-lived host still resolving the old wrapper gets the HAVEN-TOMBSTONE diagnosis.\n'
+            : '  · Directory was already tombstoned.\n',
+        )
+        for (const r of result.runtimes) {
+          const mark = r.status === 'removed' ? '✓' : r.status === 'clean' ? '–' : '✗'
+          io.stdout(redactSecrets(`  ${mark} ${r.label}: ${r.status}${r.detail ? ` — ${r.detail}` : ''}\n`))
+        }
+        io.stdout(
+          failures.length > 0
+            ? '  Some entries were NOT removed (✗ above). Re-run `--unwire` after resolving each refusal —\n' +
+              '  it is idempotent.\n'
+            : '  Verify: `--doctor --runtime <runtime>` per host should report this agent as `retired` with a\n' +
+              '  clean runtime-config check.\n',
+        )
+        io.stdout(
+          'Restart EVERY long-lived MCP host (gateway, TUI workers, editors): each holds the wiring snapshot\n' +
+            'from its own start time. This directory\u2019s local key material was removed and the tombstone\n' +
+            'record + #2155 mirror survive — but nothing was REVOKED on the backend. If you have not\n' +
+            'already, revoke the agent on the Haven agent page to stop it spending entirely.\n',
+        )
+      }
+      return failures.length > 0 ? 1 : 0
+    } catch (err) {
+      io.stderr(`${redactSecrets(err instanceof Error ? err.message : String(err))}\n`)
+      return 1
+    }
+  }
   if (parsed.rekey) {
     // #1700: replace an agent's signing key on this machine. Two phases with
     // the owner's dashboard between them — this connector never calls the

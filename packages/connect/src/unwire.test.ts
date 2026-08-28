@@ -30,22 +30,17 @@ import { serverNamesFor } from './server-names.js'
 import { unwireAgent } from './unwire.js'
 import { runDoctor, type DoctorDeps } from './doctor.js'
 import { acknowledgeLocalSignerConsent } from './signer-consent.js'
+import { isolateHermesHome, restoreHermesHome } from './test-helpers.js'
 
 const HOSTED_URL = 'https://mcp.haven.example/mcp'
 const BARE = serverNamesFor()
 const RESEARCH = serverNamesFor('research')
 
-let savedHermesHome: string | undefined
-
-beforeEach(() => {
-  savedHermesHome = process.env.HERMES_HOME
-  delete process.env.HERMES_HOME
-})
-
-afterEach(() => {
-  if (savedHermesHome === undefined) delete process.env.HERMES_HOME
-  else process.env.HERMES_HOME = savedHermesHome
-})
+// #2179: shared isolation — Hermes path resolution honours process.env.
+// HERMES_HOME before the fixture home; a gateway shell would corrupt the real
+// home without this. Same guard as the rest of the Hermes-path suites.
+beforeEach(isolateHermesHome)
+afterEach(restoreHermesHome)
 
 async function seedAgent(
   homeDir: string,

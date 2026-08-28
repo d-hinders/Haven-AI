@@ -16,7 +16,13 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('haven_quote_x402')
     expect(HAVEN_SKILL_MD).toContain('haven_pay_x402_quote')
     expect(HAVEN_SKILL_MD).toContain('haven_get_payment_status')
-    expect(HAVEN_SKILL_MD).toContain('retry_original_x402_request')
+    // #2131: was `toContain('retry_original_x402_request')`. Nothing emits that
+    // value, so this assertion required the skill to keep telling agents to
+    // wait on a signal that never arrives. Inverted to a negative, matching the
+    // `pending_approval` treatment in the sibling bundle test. Re-allow when
+    // #2145 gives it a producer.
+    expect(HAVEN_SKILL_MD).not.toContain('retry_original_x402_request')
+    expect(HAVEN_SKILL_MD).toContain('no resume signal to wait for')
     expect(HAVEN_SKILL_MD).toContain('mcp_transport')
     expect(HAVEN_SKILL_MD).toContain('expires_at')
     expect(HAVEN_SKILL_MD).toContain('mcp__haven__haven_pay_mcp_tool')

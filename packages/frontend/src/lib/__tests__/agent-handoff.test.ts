@@ -203,7 +203,11 @@ describe('buildHandoff — paid API support', () => {
     const { markdown } = buildHandoff(BASE_INPUT)
     expect(markdown).toContain('HavenApiError')
     expect(markdown).toContain('get_payment_status')
-    expect(markdown).toContain('retry_original_x402_request')
+    // #2131: the resume discipline this test names is no longer "wait for
+    // retry_original_x402_request" — nothing emits it. It is "the pay helpers
+    // retry the merchant themselves, so there is nothing to wait for".
+    expect(markdown).not.toContain('retry_original_x402_request')
+    expect(markdown).toMatch(/no resume signal to wait for/i)
     expect(markdown).toMatch(/Do not rewrite the SDK/i)
     expect(markdown).toMatch(/start a new merchant\s+session/i)
     expect(markdown).toMatch(/in a tight loop/i)

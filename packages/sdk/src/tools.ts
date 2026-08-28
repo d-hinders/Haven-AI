@@ -164,13 +164,18 @@ const AUTHORIZE_X402_DESCRIPTION =
   'In this SDK tool set, the allowance lookup tool is get_allowances. ' +
   'When a paid API returns x402 payment requirements, use this tool to sign with the agent-owned delegate key; funding, when the scheme needs it, is redeemed from the agent budget delegation and is bounded by it. ' +
   'Haven relays signed transactions only; the agent key authorizes payment and on-chain limits enforce spend. ' +
-  'A payment outside the on-chain budget is declined before any money moves — report the decline and ask the user to raise the budget in Haven; do not loop retries and do not wait for an approval, because none is queued. Preserve the original merchant/MCP session and x402 details, and use resume_x402_payment only when next_action is retry_original_x402_request. ' +
+  'A payment outside the on-chain budget is declined before any money moves — report the decline and ask the user to raise the budget in Haven; do not loop retries and do not wait for an approval, because none is queued. Preserve the original merchant/MCP session and x402 details. ' +
   'Use the returned payment_header as the X-PAYMENT header on the retry request when doing a manual HTTP retry.'
 
+// #2131: this tool is retained and registered, but it is NOT currently reachable —
+// nothing emits the `retry_original_x402_request` state its guard requires, so every
+// call reports a conflict. The guard stays fail-closed on purpose; #2145 is what gives
+// it a producer. The description tells an agent what to do meanwhile rather than
+// pretending the capability was never intended.
 const RESUME_X402_DESCRIPTION =
   sharedDescriptions.resumeX402.summary + ' ' +
-  'Use this only after get_payment_status returns next_action=retry_original_x402_request. ' +
-  'It checks the authorized payment, validates the original x402 details, and returns a merchant X-PAYMENT header without creating a new payment or merchant session.'
+  'Not currently reachable: Haven emits no payment state marking a payment ready to resume, so this call reports a conflict instead of retrying. ' +
+  'If a paid request was interrupted after Haven authorized it, read get_payment_status and tell the user what it reports — do not pay again.'
 
 const SWEEP_DELEGATE_DESCRIPTION = composeDescription(sharedDescriptions.sweep_delegate)
 

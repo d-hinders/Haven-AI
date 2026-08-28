@@ -92,9 +92,13 @@ describe('generic skill', () => {
     expect(skill).toContain('haven_quote_x402')
     expect(skill).toContain('haven_pay_x402_quote')
     expect(skill).toContain('haven_get_payment_status')
-    expect(skill).toContain('retry_original_x402_request')
     expect(skill).toContain('declined before any money moves')
     expect(skill).not.toContain('pending_approval')
+    // #2131: joins `pending_approval` as retired vocabulary. Nothing emits
+    // `retry_original_x402_request`, so advertising it told an agent to gate on
+    // a signal that never arrives. Re-allow when #2145 gives it a producer.
+    expect(skill).not.toContain('retry_original_x402_request')
+    expect(skill).toContain('no resume signal to wait for')
     expect(skill).toContain('expires_at')
     expect(skill).toContain('mcp__haven__haven_pay_mcp_tool')
     expect(skill).toContain('mcp__haven-signer__haven_sign_x402')

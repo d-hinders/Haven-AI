@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { composeDescription, toolDescriptions } from './tool-descriptions.js'
+import { AgentPaymentNextAction } from './types.js'
 
 describe('shared Haven tool descriptions', () => {
   it('routes allowance and budget questions to the allowance lookup', () => {
@@ -93,15 +94,59 @@ describe('shared Haven tool descriptions', () => {
   it('teaches agents to read the structured nextAction on payment tools, not memorise tool names', () => {
     // Each payment tool's nextActionGuidance must reference the structured
     // nextAction enum the agent will see on the response, so the agent
-    // branches on machine-readable data instead of prose. We anchor on the
-    // x402 retry action; presence of that string in the composed description
-    // means the description is doing the right thing.
+    // branches on machine-readable data instead of prose.
+    //
+    // #2131 REWROTE THIS ASSERTION, and the reason is the point. It used to
+    // anchor on the literal `nextAction=retry_original_x402_request`. The
+    // intent was right; the anchor died. Nothing emits that value — the
+    // backend's `paymentIntentState` never returns it, and the SDK's
+    // `executed` mapping reads a status the backend cannot produce since
+    // #2055 dropped `approval_requests`. So this test REQUIRED the
+    // descriptions to keep telling agents to wait on a signal that never
+    // arrives: the stale guidance was enforced, not merely un-noticed.
+    //
+    // The lesson is not "pick a better literal" — any single value can die
+    // the same way. Anchor on the SHAPE (a structured nextAction is
+    // referenced) and require the referenced value to be a declared member of
+    // the taxonomy, so a typo or a deleted enum member still fails, without
+    // hard-coding one value's fate into the test.
+    const declared = new Set<string>(Object.values(AgentPaymentNextAction))
+
     for (const key of ['payX402', 'payX402OneShot'] as const) {
       const desc = composeDescription(toolDescriptions[key])
+      const referenced = [...desc.matchAll(/nextAction=([a-z_]+)/g)].map((m) => m[1])
+
       expect(
-        desc,
-        `${key} should reference nextAction=retry_original_x402_request so the agent reads the structured field`,
-      ).toContain('nextAction=retry_original_x402_request')
+        referenced,
+        `${key} should reference at least one structured nextAction=<value> so the agent reads the machine-readable field instead of prose`,
+      ).not.toHaveLength(0)
+
+      for (const value of referenced) {
+        expect(
+          declared,
+          `${key} references nextAction=${value}, which is not a member of AgentPaymentNextAction`,
+        ).toContain(value)
+      }
+    }
+  })
+
+  it('#2131: no tool description advertises the x402 resume trigger while nothing emits it', () => {
+    // The regression guard for #2131 itself. `retry_original_x402_request` is
+    // a declared enum member with NO producer: the backend never emits it, and
+    // the SDK's `executed` mapping reads a status that cannot occur. A
+    // description naming it tells an agent to wait for, or gate on, a signal
+    // that never arrives — which is how nine live agent-facing sites came to
+    // carry it.
+    //
+    // DELETE THIS TEST when #2145 gives the value a reachable producer. Until
+    // then, re-advertising it is a regression, and the previous version of the
+    // test above shows it is one that can be introduced by a well-meant
+    // assertion rather than by careless prose.
+    for (const [key, entry] of Object.entries(toolDescriptions)) {
+      expect(
+        composeDescription(entry),
+        `${key} must not advertise retry_original_x402_request — nothing emits it (see #2145)`,
+      ).not.toContain('retry_original_x402_request')
     }
   })
 

@@ -106,16 +106,29 @@ describe('TransactionDetailPanel', () => {
   })
 
   it('shows the send body with recipient and initiator', () => {
-    renderPanel(tx({ direction: 'out', source: 'direct', agentName: undefined }))
+    renderPanel(
+      tx({ direction: 'out', source: 'direct', agentName: undefined, initiatedBy: 'human' }),
+    )
     expect(screen.getByText('Transfer')).toBeInTheDocument()
     expect(screen.getByText('To')).toBeInTheDocument()
     expect(screen.getByText('Initiator')).toBeInTheDocument()
-    expect(screen.getByText('You')).toBeInTheDocument() // no agent → user-initiated
+    expect(screen.getByText('You')).toBeInTheDocument() // "You" only for human-initiated (#2097)
+  })
+
+  it('renders explicit "Unknown" — never "You" — when an outbound row has missing attribution', () => {
+    renderPanel(tx({ direction: 'out', source: 'direct', agentName: undefined }))
+    expect(screen.getByText('Transfer')).toBeInTheDocument()
+    expect(screen.getByText('Initiator')).toBeInTheDocument()
+    expect(screen.getByText('Unknown')).toBeInTheDocument()
+    expect(screen.queryByText('You')).not.toBeInTheDocument()
   })
 
   it('attributes the initiator to the agent when present', () => {
-    renderPanel(tx({ direction: 'out', source: 'direct', agentName: 'Ops agent' }))
+    renderPanel(
+      tx({ direction: 'out', source: 'direct', agentName: 'Ops agent', initiatedBy: 'agent' }),
+    )
     expect(screen.getByText('Ops agent')).toBeInTheDocument()
+    expect(screen.queryByText('You')).not.toBeInTheDocument()
   })
 
   it('shows the receive body with sender', () => {

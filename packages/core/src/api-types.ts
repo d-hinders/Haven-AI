@@ -3477,6 +3477,11 @@ export type components = {
             activityType?: "delegate_sweep";
             agentName?: string;
             /**
+             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
+             * @enum {string}
+             */
+            initiatedBy?: "agent" | "human" | "unknown";
+            /**
              * @description Which settlement branch actually moved the money: `erc7710` (direct settlement, account → merchant, no funding leg) or `eip3009` (funded transfer — the budget delegation funds the delegate EOA, which then signs the standard EIP-3009 header). This is the settlement SCHEME and is three-way distinct from its neighbours: `source` is the payment PROTOCOL (x402, mpp_crypto, …), and the account's `execution_rail` is the ACCOUNT ARCHITECTURE (delegation vs the legacy AllowanceModule). Do not collapse them. Null when no scheme was recorded — non-machine transfers, and legacy-rail rows, which are structurally EIP-3009 but never stamp the key. Null-in-null-out: nothing is inferred or backfilled.
              * @enum {string|null}
              */

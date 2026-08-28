@@ -7248,6 +7248,18 @@ export const openapiSpec = {
           },
           activityType: { type: 'string', enum: ['delegate_sweep'] },
           agentName: { type: 'string' },
+          // #2097: backend-recorded initiator classification — never derived
+          // in the frontend. `agent` = row carries agent attribution (confirmed
+          // x402 intents, delegate sweeps, raw transfers matched to a
+          // confirmed intent). `human` = reserved; no dashboard-initiated send
+          // path populates it (mpp demo & /send retired). `unknown` = outbound
+          // raw transfer with no matched intent. Absent for `direction: in`
+          // rows.
+          initiatedBy: {
+            type: 'string',
+            enum: ['agent', 'human', 'unknown'],
+            description: 'Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.',
+          },
           // #1705 (epic #1704). Read from the intent's `machine_metadata`
           // JSONB, which both delegation-rail branches already stamp
           // (`modules/x402/delegation-authorize.ts`).

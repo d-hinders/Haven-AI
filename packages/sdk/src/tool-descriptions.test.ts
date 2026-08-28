@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { composeDescription, toolDescriptions } from './tool-descriptions.js'
 import { AgentPaymentNextAction } from './types.js'
+import { readFileSync } from 'node:fs'
 
 describe('shared Haven tool descriptions', () => {
   it('routes allowance and budget questions to the allowance lookup', () => {
@@ -188,5 +189,46 @@ describe('shared Haven tool descriptions', () => {
     expect(desc).toContain('product name, category, or description term')
     expect(desc).toContain('NOT authoritative')
     expect(desc).toContain('Never creates a payment, signature, or approval')
+  })
+})
+
+describe('#2131: the shipped SDK README does not advertise the dead resume trigger', () => {
+  /**
+   * `packages/sdk` ships README.md on npm, and its next-action table and resume
+   * section are integrator-facing copy that nothing renders — so it drifts
+   * silently. Precedent for guarding it this way: `packages/mcp/src/consent.test.ts`
+   * pins two load-bearing README sentences after #2086 found that README still
+   * showing retired AllowanceModule copy long after the renderer moved on
+   * ("Nothing checked it, so nothing said so").
+   *
+   * That is this PR's failure mode exactly, so the READMEs get the same
+   * treatment as the code. Pinning the load-bearing CLAIMS, not whole
+   * paragraphs: the point is that the README must not present the trigger as
+   * live, while still being allowed to document it as retired.
+   */
+  it('presents retry_original_x402_request only as retired, never as a live trigger', () => {
+    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
+
+    // It may still NAME the value — the next-action table documents it as
+    // retired, and deleting the row would lose the wire-compatibility record.
+    expect(readme).toContain('**No longer produced — nothing maps to it.**')
+    expect(readme).toContain('Resume is not currently available')
+
+    // What it must never do again is INSTRUCT a reader to act on it. Checked
+    // structurally rather than by pinning known phrasings: a first attempt
+    // matched two exact sentences and a mutation slipped past it, because the
+    // re-added instruction sat inside a blockquote and `\s+` cannot span the
+    // `> ` marker. Any line that names the value must not also tell the reader
+    // to call something — which holds however the sentence is worded, and is
+    // true of all four current occurrences (diagram label, diagram note, the
+    // retired table row, the unavailability blockquote).
+    const offending = readme
+      .split('\n')
+      .filter((line) => line.includes('retry_original_x402_request') && /\bcall\b/i.test(line))
+
+    expect(
+      offending,
+      'a README line naming retry_original_x402_request must not also instruct the reader to call anything — nothing emits that value (see #2145)',
+    ).toEqual([])
   })
 })

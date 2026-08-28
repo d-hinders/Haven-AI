@@ -5916,7 +5916,7 @@ describe('#2131: the hosted tool descriptions carry no dead resume trigger', () 
    * Nothing emits that value (the backend's `paymentIntentState` never returns
    * it, and the SDK's `executed` mapping reads a status the backend cannot
    * construct since #2055), so advertising it tells an agent to gate on a
-   * signal that never arrives — which is what #2131 removed from ten sites.
+   * signal that never arrives — which is what #2131 removed from nine agent-facing sites.
    *
    * Scans the exported record, so a newly registered hosted tool is covered
    * without anyone remembering to extend this list.

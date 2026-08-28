@@ -57,7 +57,14 @@ function nextActionForStatus(status: string): PaymentNextAction | null {
   if (status === 'pending' || status === 'pending_approval') return AgentPaymentNextAction.StopAndTellUser
   if (status === 'approved') return AgentPaymentNextAction.WaitForUserToCompletePayment
   if (status === 'proposed') return AgentPaymentNextAction.StopAndTellUser
-  if (status === 'executed') return AgentPaymentNextAction.RetryOriginalX402Request
+  // #2145: `executed` joins its #2101 siblings, fail-closed. It was an
+  // `approval_requests` status (table dropped, #2055) and cannot be
+  // constructed as a payment_intents.status, so the retry instruction it
+  // carried pointed at a state nothing can mint. The reachable producer of
+  // retry_original_x402_request is the backend's status projection
+  // (funded-but-undelivered on the eip3009 bridge), which arrives via the
+  // response's own `next_action` — never through this status fallback.
+  if (status === 'executed') return AgentPaymentNextAction.StopAndTellUser
   if (status === 'rejected') return AgentPaymentNextAction.StopAndTellUser
   if (status === 'expired') return AgentPaymentNextAction.RequestAgainIfUserStillWantsIt
   if (status === 'failed') return AgentPaymentNextAction.StopAndTellUser
@@ -80,7 +87,9 @@ function messageForState(
     return `${label} is not payable: it is outside the agent's on-chain budget and no approval is pending (payment_id: ${paymentId}). Ask the user to grant or raise the budget in Haven.`
   }
   if (status === 'executed') {
-    return 'The user completed the funding payment. Retry the original x402 request.'
+    // #2145: no live rail mints this status (it belonged to the dropped
+    // approval queue), so the message must not promise a retry.
+    return `This payment carries a retired status ("executed") that no live Haven rail produces (payment_id: ${paymentId}). Do not retry it — tell the user to review this payment in Haven.`
   }
   if (status === 'rejected') {
     return `The user rejected this payment request (payment_id: ${paymentId}).`

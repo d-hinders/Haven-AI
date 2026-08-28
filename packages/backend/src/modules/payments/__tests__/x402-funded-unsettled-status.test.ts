@@ -122,32 +122,49 @@ describeDb('#2145 — x402 eip3009 funded-but-undelivered status', () => {
 
   // ── The crash shape (#2074 class): funded, agent died, merchant never paid ──
 
-  it('CHARACTERIZATION (pre-fix): the crash shape reports next_action none — "The payment is confirmed"', async () => {
+  it('the crash shape reports retry_original_x402_request, not "The payment is confirmed"', async () => {
     // Funding confirmed an hour ago; no evidence row at all (the best-effort
-    // base write also failed), no reconciliation event. This is the exact
-    // wrong answer #2145 exists to remove — pinned here so the fix's diff
-    // shows the behavioural delta and nothing else.
+    // base write also failed), no reconciliation event. Before #2145 this
+    // answered next_action none / 'The payment is confirmed.' — money spent,
+    // nothing delivered, and the agent told there was nothing to do.
     const { agent, paymentId } = await seedConfirmedX402({
       settlementScheme: 'eip3009',
       confirmedMinutesAgo: 60,
     })
     const status = await getAgentPaymentStatus(agent, paymentId)
-    expect(status?.phase).toBe('payment_confirmed')
-    expect(status?.next_action).toBe('none')
-    expect(status?.message).toBe('The payment is confirmed.')
+    expect(status?.phase).toBe('funded_but_unsettled')
+    expect(status?.next_action).toBe('retry_original_x402_request')
+    // The message must name the situation and the remedy, not just a state.
+    expect(status?.message).toMatch(/no merchant response/)
+    expect(status?.message).toMatch(/Resume this payment/)
   })
 
-  it('CHARACTERIZATION (pre-fix): a base-only evidence row (server-written, never upgraded) also reports none', async () => {
+  it('a base-only evidence row (server-written, never upgraded) also reports retry', async () => {
     // The backend wrote the base row at funding confirm; the agent died before
-    // the merchant retry, so proof_status was never upgraded.
+    // the merchant retry, so proof_status was never upgraded past
+    // 'payment_confirmed'. Row-exists must not read as merchant-reported.
     const { agent, paymentId } = await seedConfirmedX402({
       settlementScheme: 'eip3009',
       confirmedMinutesAgo: 60,
       evidenceProofStatus: 'payment_confirmed',
     })
     const status = await getAgentPaymentStatus(agent, paymentId)
-    expect(status?.phase).toBe('payment_confirmed')
-    expect(status?.next_action).toBe('none')
+    expect(status?.phase).toBe('funded_but_unsettled')
+    expect(status?.next_action).toBe('retry_original_x402_request')
+  })
+
+  it('merchant-rejected wins over never-reported when both hold', async () => {
+    // A rejected retry also has no upgraded evidence row. The client-reported
+    // rejection is the more specific fact: the retry was TRIED and refused,
+    // so the remedy is reclaiming funds, not retrying again.
+    const { agent, paymentId } = await seedConfirmedX402({
+      settlementScheme: 'eip3009',
+      confirmedMinutesAgo: 60,
+      evidenceProofStatus: 'payment_confirmed',
+      merchantRejected: true,
+    })
+    const status = await getAgentPaymentStatus(agent, paymentId)
+    expect(status?.next_action).toBe('sweep_stranded_funds')
   })
 
   // ── Behaviour that must NOT change with the fix ────────────────────────────

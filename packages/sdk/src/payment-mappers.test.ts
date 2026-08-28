@@ -173,6 +173,22 @@ describe('payment result mappers', () => {
 })
 
 describe('raw payment state mapping', () => {
+  it('#2145: executed is fail-closed — stop, never a retry instruction', () => {
+    // `executed` was the last #2101 sibling still mapped to
+    // retry_original_x402_request. It was an `approval_requests` status
+    // (table dropped, #2055) and cannot be constructed as a
+    // payment_intents.status, so a retry instruction here pointed at a state
+    // nothing can mint. The reachable retry producer is the backend's
+    // funded-but-undelivered projection, which arrives via `next_action`.
+    const state = paymentStateFromRaw('x402 payment', {
+      payment_id: 'ar_2',
+      status: 'executed',
+    } as RawX402AuthorizeResponse)
+    expect(state?.nextAction).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(state?.message).toMatch(/Do not retry/)
+    expect(state?.message).toMatch(/review this payment in Haven/)
+  })
+
   it('normalizes pending and preserves top-level-before-protocol field precedence', () => {
     const raw: RawX402AuthorizeResponse = {
       payment_id: 'ar_1',

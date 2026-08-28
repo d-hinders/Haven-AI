@@ -425,6 +425,7 @@ describe('superseded agent credentials (#1688)', () => {
     const { rm } = await import('node:fs/promises')
     await writeAgentTombstone({
       directory: oldDir, agentId: 'agent-old', reason: 'reset', retiredAt: '2026-08-21T10:00:00.000Z',
+      tombstonesDir: join(homeDir, '.haven', 'tombstones'),
     })
     await rm(join(oldDir, 'identity.json'))
 
@@ -443,7 +444,7 @@ describe('superseded agent credentials (#1688)', () => {
     // still spends.
     const { homeDir, oldDir } = await homeWithSuperseded()
     const { writeAgentTombstone } = await import('./tombstone.js')
-    await writeAgentTombstone({ directory: oldDir, agentId: 'agent-old', reason: 'reset' })
+    await writeAgentTombstone({ directory: oldDir, agentId: 'agent-old', reason: 'reset', tombstonesDir: join(homeDir, '.haven', 'tombstones') })
 
     const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing('ok') })
     const check = report.checks.find((c) => c.id === 'superseded_agents')
@@ -659,7 +660,7 @@ describe('per-agent inventory (#1697)', () => {
     const deadDir = join(homeDir, '.haven', 'agents', 'dead')
     await mkdir(deadDir, { recursive: true })
     const { writeAgentTombstone } = await import('./tombstone.js')
-    await writeAgentTombstone({ directory: deadDir, agentId: 'agent-dead', reason: 'reset' })
+    await writeAgentTombstone({ directory: deadDir, agentId: 'agent-dead', reason: 'reset', tombstonesDir: join(homeDir, '.haven', 'tombstones') })
 
     const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsForTwo() })
     const dead = report.agents.find((a) => a.agentId === 'agent-dead')

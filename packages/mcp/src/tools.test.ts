@@ -1868,7 +1868,20 @@ describe('#2131: the local MCP tool descriptions and README carry no dead resume
     // this file is shipped on npm, nothing renders it, and #2086 already proved
     // it drifts silently when only the code is checked.
     const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
+
+    // The real protection: no verbatim mention at all. This README has no
+    // legitimate use of the value, unlike the SDK's, so a blanket check is
+    // available here and is the strongest form.
     expect(readme).not.toContain('retry_original_x402_request')
-    expect(readme).toContain('not\n   currently reachable')
+
+    // The positive half asserts the replacement claim is still THERE, so the
+    // section cannot be quietly deleted back to silence. Whitespace-tolerant
+    // deliberately: the first version matched `'not\n   currently reachable'`
+    // verbatim, and haven-reviewer showed that re-wrapping the identical
+    // sentence at a different column — a prettier run, a line-length lint, any
+    // cosmetic reflow — failed it. A guard that cries drift over a line break
+    // costs a debugging cycle and teaches people to distrust it.
+    expect(readme).toContain('haven_resume_x402_payment')
+    expect(readme).toMatch(/is not\s+currently reachable/)
   })
 })

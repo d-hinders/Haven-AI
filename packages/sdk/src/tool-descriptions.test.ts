@@ -209,26 +209,65 @@ describe('#2131: the shipped SDK README does not advertise the dead resume trigg
   it('presents retry_original_x402_request only as retired, never as a live trigger', () => {
     const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
 
-    // It may still NAME the value — the next-action table documents it as
-    // retired, and deleting the row would lose the wire-compatibility record.
-    expect(readme).toContain('**No longer produced — nothing maps to it.**')
-    expect(readme).toContain('Resume is not currently available')
+    // INVERTED, and the inversion is the lesson. Two earlier versions of this
+    // guard asserted the ABSENCE of something that reads like an instruction —
+    // first two exact sentences, then "no line names the value and also says
+    // 'call'". haven-reviewer defeated both with realistic prose in this file's
+    // own house style: a same-line synonym ("invoke"), and the word "call"
+    // split across a line wrap at ~80 cols. Enumerating action verbs is an
+    // unbounded synonym problem, and the wrap point is a formatting accident.
+    //
+    // So assert a POSITIVE property instead: every mention of the value sits in
+    // retirement framing, and there are no mentions beyond the known ones. An
+    // instruction has to name the value verbatim for a reader to act on it —
+    // there is no rephrase-and-still-be-a-trap move — so a new advertisement
+    // must add an occurrence, which the count pins, and must sit in framing it
+    // cannot honestly claim.
+    const LITERAL = 'retry_original_x402_request'
 
-    // What it must never do again is INSTRUCT a reader to act on it. Checked
-    // structurally rather than by pinning known phrasings: a first attempt
-    // matched two exact sentences and a mutation slipped past it, because the
-    // re-added instruction sat inside a blockquote and `\s+` cannot span the
-    // `> ` marker. Any line that names the value must not also tell the reader
-    // to call something — which holds however the sentence is worded, and is
-    // true of all four current occurrences (diagram label, diagram note, the
-    // retired table row, the unavailability blockquote).
-    const offending = readme
-      .split('\n')
-      .filter((line) => line.includes('retry_original_x402_request') && /\bcall\b/i.test(line))
+    // 1. Count pin, over the whole file including the state diagram. Any NEW
+    //    mention fails here regardless of how it is worded or wrapped.
+    //    If you legitimately restructured this README, update the count in the
+    //    same commit and satisfy yourself the new mentions are retirement
+    //    framing, not instructions.
+    const total = readme.split(LITERAL).length - 1
+    expect(
+      total,
+      `expected exactly 4 mentions of ${LITERAL} in the SDK README (2 in the retired state diagram, the retired next-action table row, the unavailability note) — a new one is a re-advertisement unless proven otherwise (see #2145)`,
+    ).toBe(4)
+
+    // 2. Every PROSE mention sits in retirement framing. Fenced blocks are
+    //    excluded: the state diagram's labels are drawn art, and the block
+    //    carries its own RETIRED BRANCH banner. Blockquote markers are stripped
+    //    and whitespace collapsed first, so a line wrap cannot hide anything.
+    const prose = readme
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/^\s*>\s?/gm, ' ')
+      .replace(/\s+/g, ' ')
+    const RETIRED = /no longer produced|not currently (available|reachable)|has no producer|nothing maps to it|nothing emits/i
+
+    const unframed: string[] = []
+    for (let i = prose.indexOf(LITERAL); i !== -1; i = prose.indexOf(LITERAL, i + 1)) {
+      const window = prose.slice(Math.max(0, i - 260), i + 260)
+      if (!RETIRED.test(window)) unframed.push(window)
+    }
 
     expect(
-      offending,
-      'a README line naming retry_original_x402_request must not also instruct the reader to call anything — nothing emits that value (see #2145)',
+      unframed,
+      `every prose mention of ${LITERAL} must sit in retirement framing — an unframed mention reads as a live instruction`,
     ).toEqual([])
+
+    // WHAT THIS DOES NOT CATCH, stated because over-claiming is how the two
+    // previous versions of this guard failed. An instruction that refers to the
+    // value by PRONOUN — "when that next action appears, invoke the resume
+    // helper" — adds no occurrence and names nothing, so both checks above pass.
+    // Verified, not assumed: that exact insertion passes today.
+    //
+    // That residue is accepted rather than chased. No assertion over prose can
+    // catch every misleading rephrasing, and the two attempts that tried
+    // (matching sentences, then matching verbs) failed precisely because they
+    // claimed to. What is bounded is the case that matters: a reader can only
+    // ACT on the value by naming it verbatim, and every verbatim mention is now
+    // pinned by count and required to sit in retirement framing.
   })
 })

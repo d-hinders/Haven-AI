@@ -16,7 +16,14 @@ Use this procedure only when the active client is Claude Code and the user expli
    claude mcp remove haven-signer -s project
    ```
 
-3. Delete `~/.haven`.
+3. Delete `~/.haven` — but **not before** the tombstone step. This procedure does not
+   restate it: follow [SKILL.md](../SKILL.md) *Required Sequence* step 4, which
+   enumerates the real agent directories (never a path built from an agent id — a
+   named agent's directory is its slug, [#1696](https://github.com/d-hinders/Haven-AI/issues/1696)),
+   tombstones each one, and **verifies** `{"tombstoned": true}` and the presence of
+   `TOMBSTONE.json` before any key material is deleted. Deleting `~/.haven` outright
+   first destroys the very record a stale long-lived host needs in order to say which
+   agent it is parked on ([#2175](https://github.com/d-hinders/Haven-AI/issues/2175)).
 
 ## Verify
 

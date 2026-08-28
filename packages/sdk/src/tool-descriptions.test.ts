@@ -245,60 +245,72 @@ describe('#2131: the shipped SDK README does not advertise the dead resume trigg
       `expected at most 4 mentions of ${LITERAL} in the SDK README (2 in the retired state diagram, the retired next-action table row, the unavailability note) — a new one is a re-advertisement unless proven otherwise (see #2145)`,
     ).toBeLessThanOrEqual(4)
 
-    // 2. Every PROSE mention sits in retirement framing. Fenced blocks are
-    //    excluded: the state diagram's labels are drawn art, and the block
-    //    carries its own RETIRED BRANCH banner. Blockquote markers are stripped
-    //    and whitespace collapsed first, so a line wrap cannot hide anything.
-    const prose = readme
-      .replace(/```[\s\S]*?```/g, ' ')
-      .replace(/^\s*>\s?/gm, ' ')
-      .replace(/\s+/g, ' ')
-    const RETIRED = /no longer produced|not currently (available|reachable)|has no producer|nothing maps to it|nothing emits/i
-
-    const unframed: string[] = []
-    for (let i = prose.indexOf(LITERAL); i !== -1; i = prose.indexOf(LITERAL, i + 1)) {
-      const window = prose.slice(Math.max(0, i - 260), i + 260)
-      if (!RETIRED.test(window)) unframed.push(window)
+    // 2. Every PROSE mention sits in retirement framing IN ITS OWN structural
+    //    unit. Fenced blocks are excluded: the state diagram's labels are drawn
+    //    art under their own RETIRED BRANCH banner.
+    //
+    //    Scoped to the unit, not a character window, and that is the fix for a
+    //    hole haven-reviewer found in the windowed version: deleting this row's
+    //    own retirement clause passed, because two unrelated sibling rows
+    //    (`wait_for_user_approval`, `wait_for_user_to_complete_payment`) carry
+    //    the identical bolded phrase two lines above and satisfied a ±260-char
+    //    window by pure table adjacency. That evasion needs no rhetoric — just
+    //    a contributor tightening the table's prose — so it was worth closing
+    //    rather than documenting.
+    //
+    //    A markdown table row is one line; everything else is its paragraph.
+    //    Blockquote markers are stripped so a `> ` cannot split a paragraph,
+    //    and each unit's whitespace is collapsed so a line wrap cannot hide
+    //    anything inside it.
+    const prose = readme.replace(/```[\s\S]*?```/g, ' ')
+    const units: string[] = []
+    for (const block of prose.split(/\n\s*\n/)) {
+      const stripped = block.replace(/^\s*>\s?/gm, '')
+      // Table rows stand alone; a sibling row must not vouch for this one.
+      if (/^\s*\|/m.test(stripped)) units.push(...stripped.split('\n'))
+      else units.push(stripped)
     }
+
+    const RETIRED = /no longer produced|not currently (available|reachable)|has no producer|nothing maps to it|nothing emits/i
+    const unframed = units
+      .map((u) => u.replace(/\s+/g, ' ').trim())
+      .filter((u) => u.includes(LITERAL) && !RETIRED.test(u))
 
     expect(
       unframed,
-      `every prose mention of ${LITERAL} must sit in retirement framing — an unframed mention reads as a live instruction`,
+      `every prose mention of ${LITERAL} must carry retirement framing in its OWN table row or paragraph — a neighbour's framing does not vouch for it`,
     ).toEqual([])
 
-    // WHAT THIS DOES NOT CATCH — stated at its real size, because every previous
-    // version of this guard failed for claiming completeness, and a third
-    // under-statement would be the same mistake in a better disguise.
+    // WHAT THIS DOES NOT CATCH — one class, stated at its real size, because
+    // every earlier version of this guard failed for claiming completeness and
+    // a flattering understatement would be the same mistake in better clothes.
     //
-    // Two demonstrated holes, both verified rather than reasoned about:
+    // REVERSAL IN PLACE. The framing check tests whether a retirement phrase is
+    // present in the unit — it cannot tell "X is true" from "X was true, and no
+    // longer is". Rewriting this row to "**No longer produced — nothing maps to
+    // it.** That was true through the last release; as of this build it fires
+    // again, so resume immediately" keeps the count at 4, keeps the retirement
+    // phrase verbatim in its own unit, and PASSES. Verified, not reasoned about.
     //
-    //   1. PRONOUN. "When that next action appears, invoke the resume helper"
-    //      adds no occurrence and names nothing, so both checks pass.
-    //   2. REVERSAL IN PLACE, and this is the bigger one. The framing check
-    //      tests whether a retirement phrase is PRESENT nearby — it cannot tell
-    //      "X is true" from "X was true, and no longer is". Editing the retired
-    //      table row in place to "**No longer produced — nothing maps to it.**
-    //      That was true through the last release; as of this build it fires
-    //      again, so resume immediately" keeps the count at 4, keeps the
-    //      retirement phrase verbatim, and passes. Widening or narrowing the
-    //      260-char window does nothing: the reversal sits adjacent, not
-    //      distant.
+    // That also proves the exact-phrase pins two versions of this guard used
+    // would not have helped: the mutation preserves them word for word and
+    // appends a supersession clause.
     //
-    // Hole 2 also proves the pre-inversion exact-phrase pins would not have
-    // helped — that mutation preserves them verbatim and appends a supersession
-    // clause.
+    // Accepted rather than chased, and this is the resting point. Detecting
+    // reversal cues ("as of", "now", "that's changed", "update:") is the same
+    // unbounded-vocabulary problem that defeated the verb list, one level up.
+    // At some point that is true of any assertion over freeform markdown.
     //
-    // The residue is ACCEPTED, not chased, and this is the resting point.
-    // Detecting reversal cues ("as of", "now", "that's changed", "update:") is
-    // the same unbounded-vocabulary problem that defeated the two earlier
-    // versions, one level up. At some point this is true of any assertion over
-    // freeform markdown, and pretending otherwise has been the actual repeated
-    // defect here — not any particular regex.
+    // What IS caught, and is the threat that has actually occurred on this
+    // repo: a lazy re-advertisement. A new mention anywhere (count), a mention
+    // carrying no retirement framing of its own (unit scoping), and deletion of
+    // the retirement claims wholesale (step 0) all fail. A neighbour's framing
+    // does not vouch for a mention — that hole was open in the windowed version
+    // and was closed rather than documented, because reaching it needed no
+    // rhetoric at all, just a contributor tightening the table's prose.
     //
-    // What IS bounded, and is the threat that has actually occurred: a lazy
-    // re-advertisement. A new tool description or README line that names the
-    // value, or a mention sitting in no retirement framing at all, fails. A
-    // deliberate rewrite that argues the value is live again does not, and a
-    // human reviewing that diff is the control, not this test.
+    // A deliberate rewrite arguing the value is live again defeats this test.
+    // The human reviewing that diff is the control there, and unlike the
+    // accidental case, that diff reads as what it is.
   })
 })

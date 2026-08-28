@@ -491,8 +491,22 @@ export const FIXTURE_AGENT_ACTIVITY = [
     x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_SAFE.chain_id,
     safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
-    confirmed_at: '2026-07-10T08:20:00.000Z', payment_proof_status: 'verified',
-    payment_flow_status: 'paid', payment_attention_reason: null,
+    // #2126: BOTH fields were fabricated. `payment_proof_status` mirrors
+    // `machine_payment_evidence.proof_status`, whose only constructible values
+    // are `payment_confirmed | merchant_response_observed |
+    // protocol_receipt_attached` (`modules/mpp/evidence.ts:38-41`; the column
+    // default is `'payment_confirmed'`, `db/migrations/014_machine_payment_evidence.ts:13`).
+    // 'verified' is not one of them and no write site can produce it.
+    // `payment_flow_status` is DERIVED per row by the route, never read —
+    // `routes/agent-activity.ts:50-55` feeds `machinePaymentLifecycle` with
+    // rail=source, paymentStatus=status, paymentProofStatus, and
+    // reconciliationEventType. For rail 'x402' (in MACHINE_PAYMENT_RAILS,
+    // `packages/core/src/machine-payment-lifecycle.ts:9`), status 'confirmed',
+    // no reconciliation event, and a proof status that is neither
+    // 'protocol_receipt_attached' nor 'merchant_response_observed' (:44-49),
+    // the function falls through to `:51` and returns 'confirming_merchant'.
+    confirmed_at: '2026-07-10T08:20:00.000Z', payment_proof_status: 'payment_confirmed',
+    payment_flow_status: 'confirming_merchant', payment_attention_reason: null,
     created_at: '2026-07-10T08:18:00.000Z',
   },
   {
@@ -535,8 +549,14 @@ export const FIXTURE_AGENT_ACTIVITY = [
     chain_id: FIXTURE_SAFE.chain_id,
     safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'b2'.repeat(32)}`,
+    // #2126: null, not 'paid'. `source: 'api'` is not in
+    // `MACHINE_PAYMENT_RAILS` (`x402 | mpp_demo | mpp_crypto | spt`,
+    // `packages/core/src/machine-payment-lifecycle.ts:9`), so the first branch
+    // (`:30-32`) returns `{ paymentFlowStatus: null, … }` before any proof
+    // status is consulted. A non-machine rail can NEVER carry a non-null flow
+    // status — 'paid' was unreachable for this row by construction.
     confirmed_at: '2026-07-09T14:02:00.000Z', payment_proof_status: null,
-    payment_flow_status: 'paid', payment_attention_reason: null,
+    payment_flow_status: null, payment_attention_reason: null,
     created_at: '2026-07-09T14:01:00.000Z',
   },
   {

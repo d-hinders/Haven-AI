@@ -14,7 +14,9 @@ import {
   isMcpToolCallActivityItem,
   isPaymentActivityItem,
   type ActivityItem,
+  type PaymentActivityItem,
 } from '../hooks/useAgentActivity'
+import { machinePaymentLifecycle } from '@haven_ai/core'
 
 const fx = fixtureFor as (apiPath: string, mode?: string) => Record<string, unknown> | null
 
@@ -228,6 +230,78 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           expect([row.id, row.status as string]).not.toEqual([
             row.id,
             expect.stringMatching(/^(pending|pending_approval|approved|proposed|rejected|executed)$/),
+          ])
+        }
+      })
+    })
+
+    /**
+     * #2126 — same defect class as #2120, in the payment-flow-status subsystem.
+     *
+     * `payment_flow_status` / `payment_attention_reason` are DERIVED per row by
+     * the backend (`routes/agent-activity.ts:50-55` and `:182-187` call
+     * `machinePaymentLifecycle` and spread its two outputs), never read from a
+     * column. A seed that restates them by hand is asserting a derivation
+     * output — and can therefore state one the derivation would never produce
+     * from the same row's inputs. So do not restate: re-derive with the SHARED
+     * function and compare.
+     */
+    describe('every seeded payment flow status is what the derivation returns (#2126)', () => {
+      /** Rows are the route's OUTPUT shape, so pick the derivation's inputs back out of it. */
+      const derive = (row: PaymentActivityItem) =>
+        machinePaymentLifecycle({
+          rail: row.source,
+          paymentStatus: row.status,
+          paymentProofStatus: row.payment_proof_status,
+          // The reconciliation event is an input the route reads from its own
+          // query and never echoes; the emitted `payment_attention_reason` is
+          // the only trace of it, and the two unions share their single member.
+          reconciliationEventType: row.payment_attention_reason,
+        })
+
+      const seededPaymentRows = () => {
+        const feeds = [
+          fx('/agent-activity/agent-research/activity'),
+          fx('/agent-activity/agent-ops/activity'),
+          fx('/agent-activity/feed'),
+        ] as { activity: ActivityItem[] }[]
+        return feeds.flatMap((f) => f.activity).filter(isPaymentActivityItem)
+      }
+
+      it('derives, rather than restates, payment_flow_status on every seeded row', () => {
+        const rows = seededPaymentRows()
+        expect(rows.length).toBeGreaterThan(0) // positive control: not vacuous
+        for (const row of rows) {
+          const lifecycle = derive(row)
+          expect([row.id, row.payment_flow_status ?? null]).toEqual([
+            row.id,
+            lifecycle.paymentFlowStatus,
+          ])
+          expect([row.id, row.payment_attention_reason ?? null]).toEqual([
+            row.id,
+            lifecycle.paymentAttentionReason,
+          ])
+        }
+      })
+
+      it('seeds only a proof status the evidence writer can construct', () => {
+        // `payment_proof_status` is `machine_payment_evidence.proof_status`
+        // (`infra/repositories/agent-activity.ts:99`, `:164`). Its whole domain
+        // is `PaymentProofStatus` — `modules/mpp/evidence.ts:38-41` — with
+        // `payment_confirmed` the column default (migration 014). 'verified',
+        // which pay-1 carried, is not a member and no write site emits it.
+        const CONSTRUCTIBLE = [
+          'payment_confirmed',
+          'merchant_response_observed',
+          'protocol_receipt_attached',
+        ]
+        const rows = seededPaymentRows()
+        expect(rows.length).toBeGreaterThan(0) // positive control: not vacuous
+        for (const row of rows) {
+          if (row.payment_proof_status == null) continue
+          expect([row.id, row.payment_proof_status]).toEqual([
+            row.id,
+            expect.stringMatching(new RegExp(`^(${CONSTRUCTIBLE.join('|')})$`)),
           ])
         }
       })

@@ -256,6 +256,9 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           // The reconciliation event is an input the route reads from its own
           // query and never echoes; the emitted `payment_attention_reason` is
           // the only trace of it, and the two unions share their single member.
+          // If `MachinePaymentAttentionReason` ever gains a member whose name
+          // is NOT the reconciliation event that produces it, this round-trip
+          // stops being an identity and needs an explicit map instead.
           reconciliationEventType: row.payment_attention_reason,
         })
 

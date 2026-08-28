@@ -21,6 +21,9 @@ covers:
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
 last-verified: "2026-08-28" # #2164: § "Automation & gating" gains the version-only exemption — a money-path file whose entire diff is a release-bump version string is no longer treated as uncovered. Documented with its three permitted line shapes, the symbol-pairing rule that makes it a check for a version BUMP rather than for version-SHAPED lines (review found three behavioural edits — constant deletion, dependency identity swap, constant rename — that shape matching alone excused), and its fail-closed direction, because it NARROWS what the gate inspects, and the section's own standard is that an overstated net is worse than a known-partial one. Reason it exists: the bump rewrites SIGNER_VERSION into packages/signer/** after every green run, so every release promotion failed by construction and qa-override was the standing route past the gate. Scope: that one subsection; the dev targets, trigger table and setup steps were NOT re-verified in this pass. Prior: #2081: the preflight now reports — and blocks on — the delegation treasury's USDC balance, the account every payment scenario spends from (the #2074 empty-treasury outage was diagnosable only by hand-decoding UserOperation calldata). Re-verified in this pass: the preflight section (example block gains the treasury line; new paragraph records the block decision, the runtime address derivation via GET /machine-payments/agent, the skip-on-absent-key rule, and the run-cost floor derivation) against packages/qa-agent/src/lib/preflight.ts on this branch. Nothing else re-verified. Prior: #2140: FIVE stale sites, and the first two are the half #2103 missed. #2103 corrected the two Claude Code prompt copies (`.claude/commands/qa-dev.md`, `qa-explore-ui.md`) and the run-report template; this file carries a duplicate of each prompt for Codex/generic runtimes and neither was updated, so the same instruction was right in one place and wrong in another. (1) Layer 2b step 3 told a LIVE QA agent to expect an over-budget payment to "queue for approval" — a rail that cannot queue, so an agent following it recorded the CORRECT decline as a failure: the #1992 lesson inverted and automated. Rewritten to be ASSERTED on (no settlement, nothing queued, nothing silently spent) and to say the refusal IS the pass. (2) Layer 3 named **approvals** as a surface to explore, in both the brief bullet and the prompt — deleted by #1989, `/approvals` does not route, and #2103 records a run already navigating to the 404 (its own brief hunts "dead ends", so it reports the correct state as a finding). Repointed at the agent detail page and its budget card, matching #2103's wording and observe-only principle. (3)+(4) found by haven-reviewer on THIS pass, in the troubleshooting/funding prose rather than the prompts: the funding prerequisites said the dev relayer "submits the legacy allowance transfers" — `executeAllowanceTransfer` was deleted by #1987 and survives in production only as a decode ABI in `infra/chain/allowance-transfer-verifier.ts`, so the relayer cannot do it; and the same list hedged "for the surviving legacy legs, the Safe" when no scenario drives a legacy identity (#2011 removed the credentials, verified against `packages/qa-agent/src/scenarios/`). (5) the sentence under the funding table said the relayer "submits both constrained Safe transfers and the gasless EIP-3009 USDC sweep" — the table directly above it has no Safe row at all since #2007. Note the recurring shape: this file already documented the deterministic sibling correctly at the `over-budget-refused` scenario row (renamed from `over-budget-queue` by #2016), so several regions of one file disagreed. Scope: the Layer 2b prompt step, the Layer 3 brief bullet and prompt, the sentence under the funding table, and the two troubleshooting funding prerequisites. NOT re-verified: the scenario table itself, the env/credential/secrets tables, the funding table rows, the workflow and gating sections, Layer 1/2a prose, and the dated incident reports. No `/qa-dev` or `/qa-explore-ui` result changes — the harness asserts on `packages/qa-agent/` scenarios, never on this prose. Prior: #2011: the QA harness no longer reads the retired AllowanceModule `QA_AGENT_API_KEY` / `QA_DELEGATE_PRIVATE_KEY` credentials. The config, preflight, seed output, workflow, required-env table, local and Actions examples, and missing-env troubleshooting loop were re-read: every live scenario uses the delegation-rail identity, so a fresh seed produces a complete `qa:dev` environment. Prior: #2012: the QA seed now refuses a same-delegate agent unless its status is active or pending_approval; it names the agent and gives the rotate-or-deliberately-restore remedy, so re-seeding cannot silently restore disabled authority. Re-read the seed, the local-run steps, and the package README. Prior: #2007: the seed is re-based on the DELEGATION RAIL — it no longer deploys a Safe or calls `POST /user/safes` (410 since #1984; an `allowance_module` account also cannot pay since #1986), and instead provisions a Hybrid DeleGator via `POST /accounts/hybrid` plus an owner-signed budget delegation. Re-verified and corrected in this pass: the seed env block (`SEED_RPC_URL` removed — the seed opens no RPC connection), the funding table (owner EOA needs no ETH; "Safe" row becomes the Hybrid account), the "Run the seed locally" step list, the `could not decode result data` troubleshooting entry (replaced by a `410` entry), the operations table's seed row, the "Seeding the delegation-rail identity" section (the seed now produces `QA_DELEGATION_*` itself, so its manual steps are re-framed as a description plus a by-hand recipe), and the `insufficient funds` balance-by-role list (owner ETH no longer required). Prior: #1882: front-matter only — the `last-verified` chain had DROPPED `#1515`. Same shape as `07-edge-signer.md`: the note at `b3627c15` (PR #1517, 2026-08-17) chained but compressed #1516's entry to "added the merchant-reason surfacing", and `#1515` was cited inside the prose it dropped. #1516's original entry is restored verbatim from `b3627c15^` at the chain tail. Nothing in the body was re-verified in this pass. Prior: #1674/#1667: x402-erc7710-fresh-agent is added; #1578: unknown MCP session ids fail closed; #1547/#1450: x402-catalog-guided-purchase is scheme-aware; #1531: out-of-reach documentation added; #1533/#1534: legacy x402 legs removed; #1530: preflight resource reporting added; #1519: merchant settled-purchase handling added; #1517/#1516: merchant fault and reason reporting added; #1457/#1456: hosted erc7710 variant added; #1312: guided catalog purchase QA leg added; #1515: lost-session troubleshooting added. Prior: #2097: a file this doc `covers:` by exact path (`docs/bug-reports/_run-report-template.md`) was re-verified for the CSV `initiator`-column note; the QA-harness config/commands this doc describes are unchanged. Scope: that covered-file relationship only.
+# #2159: same-day verification adds the funded-but-undelivered EIP-3009
+# crash/resume scenario, its Base-Sepolia-only grace override, and the
+# corrected 0.027-USDC preflight floor.
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -189,9 +192,12 @@ calldata, while preflight printed two ✓ lines for resources that were fine.
 The address is derived at runtime (`GET /machine-payments/agent` →
 `safe_address`, authenticated with `QA_DELEGATION_AGENT_API_KEY`), never
 restated in config; absent that key the check skips like everything else. The
-floor is derived from what a run spends (~12 legs × 0.001 USDC + the
-`delegation-lifecycle` grant's 0.002); a below-floor detail line names the
-token contract and that any source works, per the **Top-up** bullet under
+floor is derived from every standing-treasury debit: 0.010 USDC for the direct
+settle, seven 0.001-USDC settling merchant legs (including the #2159 resume
+leg), 0.006 USDC to the fresh-agent fixture, and 0.004 USDC net for the
+`delegation-lifecycle` fixture — **0.027 USDC**. The sweep leg's 0.001 USDC is
+temporarily spent then returned. A below-floor detail line names the token
+contract and that any source works, per the **Top-up** bullet under
 *The delegation-rail QA identity (#1063)* below.
 
 The settlement wallet's balance comes from the **merchant's own `/healthz`**,
@@ -248,7 +254,7 @@ QA identities.
 
 ## Money-flow QA
 
-The deterministic harness runs thirteen scenarios in order:
+The deterministic harness runs fourteen scenarios in order:
 
 | Scenario | Expected result |
 |---|---|
@@ -257,6 +263,7 @@ The deterministic harness runs thirteen scenarios in order:
 | `x402-over-budget-rejected` | The same refusal on the x402 **EIP-3009 funding leg**, with the same three discriminators. Re-based by #2016, which found it **passing for the wrong reason**: driven against the retired legacy identity it was satisfied by the rail-retirement 410, and would have passed with over-budget enforcement deleted outright. Its erc7710 sibling below closes what used to be flagged here as a known gap (#2082) |
 | `x402-erc7710-over-budget-rejected` | The same refusal on the **preferred** scheme (#2082). Until then the case did not exist to assert: erc7710 authorize returned 201 `pending_signature` WITH `sign_data` for ANY amount, so the #420 invariant's own words ("refused before it becomes signable") were FALSE on the path most payments take — measured live against dev 2026-08-25 and handed to #1993 rather than asserted around. The fail-fast pre-check refuses **HTTP 403 `delegation_budget_exceeded`** with no settlement child, no intent row and no relayer-paid delegate deploy. The discriminators are different from its 3009 sibling's, because the vacuous pass this shape invites is a different one: a bare 403 is ALSO what a MISSING delegation returns, so the leg requires the `error_code` AND requires the refusal's `remaining_atomic` to equal the live budget it derived the over-budget amount from, with a within-budget erc7710 authorize offered first as the control (and its `signature_scheme` checked, so a dispatch regression onto the funding leg cannot pass as this one). **What it does not claim:** that the CHAIN refuses the redemption — the caveat stack was always the gate and #2082 did not touch it; proving the redemption-side revert still needs a merchant that attempts one, and no leg does. Needs `QA_DELEGATION_AGENT_API_KEY`; **skips** without it |
 | `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and no residual may sit at or above the 1 USDC sweep floor. **Skips** without `QA_DELEGATION_*` |
+| `x402-delegation-3009-grace-resume` | Reproduces the #2145 crash shape against dev: the raw API authorizes and signs the EIP-3009 funding leg, then deliberately **does not** retry the merchant. After the Base-Sepolia-only `MERCHANT_REPORT_GRACE_MIN_OVERRIDE=0`, it requires `GET /machine-payments/:id/status` to answer `funded_but_unsettled` / `retry_original_x402_request`, then calls `resumeX402Payment()` through that real gate. The resumed purchase must debit the treasury and credit the merchant by the same amount, restoring the delegate to its starting balance; a failed post-funding path attempts a gasless sweep before reporting. The override is refused outside `HAVEN_DEPLOY_CHAIN_IDS=84532`; production remains 15 minutes. **Skips** without `QA_DELEGATION_*` |
 | `delegation-lifecycle` | Authority can be TAKEN AWAY: on a **throwaway per-run identity** (funded ~0.006 USDC from the standing delegation identity, then abandoned) — grant → activate (relayer-deploys) → within-budget payment settles → replace leaves **exactly one** active row (the #1053-finding-4 transactional-activate regression) → owner-signed revoke → the same payment shape is refused **403 "no active budget delegation"**, never a 502 (a 502 would mean authority was still offered to the chain). Ephemeral keys, all signing client-side |
 | `x402-erc7710-settle` | The delegation rail's PRIMARY x402 path: authorize (payTo = merchant) builds a narrowed child delegation, the delegate signs it, `POST /x402/:id/settle` wraps the header, and the MERCHANT redeems `[child, budget]` on-chain — treasury pays the merchant **directly**, budget metered by the settlement itself (treasury −amount exactly), **delegate EOA untouched** (no funding leg — the #713 stranded-funds class structurally absent). Needs `MERCHANT_X402_ERC7710=1` + `MERCHANT_ERC7710_DELEGATION_MANAGER` on the dev merchant; skips (→ run FAILS under #1066) with that exact remedy when the merchant is 3009-only |
 | `x402-erc7710-fresh-agent` | The COLD START (#1674, regression net for #1667): a per-run throwaway identity whose delegate hybrid account is asserted counterfactual on-chain (`getCode` = `0x` before any payment), then the agent's FIRST-EVER payment runs the erc7710 settlement — asserting authorize deployed the account (code exists between authorize and settle, pinning WHERE the deploy happens), the merchant redemption settles treasury→merchant exactly, and the delegate EOA is untouched. Funded per run from the standing identity; same env needs as `x402-erc7710-settle` |
@@ -342,7 +349,7 @@ way the 2026-07-18 live proof did):
    owner-signed, then activate it — the relayer deploys the treasury, sponsored.
 4. Fund the treasury with a little Base Sepolia USDC.
 
-Both scenarios assert more than "the purchase worked". `x402-delegation-3009`
+The three EIP-3009 scenarios assert more than "the purchase worked". `x402-delegation-3009`
 reads the payment evidence back and requires `settlement_scheme = eip3009`,
 Haven's own transfer going to the **delegate EOA** rather than the merchant, the
 merchant recorded separately from that funding address, and the treasury balance
@@ -357,9 +364,17 @@ above the sweep floor. Without them it SKIPS with a message naming the missing
 setting — a merchant that settles normally is an unmet precondition, not a sweep
 regression.
 
-Neither has run live yet. They are unit-covered and typechecked; their first
-real run is this seeding step, so treat an initial red as information about the
-setup as much as about the code.
+`x402-delegation-3009-grace-resume` uses the normal settling VPN product, but
+stops after its confirmed funding leg to reproduce an agent crash. Set
+`MERCHANT_REPORT_GRACE_MIN_OVERRIDE=0` only on the Base Sepolia dev backend;
+startup rejects it anywhere except `HAVEN_DEPLOY_CHAIN_IDS=84532`, and an unset
+override leaves the production-safe 15-minute grace period intact. The scenario
+then resumes the original request through the server-issued `next_action`; it
+does not create a second payment or use the merchant skip-settle fixture.
+
+These scenarios have not run live yet. They are unit-covered and typechecked;
+their first real run is this seeding step, so treat an initial red as
+information about the setup as much as about the code.
 
 #### The hosted-MCP leg (`x402-hosted-mcp-signer`, #1154)
 
@@ -486,8 +501,8 @@ The repository needs these encrypted Actions secrets:
 - `QA_PAYMENT_TO`
 - `QA_DEMO_MERCHANT_URL`
 
-And, for the two delegation-rail EIP-3009 legs (`x402-delegation-3009`,
-`x402-delegation-3009-sweep` — the run skips them, and the Coverage
+And, for the three delegation-rail EIP-3009 legs (`x402-delegation-3009`,
+`x402-delegation-3009-grace-resume`, and `x402-delegation-3009-sweep` — the run skips them, and the Coverage
 completeness step warns, when either is absent):
 
 - `QA_DELEGATION_AGENT_API_KEY`

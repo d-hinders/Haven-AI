@@ -5,6 +5,7 @@ import {
   type AgentPaymentNextAction as AgentPaymentNextActionValue,
   type AgentPaymentPhase as AgentPaymentPhaseValue,
 } from '../../domain/agent-payment-taxonomy.js'
+import { config } from '../../config.js'
 import { ethers } from 'ethers'
 import {
   expireOverdueIntentById,
@@ -399,6 +400,51 @@ function paymentIntentState(status: string): {
  */
 export const MERCHANT_REPORT_GRACE_MIN = 15
 
+/**
+ * Resolve the short grace period used only by the shared Base Sepolia QA
+ * deployment. Production must retain the 15-minute recovery window: a faster
+ * answer there could invite a concurrent retry while a live agent is still
+ * between its funding confirmation and merchant retry.
+ */
+export function resolveMerchantReportGraceMin(
+  rawOverride: string | undefined,
+  deployChainIds: readonly number[],
+): number {
+  if (rawOverride === undefined || rawOverride.trim() === '') return MERCHANT_REPORT_GRACE_MIN
+
+  // An unset chain allow-list means "all supported", so it is not a safe
+  // development-only deployment. The opt-in is deliberately restricted to the
+  // one-chain Base Sepolia environment rather than becoming a general timing
+  // knob for payment status.
+  if (deployChainIds.length !== 1 || deployChainIds[0] !== 84532) {
+    throw new Error(
+      'MERCHANT_REPORT_GRACE_MIN_OVERRIDE is allowed only when HAVEN_DEPLOY_CHAIN_IDS=84532 (Base Sepolia QA).',
+    )
+  }
+
+  const minutes = Number(rawOverride)
+  if (!Number.isFinite(minutes) || !Number.isInteger(minutes) || minutes < 0 || minutes > MERCHANT_REPORT_GRACE_MIN) {
+    throw new Error(
+      `MERCHANT_REPORT_GRACE_MIN_OVERRIDE must be an integer from 0 to ${MERCHANT_REPORT_GRACE_MIN}.`,
+    )
+  }
+  return minutes
+}
+
+const merchantReportGraceMin = resolveMerchantReportGraceMin(
+  process.env.MERCHANT_REPORT_GRACE_MIN_OVERRIDE,
+  config.deployChainIds,
+)
+
+export function merchantReportGraceElapsed(
+  confirmedAt: string,
+  now = Date.now(),
+  graceMin = merchantReportGraceMin,
+): boolean {
+  const confirmedAtMs = new Date(confirmedAt).getTime()
+  return Number.isFinite(confirmedAtMs) && now - confirmedAtMs >= graceMin * 60_000
+}
+
 /** `machine_metadata.settlement_scheme`, parsed the way `settlement-observed.ts` does. */
 function settlementSchemeOf(machineMetadata: unknown): string | null {
   if (!machineMetadata) return null
@@ -468,7 +514,7 @@ function intentStateFor(payment: PaymentIntentStatusRow): {
     settlementSchemeOf(payment.machine_metadata) === 'eip3009' &&
     !payment.merchant_leg_reported &&
     payment.confirmed_at !== null &&
-    Date.now() - new Date(payment.confirmed_at).getTime() >= MERCHANT_REPORT_GRACE_MIN * 60_000
+    merchantReportGraceElapsed(payment.confirmed_at)
   ) {
     return {
       phase: AgentPaymentPhase.FundedButUnsettled,

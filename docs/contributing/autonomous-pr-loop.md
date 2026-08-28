@@ -10,7 +10,7 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-08-28" # #2164: § "Be precise about what gate 2 proves" gains the version-only exemption — a money-path file whose entire diff is an IN-PLACE release-bump version bump no longer counts as uncovered — shape-per-line plus symbol pairing, the latter added after review found three behavioural edits that shape matching alone excused. Named in the list rather than left to the script, because it NARROWS the net and an unstated narrowing is the failure this whole section is written against. Scope: that one bullet; the ruleset inventory and § "Merge policy A" were NOT re-verified in this pass. Prior: #2165: the ruleset inventory's "Dev gate" bullet said it enforces two checks; it now also carries a pull-request rule pinning `main` to merge-commits only, so the bullet gained that rule, why it lives in `Dev gate` rather than the ruleset that also covers `dev`, the `hotfix/* → main` answer, and the empirically-confirmed intersection semantics. Scope: that ONE bullet. Two stale claims in the same list were found and deliberately NOT fixed here, filed instead so this bump is not a rubber stamp — the list says "Three active rulesets" and describes a "Move fast, just don't break prod by accident" ruleset that no longer exists (`GET /repos/d-hinders/Haven-AI/rulesets` returns exactly two, 2026-08-28). Its three protections all survive under the remaining rulesets, verified the same day: require-PR and block-force-push are present twice each, and "Lint, Type-check & Build" is still a required context. Nothing else in this file was re-verified. Prior: #2004: § "Known CI flake signatures" re-read and the Base Sepolia RPC entry extended — the backend test job now reaches that endpoint itself (the executable proof of CASP Red Line #4 `eth_call`s the deployed caveat enforcers), and it FAILS rather than skips when the endpoint is unreachable in CI, so this signature can now redden a backend-only PR and not just `qa-dev`. The entry names the transport-vs-policy distinction and the `HAVEN_ENFORCER_PROBE_RPC_URL` override. Scope: that section only; the ruleset inventory, the money-path safety model and § "Merge policy A" were NOT re-verified in this pass. Prior: #1968: §"Merge policy A" re-read — the frontend bullet's "pauses for the user" is now "pauses", with clearing delegated to a clean re-review rather than a human ack, and a new bullet makes an unfilled `haven-reviewer:` verdict line a bar to arming auto-merge at all. The section's own safety claim is "CI + haven-reviewer", which a silently skipped pass makes false with nothing to read it off. The ruleset inventory and the money-path safety model were not re-verified in this pass. Prior: #1607: Known CI flake signatures section added (rerun-once policy; ship-next points here). Prior: #1341: re-verified loop stop and issue-readiness conditions after ship-next gained #1289 active-claim coordination
+last-verified: "2026-08-28" # #2170: ruleset inventory re-verified against `GET /repos/d-hinders/Haven-AI/rulesets`, `GET /repos/d-hinders/Haven-AI/rules/branches/{main,dev}`, and both surviving ruleset definitions. It now names the two active rulesets and attributes the former "Move fast" protections without implying they were removed. Scope: § "One-time GitHub setup", step 3 only. Prior: #2164: § "Be precise about what gate 2 proves" gains the version-only exemption — a money-path file whose entire diff is an IN-PLACE release-bump version bump no longer counts as uncovered — shape-per-line plus symbol pairing, the latter added after review found three behavioural edits that shape matching alone excused. Named in the list rather than left to the script, because it NARROWS the net and an unstated narrowing is the failure this whole section is written against. Scope: that one bullet; the ruleset inventory and § "Merge policy A" were NOT re-verified in this pass. Prior: #2165: the ruleset inventory's "Dev gate" bullet said it enforces two checks; it now also carries a pull-request rule pinning `main` to merge-commits only, so the bullet gained that rule, why it lives in `Dev gate` rather than the ruleset that also covers `dev`, the `hotfix/* → main` answer, and the empirically-confirmed intersection semantics. Scope: that ONE bullet. Two stale claims in the same list were found and deliberately NOT fixed here, filed instead so this bump is not a rubber stamp — the list says "Three active rulesets" and describes a "Move fast, just don't break prod by accident" ruleset that no longer exists (`GET /repos/d-hinders/Haven-AI/rulesets` returns exactly two, 2026-08-28). Its three protections all survive under the remaining rulesets, verified the same day: require-PR and block-force-push are present twice each, and "Lint, Type-check & Build" is still a required context. Nothing else in this file was re-verified. Prior: #2004: § "Known CI flake signatures" re-read and the Base Sepolia RPC entry extended — the backend test job now reaches that endpoint itself (the executable proof of CASP Red Line #4 `eth_call`s the deployed caveat enforcers), and it FAILS rather than skips when the endpoint is unreachable in CI, so this signature can now redden a backend-only PR and not just `qa-dev`. The entry names the transport-vs-policy distinction and the `HAVEN_ENFORCER_PROBE_RPC_URL` override. Scope: that section only; the ruleset inventory, the money-path safety model and § "Merge policy A" were NOT re-verified in this pass. Prior: #1968: §"Merge policy A" re-read — the frontend bullet's "pauses for the user" is now "pauses", with clearing delegated to a clean re-review rather than a human ack, and a new bullet makes an unfilled `haven-reviewer:` verdict line a bar to arming auto-merge at all. The section's own safety claim is "CI + haven-reviewer", which a silently skipped pass makes false with nothing to read it off. The ruleset inventory and the money-path safety model were not re-verified in this pass. Prior: #1607: Known CI flake signatures section added (rerun-once policy; ship-next points here). Prior: #1341: re-verified loop stop and issue-readiness conditions after ship-next gained #1289 active-claim coordination
 ---
 
 # Autonomous PR loop
@@ -316,12 +316,10 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
    - ☑ **Allow auto-merge** (required, or the auto-merge step is a no-op).
    - ☑ **Automatically delete head branches** (housekeeping).
 3. **Settings → Rules → Rulesets** (the repo uses rulesets, not classic branch
-   protection). Three active rulesets carry this, all targeting **both `main` and
-   `dev`** unless noted:
-   - **"Move fast, just don't break prod by accident"** — ☑ **Require a pull
-     request before merging**, ☑ **Block force pushes**, and ☑ **Require status
-     checks to pass** on the roll-up check **Lint, Type-check & Build**.
-   - **"Haven automerge rules"** — ☑ **Require status checks to pass** on
+   protection). Two active rulesets carry this:
+   - **"Haven automerge rules"** (targets **both `main` and `dev`**) — ☑
+     **Require a pull request before merging**, ☑ **Block force pushes**, and ☑
+     **Require status checks to pass** on **Lint, Type-check & Build**, plus
      **Detect changed surfaces** plus every per-surface quality check: **Backend
      checks**, **Frontend checks**, **SDK checks**, **CLI checks**, **MCP server
      checks**, **MCP checks**, **Connect checks**, **Signer checks** — and the
@@ -363,7 +361,8 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      > which GitHub counts as satisfied. Either make the workflow
      > unconditional (fine for ~10s checks) or gate at the job level, never
      > at the workflow `paths:` level.
-   - **"Dev gate"** (targets `main` only) — carries three protections: one
+   - **"Dev gate"** (targets `main` only) — reinforces the pull-request and
+     force-push protections on `main`, and carries three additional protections: one
      ruleset rule of its own, plus two required checks from
      `.github/workflows/dev-gate.yml`:
      - **Merge method** ([#2165](https://github.com/d-hinders/Haven-AI/issues/2165)) —
@@ -388,18 +387,18 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
        lower-case (`gate`, `qa-freshness`) because neither job sets a `name:` —
        the workflow's own display name is not the check name.
 
-     `gate` and `qa-freshness` were verified present in both rulesets on
-     2026-07-27 via `GET /repos/d-hinders/Haven-AI/rules/branches/{main,dev}` —
-     that endpoint is the fastest way to re-check this list without admin UI
-     access. The **merge-method** rule is younger and narrower, so it is dated
-     separately rather than folded into that sentence: added and verified
-     2026-08-28, in `Dev gate` **only**, via
-     `GET /repos/d-hinders/Haven-AI/rulesets/18134280`. Checking it against both
-     rulesets would fail by design — `Haven automerge rules` still permits all
-     three methods, which is what keeps squash available on `dev`.
+     This inventory was verified on 2026-08-28 via
+     `GET /repos/d-hinders/Haven-AI/rulesets` and
+     `GET /repos/d-hinders/Haven-AI/rules/branches/{main,dev}` — the latter is
+     the fastest way to re-check the effective branch rules without admin UI
+     access. The API reports the pull-request and force-push rules twice on
+     `main` (once from each ruleset), **Lint, Type-check & Build** from `Haven
+     automerge rules`, and `gate` / `qa-freshness` from `Dev gate` only. The
+     **merge-method** rule is narrower by design: `Haven automerge rules` permits
+     all three methods, which keeps squash available on `dev`.
    - **Required approvals: 0** at the repo level — this is the hands-off lever.
-     Your safety comes from CI + haven-reviewer + the loop's in-session money-path
-     checkpoint, plus the code-owner gate below for migrations.
+     Your safety comes from CI + haven-reviewer + the automatic `qa-freshness`
+     promotion gate, plus the code-owner gate below for migrations.
    - ☑ **Require review from Code Owners** — keep this on. With the current
      `.github/CODEOWNERS` it bites only **DB migrations** (the one hard-gated
      class); every other path flows on green CI. Widen `.github/CODEOWNERS` if you

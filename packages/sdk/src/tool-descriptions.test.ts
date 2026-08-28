@@ -114,7 +114,11 @@ describe('shared Haven tool descriptions', () => {
 
     for (const key of ['payX402', 'payX402OneShot'] as const) {
       const desc = composeDescription(toolDescriptions[key])
-      const referenced = [...desc.matchAll(/nextAction=([a-z_]+)/g)].map((m) => m[1])
+      // Character class includes digits: `retry_original_x402_request` is today the
+      // ONLY taxonomy value containing one, so `[a-z_]+` alone would truncate it to
+      // `retry_original_x` — still failing the membership check, but by accident
+      // rather than by design, and silently wrong for any future value with a digit.
+      const referenced = [...desc.matchAll(/nextAction=([a-z0-9_]+)/g)].map((m) => m[1])
 
       expect(
         referenced,

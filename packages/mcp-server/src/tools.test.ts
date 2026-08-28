@@ -8,7 +8,7 @@ import {
   MerchantTimeoutError,
   SIGNER_UPDATE_FALLBACK,
 } from '@haven_ai/sdk'
-import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
+import { createToolHandlers, toolDescriptions, type ToolSuccess, type ToolPayload } from './tools.js'
 
 const DELEGATE_KEY = '0x' + 'a'.repeat(64)
 const HEADER_SIGNING_KEY = '0x' + '12'.repeat(32)
@@ -5902,5 +5902,38 @@ describe('#2054 — erc7710-only merchants', () => {
       expect(res.success).toBe(false)
       expect((res as { message?: string }).message).toContain('No compatible payment option')
     })
+  })
+})
+
+describe('#2131: the hosted tool descriptions carry no dead resume trigger', () => {
+  /**
+   * `RESUME_X402_DESCRIPTION` in this file is a hand-built string literal, not
+   * an entry of the SDK's shared `toolDescriptions` object — so the regression
+   * guard in `packages/sdk/src/tool-descriptions.test.ts` never scanned it.
+   * haven-reviewer proved the gap by mutation: reintroducing
+   * `nextAction=retry_original_x402_request` here left all 291 tests green.
+   *
+   * Nothing emits that value (the backend's `paymentIntentState` never returns
+   * it, and the SDK's `executed` mapping reads a status the backend cannot
+   * construct since #2055), so advertising it tells an agent to gate on a
+   * signal that never arrives — which is what #2131 removed from ten sites.
+   *
+   * Scans the exported record, so a newly registered hosted tool is covered
+   * without anyone remembering to extend this list.
+   *
+   * DELETE when #2145 gives the value a reachable producer.
+   */
+  it('no hosted tool description advertises retry_original_x402_request', () => {
+    const entries = Object.entries(toolDescriptions)
+
+    // Non-vacuity: an empty record would satisfy every assertion below.
+    expect(entries.length).toBeGreaterThan(0)
+
+    for (const [name, description] of entries) {
+      expect(
+        description,
+        `${name} must not advertise retry_original_x402_request — nothing emits it (see #2145)`,
+      ).not.toContain('retry_original_x402_request')
+    }
   })
 })

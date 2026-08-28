@@ -36,6 +36,7 @@ import { chmod, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promis
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { redactSecrets } from './redact.js'
+import { ConnectError } from './connect-error.js'
 
 export const TOMBSTONE_FILENAME = 'TOMBSTONE.json'
 
@@ -160,7 +161,19 @@ export async function writeAgentTombstone(
   // silently created and reported as a successful retirement. (#1681 review)
   const dirStat = await stat(input.directory).catch(() => null)
   if (!dirStat?.isDirectory()) {
-    throw new Error(`Not a directory: ${input.directory} — nothing to tombstone.`)
+    // A ConnectError rather than a bare Error (#2175): this is the refusal an
+    // automating caller actually hits, and the overwhelmingly likely cause is
+    // a path built from the AGENT ID when the directory is slug-named (#1696).
+    // A stable code lets that caller tell "wrong path" apart from every other
+    // reason a retirement did not happen.
+    throw new ConnectError(
+      'tombstone_directory_not_found',
+      `Not a directory: ${input.directory} — nothing to tombstone. ` +
+        'Agent directories are named by their wiring SLUG when the agent has one, and by the ' +
+        'agent id otherwise — so a path built from an agent id will not exist for a named agent. ' +
+        'List ~/.haven/agents (or read the directories from --doctor --json) and pass one of those.',
+      'retry_with_an_existing_agent_directory',
+    )
   }
   const info: TombstoneInfo = {
     // reason / replaced_by are persisted to disk and re-emitted to the host's

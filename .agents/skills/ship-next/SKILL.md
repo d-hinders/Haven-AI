@@ -357,7 +357,28 @@ check list.
 
 Never bypass required checks. Diagnose CI failures, fix them, push, and re-arm auto-merge only when appropriate.
 
-**Merged ≠ all green.** Auto-merge waits only for the checks the rulesets *require*; a workflow-blocking job outside that list (see the ruleset inventory in [autonomous-pr-loop.md](../../../docs/contributing/autonomous-pr-loop.md)) can still be running — or red — when the merge lands. Before reporting the PR shipped, confirm the blocking jobs' conclusions on the **head SHA** (`gh api repos/<o>/<r>/commits/<sha>/check-runs`), not just the PR's merged state. A red post-merge job is your failure to hand off: fix or revert before taking new work.
+**Merged ≠ all green.** Auto-merge waits only for the checks the rulesets *require*; a workflow-blocking job outside that list (see the ruleset inventory in [autonomous-pr-loop.md](../../../docs/contributing/autonomous-pr-loop.md)) can still be running — or red — when the merge lands. Before reporting the PR shipped, confirm the blocking jobs' conclusions on the commit that **actually merged**, not just the PR's merged state. A red post-merge job is your failure to hand off: fix or revert before taking new work.
+
+**Re-read the head SHA at verification time. Never reuse one you captured earlier ([#2116](https://github.com/d-hinders/Haven-AI/issues/2116)).** The shortest correct form is the tool, which takes a PR *number* and no SHA — there is no argument through which a stale one can enter:
+
+```bash
+node scripts/ci/verify-merged-head.mjs <pr>     # add --expect=<sha> to test a SHA you already have
+```
+
+By hand it is two calls, and the order is the whole point:
+
+```bash
+SHA=$(gh pr view <pr> --json headRefOid -q .headRefOid)   # read AFTER the merge, not before
+gh api repos/<o>/<r>/commits/"$SHA"/check-runs
+```
+
+A PR's head SHA is not stable between opening and merging. Four routes move it, and **only the first involves auto-merge**: GitHub's own *update branch* when auto-merge is armed and the base moves; `gh pr update-branch` to clear `BEHIND`; merging `dev` in to clear `DIRTY`; and any push after you last looked. This skill instructs the middle two itself, so **a session that never arms auto-merge is fully exposed** — that is the common route here, not the exotic one. Re-reading covers all four at once, because it asks what merged rather than what you were watching. It survives `--delete-branch`: `headRefOid` stays on the PR record after the branch is gone.
+
+**Do not substitute the merge commit for it.** Tempting, since a merge commit cannot go stale — but feature → `dev` is a **squash**, so the merge commit has exactly one parent and there is no second parent to recover the head from, and its own check runs are the push-to-`dev` run: a different, smaller set (16 on #2114 against the PR head's 23, with every PR-only gate — both coupling gates, contract-doc, copy lint — absent). Read it to ask "is `dev` green now"; it does not answer "did this PR's blocking jobs pass on what landed".
+
+**A `cancelled` conclusion is the concurrency guard working — neither a failure nor a pass.** `.github/workflows/ci.yml` sets `concurrency: <workflow>-<pr>` with `cancel-in-progress: true`, so a newer run for the same PR cancels the older one. Cancelled runs on the SHA you are reading almost always mean you are reading a **superseded** SHA; `gh run list --commit <sha>` shows whether a newer run exists. Never fold `cancelled` into "nothing failed" — that is the false-GREEN direction of this defect, and it is the one that hands off a broken `dev` while the session believes it verified.
+
+> **Worked example — PR #2114, 2026-08-27.** Head at open `bcc23cb5`; an unrelated PR merged to `dev`; the branch was updated to `af36577f`, whose CI run cancelled the old one. The PR merged on `af36577f`'s green checks. `check-runs` on the captured `bcc23cb5`: **1 failure + 5 cancelled**. On the re-read `af36577f`: **23/23 success**. Here the stale read produced a false RED — five minutes of investigation. Reverse which run went red and the identical mechanism produces a false GREEN, silently.
 
 ### Waiting on CI — mechanics
 

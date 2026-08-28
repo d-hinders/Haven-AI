@@ -535,12 +535,13 @@ Connect writes its terminal outcome to **`last-connect-outcome.json`** in the
 agent's credential directory (`~/.haven/agents/<slug-or-agent-id>/`), as
 pretty-printed JSON whose content is exactly the object emitted on stdout —
 same shape, same secret-free construction, never credential-file contents.
-Success and failure shapes both land there. A refusal that happens *before*
-credentials are written (`runtime_undetermined`, an expired setup challenge,
-the Node floor) writes nothing, because no directory exists yet and nothing was
-created that could need recovering. The write is best-effort: a failure to
-write it never fails a setup that otherwise completed, and never changes the
-verdict the run already reached.
+Every terminal outcome lands there, all three: `complete` and
+`action_required` on the return path, `failed` on the throw path. A refusal
+that happens *before* credentials are written (`runtime_undetermined`, an
+expired setup challenge, the Node floor) writes nothing, because no directory
+exists yet and nothing was created that could need recovering. The write is
+best-effort: a failure to write it never fails a setup that otherwise
+completed, and never changes the verdict the run already reached.
 
 **Guidance for agent harnesses.** Allow **several minutes** for a first run: a
 cold `npm` install of the signer routinely outruns a command harness's default

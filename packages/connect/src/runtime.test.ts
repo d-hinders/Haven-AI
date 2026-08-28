@@ -2152,6 +2152,29 @@ describe('runConnect terminal outcome record (#2173)', () => {
     expect(JSON.stringify(outcome)).not.toContain(root)
   })
 
+  it('records an action_required outcome too, not only complete and failed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+
+    // A manual runtime finishes the run without finishing the setup. It is
+    // neither of the two shapes the prose reaches for first, and it is the one
+    // a caller most needs to read back: the remaining steps are all manual.
+    const { outcome } = await runInto(root, {
+      installRuntime: vi.fn(async () => ({
+        ...completedInstall('other'),
+        runtimeMcpMode: 'manual' as const,
+        hostedMcpConfigured: false,
+        localSignerConfigured: false,
+        errorCode: 'manual_runtime_setup_required',
+      })),
+    })
+
+    expect(outcome.outcome).toBe('action_required')
+    expect(await readRecord(root)).toMatchObject({
+      outcome: 'action_required',
+      error: { code: 'manual_runtime_setup_required' },
+    })
+  })
+
   it('completes the setup when the record write fails', async () => {
     const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
     const writeOutcomeRecord = vi.fn(async () => {

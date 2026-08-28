@@ -23,6 +23,17 @@ export { settleX402 } from './settle.js'
 export { getX402SignContext } from './sign-context.js'
 export { getX402MerchantCallContext } from './merchant-call-context.js'
 
+/**
+ * The passive settlement sweep (#2117). Public because the composition root
+ * registers the tick and owns its interval — the monitor itself, like every
+ * other in `index.ts`, is wired at boot rather than reached from a route.
+ */
+export {
+  runSettlementSweepTick,
+  resetSettlementSweepBackoff,
+  SETTLEMENT_SWEEP_INTERVAL_MS,
+} from './settlement-sweeper.js'
+
 export type { X402AuthorizeBody, X402HandlerResult, X402McpCallContextInput } from './types.js'
 
 export {

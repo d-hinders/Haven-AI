@@ -455,3 +455,86 @@ export async function confirmObservedSettlement(
     return confirmObservedSettlementRow(input, tx)
   })
 }
+
+// ── passive settlement sweep candidates (#2117) ──────────────────────────────
+
+/**
+ * The open erc7710 settlements the passive sweeper may look for on-chain.
+ *
+ * Scoped to exactly `isPendingErc7710Settlement`'s lifecycle, so nothing else
+ * can ever enter the sweep, plus two bounds that exist for cost rather than for
+ * safety (safety is the verifier's and the guarded UPDATE's job):
+ *
+ * - `$1` **minimum age.** A payment authorized seconds ago is almost always
+ *   about to be completed by its own agent's evidence report. Waiting a beat
+ *   keeps the sweep off the happy path entirely, so the RPC cost is paid only
+ *   for payments that actually went unreported.
+ * - `$2` **recovery horizon**, and this is the answer to "what happens after
+ *   the settlement window closes?". The window (≤600s) bounds when the
+ *   transaction can have been MINED — that is fixed on-chain forever by the
+ *   child's `timestamp` caveat. It does not bound when Haven may LOOK. An RPC
+ *   outage spanning a payment's window is the likeliest real failure, and if
+ *   the sweep only ever considered live windows, those payments would be lost
+ *   for good — the gap merely moved. So the horizon is deliberately much wider
+ *   than the window: the candidate stays sweepable long after its window shut,
+ *   and the scan reaches back to where its transaction actually is. Looking
+ *   further back is not less safe, because check 7 still requires the block to
+ *   fall inside the intent's own window; the horizon only decides how much
+ *   history a tick is willing to pay for.
+ *
+ * `delegation_hash IS NOT NULL` is a hard requirement, not an optimisation: the
+ * stored child hash IS the lookup key. A row without one cannot be found by the
+ * only attribution path the sweeper has, and there is no second path by design.
+ *
+ * Oldest first: the candidates nearest the horizon are the ones that lose their
+ * last chance if a tick runs out of budget.
+ */
+export const FIND_SWEEPABLE_ERC7710_INTENTS_SQL = `SELECT id, agent_id, chain_id, safe_address,
+                to_address, token_symbol, token_address, amount_raw, amount_human,
+                status, tx_hash, delegation_hash, created_at,
+                source, payment_rail, execution_rail, machine_metadata
+           FROM payment_intents
+          WHERE status = 'submitted'
+            AND tx_hash IS NULL
+            AND COALESCE(payment_rail, source) = 'x402'
+            AND execution_rail = 'delegation'
+            AND machine_metadata->>'settlement_scheme' = 'erc7710'
+            AND delegation_hash IS NOT NULL
+            AND created_at <= NOW() - ($1 * interval '1 second')
+            AND created_at >= NOW() - ($2 * interval '1 second')
+          ORDER BY created_at ASC
+          LIMIT $3`
+
+export interface SweepableSettlementRow {
+  id: string
+  agent_id: string
+  chain_id: number
+  safe_address: string
+  to_address: string
+  token_symbol: string
+  token_address: string
+  amount_raw: string
+  amount_human: string
+  status: string
+  tx_hash: string | null
+  delegation_hash: string | null
+  created_at: string
+  source: string | null
+  payment_rail: string | null
+  execution_rail: string | null
+  machine_metadata: Record<string, unknown> | string | null
+}
+
+export async function findSweepableErc7710Intents(
+  minAgeSeconds: number,
+  recoveryHorizonSeconds: number,
+  limit: number,
+  db: Executor = pool,
+): Promise<SweepableSettlementRow[]> {
+  const result = await db.query<SweepableSettlementRow>(FIND_SWEEPABLE_ERC7710_INTENTS_SQL, [
+    minAgeSeconds,
+    recoveryHorizonSeconds,
+    limit,
+  ])
+  return result.rows
+}

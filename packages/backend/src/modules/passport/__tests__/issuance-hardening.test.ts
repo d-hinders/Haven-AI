@@ -56,7 +56,9 @@ describe('lost-result recovery (#1043)', () => {
     rows: [{
       delegate_address: '0x' + 'a'.repeat(40), agent_status: 'active',
       chain_id: 84532, safe_address: '0x' + 'b'.repeat(40),
-      account_type: null, execution_rail: null,
+      // #2138: these tests exercise lost-result recovery on the LIVE rail;
+      // issuance is delegation-rail only, so the facts must say so.
+      account_type: 'delegator_hybrid', execution_rail: 'delegation',
     }],
   }
   const pendingRow = (extra: Record<string, unknown>) => ({

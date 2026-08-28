@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — the schema doc carries the code mapping
-last-verified: "2026-07-27"
+last-verified: "2026-08-27" # #2138: the three claims that a passport means "controls enforced on-chain" were unqualified — false for a legacy-rail agent, which could hold an issued passport because issuance was never gated by rail. The owner decided 2026-08-27 that it should be ("we should not support issuance on legacy rails"), so the code now refuses it and this page says so rather than describing a gate that did not exist. Existing legacy passports are NOT revoked — that was the same decision — so the caveat names them explicitly and points at the receipt's own policyEnforcedOnchain: false, which was always the honest answer. Deliberately does NOT restate the controls.rail value list: #2110 pinned that to migration 041 and the OpenAPI enum, and a hand-copied fourth source in product prose is the drift this epic keeps finding. Scope: the "What a passport is" intro, the Governed row, and the L0 ladder row; the revocation, verification and adoption sections were NOT re-verified in this pass.
 ---
 
 # Agent Passport
@@ -29,13 +29,29 @@ A signed, publicly readable attestation that a specific agent was **issued by
 Haven**, is **bound to a treasury**, operates under **controls enforced
 on-chain**, and can be **revoked**.
 
+> **Passports are issued on the delegation rail only** (#2138, epic #1440).
+> That is what makes the third claim true rather than aspirational: the
+> delegation rail's caveat enforcers reject an out-of-policy redemption
+> on-chain, so "enforced by the chain" is a description of the mechanism. The
+> retired AllowanceModule and Smart Sessions rails cannot transact at all — every
+> payment entry point answers 410 — so an agent there has no spending for a
+> contract to govern, and Haven refuses to issue it a passport rather than
+> attest a control that cannot be exercised.
+>
+> **A passport issued on a legacy account before that gate still exists**, and
+> is deliberately left alone rather than revoked. Its own control summary
+> reports `policyEnforcedOnchain: false`, which is the honest answer — so the
+> receipt tells a merchant the truth even where this page's four claims read as
+> universal. Read the claims below as describing what Haven **issues**; read the
+> receipt for what a specific passport **asserts**.
+
 Four claims, each independently checkable:
 
 | Claim | What it means |
 |---|---|
 | **Issued** | A known operator provisioned this agent. It did not appear from nowhere. |
 | **Bound to a treasury** | The account whose funds it may spend is named. Its reach is finite and stated. |
-| **Governed** | The limits on it are enforced by the chain during the payment, not by a service that could be bypassed or misconfigured. |
+| **Governed** | The limits on it are enforced by the chain during the payment, not by a service that could be bypassed or misconfigured. True by construction: Haven issues only on the rail where that holds. |
 | **Revocable** | Authority can be withdrawn, and the withdrawal takes effect immediately — not when a cache expires. |
 
 **Revocable is the load-bearing one.** A credential that cannot be withdrawn is
@@ -64,7 +80,7 @@ wording.
 
 | Tier | Claim | Status |
 |---|---|---|
-| **L0 — Governance** | Issued, treasury-bound, controls enforced on-chain, revocable | The tier Haven issues |
+| **L0 — Governance** | Issued, treasury-bound, controls enforced on-chain, revocable | The tier Haven issues — on the delegation rail only |
 | **L1 — Screened** | L0 plus sanctions screening | Defined, not issuable |
 | **L2 — Verified** | L1 plus identity, anchored without disclosing it | Defined, not issuable |
 

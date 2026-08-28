@@ -42,7 +42,7 @@ function mockDb(opts: {
       return { rows: [], rowCount: 1 }
     }
     if (/FROM agents a/.test(sql) && /LEFT JOIN user_safes/.test(sql)) {
-      return { rows: opts.agent === undefined ? [{ delegate_address: EOA, chain_id: 84532, safe_address: TREASURY }] : opts.agent ? [opts.agent] : [] }
+      return { rows: opts.agent === undefined ? [{ delegate_address: EOA, chain_id: 84532, safe_address: TREASURY, execution_rail: 'delegation', account_type: 'delegator_hybrid' }] : opts.agent ? [opts.agent] : [] }
     }
     if (/SET anchoring_started_at = NOW\(\)/.test(sql)) {
       // Mirrors the real partial UPDATE: only one caller can win the claim.
@@ -253,8 +253,12 @@ describe('anchoring', () => {
     expect(claim.agentEoa).toBe(EOA)
     expect(claim.treasury).toBe(TREASURY)
     expect(claim.assuranceLevel).toBe(0) // L0 only
-    // EOA-only agent → smart account encodes as the zero-address sentinel.
-    expect(claim.smartAccount).toBe('0x0000000000000000000000000000000000000000')
+    // #2138: the shared fixture is a delegation account now (issuance is
+    // delegation-rail only), so this binds a DERIVED smart account rather than
+    // the zero sentinel. The sentinel branch is unreachable through issuance —
+    // every account that would take it is refused above it.
+    expect(claim.smartAccount).not.toBe('0x0000000000000000000000000000000000000000')
+    expect(claim.smartAccount).not.toBe(claim.treasury)
   })
 
   it('fails cleanly when the agent has no treasury bound', async () => {
@@ -348,15 +352,29 @@ describe('delegation-rail agents bind their smart account (reviewer finding #3)'
     expect(claim.smartAccount).not.toBe(claim.treasury)
   })
 
-  it('an EOA-only agent still binds the absent sentinel', async () => {
+  it('a legacy-rail agent is REFUSED, and nothing is anchored (#2138)', async () => {
+    // This test asserted the opposite until #2138: that an EOA-only agent
+    // still gets a passport, bound to the zero-address sentinel. The owner's
+    // 2026-08-27 decision — "we should not support issuance on legacy rails" —
+    // makes that scenario unreachable, so the test is CONVERTED rather than
+    // deleted: same setup, corrected expectation, and the coverage that a
+    // legacy agent is handled at all survives.
+    //
+    // Note what this makes dead: the zero-sentinel branch in `issuance.ts` is
+    // no longer reachable through issuance, because every account that would
+    // take it is now refused above it. It is left in place as defence rather
+    // than removed — deleting it is a separate judgement, not this issue's.
     mockDb({
       passport: { agent_id: AGENT, chain_id: 84532, status: 'pending', attempts: 0 },
       agent: { delegate_address: EOA, chain_id: 84532, safe_address: TREASURY, account_type: null, execution_rail: 'allowance_module' },
     })
     const anchor = vi.fn(async () => ({ attestationUid: UID, txHash: '0x1' }))
     setAnchor(anchor)
+
     await issuePassport(AGENT, USER)
-    const [, claim] = anchor.mock.calls[0] as unknown as [number, Record<string, unknown>]
-    expect(claim.smartAccount).toBe('0x0000000000000000000000000000000000000000')
+
+    // The refusal must be BEFORE the chain write, not after it — otherwise it
+    // would spend relayer gas to mint a credential it then refuses to keep.
+    expect(anchor).not.toHaveBeenCalled()
   })
 })

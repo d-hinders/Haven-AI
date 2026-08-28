@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/infra/repositories/reporting-feed-syncs.ts
   - packages/frontend/src/app/(authenticated)/reporting/page.tsx
   - packages/frontend/src/hooks/useReporting.ts
-last-verified: "2026-08-26" # #2092: re-read the "flow, end to end" section only — the entry condition was stated as "x402 funding confirmation or MPP receipt", which excluded erc7710 by construction and was the doc-level shadow of the bug; corrected, with the scheme-agnostic entry and its residual gap named. The verification, troubleshooting and recovery sections were NOT re-read in this pass. Prior 2026-08-13: feed live-verified end-to-end on a real user account (entitlement grant -> connect -> x402 purchase -> pushed w/ invoice number -> read-back "Registered"); added the Fortnox first-visit UI-wizard gotcha. Prior same-day: #1365 recovery gaps
+last-verified: "2026-08-27" # #2117: re-read the "flow, end to end" section only — its residual-gap paragraph named #2117 as open, which the passive settlement sweep closed; replaced with the sweep's entry and the three narrower residuals it deliberately leaves. The verification, troubleshooting and recovery sections were NOT re-read in this pass. Prior 2026-08-26 #2092: re-read the "flow, end to end" section only — the entry condition was stated as "x402 funding confirmation or MPP receipt", which excluded erc7710 by construction and was the doc-level shadow of the bug; corrected, with the scheme-agnostic entry and its residual gap named. The verification, troubleshooting and recovery sections were NOT re-read in this pass. Prior 2026-08-13: feed live-verified end-to-end on a real user account (entitlement grant -> connect -> x402 purchase -> pushed w/ invoice number -> read-back "Registered"); added the Fortnox first-visit UI-wizard gotcha. Prior same-day: #1365 recovery gaps
 ---
 
 # Fortnox reporting feed — operations runbook
@@ -60,12 +60,32 @@ delegation chain and Haven submits nothing, so the intent used to sit at
 dashboard. `POST /machine-payments/evidence` now completes such an intent from
 the merchant's reported settlement hash after verifying it on-chain — see
 [`04-x402-payment-sequence.md` § Completing an erc7710 settlement](../architecture/04-x402-payment-sequence.md).
-**Residual gap:** a merchant that returns no `PAYMENT-RESPONSE` transaction
-leaves Haven nothing to verify, so that payment stays `submitted` and never
-reaches the feed — neither by auto-feed nor by "Sync now", since the backfill
-enumerates `machine_payment_evidence`. Passive on-chain observation of such a
-settlement is tracked as
-[#2117](https://github.com/d-hinders/Haven-AI/issues/2117).
+**A settlement nobody reported still reaches the feed (#2117).** A merchant that
+returns no `PAYMENT-RESPONSE` transaction leaves Haven no hash to verify, and
+such a payment used to stay `submitted` and never reach the feed at all —
+neither by auto-feed nor by "Sync now", since the backfill enumerates
+`machine_payment_evidence`. A leader-gated sweep now finds those settlements
+on-chain and completes them through the same door, so they arrive with book-time
+FX, a fee-ledger row and an auto-feed call exactly like every other rail.
+
+**Residual gaps, and why they are left open on purpose.** The sweep attributes a
+settlement only when the pinned DelegationManager's own log names that payment's
+settlement child. It will not fall back to "a transfer of the right shape in the
+right window", because on an accounting feed a confidently misattributed row is
+worse than a missing one — the missing row surfaces at reconciliation and the
+wrong one does not. So three cases still produce no feed row, all of them
+fail-closed and all of them logged as warnings once the payment's settlement
+window has closed:
+
+1. a facilitator route that emits no decodable manager log;
+2. two look-alike payments authorized before #2094, which share one settlement
+   child and so cannot be told apart at all;
+3. a settlement older than the sweep's 24-hour recovery horizon — i.e. an RPC
+   outage lasting more than a day.
+
+If a settled payment is missing from Fortnox, that warning line is where to
+look; see
+[`04-x402-payment-sequence.md` § Completing a settlement nobody reported](../architecture/04-x402-payment-sequence.md).
 
 **No longer a gap (#2094):** two of a user's own look-alike erc7710 payments —
 same merchant, token, amount and authorize second — used to be *individually*

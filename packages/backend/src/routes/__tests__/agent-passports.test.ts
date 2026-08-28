@@ -46,8 +46,24 @@ vi.mock('../../middleware/auth.js', () => ({
   },
 }))
 
-/** `findAgentChain` — the only DB read the POST path makes before its guards. */
-function mockAgent(row: { chain_id: number | null; status: string } | null) {
+/**
+ * `findAgentChain` — the only DB read the POST path makes before its guards.
+ *
+ * #2138 widened it to carry the rail. The fields are OPTIONAL here so the
+ * pre-existing tests keep describing agents whose rail is simply not the
+ * subject; `hasBoundAccount(undefined, undefined)` is false, so those agents
+ * fall through the rail gate exactly as an unbound account does.
+ */
+function mockAgent(
+  row:
+    | {
+        chain_id: number | null
+        status: string
+        execution_rail?: string | null
+        account_type?: string | null
+      }
+    | null,
+) {
   mockQuery.mockImplementation(async () => ({ rows: row ? [row] : [] }))
 }
 
@@ -146,5 +162,90 @@ describe('POST /agents/:id/passport', () => {
     expect(res.json().already_issued).toBe(true)
     expect(mockIssue).not.toHaveBeenCalled()
     expectMatchesSpec('POST', '/agents/{id}/passport', res.json(), '200')
+  })
+
+  // ── #2138: issuance is delegation-rail only ─────────────────────────────
+
+  it('refuses a legacy-rail agent with 409, naming the rail, and never issues', async () => {
+    mockAgent({
+      chain_id: 84532,
+      status: 'active',
+      execution_rail: 'allowance_module',
+      account_type: 'safe',
+    })
+    mockGetPassport.mockResolvedValue(null)
+
+    const res = await (await build()).inject({ method: 'POST', url: '/agents/a1/passport' })
+
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toMatch(/delegation rail only/i)
+    // The rail is named so an operator does not have to look it up.
+    expect(res.json().error).toMatch(/allowance_module/)
+    expect(mockIssue).not.toHaveBeenCalled()
+  })
+
+  it('refuses a session-rail agent too — the gate is an allowlist, not an allowance_module denylist', async () => {
+    mockAgent({
+      chain_id: 84532,
+      status: 'active',
+      execution_rail: 'session_key',
+      account_type: 'safe',
+    })
+    mockGetPassport.mockResolvedValue(null)
+
+    const res = await (await build()).inject({ method: 'POST', url: '/agents/a1/passport' })
+
+    expect(res.statusCode).toBe(409)
+    expect(mockIssue).not.toHaveBeenCalled()
+  })
+
+  it('an ALREADY-ANCHORED legacy passport still answers 200 — existing passports are left alone', async () => {
+    // Review finding 1, and the reason this test exists rather than the fix
+    // alone: the rail gate originally ran BEFORE the idempotent
+    // already-anchored return, so a repeat POST for a passport the owner
+    // decision says to leave alone answered 409 — telling the caller it cannot
+    // exist, about one that does. The endpoint's own OpenAPI description
+    // promises idempotency here, so this is a contract regression, not just an
+    // odd message.
+    mockAgent({
+      chain_id: 84532,
+      status: 'active',
+      execution_rail: 'allowance_module',
+      account_type: 'safe',
+    })
+    mockGetPassport.mockResolvedValue({
+      status: 'anchored',
+      assurance_level: 0,
+      attestation_uid: `0x${'ab'.repeat(32)}`,
+      tx_hash: `0x${'cd'.repeat(32)}`,
+      chain_id: 84532,
+      attempts: 1,
+      last_error: null,
+      requested_at: '2026-08-01T10:00:00.000Z',
+      anchored_at: '2026-08-01T10:00:30.000Z',
+    })
+
+    const res = await (await build()).inject({ method: 'POST', url: '/agents/a1/passport' })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().already_issued).toBe(true)
+    expect(mockIssue).not.toHaveBeenCalled()
+  })
+
+  it('a delegation-rail agent is unaffected and still issues', async () => {
+    // Non-vacuity: without this, every assertion above could pass on a route
+    // that refused everyone.
+    mockAgent({
+      chain_id: 84532,
+      status: 'active',
+      execution_rail: 'delegation',
+      account_type: 'delegator_hybrid',
+    })
+    mockGetPassport.mockResolvedValue(null)
+
+    const res = await (await build()).inject({ method: 'POST', url: '/agents/a1/passport' })
+
+    expect(res.statusCode).toBe(202)
+    expect(mockIssue).toHaveBeenCalled()
   })
 })

@@ -607,7 +607,7 @@ export type paths = {
         put?: never;
         /**
          * Opt an existing agent in to a passport.
-         * @description Owner action, never agent-authenticated: an agent must not be able to issue itself a credential. Records the request synchronously and returns **202** — the EAS write is fire-and-forget, so poll the GET (or the public verifier) for the anchored state. Idempotent: an already-anchored passport returns **200** with `already_issued: true` rather than minting a second attestation. Refusals are shaped by whose problem it is — a revoked agent is a 409 (terminal, and anchoring now would spend gas on an attestation that must be revoked immediately), an unbound or unsupported chain is a 400, and a deployment that has not configured issuance is a 503, because that is the operator's gap and not the caller's mistake. A PAUSED agent is deliberately not blocked: pausing is reversible and `standing` already reports it as suspended.
+         * @description Owner action, never agent-authenticated: an agent must not be able to issue itself a credential. Records the request synchronously and returns **202** — the EAS write is fire-and-forget, so poll the GET (or the public verifier) for the anchored state. Idempotent: an already-anchored passport returns **200** with `already_issued: true` rather than minting a second attestation. Refusals are shaped by whose problem it is — a revoked agent is a 409 (terminal, and anchoring now would spend gas on an attestation that must be revoked immediately), an account on a RETIRED rail is also a 409 (#2138: passports are issued on the delegation rail only, because a rail that cannot transact has no spending for a contract to govern), an unbound or unsupported chain is a 400, and a deployment that has not configured issuance is a 503, because that is the operator's gap and not the caller's mistake. The rail refusal is ordered AFTER the idempotency check, so a passport already anchored on a legacy account still returns 200 — existing passports are left alone rather than revoked. A PAUSED agent is deliberately not blocked: pausing is reversible and `standing` already reports it as suspended.
          */
         post: operations["requestAgentPassport"];
         delete?: never;
@@ -7059,7 +7059,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Agent is revoked — revocation is terminal. */
+            /** @description Agent is revoked (terminal), or its account is on a retired rail — passports are issued on the delegation rail only (#2138). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7199,8 +7199,12 @@ export interface operations {
                             evidenceUid: string | null;
                             chainId: number | null;
                             controls: {
-                                /** @description The rail whose primitive holds the policy: 'delegation' or 'allowance'. */
-                                rail: string;
+                                /**
+                                 * @description The account's execution rail, verbatim from user_safes. Only 'delegation' is live; 'allowance_module' (#1440) and 'session_key' (#834) are retired and cannot transact. This field named a shorter, non-existent rail value until #2110 — one the column CHECK has never permitted.
+                                 * @enum {string}
+                                 */
+                                rail: "delegation" | "allowance_module" | "session_key";
+                                /** @description True only on the delegation rail, where the caveat enforcers revert an out-of-policy redemption on-chain. False on both retired rails: a legacy account may still hold a real on-chain allowance, but every agent payment entry point answers 410, so there is no spend for a contract to govern. */
                                 policyEnforcedOnchain: boolean;
                                 treasuryBound: boolean;
                             } | null;

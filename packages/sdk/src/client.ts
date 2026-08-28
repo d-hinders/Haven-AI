@@ -1356,6 +1356,13 @@ export class HavenClient {
       const evidenceTxHash = input.noFundingLeg
         ? (settlement.settlementTxHash ?? undefined)
         : (fundingTxHash ?? undefined)
+      // #2117: when the merchant returned no settlement transaction there is
+      // simply nothing to report, and inventing an anchor client-side is what
+      // the backend's on-chain verification exists to prevent. That gap is
+      // closed SERVER-side instead, by the passive settlement sweep
+      // (`modules/x402/settlement-sweeper.ts`), which finds the settlement by
+      // this payment's own intent-unique delegation child. Do not "fix" this
+      // branch by fabricating a hash.
       if (evidenceTxHash) {
         await this.merchantCompletion.reportEvidence({
           paymentId: evidenceContext.paymentId,

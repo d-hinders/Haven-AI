@@ -32,6 +32,11 @@ import { computeHybridAccountAddress } from '../../rails/hybrid-provisioning.js'
 import { getEasDeployment, isPassportConfigured } from './schema.js'
 import { AssuranceLevel } from './schema.js'
 import { buildAddressBinding, encodeAddressBinding } from './binding.js'
+import {
+  hasBoundAccount,
+  isPassportIssuableAccount,
+  passportRailRefusalReason,
+} from '../../domain/passport-issuance-rail.js'
 import { revokePassportBestEffort } from './revocation.js'
 
 export type { PassportStatus, PassportRow } from '../../infra/repositories/agent-passports.js'
@@ -165,6 +170,28 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
   const facts = await repo.findAgentFacts(agentId, userId)
   if (!facts) {
     await markFailed(agentId, 'agent not found for this user')
+    return getPassport(agentId)
+  }
+  if (
+    hasBoundAccount(facts.execution_rail, facts.account_type) &&
+    !isPassportIssuableAccount(facts.execution_rail, facts.account_type)
+  ) {
+    // #2138 (owner decision 2026-08-27): passports are delegation-rail only.
+    // Terminal, not retryable — listRetryable excludes these accounts, so the
+    // row stops churning instead of failing every tick until it trips
+    // ISSUANCE_ATTENTION_ATTEMPTS and alarms an operator about a refusal that
+    // is working as designed. Exactly the shape of the revoked-agent guard
+    // below (#1043 finding 3).
+    //
+    // Guarded by `hasBoundAccount` so an agent with NO account falls through
+    // to the existing "no bound treasury account" error below — same refusal,
+    // more useful reason. A null rail means the LEFT JOIN missed, never a
+    // legacy account, because the column is NOT NULL.
+    //
+    // An already-anchored passport on a legacy account is NOT touched: the
+    // idempotent early return above sends it home before this runs. The
+    // decision was to gate NEW issuance, not to revoke history.
+    await markFailed(agentId, passportRailRefusalReason(facts.execution_rail))
     return getPassport(agentId)
   }
   if (facts.agent_status === 'revoked') {

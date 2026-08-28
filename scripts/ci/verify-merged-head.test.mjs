@@ -64,6 +64,43 @@ test('zero check runs is NOT green — the #1777 parked-runs shape', () => {
   assert.equal(verdictFor(undefined).verdict, 'no-checks')
 })
 
+test('action_required is NOT green — it is completed, so it is not pending either', () => {
+  // Found by review, not by these fixtures. `action_required` is a completed
+  // conclusion in none of the failing/passing/cancelled sets, so an earlier draft
+  // that let the verdict DEFAULT to green reported GREEN here and omitted the run
+  // from every printed bucket. A false green inside the tool built to stop false
+  // greens — the exact defect class, one level down.
+  const result = verdictFor([
+    ok('Backend checks'),
+    { name: 'Frontend checks', status: 'completed', conclusion: 'action_required' },
+  ])
+  assert.notEqual(result.verdict, 'green')
+  assert.equal(result.verdict, 'unclassified')
+  assert.deepEqual(result.unclassified, ['Frontend checks (action_required)'])
+})
+
+test('an unknown future conclusion is surfaced, never defaulted to green', () => {
+  // The general form of the bug above: no conclusion value this tool has not been
+  // taught about may reach a green verdict.
+  const result = verdictFor([ok('CI'), { name: 'New Gate', status: 'completed', conclusion: 'some_future_value' }])
+  assert.equal(result.verdict, 'unclassified')
+  assert.deepEqual(result.unclassified, ['New Gate (some_future_value)'])
+})
+
+test('every check run lands in exactly one bucket', () => {
+  const runs = [
+    ok('a'), cancelled('b'),
+    { name: 'c', status: 'completed', conclusion: 'failure' },
+    { name: 'd', status: 'in_progress', conclusion: null },
+    { name: 'e', status: 'completed', conclusion: 'action_required' },
+  ]
+  const r = verdictFor(runs)
+  assert.equal(
+    r.failed.length + r.cancelled.length + r.pending.length + r.succeeded.length + r.unclassified.length,
+    runs.length,
+  )
+})
+
 test('skipped and neutral conclusions do not block a green verdict', () => {
   assert.equal(
     verdictFor([ok('Backend checks'),
@@ -106,4 +143,16 @@ test('#2114: drift between the captured SHA and the merged head is named, not ab
 test('an abbreviated captured SHA that DOES match the merged head is not reported as drift', () => {
   const drift = describeDrift('af36577f', PR_2114_MERGED_SHA)
   assert.equal(drift.drifted, false)
+  assert.equal(describeDrift(PR_2114_MERGED_SHA, PR_2114_MERGED_SHA).drifted, false)
+})
+
+test('two commits sharing an 8-char prefix are still drift', () => {
+  // The branch a review finding named as untested. An earlier draft OR-ed in
+  // `captured.startsWith(resolved.slice(0,8))`, which called this pair a match.
+  const sameFirstEight = 'af36577f' + 'deadbeef'.repeat(4)
+  assert.equal(describeDrift(sameFirstEight, PR_2114_MERGED_SHA).drifted, true)
+})
+
+test('no captured SHA means nothing to compare, and nothing is claimed', () => {
+  assert.deepEqual(describeDrift(undefined, PR_2114_MERGED_SHA), { drifted: false, checked: false })
 })

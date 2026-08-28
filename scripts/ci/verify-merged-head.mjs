@@ -25,7 +25,16 @@
 import { execFileSync } from 'node:child_process'
 
 // Conclusions that mean the job ran and said no.
+//
+// `stale` is deliberately here rather than beside `cancelled`. GitHub means "this
+// conclusion is out of date by something that happened later", which is closer in
+// spirit to superseded — but both buckets are non-green, and of the two, treating
+// an out-of-date verdict as a failure is the direction that cannot hand off a
+// broken `dev`. Reclassify it only with a real observation of one in this repo.
 const FAILING = new Set(['failure', 'timed_out', 'startup_failure', 'stale'])
+
+// Conclusions that mean the job ran and said yes.
+const PASSING = new Set(['success', 'neutral', 'skipped'])
 
 /**
  * Reduce a commit's check runs to one verdict.
@@ -39,24 +48,44 @@ const FAILING = new Set(['failure', 'timed_out', 'startup_failure', 'stale'])
  * Zero check runs is also not green. That is the #1777 parked-runs shape
  * (`total_count: 0` beside runs held at `action_required`), and "nothing said
  * no" has never been the same claim as "the blocking jobs passed".
+ *
+ * Every run lands in exactly one bucket, and the buckets are asserted to cover
+ * the input. An earlier draft whitelisted the passing conclusions and let the
+ * verdict DEFAULT to green, so a conclusion in none of the sets — `action_required`,
+ * which is `status: 'completed'` and therefore not pending either — fell through
+ * to GREEN and was omitted from every printed bucket, invisible. Found by review,
+ * not by the fixtures. A tool whose whole purpose is refusing to call an
+ * unverified commit green must not have a default-green path in it, so unknown
+ * conclusions are collected and reported rather than assumed benign.
  */
 export function verdictFor(checkRuns) {
   const runs = checkRuns ?? []
   const name = (r) => r.name ?? '(unnamed)'
+  const label = (r) => `${name(r)} (${r.conclusion ?? r.status})`
 
-  const failed = runs.filter((r) => FAILING.has(r.conclusion)).map(name).sort()
-  const cancelled = runs.filter((r) => r.conclusion === 'cancelled').map(name).sort()
+  const failed = runs.filter((r) => r.status === 'completed' && FAILING.has(r.conclusion)).map(name).sort()
+  const cancelled = runs.filter((r) => r.status === 'completed' && r.conclusion === 'cancelled').map(name).sort()
   const pending = runs.filter((r) => r.status !== 'completed').map(name).sort()
-  const succeeded = runs.filter((r) => r.conclusion === 'success' || r.conclusion === 'neutral' || r.conclusion === 'skipped').map(name).sort()
+  const succeeded = runs.filter((r) => r.status === 'completed' && PASSING.has(r.conclusion)).map(name).sort()
+  const unclassified = runs
+    .filter((r) => r.status === 'completed' && !FAILING.has(r.conclusion) && !PASSING.has(r.conclusion) && r.conclusion !== 'cancelled')
+    .map(label).sort()
+
+  // Totality: if this ever trips, a bucket was added without being counted.
+  const bucketed = failed.length + cancelled.length + pending.length + succeeded.length + unclassified.length
+  if (bucketed !== runs.length) {
+    throw new Error(`verdictFor bucketed ${bucketed} of ${runs.length} check runs — a conclusion is unaccounted for`)
+  }
 
   let verdict
   if (runs.length === 0) verdict = 'no-checks'
   else if (failed.length > 0) verdict = 'red'
+  else if (unclassified.length > 0) verdict = 'unclassified'
   else if (cancelled.length > 0) verdict = 'superseded'
   else if (pending.length > 0) verdict = 'pending'
   else verdict = 'green'
 
-  return { verdict, total: runs.length, failed, cancelled, pending, succeeded }
+  return { verdict, total: runs.length, failed, cancelled, pending, succeeded, unclassified }
 }
 
 /**
@@ -94,8 +123,14 @@ export function resolveVerificationTarget(pr) {
 export function describeDrift(captured, resolved) {
   if (!captured) return { drifted: false, checked: false }
   const short = (s) => s.slice(0, 8)
-  // Accept an abbreviated captured SHA — that is how they get pasted around.
-  const drifted = !resolved.startsWith(captured) && !captured.startsWith(short(resolved))
+  // `resolved` always arrives full-length from `gh pr view`, so a prefix test
+  // alone accepts every legitimate abbreviated `captured` — that is how SHAs get
+  // pasted around. An earlier draft OR-ed in `captured.startsWith(short(resolved))`
+  // as well; that clause can only fire when `captured` is longer than 8 chars and
+  // diverges after position 8, i.e. two genuinely different commits sharing an
+  // 8-char prefix — where it would report "no drift". Strictly more permissive,
+  // never more correct, so it is gone (review finding).
+  const drifted = !resolved.startsWith(captured)
   return { drifted, checked: true, captured, resolved, message: drifted
     ? `STALE: the SHA you captured (${captured}) is NOT the merged head (${short(resolved)}). Anything you concluded from it describes a commit that never merged.`
     : `The captured SHA matches the merged head (${short(resolved)}).` }
@@ -128,6 +163,11 @@ export async function main(argv) {
   console.log(`PR #${prNumber} — ${pr.title ?? ''}`)
   console.log(`state: ${target.state}   head SHA (re-read now): ${target.sha}`)
   if (target.mergeCommit) console.log(`merge commit: ${target.mergeCommit}`)
+  if (!target.merged) {
+    // Useful pre-merge, but say so: the head can still move before it lands, so
+    // this is a snapshot, not the post-merge verification the rule asks for.
+    console.log('note: this PR is NOT merged. Re-run after the merge — the head can still move.')
+  }
 
   if (expect) {
     const drift = describeDrift(expect, target.sha)
@@ -141,6 +181,7 @@ export async function main(argv) {
   if (result.failed.length) console.log(`  FAILED:    ${result.failed.join(', ')}`)
   if (result.cancelled.length) console.log(`  CANCELLED: ${result.cancelled.join(', ')}`)
   if (result.pending.length) console.log(`  PENDING:   ${result.pending.join(', ')}`)
+  if (result.unclassified.length) console.log(`  UNKNOWN:   ${result.unclassified.join(', ')}`)
 
   switch (result.verdict) {
     case 'green':
@@ -150,6 +191,11 @@ export async function main(argv) {
       console.log('\n🔁 SUPERSEDED — cancelled runs on the head SHA. A newer run for this PR')
       console.log('   replaced them (concurrency: CI-<pr>, cancel-in-progress). This is NOT a pass')
       console.log(`   and NOT a failure. Cross-check with: gh run list --commit ${target.sha.slice(0, 8)}`)
+      return 1
+    case 'unclassified':
+      console.log('\n❓ UNKNOWN CONCLUSION on the merged head — a check run reported something')
+      console.log('   this tool does not classify (e.g. action_required, a run held for approval).')
+      console.log('   NOT a pass. Read the run itself before reporting this PR shipped.')
       return 1
     case 'pending':
       console.log('\n⏳ PENDING — checks still running on the merged head. Not verified yet.')

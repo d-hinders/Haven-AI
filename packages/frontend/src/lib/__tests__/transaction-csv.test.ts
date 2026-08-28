@@ -48,7 +48,7 @@ describe('transactionsToCsv', () => {
     expect(rows(csv)[0]).toBe(
       'date,type,status,direction,amount,token_symbol,token_address,' +
         'counterparty_address,counterparty_name,safe_address,agent_name,tx_hash,chain_id,' +
-        'amount_sek,fee_sek',
+        'amount_sek,fee_sek,initiator',
     )
   })
 
@@ -110,6 +110,17 @@ describe('transactionsToCsv', () => {
     // null SEK (non-machine transfer) → empty cell
     const noSek = transactionsToCsv([tx({ amountSek: null })], noNames)
     expect(cells(rows(noSek)[1])[13].replace(/"/g, '')).toBe('')
+  })
+
+  // #2097 — the initiator column carries the raw attribution enum from the
+  // unified schema, never the display string "You".
+  it('emits the initiator attribution enum — never "You"', () => {
+    const i = (o: Partial<AggregatedTransaction>) =>
+      cells(rows(transactionsToCsv([tx(o)], noNames))[1])[15].replace(/"/g, '')
+    expect(i({})).toBe('') // no attribution recorded → intentionally empty
+    expect(i({ initiatedBy: 'agent' })).toBe('agent')
+    expect(i({ initiatedBy: 'human' })).toBe('human')
+    expect(i({ initiatedBy: 'unknown' })).toBe('unknown')
   })
 
   it('escapes embedded quotes and neutralises spreadsheet formula injection', () => {

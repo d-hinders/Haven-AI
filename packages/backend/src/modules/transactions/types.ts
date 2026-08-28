@@ -31,6 +31,24 @@ export interface Transaction {
   activityType?: 'delegate_sweep'
   /** Book-time SEK value (P0 #463); null for non-machine / unpriced transactions. */
   amountSek?: string | null
+  /**
+   * Who initiated the money movement that produced this row — recorded by
+   * the backend (#2097), never derived in the frontend.
+   *
+   * - `'agent'`: the row carries agent attribution — confirmed x402 payment
+   *   intents, delegate sweeps, and raw explorer / Safe-service transfers
+   *   matched to a confirmed intent or sweep during enrichment
+   *   (`enrichTransactionsWithAgents`).
+   * - `'human'`: reserved. Nothing populates it today — no
+   *   dashboard-initiated send path exists (the mpp demo and `/send` were
+   *   retired), so no row can currently claim a human initiator.
+   * - `'unknown'`: an OUTBOUND raw transfer that stayed unattributed — no
+   *   matched intent or sweep.
+   *
+   * Absent (undefined) for inbound (`direction: 'in'`) rows, which have no
+   * initiator record at all.
+   */
+  initiatedBy?: 'agent' | 'human' | 'unknown'
 }
 
 export interface EnrichedTransaction extends Transaction {

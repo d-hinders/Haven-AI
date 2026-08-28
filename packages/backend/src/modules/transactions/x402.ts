@@ -70,6 +70,9 @@ export async function fetchConfirmedX402Transactions(
       paymentAttentionReason: lifecycle.paymentAttentionReason,
       amountSek: row.amount_sek,
       settlementScheme: row.settlement_scheme,
+      // #2097: confirmed x402 rows are agent-attributed by construction (the
+      // SQL joins `agents`), so the initiator record is always 'agent'.
+      initiatedBy: 'agent',
     }
   })
 

@@ -15,7 +15,9 @@ import {
   assertServerSlugAvailable,
   defaultCredentialRoot,
   preflightCredentialStorage,
+  writeConnectOutcomeRecord,
   writeCredentialFiles,
+  CONNECT_OUTCOME_FILENAME,
   type StoredCredentialPaths,
 } from './storage.js'
 import {
@@ -98,6 +100,27 @@ export interface ConnectOutcome {
   delegate_address?: string
   setup_challenge_expires_at?: string
   /**
+   * #2173, additive within schema_version 1. Both are present on a completed
+   * run and absent on `failedConnectOutcome`, which by construction has
+   * neither a registration nor a credential scan behind it.
+   *
+   * `hosted_mcp_url` is the endpoint Connect actually wrote into the runtime's
+   * MCP config. It is deliberately NOT the `--api` backend URL: the hosted MCP
+   * server is a separate deployment, and an automation caller comparing the
+   * two used to read that intentional topology as an environment mismatch. It
+   * is non-secret — the same string already sits in the user's own config file
+   * — and carries no credential; the API key travels beside it in a header.
+   *
+   * `superseded_agent_ids` is the #1688 heads-up made structural: previously
+   * it was prose on stderr, so a `--json` caller could not see that the run it
+   * just completed left older agents alive with their own keys. Empty on a
+   * clean first run. An empty list is NOT proof of a clean machine — a scan
+   * that cannot read the credential root also yields an empty list, and the
+   * connector prefers that to failing a completed setup.
+   */
+  hosted_mcp_url?: string
+  superseded_agent_ids?: readonly string[]
+  /**
    * #2091, additive within schema_version 1: `message` is the redacted human
    * refusal (automation used to get code + next_action and nothing to act
    * on), and `allowed_runtimes` carries the valid `--runtime` retry values on
@@ -131,6 +154,12 @@ export interface ConnectDeps {
   isTty?: boolean
   /** Overridable so the #1719 installed-client prompt is testable without readline. */
   promptRuntime?: () => Promise<RuntimeId>
+  /**
+   * Overridable so the #2173 recovery-record write is testable without a real
+   * credential directory — and so a FAILING writer can be injected to prove
+   * that a broken record write never fails a completed setup.
+   */
+  writeOutcomeRecord?: typeof writeConnectOutcomeRecord
 }
 
 export interface ConnectResult {
@@ -142,7 +171,62 @@ export interface ConnectResult {
   outcome: ConnectOutcome
 }
 
+/**
+ * What a failing run has to hand back to the wrapper below (#2173).
+ *
+ * The failure record has to reach the same recovery file as the success
+ * record, and the only place the credential directory exists is inside the
+ * run. Reporting it into this box as soon as it exists keeps the whole body
+ * un-indented; the wrapper writes the failure outcome there and re-throws the
+ * error unchanged.
+ *
+ * A refusal that happens BEFORE credentials are written — `runtime_undetermined`,
+ * an expired setup challenge, the Node floor — leaves the box empty by
+ * construction. There is no directory to write into, and nothing was created
+ * that a caller could need to recover.
+ */
+interface ConnectRunTrace {
+  directory?: string
+  runtime?: string
+}
+
 export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}): Promise<ConnectResult> {
+  const trace: ConnectRunTrace = {}
+  try {
+    return await executeConnect(options, deps, trace)
+  } catch (err) {
+    if (trace.directory) {
+      await recordConnectOutcome(deps, trace.directory, failedConnectOutcome(trace.runtime ?? options.runtime, err))
+    }
+    throw err
+  }
+}
+
+/**
+ * Park the terminal outcome where a caller that lost the stream can read it.
+ *
+ * Best-effort, and the swallow lives HERE rather than in the writer: the setup
+ * has already either succeeded or failed for its own reason by the time this
+ * runs, and neither verdict may be changed by a filesystem write that exists
+ * only as a convenience.
+ */
+async function recordConnectOutcome(
+  deps: ConnectDeps,
+  directory: string,
+  outcome: ConnectOutcome,
+): Promise<string | undefined> {
+  try {
+    return await (deps.writeOutcomeRecord ?? writeConnectOutcomeRecord)(directory, outcome)
+  } catch {
+    return undefined
+  }
+}
+
+async function executeConnect(
+  options: ConnectOptions,
+  deps: ConnectDeps,
+  trace: ConnectRunTrace,
+): Promise<ConnectResult> {
   // FIRST, before anything with a side effect (#1161).
   //
   // This runs ahead of the setup-token resolve, the storage preflight, key
@@ -210,6 +294,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     )
   }
   const runtime = selection.runtime
+  trace.runtime = runtime
   const installCapabilities = runtimeInstallCapabilities(runtime)
 
   if (options.localMcp) {
@@ -333,6 +418,8 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     x402BindingSigner: setup.x402_binding_signer ?? undefined,
     warn: log,
   })
+  // From here on a failure has somewhere to leave its verdict (#2173).
+  trace.directory = credentialPaths.directory
   log(`Stored Haven identity credential locally: ${credentialPaths.identityPath}`)
   log(`Stored local signer credential locally: ${credentialPaths.signerPath}`)
   log(`Stored non-secret agent orientation locally: ${credentialPaths.agentPath}`)
@@ -408,12 +495,13 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   // started before this run keeps spending as that agent. Name the superseded
   // agents here, at the moment the user is watching, with the one action only
   // they can take. Connect never revokes or deletes credentials itself.
+  let supersededAgentIds: string[] = []
   try {
-    const supersededIds = await listOtherAgentIds(options.credentialsDir, credentialPaths.directory)
-    if (supersededIds.length > 0) {
+    supersededAgentIds = await listOtherAgentIds(options.credentialsDir, credentialPaths.directory)
+    if (supersededAgentIds.length > 0) {
       log('')
       log(
-        `Heads-up: this setup created a NEW agent. Your previous agent(s) — ${supersededIds.join(', ')} — ` +
+        `Heads-up: this setup created a NEW agent. Your previous agent(s) — ${supersededAgentIds.join(', ')} — ` +
           'still exist with their own keys, and any host that was already running keeps acting as them.',
       )
       log(
@@ -425,7 +513,11 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
       )
     }
   } catch {
-    // Best-effort — never let the heads-up break a completed setup.
+    // Best-effort — never let the heads-up break a completed setup. The
+    // outcome's `superseded_agent_ids` then reports the empty list, the same
+    // thing a genuinely clean machine reports: a scan that could not run is
+    // not evidence, and the field's doc comment says so rather than letting a
+    // caller read emptiness as a guarantee.
   }
 
   // Report the completed runtime state before polling for budget approval.
@@ -473,23 +565,39 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
 
   printNextSteps(runtimeInstall, log, approval)
 
+  const outcome = completionOutcome({
+    runtimeInstall,
+    delegateAddress: registration.delegate_address,
+    hostedMcpUrl: registration.hosted_mcp_url,
+    supersededAgentIds,
+    setupChallengeExpiresAt: setup.challenge.expires_at,
+    approvalRequired: registration.agent_status === 'pending_approval',
+  })
+
+  // #2173: park the verdict on disk before returning it. A harness whose watch
+  // window closed during the cold signer install gets the same object here that
+  // it missed on stdout — including the restart instruction and the read-only
+  // verification sequence. The FILENAME only: the credential directory is
+  // deliberately withheld from `--json` output, and naming it on the progress
+  // stream would put back what `redactPaths` takes out.
+  if (await recordConnectOutcome(deps, credentialPaths.directory, outcome)) {
+    log(`Saved this run's outcome to ${CONNECT_OUTCOME_FILENAME} in the agent's credential directory.`)
+  }
+
   return {
     setupId: registration.setup_id,
     agentId: registration.agent_id,
     delegateAddress: registration.delegate_address,
     credentialPaths,
-    outcome: completionOutcome({
-      runtimeInstall,
-      delegateAddress: registration.delegate_address,
-      setupChallengeExpiresAt: setup.challenge.expires_at,
-      approvalRequired: registration.agent_status === 'pending_approval',
-    }),
+    outcome,
   }
 }
 
 export function completionOutcome(input: {
   runtimeInstall: RuntimeInstallResult
   delegateAddress: string
+  hostedMcpUrl?: string
+  supersededAgentIds?: readonly string[]
   setupChallengeExpiresAt?: string
   approvalRequired: boolean
 }): ConnectOutcome {
@@ -525,6 +633,15 @@ export function completionOutcome(input: {
     delegate_address: /^0x[0-9a-fA-F]{40}$/.test(input.delegateAddress)
       ? shortAddress(input.delegateAddress)
       : '[delegate-address-redacted]',
+    // The endpoint Connect wrote into the runtime's MCP config, verbatim — the
+    // same string that already sits in the user's own config file. Passed
+    // through the secret filter anyway: this is the automation contract, the
+    // value is server-supplied, and belts are cheap (the #1589 stance).
+    ...(input.hostedMcpUrl ? { hosted_mcp_url: redactSecrets(input.hostedMcpUrl) } : {}),
+    // Always emitted on a completed run, empty list included: "no superseded
+    // agents" is a fact a caller needs, and an omitted key would be
+    // indistinguishable from an older connector that never reported it.
+    superseded_agent_ids: input.supersededAgentIds ?? [],
     ...(input.setupChallengeExpiresAt ? { setup_challenge_expires_at: input.setupChallengeExpiresAt } : {}),
     ...(runtimeInstall.errorCode
       ? { error: { code: runtimeInstall.errorCode, next_action: nextAction } }

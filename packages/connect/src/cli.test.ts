@@ -305,3 +305,33 @@ describe('--doctor per-agent output (#1697)', () => {
     }
   })
 })
+
+describe('the --json outcome carries the recovery fields (#2173)', () => {
+  // The stdout line is the contract an automation caller parses. These two
+  // fields answer the questions the 2026-08-28 field test had to answer by
+  // hand: which MCP endpoint was actually wired, and what the run superseded.
+  it('emits hosted_mcp_url and superseded_agent_ids verbatim on stdout', async () => {
+    const stdout: string[] = []
+    const spy = vi.spyOn(runtime, 'runConnect').mockResolvedValue({
+      outcome: {
+        schema_version: 1,
+        outcome: 'complete',
+        hosted_mcp_url: 'https://mcp.haven.example/v1',
+        superseded_agent_ids: ['agent-0'],
+      },
+    } as never)
+    try {
+      const exitCode = await runCli(
+        ['--setup', 'hv_setup_x', '--api', 'https://api.haven.example', '--json'],
+        { stdout: (message) => stdout.push(message), stderr: () => undefined },
+      )
+      expect(exitCode).toBe(0)
+      expect(JSON.parse(stdout[0])).toMatchObject({
+        hosted_mcp_url: 'https://mcp.haven.example/v1',
+        superseded_agent_ids: ['agent-0'],
+      })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})

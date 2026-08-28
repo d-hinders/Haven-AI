@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
   - docs/operations/dev-environment.md
-last-verified: "2026-08-10" # re-verified for #1266 demo merchant x402 settlement selection/canary posture
+last-verified: "2026-08-28" # #2151: the migration checklist re-read for hot-table lock availability; adds the lock-duration question and its pre-build/low-traffic mitigations. Prior: re-verified for #1266 demo merchant x402 settlement selection/canary posture
 ---
 
 # Promoting `dev → main` (production release)
@@ -52,6 +52,11 @@ for how the environments are wired, see
 - [ ] **Migrations:** list every migration included since the last promotion.
       Confirm each is **forward-only / safe on existing rows**, and that a
       **prod DB snapshot** exists before they run on deploy.
+- [ ] **Migration availability:** does any migration build an index, rewrite a
+      table, or otherwise hold a lock on a hot table? If so, record the expected
+      lock duration and mitigation: pre-build the migration's index under the
+      same name, out of band with `CREATE INDEX CONCURRENTLY`, so the deploy's
+      `IF NOT EXISTS` is a no-op, or use a low-traffic deployment window.
 - [ ] **No dev-only config leaks into prod:** production leaves
       `NEXT_PUBLIC_HAVEN_ENV` unset (no `DEV` badge) and keeps its own
       secrets / relayer key / RPCs (these live on the platforms, not in code —

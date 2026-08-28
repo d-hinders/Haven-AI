@@ -103,6 +103,35 @@ minutes. Two rules follow:
    agent on the Haven agent page yourself. Delete the tombstone only once every
    long-lived host has been restarted.
 
+### Unwiring an agent (`--unwire`, #2169)
+
+Connect has always been able to *write* a pair into a runtime config and never
+able to *erase* one — so a "reset" left the old `mcp_servers` pair and (on
+Hermes) the `MCP_HAVEN_API_KEY` dotenv line behind, and the runtime quoted as
+one agent while signing as another. `--unwire` is the erase half:
+
+```
+npx @haven_ai/connect@alpha --unwire ~/.haven/agents/<id> [--reason "..."]
+npx @haven_ai/connect@alpha --unwire --name research [--reason "..."]
+```
+
+It tombstone-first (so a stale long-lived host still hears `HAVEN-TOMBSTONE`,
+never a masked `ENOENT`), then removes THAT agent's hosted + signer pair from
+every runtime config it appears in (Hermes YAML, Codex TOML, the Cursor / VS
+Code / Insiders / Claude Desktop JSON configs), plus the Hermes dotenv API-key
+line — bare `MCP_HAVEN_API_KEY` or named `MCP_HAVEN_<SLUG>_API_KEY`. Finally it
+tears down the target directory's local key material (signer key, any abandoned
+re-key, the stored API key) so `--doctor` reports `retired`, not the
+still-spend-capable `superseded`; the #2155 tombstone mirror keeps the record.
+
+An **unnamed** pair (`haven` / `haven-signer`) is shared by every unnamed agent
+and is only removed when this directory's wrapper is the one the config
+launches (or its key is the one the Hermes env holds) — otherwise `--unwire`
+**refuses** rather than unwire a different, working agent. Nothing is ever
+revoked on the backend; `connect reports, the user decides` (#1688) survives,
+and revocation stays an owner action on the Haven agent page. Restart every
+long-lived host afterwards, as with any retirement.
+
 ### Structured output for automation
 
 Pass `--json` when a launcher needs a machine-readable completion record. Connect

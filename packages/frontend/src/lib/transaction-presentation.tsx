@@ -17,12 +17,27 @@ export function transactionTitle(tx: AggregatedTransaction): string {
   if (sourceTitle && tx.agentName) return `${sourceTitle} by ${tx.agentName}`
   if (sourceTitle) return sourceTitle
   if (tx.agentName) return `Agent payment by ${tx.agentName}`
-  return 'Payment sent by you'
+  // "Payment sent by you" is reserved for human-initiated payments; a row
+  // with no human marker renders neutral copy — the Initiator field carries
+  // the attribution state (#2097).
+  if (tx.initiatedBy === 'human') return 'Payment sent by you'
+  return 'Payment sent'
 }
 
+/**
+ * Who initiated the row (#2097). "You" is reserved for human-initiated
+ * payments (`initiatedBy === 'human'`); agent rows render the agent identity;
+ * inbound rows carry no initiator; and missing attribution renders as
+ * explicit "Unknown" — never "You".
+ */
 export function transactionInitiator(tx: AggregatedTransaction): string {
-  if (isDelegateSweep(tx)) return tx.agentName ?? 'Agent'
-  return tx.agentName ?? (tx.direction === 'in' ? '' : 'You')
+  // Delegate sweeps are agent-attributed regardless of direction — they read
+  // as inbound rows (funds recovered TO the Haven wallet), so the sweep check
+  // must precede the direction check.
+  if (isDelegateSweep(tx)) return tx.agentName ?? 'Unknown'
+  if (tx.direction === 'in') return ''
+  if (tx.initiatedBy === 'human') return 'You'
+  return tx.agentName ?? 'Unknown'
 }
 
 export function transactionStatus(

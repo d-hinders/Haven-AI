@@ -93,9 +93,16 @@ export async function enrichTransactionsWithAgents(
       const agent = agentByTransactionIdentity.get(
         paymentAgentIdentityKey(tx.hash, tx.safeId, tx.chainId),
       )
+      // #2097: the initiator record follows the EFFECTIVE attribution — an
+      // agent matched here, or one already on the row (confirmed x402 rows
+      // arrive pre-attributed from `mergeX402Transactions`), makes the row
+      // 'agent'. An outbound row that stays unattributed is a raw transfer
+      // with no matched intent — 'unknown'. Inbound rows carry no initiator
+      // record (undefined).
+      const attributedAgentId = agent?.id ?? tx.agentId
       return {
         ...tx,
-        agentId: agent?.id ?? tx.agentId,
+        agentId: attributedAgentId,
         agentName: agent?.name ?? tx.agentName,
         source: agent?.source ?? tx.source,
         x402ResourceUrl: agent?.resourceUrl ?? tx.x402ResourceUrl,
@@ -107,9 +114,21 @@ export async function enrichTransactionsWithAgents(
         activityType: agent?.activityType ?? tx.activityType,
         amountSek: agent?.amountSek ?? tx.amountSek,
         settlementScheme: agent?.settlementScheme ?? tx.settlementScheme,
+        initiatedBy: attributedAgentId
+          ? 'agent'
+          : tx.direction === 'out'
+            ? 'unknown'
+            : undefined,
       }
     })
   } catch {
+    // #2097: on any DB/repo failure the rows are returned UNMODIFIED — a
+    // matched agent keeps its agentId/agentName but no `initiatedBy`
+    // classification is stamped. Deliberate and fail-soft: the frontend's
+    // initiator helper degrades to explicit 'Unknown' on a missing record,
+    // never 'You', so an enrichment outage cannot falsely claim a human
+    // initiator. The trade is that unknown-vs-agent goes unreported here;
+    // keep the two in agreement if this path ever gets a logger.
     return transactions
   }
 }

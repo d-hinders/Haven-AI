@@ -782,12 +782,21 @@ answer split into two:
   (`packages/sdk/src/merchant-completion.ts`), written when the agent retries
   and is rejected — so it cannot fire for an agent that never came back.
 
-One correction to point 3 above, verified repo-wide: `'executed'` does not
-appear anywhere in backend production code, not merely in no reachable branch.
-It was an `approval_requests` status and #2055 dropped that table, so the SDK's
-`executed` → `retry_original_x402_request` mapping reads a value the backend
-cannot construct — the value is unreachable on the pay/sign response path as
-well as on the status route.
+One correction to point 3 above: `'executed'` is not merely unreachable on the
+status route, it cannot be constructed at all. It was an `approval_requests`
+status and #2055 dropped that table, so the SDK's `executed` →
+`retry_original_x402_request` mapping reads a value the backend cannot produce —
+the value is unreachable on the pay/sign response path as well as on the status
+route.
+
+Stated that way deliberately. An earlier draft of this paragraph said
+`'executed'` "does not appear anywhere in backend production code", which is
+false: `packages/core/src/machine-payment-lifecycle.ts` compares against it in a
+live, backend-called branch. That branch is *vacuous* — the five-literal status
+domain proved above means nothing ever satisfies it — so the conclusion holds,
+but the sentence did not. It was written from a grep of `packages/backend/src`
+and generalised to code the grep never covered; the shared kernel is consumed by
+the backend but does not live there. Caught by `haven-doc-reviewer` on #2131.
 
 ## Which Address A Merchant Sees, And Mapping It Back (#1472)
 

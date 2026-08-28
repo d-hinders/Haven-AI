@@ -142,16 +142,47 @@ budget-approval wait so the record is emitted promptly; approve in the Haven
 dashboard whenever ready and verify later with the read-only `haven_get_agent`
 tool. The object includes runtime/topology status,
 probe result, activation and next-action guidance, approval state/expiry (null
-when the backend does not provide an approval expiry), and the two
-read-only verification tools. It contains no API key, private key, credential
+when the backend does not provide an approval expiry), the two
+read-only verification tools, `hosted_mcp_url`, and `superseded_agent_ids`. It
+contains no API key, private key, credential
 contents, full credential paths, or full delegate address. The same redacted
 object is available to library callers as `runConnect(...).outcome`; the older
 fields remain for additive compatibility.
+
+`hosted_mcp_url` is the hosted MCP endpoint this run wired up — **not** the
+backend URL you passed as `--api`. The hosted MCP server is a separate
+deployment, so the two differing is intended topology, not an environment
+mismatch. It is non-secret: the same string goes into your own MCP config file,
+and the API key travels beside it in a header.
+
+`superseded_agent_ids` lists the other agent directories on this machine. A
+re-run mints a NEW agent and retires nothing, so those older agents still hold
+live API and signing keys — revoke them on the Haven agent page if you meant to
+replace them. Empty on a clean first run; an empty list is not a guarantee,
+since a scan that cannot read the credential root also yields one rather than
+failing a completed setup.
 
 For a recoverable install, configuration, probe, consent, or manual-runtime
 condition, inspect `error.code` and `error.next_action`, then follow the safe
 next action. A failed setup emits `outcome: "failed"` with a stable error code;
 it never presents credential material as a recovery diagnostic.
+
+### Recovering the record after a lost stream
+
+Connect also writes its terminal outcome to `last-connect-outcome.json` in the
+agent's credential directory (`~/.haven/agents/<slug-or-agent-id>/`) — the same
+object, pretty-printed, for every terminal state. **If your harness stopped
+watching before the connector finished, read that file rather than guessing
+from your runtime's MCP listing.** A first run downloads and installs the
+signer, which can take several minutes on a cold cache; a command harness that
+gives up during it sees the install heartbeat as the last line and never the
+verdict. The setup usually finished.
+
+A refusal that happens before any credentials are written (an undetermined
+runtime, an expired setup challenge, an unsupported Node) writes no file,
+because nothing was created that could need recovering. The write is
+best-effort and never changes the verdict: a setup that completed stays
+completed even if the record could not be written.
 
 If the setup challenge expires, return to Haven to start a fresh connection and
 rerun Connect. If a runtime write, installation, or probe fails, follow the

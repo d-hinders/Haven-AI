@@ -244,6 +244,34 @@ describe('--tombstone (#1681)', () => {
     expect(stdout[0]).not.toContain('sk_agent_x')
   })
 
+  // #2175, the field defect: stdout carried NOTHING on a refused retirement,
+  // so a --json caller parsing stdout saw the same empty result it would see
+  // for a run whose stream it had simply stopped reading. "No output" has to
+  // mean "no output", not "it failed and you cannot tell".
+  it('--json emits a failure record on stdout when the directory does not exist', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'haven-cli-tombstone-missing-'))
+    const stdout: string[] = []
+    const stderr: string[] = []
+
+    const exitCode = await runCli(['--tombstone', join(tempDir, 'agt_1b8d4f60'), '--json'], {
+      stdout: (m) => stdout.push(m), stderr: (m) => stderr.push(m),
+    })
+
+    expect(exitCode).toBe(1)
+    // stdout stays exactly one pure-JSON line, the same discipline #2091 gave
+    // the main connect path.
+    expect(stdout).toHaveLength(1)
+    expect(JSON.parse(stdout[0])).toMatchObject({
+      tombstoned: false,
+      error: {
+        code: 'tombstone_directory_not_found',
+        next_action: 'retry_with_an_existing_agent_directory',
+      },
+    })
+    // And the prose is still mirrored to stderr rather than being replaced.
+    expect(stderr.join('')).toMatch(/Not a directory/)
+  })
+
   it('a directory with unreadable identity is still retired, named unknown', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'haven-cli-tombstone-bare-'))
     const dir = join(tempDir, 'mystery')

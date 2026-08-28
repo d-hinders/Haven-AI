@@ -9,6 +9,7 @@
  * revokes.
  */
 import { describe, it, expect } from 'vitest'
+import { ConnectError, isConnectError } from './connect-error.js'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -166,6 +167,28 @@ describe('review hardening (#1681 findings 1 and 3)', () => {
     await expect(
       writeAgentTombstone({ directory: join(dir, 'no-such-agent'), agentId: AGENT, reason: 'x', tombstonesDir: await tempTombstonesDir() }),
     ).rejects.toThrow(/Not a directory/)
+  })
+
+  // #2175: the refusal an automating caller actually hits. A `haven-reset`
+  // agent built the path from the AGENT ID while the directory was slug-named
+  // (#1696), so this fired — and with only a bare Error to go on, the caller
+  // could not tell "wrong path" from any other reason nothing was retired.
+  it('refuses with a stable code and says WHY the path may be wrong', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-tombstone-code-'))
+    const error = await writeAgentTombstone({
+      directory: join(dir, 'agt_1b8d4f60'),
+      agentId: AGENT,
+      reason: 'haven-reset',
+      tombstonesDir: await tempTombstonesDir(),
+    }).catch((err: unknown) => err)
+
+    expect(isConnectError(error)).toBe(true)
+    expect((error as ConnectError).code).toBe('tombstone_directory_not_found')
+    expect((error as ConnectError).nextAction).toBe('retry_with_an_existing_agent_directory')
+    // The message has to name the slug-vs-id trap, because that is the one
+    // thing the caller cannot deduce from "not a directory".
+    expect((error as ConnectError).message).toMatch(/named by their wiring SLUG/)
+    expect((error as ConnectError).message).toMatch(/will not exist for a named agent/)
   })
 })
 

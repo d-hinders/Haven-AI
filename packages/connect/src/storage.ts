@@ -571,3 +571,47 @@ async function restrictPermissions(
     )
   }
 }
+
+// ── The recovery record (#2173) ─────────────────────────────────────────────
+
+/**
+ * Where the terminal `ConnectOutcome` is parked so a caller that lost the
+ * stream can still read the verdict.
+ *
+ * The field failure this exists for (2026-08-28, connector 0.1.31-alpha.0):
+ * setup SUCCEEDED, but the agent driving it stopped watching during the cold
+ * signer install, so the connector's final `--json` object — the only place
+ * the restart instruction and the read-only verification sequence live — was
+ * emitted into a stream nobody was reading. The agent reverse-engineered
+ * completion from `codex mcp list` instead.
+ */
+export const CONNECT_OUTCOME_FILENAME = 'last-connect-outcome.json'
+
+/**
+ * Persist the terminal outcome next to the credentials it describes.
+ *
+ * Non-secret by construction: the content is exactly the object already
+ * emitted on stdout, whose secret-freedom is pinned by its own tests. This
+ * function never reads or embeds credential-file contents — it serializes what
+ * it is handed and nothing else. Written 0o600 anyway, because it lives inside
+ * a 0o700 credential directory and there is no reason to widen it.
+ *
+ * Overwrites, unlike every other write in this file: "the last outcome" is a
+ * single slot, not a credential, so `assertDoesNotExist` would be wrong here —
+ * a stale verdict left in place is exactly the failure the file exists to
+ * prevent.
+ *
+ * Throws on failure. Best-effort is the CALLER's contract (`runConnect` wraps
+ * both call sites), so that a test can inject a writer that fails and still
+ * assert the run completes.
+ */
+export async function writeConnectOutcomeRecord(
+  directory: string,
+  outcome: unknown,
+  warn?: (message: string) => void,
+): Promise<string> {
+  const path = join(directory, CONNECT_OUTCOME_FILENAME)
+  await writeFile(path, `${JSON.stringify(outcome, null, 2)}\n`, { mode: 0o600 })
+  await restrictPermissions(path, 0o600, warn)
+  return path
+}

@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ConnectRequestError } from './api.js'
 import type { ConnectApiClient, ConnectorStatusResponse, RegisterSetupInput, UpdateInstallStatusInput } from './api.js'
 import { delegateKeyFromPrivateKey } from './key.js'
-import { completionHandoffLines, failedConnectOutcome, runConnect, waitForBudgetApproval } from './runtime.js'
+import { completionHandoffLines, failedConnectOutcome, failureOutcomeFor, runConnect, waitForBudgetApproval } from './runtime.js'
+import type { ConnectDeps } from './runtime.js'
+import { CONNECT_OUTCOME_FILENAME } from './storage.js'
 import { ConnectError } from './connect-error.js'
 import { RUNTIME_FLAG_VALUE_LIST } from './runtime-registry.js'
 import type { RuntimeInstallResult } from './runtime-install.js'
@@ -1989,3 +1991,319 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
   })
 })
 
+
+// #2173: the terminal outcome has to survive a caller that stopped watching
+// the stream. Two halves — what the record SAYS (the hosted endpoint and the
+// superseded agents, both previously stderr-prose or nothing at all) and where
+// it LIVES (a file beside the credentials it describes).
+describe('runConnect terminal outcome record (#2173)', () => {
+  const HOSTED_MCP_URL = 'https://mcp.haven.example/v1'
+  const API_BASE_URL = 'https://api.haven.example'
+  const AGENT_API_KEY = 'sk_agent_supersecret'
+
+  function outcomeApi(): ConnectApiClient {
+    return {
+      resolveSetup: vi.fn(async () => ({
+        setup_id: 'setup-1',
+        status: 'awaiting_connection',
+        agent: { name: 'Research Agent' },
+        haven_wallet: {
+          id: 'safe-1',
+          name: 'Main Haven wallet',
+          address: '0x2222222222222222222222222222222222222222',
+          chain_id: 8453,
+          network: 'Base',
+        },
+        agent_budget: [],
+        hosted_mcp_url: HOSTED_MCP_URL,
+        challenge: {
+          id: 'challenge-1',
+          message: 'Haven Connect Agent 2\nsetup_id: setup-1',
+          expires_at: '2099-01-01T00:00:00.000Z',
+        },
+      })),
+      registerSetup: vi.fn(async (input: RegisterSetupInput) => ({
+        setup_id: 'setup-1',
+        agent_id: 'agent-1',
+        status: 'connected_local',
+        agent_status: 'active',
+        api_key_prefix: input.apiKeyPrefix,
+        api_key_scope: 'setup_pending',
+        delegate_address: input.delegateAddress.toLowerCase(),
+        hosted_mcp_url: HOSTED_MCP_URL,
+        next_action: 'activate_runtime',
+      })),
+      updateInstallStatus: vi.fn(async () => undefined),
+      getConnectorStatus: vi.fn(),
+      getAgentIdentity: vi.fn(),
+    }
+  }
+
+  /**
+   * A `writeCredentials` stand-in that really creates the agent directory, so
+   * the production outcome writer has somewhere real to write and the #1688
+   * scan has something real to read. Only the credential CONTENTS are faked.
+   */
+  function credentialWriter(root: string) {
+    return async () => {
+      const directory = join(root, 'agent-1')
+      await mkdir(directory, { recursive: true })
+      await writeFile(join(directory, 'identity.json'), JSON.stringify({ agent_id: 'agent-1' }))
+      return {
+        directory,
+        identityPath: join(directory, 'identity.json'),
+        signerPath: join(directory, 'signer.json'),
+        agentPath: join(directory, 'agent.json'),
+      }
+    }
+  }
+
+  async function runInto(root: string, overrides: Partial<ConnectDeps> = {}) {
+    return runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: API_BASE_URL,
+      runtime: 'claude-code',
+      credentialsDir: root,
+      waitForApproval: false,
+    }, {
+      api: outcomeApi(),
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => AGENT_API_KEY,
+      preflightStorage: vi.fn(async () => root),
+      writeCredentials: credentialWriter(root),
+      installRuntime: vi.fn(async () => completedInstall('claude-code')),
+      log: () => undefined,
+      ...overrides,
+    })
+  }
+
+  async function readRecord(root: string): Promise<unknown> {
+    return JSON.parse(await readFile(join(root, 'agent-1', CONNECT_OUTCOME_FILENAME), 'utf8'))
+  }
+
+  it('reports the hosted MCP endpoint, which is deliberately not the --api backend URL', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+
+    const { outcome } = await runInto(root)
+
+    expect(outcome.hosted_mcp_url).toBe(HOSTED_MCP_URL)
+    // The whole point of the field: a caller comparing the two used to read
+    // this intentional topology as an environment mismatch.
+    expect(outcome.hosted_mcp_url).not.toBe(API_BASE_URL)
+  })
+
+  it('reports an empty superseded list on a clean first run', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+
+    const { outcome } = await runInto(root)
+
+    expect(outcome.superseded_agent_ids).toEqual([])
+  })
+
+  it('names the agents this run superseded, excluding by directory rather than id (#1696)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+    // A previous run's directory, and a named (slug-keyed) one whose directory
+    // name can never equal its agent id — the #1696 case an id comparison
+    // would misreport as superseded.
+    await mkdir(join(root, 'agent-0'), { recursive: true })
+    await writeFile(join(root, 'agent-0', 'identity.json'), JSON.stringify({ agent_id: 'agent-0' }))
+    await mkdir(join(root, 'research'), { recursive: true })
+    await writeFile(join(root, 'research', 'identity.json'), JSON.stringify({ agent_id: 'agent-named' }))
+
+    const logs: string[] = []
+    const { outcome } = await runInto(root, { log: (message) => logs.push(message) })
+
+    expect([...(outcome.superseded_agent_ids ?? [])].sort()).toEqual(['agent-0', 'agent-named'])
+    // The agent this run just created is never named as superseded.
+    expect(outcome.superseded_agent_ids).not.toContain('agent-1')
+    // The #1688 stderr heads-up is now fed from the same list, so it must
+    // still name the same agents — the field is additive to that prose, not a
+    // replacement for it.
+    const headsUp = logs.join('\n')
+    expect(headsUp).toContain('this setup created a NEW agent')
+    // Each id separately: readdir order is not guaranteed, so asserting the
+    // joined string would be an ordering flake rather than a guard.
+    expect(headsUp).toContain('agent-0')
+    expect(headsUp).toContain('agent-named')
+  })
+
+  it('persists the emitted outcome verbatim, pretty-printed, beside the credentials', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+
+    const { outcome } = await runInto(root)
+
+    const path = join(root, 'agent-1', CONNECT_OUTCOME_FILENAME)
+    const raw = await readFile(path, 'utf8')
+    expect(JSON.parse(raw)).toEqual(JSON.parse(JSON.stringify(outcome)))
+    expect(raw).toContain('\n  "schema_version": 1')
+    // Secret-free by construction, asserted rather than assumed: this file is
+    // the one Connect artifact a caller is told to read back and paste around.
+    expect(raw).not.toContain(AGENT_API_KEY)
+    expect(raw).not.toContain(PRIVATE_KEY)
+    expect((await stat(path)).mode & 0o777).toBe(0o600)
+  })
+
+  it('keeps the credential directory out of the emitted outcome even though the record lives there', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+
+    const { outcome } = await runInto(root)
+
+    expect(JSON.stringify(outcome)).not.toContain(root)
+  })
+
+  it('records an action_required outcome too, not only complete and failed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+
+    // A manual runtime finishes the run without finishing the setup. It is
+    // neither of the two shapes the prose reaches for first, and it is the one
+    // a caller most needs to read back: the remaining steps are all manual.
+    const { outcome } = await runInto(root, {
+      installRuntime: vi.fn(async () => ({
+        ...completedInstall('other'),
+        runtimeMcpMode: 'manual' as const,
+        hostedMcpConfigured: false,
+        localSignerConfigured: false,
+        errorCode: 'manual_runtime_setup_required',
+      })),
+    })
+
+    expect(outcome.outcome).toBe('action_required')
+    expect(await readRecord(root)).toMatchObject({
+      outcome: 'action_required',
+      error: { code: 'manual_runtime_setup_required' },
+    })
+  })
+
+  it('completes the setup when the record write fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+    const writeOutcomeRecord = vi.fn(async () => {
+      throw new Error('EROFS: read-only file system')
+    })
+
+    const { outcome } = await runInto(root, { writeOutcomeRecord })
+
+    expect(writeOutcomeRecord).toHaveBeenCalledTimes(1)
+    expect(outcome.outcome).toBe('complete')
+  })
+
+  it('persists the failure outcome once a credential directory exists', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+
+    await expectRejection(runInto(root, {
+      installRuntime: vi.fn(async () => {
+        throw new ConnectError('probe_failed', 'The MCP probe did not answer.', 'rerun_connect')
+      }),
+    }))
+
+    expect(await readRecord(root)).toMatchObject({
+      schema_version: 1,
+      outcome: 'failed',
+      error: { code: 'probe_failed' },
+    })
+  })
+
+  it('persists the RESOLVED runtime, not the raw hint detection overrode', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+
+    // Detection overrides an explicit --runtime hint (#1672). One failed run
+    // must not produce two records — `cursor` on stdout and `claude-code` in
+    // the file — because the recovery file's whole promise is that it holds
+    // exactly what was emitted.
+    const error = await expectRejection(runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: API_BASE_URL,
+      runtime: 'cursor',
+      credentialsDir: root,
+      waitForApproval: false,
+    }, {
+      api: outcomeApi(),
+      nodeVersion: SUPPORTED_NODE,
+      env: { CLAUDECODE: '1' },
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => AGENT_API_KEY,
+      preflightStorage: vi.fn(async () => root),
+      writeCredentials: credentialWriter(root),
+      installRuntime: vi.fn(async () => {
+        throw new ConnectError('probe_failed', 'The MCP probe did not answer.', 'rerun_connect')
+      }),
+      log: () => undefined,
+    }))
+
+    const record = await readRecord(root)
+    expect(record).toMatchObject({ outcome: 'failed', runtime: 'claude-code' })
+    // And the caller is handed that same record rather than re-deriving one
+    // from the hint it passed in.
+    expect(failureOutcomeFor('cursor', error)).toEqual(record)
+  })
+
+  it('reports the resolved runtime even when the failure never reached a directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+    const api = outcomeApi()
+    api.registerSetup = vi.fn(async () => {
+      throw new ConnectError('registration_failed', 'Haven did not answer.', 'rerun_connect')
+    })
+
+    // The sub-case between the two boundaries: runtime selection resolved, so
+    // the record must report `claude-code` rather than the `cursor` hint — but
+    // no credentials were written, so nothing is persisted.
+    const error = await expectRejection(runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: API_BASE_URL,
+      runtime: 'cursor',
+      credentialsDir: root,
+      waitForApproval: false,
+    }, {
+      api,
+      nodeVersion: SUPPORTED_NODE,
+      env: { CLAUDECODE: '1' },
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => AGENT_API_KEY,
+      preflightStorage: vi.fn(async () => root),
+      writeCredentials: credentialWriter(root),
+      log: () => undefined,
+    }))
+
+    expect(failureOutcomeFor('cursor', error)).toMatchObject({ outcome: 'failed', runtime: 'claude-code' })
+    await expect(readRecord(root)).rejects.toThrow()
+  })
+
+  it('rethrows the original error unchanged when the record write fails on a failed run', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+    const cause = new ConnectError('probe_failed', 'The MCP probe did not answer.', 'rerun_connect')
+
+    const error = await expectRejection(runInto(root, {
+      installRuntime: vi.fn(async () => {
+        throw cause
+      }),
+      writeOutcomeRecord: vi.fn(async () => {
+        throw new Error('EROFS: read-only file system')
+      }),
+    }))
+
+    // A broken recovery write must never replace the reason the run failed.
+    expect(error).toBe(cause)
+  })
+
+  it('writes no record for a refusal that happens before any credentials exist', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-outcome-'))
+    const writeOutcomeRecord = vi.fn(async () => join(root, CONNECT_OUTCOME_FILENAME))
+
+    const error = await expectRejection(runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: API_BASE_URL,
+      credentialsDir: root,
+      waitForApproval: false,
+    }, {
+      api: outcomeApi(),
+      nodeVersion: SUPPORTED_NODE,
+      env: {},
+      isTty: false,
+      log: () => undefined,
+      writeOutcomeRecord,
+    }))
+
+    expect((error as ConnectError).code).toBe('runtime_undetermined')
+    expect(writeOutcomeRecord).not.toHaveBeenCalled()
+  })
+})

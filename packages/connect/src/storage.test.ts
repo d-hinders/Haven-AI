@@ -2,7 +2,14 @@ import { mkdir, mkdtemp, readFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { assertServerSlugAvailable, defaultAgentDirectory, preflightCredentialStorage, writeCredentialFiles } from './storage.js'
+import {
+  assertServerSlugAvailable,
+  defaultAgentDirectory,
+  preflightCredentialStorage,
+  writeConnectOutcomeRecord,
+  writeCredentialFiles,
+  CONNECT_OUTCOME_FILENAME,
+} from './storage.js'
 
 describe('writeCredentialFiles', () => {
   it('writes separated owner-only identity and signer credential files', async () => {
@@ -189,3 +196,39 @@ function credentialInput(agentId = 'agt_1696') {
     hostedMcpUrl: 'https://mcp.haven.example/mcp',
   }
 }
+
+describe('writeConnectOutcomeRecord (#2173)', () => {
+  it('writes the record pretty-printed, owner-only, at the documented filename', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'haven-outcome-record-'))
+    const outcome = { schema_version: 1, outcome: 'complete', superseded_agent_ids: [] }
+
+    const path = await writeConnectOutcomeRecord(directory, outcome)
+
+    expect(path).toBe(join(directory, CONNECT_OUTCOME_FILENAME))
+    const raw = await readFile(path, 'utf8')
+    expect(JSON.parse(raw)).toEqual(outcome)
+    // Pretty-printed and newline-terminated: a human recovering a lost stream
+    // reads this file directly as often as a parser does.
+    expect(raw).toBe(`${JSON.stringify(outcome, null, 2)}\n`)
+    expect((await stat(path)).mode & 0o777).toBe(0o600)
+  })
+
+  it('replaces an earlier record rather than refusing like a credential file', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'haven-outcome-record-'))
+    await writeConnectOutcomeRecord(directory, { outcome: 'failed' })
+
+    const path = await writeConnectOutcomeRecord(directory, { outcome: 'complete' })
+
+    // A stale verdict left in place is exactly what this file exists to
+    // prevent, so `assertDoesNotExist` would be the wrong guard here.
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ outcome: 'complete' })
+  })
+
+  it('reports a directory it cannot write into instead of failing silently', async () => {
+    const directory = join(await mkdtemp(join(tmpdir(), 'haven-outcome-record-')), 'does-not-exist')
+
+    // The swallow is the caller's contract (runConnect), never this writer's —
+    // a silent no-op here would make an injected failing writer untestable.
+    await expect(writeConnectOutcomeRecord(directory, { outcome: 'complete' })).rejects.toThrow()
+  })
+})

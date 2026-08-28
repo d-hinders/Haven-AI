@@ -14,6 +14,7 @@ export {
   runConnect,
   completionOutcome,
   failedConnectOutcome,
+  failureOutcomeFor,
   CONNECTOR_VERSION,
   CONNECT_OUTCOME_SCHEMA_VERSION,
   type ConnectDeps,
@@ -53,5 +54,12 @@ export {
   type PromptIo,
   type ScanInstalledClientsOptions,
 } from './installed-clients.js'
-export { defaultAgentDirectory, writeCredentialFiles, type StoredCredentialPaths, type WriteCredentialInput } from './storage.js'
+export {
+  defaultAgentDirectory,
+  writeCredentialFiles,
+  writeConnectOutcomeRecord,
+  CONNECT_OUTCOME_FILENAME,
+  type StoredCredentialPaths,
+  type WriteCredentialInput,
+} from './storage.js'
 export { MCP_RUNTIME_MANIFEST, mcpPackageSpec, sdkPackageSpec, signerPackageSpec } from './runtime-manifest.js'

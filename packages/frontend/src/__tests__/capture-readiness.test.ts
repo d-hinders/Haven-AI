@@ -16,7 +16,9 @@
  * REJECT. A check that can only say yes is what this whole family of issues
  * has been about.
  */
+import { readFileSync } from 'node:fs'
 import net from 'node:net'
+import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs, the capture harness
@@ -25,7 +27,9 @@ import {
   READINESS_DEFAULTS,
   describeReadinessFailure,
   formatRunResult,
+  portOf,
   probeAnsweringIsBounded,
+  probeListeningDefault,
   readinessBudgetProblems,
   resolveReadinessBudgets,
   waitForServer,
@@ -257,6 +261,68 @@ describe('the REAL answering probe is time-bounded', () => {
     } finally {
       server.close()
     }
+  })
+})
+
+describe('the REAL listening probe', () => {
+  /**
+   * Every `waitForServer` test injects a fake `probeListening`, so a mutation
+   * that broke the real TCP probe — wrong field, inverted boolean, the port-0
+   * coercion below — would pass the whole suite. Flagged by `haven-reviewer`;
+   * this drives the real thing against a real socket in both directions.
+   */
+  it('says yes to a listening socket and no to a closed port', async () => {
+    const server = net.createServer(() => {})
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as net.AddressInfo
+    try {
+      expect(await probeListeningDefault(`http://127.0.0.1:${port}`)).toBe(true)
+    } finally {
+      server.close()
+      await new Promise((resolve) => server.once('close', resolve))
+    }
+    // The same port, now closed — the probe must be able to say NO.
+    expect(await probeListeningDefault(`http://127.0.0.1:${port}`)).toBe(false)
+  })
+
+  it('defaults a portless URL by scheme instead of dialling port 0', () => {
+    // `Number(new URL('http://h').port)` is 0, and `net.connect({ port: 0 })`
+    // never connects — a portless SCREENSHOT_BASE_URL would have reported
+    // "never opened a socket" against a healthy server.
+    expect(portOf('http://127.0.0.1')).toBe(80)
+    expect(portOf('https://staging.example')).toBe(443)
+    expect(portOf('http://127.0.0.1:3161')).toBe(3161)
+  })
+})
+
+describe('the main() call site is wired to the new signature', () => {
+  /**
+   * The blind spot `haven-reviewer` named when asked what a 7th mutation would
+   * miss: every test above calls the exported `waitForServer` directly and
+   * hands it `child` and `budgets` by hand. Reverting the call site in `main()`
+   * to the old `await waitForServer(BASE_URL)` still compiles — every option
+   * defaults — and all of the unit tests still pass, while the real run
+   * silently loses child-process liveness and a dead server burns the full
+   * 986s budget. That is the exact regression this change exists to prevent,
+   * one level up from where the units can see it.
+   *
+   * A source assertion is a blunt instrument, and it is used here deliberately:
+   * driving `main()` needs a real `next dev`, which is the five-minute cost
+   * that stops anyone running the check at all.
+   */
+  it('passes the spawned child to waitForServer, so liveness is actually watched', () => {
+    // `resolve(__dirname, '../..')` is the repo's convention for the frontend
+    // root in these tests (design-token-alpha.test.ts:24); `import.meta.url` is
+    // not a file URL under vitest.
+    const src = readFileSync(join(resolve(__dirname, '../..'), 'scripts/screenshot.mjs'), 'utf8')
+    const callSite = src.match(/await waitForServer\([^)]*\)/)
+    expect(callSite, 'the harness must still call waitForServer').not.toBeNull()
+    expect(callSite![0], 'without `child` a dead dev server waits out the whole compile budget').toMatch(
+      /child:/,
+    )
+    expect(callSite![0]).toMatch(/budgets:/)
+    // Exactly one call site — a second, unwired one would defeat the check above.
+    expect(src.match(/await waitForServer\(/g)!.length).toBe(1)
   })
 })
 

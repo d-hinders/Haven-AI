@@ -878,12 +878,31 @@ export function describeReadinessFailure(kind, ctx) {
   )
 }
 
+/**
+ * The port to dial for `url`, defaulted by scheme.
+ *
+ * `new URL('http://127.0.0.1').port` is the empty string, and `Number('')` is
+ * **0** — not NaN. `net.connect({ port: 0 })` can never succeed, so a portless
+ * `SCREENSHOT_BASE_URL` would have failed with `never opened a socket` against a
+ * server that was listening perfectly well: this fix's own defect class, from the
+ * other side. Neither live caller can hit it today (the spawn path always builds
+ * `http://127.0.0.1:${port}`, and every documented pre-warm example carries a
+ * port) — but nothing forbids a portless override, so it is defaulted rather
+ * than left to depend on that. Exported for the guard, because an edge this
+ * quiet is only real if something drives it.
+ */
+export function portOf(url) {
+  const parsed = new URL(url)
+  if (parsed.port) return Number(parsed.port)
+  return parsed.protocol === 'https:' ? 443 : 80
+}
+
 /** Is anything accepting TCP connections there? Deliberately not an HTTP request:
  *  a bare connect does not ask a compiling Next dev server to do any work. */
-function probeListeningDefault(url, timeoutMs = 2000) {
+export function probeListeningDefault(url, timeoutMs = 2000) {
   const { hostname, port } = new URL(url)
   return new Promise((resolve) => {
-    const socket = net.connect({ host: hostname, port: Number(port) })
+    const socket = net.connect({ host: hostname, port: portOf(url) })
     const done = (answer) => {
       socket.destroy()
       resolve(answer)

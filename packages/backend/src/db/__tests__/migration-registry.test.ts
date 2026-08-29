@@ -57,6 +57,30 @@ describe('migration registry', () => {
     expect(new Set(versions).size).toBe(versions.length)
   })
 
+  it('every non-transactional migration says WHY (#2150)', () => {
+    // The type union in `migrations/index.ts` already makes this a compile
+    // error, but the compiler is not what a reviewer reads, and the reason is
+    // what the runner prints to an operator staring at a backend that will not
+    // boot (`partialFailureMessage`). A reason-less opt-out would produce
+    // "non-transactional (no reason recorded)" at exactly the wrong moment.
+    const unexplained = migrations
+      .filter((m) => m.transactional === false)
+      .filter((m) => !m.nonTransactionalReason?.trim())
+      .map((m) => m.version)
+    expect(unexplained).toEqual([])
+  })
+
+  it('opting out of the transaction is EXPLICIT — absence means transactional', () => {
+    // The dangerous lane must never be something a migration falls into. Any
+    // value other than a literal `false` here would mean someone wrote
+    // `transactional: 0`/`'false'`/undefined and got a lane they did not
+    // choose (in either direction).
+    const odd = migrations
+      .filter((m) => m.transactional !== undefined && m.transactional !== false)
+      .map((m) => m.version)
+    expect(odd).toEqual([])
+  })
+
   it('every migration exposes an `up`', () => {
     const broken = migrations.filter((m) => typeof m.up !== 'function').map((m) => m.version)
     expect(broken).toEqual([])

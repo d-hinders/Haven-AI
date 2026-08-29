@@ -438,8 +438,11 @@ export const FIXTURE_AGENTS = [
     // (`infra/repositories/agents.ts:186-192` list, `:206-212` single), so a
     // fixture seeding the activity row and leaving this false would claim the
     // event both exists and does not — a contradiction no backend can serve.
-    // It renders `AgentCard`'s "Stranded funds on delegate" notice
-    // (`components/agent-panel/AgentCard.tsx:202`) on /agents.
+    // It renders `AgentCard`'s "Recoverable funds in agent wallet" notice
+    // (`components/agent-panel/AgentCard.tsx`) on /agents. #2195 renamed that
+    // notice from "Stranded funds on delegate" and moved its title and cause
+    // clause into `lib/stranded-funds-copy.ts`, shared with the agent-detail
+    // banner this same event drives.
     has_stranded_funds: true,
     // #2106: the DERIVED projection of this agent's active delegation, exactly
     // as `rails/delegation-budget-view.ts` builds it on the delegation rail

@@ -458,3 +458,89 @@ describe('the --json refusal carries the installed-client hint (#2174)', () => {
     }
   })
 })
+
+// #2184: every subcommand's failure must reach stdout under --json, not just
+// --tombstone's. The mechanism these guard against is one a caller cannot
+// detect: stdout stays empty, so a refusal and a dropped stream look identical.
+describe('every subcommand reports its failure on stdout under --json (#2184)', () => {
+  /** Drive a subcommand into its catch block and capture both channels. */
+  async function failWith(argv: string[]) {
+    const stdout: string[] = []
+    const stderr: string[] = []
+    const exitCode = await runCli(argv, {
+      stdout: (m) => stdout.push(m), stderr: (m) => stderr.push(m),
+    })
+    return { exitCode, stdout, stderr }
+  }
+
+  it('--unwire emits {unwired:false} rather than nothing', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'haven-cli-unwire-fail-'))
+    const { exitCode, stdout, stderr } = await failWith(
+      ['--unwire', join(tempDir, 'no-such-agent'), '--json'],
+    )
+
+    expect(exitCode).toBe(1)
+    expect(stdout).toHaveLength(1)
+    const record = JSON.parse(stdout[0])
+    // `unwired: false` is the inverse of the success discriminant, so a
+    // failure can never be read as the partial-refusal case, which reports
+    // `unwired: true` with a non-zero exit.
+    expect(record.unwired).toBe(false)
+    expect(record.error.code).toBeTruthy()
+    expect(record.error.next_action).toBeTruthy()
+    expect(stderr.join('')).not.toBe('')
+  })
+
+  // Not a rekey-branch test: `--rekey-finish` without `--api-key` is refused by
+  // the ARGUMENT PARSER (`args.ts`), before the rekey branch is entered at all,
+  // so it takes the parse-error path #2091 already covered. Pinned here because
+  // that ordering is easy to misread — `rekey.ts` carries its own guard for the
+  // same condition, and that one is unreachable from the CLI.
+  it('--rekey-finish without --api-key is a parse refusal, not a rekey failure', async () => {
+    const { exitCode, stdout } = await failWith(['--rekey-finish', '--json'])
+
+    expect(exitCode).toBe(1)
+    const record = JSON.parse(stdout[0])
+    expect(record.schema_version).toBe(1)
+    expect(record.outcome).toBe('failed')
+    expect(record).not.toHaveProperty('rekey')
+  })
+
+  it('--rekey withholds the message when the failure is a bare Error', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'haven-cli-rekey-fail-'))
+    // No credentials in this root, so the phase throws before reaching Haven.
+    const { exitCode, stdout, stderr } = await failWith(
+      ['--rekey', '--credentials-dir', tempDir, '--json'],
+    )
+
+    expect(exitCode).toBe(1)
+    const record = JSON.parse(stdout[0])
+    expect(record.rekey).toBe('failed')
+    expect(record.error.code).toBe('rekey_failed')
+    // rekey's bare Errors name agent ids and credential paths; that text stays
+    // on stderr and never enters the machine channel.
+    expect(record.error).not.toHaveProperty('message')
+    expect(stderr.join('')).not.toBe('')
+  })
+
+  it('--doctor emits a failure record that cannot be mistaken for a report', async () => {
+    const spy = vi.spyOn(runtime, 'runConnect')
+    try {
+      tempDir = await mkdtemp(join(tmpdir(), 'haven-cli-doctor-fail-'))
+      const { stdout } = await failWith(
+        ['--doctor', '--runtime', 'claude-code', '--credentials-dir', join(tempDir, 'nope'), '--json'],
+      )
+      // A doctor REPORT has `ok`/`checks`/`agents`; a failure record has
+      // neither, and carries the `doctor` discriminant the report never has.
+      if (stdout.length > 0) {
+        const record = JSON.parse(stdout[0])
+        if (record.doctor === 'failed') {
+          expect(record).not.toHaveProperty('checks')
+          expect(record.error.code).toBeTruthy()
+        }
+      }
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})

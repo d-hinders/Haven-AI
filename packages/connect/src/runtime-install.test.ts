@@ -1,15 +1,23 @@
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 import { SIGNER_INSTALL_TIMEOUT_MS, prepareSignerRuntime } from './signer-runtime.js'
 import { prepareLocalMcpRuntime } from './local-mcp-runtime.js'
 import { installRuntime, supportsLocalMcp, type EarlyRuntimeConfigReport } from './runtime-install.js'
+import { isolateHermesHome, restoreHermesHome } from './test-helpers.js'
 
-const API_KEY = 'sk_agent_secret_for_runtime_test'
+const API_KEY = 'sk_age...test'
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
 const HOSTED_URL = 'https://mcp.haven.example/v1'
+
+// #2179: installRuntime writes the Hermes pair through the writer, which honours
+// process.env.HERMES_HOME before the fixture homeDir — the per-runtime loop
+// tests (and others here) would corrupt a real Hermes home when run inside a
+// Hermes gateway shell. Isolate like CI.
+beforeEach(isolateHermesHome)
+afterEach(restoreHermesHome)
 
 describe('installRuntime', () => {
   it('prepares Codex local MCP config and acknowledgement for normal restart', async () => {

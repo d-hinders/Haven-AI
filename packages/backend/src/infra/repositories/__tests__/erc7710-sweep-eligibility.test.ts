@@ -10,10 +10,12 @@
  * the only execution coverage of this query was migration 072's
  * index-parity test, which seeds two rows differing solely in `tx_hash` and
  * asserts the candidate set is the same with and without the index. That
- * proves the index is neutral; it proves nothing about the predicate. So every
- * guard is exercised here on BOTH sides — the row that must come back and the
- * row that must not — plus the ordering, the limit, and the two bounds the
- * sweeper passes in.
+ * proves the index is neutral, and in passing it exercises two conjuncts —
+ * the settled control row is excluded, so `status = 'submitted'` and
+ * `tx_hash IS NULL` are covered. The other six are not, and neither is the
+ * ordering, the limit, nor the column list. So every guard is exercised here
+ * on BOTH sides — the row that must come back and the row that must not —
+ * plus the ordering, the limit, and the two bounds the sweeper passes in.
  *
  * Why this file is named for the *sweep* and not the *observer*: #2134 built
  * an "observer" keyed on transfer shape; the design that merged (#2135) is a

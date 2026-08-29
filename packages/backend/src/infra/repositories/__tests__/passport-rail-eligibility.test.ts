@@ -133,17 +133,30 @@ describeDb('passport issuance is delegation-rail only (#2138)', () => {
   // ── The new rule ────────────────────────────────────────────────────────
 
   it('excludes every retired and unset rail from the retry queue', async () => {
+    // Seeded side by side in ONE database state rather than one `resetDb()`
+    // per case (#2209). `resetDb()` truncates every table in the worker schema,
+    // so its cost is set by the migration count, not by what this test wrote —
+    // paying it per iteration made a 3-case loop the second-slowest test in the
+    // file and put it on the same path to the 5 s default that the drift guard
+    // below already fell off. Per-case attribution is kept by asserting on the
+    // agent ids, which is what the loop's failure message needed anyway.
+    const seeded: Array<{ label: string; agentId: string }> = []
     for (const [rail, accountType] of [
       ['allowance_module', 'safe'],
       ['session_key', 'safe'],
       [null, null], // no bound account at all — the LEFT JOIN's null
     ] as Array<[string | null, string | null]>) {
-      await resetDb()
       const { agentId } = await seedAgentOnRail(rail, accountType)
       await seedRetryablePassport(agentId)
-
-      expect(await listRetryable(50), `rail=${rail ?? 'null'} must not be retried`).toHaveLength(0)
+      seeded.push({ label: `rail=${rail ?? 'null'}`, agentId })
     }
+
+    const returned = new Set((await listRetryable(50)).map((r) => r.agent_id))
+    for (const { label, agentId } of seeded) {
+      expect(returned.has(agentId), `${label} must not be retried`).toBe(false)
+    }
+    // …and nothing else came back either, which the per-case loop also proved.
+    expect(returned.size).toBe(0)
   })
 
   it('a delegator_hybrid account is eligible even if its rail string is not "delegation"', async () => {
@@ -192,20 +205,54 @@ describeDb('passport issuance is delegation-rail only (#2138)', () => {
     // are varied now, so "the whole domain" means the whole domain — the
     // account_type arm is the one that lets a hybrid account qualify on a
     // non-delegation rail string, and it deserves the same guard.
+    //
+    // ## Why the whole domain is seeded into ONE database state (#2209)
+    //
+    // This used to call `resetDb()` per combination and read eligibility off
+    // the batch SIZE (`length === 1`). That made the test cost
+    // `6 × resetDb`, and `resetDb()` truncates EVERY table in the worker
+    // schema — so its cost tracks the migration count, not anything this test
+    // writes. Measured on `dev` at 38 tables: ~250 ms per reset with the suite
+    // quiet, ~800 ms–1.2 s with the scoped `vitest run src/db src/infra` load,
+    // i.e. 7 resets (6 here + `beforeEach`) landing at ~5.7 s against the 5 s
+    // default. Not a timeout that was set too tight — a fixture that got more
+    // expensive with every migration and would have outgrown any number.
+    //
+    // Seeding once and asserting on agent IDs removes the resets without
+    // narrowing the claim: every (rail × account_type) pair in the domain is
+    // still checked against the real query, and per-pair attribution survives
+    // in the failure message. It is if anything STRICTER — the SQL now has to
+    // pick the eligible rows out of a table that also holds the ineligible
+    // ones, which per-combination isolation could not see, and the closing
+    // set-equality assertion keeps the "nothing extra came back" half of the
+    // old `length === 1`.
+    const seeded: Array<{ agentId: string; label: string; tsSaysEligible: boolean }> = []
     for (const rail of domain) {
       for (const accountType of ['safe', 'delegator_hybrid']) {
-        await resetDb()
         const { agentId } = await seedAgentOnRail(rail, accountType)
         await seedRetryablePassport(agentId)
-
-        const sqlSaysEligible = (await listRetryable(50)).length === 1
-        const tsSaysEligible = isPassportIssuableAccount(rail, accountType)
-        expect(
-          sqlSaysEligible,
-          `SQL and TS disagree for rail=${rail} account_type=${accountType}`,
-        ).toBe(tsSaysEligible)
+        seeded.push({
+          agentId,
+          label: `rail=${rail} account_type=${accountType}`,
+          tsSaysEligible: isPassportIssuableAccount(rail, accountType),
+        })
       }
     }
+
+    // The batch limit must not be what decides the answer: a truncated batch
+    // would read as "SQL says ineligible" for whatever fell off the end. Stated
+    // over the SEEDED universe, not over `rows` — `rows` can never reach 50
+    // while `seeded` holds 6, so asserting on it would be a guard that cannot
+    // fire (review nit). Asserted on `seeded` it is the real precondition, and
+    // it starts firing the moment the rail domain outgrows the batch.
+    expect(seeded.length, 'the seeded domain no longer fits under the batch limit').toBeLessThan(50)
+    const rows = await listRetryable(50)
+
+    const returned = new Set(rows.map((r) => r.agent_id))
+    for (const { agentId, label, tsSaysEligible } of seeded) {
+      expect(returned.has(agentId), `SQL and TS disagree for ${label}`).toBe(tsSaysEligible)
+    }
+    expect(rows).toHaveLength(seeded.filter((s) => s.tsSaysEligible).length)
   })
 
   it('the drift guard is not vacuous: the domain contains both an eligible and an ineligible rail', () => {

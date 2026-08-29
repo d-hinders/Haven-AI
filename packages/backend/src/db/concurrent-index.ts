@@ -58,6 +58,13 @@ export interface ConcurrentIndexSpec {
   /**
    * Everything after the index name, e.g.
    * `ON payment_intents (LOWER(tx_hash)) WHERE tx_hash IS NOT NULL`.
+   *
+   * Raw SQL, deliberately unvalidated — unlike `name`, which is regex-guarded.
+   * That is not an oversight in the same trust boundary: this is a literal
+   * written by a migration author and reviewed under the `db/migrations/`
+   * CODEOWNERS gate, never runtime input. `name` is guarded anyway because it
+   * is interpolated in three places, one of which (`DROP INDEX`) is
+   * destructive.
    */
   definition: string
   /** `CREATE UNIQUE INDEX` — the form that most often fails mid-build. */
@@ -90,7 +97,7 @@ export async function createIndexConcurrently(
   }
 
   if ((await indexIsValid(client, name)) === false) {
-    await client.query(`DROP INDEX CONCURRENTLY IF EXISTS "${name}"`)
+    await dropIndexConcurrently(client, name)
   }
 
   await client.query(

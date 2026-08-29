@@ -1,4 +1,4 @@
-import type { PoolClient } from 'pg'
+import type { Pool, PoolClient } from 'pg'
 import { getPool } from '../db.js'
 import { migrations as registeredMigrations, type Migration } from './migrations/index.js'
 
@@ -24,9 +24,12 @@ import { migrations as registeredMigrations, type Migration } from './migrations
  * `CREATE INDEX CONCURRENTLY` and `DROP INDEX CONCURRENTLY` above all, plus
  * `REINDEX CONCURRENTLY`, `VACUUM`, `CREATE DATABASE` and `ALTER SYSTEM`. A
  * lock-free index build on a hot table is therefore impossible in the
- * transactional lane, which is what PR #2149 hit: it had to accept a ~6.0 s
- * write-blocking `SHARE` lock on `payment_intents` because `CONCURRENTLY` was
- * unavailable at any price.
+ * transactional lane, which is what PR #2149 hit. Its two indexes on
+ * `payment_intents` are therefore plain `CREATE INDEX` statements, and the
+ * owner decision recorded on that PR is to accept the resulting write-blocking
+ * `SHARE` lock in a low-traffic window. The ~6.0 s figure quoted for it was
+ * measured on a 200 000-row **harness** table, not in production; that PR is
+ * still open, so nothing has yet paid it.
  *
  * ### What is given up, stated plainly
  *
@@ -81,6 +84,10 @@ import { migrations as registeredMigrations, type Migration } from './migrations
  * runner would have to refuse in both cases — turning every concurrent boot
  * into a crashloop.
  *
+ * The wait for that lock is POLLED, not blocking, and that detail is load-
+ * bearing rather than cosmetic: a blocking waiter deadlocks the very index
+ * build it is waiting for. See `acquireLaneLock`.
+ *
  * ### `down()`
  *
  * The runner never calls `down()` in either lane — rollback is a hand-run or
@@ -107,9 +114,15 @@ export const NON_TRANSACTIONAL_LOCK_KEY = 21_500_001
  * How long a replica waits for a peer's non-transactional migration before
  * giving up. The wait covers a whole index build, so it is generous; it exists
  * only so a boot cannot hang forever on a lock that is never released.
- * Cleared again before `up()` runs, so it never truncates the build itself.
  */
-const LOCK_WAIT_TIMEOUT = '15min'
+const LOCK_WAIT_TIMEOUT_MS = 15 * 60 * 1000
+
+/**
+ * How often the waiter re-tries. The wait is POLLED rather than blocking, and
+ * that is a correctness requirement, not a style choice — see
+ * `acquireLaneLock`.
+ */
+const LOCK_POLL_INTERVAL_MS = 250
 
 /** Absence means transactional — the lane that cannot leave a partial state. */
 function isTransactional(migration: Migration): boolean {
@@ -144,11 +157,14 @@ export function partialFailureMessage(migration: Migration): string {
 /**
  * Bring the database to the current migration head.
  *
- * @param list the migrations to apply. Defaults to the real registry; the
- *   parameter is a seam for the runner's own tests, which need to drive
+ * @param list the migrations to apply. **Test-only — production must always
+ *   call this with no argument.** It defaults to the real registry, and the
+ *   parameter exists as a seam for the runner's own tests, which need to drive
  *   fixture migrations (including deliberately failing ones) through the real
  *   runner against a real Postgres without adding a permanent migration to
  *   `db/migrations/` whose only purpose is to demonstrate a runner feature.
+ *   Passing a partial list from a production path would silently skip real
+ *   migrations.
  */
 export async function runMigrations(list: Migration[] = registeredMigrations): Promise<void> {
   const pool = getPool()
@@ -159,16 +175,7 @@ export async function runMigrations(list: Migration[] = registeredMigrations): P
       applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `)
-  // Added by #2150 to databases that predate it. `NOT NULL DEFAULT 'applied'`
-  // is deliberate and does the backfill for free: every row already in the
-  // table was written by the old transactional-only runner, which only ever
-  // recorded a version AFTER the work committed, so 'applied' is not a guess.
-  // (Postgres 11+ adds a defaulted NOT NULL column without rewriting the
-  // table, so this costs nothing on every subsequent boot either.)
-  await pool.query(`
-    ALTER TABLE schema_migrations
-      ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'applied';
-  `)
+  await ensureStatusColumn(pool)
 
   const recorded = await pool.query<{ version: string; status: string }>(
     `SELECT version, status FROM schema_migrations`,
@@ -206,6 +213,92 @@ export async function runMigrations(list: Migration[] = registeredMigrations): P
   }
 }
 
+/**
+ * Add `schema_migrations.status` to a database that predates #2150.
+ *
+ * `NOT NULL DEFAULT 'applied'` does the backfill for free: every row already
+ * in the table was written by the old transactional-only runner, which
+ * recorded a version only AFTER the work had committed, so 'applied' is not a
+ * guess. Postgres 11+ adds a defaulted NOT NULL column without rewriting the
+ * table.
+ *
+ * The existence check is there because `ADD COLUMN IF NOT EXISTS` still takes
+ * an `ACCESS EXCLUSIVE` lock on `schema_migrations` when the column is already
+ * present — a no-op that briefly blocks every other reader of the bookkeeping
+ * table, on every boot, forever. Reading the catalog first means every boot
+ * after the first takes no DDL lock at all. (It is NOT what makes concurrent
+ * boots safe: that is `acquireLaneLock`'s polled wait, and this check alone
+ * did not fix the 40P01 the concurrent-boot test found.)
+ *
+ * The check-then-act window is still handled rather than hoped away: a genuine
+ * first-boot race is caught, and the column is re-read to decide whether the
+ * peer won (continue) or the ALTER failed for its own reasons (rethrow).
+ */
+async function ensureStatusColumn(pool: Pool): Promise<void> {
+  if (await statusColumnExists(pool)) return
+  try {
+    await pool.query(`
+      ALTER TABLE schema_migrations
+        ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'applied';
+    `)
+  } catch (err) {
+    if (!(await statusColumnExists(pool))) throw err
+  }
+}
+
+async function statusColumnExists(pool: Pool): Promise<boolean> {
+  const { rows } = await pool.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM pg_attribute
+       WHERE attrelid = to_regclass('schema_migrations')
+         AND attname = 'status'
+         AND NOT attisdropped
+     ) AS exists`,
+  )
+  return rows[0].exists
+}
+
+/**
+ * Take the lane lock, polling with `pg_try_advisory_lock` instead of blocking
+ * on `pg_advisory_lock`.
+ *
+ * **This is a correctness requirement, and it was found by execution rather
+ * than reasoning.** A blocking `pg_advisory_lock()` runs inside its own
+ * implicit transaction, so a waiting replica holds a live virtual transaction
+ * id and a snapshot for the whole wait. `CREATE INDEX CONCURRENTLY` on the
+ * replica that HOLDS the lock must wait for exactly such transactions to
+ * finish before it can complete. Each side then waits for the other and
+ * Postgres kills one with `40P01 deadlock detected` — which is not a rare race
+ * but the *normal* outcome of two replicas booting into the same
+ * non-transactional migration, i.e. the case this lock exists to make safe.
+ * The concurrent-boot test in `__tests__/migrate-non-transactional.test.ts`
+ * reproduced it on the first run.
+ *
+ * `pg_try_advisory_lock` returns immediately, so each attempt is a complete,
+ * short transaction and the waiter holds no snapshot between attempts. The
+ * peer's index build is then free to finish, which is the only thing that ever
+ * ends the wait.
+ */
+async function acquireLaneLock(client: PoolClient, migration: Migration): Promise<void> {
+  const deadline = Date.now() + LOCK_WAIT_TIMEOUT_MS
+  for (;;) {
+    const { rows } = await client.query<{ locked: boolean }>(
+      'SELECT pg_try_advisory_lock($1) AS locked',
+      [NON_TRANSACTIONAL_LOCK_KEY],
+    )
+    if (rows[0].locked) return
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Timed out after ${Math.round(LOCK_WAIT_TIMEOUT_MS / 1000)}s waiting for another node to ` +
+          `finish a non-transactional migration before applying ${migration.version}. ` +
+          'Check whether a peer is still building, or whether a session is holding ' +
+          `advisory lock ${NON_TRANSACTIONAL_LOCK_KEY} without releasing it.`,
+      )
+    }
+    await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_INTERVAL_MS))
+  }
+}
+
 /** The default lane. Work and bookkeeping commit or roll back together. */
 async function applyInTransaction(client: PoolClient, migration: Migration): Promise<void> {
   try {
@@ -224,15 +317,7 @@ async function applyInTransaction(client: PoolClient, migration: Migration): Pro
  * bookkeeping this substitutes for it.
  */
 async function applyWithoutTransaction(client: PoolClient, migration: Migration): Promise<void> {
-  await client.query(`SET lock_timeout = '${LOCK_WAIT_TIMEOUT}'`)
-  try {
-    await client.query('SELECT pg_advisory_lock($1)', [NON_TRANSACTIONAL_LOCK_KEY])
-  } finally {
-    // Reset even on the timeout path, and BEFORE up() on the happy path: a
-    // 15-minute lock_timeout left on the session would abort a longer index
-    // build that is making perfectly good progress.
-    await client.query('RESET lock_timeout')
-  }
+  await acquireLaneLock(client, migration)
 
   try {
     const { rows } = await client.query<{ status: string }>(

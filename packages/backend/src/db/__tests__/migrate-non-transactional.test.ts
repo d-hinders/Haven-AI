@@ -24,7 +24,11 @@ import db from '../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
 import { runMigrations } from '../migrate.js'
 import type { Migration } from '../migrations/index.js'
-import { createIndexConcurrently, indexIsValid } from '../concurrent-index.js'
+import {
+  createIndexConcurrently,
+  dropIndexConcurrently,
+  indexIsValid,
+} from '../concurrent-index.js'
 
 const FIXTURE_PREFIX = 'fixture_2150_'
 
@@ -281,6 +285,44 @@ describeDb('migration runner: the transactional opt-out (#2150)', () => {
     expect(runs).toBe(1)
   }, CONCURRENT_BUILD_TIMEOUT_MS)
 
+  // ── Two replicas reaching the same new migration at once. ────────────────
+
+  it('two concurrent boots run it ONCE, and the loser returns cleanly', async () => {
+    // The branch the advisory lock exists for, and the only one the runner's
+    // three-way decision cannot reach sequentially: the loser re-reads the row
+    // INSIDE the lock and must see `applied` and skip. If it instead read a
+    // `running` row it would diagnose a crashed partial and refuse — turning
+    // every multi-replica deploy carrying a non-transactional migration into a
+    // crashloop on all but one replica.
+    //
+    // Both calls are started before either can finish (the sleep in `up()`
+    // guarantees the second reaches the lock while the first still holds it),
+    // so this races the real code rather than simulating a race.
+    await seedWidgets([1, 2, 3])
+    const version = `${FIXTURE_PREFIX}concurrent`
+    let runs = 0
+    const migration: Migration = {
+      version,
+      transactional: false,
+      nonTransactionalReason: 'fixture: proves the concurrent-boot branch',
+      up: async (client: PoolClient) => {
+        runs += 1
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        await client.query(CONCURRENT_INDEX_SQL)
+      },
+    }
+
+    const results = await Promise.allSettled([
+      runMigrations([migration]),
+      runMigrations([migration]),
+    ])
+
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled'])
+    expect(runs).toBe(1)
+    expect(await bookkeeping(version)).toEqual({ status: 'applied' })
+    expect(await indexIsValid(db as never, `${FIXTURE_PREFIX}idx`)).toBe(true)
+  }, CONCURRENT_BUILD_TIMEOUT_MS)
+
   // ── The INVALID index a failed CONCURRENTLY build leaves behind. ──────────
 
   it('a failed CONCURRENTLY build leaves an INVALID index, and the helper heals it', async () => {
@@ -354,6 +396,33 @@ describeDb('migration runner: the transactional opt-out (#2150)', () => {
       client.release()
     }
     expect(await indexIsValid(db as never, `${FIXTURE_PREFIX}idx`)).toBe(true)
+  }, CONCURRENT_BUILD_TIMEOUT_MS)
+
+  it('dropIndexConcurrently removes an index and is safe to repeat', async () => {
+    // The `down()` counterpart. Exercised directly because no migration uses
+    // the opt-out yet, and an untested destructive helper is worse than none.
+    await seedWidgets([1, 2])
+    const client = await db.connect()
+    try {
+      await createIndexConcurrently(client, {
+        name: `${FIXTURE_PREFIX}idx`,
+        definition: `ON ${FIXTURE_PREFIX}widgets (n)`,
+      })
+      expect(await indexIsValid(client, `${FIXTURE_PREFIX}idx`)).toBe(true)
+
+      await dropIndexConcurrently(client, `${FIXTURE_PREFIX}idx`)
+      expect(await indexIsValid(client, `${FIXTURE_PREFIX}idx`)).toBeNull()
+
+      // IF EXISTS — a non-transactional down() must survive its own retry.
+      await dropIndexConcurrently(client, `${FIXTURE_PREFIX}idx`)
+      expect(await indexIsValid(client, `${FIXTURE_PREFIX}idx`)).toBeNull()
+
+      await expect(dropIndexConcurrently(client, 'widgets"; DROP TABLE x --')).rejects.toThrow(
+        'unsafe index name',
+      )
+    } finally {
+      client.release()
+    }
   }, CONCURRENT_BUILD_TIMEOUT_MS)
 
   // ── Legacy bookkeeping rows. ─────────────────────────────────────────────

@@ -78,6 +78,19 @@ function gitLines(args) {
  * identical to another shard is a copy-paste, not a verification record for a
  * different change. `C` (copy) cannot occur — git emits it only under an
  * explicit `-C`/`--find-copies`, which this file never passes.
+ *
+ * The worry this leaves is a MIDDLE band — two genuinely distinct shards paired
+ * on shared boilerplate. Review measured the real corpus for it and found none:
+ *   - 6 pairs of same-day, same-domain shards (the erc7710/x402 cluster, chosen
+ *     to maximise shared vocabulary): 0% similarity, even at `-M1%`.
+ *   - the two most boilerplate-heavy files in the directory — consecutive
+ *     RELEASE shards sharing a verbatim ~100-word opening: `R003`, 3%.
+ *   - an old shard copied and edited only in its issue number: `R095`.
+ * So the gap is 3% against a 50% default threshold, with copy-paste at 95%+.
+ * There is no band in between, because shards are issue-specific narrative
+ * prose rather than a filled-in template. That is a property of how shards are
+ * WRITTEN, not a proof — if the convention ever becomes templated, re-measure
+ * this rather than reaching for `--no-renames`.
  */
 export function parseNameStatus(out) {
   const files = []

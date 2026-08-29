@@ -60,6 +60,10 @@
  */
 import { describe } from 'vitest'
 import db from '../../../db.js'
+import {
+  acquireAdvisoryLockByPolling,
+  releaseAdvisoryLock,
+} from '../../../db/advisory-lock.js'
 import { runMigrations } from '../../../db/migrate.js'
 import {
   ciFailureMessage,
@@ -121,6 +125,51 @@ export const describeDb: typeof describe = dbAvailable
   ? describe
   : (describe.skip as typeof describe)
 
+/**
+ * The global lock that serialises migration runs across vitest workers.
+ * Distinct from the migration runner's cross-replica lane lock and from
+ * `LEADER_LOCK_KEYS` (`platform/leader-lock.ts`).
+ */
+const MIGRATION_LOCK_KEY = 811000061
+
+/**
+ * How often a waiting worker retries the lock.
+ *
+ * Shorter than the migration runner's 250 ms, and the difference follows from
+ * what each side is waiting for. The runner waits once per process boot, for a
+ * production index build measured in minutes, so a quarter-second of extra
+ * latency is free. A vitest worker pays up to one interval on EVERY test file
+ * that reaches the harness, so the interval shows up as run-wide startup
+ * latency. 50 ms keeps that imperceptible; the cost is ~20 `pg_try_advisory_lock`
+ * calls per second per waiting worker, which is nothing next to the migration
+ * DDL the lock holder is running.
+ */
+const LOCK_POLL_INTERVAL_MS = 50
+
+/**
+ * How long a worker keeps trying before failing the run.
+ *
+ * Deliberately LARGER than `vitest.config.ts`'s 120 s `hookTimeout`, and that
+ * ordering is the whole point. The lock genuinely has to be held for one
+ * worker's full migration run, EVERY waiting worker's wait is the sum of the
+ * runs ahead of it, and CI runs several workers against one Postgres. A
+ * deadline tight enough to expire under that load would convert a slow-but-
+ * correct run into a failure — a harness that intermittently refuses to
+ * acquire is worse than the deadlock this polling replaced, because it
+ * surfaces as flakiness across every real-DB suite and gets misdiagnosed as
+ * contention. So the effective budget is unchanged from the blocking form it
+ * replaces: vitest's `hookTimeout` is still what bounds a stuck run, and this
+ * deadline is a backstop against hanging forever for a non-vitest caller.
+ *
+ * `onSlowWait` is what recovers the diagnosis that a too-tight deadline would
+ * have bought: a long wait names the lock while it is still happening, instead
+ * of surfacing as an anonymous "hook timed out".
+ */
+const LOCK_WAIT_TIMEOUT_MS = 10 * 60 * 1000
+
+/** When a wait becomes worth mentioning. Well inside `hookTimeout`. */
+const LOCK_SLOW_WAIT_MS = 30 * 1000
+
 let ready: Promise<void> | null = null
 
 /**
@@ -141,15 +190,37 @@ export function initDbHarness(): Promise<void> {
     // no-op schema_migrations read, so the cost is bounded to run start.
     // Held on a dedicated connection: pg advisory locks are session-scoped,
     // and the pool would otherwise hand the lock's session to someone else.
+    //
+    // The wait is POLLED, never blocking (#2198) — see `advisory-lock.ts` for
+    // why, and `LOCK_POLL_INTERVAL_MS` / `LOCK_WAIT_TIMEOUT_MS` below for why
+    // this caller's numbers differ from the migration runner's.
     const lockHolder = await db.connect()
     try {
-      await lockHolder.query('SELECT pg_advisory_lock(811000061)')
+      await acquireAdvisoryLockByPolling(lockHolder, {
+        key: MIGRATION_LOCK_KEY,
+        pollIntervalMs: LOCK_POLL_INTERVAL_MS,
+        timeoutMs: LOCK_WAIT_TIMEOUT_MS,
+        slowWaitAfterMs: LOCK_SLOW_WAIT_MS,
+        onSlowWait: (waited) => {
+          console.warn(
+            `db-harness: still waiting ${Math.round(waited / 1000)}s for advisory lock ` +
+              `${MIGRATION_LOCK_KEY} (another vitest worker is applying migrations). ` +
+              'If this never clears, look for a session holding it in pg_locks.',
+          )
+        },
+        describeTimeout: (waited) =>
+          `db-harness: gave up after ${Math.round(waited / 1000)}s waiting for advisory lock ` +
+          `${MIGRATION_LOCK_KEY}, which serialises migration runs across vitest workers. ` +
+          'Another worker is stuck applying migrations, or a session is holding the lock ' +
+          'without releasing it (check pg_locks where locktype = \'advisory\'). ' +
+          'Refusing to run migrations unserialised — see db-harness.ts.',
+      })
       try {
         // The runner creates/reads `schema_migrations` UNQUALIFIED, so it
         // lives in the worker schema and tracks that schema's versions.
         await runMigrations()
       } finally {
-        await lockHolder.query('SELECT pg_advisory_unlock(811000061)')
+        await releaseAdvisoryLock(lockHolder, MIGRATION_LOCK_KEY)
       }
     } finally {
       lockHolder.release()

@@ -210,7 +210,15 @@ export function AgentCard({
                 because `has_stranded_funds` is a SQL `EXISTS`, so this surface
                 knows the state exists and cannot know how many events or how
                 much money; the detail banner holds the list and the balance, and
-                says so. That is the difference in detail level, made deliberate. */}
+                says so. That is the difference in detail level, made deliberate.
+
+                `strandedFundsCause`, not the `WithLocation` variant the detail
+                banner uses: the shared title already says "in agent wallet" and
+                the link below says "these funds", so repeating the location
+                here bought nothing and cost a fourth wrapped line at 390px
+                (`haven-design-reviewer` on this change, measured off the 390
+                capture — it also corrected my desktop-only "2 to 3 lines"
+                reading; the real growth at 390 was 3 to 4). */}
             <p className="text-xs font-medium text-[var(--v2-warning)]">{STRANDED_FUNDS_TITLE}</p>
             <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
               {strandedFundsCause(null)}{' '}

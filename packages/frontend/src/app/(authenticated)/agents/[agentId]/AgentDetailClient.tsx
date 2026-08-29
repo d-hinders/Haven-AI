@@ -28,7 +28,7 @@ import { formatAgentLastActivityTitle, formatAgentLastActivityValue } from '@/li
 import {
   STRANDED_FUNDS_TITLE,
   reviewStrandedPaymentsLabel,
-  strandedFundsCause,
+  strandedFundsCauseWithLocation,
 } from '@/lib/stranded-funds-copy'
 import {
   agentStatusPresentation,
@@ -676,7 +676,7 @@ export default function AgentDetailClient({ agentId }: Props) {
               {/* #2195: the cause clause is shared with `AgentCard` and count-aware
                   here because this surface holds the LIST, not an EXISTS. */}
               {unsettledPayments.length > 0
-                ? strandedFundsCause(unsettledPayments.length)
+                ? strandedFundsCauseWithLocation(unsettledPayments.length)
                 : 'Your agent’s wallet is holding funds that weren’t spent.'}{' '}
               {strandedSummary
                 ? `Recover ${strandedSummary} to your Haven wallet.`
@@ -702,9 +702,20 @@ export default function AgentDetailClient({ agentId }: Props) {
               </Button>
               {/* #2196: the connection between this warning and the rows that
                   caused it — NAVIGATIONAL only, deliberately. See the comment on
-                  AGENT_ACTIVITY_SECTION_ID. */}
+                  AGENT_ACTIVITY_SECTION_ID.
+
+                  `ghost`, not `tertiary`: `tertiary` is transparent with no
+                  resting chrome, so against the banner's `--v2-warning-soft`
+                  fill it read as prose rather than as a control
+                  (`haven-design-reviewer` on this change, off the 1280 and 390
+                  captures). `ghost` is also the variant the ONE other `Button`
+                  inside an `ApprovalRequiredBanner` uses — `ReceiveFundsModal`'s
+                  "Refresh page". It stays a `Button` rather than becoming an
+                  inline link so it keeps #1726's 44px hit area: a second
+                  control in this banner at 24px would be the defect #2203 was
+                  filed about, one row down. */}
               {unsettledPayments.length > 0 ? (
-                <Button variant="tertiary" size="sm" onClick={scrollToActivity}>
+                <Button variant="ghost" size="sm" onClick={scrollToActivity}>
                   {reviewStrandedPaymentsLabel(unsettledPayments.length)}
                 </Button>
               ) : null}

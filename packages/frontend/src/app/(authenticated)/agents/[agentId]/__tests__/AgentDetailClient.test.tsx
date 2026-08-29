@@ -425,6 +425,27 @@ describe('AgentDetailClient last-activity metadata', () => {
     }
   })
 
+  /**
+   * `haven-design-reviewer` on this change: rendered against the banner's
+   * `--v2-warning-soft` fill, a chrome-less `tertiary` Button read as prose
+   * rather than as a control. It must carry RESTING affordance, not only a
+   * hover state — a control you cannot see is not a connection (#2196).
+   */
+  it('gives the review affordance resting chrome, so it reads as a control (#2196)', () => {
+    mockRecoverable('8.00', '8000000')
+    mockUnsettled([unsettledRow('1', '8.00')])
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    const review = screen.getByRole('button', { name: 'Review the payment' })
+    // `Button`'s ghost variant — a white fill and a hairline, the same variant
+    // the one other Button inside an ApprovalRequiredBanner uses
+    // (`ReceiveFundsModal`'s "Refresh page").
+    expect(review.className).toContain('bg-white')
+    expect(review.className).toContain('border-[var(--v2-border-strong)]')
+    // `tertiary` is `bg-transparent` with no border — the shape that failed.
+    expect(review.className).not.toContain('bg-transparent')
+  })
+
   it('uses the SHARED cause clause on the detail banner, singular for one event (#2195)', () => {
     mockRecoverable('8.00', '8000000')
     mockUnsettled([unsettledRow('1', '8.00')])

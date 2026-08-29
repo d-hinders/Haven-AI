@@ -15,13 +15,17 @@ import {
   STRANDED_FUNDS_TITLE,
   reviewStrandedPaymentsLabel,
   strandedFundsCause,
+  strandedFundsCauseWithLocation,
 } from '../stranded-funds-copy'
 
 /**
- * The clause both surfaces share. Everything before it is the count; nothing
- * after it may differ by surface.
+ * The clause both surfaces share. Everything before it is the count; the only
+ * thing that may differ after it is the detail banner's ADDED location clause.
  */
-const SHARED_TAIL =
+const SHARED_TAIL = 'funded on-chain but didn’t reach the merchant.'
+
+/** What the detail banner adds, and only it. */
+const LOCATION_TAIL =
   'funded on-chain but didn’t reach the merchant, leaving money in your agent’s wallet.'
 
 describe('stranded-funds copy (#2195)', () => {
@@ -35,6 +39,26 @@ describe('stranded-funds copy (#2195)', () => {
   it('ends every branch with the identical shared clause', () => {
     for (const count of [null, 1, 2, 7] as const) {
       expect(strandedFundsCause(count).endsWith(SHARED_TAIL), `count=${count}`).toBe(true)
+      expect(
+        strandedFundsCauseWithLocation(count).endsWith(LOCATION_TAIL),
+        `count=${count}`,
+      ).toBe(true)
+    }
+  })
+
+  /**
+   * The #2195 property, stated as an invariant rather than as two literals:
+   * the detail banner's sentence is the card's sentence with a clause ADDED,
+   * never a reworded core. If someone edits one branch and not the other, the
+   * prefix stops matching and this fails.
+   */
+  it('makes the detail variant the shared clause PLUS a location, not a rewording', () => {
+    for (const count of [null, 1, 2, 7] as const) {
+      const core = strandedFundsCause(count)
+      const withLocation = strandedFundsCauseWithLocation(count)
+      // Same words up to the core's final full stop.
+      expect(withLocation.startsWith(core.slice(0, -1)), `count=${count}`).toBe(true)
+      expect(withLocation.length).toBeGreaterThan(core.length)
     }
   })
 
@@ -43,6 +67,16 @@ describe('stranded-funds copy (#2195)', () => {
     expect(strandedFundsCause(null)).toBe(`At least one payment was ${SHARED_TAIL}`)
     expect(strandedFundsCause(1)).toBe(`A payment was ${SHARED_TAIL}`)
     expect(strandedFundsCause(2)).toBe(`2 payments were ${SHARED_TAIL}`)
+    expect(strandedFundsCauseWithLocation(1)).toBe(`A payment was ${LOCATION_TAIL}`)
+  })
+
+  /**
+   * The card must NOT carry the location clause: the shared title already says
+   * "in agent wallet" and its link says "these funds", and the repetition cost
+   * a fourth wrapped line at 390px.
+   */
+  it('keeps the location clause off the count-free (card) variant', () => {
+    expect(strandedFundsCause(null)).not.toContain('leaving money')
   })
 
   it('never emits a bare singular for a count it knows is greater than one', () => {

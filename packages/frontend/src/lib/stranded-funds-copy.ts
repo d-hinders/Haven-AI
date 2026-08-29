@@ -46,20 +46,43 @@
 export const STRANDED_FUNDS_TITLE = 'Recoverable funds in agent wallet'
 
 /**
- * The cause clause, count-aware.
+ * The count-bearing subject.
  *
  * `null` means "this surface knows the state exists and nothing more" — it
  * gets "At least one payment", which is exactly as strong a claim as the
  * `EXISTS` behind it and no stronger.
  */
+function strandedSubject(count: number | null): string {
+  if (count === null) return 'At least one payment was'
+  if (count === 1) return 'A payment was'
+  return `${count} payments were`
+}
+
+/** What happened. The clause every surface shares, verbatim. */
 export function strandedFundsCause(count: number | null): string {
-  if (count === null) {
-    return 'At least one payment was funded on-chain but didn’t reach the merchant, leaving money in your agent’s wallet.'
-  }
-  if (count === 1) {
-    return 'A payment was funded on-chain but didn’t reach the merchant, leaving money in your agent’s wallet.'
-  }
-  return `${count} payments were funded on-chain but didn’t reach the merchant, leaving money in your agent’s wallet.`
+  return `${strandedSubject(count)} funded on-chain but didn’t reach the merchant.`
+}
+
+/**
+ * The same clause plus where the money ended up — the detail banner's variant.
+ *
+ * This is the detail-level difference #2195 asked for: carried by what is
+ * ADDED around the shared core rather than by a reworded core. Two reasons the
+ * location clause lives here and not on `AgentCard`:
+ *
+ * 1. On the detail banner the next sentence is *"Recover it to your Haven
+ *    wallet."* whenever the balance has not fully loaded (`strandedSummary` is
+ *    null — the #1098 partial-response guard). "It" needs "money in your
+ *    agent's wallet" as its antecedent, so dropping the clause there would
+ *    leave a dangling pronoun in a money warning.
+ * 2. On `AgentCard` there is no such pronoun, the shared title already says
+ *    "in agent wallet", and the link says "recover these funds" — so the
+ *    clause was pure repetition that pushed the notice from three rendered
+ *    lines to four at 390px, stranding the link alone on the last one
+ *    (`haven-design-reviewer` on this change, measured off the 390 capture).
+ */
+export function strandedFundsCauseWithLocation(count: number | null): string {
+  return `${strandedSubject(count)} funded on-chain but didn’t reach the merchant, leaving money in your agent’s wallet.`
 }
 
 /**

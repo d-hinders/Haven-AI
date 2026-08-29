@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { finishRekey, startRekey } from './rekey.js'
+import { parseArgs } from './args.js'
+import { REKEY_FINISH_NEEDS_API_KEY } from './rekey-messages.js'
 import { runCli } from './cli.js'
 import {
   REKEY_PENDING_FILENAME,
@@ -655,5 +657,48 @@ describe('the config rewrite reaches the REAL writer (#1700)', () => {
     )
     expect(result.configRewritten).toBe(false)
     expect(result.messages.join('\n')).toMatch(/still carries the OLD API key/)
+  })
+})
+
+// #2187: two layers legitimately refuse `--rekey-finish` without a new API key
+// — the parser refuses the invocation before touching disk, the function
+// refuses the call whoever made it (`newApiKey` is optional in the shared
+// `RekeyOptions` only because phase one takes none). What was wrong was two
+// copies of the sentence with nothing pinning them together.
+describe('the missing-api-key refusal is one sentence, not two (#2187)', () => {
+  /** The message each layer actually produces, driven through its real path. */
+  async function messages() {
+    const fromParser = (() => {
+      try {
+        parseArgs(['--rekey-finish'])
+        return null
+      } catch (err) {
+        return (err as Error).message
+      }
+    })()
+    const fromFunction = await finishRekey({}, {}).then(
+      () => null,
+      (err: unknown) => (err as Error).message,
+    )
+    return { fromParser, fromFunction }
+  }
+
+  it('both layers still refuse', async () => {
+    const { fromParser, fromFunction } = await messages()
+
+    // Neither guard may quietly disappear: the parser's is what a CLI user
+    // hits, the function's is what a direct caller hits.
+    expect(fromParser).not.toBeNull()
+    expect(fromFunction).not.toBeNull()
+  })
+
+  it('and they say exactly the same thing', async () => {
+    const { fromParser, fromFunction } = await messages()
+
+    // Asserted between the two REAL paths rather than against the constant —
+    // comparing each to `REKEY_FINISH_NEEDS_API_KEY` would pass even if one
+    // site stopped importing it, which is the drift this pins.
+    expect(fromParser).toBe(fromFunction)
+    expect(fromParser).toBe(REKEY_FINISH_NEEDS_API_KEY)
   })
 })

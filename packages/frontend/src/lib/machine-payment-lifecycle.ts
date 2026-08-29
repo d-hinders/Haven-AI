@@ -23,6 +23,16 @@ const PRESENTATION: Record<MachinePaymentFlowStatus, MachinePaymentLifecyclePres
   needs_attention: { label: 'Needs attention', tone: 'warning' },
 }
 
+/**
+ * Every label this map can put on screen, derived from the map rather than
+ * restated beside it (#2147). `StatusBadge.test.tsx` renders each one to hold
+ * the one-line stadium rule: these labels land in the narrowest column the app
+ * has, and `needs_attention`'s two words were the first to wrap there.
+ */
+export const PRESENTATION_LABELS: readonly string[] = Object.values(PRESENTATION)
+  .filter((p): p is MachinePaymentLifecyclePresentation => p !== null)
+  .map((p) => p.label)
+
 export function machinePaymentLifecyclePresentation(
   tx: Pick<Transaction | AggregatedTransaction, 'paymentFlowStatus'>,
 ): MachinePaymentLifecyclePresentation | null {

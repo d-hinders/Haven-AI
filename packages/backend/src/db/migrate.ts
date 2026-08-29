@@ -88,6 +88,17 @@ import { migrations as registeredMigrations, type Migration } from './migrations
  * bearing rather than cosmetic: a blocking waiter deadlocks the very index
  * build it is waiting for. See `acquireLaneLock`.
  *
+ * ### One residual an operator will meet, and no lock can fix
+ *
+ * `CREATE INDEX CONCURRENTLY` finishes by waiting for every transaction with a
+ * snapshot older than its own to end — **database-wide**, not just on the table
+ * being indexed. So a non-transactional migration can sit there for reasons
+ * that have nothing to do with migrations: an ordinary long transaction from
+ * application traffic, a report, a slow request. Nothing here can quiesce
+ * those, and no advisory-lock scheme would help; the only bound is
+ * `LOCK_WAIT_TIMEOUT_MS`. If a boot appears stuck on an index build, look at
+ * `pg_stat_activity` for old transactions before suspecting the runner.
+ *
  * ### `down()`
  *
  * The runner never calls `down()` in either lane — rollback is a hand-run or
@@ -230,9 +241,18 @@ export async function runMigrations(list: Migration[] = registeredMigrations): P
  * boots safe: that is `acquireLaneLock`'s polled wait, and this check alone
  * did not fix the 40P01 the concurrent-boot test found.)
  *
- * The check-then-act window is still handled rather than hoped away: a genuine
- * first-boot race is caught, and the column is re-read to decide whether the
- * peer won (continue) or the ALTER failed for its own reasons (rethrow).
+ * The check-then-act window is handled rather than hoped away: on failure the
+ * column is re-read to decide whether a peer won (continue) or the ALTER failed
+ * for its own reasons (rethrow).
+ *
+ * **That `catch` is defensive and is deliberately NOT claimed as a proven
+ * guard.** The ordinary race does not reach it — `ADD COLUMN IF NOT EXISTS` is
+ * a no-op for the loser, not an error — so what is left is Postgres raising
+ * `XX000 tuple concurrently updated` from concurrent catalog writes, which
+ * cannot be scheduled from a test. The concurrent path that CAN be proven is,
+ * by `two concurrent boots ADD the status column exactly once` in
+ * `__tests__/migrate-non-transactional.test.ts`. Saying so beats a test shaped
+ * like a proof that never exercises the branch.
  */
 async function ensureStatusColumn(pool: Pool): Promise<void> {
   if (await statusColumnExists(pool)) return

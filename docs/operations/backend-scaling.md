@@ -58,6 +58,14 @@ may now run more than one, and the relayer is what still caps throughput.**
   `withKeyedAdvisoryLock` are unaffected — neither is ever held across a
   `CONCURRENTLY` build.
 
+  **A non-transactional migration can also be slow for reasons that are not
+  about migrations.** `CREATE INDEX CONCURRENTLY` finishes by waiting out every
+  transaction holding a snapshot older than its own, **database-wide** — so an
+  unrelated long-running query or a slow request on another replica delays the
+  build, bounded only by the runner's 15-minute wait. No locking scheme can fix
+  that (you cannot quiesce unrelated traffic for an index build). Check
+  `pg_stat_activity` for old transactions before suspecting the runner.
+
   The failure mode this lane introduces is deliberate and operator-visible: a
   migration that dies part-way leaves `schema_migrations.status = 'running'`,
   and the next boot REFUSES to start rather than retrying blind. On a fleet

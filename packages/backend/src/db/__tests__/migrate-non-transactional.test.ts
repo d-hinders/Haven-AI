@@ -425,6 +425,28 @@ describeDb('migration runner: the transactional opt-out (#2150)', () => {
     }
   }, CONCURRENT_BUILD_TIMEOUT_MS)
 
+  it('two concurrent boots ADD the status column exactly once', async () => {
+    // The bootstrap's own race. Both callers find the column missing, so both
+    // attempt the ALTER — the path `ensureStatusColumn` exists to survive. The
+    // loser must come back with the column present and no error, not with a
+    // failed boot.
+    const legacy = `${FIXTURE_PREFIX}legacy_race`
+    await db.query(`INSERT INTO schema_migrations (version) VALUES ($1)`, [legacy])
+    await db.query(`ALTER TABLE schema_migrations DROP COLUMN status`)
+
+    const results = await Promise.allSettled([runMigrations([]), runMigrations([])])
+
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled'])
+    const { rows } = await db.query<{ n: string }>(
+      `SELECT count(*) AS n FROM pg_attribute
+       WHERE attrelid = to_regclass('schema_migrations')
+         AND attname = 'status' AND NOT attisdropped`,
+    )
+    expect(rows[0].n).toBe('1')
+    // And the row that predated the column is applied, not incomplete.
+    expect(await bookkeeping(legacy)).toEqual({ status: 'applied' })
+  })
+
   // ── Legacy bookkeeping rows. ─────────────────────────────────────────────
 
   it('rows written before the status column are treated as applied, not as incomplete', async () => {

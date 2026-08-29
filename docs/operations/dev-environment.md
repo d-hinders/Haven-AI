@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-08-25" # #2011 re-verify: qa-dev and its config now consume only the active delegation-rail identity; the retired AllowanceModule QA_AGENT_API_KEY / QA_DELEGATE_PRIVATE_KEY secrets are absent, so a freshly seeded database has a complete harness environment. Prior: #1690 re-verify: the backend gains X402_EMIT_PAYER_CONTEXT (emits expected-context v3 with the payer identity; SIGNER-FIRST — leave unset until the connector population supports v3, since older signers refuse v3 with the skew message). Operator env flip per environment, documented in .env.dev.example with that warning. Nothing else this doc claims moves. Prior: #1670 re-verify: the backend gains TRUST_PROXY_HOPS (arms per-IP auth rate limits; hop COUNT, never `true` — see config.ts) — an OPERATOR env flip per environment, dev first. The .env.dev.example documents it, including the empirical hop-count verification step before trusting a new environment's proxy. Nothing else this doc claims moves; the dev wiring, endpoints and isolation rules re-read against the diff stand. Prior: #1459: the "no automated scenario covers the erc7710 rail" claim was false (x402-erc7710-settle has run nightly since #1064), and the QA-interaction note argued from a selector that #1453 changed — both corrected against the code as it now stands. #1154: the hosted MCP is now on the money-flow QA path (x402-hosted-mcp-signer), and qa-dev.yml gained a signer build step plus QA_HOSTED_MCP_URL / QA_X402_BINDING_SIGNER. Endpoints re-confirmed by a live run against dev the same day.
+last-verified: "2026-08-28" # chain-reset(#2159): compacted prior verification notes into git history. Re-verified the Base-Sepolia-only MERCHANT_REPORT_GRACE_MIN_OVERRIDE operator control: only a backend serving HAVEN_DEPLOY_CHAIN_IDS=84532 may set it, startup rejects every other deployment, and production retains the 15-minute default.
 ---
 
 # Dev environment
@@ -193,6 +193,13 @@ Isolation rules that are non-negotiable for a payments product:
   (`RELAYER_PRIVATE_KEY_<chainId>`, #640/#678) — a mechanism that *permits*
   isolating testnet from mainnet keys, though the deployed posture shares one
   key (see above).
+- **QA crash/resume grace** — set
+  `MERCHANT_REPORT_GRACE_MIN_OVERRIDE=0` on the dev **backend only** before
+  running the #2159 funded-but-undelivered QA leg. The backend starts only when
+  this deployment serves exactly `HAVEN_DEPLOY_CHAIN_IDS=84532`; it rejects the
+  override on mainnet, mixed, or unbounded deployments. Leave it unset outside
+  that deterministic test so the normal 15-minute merchant-report grace stays
+  in force; never set it in production.
 
 The dev backend also runs the **Fortnox bookkeeping integration**: `FORTNOX_*`
 vars (client id/secret + redirect to the dev backend's

@@ -58,7 +58,9 @@ export const toolDescriptions = {
     behavior:
       'Signs the payment locally and returns the merchant response. Settlement is either direct account-to-merchant with no funding leg, or a bridge that first redeems the agent\'s budget delegation to fund the delegate wallet for an EIP-3009 authorization. A payment outside the on-chain budget is declined before any money moves; nothing is queued for a human to approve later.',
     nextActionGuidance:
-      'Preserve the returned resume_state and resume only on nextAction=retry_original_x402_request. ' +
+      'Preserve the returned resume_state — it identifies this payment if you need to ask about it later. ' +
+      'This tool performs the merchant retry itself, so do not wait on a signal while the call is in flight. ' +
+      'If the process crashes after this call and a later haven_get_payment_status reports nextAction=retry_original_x402_request, Haven\'s funding leg confirmed but no merchant response was ever recorded — call the resume tool with the preserved resume_state or payment_id instead of paying again. ' +
       'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the account is funded or the agent budget raised — stop and tell the user the shortfall reported on the response.',
   },
   payX402OneShot: {
@@ -69,7 +71,9 @@ export const toolDescriptions = {
     behavior:
       'Calls the URL, parses any HTTP 402 x402 challenge, signs the payment locally, then retries the original request with the X-PAYMENT header and returns the merchant response. Settlement is either direct account-to-merchant with no funding leg, or a bridge that first redeems the agent\'s budget delegation to fund the delegate wallet for an EIP-3009 authorization. A payment outside the on-chain budget is declined before any money moves; nothing is queued for a human to approve later. If the resource returns a non-402 status, returns it unchanged without contacting Haven.',
     nextActionGuidance:
-      'Preserve the returned resume_state or paymentId and resume only on nextAction=retry_original_x402_request. ' +
+      'Preserve the returned resume_state or paymentId — either identifies this payment if you need to ask about it later. ' +
+      'This tool performs the merchant retry itself, so do not wait on a signal while the call is in flight. ' +
+      'If the process crashes after this call and a later haven_get_payment_status reports nextAction=retry_original_x402_request, Haven\'s funding leg confirmed but no merchant response was ever recorded — call the resume tool with the preserved resume_state or payment_id instead of paying again. ' +
       'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the account is funded or the agent budget raised — stop and tell the user the shortfall reported on the response.',
   },
   resumeX402: {
@@ -78,7 +82,9 @@ export const toolDescriptions = {
     behavior:
       'Accepts either resume_state or payment_id, validates the original x402 details against the authorized Haven funding, and retries the merchant request with the X-PAYMENT header. No new Haven payment is created.',
     nextActionGuidance:
-      'Only use when get_payment_status returns nextAction=retry_original_x402_request; do not start a new merchant session.',
+      'Only call this after haven_get_payment_status reports nextAction=retry_original_x402_request — that means Haven\'s funding leg confirmed but no merchant response was ever recorded, most often because the process crashed between funding and the merchant retry. ' +
+      'Any other nextAction reports a conflict instead of retrying, so do not call this speculatively. ' +
+      'Do not start a new merchant session and do not pay again — that would pay twice for one resource.',
   },
   // #1328: quoteMpp / payMpp / resumeMpp (the mpp_demo challenge/quote/resume
   // fragments) are retired along with the client surface they described —
@@ -148,7 +154,8 @@ export const toolDescriptions = {
       'Amounts within the remaining on-chain budget execute automatically; anything outside it is declined before any money moves — follow the response\'s nextAction when present.',
     nextActionGuidance:
       'On a decline, report the reason to the user and ask them to raise the budget in Haven — there is no approval queue to wait on. ' +
-      'Use haven_resume_x402_payment once nextAction=retry_original_x402_request.',
+      'This tool retries the merchant itself while it runs, so do not wait on a signal mid-call. ' +
+      'If the process crashes after payment, a later haven_get_payment_status call may report nextAction=retry_original_x402_request — resume via haven_resume_x402_payment instead of paying again.',
   },
   discoverTools: {
     summary:

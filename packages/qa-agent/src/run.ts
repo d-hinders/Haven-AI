@@ -17,6 +17,7 @@ import { x402OverBudgetRejected } from './scenarios/x402-over-budget-rejected.js
 import { x402Erc7710OverBudgetRejected } from './scenarios/x402-erc7710-over-budget-rejected.js'
 import { x402Delegation3009 } from './scenarios/x402-delegation-3009.js'
 import { x402Delegation3009Sweep } from './scenarios/x402-delegation-3009-sweep.js'
+import { x402Delegation3009GraceResume } from './scenarios/x402-delegation-3009-grace-resume.js'
 import { x402Erc7710Settle } from './scenarios/x402-erc7710-settle.js'
 import { x402Erc7710FreshAgent } from './scenarios/x402-erc7710-fresh-agent.js'
 import { x402Erc7710Sdk } from './scenarios/x402-erc7710-sdk.js'
@@ -104,6 +105,7 @@ const SCENARIOS: Scenario[] = [
   // schemes, rather than as unrelated legs.
   x402Erc7710OverBudgetRejected,
   x402Delegation3009,
+  x402Delegation3009GraceResume,
   x402Delegation3009Sweep,
   x402Erc7710Settle,
   // #1674: the COLD START — a fresh agent whose first-ever payment is

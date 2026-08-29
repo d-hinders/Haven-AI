@@ -308,6 +308,83 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           ])
         }
       })
+
+      /**
+       * #2147 — the attention half of the same describe block, extending it
+       * rather than standing a parallel one beside it.
+       *
+       * The `derives, rather than restates` test above round-trips
+       * `payment_attention_reason` back in as `reconciliationEventType`, so it
+       * proves the seeded PAIR is self-consistent. What it structurally cannot
+       * see is whether the reconciliation event could have been recorded at
+       * all: `machinePaymentLifecycle` never learns the tx hash, and the
+       * endpoint that writes the event refuses on exactly that. So the
+       * preconditions are asserted here, against
+       * `modules/mpp/reconciliation.ts`.
+       */
+      const attentionRows = () =>
+        seededPaymentRows().filter(
+          (r) => r.payment_attention_reason === 'merchant_retry_rejected_after_payment',
+        )
+
+      it('seeds the needs_attention state at all — the #2147 gap', () => {
+        // Non-vacuity for the two assertions below, and the guard against
+        // silently regressing to the state this issue was filed about: with no
+        // attention row, `needs_attention`'s badge and the "Recoverable funds"
+        // banner's specific copy branch (`AgentDetailClient.tsx:634-636`) have
+        // no rendered evidence anywhere in the capture suite.
+        const rows = attentionRows()
+        expect(rows.length).toBeGreaterThan(0)
+        expect(rows.map((r) => r.payment_flow_status)).toEqual(rows.map(() => 'needs_attention'))
+      })
+
+      it('seeds an attention row the reconciliation endpoint would have accepted', () => {
+        // `handleReconciliationEvent` (`modules/mpp/reconciliation.ts:40-48`)
+        // answers 409 "Reconciliation events require a confirmed payment"
+        // unless BOTH hold, and stores `payment.tx_hash.toLowerCase()` (`:73`).
+        // An attention row missing either describes an event that could never
+        // have been written, however consistent its derived pair looks.
+        for (const row of attentionRows()) {
+          expect([row.id, row.status, row.tx_hash != null]).toEqual([row.id, 'confirmed', true])
+        }
+      })
+
+      it('leaves an attention row at the proof status its own path can reach', () => {
+        // `haven-reviewer`'s should-fix: the #2126 proof-status test above
+        // checks UNION MEMBERSHIP, so `merchant_response_observed` on this row
+        // passes it while being unreachable — and the value RENDERS, verbatim,
+        // as `TransactionDetailPanel.tsx:170`'s "Proof" row. Union membership
+        // is the wrong bar for a row whose path is known.
+        //
+        // On the retry-rejected path the proof status is still the
+        // settlement-time base-row literal `'payment_confirmed'`
+        // (`infra/repositories/machine-payments.ts:49`; column default,
+        // migration `014:13`). The only writer that raises it is
+        // `proofStatusForAttach` (`modules/mpp/evidence.ts:196-200`), reached
+        // from the agent-reported attach — and the SDK throws at
+        // `merchant-completion.ts:137-149` before it can report any evidence.
+        // A merchant that answered well enough to attach a response would not
+        // have produced the rejection this row is about.
+        for (const row of attentionRows()) {
+          expect([row.id, row.payment_proof_status]).toEqual([row.id, 'payment_confirmed'])
+        }
+      })
+
+      it('agrees with the agent row that the reconciliation event is open', () => {
+        // One event, two reads. `has_stranded_funds` is
+        // `EXISTS(… event_type = 'merchant_retry_rejected_after_payment' AND
+        // status = 'open')` over the agent's intents
+        // (`infra/repositories/agents.ts:186-192`, `:206-212`) — the same row
+        // the activity feed derives `payment_attention_reason` from. A fixture
+        // where the two disagree serves a contradiction no backend can.
+        const flagged = new Set(
+          (FIXTURE_AGENTS as { id: string; has_stranded_funds?: boolean }[])
+            .filter((a) => a.has_stranded_funds)
+            .map((a) => a.id),
+        )
+        const withAttention = new Set(attentionRows().map((r) => r.agent_id))
+        expect([...withAttention].sort()).toEqual([...flagged].sort())
+      })
     })
 
     it('carries `activity` in the generic empty fallback', () => {

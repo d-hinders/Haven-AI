@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
 import { ConnectError } from './connect-error.js'
 import {
+  installedClientHint,
   promptForInstalledClient,
   resolveRuntimeByInstalledClientPrompt,
   scanInstalledClients,
@@ -170,5 +171,85 @@ describe('installed-client prompt (#1719)', () => {
 
     expect((error as ConnectError).code).toBe('runtime_no_installed_clients')
     expect(question).not.toHaveBeenCalled()
+  })
+})
+
+// #2174: the scan's findings as DATA for the --json refusal. The invariant
+// under test is #1719's property 2 — populates, never selects — which here
+// means the hint must stay silent whenever "top" would be an artefact of the
+// fixed SCAN_ORDER tiebreak rather than a fact about the machine.
+describe('installedClientHint (#2174)', () => {
+  function candidate(
+    runtime: InstalledClientCandidate['runtime'],
+    evidence: InstalledClientCandidate['evidence'],
+  ): InstalledClientCandidate {
+    return { runtime, label: runtime, detail: 'x', configPath: null, evidence }
+  }
+
+  it('reports nothing and suggests nothing when the scan found nothing', () => {
+    expect(installedClientHint([])).toEqual({ installedClients: [] })
+  })
+
+  it('suggests a lone candidate', () => {
+    expect(installedClientHint([candidate('cursor', 'client-directory')])).toEqual({
+      installedClients: ['cursor'],
+      suggestedRuntime: 'cursor',
+    })
+  })
+
+  it('suggests a live MCP config over a bare client directory', () => {
+    const hint = installedClientHint([
+      candidate('codex-cli', 'config-file'),
+      candidate('claude-code', 'client-directory'),
+    ])
+
+    expect(hint.installedClients).toEqual(['codex-cli', 'claude-code'])
+    expect(hint.suggestedRuntime).toBe('codex-cli')
+  })
+
+  it('lists both but suggests neither when the top two share an evidence tier', () => {
+    // Separated only by SCAN_ORDER — a fixed preference, not a finding. The
+    // agent still gets the narrowed list to choose from.
+    const hint = installedClientHint([
+      candidate('claude-code', 'config-file'),
+      candidate('cursor', 'config-file'),
+    ])
+
+    expect(hint.installedClients).toEqual(['claude-code', 'cursor'])
+    expect(hint.suggestedRuntime).toBeUndefined()
+  })
+
+  it('picks the single configured client out of an UNSORTED list', () => {
+    // The rule reads the whole array, not the first two entries: this is an
+    // exported function, and a caller that has not sorted its candidates must
+    // not get a quietly wrong suggestion.
+    const hint = installedClientHint([
+      candidate('claude-code', 'client-directory'),
+      candidate('hermes', 'client-directory'),
+      candidate('codex-cli', 'config-file'),
+    ])
+
+    expect(hint.suggestedRuntime).toBe('codex-cli')
+    // The list itself keeps the order it was given.
+    expect(hint.installedClients).toEqual(['claude-code', 'hermes', 'codex-cli'])
+  })
+
+  it('suggests nothing when two configured clients tie anywhere in the list', () => {
+    const hint = installedClientHint([
+      candidate('cursor', 'config-file'),
+      candidate('claude-code', 'client-directory'),
+      candidate('hermes', 'config-file'),
+    ])
+
+    expect(hint.suggestedRuntime).toBeUndefined()
+  })
+
+  it('suggests nothing when two bare client directories tie', () => {
+    const hint = installedClientHint([
+      candidate('claude-code', 'client-directory'),
+      candidate('hermes', 'client-directory'),
+    ])
+
+    expect(hint.suggestedRuntime).toBeUndefined()
   })
 })

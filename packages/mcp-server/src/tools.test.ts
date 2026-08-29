@@ -8,7 +8,7 @@ import {
   MerchantTimeoutError,
   SIGNER_UPDATE_FALLBACK,
 } from '@haven_ai/sdk'
-import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
+import { createToolHandlers, toolDescriptions, type ToolSuccess, type ToolPayload } from './tools.js'
 
 const DELEGATE_KEY = '0x' + 'a'.repeat(64)
 const HEADER_SIGNING_KEY = '0x' + '12'.repeat(32)
@@ -5902,5 +5902,44 @@ describe('#2054 — erc7710-only merchants', () => {
       expect(res.success).toBe(false)
       expect((res as { message?: string }).message).toContain('No compatible payment option')
     })
+  })
+})
+
+describe('#2145: the hosted resume description gates on the live retry trigger', () => {
+  /**
+   * `RESUME_X402_DESCRIPTION` in this file is a hand-built string literal, not
+   * an entry of the SDK's shared `toolDescriptions` object — so the regression
+   * guard in `packages/sdk/src/tool-descriptions.test.ts` never scanned it.
+   *
+   * #2145 gave `retry_original_x402_request` a real producer
+   * (agent-payment-status.ts emits it when the funding leg confirmed but no
+   * merchant response was ever recorded). `haven_resume_x402_payment`'s
+   * description must name it as the gate, and no hosted description should
+   * still claim the trigger is unreachable.
+   *
+   * Scans the exported record, so a newly registered hosted tool is covered
+   * without anyone remembering to extend this list.
+   */
+  it('haven_resume_x402_payment names retry_original_x402_request as its gate; nothing claims it is unreachable', () => {
+    const entries = Object.entries(toolDescriptions)
+
+    // Non-vacuity: an empty record would satisfy every assertion below.
+    expect(entries.length).toBeGreaterThan(0)
+
+    expect(toolDescriptions.haven_resume_x402_payment).toContain(
+      'nextAction=retry_original_x402_request',
+    )
+
+    for (const [name, description] of entries) {
+      const lower = description.toLowerCase()
+      expect(
+        lower,
+        `${name} must not claim retry_original_x402_request is unreachable — #2145 gave it a producer`,
+      ).not.toContain('not currently reachable')
+      expect(
+        lower,
+        `${name} must not claim nothing emits a resume trigger — #2145 gave it a producer`,
+      ).not.toContain('nothing emits')
+    }
   })
 })

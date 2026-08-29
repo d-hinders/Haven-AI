@@ -40,7 +40,7 @@ document for the remaining exploratory checklist.
 
 | Slice | Coverage |
 |---|---|
-| Base Sepolia money-flow invariants: settle, over-budget refusal (direct and x402), x402 settle, sweep recovery | `packages/qa-agent`; local `npm run qa:dev -w packages/qa-agent` or Actions `qa-dev.yml` |
+| Base Sepolia money-flow invariants: settle, over-budget refusal (direct and x402), x402 settle, funded-but-undelivered crash/resume recovery, sweep recovery | `packages/qa-agent`; local `npm run qa:dev -w packages/qa-agent` or Actions `qa-dev.yml` |
 | Unmocked login/dashboard smoke against a Vercel preview + dev backend | `packages/frontend/e2e/live`; local `test:e2e:live` or Actions `qa-live.yml` |
 | Connect-agent modal: create setup → prompt → connected-local → approval screen, no secrets leaked | `e2e/connect-agent.spec.ts` |
 | Hosted-MCP agent/allowance/CTA states | `e2e/hosted-mcp.spec.ts` |

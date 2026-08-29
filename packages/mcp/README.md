@@ -177,11 +177,14 @@ regardless of audit state.
    delegate address.
 3. Call `haven_quote_x402` for a paid test URL.
 4. Call `haven_pay_x402_quote` with the returned quote.
-5. If the result has `nextAction: "retry_original_x402_request"`, call
-   `haven_resume_x402_payment` with the returned `resume_state` or
-   `payment_id`. If instead the call is declined for budget, raise the agent
-   budget in Haven and repeat from step 4 — Haven holds no approval queue, so
-   there is nothing to wait for.
+5. The pay tool performs the merchant retry itself, so a successful call needs
+   no follow-up. If the call is declined for budget, raise the agent budget in
+   Haven and repeat from step 4 — Haven holds no approval queue, so there is
+   nothing to wait for. If the process crashes after payment, a later
+   `haven_get_payment_status` call may report
+   `nextAction: 'retry_original_x402_request'` — only then call
+   `haven_resume_x402_payment` with the preserved resume state or payment id;
+   do not call it speculatively.
 
 The legacy MPP demo flow is retired (#1328) — pay through the x402 merchant
 flow above instead.

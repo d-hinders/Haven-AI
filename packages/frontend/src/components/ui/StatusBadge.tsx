@@ -20,7 +20,16 @@ export function StatusBadge({
   className?: string
 }) {
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TONE_CLASS[tone]} ${className}`}>
+    // #2147: `whitespace-nowrap` because `rounded-full` is a STADIUM — it is a
+    // one-line shape, and wrapped text turns it into an over-rounded blob that
+    // stops reading as a status chip. Nothing wrapped here until #2147 seeded
+    // `needs_attention`, whose "Needs attention" is the longest label in the
+    // `MachinePaymentFlowStatus` vocabulary and the first to wrap at 390 in the
+    // activity table's narrow column (`haven-design-reviewer`'s should-fix, on
+    // the capture that state's first-ever rendering produced). Every other
+    // badge in the app already fits on one line, so this changes no existing
+    // rendering; `StatusBadge.test.tsx` holds the shape and the rule together.
+    <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${TONE_CLASS[tone]} ${className}`}>
       {children}
     </span>
   )

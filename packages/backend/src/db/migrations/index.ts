@@ -70,6 +70,7 @@ import * as catalogLifecycle from './068_catalog_lifecycle.js'
 import * as dropSafeApproverMetadata from './069_drop_safe_approver_metadata.js'
 import * as dropApprovalRequests from './070_drop_approval_requests.js'
 import * as dropAllowanceNonceWatermarks from './071_drop_allowance_nonce_watermarks.js'
+import * as paymentIntentsSettlementIndexes from './072_payment_intents_settlement_indexes.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -199,4 +200,5 @@ export const migrations: Migration[] = [
   dropSafeApproverMetadata,
   dropApprovalRequests,
   dropAllowanceNonceWatermarks,
+  paymentIntentsSettlementIndexes,
 ]

@@ -2,7 +2,7 @@
 owner: "@AntonioSaaranen"
 status: current
 covers: []  # index and naming convention for the shard directory — it describes how shards are written, not any code path
-last-verified: "2026-08-29" # #2188: merged shards are IMMUTABLE — new section states the correction mechanism for each of the three ways a shard goes wrong, and closes the wrong inference that shards have a `chain-reset` equivalent (they do not; the per-file model already is the compaction). Measured while writing it, and reproduced independently by review: editing a merged shard satisfies the satisfied-by gate for an unrelated money-path PR (exit 1 -> exit 0 on a one-character edit), so the rule has a mechanical reason, not only an attestation one — and the doc says plainly that its own case-3 qualifier is convention rather than a gate check. Counted for the chain-reset claim: 181 shards, zero carrying a last-verified line. Convention/filename rules re-read against the gate and unchanged. Prior: #1789: release shards are named for the VERSION, not the PR number — the PR-number convention was unsatisfiable in principle (the gate blocks the PR until the shard exists, so the number cannot be known when the name is needed) and cost the 0.1.29-alpha.0 cut a wrong guess plus a correcting commit. Issue shards are unchanged; existing shards keep their names; the release/SKILL.md and scripts/README.md copies now say the same thing. Body re-read against the gate: the satisfied-by claim and the no-front-matter exemption still hold. Prior: created for #1366 — the sharded CASP verification log
+last-verified: "2026-08-29" # #2192: the whole file swept for the old any-match assumption, not just the section being changed — the Convention "The gate:" bullet still asserted it and now contradicted the rewritten section 30 lines below (review finding; my first pass changed the section and not its cross-references). The chain-reset section's shard COUNT corrected 181 -> 179, invalidated by this PR's own deletion of the two duplicates — the doc's own 'stale via a later change' case, caught on sweep rather than shipped. Case 3 also now names a byte-identical duplicate FILE explicitly, because its letter covered malformed content within a record and not deletion of an exact copy. Plus: the hazard this section described is now CHECKED — the coupling gate requires an ADDED satisfied-by match, so editing a merged shard no longer clears the blocking gate. Both the case-3 qualifier and the hazard paragraph rewritten accordingly (the former said in as many words that the rule was convention and not gate-checked; that is no longer true), and the parent-doc edit named as the escape hatch it always was. Immutability rule and the three cases otherwise unchanged. Prior: #2188: merged shards are IMMUTABLE — new section states the correction mechanism for each of the three ways a shard goes wrong, and closes the wrong inference that shards have a `chain-reset` equivalent (they do not; the per-file model already is the compaction). Measured while writing it, and reproduced independently by review: editing a merged shard satisfies the satisfied-by gate for an unrelated money-path PR (exit 1 -> exit 0 on a one-character edit), so the rule has a mechanical reason, not only an attestation one — and the doc says plainly that its own case-3 qualifier is convention rather than a gate check. Counted for the chain-reset claim: 181 shards, zero carrying a last-verified line. Convention/filename rules re-read against the gate and unchanged. Prior: #1789: release shards are named for the VERSION, not the PR number — the PR-number convention was unsatisfiable in principle (the gate blocks the PR until the shard exists, so the number cannot be known when the name is needed) and cost the 0.1.29-alpha.0 cut a wrong guess plus a correcting commit. Issue shards are unchanged; existing shards keep their names; the release/SKILL.md and scripts/README.md copies now say the same thing. Body re-read against the gate: the satisfied-by claim and the no-front-matter exemption still hold. Prior: created for #1366 — the sharded CASP verification log
 ---
 
 # CASP verification log — sharded entries (#1366)
@@ -43,10 +43,11 @@ also edits.
   `satisfied-by: docs/regulatory/casp-changelog/**` — the docs coupling gate
   accepts a PR that adds its shard here, without touching the parent doc.
   The DISCIPLINE is unchanged: every money-path change still writes its
-  analysis; only the storage stopped colliding. The glob matches **any** changed
-  file in this directory, including a modified one — see *Once merged, a shard
-  is immutable* below for why that makes editing an old shard a gate hazard and
-  not just a style question.
+  analysis; only the storage stopped colliding. The glob matches any changed file in
+  this directory, but since #2192 only an **added** one satisfies it: editing a
+  shard that already merged does not clear the gate for your change. Until then
+  it did, which is why *Once merged, a shard is immutable* below is written as a
+  compliance rule first and a gate behaviour second.
 - **The parent doc** keeps the guardrails body and the historical EOF log
   (frozen as of 2026-08-12). Its `last-verified` now reflects genuine
   re-verification of the BODY claims (e.g. the weekly #1248 audit), not
@@ -69,35 +70,43 @@ not on how wrong it is:
   claim, says it was wrong and why, and states the correct fact. Rewriting the
   original would remove the evidence that the error was ever made.
 - **Pure transcription defect** — a broken link, a typo'd issue number, mangled
-  table syntax. Fixable in place: it is a rendering fault in *carrying* the
-  claim, not a claim about the code. Land it in a PR that changes no money-path
-  code, so the in-place edit cannot stand in for that PR's own shard — see the
-  gate hazard below. **That last part is convention, not something the gate
-  checks**: bundle a shard typo-fix into your own money-path PR and you
-  reproduce the hazard exactly, silently and on green CI. This rule relocates
-  the danger to a discipline you have to keep; it does not close it.
+  table syntax, or a **byte-identical duplicate file** (a stray `… 3.md` copy
+  alongside its original). Fixable in place, deletion included for the
+  duplicate: these are faults in *carrying* the claim, not claims about the
+  code, and an exact copy holds no evidence its original does not. Establish the identity — same content hash, and ideally the same
+  origin commit — in the PR; do not eyeball it. Bundling such a fix into your
+  own money-path PR is safe: since #2192 the gate needs a genuinely **new**
+  file, so the edit cannot stand in for the shard you still have to write.
 
-**The mechanical reason, which is sharper than the principle.** The gate that
-`satisfied-by` drives asks only whether *some* changed file matches
-`docs/regulatory/casp-changelog/**` — it does not ask whether that file is new.
-So editing a merged shard **satisfies the blocking contract-doc gate for an
-unrelated money-path PR**, and no new verification record gets written.
-Measured on 2026-08-29 (#2188), holding one money-path edit fixed:
+**The mechanical reason, which is sharper than the principle — and is now
+checked (#2192).** The gate that `satisfied-by` drives used to ask only whether
+*some* changed file matched `docs/regulatory/casp-changelog/**`, never whether
+that file was new. So editing a merged shard **satisfied the blocking
+contract-doc gate for an unrelated money-path PR**, with no verification record
+written — silently, on green CI. Both columns measured on 2026-08-29 holding
+one money-path edit fixed — the *before* under #2188, the *after* on #2192's
+own fix:
 
-| Diff | `npm run docs:coupling` (strict) |
-|---|---|
-| money-path code only | **exit 1** — `BLOCKING: casp-risk-guardrails.md` |
-| the same code + a **one-character** edit to an already-merged shard | **exit 0** |
+| Diff | before #2192 | after #2192 |
+|---|---|---|
+| money-path code only | exit 1 | exit 1 |
+| the same code + a **one-character** edit to an already-merged shard | **exit 0** | **exit 1** |
 
-The write that was supposed to be forced never happened, and nothing reports
-it. That is why "correct it in a new shard" is the rule even when an in-place
-fix would read better: the new file is what re-arms the gate.
+The gate now requires at least one **added** match, so an edit to an old shard
+no longer stands in for the new one. It is "at least one added", never "no
+modified matches" — a PR that writes its own shard and tidies an old one still
+passes. Renames do not count: an old record under a new name is not a new
+record.
+
+If a money-path change genuinely warrants no new shard, the escape hatch is the
+one that was always there: **edit the parent `casp-risk-guardrails.md`
+directly**, which clears the gate and leaves a reviewable statement of why.
 
 **There is no `chain-reset` for shards, and there should not be.** The
 structural answer first, because it is not arguable: `chain-reset(#N)` is an
 escape hatch for one `last-verified` **line**, and
 [`chain-integrity.mjs`](../../../scripts/docs/chain-integrity.mjs) only ever
-inspects that line. **No shard carries one** — 181 shards, zero
+inspects that line. **No shard carries one** — 179 shards, zero
 `last-verified:` front-matter entries (one shard carries other front-matter;
 none carries this). There is nothing for the marker to act on.
 

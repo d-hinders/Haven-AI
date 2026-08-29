@@ -2,7 +2,7 @@
 owner: "@AntonioSaaranen"
 status: current
 covers: []  # index and naming convention for the shard directory — it describes how shards are written, not any code path
-last-verified: "2026-08-29" # #2188: merged shards are IMMUTABLE — new section states the correction mechanism for each of the three ways a shard goes wrong, and closes the wrong inference that shards have a `chain-reset` equivalent (they do not; the per-file model already is the compaction). Measured while writing it: editing a merged shard satisfies the satisfied-by gate for an unrelated money-path PR (exit 1 -> exit 0 on a one-character edit), so the rule has a mechanical reason, not only an attestation one. Convention/filename rules re-read against the gate and unchanged. Prior: #1789: release shards are named for the VERSION, not the PR number — the PR-number convention was unsatisfiable in principle (the gate blocks the PR until the shard exists, so the number cannot be known when the name is needed) and cost the 0.1.29-alpha.0 cut a wrong guess plus a correcting commit. Issue shards are unchanged; existing shards keep their names; the release/SKILL.md and scripts/README.md copies now say the same thing. Body re-read against the gate: the satisfied-by claim and the no-front-matter exemption still hold. Prior: created for #1366 — the sharded CASP verification log
+last-verified: "2026-08-29" # #2188: merged shards are IMMUTABLE — new section states the correction mechanism for each of the three ways a shard goes wrong, and closes the wrong inference that shards have a `chain-reset` equivalent (they do not; the per-file model already is the compaction). Measured while writing it, and reproduced independently by review: editing a merged shard satisfies the satisfied-by gate for an unrelated money-path PR (exit 1 -> exit 0 on a one-character edit), so the rule has a mechanical reason, not only an attestation one — and the doc says plainly that its own case-3 qualifier is convention rather than a gate check. Counted for the chain-reset claim: 181 shards, zero carrying a last-verified line. Convention/filename rules re-read against the gate and unchanged. Prior: #1789: release shards are named for the VERSION, not the PR number — the PR-number convention was unsatisfiable in principle (the gate blocks the PR until the shard exists, so the number cannot be known when the name is needed) and cost the 0.1.29-alpha.0 cut a wrong guess plus a correcting commit. Issue shards are unchanged; existing shards keep their names; the release/SKILL.md and scripts/README.md copies now say the same thing. Body re-read against the gate: the satisfied-by claim and the no-front-matter exemption still hold. Prior: created for #1366 — the sharded CASP verification log
 ---
 
 # CASP verification log — sharded entries (#1366)
@@ -55,14 +55,13 @@ also edits.
 ## Once merged, a shard is immutable
 
 A shard that has landed on `dev` is a compliance record, not a working note.
-Do not edit it in place. Which correction mechanism applies depends on **when
-the shard became wrong**, not on how wrong it is:
+Do not edit it in place — with one narrow exception, the third case below.
+Which correction mechanism applies depends on **when the shard became wrong**,
+not on how wrong it is:
 
 - **Stale via a later change** — it was true when written, and a subsequent PR
   invalidated it. The correction belongs in the **new** shard; the old one
-  stays untouched. Shard-per-PR is already the structural equivalent of the
-  `last-verified` chain — one shard *is* one dated entry — so there is no gap
-  for an in-shard escape hatch to fill.
+  stays untouched.
 - **Wrong when written** — a genuine analysis error, describing the code as it
   stood at merge time. Still no in-place edit, for a stronger reason than
   tidiness: a merged shard may already be relied on as an attestation of what
@@ -73,7 +72,10 @@ the shard became wrong**, not on how wrong it is:
   table syntax. Fixable in place: it is a rendering fault in *carrying* the
   claim, not a claim about the code. Land it in a PR that changes no money-path
   code, so the in-place edit cannot stand in for that PR's own shard — see the
-  gate hazard below.
+  gate hazard below. **That last part is convention, not something the gate
+  checks**: bundle a shard typo-fix into your own money-path PR and you
+  reproduce the hazard exactly, silently and on green CI. This rule relocates
+  the danger to a discipline you have to keep; it does not close it.
 
 **The mechanical reason, which is sharper than the principle.** The gate that
 `satisfied-by` drives asks only whether *some* changed file matches
@@ -92,14 +94,21 @@ it. That is why "correct it in a new shard" is the rule even when an in-place
 fix would read better: the new file is what re-arms the gate.
 
 **There is no `chain-reset` for shards, and there should not be.** The
-`last-verified` chain has one ([`chain-integrity.mjs`](../../../scripts/docs/chain-integrity.mjs))
-because that chain lives on a single line that must sometimes be compacted —
-and `casp-risk-guardrails.md` itself declared `chain-reset(#1496)` for exactly
-that reason: *its* entries became these shards. Reading that as precedent for
-an in-shard escape hatch inverts it. The compaction the marker exists to
-license is already what the per-file model gives you by default: one file per
-entry, compacted by never having been concatenated. A shard needs no escape
-from a chain it is not on.
+structural answer first, because it is not arguable: `chain-reset(#N)` is an
+escape hatch for one `last-verified` **line**, and
+[`chain-integrity.mjs`](../../../scripts/docs/chain-integrity.mjs) only ever
+inspects that line. **No shard carries one** — 181 shards, zero
+`last-verified:` front-matter entries (one shard carries other front-matter;
+none carries this). There is nothing for the marker to act on.
+
+The reason it feels like there should be one is worth naming, since the
+analogy is what misleads: `casp-risk-guardrails.md` declared
+`chain-reset(#1496)` on its own line *because its entries became these
+shards*. That is the compaction, already performed — reading it as precedent
+for an in-shard escape hatch inverts it. The per-file model gives you by
+default what the marker exists to license: one file per entry, compacted by
+never having been concatenated. A shard needs no escape from a chain it is
+not on.
 
 ## Example shard (`2026-08-12-9999.md`)
 

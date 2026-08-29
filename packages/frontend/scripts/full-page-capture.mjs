@@ -465,50 +465,67 @@ export class ScrollShellError extends Error {
   }
 }
 
+/**
+ * The DOM half of `probeShell`, hoisted out of the `page.evaluate` call so it
+ * can be tested (#2204 review).
+ *
+ * This body used to be an inline arrow inside `page.evaluate`, which meant the
+ * only thing that ever ran it was a live Chromium — so a typo in the
+ * `[aria-busy="true"]` selector, or a broken label fallback, would fail OPEN:
+ * the guard would silently never fire and the #2204 defect would be back with
+ * a green test suite over it. Hoisted, `content-probe.test.ts` runs it against
+ * a real jsdom document.
+ *
+ * CONSTRAINT, and it is not stylistic: Playwright serialises this function and
+ * evaluates it in the page, so it may reference NOTHING from module scope —
+ * no imports, no constants, no other function in this file. Everything it needs
+ * arrives as `sel` or comes from the page's own globals.
+ */
+export function readContentProbe(sel) {
+  const doc = document.documentElement
+  const text = (document.body?.innerText ?? '').trim()
+
+  // The ROUTE'S OWN content region, measured separately from the document.
+  // `renderedChars` above counts the whole body, which on an authenticated
+  // page is dominated by the shell — sidebar nav, TopBar, account chip. That
+  // is why a route stuck on its loading fallback clears every existing floor
+  // (#2036): the shell alone is thousands of characters, and the region the
+  // capture actually claims to show holds ten.
+  const root = document.querySelector(sel)
+  const contentText = root ? (root.innerText ?? '').trim() : ''
+
+  // The app's OWN statement that a region of this route has not finished
+  // (#2204). `aria-busy="true"` is the accessibility contract for exactly
+  // this — "the content here is being updated, do not read it yet" — and a
+  // capture is a reader like any other. Only `"true"` counts: several surfaces
+  // bind `aria-busy={loading}`, and a resolved `"false"` is the signal working,
+  // not a match.
+  const busyNodes = root ? [...root.querySelectorAll('[aria-busy="true"]')] : []
+  // A label per busy node, so the refusal can name WHAT was still loading
+  // instead of printing a count. Capped: a route mid-load can hold dozens.
+  const busyLabels = busyNodes.slice(0, 8).map((el) => {
+    const label = el.getAttribute('aria-label')
+    if (label) return label
+    const own = (el.innerText ?? '').trim().replace(/\s+/g, ' ')
+    if (own) return own.slice(0, 60)
+    return `${el.tagName.toLowerCase()}${el.className ? `.${String(el.className).split(/\s+/)[0]}` : ''}`
+  })
+
+  return {
+    found: Boolean(root),
+    docScrollHeight: doc.scrollHeight,
+    viewportHeight: window.innerHeight,
+    renderedChars: text.length,
+    contentChars: root ? contentText.length : null,
+    contentElements: root ? root.querySelectorAll('*').length : null,
+    contentBusy: root ? busyNodes.length : null,
+    contentBusyLabels: busyLabels,
+  }
+}
+
 /** One cheap DOM probe: is the root there, and what kind of page is this? */
 async function probeShell(page, selector) {
-  return page.evaluate((sel) => {
-    const doc = document.documentElement
-    const text = (document.body?.innerText ?? '').trim()
-    // The ROUTE'S OWN content region, measured separately from the document.
-    // `renderedChars` above counts the whole body, which on an authenticated
-    // page is dominated by the shell — sidebar nav, TopBar, account chip. That
-    // is why a route stuck on its loading fallback clears every existing floor
-    // (#2036): the shell alone is thousands of characters, and the region the
-    // capture actually claims to show holds ten.
-    const root = document.querySelector(sel)
-    const contentText = root ? ((root.innerText ?? '').trim()) : ''
-
-    // The app's OWN statement that a region of this route has not finished
-    // (#2204). `aria-busy="true"` is the accessibility contract for exactly
-    // this — "the content here is being updated, do not read it yet" — and a
-    // capture is a reader like any other. Only `"true"` counts: several
-    // surfaces bind `aria-busy={loading}`, and a resolved `"false"` is the
-    // signal working, not a match.
-    const busyNodes = root
-      ? [...root.querySelectorAll('[aria-busy="true"]')]
-      : []
-    // A label per busy node, so the refusal can name WHAT was still loading
-    // instead of printing a count. Capped: a route mid-load can hold dozens.
-    const busyLabels = busyNodes.slice(0, 8).map((el) => {
-      const label = el.getAttribute('aria-label')
-      if (label) return label
-      const own = (el.innerText ?? '').trim().replace(/\s+/g, ' ')
-      if (own) return own.slice(0, 60)
-      return `${el.tagName.toLowerCase()}${el.className ? `.${String(el.className).split(/\s+/)[0]}` : ''}`
-    })
-
-    return {
-      found: Boolean(root),
-      docScrollHeight: doc.scrollHeight,
-      viewportHeight: window.innerHeight,
-      renderedChars: text.length,
-      contentChars: root ? contentText.length : null,
-      contentElements: root ? root.querySelectorAll('*').length : null,
-      contentBusy: root ? busyNodes.length : null,
-      contentBusyLabels: busyLabels,
-    }
-  }, selector)
+  return page.evaluate(readContentProbe, selector)
 }
 
 /**

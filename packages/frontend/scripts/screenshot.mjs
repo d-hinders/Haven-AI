@@ -1461,9 +1461,14 @@ const CHAIN_READ_GAPS = []
  *  - it is per ROUTE, never a global flag and never per run;
  *  - each entry carries a written `reason`, so the exemption is anchored to an
  *    explanation rather than to a bare boolean;
- *  - it SELF-EXPIRES. A declared-tolerant route that turns out to hold no busy
- *    element is reported (`stale_busy_declarations`), so the day the showcase
- *    stops rendering a skeleton this stops claiming it does.
+ *  - it SELF-EXPIRES, and expiry is FATAL. A declared-tolerant route that turns
+ *    out to hold no busy element FAILS THE RUN (`stale_busy_declarations`), so
+ *    the day the showcase stops rendering a skeleton this stops claiming it
+ *    does. Review of #2204 caught the first draft reporting that to stdout and
+ *    the manifest only, which expires nothing in a repo whose own playbook says
+ *    the exit code does not survive a pipe. Its sibling `CHAIN_SILENT_CAPTURES`
+ *    fails the run on the mirror-image staleness — a declared-silent route that
+ *    DID read — so the two now cost the same to leave rotting.
  *
  * Adding a route here is almost always the wrong fix. The right one is to mark
  * the placeholder `aria-busy` where it lives — which is an accessibility fix
@@ -4114,13 +4119,18 @@ async function main() {
     }
   }
   if (STALE_BUSY_DECLARATIONS.length > 0) {
-    console.log(
-      `\n⚠ ${STALE_BUSY_DECLARATIONS.length} busy-tolerance declaration(s) were not needed — ` +
+    console.error(
+      `\n✗ ${STALE_BUSY_DECLARATIONS.length} busy-tolerance declaration(s) were not needed — ` +
         `BUSY_TOLERANT_CAPTURES in scripts/screenshot.mjs is stale (#2204):`,
     )
     for (const e of STALE_BUSY_DECLARATIONS) {
-      console.log(`  [${e.route} · ${e.viewport}] held no aria-busy element — declared because: ${e.reason}`)
+      console.error(`  [${e.route} · ${e.viewport}] held no aria-busy element — declared because: ${e.reason}`)
     }
+    console.error(
+      '  (remove the entry from BUSY_TOLERANT_CAPTURES — the exemption is only sound while the reason\n' +
+        '   it names is still true, and a route that no longer needs it is a route the guard should be\n' +
+        '   protecting)',
+    )
   }
   for (const line of formatDeletionReport(deletedCaptures)) console.error(line)
   if (clipped.length > 0) {
@@ -4256,6 +4266,15 @@ async function main() {
     deletedCaptures.length > 0 && `${deletedCaptures.length} capture(s) deleted as unusable`,
     CHAIN_READ_GAPS.length > 0 && `${CHAIN_READ_GAPS.length} chain-fed route(s) issued no on-chain reads`,
     CHAIN_SILENT_CAPTURES.length > 0 && `${CHAIN_SILENT_CAPTURES.length} silent chain-fed capture(s)`,
+    // GATING, not advisory — review of #2204 caught this as a should-fix and it
+    // was the right call. The whole claim made for `BUSY_TOLERANT_CAPTURES` is
+    // that it SELF-EXPIRES; a stale declaration that only prints to stdout and
+    // the manifest expires nothing, in a repo whose own playbook says the exit
+    // code does not survive a pipe. Its sibling `CHAIN_SILENT_CAPTURES` fails
+    // the run on exactly the mirror-image staleness, so the two mechanisms now
+    // cost the same to leave rotting.
+    STALE_BUSY_DECLARATIONS.length > 0 &&
+      `${STALE_BUSY_DECLARATIONS.length} stale busy-tolerance declaration(s)`,
   ].filter(Boolean)
   if (failures.length > 0) {
     printRunResult(false, failures.join('; '))

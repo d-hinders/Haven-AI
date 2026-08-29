@@ -510,6 +510,49 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         }
       })
 
+      it('describes the agent it is keyed by — every echoed field, not just the amounts', () => {
+        // `haven-reviewer`'s should-fix, applied, and it is the shape #2194 is
+        // about one field further out: `chain_id: 1` or another agent's
+        // `delegate_address` here is union-legal, path-impossible (the route
+        // echoes `agent.delegate_address`, `agent.safe_address` and
+        // `agent.safe_chain_id ?? DEFAULT_CHAIN_ID` — `routes/agents.ts:143,159-162`
+        // — it cannot answer for a different agent or a different chain), and
+        // the reviewer's own mutations of both left all 77 tests green.
+        //
+        // Latent rather than live TODAY: `AgentDetailClient` reads the delegate
+        // and chain off the AGENT record, not off this body
+        // (`AgentDetailClient.tsx:302,310`), so nothing currently renders these
+        // three. `SweepClient.tsx:13` already types `delegate_address` off this
+        // response though, so "no consumer" is a fact about today's callers,
+        // not a property of the shape. Pinned now rather than after the first
+        // caller reads it.
+        const agents = FIXTURE_AGENTS as {
+          id: string
+          delegate_address: string | null
+          safe_address: string
+          safe_chain_id: number
+        }[]
+        const usdcAddress = (fixtureFor('/agents/agent-research/delegate-balance') as {
+          usdc_address: string
+        }).usdc_address
+        // One token per chain: the SAME address the API fixture's allowance
+        // rows carry, which `chain-fed-capture-guard` pins to the shared
+        // registry. Two USDC addresses in one fixture is a contradiction the
+        // deployment cannot serve.
+        expect(typeof usdcAddress).toBe('string')
+        let checked = 0
+        for (const agent of agents) {
+          const body = balanceFor(agent.id)
+          if (body === null || body instanceof ScenarioHttpError) continue
+          checked += 1
+          expect([agent.id, body.delegate_address]).toEqual([agent.id, agent.delegate_address])
+          expect([agent.id, body.safe_address]).toEqual([agent.id, agent.safe_address])
+          expect([agent.id, body.chain_id]).toEqual([agent.id, agent.safe_chain_id])
+          expect([agent.id, body.usdc_address]).toEqual([agent.id, usdcAddress])
+        }
+        expect(checked).toBeGreaterThan(0)
+      })
+
       it('formats every human amount the way formatTokenValue actually would', () => {
         // The #2197 reviewer's finding, applied to a numeric field: a value can
         // be union-legal — any string satisfies `type: 'string'` — path-
@@ -538,12 +581,22 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
             // Non-zero: at least two decimal places (`:44`), at most six
             // (`:46`), and the string must re-parse to the atomic value it
             // claims to format.
-            const [, frac = ''] = human.split('.')
+            //
+            // `haven-reviewer`'s nit, applied: reconstruct via the INTEGER and
+            // FRACTIONAL halves separately. Concatenating the whole string and
+            // padding by `decimals - frac.length` is only correct while the
+            // integer part is a single non-zero digit — for `'0.005'` it keeps
+            // the leading `'0'` and produces one digit too many, a FALSE
+            // failure on a correctly formatted value. Nothing seeded here is
+            // sub-unit today, which is exactly why it would have been found by
+            // a future amount rather than by this run.
+            const [int = '', frac = ''] = human.split('.')
             expect([id, frac.length >= 2 && frac.length <= 6]).toEqual([id, true])
-            expect([id, human.replace('.', '') + '0'.repeat(decimals - frac.length)]).toEqual([
-              id,
-              atomic,
-            ])
+            const reconstructed = (
+              BigInt(int) * 10n ** BigInt(decimals) +
+              BigInt(frac.padEnd(decimals, '0'))
+            ).toString()
+            expect([id, reconstructed]).toEqual([id, atomic])
           }
         }
       })

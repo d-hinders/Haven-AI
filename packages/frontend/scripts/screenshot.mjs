@@ -406,8 +406,9 @@ export const FIXTURE_AGENTS = [
     //   This agent in particular cannot be one. It is seeded with CONFIRMED
     //   x402 payment intents (`pay-1`, `pay-4`), and `payment_intents`
     //   declares `delegate_address VARCHAR(42) NOT NULL`
-    //   (`002_self_sign_payment_intents.ts:18`) — an intent records the
-    //   delegate it was signed for. An agent that has paid provably had one.
+    //   (`000_initial.ts:82` — NOT the same-named column on the legacy
+    //   `self_sign_payment_intents` table) — an intent records the delegate it
+    //   was signed for. An agent that has paid provably had one.
     //
     //   What the null actually did: `routes/agents.ts:140-142` answers 422
     //   "Agent has no delegate address" for it, `useDelegateBalance`'s catch

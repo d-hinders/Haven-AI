@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 import {
   hermesConfigPath,
@@ -14,6 +14,7 @@ import {
   validateCodexToml,
   writeRuntimeConfig,
 } from './config-writers.js'
+import { isolateHermesHome, restoreHermesHome } from './test-helpers.js'
 import { signerPackageSpec } from './runtime-manifest.js'
 
 const API_KEY = 'sk_agent_secret_for_config_test'
@@ -25,6 +26,12 @@ const WRAPPER_PATH = '/Users/example/.haven/agents/agent-1/bin/haven-mcp'
 const SIGNER_PACKAGE = signerPackageSpec()
 
 describe('runtime config writers', () => {
+  // #2179: these tests write Hermes configs; hermesConfigPath()/hermesEnvPath()
+  // honour process.env.HERMES_HOME before the fixture home, so a developer shell
+  // inside a Hermes gateway would corrupt the REAL home. Isolate like CI.
+  beforeEach(isolateHermesHome)
+  afterEach(restoreHermesHome)
+
   it('preserves existing JSON MCP entries and intentionally updates Haven entries', () => {
     const merged = mergeJsonMcpConfig(
       JSON.stringify({

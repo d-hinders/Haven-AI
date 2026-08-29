@@ -342,18 +342,20 @@ match a changed file the PR did **not** also touch, and posts a single advisory
 sticky comment naming each doc and its `last-verified` age.
 
 **Editing the gate itself is a money-path change (#2200).**
-`scripts/docs/coupling-gate.mjs` and `scripts/docs/validate-frontmatter.mjs` are
-`controlGlobs` in [`.github/money-path-globs.json`](../../.github/money-path-globs.json),
-so a PR touching either gets the `money-path` label and the
+`scripts/docs/coupling-gate.mjs`, `scripts/docs/validate-frontmatter.mjs` and
+`.github/workflows/docs-coupling.yml` are `controlGlobs` in
+[`.github/money-path-globs.json`](../../.github/money-path-globs.json),
+so a PR touching any of them gets the `money-path` label and the
 [`money.md`](ship-playbooks/money.md) playbook — a human read, but no
 `qa-freshness` QA re-run, since re-running the money-flow harness proves nothing
 about a docs gate. The reason is that this gate is what forces a money-path PR to
 write its CASP perimeter analysis, so weakening it weakens that discipline;
 `validate-frontmatter.mjs` is listed because the gate imports its
 `globToRegExp`/`parseFrontMatter` and can therefore be disabled from outside
-itself. `chain-integrity.mjs` is deliberately **not** listed — the gate does not
-import it, and it guards `last-verified` history rather than the shard
-requirement.
+itself, and the workflow because its `contract` job is what makes the script a
+**required** check. `chain-integrity.mjs` is deliberately **not** listed — the
+gate does not import it, and it guards `last-verified` history rather than the
+shard requirement.
 
 **Run `npm run docs:coupling` locally — it is the strict, CI-equivalent form.**
 The bare `node scripts/docs/coupling-gate.mjs` is the *advisory* posture: it always

@@ -85,6 +85,7 @@
           - "packages/frontend/src/lib/signer.ts"
           - "packages/sdk/src/signer.ts"
           - "packages/signer/**"
+          - ".github/workflows/docs-coupling.yml"
           - "scripts/docs/coupling-gate.mjs"
           - "scripts/docs/validate-frontmatter.mjs"
           - "scripts/ci/money-path-restatement-scan.mjs"

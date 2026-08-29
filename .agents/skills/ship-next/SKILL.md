@@ -312,7 +312,8 @@ you need the reasoning. Never edit one without the other — CI will not let you
   `.github/money-path-globs.json`, `.github/workflows/publish.yml`,
   `.github/workflows/dev-gate.yml`, `.github/workflows/qa-dev.yml`,
   `packages/frontend/src/lib/signer.ts`, `packages/frontend/src/hooks/useAgentRekey.ts`,
-  `scripts/docs/coupling-gate.mjs` and `scripts/docs/validate-frontmatter.mjs`. These are
+  `scripts/docs/coupling-gate.mjs`, `scripts/docs/validate-frontmatter.mjs` and
+  `.github/workflows/docs-coupling.yml`. These are
   `controlGlobs` in the JSON: labelled money-path so a PR weakening the gate gets
   this playbook and a human, but excluded from the freshness re-run, because
   re-running the money-flow harness proves nothing about a CI config change —

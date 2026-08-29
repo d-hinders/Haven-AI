@@ -78,6 +78,46 @@ describe('evidence reporting retries a retryable refusal (#2117)', () => {
     expect(sleep).not.toHaveBeenCalled()
   })
 
+  // #2136, absorbed from PR #2134's `merchant-completion.test.ts`: 409 is not
+  // the only terminal refusal the endpoint can answer with. The predicate is
+  // an equality on 503 rather than a "5xx retryable" rule, so these already
+  // pass — the point is that they are PINNED, because the tempting widening
+  // ("retry anything that isn't a 409") would silently start retrying a
+  // rejected body or an unknown payment id forever on a path that must never
+  // delay a completed payment.
+  it.each([
+    [400, 'a validation refusal — the body will never become acceptable'],
+    [404, 'an unknown payment id — no later attempt can make it exist'],
+  ])('a terminal %i is not retried: %s', async (status) => {
+    const post = vi.fn().mockRejectedValue(new HavenApiError('refused', status))
+    const { completion, sleep } = completionWith(post)
+
+    await report(completion)
+
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(sleep).not.toHaveBeenCalled()
+  })
+
+  // Also from #2134. Distinct from the plain-`Error` case below: this IS a
+  // `HavenApiError`, so it passes the first half of the retry predicate and is
+  // stopped only by the status equality. A transport failure carries
+  // `statusCode` 0 — the server never answered, so there is no refusal to
+  // classify, and retrying it here would duplicate the transport's own
+  // retry policy at a layer that cannot see it.
+  it('a transport-level HavenApiError (statusCode 0) is not retried', async () => {
+    const post = vi
+      .fn()
+      .mockRejectedValue(
+        new HavenApiError('Request to /machine-payments/evidence failed: ECONNREFUSED', 0),
+      )
+    const { completion, sleep } = completionWith(post)
+
+    await expect(report(completion)).resolves.toBeUndefined()
+
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(sleep).not.toHaveBeenCalled()
+  })
+
   it('a non-HTTP failure is not retried, and never surfaces to the caller', async () => {
     const post = vi.fn().mockRejectedValue(new Error('socket hang up'))
     const { completion } = completionWith(post)

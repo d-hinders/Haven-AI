@@ -40,16 +40,6 @@ const ARROW_PATH = 'M3.5 8h9M9 4.5L12.5 8 9 11.5'
  */
 const TRAILING_ARROW_COUNT = 4
 
-/**
- * The blanket `aria-hidden` sweep above covers every `<svg>` in a link, which
- * on this page also catches the two `HavenMark` logos in the header and footer.
- * Those carry `aria-hidden="true"` but NOT `focusable="false"` — measured, not
- * assumed, and deliberately left alone here: it is a shared brand component,
- * outside #1954's scope, and `aria-hidden` is the half that matters to a screen
- * reader (`focusable` is IE-era belt-and-braces). Filed separately rather than
- * folded in, which is why this second assertion is arrow-scoped instead of the
- * sweep simply being widened.
- */
 const LINK_LABELS_WITH_ARROWS = [
   // #1954's three, previously raw inline `<svg>`s in this file.
   'See the full walkthrough',
@@ -68,6 +58,7 @@ describe('landing page decorative trailing arrows', () => {
 
     for (const glyph of glyphs) {
       expect(glyph).toHaveAttribute('aria-hidden', 'true')
+      expect(glyph).toHaveAttribute('focusable', 'false')
     }
   })
 

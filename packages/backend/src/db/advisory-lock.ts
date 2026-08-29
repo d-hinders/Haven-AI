@@ -16,9 +16,10 @@ import type { QueryResultRow } from 'pg'
  * That is not a rare race. It is the *normal* outcome whenever the thing
  * protected by the lock is a non-transactional index build — i.e. precisely
  * the case such a lock exists to make safe. It was found by execution, not by
- * argument: the concurrent-boot test written for PR #2199 (#2150) failed on
- * its first run with `40P01`, and #2198 reproduced the same failure against
- * the real-Postgres test harness's own lock.
+ * argument: the concurrent-boot test written for #2150 failed on its first run
+ * with `40P01`, and #2198 reproduced the same failure against the
+ * real-Postgres test harness's own lock and through `initDbHarness()` itself
+ * (`infra/__tests__/db-harness-lock-concurrency.test.ts`).
  *
  * `pg_try_advisory_lock` returns immediately either way, so each attempt is a
  * complete sub-millisecond transaction and **no snapshot is held between
@@ -28,11 +29,13 @@ import type { QueryResultRow } from 'pg'
  * ## Why this lives in its own module
  *
  * There are two independent callers with two different locks — the migration
- * runner's cross-replica lane lock (`db/migrate.ts`) and the vitest harness's
- * cross-worker migration lock (`infra/__tests__/helpers/db-harness.ts`) — and
- * the reason above has to be true of both. Two hand-rolled loops that must
- * stay in agreement is how this class of bug comes back; the loop lives here
- * once and the reason is stated here once.
+ * runner's cross-replica lane lock (`db/migrate.ts`, #2150) and the vitest
+ * harness's cross-worker migration lock
+ * (`infra/__tests__/helpers/db-harness.ts`, #2198) — and the reason above has
+ * to be true of both. Two hand-rolled loops that must stay in agreement is how
+ * this class of bug comes back, so the loop lives here once and the reason is
+ * stated here once. The runner's loop was written first and inlined; #2198
+ * moved it here rather than copying it.
  *
  * The *tuning* is deliberately NOT shared. Interval and deadline follow from
  * what each caller is waiting for, and the callers explain their own numbers.

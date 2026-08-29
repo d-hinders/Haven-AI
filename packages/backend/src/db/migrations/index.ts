@@ -72,10 +72,56 @@ import * as dropApprovalRequests from './070_drop_approval_requests.js'
 import * as dropAllowanceNonceWatermarks from './071_drop_allowance_nonce_watermarks.js'
 import * as paymentIntentsSettlementIndexes from './072_payment_intents_settlement_indexes.js'
 
-export interface Migration {
+/**
+ * The shape every entry in `migrations` must have.
+ *
+ * `version` and `up` are required; `down` is deliberately NOT part of the
+ * contract — the runner never calls it (only tests and hand-run rollbacks do),
+ * and roughly half the migrations here do not export one.
+ *
+ * ## The transactional opt-out (#2150)
+ *
+ * `migrate.ts` wraps every migration in `BEGIN`/`COMMIT` by default, which is
+ * what makes a failed migration a non-event: the work and the
+ * `schema_migrations` row roll back together and the next boot retries from a
+ * clean schema. A handful of Postgres statements cannot run there at all —
+ * `CREATE INDEX CONCURRENTLY` and `DROP INDEX CONCURRENTLY` raise SQLSTATE
+ * `25001` ("cannot run inside a transaction block"), and so do
+ * `REINDEX CONCURRENTLY`, `VACUUM` and `ALTER SYSTEM`. Before #2150 that made
+ * a lock-free index build impossible: every index migration took a `SHARE`
+ * lock and blocked writes for the whole build (PR #2149 measured ~6.0 s on a
+ * 200 000-row `payment_intents`).
+ *
+ * A migration opts out with a LITERAL `false`:
+ *
+ * ```ts
+ * export const transactional = false
+ * export const nonTransactionalReason =
+ *   'CREATE INDEX CONCURRENTLY cannot run inside a transaction block (25001)'
+ * ```
+ *
+ * The two exports are ONE decision, so the type makes them one: the union
+ * below means a migration declaring `transactional = false` without a reason
+ * does not compile. Absence means transactional — the dangerous mode is
+ * opt-in, never the default a forgotten export lands you in.
+ *
+ * **Read `migrate.ts`'s header before writing one.** Outside a transaction the
+ * runner cannot roll anything back, so it trades rollback for detection: the
+ * bookkeeping row is written `status = 'running'` BEFORE `up()` and promoted
+ * to `'applied'` after, and a `'running'` row left behind by a crash stops the
+ * next boot dead with an operator recovery message rather than being retried
+ * blind. `up()` must therefore be written to be re-runnable after a partial
+ * failure — for index builds use `createIndexConcurrently()` from
+ * `../concurrent-index.js`, which handles the INVALID index a failed
+ * `CONCURRENTLY` build leaves behind.
+ */
+export type Migration = {
   version: string
   up: (client: PoolClient) => Promise<void>
-}
+} & (
+  | { transactional?: true; nonTransactionalReason?: undefined }
+  | { transactional: false; nonTransactionalReason: string }
+)
 
 /**
  * All migrations, in execution order.

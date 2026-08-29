@@ -8,7 +8,7 @@ covers:
   - packages/backend/vitest.global-setup.ts
   - scripts/db-mock-ratchet.mjs
   - packages/backend/db-mock-baseline.json
-last-verified: "2026-08-29" # #2198: harness section re-read against db-harness.ts — the cross-worker migration lock now WAITS by polling pg_try_advisory_lock (shared helper db/advisory-lock.ts) instead of blocking in pg_advisory_lock, because a blocking waiter pins a snapshot that deadlocks CREATE INDEX CONCURRENTLY; no doc-visible change, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #1763: the no-database section is rewritten — the local default inverts to failing, HAVEN_SKIP_DB_TESTS=1 acknowledges a narrowed run, and the verdict prints after vitest's summary; harness section re-read against db-harness.ts, the beforeAll example unchanged and still preferred. Prior: resetDb now awaits initDbHarness (the un-awaited-init 42P01/40P01 CI flake); harness section re-read against db-harness.ts, example unchanged and still the preferred shape
+last-verified: "2026-08-29" # #2209: harness section re-read against db-harness.ts; adds the resetDb()-in-a-loop convention with measured per-call cost (~250 ms quiet / ~800 ms-1.2 s loaded at 38 tables) — no harness behaviour changed, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #2198: harness section re-read against db-harness.ts — the cross-worker migration lock now WAITS by polling pg_try_advisory_lock (shared helper db/advisory-lock.ts) instead of blocking in pg_advisory_lock, because a blocking waiter pins a snapshot that deadlocks CREATE INDEX CONCURRENTLY; no doc-visible change, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #1763: the no-database section is rewritten — the local default inverts to failing, HAVEN_SKIP_DB_TESTS=1 acknowledges a narrowed run, and the verdict prints after vitest's summary; harness section re-read against db-harness.ts, the beforeAll example unchanged and still preferred. Prior: resetDb now awaits initDbHarness (the un-awaited-init 42P01/40P01 CI flake); harness section re-read against db-harness.ts, example unchanged and still the preferred shape
 ---
 
 # Backend testing strategy: the real-database rule
@@ -126,6 +126,28 @@ transition and the row that must not. The reference conversion is
 `delegation-budgets.test.ts` (#1221); the concurrency patterns (claim CAS,
 `FOR UPDATE` serialisation with two live transactions) are in
 `payment-intents.test.ts` and `agent-connection-setups.test.ts`.
+
+### `resetDb()` belongs in `beforeEach`, not in a loop (#2209)
+
+One more convention, learned from a flake rather than a conversion. `resetDb()`
+truncates **every** table in the worker schema, so its cost is set by the
+migration count and not by what your test wrote. It is not a per-case
+primitive you can sprinkle inside a table-driven loop.
+
+Measured on `dev` at 38 tables: ~250 ms per call with the suite quiet, and
+~800 ms–1.2 s under the ordinary parallel load of `vitest run src/db src/infra`,
+because several workers TRUNCATE against one Postgres at once. A six-case loop
+that reset per case therefore cost seven resets and landed at ~5.7 s against
+vitest's 5 s default `testTimeout` — failing on whichever unrelated PR happened
+to be running. And the cost **grows with every migration that adds a table**, so
+a bumped timeout only moves the date.
+
+Seed the whole case table into one database state and assert on the IDs you
+seeded instead of on the batch size. That is usually the stronger assertion
+anyway: the query has to pick the right rows out of a table that also holds the
+wrong ones, which per-case isolation cannot see. Keep the "nothing extra came
+back" half with a closing set-equality check.
+`passport-rail-eligibility.test.ts` is the worked example.
 
 ## The ratchet
 

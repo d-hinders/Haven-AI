@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from 'pg'
 import { getPool } from '../db.js'
+import { acquireAdvisoryLockByPolling, releaseAdvisoryLock } from './advisory-lock.js'
 import { migrations as registeredMigrations, type Migration } from './migrations/index.js'
 
 /**
@@ -86,7 +87,8 @@ import { migrations as registeredMigrations, type Migration } from './migrations
  *
  * The wait for that lock is POLLED, not blocking, and that detail is load-
  * bearing rather than cosmetic: a blocking waiter deadlocks the very index
- * build it is waiting for. See `acquireLaneLock`.
+ * build it is waiting for. See `acquireLaneLock`, and `advisory-lock.ts` for
+ * the shared loop and the full reasoning.
  *
  * ### One residual an operator will meet, and no lock can fix
  *
@@ -294,29 +296,24 @@ async function statusColumnExists(pool: Pool): Promise<boolean> {
  * The concurrent-boot test in `__tests__/migrate-non-transactional.test.ts`
  * reproduced it on the first run.
  *
- * `pg_try_advisory_lock` returns immediately, so each attempt is a complete,
- * short transaction and the waiter holds no snapshot between attempts. The
- * peer's index build is then free to finish, which is the only thing that ever
- * ends the wait.
+ * The loop itself lives in `advisory-lock.ts` (#2198), because the vitest
+ * harness's cross-worker migration lock has the identical hazard and the
+ * identical fix — and two hand-rolled loops that must stay in agreement is how
+ * this class of bug comes back. What stays HERE is the tuning, which does not
+ * generalise: this caller waits once per process boot for a production index
+ * build measured in minutes.
  */
 async function acquireLaneLock(client: PoolClient, migration: Migration): Promise<void> {
-  const deadline = Date.now() + LOCK_WAIT_TIMEOUT_MS
-  for (;;) {
-    const { rows } = await client.query<{ locked: boolean }>(
-      'SELECT pg_try_advisory_lock($1) AS locked',
-      [NON_TRANSACTIONAL_LOCK_KEY],
-    )
-    if (rows[0].locked) return
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `Timed out after ${Math.round(LOCK_WAIT_TIMEOUT_MS / 1000)}s waiting for another node to ` +
-          `finish a non-transactional migration before applying ${migration.version}. ` +
-          'Check whether a peer is still building, or whether a session is holding ' +
-          `advisory lock ${NON_TRANSACTIONAL_LOCK_KEY} without releasing it.`,
-      )
-    }
-    await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_INTERVAL_MS))
-  }
+  await acquireAdvisoryLockByPolling(client, {
+    key: NON_TRANSACTIONAL_LOCK_KEY,
+    pollIntervalMs: LOCK_POLL_INTERVAL_MS,
+    timeoutMs: LOCK_WAIT_TIMEOUT_MS,
+    describeTimeout: () =>
+      `Timed out after ${Math.round(LOCK_WAIT_TIMEOUT_MS / 1000)}s waiting for another node to ` +
+      `finish a non-transactional migration before applying ${migration.version}. ` +
+      'Check whether a peer is still building, or whether a session is holding ' +
+      `advisory lock ${NON_TRANSACTIONAL_LOCK_KEY} without releasing it.`,
+  })
 }
 
 /** The default lane. Work and bookkeeping commit or roll back together. */
@@ -359,6 +356,6 @@ async function applyWithoutTransaction(client: PoolClient, migration: Migration)
       [migration.version],
     )
   } finally {
-    await client.query('SELECT pg_advisory_unlock($1)', [NON_TRANSACTIONAL_LOCK_KEY])
+    await releaseAdvisoryLock(client, NON_TRANSACTIONAL_LOCK_KEY)
   }
 }

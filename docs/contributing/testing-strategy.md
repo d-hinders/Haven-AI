@@ -8,7 +8,7 @@ covers:
   - packages/backend/vitest.global-setup.ts
   - scripts/db-mock-ratchet.mjs
   - packages/backend/db-mock-baseline.json
-last-verified: "2026-08-22" # #1763: the no-database section is rewritten — the local default inverts to failing, HAVEN_SKIP_DB_TESTS=1 acknowledges a narrowed run, and the verdict prints after vitest's summary; harness section re-read against db-harness.ts, the beforeAll example unchanged and still preferred. Prior: resetDb now awaits initDbHarness (the un-awaited-init 42P01/40P01 CI flake); harness section re-read against db-harness.ts, example unchanged and still the preferred shape
+last-verified: "2026-08-29" # #2198: harness section re-read against db-harness.ts — the cross-worker migration lock now WAITS by polling pg_try_advisory_lock (shared helper db/advisory-lock.ts) instead of blocking in pg_advisory_lock, because a blocking waiter pins a snapshot that deadlocks CREATE INDEX CONCURRENTLY; no doc-visible change, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #1763: the no-database section is rewritten — the local default inverts to failing, HAVEN_SKIP_DB_TESTS=1 acknowledges a narrowed run, and the verdict prints after vitest's summary; harness section re-read against db-harness.ts, the beforeAll example unchanged and still preferred. Prior: resetDb now awaits initDbHarness (the un-awaited-init 42P01/40P01 CI flake); harness section re-read against db-harness.ts, example unchanged and still the preferred shape
 ---
 
 # Backend testing strategy: the real-database rule

@@ -61,6 +61,23 @@ function gitLines(args) {
  * pointing at the new path exactly as `--name-only` reports them. Only `A`
  * counts as added: a rename is an old record under a new name, not a new one —
  * see `implicatedDocs` for why that distinction is the whole point (#2192).
+ *
+ * DO NOT "fix" this with `--no-renames`, which review proposed and measurement
+ * rejected. The concern is real: git pairs a deleted file with a similar added
+ * one, so a PR that deletes an old shard while adding its own could see its new
+ * shard reported `R` and be wrongly blocked. But `--no-renames` reports every
+ * rename as `D` + `A`, which makes RENAMING a merged shard satisfy the gate —
+ * trading a loud false block for exactly the silent bypass this change exists
+ * to close, and the silent direction is the one that ships.
+ *
+ * Measured 2026-08-29 on git 2.43, both shapes:
+ *   - delete a byte-identical duplicate + add an UNRELATED new shard (the case-3
+ *     fold-in this repo endorses) -> `D` + `A`. Counted. No false block.
+ *   - delete a shard + add one ~97% identical to it -> `R097`. Blocked.
+ * The second is the only case that fires, and blocking it is right: a shard 97%
+ * identical to another shard is a copy-paste, not a verification record for a
+ * different change. `C` (copy) cannot occur — git emits it only under an
+ * explicit `-C`/`--find-copies`, which this file never passes.
  */
 export function parseNameStatus(out) {
   const files = []

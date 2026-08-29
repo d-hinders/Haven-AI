@@ -73,8 +73,7 @@ not on how wrong it is:
   table syntax, or a **byte-identical duplicate file** (a stray `… 3.md` copy
   alongside its original). Fixable in place, deletion included for the
   duplicate: these are faults in *carrying* the claim, not claims about the
-  code, and removing an exact copy destroys no evidence the original does not
-  still hold. Establish the identity — same content hash, and ideally the same
+  code, and an exact copy holds no evidence its original does not. Establish the identity — same content hash, and ideally the same
   origin commit — in the PR; do not eyeball it. Bundling such a fix into your
   own money-path PR is safe: since #2192 the gate needs a genuinely **new**
   file, so the edit cannot stand in for the shard you still have to write.

@@ -604,6 +604,20 @@ test2192('a RENAMED shard does not count as added (#2192)', () => {
   assert2192.equal(implicatedDocs(files, [SHARDED_DOC], { strict: true, added }).length, 1)
 })
 
+test2192('a deleted old shard alongside an UNRELATED new one still counts as added (#2192)', () => {
+  // The case-3 fold-in shape this repo endorses: remove a duplicate while
+  // writing your own shard. Measured on git 2.43 — an unrelated pair reports
+  // `D` + `A`, so the new shard counts and nothing is wrongly blocked. Only a
+  // near-identical pair collapses to `R`, and blocking THAT is correct.
+  // This pins the shape so `--no-renames` is never needed to "fix" it; see the
+  // `parseNameStatus` docblock for why that fix would reopen the bypass.
+  const { files, added } = parseNameStatus(
+    `M\t${MONEY_FILE}\nD\tdocs/regulatory/casp-changelog/2026-08-14-1403 3.md\nA\t${NEW_SHARD}\n`,
+  )
+  assert2192.ok(added.has(NEW_SHARD), 'the genuinely new shard must still count as added')
+  assert2192.deepEqual(implicatedDocs(files, [SHARDED_DOC], { strict: true, added }), [])
+})
+
 test2192('parseNameStatus reads status and path, tolerating renames and blanks', () => {
   const { files, added } = parseNameStatus('A\ta.ts\nM\tb.ts\n\nD\tc.ts\nR100\told.md\tnew.md\n')
   assert2192.deepEqual(files, ['a.ts', 'b.ts', 'c.ts', 'new.md'])

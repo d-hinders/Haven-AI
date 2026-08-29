@@ -122,16 +122,24 @@ describe('readContentProbe', () => {
   })
 
   it('reproduces the exact /agents shape the guard refuses', () => {
-    // Three `AllowanceBarSkeleton`s, transcribed from
-    // `components/agent-panel/AllowanceBar.tsx` as this change leaves it. This
-    // is the DOM behind the measured 886 chars / 147 elements / 1856px capture.
+    // Three `AllowanceBarSkeleton`s in three `AgentCard`s, transcribed from
+    // `components/agent-panel/{AllowanceBar,AgentCard}.tsx` as this change
+    // leaves them. This is the DOM behind the measured 886 chars / 150 elements
+    // / 1856px capture.
+    //
+    // Note where the attributes sit, because #2204's design review moved them:
+    // the LIVE REGION is the per-card wrapper (one announcement per surface,
+    // the app's own convention) and `aria-busy` is on each ROW. The guard reads
+    // the rows, so the count is 3 — one per card — not 3 wrappers plus 3 rows.
     render(`
       <main id="main-content">
-        ${['USDC', 'USDC', 'USDC']
+        ${['Research agent', 'Ops agent', 'Data-feed agent']
           .map(
-            (symbol) => `
-          <div role="status" aria-busy="true" aria-live="polite" aria-label="Loading ${symbol} budget">
-            <span>${symbol}</span><div></div><span>loading...</span>
+            (name) => `
+          <div role="status" aria-live="polite" aria-label="Loading ${name}'s budget" class="space-y-2">
+            <div class="flex items-center gap-2 text-xs" aria-busy="true">
+              <span>USDC</span><div></div><span>loading...</span>
+            </div>
           </div>`,
           )
           .join('')}
@@ -141,11 +149,26 @@ describe('readContentProbe', () => {
     const result = probe()
 
     expect(result.contentBusy).toBe(3)
-    expect(result.contentBusyLabels).toEqual([
-      'Loading USDC budget',
-      'Loading USDC budget',
-      'Loading USDC budget',
-    ])
+    // jsdom has no layout, so `innerText` is undefined and the naming falls to
+    // the tag/class rung. What matters here is that all three rows are SEEN;
+    // the label rungs have their own cases above and below.
+    expect(result.contentBusyLabels).toHaveLength(3)
+  })
+
+  it('does not count the live-region WRAPPER — only the busy rows inside it', () => {
+    // The wrapper carries `role="status"` and no `aria-busy`. If the probe ever
+    // widened to "anything that looks like a loading region", this shape would
+    // double-count and the refusal message would name containers rather than
+    // the rows that are actually unfinished.
+    render(`
+      <main id="main-content">
+        <div role="status" aria-live="polite" aria-label="Loading Ops agent's budget">
+          <div aria-busy="true"><span>USDC</span></div>
+        </div>
+      </main>
+    `)
+
+    expect(probe().contentBusy).toBe(1)
   })
 
   it('names a busy element with no aria-label by its tag and class', () => {

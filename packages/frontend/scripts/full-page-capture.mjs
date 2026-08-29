@@ -239,12 +239,12 @@ export const MIN_CONTENT_ELEMENTS = 6
  * Reproduced and measured on `#main-content` at 1280:
  *
  *   resolved          912 CSS px   1022 chars   157 elements   → 1936px PNG
- *   chain still read   872 CSS px    886 chars   147 elements   → 1856px PNG
+ *   chain still read   872 CSS px    886 chars   150 elements   → 1856px PNG
  *
  * 40 CSS px at `deviceScaleFactor: 2` is the 80 device px that was reported.
  * The missing content is the three `AllowanceBar` rows: `useOnChainAllowances`
  * had not answered, so every `AgentCard` was showing `AllowanceBarSkeleton`
- * ("USDC loading…") instead of its budget. 886/147 is 29x and 24x above the
+ * ("USDC loading…") instead of its budget. 886/150 is 29x and 25x above the
  * floors, so nothing above this line can see it — and #1971's chain-read guard
  * cannot either, because the reads *had* been issued, just not answered yet.
  *

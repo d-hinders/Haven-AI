@@ -628,7 +628,7 @@ const AGENTS_PARTIAL: ContentProbe = {
  * CSS px shorter than `AGENTS_RESOLVED` (872 vs 912), which at
  * `deviceScaleFactor: 2` is exactly the 80 device px in the report.
  *
- * The numbers are the whole point: 886 chars in 147 elements is 29x and 24x
+ * The numbers are the whole point: 886 chars in 150 elements is 29x and 25x
  * above the #2036 floors. Nothing measuring quantity can tell these two apart,
  * which is why the discriminator has to be the app's own busy flag.
  */
@@ -638,7 +638,7 @@ const AGENTS_CHAIN_PENDING: ContentProbe = {
   viewportHeight: 800,
   renderedChars: 2_800,
   contentChars: 886,
-  contentElements: 147,
+  contentElements: 150,
   contentBusy: 3,
   contentBusyLabels: ['Loading USDC budget', 'Loading USDC budget', 'Loading USDC budget'],
 }
@@ -960,7 +960,7 @@ describe('resolveContentSettled', () => {
     // The numbers that make this failure invisible to the #2036 floor are
     // quoted, so the reader can see why the older guard passed it.
     expect(error.message).toContain('886 character(s)')
-    expect(error.message).toContain('147 element(s)')
+    expect(error.message).toContain('150 element(s)')
   })
 
   it('captures the same state when the caller declares it busy-tolerant', async () => {

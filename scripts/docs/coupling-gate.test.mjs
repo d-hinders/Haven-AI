@@ -334,7 +334,7 @@ import assert1366 from 'node:assert'
 
 const SHARDED_DOC = {
   doc: 'docs/regulatory/casp-risk-guardrails.md',
-  covers: ['packages/signer/**'],
+  covers: ['packages/signer/**', 'packages/backend/src/routes/payments.ts'],
   lastVerified: '2020-01-01',
   contract: true,
   satisfiedBy: ['docs/regulatory/casp-changelog/**'],
@@ -518,4 +518,142 @@ test('a bump-only release diff still FAILS the strict gate — no shard, no gree
     /casp-risk-guardrails\.md/,
     'the blocking finding should be the CASP guardrails doc, which only a hand-written shard satisfies',
   )
+})
+
+// ── #2192: only an ADDED satisfied-by file clears the gate ────────────────────
+//
+// The defect: `satisfiedBy` asked only whether SOME changed file matched the
+// glob, never whether it was new. So a money-path PR could clear the blocking
+// contract-doc gate by editing a shard that merged months ago, writing no
+// verification record at all — silently, on green CI.
+//
+// The bug lived in the seam between "what git reports" and "what the gate asks
+// of it", so the seam is covered from both ends: `parseNameStatus` against real
+// `git diff --name-status` text, and a spawned end-to-end pair that drives the
+// real script — main(), the message, the exit code — against the repo's real
+// front-matter.
+
+import { test as test2192 } from 'node:test'
+import assert2192 from 'node:assert/strict'
+import { execFileSync as exec2192 } from 'node:child_process'
+import { join as join2192, dirname as dirname2192 } from 'node:path'
+import { fileURLToPath as fileURLToPath2192 } from 'node:url'
+import { parseNameStatus } from './coupling-gate.mjs'
+
+const ROOT2192 = dirname2192(dirname2192(dirname2192(fileURLToPath2192(import.meta.url))))
+
+// Deliberately routes/payments.ts and not packages/signer/src/core.ts: signer
+// is ALSO covered by mcp-runtime-compatibility.md, another contract doc with no
+// `satisfied-by`, so the positive control below would block for a reason that
+// has nothing to do with this rule. payments.ts is covered by the CASP
+// guardrails doc alone, which makes both directions unambiguous.
+const MONEY_FILE = 'packages/backend/src/routes/payments.ts'
+const OLD_SHARD = 'docs/regulatory/casp-changelog/2026-08-12-1399.md'
+const NEW_SHARD = 'docs/regulatory/casp-changelog/2026-08-29-2192.md'
+
+test2192('editing an ALREADY-MERGED shard no longer satisfies the contract doc (#2192)', () => {
+  const f = implicatedDocs([MONEY_FILE, OLD_SHARD], [SHARDED_DOC], {
+    strict: true,
+    added: new Set(), // the shard was modified, not added
+  })
+  assert2192.equal(f.length, 1, 'an edit to a pre-existing shard must NOT clear the gate')
+  assert2192.equal(f[0].doc, 'docs/regulatory/casp-risk-guardrails.md')
+  assert2192.deepEqual(
+    f[0].editedOnlySatisfyMatches,
+    [OLD_SHARD],
+    'the near-miss is carried so the error message can explain why the edit did not count',
+  )
+})
+
+test2192('adding a new shard still satisfies it (#2192)', () => {
+  const f = implicatedDocs([MONEY_FILE, NEW_SHARD], [SHARDED_DOC], {
+    strict: true,
+    added: new Set([NEW_SHARD]),
+  })
+  assert2192.deepEqual(f, [], 'writing your own shard is the whole intended remedy')
+})
+
+test2192('a new shard PLUS an edit to an old one still satisfies it (#2192)', () => {
+  // The rule is "at least one ADDED match", never "no modified matches" —
+  // otherwise tidying an old shard in the same PR would block a change that
+  // did write its own record. This is what keeps #2191's duplicate cleanup
+  // and ordinary release flows working.
+  const f = implicatedDocs([MONEY_FILE, OLD_SHARD, NEW_SHARD], [SHARDED_DOC], {
+    strict: true,
+    added: new Set([NEW_SHARD]),
+  })
+  assert2192.deepEqual(f, [])
+})
+
+test2192('unknown add/modify status restores the pre-#2192 behaviour (#2192)', () => {
+  // `added: null` is what a bare `--changed=` list produces. Permissive by
+  // design and scoped to that path only: the job that gates a PR sets BASE_SHA
+  // and always supplies real status.
+  const f = implicatedDocs([MONEY_FILE, OLD_SHARD], [SHARDED_DOC], { strict: true, added: null })
+  assert2192.deepEqual(f, [])
+})
+
+test2192('a RENAMED shard does not count as added (#2192)', () => {
+  // An old record under a new name is not a new record. `parseNameStatus`
+  // reports the new path (matching --name-only) but only marks `A` as added.
+  const { files, added } = parseNameStatus(
+    `M\t${MONEY_FILE}\nR100\t${OLD_SHARD}\t${NEW_SHARD}\n`,
+  )
+  assert2192.deepEqual(files, [MONEY_FILE, NEW_SHARD], 'renames report the NEW path')
+  assert2192.equal(added.size, 0, 'a rename is not an add')
+  assert2192.equal(implicatedDocs(files, [SHARDED_DOC], { strict: true, added }).length, 1)
+})
+
+test2192('parseNameStatus reads status and path, tolerating renames and blanks', () => {
+  const { files, added } = parseNameStatus('A\ta.ts\nM\tb.ts\n\nD\tc.ts\nR100\told.md\tnew.md\n')
+  assert2192.deepEqual(files, ['a.ts', 'b.ts', 'c.ts', 'new.md'])
+  assert2192.deepEqual([...added], ['a.ts'])
+})
+
+test2192('end-to-end: the real script BLOCKS a money-path diff whose only shard match is an edit (#2192)', () => {
+  let failed = false
+  let output = ''
+  try {
+    output = exec2192(
+      'node',
+      [
+        join2192(ROOT2192, 'scripts', 'docs', 'coupling-gate.mjs'),
+        '--strict',
+        `--changed=${MONEY_FILE},${OLD_SHARD}`,
+        '--added=', // nothing added: the shard was edited
+        '--out=/dev/null',
+      ],
+      { cwd: ROOT2192, encoding: 'utf8' },
+    )
+  } catch (err) {
+    failed = true
+    output = `${err.stdout ?? ''}${err.stderr ?? ''}`
+  }
+  assert2192.ok(
+    failed,
+    'the gate went GREEN on a money-path diff whose only satisfying file was an EDIT to an already-merged shard — the #2192 defect',
+  )
+  assert2192.match(output, /casp-risk-guardrails\.md/)
+  assert2192.match(
+    output,
+    /EDITED, not added/,
+    'the error must say why an apparently-satisfying edit did not satisfy, or it reads as "add a shard" to someone looking at the shard they just edited',
+  )
+})
+
+test2192('end-to-end: the real script PASSES the same diff once a new shard is added (#2192)', () => {
+  // The positive control. Without it, a gate that refused everything would
+  // pass the test above for the wrong reason.
+  const output = exec2192(
+    'node',
+    [
+      join2192(ROOT2192, 'scripts', 'docs', 'coupling-gate.mjs'),
+      '--strict',
+      `--changed=${MONEY_FILE},${OLD_SHARD},${NEW_SHARD}`,
+      `--added=${NEW_SHARD}`,
+      '--out=/dev/null',
+    ],
+    { cwd: ROOT2192, encoding: 'utf8' },
+  )
+  assert2192.doesNotMatch(output, /BLOCKING/)
 })

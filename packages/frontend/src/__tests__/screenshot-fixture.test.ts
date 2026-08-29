@@ -349,6 +349,27 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         }
       })
 
+      it('leaves an attention row at the proof status its own path can reach', () => {
+        // `haven-reviewer`'s should-fix: the #2126 proof-status test above
+        // checks UNION MEMBERSHIP, so `merchant_response_observed` on this row
+        // passes it while being unreachable — and the value RENDERS, verbatim,
+        // as `TransactionDetailPanel.tsx:170`'s "Proof" row. Union membership
+        // is the wrong bar for a row whose path is known.
+        //
+        // On the retry-rejected path the proof status is still the
+        // settlement-time base-row literal `'payment_confirmed'`
+        // (`infra/repositories/machine-payments.ts:49`; column default,
+        // migration `014:13`). The only writer that raises it is
+        // `proofStatusForAttach` (`modules/mpp/evidence.ts:196-200`), reached
+        // from the agent-reported attach — and the SDK throws at
+        // `merchant-completion.ts:137-149` before it can report any evidence.
+        // A merchant that answered well enough to attach a response would not
+        // have produced the rejection this row is about.
+        for (const row of attentionRows()) {
+          expect([row.id, row.payment_proof_status]).toEqual([row.id, 'payment_confirmed'])
+        }
+      })
+
       it('agrees with the agent row that the reconciliation event is open', () => {
         // One event, two reads. `has_stranded_funds` is
         // `EXISTS(… event_type = 'merchant_retry_rejected_after_payment' AND

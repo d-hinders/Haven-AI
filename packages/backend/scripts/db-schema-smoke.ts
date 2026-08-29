@@ -165,6 +165,7 @@ import {
   COUNT_RECENT_X402_INTENTS_SQL,
   FAIL_X402_INTENT_SQL,
   FIND_ACTIVE_X402_INTENT_BY_KEY_SQL,
+  FIND_SWEEPABLE_ERC7710_INTENTS_SQL,
   FIND_SETTLE_INTENT_SQL,
   FIND_X402_INTENT_BY_KEY_SQL,
   GET_MAX_X402_PER_HOUR_SQL,
@@ -658,6 +659,12 @@ const QUERIES: SmokeQuery[] = [
   { name: 'x402: one-shot fail', sql: FAIL_X402_INTENT_SQL },
   { name: 'x402: settle intent load (#830)', sql: FIND_SETTLE_INTENT_SQL },
   { name: 'x402: settle flip to submitted (#976 ordering)', sql: MARK_INTENT_SUBMITTED_FOR_SETTLEMENT_SQL },
+  // #2117 passive settlement sweep. Three of the columns it filters on —
+  // `delegation_hash`, `machine_metadata`, `execution_rail` — appear together in
+  // no other curated query, and this is the only consumer of migration 072's
+  // partial index. Schema drift here is silent in production: the leader-gated
+  // tick logs a warning and confirms nothing, so no payment fails loudly.
+  { name: 'x402: passive settlement sweep candidates (#2117)', sql: FIND_SWEEPABLE_ERC7710_INTENTS_SQL },
   // machine-payment evidence / reconciliation / sweeps / merchant receipts:
   { name: 'evidence: base upsert anchored on intent', sql: UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL },
   { name: 'evidence: intent source read (optional agent scope)', sql: FIND_INTENT_EVIDENCE_SOURCE_SQL },

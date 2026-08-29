@@ -151,6 +151,16 @@ describeDb('migration 072: payment_intents settlement indexes (#2095)', () => {
 
   // ── No behaviour change: the point of the whole migration. ───────────────
 
+  // Timeout, not the #2209 "seed once" remedy, and deliberately so. This body
+  // calls `resetDb()` TWICE because the whole assertion is "the same scenario,
+  // run against two different schema states" — the index present, then dropped.
+  // The reset cannot be hoisted into `beforeEach` without destroying what is
+  // being compared, so the usual fix (seed the case table once, assert on
+  // seeded IDs) does not apply here. #2209 measured `resetDb()` at ~250 ms
+  // quiet and ~800 ms-1.2 s under parallel load, growing with the migration
+  // count; two of them plus two index rebuilds does not fit vitest's 5 s
+  // default once the suite is busy, which is how this surfaced — as a timeout
+  // on an unrelated PR (#2136) that merely added one more real-DB file.
   it('the replay guard refuses the SAME hash whether the index is present or absent', async () => {
     async function refusalOutcome(): Promise<{ replayed: boolean; fresh: boolean }> {
       await resetDb()
@@ -190,8 +200,9 @@ describeDb('migration 072: payment_intents settlement indexes (#2095)', () => {
 
     expect(withIndex).toEqual({ replayed: false, fresh: true })
     expect(withoutIndex).toEqual(withIndex)
-  })
+  }, 30_000)
 
+  // Same two-schema-state shape, same reason. See the note above.
   it("the sweeper selects the SAME candidates whether the index is present or absent", async () => {
     // The sibling of the test above, for the OTHER query this migration
     // indexes. Reviewer finding (#2095, nice-to-have): the no-behaviour-change
@@ -223,7 +234,7 @@ describeDb('migration 072: payment_intents settlement indexes (#2095)', () => {
 
     expect(withIndex).toEqual([open.id])
     expect(withoutIndex).toEqual(withIndex)
-  })
+  }, 30_000)
 })
 
 describe('migration 072 registration', () => {

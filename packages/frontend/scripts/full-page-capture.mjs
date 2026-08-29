@@ -227,6 +227,141 @@ export const MIN_CONTENT_CHARS = 30
 export const MIN_CONTENT_ELEMENTS = 6
 
 /**
+ * ── The half of that KNOWN LIMIT this closes (#2204) ─────────────────────────
+ *
+ * The paragraph above ends by naming its own boundary: a route caught
+ * PARTIALLY rendered clears these floors and is captured. That is not a
+ * theoretical gap. `/agents` was observed at **1856px in 1 of 4 otherwise
+ * identical runs** against 1936px in the other three — same code, same
+ * pre-warmed server, `RESULT ok`, the #1800 identity check green, and the
+ * content floor above satisfied.
+ *
+ * Reproduced and measured on `#main-content` at 1280:
+ *
+ *   resolved          912 CSS px   1022 chars   157 elements   → 1936px PNG
+ *   chain still read   872 CSS px    886 chars   150 elements   → 1856px PNG
+ *
+ * 40 CSS px at `deviceScaleFactor: 2` is the 80 device px that was reported.
+ * The missing content is the three `AllowanceBar` rows: `useOnChainAllowances`
+ * had not answered, so every `AgentCard` was showing `AllowanceBarSkeleton`
+ * ("USDC loading…") instead of its budget. 886/150 is 29x and 25x above the
+ * floors, so nothing above this line can see it — and #1971's chain-read guard
+ * cannot either, because the reads *had* been issued, just not answered yet.
+ *
+ * ── Why this is not a height assertion and not a longer wait ─────────────────
+ *
+ * The two obvious fixes are both the failure mode this harness keeps relearning.
+ * A per-route expected height is a snapshot of today that fails tomorrow for
+ * legitimate reasons — a copy change moves it, and the guard then cries wolf
+ * until someone re-baselines it into uselessness. A longer sleep turns an
+ * intermittent wrong answer into a slower intermittent wrong answer: it makes
+ * the bad capture rarer without making it any less silent, which is precisely
+ * what #2036 recorded about waiting as a whole fix.
+ *
+ * ── The signal, and why it is the app's rather than the harness's ────────────
+ *
+ * What is asked for instead is the app's own statement: **no element inside the
+ * route's content region may still be `aria-busy="true"`.** That is the
+ * accessibility contract for "this region is being updated, do not read it
+ * yet", it is written where the loading state lives rather than in a list here,
+ * and it is the same claim a screen reader acts on — so it cannot silently stop
+ * matching the product the way an enumerated selector list would. It is also
+ * the shape the paragraph above asked for and declined to build: per-route
+ * named content, named by the route.
+ *
+ * `AllowanceBarSkeleton` did not carry it and now does; adding it was an
+ * accessibility fix in its own right (the row announced nothing when it
+ * resolved). That is the intended pattern for the next loading state this
+ * catches: mark the placeholder, do not extend the harness.
+ *
+ * ── Its deliberate exemption ────────────────────────────────────────────────
+ *
+ * `/design-system` renders loading states as CONTENT — its skeleton showcase is
+ * permanently `aria-busy="true"`, correctly. `BUSY_TOLERANT_CAPTURES` below
+ * declares exactly that, `captureFullPage` derives it from the page's own URL
+ * so no caller can forget it, and a declaration that stops being true FAILS the
+ * run — the same self-expiring shape as #2197's `expectedSilentRoutes`.
+ *
+ * ── Refuse, do not retry ────────────────────────────────────────────────────
+ *
+ * The retry already exists and is the poll loop below: a region that is busy
+ * gets `CONTENT_SETTLE_WAIT_MS` to stop being busy, re-probed every
+ * `CONTENT_SETTLE_POLL_MS`. What is deliberately NOT added is a second attempt
+ * at the whole capture after the wait expires. A capture-level retry would turn
+ * a genuine slow-paint regression into a green run whose PNG came from attempt
+ * two, and nothing a design reviewer reads out of `.screenshots/` would say so
+ * — which is the same "evidence that is confidently wrong" this file exists to
+ * refuse. A refusal is louder to use and cheaper to trust, and the wait already
+ * absorbs ordinary slowness.
+ */
+export const CONTENT_BUSY_ALLOWED = false
+
+/**
+ * Captures allowed to hold `aria-busy="true"` content at shutter time (#2204).
+ *
+ * One surface legitimately breaks the rule above: `/design-system` renders
+ * loading states AS CONTENT — its skeleton showcase is permanently busy,
+ * correctly, and always will be.
+ *
+ * Deliberately the same narrow shape as #2197's `expectedSilentRoutes`, for the
+ * same reason — an exemption list is one edit away from being the way the guard
+ * gets waved through:
+ *
+ *  - it is per ROUTE, never a global flag and never per run;
+ *  - each entry carries a written `reason`, so the exemption is anchored to an
+ *    explanation rather than to a bare boolean;
+ *  - it SELF-EXPIRES, and expiry is FATAL. A declared-tolerant route that turns
+ *    out to hold no busy element FAILS the screenshot run
+ *    (`stale_busy_declarations`), so the day the showcase stops rendering a
+ *    skeleton this stops claiming it does. Review of #2204 caught the first
+ *    draft reporting that to stdout and the manifest only, which expires
+ *    nothing in a repo whose own playbook says the exit code does not survive a
+ *    pipe. Its sibling `CHAIN_SILENT_CAPTURES` fails the run on the
+ *    mirror-image staleness — a declared-silent route that DID read — so the
+ *    two now cost the same to leave rotting.
+ *
+ * It lives HERE, beside the guard, rather than in `screenshot.mjs` — and that
+ * was a CI catch, not a preference. `captureFullPage` has two consumers, the
+ * screenshot CLI and `e2e/capture-integrity.spec.ts`, and the first draft kept
+ * the registry in the CLI: the spec then captured `/design-system` with no
+ * tolerance at all and CI refused it, correctly, on this very guard. An
+ * exemption only one caller knows about is not an exemption, it is a
+ * divergence. `captureFullPage` now derives the tolerance from the page's own
+ * URL, so a third consumer cannot forget to pass it.
+ *
+ * Adding a route here is almost always the wrong fix. The right one is to mark
+ * the placeholder `aria-busy` where it lives — which is an accessibility fix
+ * the loading state needed anyway — and let the guard wait for it to clear.
+ */
+export const BUSY_TOLERANT_CAPTURES = [
+  {
+    pattern: /^\/design-system$/,
+    reason:
+      'the skeleton/loading-state showcase renders aria-busy regions as documented CONTENT, ' +
+      'so they never resolve and never should',
+  },
+]
+
+/** Is this route allowed to be busy, and why? `null` when it is not. */
+export function busyToleranceFor(pathname) {
+  return BUSY_TOLERANT_CAPTURES.find((entry) => entry.pattern.test(pathname)) ?? null
+}
+
+/**
+ * The route a page is showing, for `busyToleranceFor`.
+ *
+ * Reads `page.url()` rather than trusting a caller-supplied route string: the
+ * page is the thing being captured, and a label can drift from it.
+ */
+export function routeOfPage(page) {
+  try {
+    return new URL(page.url()).pathname
+  } catch {
+    return ''
+  }
+}
+
+/**
  * How long the content region gets to resolve, and how often it is re-probed.
  *
  * Longer than `SCROLL_SHELL_WAIT_MS`, because the two waits are for different
@@ -242,13 +377,23 @@ export const MIN_CONTENT_ELEMENTS = 6
 export const CONTENT_SETTLE_WAIT_MS = 30_000
 export const CONTENT_SETTLE_POLL_MS = 250
 
-/** The route content never resolved. `captureCause` is machine-readable. */
+/**
+ * The route content never resolved. `captureCause` is machine-readable.
+ *
+ * TWO causes, kept apart on purpose (#2204). `still-loading` is #2036's case:
+ * the region holds nothing at all. `partially-loading` is a region that holds a
+ * real screen's worth of content while the app still says part of it is busy —
+ * a PNG that looks completely healthy and is 40 CSS px short. Folding the
+ * second into the first would send every reader to the #2036 remedy ("re-run
+ * against a warm server") for a failure whose remedy is different, which is the
+ * one-sentence-for-three-defects mistake #1936 removed one layer up.
+ */
 export class ContentNotSettledError extends Error {
   constructor(message, { probe, waitedMs, verdict } = {}) {
     super(message)
     this.name = 'ContentNotSettledError'
-    /** 'still-loading' */
-    this.captureCause = 'still-loading'
+    /** 'still-loading' | 'partially-loading' */
+    this.captureCause = verdict?.reason === 'partially-loaded' ? 'partially-loading' : 'still-loading'
     this.probe = probe
     this.waitedMs = waitedMs
     this.verdict = verdict
@@ -265,17 +410,29 @@ export class ContentNotSettledError extends Error {
  */
 export function judgeContentSettled(
   probe,
-  { minChars = MIN_CONTENT_CHARS, minElements = MIN_CONTENT_ELEMENTS } = {},
+  {
+    minChars = MIN_CONTENT_CHARS,
+    minElements = MIN_CONTENT_ELEMENTS,
+    allowBusy = CONTENT_BUSY_ALLOWED,
+  } = {},
 ) {
   const chars = probe?.contentChars
   const elements = probe?.contentElements
+  const busy = typeof probe?.contentBusy === 'number' ? probe.contentBusy : 0
+  const busyLabels = Array.isArray(probe?.contentBusyLabels) ? probe.contentBusyLabels : []
   if (typeof chars !== 'number' || typeof elements !== 'number') {
-    return { settled: false, reason: 'no-content-root', chars: null, elements: null }
+    return { settled: false, reason: 'no-content-root', chars: null, elements: null, busy: null, busyLabels: [] }
   }
   if (chars < minChars || elements < minElements) {
-    return { settled: false, reason: 'still-loading', chars, elements }
+    return { settled: false, reason: 'still-loading', chars, elements, busy, busyLabels }
   }
-  return { settled: true, reason: 'settled', chars, elements }
+  // Ordered AFTER the floor deliberately: an empty region is #2036's failure
+  // and keeps #2036's name even when it also happens to be busy. This branch is
+  // only ever reached by a region that already looks like a rendered route.
+  if (busy > 0 && !allowBusy) {
+    return { settled: false, reason: 'partially-loaded', chars, elements, busy, busyLabels }
+  }
+  return { settled: true, reason: 'settled', chars, elements, busy, busyLabels }
 }
 
 /**
@@ -296,11 +453,12 @@ export async function resolveContentSettled(
     pollMs = CONTENT_SETTLE_POLL_MS,
     probe: initialProbe = null,
     label = 'capture',
+    allowBusy = CONTENT_BUSY_ALLOWED,
   } = {},
 ) {
   const start = Date.now()
   let probe = initialProbe ?? (await probeShell(page, selector))
-  let verdict = judgeContentSettled(probe)
+  let verdict = judgeContentSettled(probe, { allowBusy })
 
   // Counted, not timed — same reasoning as `resolveScrollShell`: `raced` must
   // mean we actually had to poll, not that the wall clock happened to move.
@@ -308,10 +466,27 @@ export async function resolveContentSettled(
   while (!verdict.settled && Date.now() - start < timeoutMs) {
     await page.waitForTimeout(pollMs)
     probe = await probeShell(page, selector)
-    verdict = judgeContentSettled(probe)
+    verdict = judgeContentSettled(probe, { allowBusy })
     polls += 1
   }
   const waitedMs = Date.now() - start
+
+  if (verdict.reason === 'partially-loaded') {
+    throw new ContentNotSettledError(
+      `full-page capture: ${label} — "${selector}" is full of content but the app still says part of it ` +
+        `is LOADING. After waiting ${waitedMs}ms it holds ${verdict.busy} element(s) marked ` +
+        `aria-busy="true"${verdict.busyLabels.length ? ` (${verdict.busyLabels.join('; ')})` : ''}, alongside ` +
+        `${verdict.chars} character(s) in ${verdict.elements} element(s) — comfortably above the #2036 floor ` +
+        `of ${MIN_CONTENT_CHARS} characters / ${MIN_CONTENT_ELEMENTS} elements, which is why this used to be ` +
+        `captured. A PARTIALLY painted route photographs as a healthy one: /agents shot on its budget ` +
+        `placeholders is 40 CSS px shorter than the same page resolved and is otherwise indistinguishable ` +
+        `(#2204). Usually a slow render-time read under load — re-run against a warm, unloaded server. If it ` +
+        `persists, the region genuinely never resolves. If the route renders loading states as CONTENT ` +
+        `(/design-system's skeleton showcase), add it to BUSY_TOLERANT_CAPTURES in this file with a ` +
+        `reason rather than removing this guard.`,
+      { probe, waitedMs, verdict },
+    )
+  }
 
   if (!verdict.settled) {
     throw new ContentNotSettledError(
@@ -355,29 +530,67 @@ export class ScrollShellError extends Error {
   }
 }
 
+/**
+ * The DOM half of `probeShell`, hoisted out of the `page.evaluate` call so it
+ * can be tested (#2204 review).
+ *
+ * This body used to be an inline arrow inside `page.evaluate`, which meant the
+ * only thing that ever ran it was a live Chromium — so a typo in the
+ * `[aria-busy="true"]` selector, or a broken label fallback, would fail OPEN:
+ * the guard would silently never fire and the #2204 defect would be back with
+ * a green test suite over it. Hoisted, `content-probe.test.ts` runs it against
+ * a real jsdom document.
+ *
+ * CONSTRAINT, and it is not stylistic: Playwright serialises this function and
+ * evaluates it in the page, so it may reference NOTHING from module scope —
+ * no imports, no constants, no other function in this file. Everything it needs
+ * arrives as `sel` or comes from the page's own globals.
+ */
+export function readContentProbe(sel) {
+  const doc = document.documentElement
+  const text = (document.body?.innerText ?? '').trim()
+
+  // The ROUTE'S OWN content region, measured separately from the document.
+  // `renderedChars` above counts the whole body, which on an authenticated
+  // page is dominated by the shell — sidebar nav, TopBar, account chip. That
+  // is why a route stuck on its loading fallback clears every existing floor
+  // (#2036): the shell alone is thousands of characters, and the region the
+  // capture actually claims to show holds ten.
+  const root = document.querySelector(sel)
+  const contentText = root ? (root.innerText ?? '').trim() : ''
+
+  // The app's OWN statement that a region of this route has not finished
+  // (#2204). `aria-busy="true"` is the accessibility contract for exactly
+  // this — "the content here is being updated, do not read it yet" — and a
+  // capture is a reader like any other. Only `"true"` counts: several surfaces
+  // bind `aria-busy={loading}`, and a resolved `"false"` is the signal working,
+  // not a match.
+  const busyNodes = root ? [...root.querySelectorAll('[aria-busy="true"]')] : []
+  // A label per busy node, so the refusal can name WHAT was still loading
+  // instead of printing a count. Capped: a route mid-load can hold dozens.
+  const busyLabels = busyNodes.slice(0, 8).map((el) => {
+    const label = el.getAttribute('aria-label')
+    if (label) return label
+    const own = (el.innerText ?? '').trim().replace(/\s+/g, ' ')
+    if (own) return own.slice(0, 60)
+    return `${el.tagName.toLowerCase()}${el.className ? `.${String(el.className).split(/\s+/)[0]}` : ''}`
+  })
+
+  return {
+    found: Boolean(root),
+    docScrollHeight: doc.scrollHeight,
+    viewportHeight: window.innerHeight,
+    renderedChars: text.length,
+    contentChars: root ? contentText.length : null,
+    contentElements: root ? root.querySelectorAll('*').length : null,
+    contentBusy: root ? busyNodes.length : null,
+    contentBusyLabels: busyLabels,
+  }
+}
+
 /** One cheap DOM probe: is the root there, and what kind of page is this? */
 async function probeShell(page, selector) {
-  return page.evaluate((sel) => {
-    const doc = document.documentElement
-    const text = (document.body?.innerText ?? '').trim()
-    // The ROUTE'S OWN content region, measured separately from the document.
-    // `renderedChars` above counts the whole body, which on an authenticated
-    // page is dominated by the shell — sidebar nav, TopBar, account chip. That
-    // is why a route stuck on its loading fallback clears every existing floor
-    // (#2036): the shell alone is thousands of characters, and the region the
-    // capture actually claims to show holds ten.
-    const root = document.querySelector(sel)
-    const contentText = root ? ((root.innerText ?? '').trim()) : ''
-
-    return {
-      found: Boolean(root),
-      docScrollHeight: doc.scrollHeight,
-      viewportHeight: window.innerHeight,
-      renderedChars: text.length,
-      contentChars: root ? contentText.length : null,
-      contentElements: root ? root.querySelectorAll('*').length : null,
-    }
-  }, selector)
+  return page.evaluate(readContentProbe, selector)
 }
 
 /**
@@ -577,7 +790,7 @@ async function unclipFrom(page, selector) {
  * against a CSS height would put the fold in the wrong place (at `dsf: 2` it
  * would sit at half the real fold and the guard would never fire).
  */
-export async function captureFullPage(page, { path, label, viewportDevicePx, selector, timeoutMs, contentTimeoutMs } = {}) {
+export async function captureFullPage(page, { path, label, viewportDevicePx, selector, timeoutMs, contentTimeoutMs, allowBusy } = {}) {
   const root = selector ?? SCROLL_SHELL_ROOT
   const shell = await resolveScrollShell(page, {
     ...(selector ? { selector } : {}),
@@ -589,6 +802,14 @@ export async function captureFullPage(page, { path, label, viewportDevicePx, sel
   // page IS its own content, and is already covered by `MIN_RENDERED_CHARS`
   // and by the blank-below-fold read-back — asking for `#main-content` there
   // would refuse every marketing capture.
+  // Busy tolerance is DERIVED from the page, not passed in (#2204 CI catch):
+  // `e2e/capture-integrity.spec.ts` calls this function directly and knew
+  // nothing about the CLI's registry, so `/design-system`'s permanently-busy
+  // showcase was refused there while being tolerated here. An explicit
+  // `allowBusy` still wins, for a caller that genuinely knows better.
+  const resolvedAllowBusy =
+    typeof allowBusy === 'boolean' ? allowBusy : Boolean(busyToleranceFor(routeOfPage(page)))
+
   let content = null
   if (shell.mode === SHELL_MODE.UNCLIPPED) {
     try {
@@ -599,6 +820,7 @@ export async function captureFullPage(page, { path, label, viewportDevicePx, sel
         // first poll would buy nothing. `contentChars`/`contentElements` are
         // unaffected by the un-clip walk, which only rewrites heights.
         probe: shell.probe,
+        allowBusy: resolvedAllowBusy,
         ...(Number.isFinite(contentTimeoutMs) ? { timeoutMs: contentTimeoutMs } : {}),
       })
     } catch (err) {

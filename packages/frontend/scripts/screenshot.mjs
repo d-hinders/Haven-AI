@@ -147,6 +147,7 @@ import {
   MIN_CONTENT_ELEMENTS,
   SCROLL_SHELL_ROOT,
   SHELL_MODE,
+  busyToleranceFor,
   captureFullPage,
 } from './full-page-capture.mjs'
 import { CLIP_TOLERANCE_PX, measureHiddenBelowFold } from './clip-guard.mjs'
@@ -223,6 +224,9 @@ const KEEP_RUNS = resolveKeepRuns(ARGS, process.env)
  *   'blank-below-fold'     the PNG came back empty below the first viewport
  *   'still-loading'        the shell mounted, the ROUTE never did (#2036) — the
  *                          one cause whose PNG looks entirely healthy
+ *   'partially-loading'    the route rendered but part of it is still loading
+ *                          (#2204) — the PNG looks healthy AND clears the #2036
+ *                          floor; the only tell is that it is short
  *   'unknown'              anything else, never silently folded into the above
  */
 export function describeDeletedCapture(err, { route, viewport, file, written = true }) {
@@ -1442,6 +1446,20 @@ const CHAIN_READ_GAPS = []
  * adds the sixteenth; routes change rarely, and the property being asserted is
  * a property of the screen, not of the story told about it.
  */
+/**
+ * Declared-tolerant captures that held no busy element — the declaration is
+ * stale, and that FAILS THE RUN (#2204).
+ *
+ * The registry itself lives in `full-page-capture.mjs` beside the guard, not
+ * here: `captureFullPage` has TWO consumers (this CLI and
+ * `e2e/capture-integrity.spec.ts`), and the first draft kept the exemption in
+ * the CLI only — so the spec captured `/design-system` with no tolerance at
+ * all and CI refused it. An exemption that one caller knows about is not an
+ * exemption, it is a divergence. `busyToleranceFor` is now derived from the
+ * page's own URL inside `captureFullPage`, so a third consumer cannot forget it.
+ */
+export const STALE_BUSY_DECLARATIONS = []
+
 export const CHAIN_FED_ROUTES = [
   {
     pattern: /^\/agents(\/|$)/,
@@ -1722,6 +1740,42 @@ async function newFixtureContext(browser, vp, scenario) {
   // the app's own read path, gate branch and rendering are all real. It is not
   // a hook for stubbing component state, and a scenario that needs one should
   // be re-examined rather than served here.
+  // ── The lever that makes the #2204 race happen on demand ──────────────────
+  //
+  // A guard that has only ever been seen to pass is not evidence. This
+  // reproduces the genuinely-unpainted page the busy check exists to refuse:
+  // it stalls each JSON-RPC read CLIENT-SIDE, before the request is issued.
+  //
+  // The stall has to be on THIS side of the wire, and finding that out cost a
+  // diagnosis worth recording. Delaying the ANSWER (inside the route handler)
+  // reproduces nothing at all: the request is in flight the whole time, so
+  // `waitUntil: 'networkidle'` simply waits it out and the capture is correct
+  // — measured at 500 / 2000 / 6000ms, all three came back at the healthy
+  // 1936px. Stalling BEFORE the fetch leaves the page creates a window with no
+  // in-flight request, `networkidle` fires into it, and the shutter lands on
+  // `useOnChainAllowances` still loading. That is also the real mechanism: the
+  // hook issues four SEQUENTIAL reads, and under load the client-side gap
+  // between two of them can exceed networkidle's 500ms threshold on its own —
+  // which is why the bad run is 1 in 4 on a busy machine and 0 in 10 on an
+  // idle one.
+  //
+  // Diagnostic only, and it says so: it is off unless asked for, and it is
+  // deliberately not a `scenario` field, because nothing committed should ever
+  // capture through it.
+  const chainStallMs = Number(process.env.SCREENSHOT_CHAIN_STALL_MS ?? 0)
+  if (chainStallMs > 0) {
+    await context.addInitScript((ms) => {
+      const original = window.fetch
+      window.fetch = async (input, init) => {
+        const body = typeof init?.body === 'string' ? init.body : ''
+        if (body.includes('"jsonrpc"')) {
+          await new Promise((resolve) => setTimeout(resolve, ms))
+        }
+        return original(input, init)
+      }
+    }, chainStallMs)
+  }
+
   const seeded = scenario?.seed?.()
   if (seeded) {
     await context.addInitScript((entries) => {
@@ -3752,6 +3806,10 @@ async function main() {
         // Un-clips the h-screen/overflow-hidden shell so `fullPage` paints the
         // whole route, then reads the PNG back and refuses a blank one (#1738).
         try {
+          // No `allowBusy` here on purpose: `captureFullPage` derives the
+          // tolerance from the page's own URL, so every consumer gets the same
+          // answer (#2204 CI catch).
+          const busyTolerance = busyToleranceFor(routePath)
           const { shell, content } = await captureFullPage(page, {
             path: file,
             label: `${routePath} · ${vp.name}`,
@@ -3764,8 +3822,19 @@ async function main() {
               viewport: vp.name,
               chars: content.chars,
               elements: content.elements,
+              busy: content.busy ?? 0,
               waited_ms: content.waitedMs,
             })
+            // The exemption's expiry date (#2204). A route declared
+            // busy-tolerant that held nothing busy is a declaration nobody has
+            // re-read; say so rather than carry it forever.
+            if (busyTolerance && !(content.busy > 0)) {
+              STALE_BUSY_DECLARATIONS.push({
+                route: routePath,
+                viewport: vp.name,
+                reason: busyTolerance.reason,
+              })
+            }
             if (content.raced) {
               contentRaced.push({ route: routePath, viewport: vp.name, waitedMs: content.waitedMs })
             }
@@ -3950,6 +4019,9 @@ async function main() {
         // failing runs.
         content_settle: contentSettles,
         content_waits: contentRaced,
+        // Busy-tolerance declarations (#2204) that turned out not to be needed
+        // — the exemption's own expiry notice.
+        stale_busy_declarations: STALE_BUSY_DECLARATIONS,
         // Retention, recorded so the live manifest can be read as "this is the
         // current run, and here is where the one before it went" (#1888). A
         // reader who finds PNGs under `previous/` can tell from HERE that they
@@ -4006,12 +4078,30 @@ async function main() {
   }
   if (contentSettles.length > 0) {
     console.log(
-      `\nℹ route content confirmed present at capture time (#2036) — floor is ` +
-        `${MIN_CONTENT_CHARS} chars / ${MIN_CONTENT_ELEMENTS} elements in "${SCROLL_SHELL_ROOT}":`,
+      `\nℹ route content confirmed present AND FINISHED at capture time (#2036/#2204) — floor is ` +
+        `${MIN_CONTENT_CHARS} chars / ${MIN_CONTENT_ELEMENTS} elements in "${SCROLL_SHELL_ROOT}", ` +
+        `and nothing in it may still be aria-busy:`,
     )
     for (const e of contentSettles) {
-      console.log(`  [${e.route} · ${e.viewport}] ${e.chars} chars, ${e.elements} elements`)
+      console.log(
+        `  [${e.route} · ${e.viewport}] ${e.chars} chars, ${e.elements} elements` +
+          (e.busy > 0 ? `, ${e.busy} still-busy element(s) — tolerated by declaration` : ''),
+      )
     }
+  }
+  if (STALE_BUSY_DECLARATIONS.length > 0) {
+    console.error(
+      `\n✗ ${STALE_BUSY_DECLARATIONS.length} busy-tolerance declaration(s) were not needed — ` +
+        `BUSY_TOLERANT_CAPTURES in scripts/full-page-capture.mjs is stale (#2204):`,
+    )
+    for (const e of STALE_BUSY_DECLARATIONS) {
+      console.error(`  [${e.route} · ${e.viewport}] held no aria-busy element — declared because: ${e.reason}`)
+    }
+    console.error(
+      '  (remove the entry from BUSY_TOLERANT_CAPTURES — the exemption is only sound while the reason\n' +
+        '   it names is still true, and a route that no longer needs it is a route the guard should be\n' +
+        '   protecting)',
+    )
   }
   for (const line of formatDeletionReport(deletedCaptures)) console.error(line)
   if (clipped.length > 0) {
@@ -4147,6 +4237,15 @@ async function main() {
     deletedCaptures.length > 0 && `${deletedCaptures.length} capture(s) deleted as unusable`,
     CHAIN_READ_GAPS.length > 0 && `${CHAIN_READ_GAPS.length} chain-fed route(s) issued no on-chain reads`,
     CHAIN_SILENT_CAPTURES.length > 0 && `${CHAIN_SILENT_CAPTURES.length} silent chain-fed capture(s)`,
+    // GATING, not advisory — review of #2204 caught this as a should-fix and it
+    // was the right call. The whole claim made for `BUSY_TOLERANT_CAPTURES` is
+    // that it SELF-EXPIRES; a stale declaration that only prints to stdout and
+    // the manifest expires nothing, in a repo whose own playbook says the exit
+    // code does not survive a pipe. Its sibling `CHAIN_SILENT_CAPTURES` fails
+    // the run on exactly the mirror-image staleness, so the two mechanisms now
+    // cost the same to leave rotting.
+    STALE_BUSY_DECLARATIONS.length > 0 &&
+      `${STALE_BUSY_DECLARATIONS.length} stale busy-tolerance declaration(s)`,
   ].filter(Boolean)
   if (failures.length > 0) {
     printRunResult(false, failures.join('; '))

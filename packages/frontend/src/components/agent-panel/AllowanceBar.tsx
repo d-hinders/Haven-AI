@@ -124,9 +124,35 @@ export function AllowanceBar({
   )
 }
 
+/**
+ * The placeholder shown while `useOnChainAllowances` is still reading the
+ * chain for this token.
+ *
+ * `aria-busy="true"` is not decoration (#2204). Two readers need it and
+ * neither had it:
+ *
+ *   - a screen reader, which was given a bare "loading..." with no busy state,
+ *     so the row said nothing about being unfinished;
+ *   - the capture harness, which cannot otherwise tell this row apart from a
+ *     resolved one. `/agents` photographed with all three cards on this
+ *     placeholder is 40 CSS px shorter than the same page resolved, clears the
+ *     #2036 content floor comfortably (886 chars / 147 elements against a floor
+ *     of 30 / 6), and produces a PNG that looks entirely healthy. The busy flag
+ *     is the app SAYING it is not finished, which is what
+ *     `resolveContentSettled` now refuses to capture over.
+ *
+ * `aria-busy` and nothing else, deliberately (#2204 design review). The first
+ * draft also put `role="status"` + `aria-live="polite"` + a per-token
+ * `aria-label` here, which announced the byte-identical "Loading USDC budget"
+ * once per AgentCard — three times over on `/agents`, carrying no information
+ * the first one did not. The app's own convention is one status region per
+ * loading SURFACE (`DashboardClient.tsx:134`, `AgentDetailClient.tsx:373`,
+ * `TransactionsTable.tsx:150`), so the live region lives on the list in
+ * `AgentCard` and each row only reports its own busy state.
+ */
 export function AllowanceBarSkeleton({ symbol }: { symbol: string }) {
   return (
-    <div className="flex items-center gap-2 text-xs">
+    <div className="flex items-center gap-2 text-xs" aria-busy="true">
       <span className="text-[var(--v2-ink-2)]">{symbol}</span>
       <div className="flex-1 h-[3px] bg-[var(--v2-surface-2)] rounded-full" />
       <span className="text-[var(--v2-ink-3)] animate-pulse">loading...</span>

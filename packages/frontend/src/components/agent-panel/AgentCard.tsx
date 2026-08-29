@@ -235,9 +235,29 @@ export function AgentCard({
               <p className="text-xs text-[var(--v2-ink-3)]">No agent budget configured</p>
             ) : null}
 
-            {pendingDbTokens.map((symbol) => (
-              <AllowanceBarSkeleton key={symbol} symbol={symbol} />
-            ))}
+            {/* ONE status region for the whole pending list, not one per row
+                (#2204 design review). The app's convention is a status region
+                per loading SURFACE — `DashboardClient.tsx:134`,
+                `AgentDetailClient.tsx:373`, `TransactionsTable.tsx:150` — and
+                the per-row version announced the same string once per card,
+                three times over on `/agents`. The rows keep `aria-busy`, which
+                is what the capture harness reads. */}
+            {pendingDbTokens.length > 0 && (
+              <div
+                /* `space-y-2` is carried, not added: these rows used to be
+                   direct children of the `space-y-2` list above, so wrapping
+                   them without it would silently close the gap between two
+                   pending tokens. */
+                className="space-y-2"
+                role="status"
+                aria-live="polite"
+                aria-label={`Loading ${agent.name}'s budget`}
+              >
+                {pendingDbTokens.map((symbol) => (
+                  <AllowanceBarSkeleton key={symbol} symbol={symbol} />
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

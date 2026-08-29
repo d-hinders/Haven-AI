@@ -5,6 +5,8 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { isCliEntrypoint, runCli } from './cli.js'
 import * as runtime from './runtime.js'
+import * as doctorModule from './doctor.js'
+import * as unwireModule from './unwire.js'
 import { ConnectError } from './connect-error.js'
 
 let tempDir = ''
@@ -524,21 +526,51 @@ describe('every subcommand reports its failure on stdout under --json (#2184)', 
   })
 
   it('--doctor emits a failure record that cannot be mistaken for a report', async () => {
-    const spy = vi.spyOn(runtime, 'runConnect')
+    // Forced deterministically, the same way this file already forces
+    // `runtime.runConnect` failures. An earlier version of this test guarded
+    // its assertions behind `if (record.doctor === 'failed')` and so could not
+    // fail at all — review proved it by flipping the discriminant and watching
+    // the whole suite stay green.
+    const spy = vi.spyOn(doctorModule, 'runDoctor').mockRejectedValue(new Error('synthetic doctor boom'))
     try {
-      tempDir = await mkdtemp(join(tmpdir(), 'haven-cli-doctor-fail-'))
-      const { stdout } = await failWith(
-        ['--doctor', '--runtime', 'claude-code', '--credentials-dir', join(tempDir, 'nope'), '--json'],
-      )
-      // A doctor REPORT has `ok`/`checks`/`agents`; a failure record has
-      // neither, and carries the `doctor` discriminant the report never has.
-      if (stdout.length > 0) {
-        const record = JSON.parse(stdout[0])
-        if (record.doctor === 'failed') {
-          expect(record).not.toHaveProperty('checks')
-          expect(record.error.code).toBeTruthy()
-        }
-      }
+      const { exitCode, stdout, stderr } = await failWith(['--doctor', '--runtime', 'claude-code', '--json'])
+
+      expect(exitCode).toBe(1)
+      expect(stdout).toHaveLength(1)
+      const record = JSON.parse(stdout[0])
+      // The discriminant itself is pinned, not merely branched on.
+      expect(record.doctor).toBe('failed')
+      expect(record.error.code).toBe('doctor_failed')
+      expect(record.error.next_action).toBe('review_the_error_and_rerun_doctor')
+      // A doctor REPORT carries `ok`/`checks`/`agents`; a failure record must
+      // carry none of them, or a caller reading `checks` gets undefined and
+      // silently concludes the machine is clean.
+      expect(record).not.toHaveProperty('checks')
+      expect(record).not.toHaveProperty('ok')
+      expect(record).not.toHaveProperty('agents')
+      // A bare Error, so its text stays out of the machine channel.
+      expect(record.error).not.toHaveProperty('message')
+      expect(stderr.join('')).toContain('synthetic doctor boom')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('--unwire falls back to unwire_failed when the throw is not a ConnectError', async () => {
+    // The nonexistent-directory case above is refused by `unwireAgent`'s own
+    // tombstone step with a ConnectError, so it never reaches the fallback
+    // strings this change introduces. Force a bare throw to pin them.
+    const spy = vi.spyOn(unwireModule, 'unwireAgent').mockRejectedValue(new Error('synthetic unwire boom'))
+    try {
+      const { exitCode, stdout, stderr } = await failWith(['--unwire', '/tmp/whatever', '--json'])
+
+      expect(exitCode).toBe(1)
+      const record = JSON.parse(stdout[0])
+      expect(record.unwired).toBe(false)
+      expect(record.error.code).toBe('unwire_failed')
+      expect(record.error.next_action).toBe('review_the_error_and_rerun_unwire_which_is_idempotent')
+      expect(record.error).not.toHaveProperty('message')
+      expect(stderr.join('')).toContain('synthetic unwire boom')
     } finally {
       spy.mockRestore()
     }

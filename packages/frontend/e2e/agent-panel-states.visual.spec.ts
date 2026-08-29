@@ -177,8 +177,15 @@ const SNAPSHOT_OPTIONS = {
  * invisible to `expectCardBanners` until it is added here; the
  * `expectKnownBannerCount` guard below closes that, by counting banner-shaped
  * children independently and failing when the two disagree.
+ *
+ * #2195 renamed the stranded-funds banner ("Stranded funds on delegate" →
+ * "Recoverable funds in agent wallet", now shared with the agent-detail banner
+ * via `lib/stranded-funds-copy.ts`). The titles here stay RESTATED LITERALS and
+ * are deliberately NOT imported from that module: an independently written
+ * vocabulary is the only thing that can catch an unintended copy change, and a
+ * spec that imports the string it is checking asserts nothing about it.
  */
-const BANNER_TITLES = ['Paused in Haven', 'Stranded funds on delegate'] as const
+const BANNER_TITLES = ['Paused in Haven', 'Recoverable funds in agent wallet'] as const
 
 /**
  * This spec's OWN `/agents` and `/auth/me` payloads, layered over
@@ -903,8 +910,8 @@ test.describe('agent panel empty states and card banners', () => {
         name: 'Stranded agent',
         has_stranded_funds: true,
       }),
-      banners: ['Stranded funds on delegate'],
-      title: 'Stranded funds on delegate',
+      banners: ['Recoverable funds in agent wallet'],
+      title: 'Recoverable funds in agent wallet',
     },
   ] as const
 
@@ -939,7 +946,7 @@ test.describe('agent panel empty states and card banners', () => {
     status: 'paused',
     has_stranded_funds: true,
   })
-  const STACKED_BANNERS = ['Paused in Haven', 'Stranded funds on delegate'] as const
+  const STACKED_BANNERS = ['Paused in Haven', 'Recoverable funds in agent wallet'] as const
 
   test('agent card warning banners — paused and stranded stack in order', async ({ page }) => {
     await seedPanel(page, { agents: [STACKED_AGENT] })
@@ -956,7 +963,7 @@ test.describe('agent panel empty states and card banners', () => {
     const boxes = await card.evaluate((el) =>
       Array.from(el.querySelectorAll('p'))
         .filter((p) =>
-          ['Paused in Haven', 'Stranded funds on delegate'].includes(p.textContent?.trim() ?? ''),
+          ['Paused in Haven', 'Recoverable funds in agent wallet'].includes(p.textContent?.trim() ?? ''),
         )
         .map((p) => Math.round(p.getBoundingClientRect().top)),
     )

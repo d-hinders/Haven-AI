@@ -8,6 +8,7 @@ import { type Agent } from '@/hooks/useAgents'
 import { type AllowanceInfo } from '@/lib/allowance-module'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
+import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
 import ConfirmDialog from '../ConfirmDialog'
 import { RemoveAgentDialog } from './RemoveAgentDialog'
 import { entityCardClassName } from '../ui/entityCardStyles'
@@ -203,11 +204,18 @@ export function AgentCard({
         <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-warning/20 rounded-lg">
           <Icon icon={TriangleAlert} className="h-3.5 w-3.5 text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-[var(--v2-warning)]">Stranded funds on delegate</p>
+            {/* #2195: title and cause clause are the SHARED ones — this card and
+                the agent-detail banner are one click apart and used to name the
+                same reconciliation event two different ways. The count is `null`
+                because `has_stranded_funds` is a SQL `EXISTS`, so this surface
+                knows the state exists and cannot know how many events or how
+                much money; the detail banner holds the list and the balance, and
+                says so. That is the difference in detail level, made deliberate. */}
+            <p className="text-xs font-medium text-[var(--v2-warning)]">{STRANDED_FUNDS_TITLE}</p>
             <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
-              A payment was funded on-chain but not settled.{' '}
+              {strandedFundsCause(null)}{' '}
               <a href={`/agents/${agent.id}`} className="underline underline-offset-2">
-                View agent to sweep funds back to your account.
+                View agent to recover these funds.
               </a>
             </p>
           </div>

@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from 'pg'
 import { getPool } from '../db.js'
-import { acquireAdvisoryLockByPolling } from './advisory-lock.js'
+import { acquireAdvisoryLockByPolling, releaseAdvisoryLock } from './advisory-lock.js'
 import { migrations as registeredMigrations, type Migration } from './migrations/index.js'
 
 /**
@@ -356,6 +356,6 @@ async function applyWithoutTransaction(client: PoolClient, migration: Migration)
       [migration.version],
     )
   } finally {
-    await client.query('SELECT pg_advisory_unlock($1)', [NON_TRANSACTIONAL_LOCK_KEY])
+    await releaseAdvisoryLock(client, NON_TRANSACTIONAL_LOCK_KEY)
   }
 }

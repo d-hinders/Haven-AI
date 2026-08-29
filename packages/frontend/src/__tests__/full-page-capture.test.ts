@@ -17,11 +17,13 @@ import { describe, expect, it } from 'vitest'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs, shared by the screenshot script and both e2e specs
 import {
+  BUSY_TOLERANT_CAPTURES,
   MIN_CONTENT_CHARS,
   MIN_CONTENT_ELEMENTS,
   PAINTED_SLACK,
   TALL_FACTOR,
   assertCaptureNotBlank,
+  busyToleranceFor,
   inspectCapture,
   judgeContentSettled,
   resolveContentSettled,
@@ -862,15 +864,43 @@ describe('judgeContentSettled', () => {
     expect(verdict.reason).toBe('still-loading')
   })
 
-  it('lets a declared busy-tolerant capture through — /design-system by name', () => {
+  it('lets a declared busy-tolerant capture through', () => {
     // `/design-system` renders loading states AS CONTENT; its skeleton showcase
-    // is permanently aria-busy and correctly so.
+    // is permanently aria-busy and correctly so. `busyToleranceFor` below is
+    // what decides that in the live path.
     const verdict = judgeContentSettled(AGENTS_CHAIN_PENDING, { allowBusy: true })
 
     expect(verdict.settled).toBe(true)
     // The count still survives, so the run can report the declaration as STALE
     // the day the showcase stops rendering one.
     expect(verdict.busy).toBe(3)
+  })
+
+  it('declares /design-system busy-tolerant, and nothing else', () => {
+    // The registry lives beside the guard rather than in the CLI, and that was
+    // a CI catch: `e2e/capture-integrity.spec.ts` calls `captureFullPage`
+    // directly and knew nothing about a CLI-side registry, so the
+    // permanently-busy showcase was refused there while being tolerated in the
+    // screenshot run. An exemption only one caller knows about is a divergence.
+    expect(busyToleranceFor('/design-system')).toMatchObject({
+      reason: expect.stringContaining('showcase'),
+    })
+    // Narrow by construction — the pattern is anchored, so neither a
+    // sub-route nor a lookalike inherits the exemption.
+    for (const route of ['/agents', '/dashboard', '/design-system/foo', '/my-design-system']) {
+      expect(busyToleranceFor(route)).toBeNull()
+    }
+  })
+
+  it('every declaration carries a written reason', () => {
+    // The anchor that makes this list an explanation rather than a boolean. A
+    // future entry added without one would make the refusal message lie about
+    // why the capture was let through.
+    for (const entry of BUSY_TOLERANT_CAPTURES) {
+      expect(entry.pattern).toBeInstanceOf(RegExp)
+      expect(typeof entry.reason).toBe('string')
+      expect(entry.reason.length).toBeGreaterThan(20)
+    }
   })
 })
 

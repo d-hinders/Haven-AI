@@ -147,6 +147,7 @@ import {
   MIN_CONTENT_ELEMENTS,
   SCROLL_SHELL_ROOT,
   SHELL_MODE,
+  busyToleranceFor,
   captureFullPage,
 } from './full-page-capture.mjs'
 import { CLIP_TOLERANCE_PX, measureHiddenBelowFold } from './clip-guard.mjs'
@@ -1446,50 +1447,18 @@ const CHAIN_READ_GAPS = []
  * a property of the screen, not of the story told about it.
  */
 /**
- * Captures allowed to hold `aria-busy="true"` content at shutter time (#2204).
+ * Declared-tolerant captures that held no busy element — the declaration is
+ * stale, and that FAILS THE RUN (#2204).
  *
- * `resolveContentSettled` refuses a route whose content region still says part
- * of itself is loading, because that is what an 80px-short `/agents` capture
- * looks like from the inside. One surface breaks that rule legitimately:
- * `/design-system` renders loading states AS CONTENT — its skeleton showcase is
- * permanently busy, correctly, and always will be.
- *
- * Deliberately the same narrow shape as #2197's `expectedSilentRoutes`, for the
- * same reason — an exemption list is one edit away from being the way the guard
- * gets waved through:
- *
- *  - it is per ROUTE, never a global flag and never per run;
- *  - each entry carries a written `reason`, so the exemption is anchored to an
- *    explanation rather than to a bare boolean;
- *  - it SELF-EXPIRES, and expiry is FATAL. A declared-tolerant route that turns
- *    out to hold no busy element FAILS THE RUN (`stale_busy_declarations`), so
- *    the day the showcase stops rendering a skeleton this stops claiming it
- *    does. Review of #2204 caught the first draft reporting that to stdout and
- *    the manifest only, which expires nothing in a repo whose own playbook says
- *    the exit code does not survive a pipe. Its sibling `CHAIN_SILENT_CAPTURES`
- *    fails the run on the mirror-image staleness — a declared-silent route that
- *    DID read — so the two now cost the same to leave rotting.
- *
- * Adding a route here is almost always the wrong fix. The right one is to mark
- * the placeholder `aria-busy` where it lives — which is an accessibility fix
- * the loading state needed anyway — and let the guard wait for it to clear.
+ * The registry itself lives in `full-page-capture.mjs` beside the guard, not
+ * here: `captureFullPage` has TWO consumers (this CLI and
+ * `e2e/capture-integrity.spec.ts`), and the first draft kept the exemption in
+ * the CLI only — so the spec captured `/design-system` with no tolerance at
+ * all and CI refused it. An exemption that one caller knows about is not an
+ * exemption, it is a divergence. `busyToleranceFor` is now derived from the
+ * page's own URL inside `captureFullPage`, so a third consumer cannot forget it.
  */
-export const BUSY_TOLERANT_CAPTURES = [
-  {
-    pattern: /^\/design-system$/,
-    reason:
-      'the skeleton/loading-state showcase renders aria-busy regions as documented CONTENT, ' +
-      'so they never resolve and never should',
-  },
-]
-
-/** Declared-tolerant captures that held no busy element — the declaration is stale. */
 export const STALE_BUSY_DECLARATIONS = []
-
-/** Is this capture allowed to be busy, and why? `null` when it is not. */
-export function busyToleranceFor(pathname) {
-  return BUSY_TOLERANT_CAPTURES.find((entry) => entry.pattern.test(pathname)) ?? null
-}
 
 export const CHAIN_FED_ROUTES = [
   {
@@ -3837,12 +3806,14 @@ async function main() {
         // Un-clips the h-screen/overflow-hidden shell so `fullPage` paints the
         // whole route, then reads the PNG back and refuses a blank one (#1738).
         try {
+          // No `allowBusy` here on purpose: `captureFullPage` derives the
+          // tolerance from the page's own URL, so every consumer gets the same
+          // answer (#2204 CI catch).
           const busyTolerance = busyToleranceFor(routePath)
           const { shell, content } = await captureFullPage(page, {
             path: file,
             label: `${routePath} · ${vp.name}`,
             viewportDevicePx: vp.height * DEVICE_SCALE_FACTOR,
-            ...(busyTolerance ? { allowBusy: true } : {}),
           })
           captured.push(path.relative(ROOT, file))
           if (content) {
@@ -4121,7 +4092,7 @@ async function main() {
   if (STALE_BUSY_DECLARATIONS.length > 0) {
     console.error(
       `\n✗ ${STALE_BUSY_DECLARATIONS.length} busy-tolerance declaration(s) were not needed — ` +
-        `BUSY_TOLERANT_CAPTURES in scripts/screenshot.mjs is stale (#2204):`,
+        `BUSY_TOLERANT_CAPTURES in scripts/full-page-capture.mjs is stale (#2204):`,
     )
     for (const e of STALE_BUSY_DECLARATIONS) {
       console.error(`  [${e.route} · ${e.viewport}] held no aria-busy element — declared because: ${e.reason}`)

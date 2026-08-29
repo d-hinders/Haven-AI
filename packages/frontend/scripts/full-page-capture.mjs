@@ -277,10 +277,10 @@ export const MIN_CONTENT_ELEMENTS = 6
  * ── Its deliberate exemption ────────────────────────────────────────────────
  *
  * `/design-system` renders loading states as CONTENT — its skeleton showcase is
- * permanently `aria-busy="true"`, correctly. `captureFullPage({ allowBusy })`
- * lets one capture declare that, and `screenshot.mjs` owns the registry; a
- * declaration that stops being true is REPORTED rather than silently kept, the
- * same self-expiring shape as #2197's `expectedSilentRoutes`.
+ * permanently `aria-busy="true"`, correctly. `BUSY_TOLERANT_CAPTURES` below
+ * declares exactly that, `captureFullPage` derives it from the page's own URL
+ * so no caller can forget it, and a declaration that stops being true FAILS the
+ * run — the same self-expiring shape as #2197's `expectedSilentRoutes`.
  *
  * ── Refuse, do not retry ────────────────────────────────────────────────────
  *
@@ -295,6 +295,71 @@ export const MIN_CONTENT_ELEMENTS = 6
  * absorbs ordinary slowness.
  */
 export const CONTENT_BUSY_ALLOWED = false
+
+/**
+ * Captures allowed to hold `aria-busy="true"` content at shutter time (#2204).
+ *
+ * One surface legitimately breaks the rule above: `/design-system` renders
+ * loading states AS CONTENT — its skeleton showcase is permanently busy,
+ * correctly, and always will be.
+ *
+ * Deliberately the same narrow shape as #2197's `expectedSilentRoutes`, for the
+ * same reason — an exemption list is one edit away from being the way the guard
+ * gets waved through:
+ *
+ *  - it is per ROUTE, never a global flag and never per run;
+ *  - each entry carries a written `reason`, so the exemption is anchored to an
+ *    explanation rather than to a bare boolean;
+ *  - it SELF-EXPIRES, and expiry is FATAL. A declared-tolerant route that turns
+ *    out to hold no busy element FAILS the screenshot run
+ *    (`stale_busy_declarations`), so the day the showcase stops rendering a
+ *    skeleton this stops claiming it does. Review of #2204 caught the first
+ *    draft reporting that to stdout and the manifest only, which expires
+ *    nothing in a repo whose own playbook says the exit code does not survive a
+ *    pipe. Its sibling `CHAIN_SILENT_CAPTURES` fails the run on the
+ *    mirror-image staleness — a declared-silent route that DID read — so the
+ *    two now cost the same to leave rotting.
+ *
+ * It lives HERE, beside the guard, rather than in `screenshot.mjs` — and that
+ * was a CI catch, not a preference. `captureFullPage` has two consumers, the
+ * screenshot CLI and `e2e/capture-integrity.spec.ts`, and the first draft kept
+ * the registry in the CLI: the spec then captured `/design-system` with no
+ * tolerance at all and CI refused it, correctly, on this very guard. An
+ * exemption only one caller knows about is not an exemption, it is a
+ * divergence. `captureFullPage` now derives the tolerance from the page's own
+ * URL, so a third consumer cannot forget to pass it.
+ *
+ * Adding a route here is almost always the wrong fix. The right one is to mark
+ * the placeholder `aria-busy` where it lives — which is an accessibility fix
+ * the loading state needed anyway — and let the guard wait for it to clear.
+ */
+export const BUSY_TOLERANT_CAPTURES = [
+  {
+    pattern: /^\/design-system$/,
+    reason:
+      'the skeleton/loading-state showcase renders aria-busy regions as documented CONTENT, ' +
+      'so they never resolve and never should',
+  },
+]
+
+/** Is this route allowed to be busy, and why? `null` when it is not. */
+export function busyToleranceFor(pathname) {
+  return BUSY_TOLERANT_CAPTURES.find((entry) => entry.pattern.test(pathname)) ?? null
+}
+
+/**
+ * The route a page is showing, for `busyToleranceFor`.
+ *
+ * Reads `page.url()` rather than trusting a caller-supplied route string: the
+ * page is the thing being captured, and a label can drift from it.
+ */
+export function routeOfPage(page) {
+  try {
+    return new URL(page.url()).pathname
+  } catch {
+    return ''
+  }
+}
 
 /**
  * How long the content region gets to resolve, and how often it is re-probed.
@@ -417,8 +482,8 @@ export async function resolveContentSettled(
         `placeholders is 40 CSS px shorter than the same page resolved and is otherwise indistinguishable ` +
         `(#2204). Usually a slow render-time read under load — re-run against a warm, unloaded server. If it ` +
         `persists, the region genuinely never resolves. If the route renders loading states as CONTENT ` +
-        `(/design-system's skeleton showcase), declare it in BUSY_TOLERANT_CAPTURES in scripts/screenshot.mjs ` +
-        `with a reason rather than removing this guard.`,
+        `(/design-system's skeleton showcase), add it to BUSY_TOLERANT_CAPTURES in this file with a ` +
+        `reason rather than removing this guard.`,
       { probe, waitedMs, verdict },
     )
   }
@@ -737,6 +802,14 @@ export async function captureFullPage(page, { path, label, viewportDevicePx, sel
   // page IS its own content, and is already covered by `MIN_RENDERED_CHARS`
   // and by the blank-below-fold read-back — asking for `#main-content` there
   // would refuse every marketing capture.
+  // Busy tolerance is DERIVED from the page, not passed in (#2204 CI catch):
+  // `e2e/capture-integrity.spec.ts` calls this function directly and knew
+  // nothing about the CLI's registry, so `/design-system`'s permanently-busy
+  // showcase was refused there while being tolerated here. An explicit
+  // `allowBusy` still wins, for a caller that genuinely knows better.
+  const resolvedAllowBusy =
+    typeof allowBusy === 'boolean' ? allowBusy : Boolean(busyToleranceFor(routeOfPage(page)))
+
   let content = null
   if (shell.mode === SHELL_MODE.UNCLIPPED) {
     try {
@@ -747,7 +820,7 @@ export async function captureFullPage(page, { path, label, viewportDevicePx, sel
         // first poll would buy nothing. `contentChars`/`contentElements` are
         // unaffected by the un-clip walk, which only rewrites heights.
         probe: shell.probe,
-        ...(typeof allowBusy === 'boolean' ? { allowBusy } : {}),
+        allowBusy: resolvedAllowBusy,
         ...(Number.isFinite(contentTimeoutMs) ? { timeoutMs: contentTimeoutMs } : {}),
       })
     } catch (err) {

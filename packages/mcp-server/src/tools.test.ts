@@ -8,7 +8,7 @@ import {
   MerchantTimeoutError,
   SIGNER_UPDATE_FALLBACK,
 } from '@haven_ai/sdk'
-import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
+import { createToolHandlers, toolDescriptions, type ToolSuccess, type ToolPayload } from './tools.js'
 
 const DELEGATE_KEY = '0x' + 'a'.repeat(64)
 const HEADER_SIGNING_KEY = '0x' + '12'.repeat(32)
@@ -2473,6 +2473,22 @@ describe('haven_settle_mcp_tool', () => {
     // payment_id is echoed on the not-settled path too, for status follow-up.
     expect(result.data.payment_id).toBe('pay_pending')
     expect(spy).not.toHaveBeenCalled()
+
+    // #2101: this branch used to emit next_action=wait_for_user_approval beside
+    // a reason telling the agent not to wait — a payload contradicting itself,
+    // with the FIELD winning under the agent contract. No live rail can ever
+    // resolve that wait (410 on the legacy rail per #1986; 403/502 at prepare
+    // on the delegation rail; `approval_requests` dropped by #2055), so the
+    // verdict is stop. This assertion was mutation-proven: it is the one that
+    // was missing when the field was first corrected.
+    const guidance = result.data as unknown as {
+      next_action: string
+      safe_to_continue: boolean
+      reason: string
+    }
+    expect(guidance.next_action).toBe('stop_and_tell_user')
+    expect(guidance.safe_to_continue).toBe(false)
+    expect(guidance.reason).toContain('do not wait for an approval')
   })
 
   it('waits for on-chain funding confirmation BEFORE delivering to the merchant', async () => {
@@ -3704,11 +3720,16 @@ describe('structured agent guidance (#1308)', () => {
     const result = ok<{ next_action: string; safe_to_continue: boolean }>(
       await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
     )
-    expect(result.data.next_action).toBe('wait_for_user_approval')
+    // #2101: the authoritative field must say STOP, not wait. No live rail
+    // mints this status (410 on the legacy rail per #1986; 403/502 at prepare
+    // on the delegation rail; `approval_requests` dropped by #2055), so an
+    // agent that followed `wait_for_user_approval` here — the field the agent
+    // contract says to follow FIRST — would poll a loop that cannot terminate.
+    expect(result.data.next_action).toBe('stop_and_tell_user')
     expect(result.data.safe_to_continue).toBe(false)
   })
 
-  it('pending approval is UNSAFE to continue and points at status polling', async () => {
+  it('a retained pending status is UNSAFE to continue and tells the agent to stop', async () => {
     stubFetch({
       ...stubs(),
       'POST /x402': {
@@ -3724,8 +3745,13 @@ describe('structured agent guidance (#1308)', () => {
       agent_summary: Record<string, unknown>
     }>(await pay())
 
+    // #2101: the authoritative field must say STOP, not wait. No live rail
+    // mints this status (410 on the legacy rail per #1986; 403/502 at prepare
+    // on the delegation rail; `approval_requests` dropped by #2055), so an
+    // agent that followed `wait_for_user_approval` here — the field the agent
+    // contract says to follow FIRST — would poll a loop that cannot terminate.
     expect(result.data.status).toBe('pending_approval')
-    expect(result.data.next_action).toBe('wait_for_user_approval')
+    expect(result.data.next_action).toBe('stop_and_tell_user')
     expect(result.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
     expect((result.data as { next_tool_server?: string }).next_tool_server).toBe('haven')
     expect((result.data as { next_tool_name?: string }).next_tool_name).toBe('haven_get_payment_status')
@@ -5876,5 +5902,44 @@ describe('#2054 — erc7710-only merchants', () => {
       expect(res.success).toBe(false)
       expect((res as { message?: string }).message).toContain('No compatible payment option')
     })
+  })
+})
+
+describe('#2145: the hosted resume description gates on the live retry trigger', () => {
+  /**
+   * `RESUME_X402_DESCRIPTION` in this file is a hand-built string literal, not
+   * an entry of the SDK's shared `toolDescriptions` object — so the regression
+   * guard in `packages/sdk/src/tool-descriptions.test.ts` never scanned it.
+   *
+   * #2145 gave `retry_original_x402_request` a real producer
+   * (agent-payment-status.ts emits it when the funding leg confirmed but no
+   * merchant response was ever recorded). `haven_resume_x402_payment`'s
+   * description must name it as the gate, and no hosted description should
+   * still claim the trigger is unreachable.
+   *
+   * Scans the exported record, so a newly registered hosted tool is covered
+   * without anyone remembering to extend this list.
+   */
+  it('haven_resume_x402_payment names retry_original_x402_request as its gate; nothing claims it is unreachable', () => {
+    const entries = Object.entries(toolDescriptions)
+
+    // Non-vacuity: an empty record would satisfy every assertion below.
+    expect(entries.length).toBeGreaterThan(0)
+
+    expect(toolDescriptions.haven_resume_x402_payment).toContain(
+      'nextAction=retry_original_x402_request',
+    )
+
+    for (const [name, description] of entries) {
+      const lower = description.toLowerCase()
+      expect(
+        lower,
+        `${name} must not claim retry_original_x402_request is unreachable — #2145 gave it a producer`,
+      ).not.toContain('not currently reachable')
+      expect(
+        lower,
+        `${name} must not claim nothing emits a resume trigger — #2145 gave it a producer`,
+      ).not.toContain('nothing emits')
+    }
   })
 })

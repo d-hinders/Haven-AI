@@ -1338,11 +1338,36 @@ export class HavenClient {
         })
       }
     } else {
-      if (!input.noFundingLeg && fundingTxHash) {
+      // #2092: the evidence anchor is scheme-dependent, and skipping it on
+      // erc7710 (#1508) left a whole settlement scheme with no
+      // `machine_payment_evidence` row — and therefore invisible to the Fortnox
+      // reporting feed, `GET /receipts`, transaction history, and the
+      // merchant-receipt capture on the very next line (which 404s without an
+      // evidence row). The #1508 reasoning — "evidence's consumer is
+      // funding-leg reconciliation, and this rail has no funding leg" — was
+      // true about #713 and incomplete about everything else evidence feeds.
+      //
+      // On the funding-leg path the anchor is Haven's funding transaction; on
+      // erc7710 it is the MERCHANT's settlement transaction, which the merchant
+      // just handed us in `PAYMENT-RESPONSE`. Both are reported through the
+      // same call, so the backend and every consumer keep one code path. The
+      // backend verifies the erc7710 hash on-chain before it confirms anything
+      // (#2092), so reporting it is a claim, not an authority.
+      const evidenceTxHash = input.noFundingLeg
+        ? (settlement.settlementTxHash ?? undefined)
+        : (fundingTxHash ?? undefined)
+      // #2117: when the merchant returned no settlement transaction there is
+      // simply nothing to report, and inventing an anchor client-side is what
+      // the backend's on-chain verification exists to prevent. That gap is
+      // closed SERVER-side instead, by the passive settlement sweep
+      // (`modules/x402/settlement-sweeper.ts`), which finds the settlement by
+      // this payment's own intent-unique delegation child. Do not "fix" this
+      // branch by fabricating a hash.
+      if (evidenceTxHash) {
         await this.merchantCompletion.reportEvidence({
           paymentId: evidenceContext.paymentId,
           rail: 'x402',
-          txHash: fundingTxHash,
+          txHash: evidenceTxHash,
           resourceUrl: evidenceContext.resourceUrl,
           merchantStatus: surfaced.status,
           paymentProofHeaderName: 'X-PAYMENT',

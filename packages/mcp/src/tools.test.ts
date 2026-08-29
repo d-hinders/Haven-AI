@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient, toolDescriptions as sharedDescriptions } from '@haven_ai/sdk'
 import { createToolHandlers, toolDescriptions } from './tools.js'
+import { readFileSync } from 'node:fs'
 
 const delegateKey = '0x59c6995e998f97a5a0044966f09453843a4bba3e18a70e0614612ece7c1e4568'
 const delegateAddress = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'
@@ -1834,3 +1835,53 @@ function jsonResponse(body: unknown, status = 200): Response {
     headers: { 'Content-Type': 'application/json' },
   })
 }
+
+describe('#2145: the local MCP tool descriptions and README present the resume trigger as live', () => {
+  /**
+   * The local MCP package has its OWN `toolDescriptions` record — a third
+   * agent-facing description surface beside the SDK's and the hosted server's,
+   * though `haven_resume_x402_payment` here is composed directly from the
+   * SDK's shared `resumeX402` fragment (see `tools.ts`), so it inherits the
+   * shared-source fix automatically.
+   *
+   * #2145 gave `retry_original_x402_request` a real producer
+   * (agent-payment-status.ts emits it when the funding leg confirmed but no
+   * merchant response was ever recorded). This guard pins that no local
+   * description still claims the trigger is unreachable, and that the resume
+   * description names it as the gate.
+   */
+  it('haven_resume_x402_payment names retry_original_x402_request as its gate; nothing claims it is unreachable', () => {
+    const entries = Object.entries(toolDescriptions)
+
+    // Non-vacuity: an empty record would satisfy every assertion below.
+    expect(entries.length).toBeGreaterThan(0)
+
+    expect(toolDescriptions.haven_resume_x402_payment).toContain(
+      'nextAction=retry_original_x402_request',
+    )
+
+    for (const [name, description] of entries) {
+      const lower = description.toLowerCase()
+      expect(
+        lower,
+        `${name} must not claim retry_original_x402_request is unreachable — #2145 gave it a producer`,
+      ).not.toContain('not currently reachable')
+      expect(
+        lower,
+        `${name} must not claim nothing emits a resume trigger — #2145 gave it a producer`,
+      ).not.toContain('nothing emits')
+    }
+  })
+
+  it('the shipped README tells an operator to gate on the live trigger, not to expect it never to fire', () => {
+    // Same treatment and same reasoning as the README guard in `consent.test.ts`:
+    // this file is shipped on npm, nothing renders it, and #2086 already proved
+    // it drifts silently when only the code is checked.
+    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
+
+    expect(readme).toContain('haven_resume_x402_payment')
+    expect(readme).toContain("nextAction: 'retry_original_x402_request'")
+    expect(readme.toLowerCase()).not.toMatch(/is not\s+currently reachable/)
+    expect(readme.toLowerCase()).not.toContain('nothing emits')
+  })
+})

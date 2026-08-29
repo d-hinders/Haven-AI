@@ -51,8 +51,9 @@ const response = await haven.fetch('https://your-x402-endpoint.example/resource'
 const data = await response.json()
 ```
 
-The payment fits within the agent's on-chain allowance (or is queued for your
-approval if it exceeds it), and shows up in your Haven dashboard activity feed.
+The payment fits within the agent's on-chain budget — anything outside it is
+declined before any money moves, never queued for you to approve later — and it
+shows up in your Haven dashboard activity feed.
 
 ## Supported Networks & Tokens
 
@@ -65,10 +66,10 @@ approval if it exceeds it), and shows up in your Haven dashboard activity feed.
 
 - The Haven API key identifies the agent. It is not payment authority.
 - The delegate key signs payment payloads locally. Haven's backend never receives it.
-- On-chain Safe AllowanceModule state enforces the agent budget.
+- The agent's on-chain budget delegation enforces the agent budget: budget, recipient and expiry are checked by audited caveat enforcers at redemption, not by an off-chain rules engine.
 - `getAllowances()` / `get_allowances` is the right path for budget, remaining amount, reset period, or "what can I spend?" questions.
 - If an API key is exposed or lost, rotate it from the Haven agent detail page. The new key is shown once and the old key stops working.
-- If a delegate key is exposed or lost, a delegation-rail agent is **re-keyed** rather than replaced — same agent, new signing key, budget remainder carried. See [Replacing an agent's signing key](../../docs/product/agent-key-rotation.md). Legacy AllowanceModule agents are paused or revoked and re-onboarded instead.
+- If a delegate key is exposed or lost, a delegation-rail agent is **re-keyed** rather than replaced — same agent, new signing key, budget remainder carried. See [Replacing an agent's signing key](../../docs/product/agent-key-rotation.md).
 
 ## Step-by-Step API
 
@@ -103,11 +104,11 @@ const result = await haven.waitForConfirmation(intent.paymentId)
 
 Production merchant acceptance, facilitator, settlement, fiat, or acquiring functionality needs separate product and legal review under the repo's [CASP / MiCA guardrails](../../docs/regulatory/casp-risk-guardrails.md). The hosted x402 endpoint is an internal technical demo, not a merchant settlement product.
 
-The SDK supports [x402](https://x402.org) client flows. When an API returns HTTP 402, the SDK evaluates the challenge against the agent's approved limits, uses the configured delegate key for the required signature, and retries automatically:
+The SDK supports [x402](https://x402.org) client flows. When an API returns HTTP 402, the SDK evaluates the challenge against the agent's on-chain budget, uses the configured delegate key for the required signature, and retries automatically:
 
 ```typescript
 // Automatic — fetch() intercepts 402, pays, and retries.
-// Use a stable idempotencyKey when one user intent may need manual approval.
+// Use a stable idempotencyKey so one user intent stays one Haven payment.
 const response = await haven.fetch(
   'https://paid-api.example.com/data',
   undefined,
@@ -179,7 +180,7 @@ delegate's balance, so an accidental key collision refuses on the weaker
 for.
 
 **Resuming is not affected by that.** When you are following the documented
-approval flow — re-calling after a queued payment is approved, or calling
+resume flow — re-calling after a funding leg confirms, or calling
 `resumeAuthorizedX402({ paymentId })` — you named the payment, so an
 unverifiable balance lets the resume proceed as before. Only a balance
 verified *absent* refuses there. The stricter default applies solely to the
@@ -191,8 +192,7 @@ no funding leg and no delegate balance to exhaust.
 
 For agents that need to inspect the price before paying, use the quote-first
 path. `quoteX402()` probes the merchant and parses the HTTP 402 response, but it
-does not create a Haven payment, approval request, signature, or on-chain
-transaction.
+does not create a Haven payment, signature, or on-chain transaction.
 
 ```typescript
 const quote = await haven.quoteX402(
@@ -245,13 +245,13 @@ for (const block of response.content) {
 
 | Tool | Description |
 |------|-------------|
-| `make_payment` | Request and sign a payment from the user-controlled Safe within approved limits |
-| `get_payment_status` | Check the status of a payment intent or approval request |
-| `get_allowances` | Read configured and on-chain allowance state, including spent and remaining allowance |
+| `make_payment` | Request and sign a payment from the user-controlled account within its on-chain budget |
+| `get_payment_status` | Check the status of a payment intent |
+| `get_allowances` | Read configured and on-chain budget state, including spent and remaining budget |
 | `authorize_x402_payment` | Authorize a policy-limited x402 payment and return a payment header for an HTTP 402 resource |
-| `resume_x402_payment` | Resume an approved x402 payment and return a merchant payment header without creating a duplicate approval |
+| `resume_x402_payment` | Resume an authorized x402 payment and return a merchant payment header without creating a duplicate payment |
 
-Use `get_allowances` for allowance, budget, spend-limit, remaining amount, reset-period, or "what can I spend?" questions. Payment tools still require the agent-held delegate key and on-chain Safe allowance state; the Haven API key identifies the agent but does not authorize spending by itself.
+Use `get_allowances` for allowance, budget, spend-limit, remaining amount, reset-period, or "what can I spend?" questions. Payment tools still require the agent-held delegate key and the on-chain budget delegation; the Haven API key identifies the agent but does not authorize spending by itself.
 
 ## Configuration
 
@@ -280,12 +280,12 @@ receipts, and transactions. `POST /machine-payments/authorize` (the legacy
 internal MPP demo challenge flow) is retired — it now refuses unconditionally
 with HTTP 410; use the x402 flow for agent-to-merchant payments. Its security
 scheme is deliberate: the Haven API key identifies the agent, but payment
-authority still requires an agent-held delegate signature and on-chain Safe
-allowance state.
+authority still requires an agent-held delegate signature and an on-chain
+budget delegation.
 
 ## Agent payment state machine
 
-Every payment or approval state returned by Haven includes:
+Every payment state returned by Haven includes:
 
 - `phase`: where the Haven-side payment currently is.
 - `nextAction`: the stable action an agent should take next.
@@ -319,26 +319,21 @@ import {
                                 │ payment_submitted       │
                                 └──────────┬──────────────┘
                                            │  check_status_later
-                                ┌──────────┴──────────────┐
-                                ▼                         ▼
-                  ┌────────────────────────┐  ┌──────────────────────┐
-                  │ payment_confirmed (✔)  │  │ user_approval_required│
-                  └────────────────────────┘  └──────────┬───────────┘
-                                                         │ wait_for_user_approval
-                                       ┌─────────────────┴───────────────────┐
-                                       │ single-owner Safe                   │ multisig Safe
-                                       ▼                                     ▼
-                          ┌──────────────────────────┐    ┌──────────────────────────────────┐
-                          │ user_execution_required  │    │ waiting_for_additional_approvals │
-                          └──────────┬───────────────┘    └────────────────┬─────────────────┘
-                                     │ wait_for_user_to_complete_payment   │ wait_for_user_approval
-                                     └─────────────────┬───────────────────┘
-                                                       ▼
-                                          ┌───────────────────────┐
-                                          │ funding_sent          │
-                                          └──────────┬────────────┘
-                                                     │ retry_original_x402_request (x402)
-                                                     │ none (direct)
+                                           ▼
+                                ┌─────────────────────────┐
+                                │ payment_confirmed (✔)   │
+                                └─────────────────────────┘
+
+  (EIP-3009 bridge only. `funding_sent` is Haven's funding leg confirming —
+   value left the treasury and sits on the delegate EOA. `executed` is the
+   agent's own merchant retry succeeding; Haven has no phase for the merchant
+   leg itself. See the `retry_original_x402_request` row below.)
+                                ┌───────────────────────┐
+                                │ funding_sent          │
+                                └──────────┬────────────┘
+                                                     │ retry_original_x402_request (x402, after the
+                                                     │   merchant-report grace window — #2145)
+                                                     │ none (direct / erc7710)
                                                      ▼
                                           ┌───────────────────────┐
                                           │ executed (✔)          │
@@ -361,12 +356,12 @@ x402 tool-window failures:
 | `agent_signature_required` | Haven prepared a payment intent; the agent must sign and submit. | no |
 | `payment_submitted` | Haven received the signed payment; the agent should poll for confirmation. | no |
 | `payment_confirmed` | Direct payment is confirmed on chain. | yes |
-| `user_approval_required` | Payment exceeds remaining on-chain allowance; wallet owner must approve in Haven. | no |
-| `user_execution_required` | Owner approved; the funding payment has not been sent yet (single-owner Safe). | no |
-| `waiting_for_additional_approvals` | Funding payment was proposed and is waiting for the remaining multisig approvals. | no |
-| `funding_sent` | Haven funding leg landed; the agent can continue the merchant/protocol leg. | no |
-| `rejected` | Owner rejected the request. | yes |
-| `expired` | Payment or approval request expired before completion. | yes |
+| `user_approval_required` | **No live rail produces it.** Described the retired Safe rail's approval queue; kept in the exported enum for wire compatibility only. A payment outside the budget is now declined outright — see [Payments outside the agent's budget](#payments-outside-the-agents-budget). | n/a |
+| `user_execution_required` | **No live rail produces it.** Same retirement as above. | n/a |
+| `waiting_for_additional_approvals` | **No live rail produces it.** Same retirement as above. | n/a |
+| `funding_sent` | Haven funding leg landed; the agent can continue the merchant/protocol leg. Only the EIP-3009 bridge has a funding leg; erc7710 direct settlement has none. | no |
+| `rejected` | The payment was rejected and cannot proceed. | yes |
+| `expired` | Payment expired before completion. | yes |
 | `failed` | Haven could not complete the payment. | yes |
 
 The merchant settlement leg of x402 (and the MPP retry) is the agent's own request to the merchant — it does not have a Haven `phase`. The payment is `funding_sent` until the agent retries with `X-PAYMENT` (x402) or the MPP proof header; from Haven's perspective the payment becomes `executed` only after the agent successfully resumes.
@@ -378,9 +373,9 @@ The merchant settlement leg of x402 (and the MPP retry) is the agent's own reque
 | `sign_and_submit_payment` | Sign with the delegate key and submit the payment to Haven. |
 | `check_status_later` | Poll `getPaymentStatus(payment_id)` later. |
 | `none` | Stop polling; no more action is needed for this payment id. |
-| `wait_for_user_approval` | Tell the user the payment is waiting in Haven, then poll later. Do not create a duplicate payment. Same `nextAction` covers both the single-owner case (waiting for one owner to approve) and the multisig case (waiting for additional approvals after the first one). |
-| `wait_for_user_to_complete_payment` | The user approved the request; wait for them to finish the funding payment. |
-| `retry_original_x402_request` | Resume this payment id and retry the original x402 request with the merchant payment header. Do not start a new merchant session. |
+| `wait_for_user_approval` | **No longer produced — nothing maps to it.** Retired with the Safe rail's approval queue; kept in the exported enum for wire compatibility. The SDK's own status mapping now answers `stop_and_tell_user` for the statuses that used to yield this. |
+| `wait_for_user_to_complete_payment` | **No longer produced — nothing maps to it.** Same retirement as above. |
+| `retry_original_x402_request` | Haven's funding leg confirmed but no merchant response was ever recorded — most often because the process crashed between the funding confirmation and the merchant retry (a 15-minute grace window applies before this fires; a client-reported merchant rejection instead yields `sweep_stranded_funds`). Call `resumeX402Payment()` with the preserved `resumeState`, or rehydrate it first with `getResumeState(payment_id)`. Do not start a new payment for the same purchase. |
 | `stop_and_tell_user` | Stop retrying and tell the user the payment failed or was rejected. |
 | `request_again_if_user_still_wants_it` | The request expired; ask again only if the user still wants the payment. |
 | `payment_window_expired` | The x402 funding/quote window expired. Re-quote the same paid MCP tool call with the same `idempotency_key`, then sign the fresh `payload_hash`. |
@@ -398,55 +393,70 @@ Hosted MCP and signer tools also return stable `code` values on recoverable x402
 | `PAYMENT_WINDOW_EXPIRED` | The funding/quote window closed before `haven_x402_sign_header`, `haven_submit`, or `haven_complete_mcp_tool` could finish. | Re-run `haven_pay_mcp_tool` with the same `idempotency_key`, then sign and complete the fresh quote. Payloads include `retry_with_new_quote: true`. |
 | `MERCHANT_REJECTED_AFTER_FUNDING` | Haven's funding leg succeeded, but the merchant rejected the paid retry. | Stop retrying the merchant and call `haven_sweep_delegate` so the user can recover stranded delegate USDC. |
 
-## Payments above the on-chain allowance
+## Payments outside the agent's budget
 
-Haven's policy lives on the Safe AllowanceModule (token, amount, reset period).
-If an agent requests a payment above the remaining allowance, Haven does **not**
-reject it — it returns HTTP 202 with `status: 'pending_approval'`, a
-`payment_id`, `phase`, and `next_action`, then queues it for the wallet owner
-to approve in the dashboard.
+Haven's policy is the agent's on-chain budget delegation — a period budget, an
+optional recipient pin, and an expiry, each enforced by an audited caveat
+enforcer at redemption. There is no off-chain rules engine and **no approval
+queue**: the queue-and-approve path belonged to the retired Safe rail, which now
+answers HTTP 410 at every agent-payment entry point.
 
-Surface that to the user: the payment isn't dead, it's waiting for a human to
-sign off. Check `getPaymentStatus(payment_id)` or the `get_payment_status`
-tool later instead of retrying in a tight loop.
+If an agent requests a payment outside that policy, Haven **declines it before
+any money moves** — during prepare, before anything is written and before the
+agent is asked to sign. `POST /payments` answers `403` when no active delegation
+authorizes that token and recipient, and `502` when the on-chain caveat check
+rejects the amount, recipient or expiry; the x402 authorize path answers `403
+delegation_budget_exceeded`. In every case the SDK raises `HavenApiError` and no
+`payment_id` exists to poll.
 
-For x402, approval resume is explicit. If `authorizeX402()` or `haven.fetch()`
-throws `HavenPaymentStateError` with `nextAction: 'wait_for_user_approval'`,
-stop and tell the user the Haven funding leg is waiting in Haven. Do not loop
-and do not start a new merchant or MCP session. Pending x402 states include the
-resource URL, merchant address, chain id, asset, network, atomic amount, and
-idempotency key so agents can explain what is waiting for approval. After the
-user approves, call `getPaymentStatus(payment_id)`. When Haven reports
-`nextAction: 'retry_original_x402_request'`, call `resumeX402Payment()` with the
-same user-intent idempotency key and the original x402 details.
+Surface that to the user as a decline, not a wait: **nothing will arrive later.**
+The fix is for the wallet owner to grant or raise the budget in Haven, after
+which the agent can request the payment again. Do not retry in a loop, and do
+not poll `getPaymentStatus()` hoping for an approval.
 
-When the agent used `quoteX402()` / `payX402Quote()`, pending approval errors
-include a serializable `resumeState`. Persist it with the MCP session details
-and pass it back to `resumeX402Payment()` after approval.
+### Resuming an x402 payment
+
+Resume was triggered by *funding confirmation*, not by an approval, and applied
+only to the EIP-3009 bridge — erc7710 direct settlement has no funding leg and
+nothing to resume.
+
+> **Resume is reachable again (#2145).** If the agent process crashes after
+> Haven's funding leg confirms but before the merchant retry is recorded, a
+> later `getPaymentStatus(payment_id)` reports
+> `nextAction: 'retry_original_x402_request'` — Haven's funding confirmed but
+> the merchant has likely not been paid. Gate on that structured field, not on
+> message prose: call `resumeX402Payment()` with the preserved `resumeState`, or
+> rehydrate it first via `getResumeState(payment_id)`. Any other `nextAction`
+> means the payment is not ready to resume — do not call it speculatively.
+>
+> Meanwhile: the `payX402*` helpers perform the merchant retry themselves, so
+> the ordinary in-flight path never needs resume. Only reach for
+> `resumeX402Payment()` after seeing the trigger on a later status check —
+> never speculatively, and never as a substitute for a fresh payment.
+
+When the agent used `quoteX402()` / `payX402Quote()`, the thrown
+`HavenPaymentStateError` includes a serializable `resumeState`. Persist it with
+the MCP session details and pass it back to `resumeX402Payment()`.
 
 If the agent process restarts and only kept the `payment_id`, call
-`getResumeState(payment_id)` after approval to rehydrate the stored x402/MPP
-context from Haven, then pass that state to the matching resume helper. For
-POST-based merchant or MCP calls, rebuild the live request details before
-retrying; Haven stores payment context, not the agent's local request stream.
+`getResumeState(payment_id)` to rehydrate the stored x402/MPP context from
+Haven, then pass that state to the matching resume helper. For POST-based
+merchant or MCP calls, rebuild the live request details before retrying; Haven
+stores payment context, not the agent's local request stream.
 
 ```typescript
 let resumeState
 try {
   await haven.payX402Quote(quote)
 } catch (err) {
-  if (
-    err instanceof HavenPaymentStateError &&
-    err.nextAction === AgentPaymentNextAction.WaitForUserApproval &&
-    err.resumeState
-  ) {
+  if (err instanceof HavenPaymentStateError && err.resumeState) {
     resumeState = err.resumeState
     console.log(err.paymentId, err.phase, err.nextAction)
-    console.log('Queued for owner approval. Save resumeState and wait.')
+    console.log('Funding has not confirmed yet. Save resumeState and poll.')
   }
 }
 
-const status = await haven.getPaymentStatus('approval-or-payment-id')
+const status = await haven.getPaymentStatus('payment-id')
 if (status.nextAction === AgentPaymentNextAction.RetryOriginalX402Request) {
   resumeState ??= await haven.getResumeState(status.paymentId)
   const response = await haven.resumeX402Payment(resumeState)
@@ -454,11 +464,12 @@ if (status.nextAction === AgentPaymentNextAction.RetryOriginalX402Request) {
 }
 ```
 
-Think of manual approval x402 as two separate legs:
+Think of bridged x402 as two separate legs:
 
-- Haven funding leg: the user may need to approve a Safe AllowanceModule transfer
-  to the agent delegate wallet. Status fields such as `phase`,
-  `nextAction`, and `txHash` describe this leg.
+- Haven funding leg: the account funds the agent delegate wallet by redeeming
+  the budget delegation. Status fields such as `phase`, `nextAction`, and
+  `txHash` describe this leg. It is automatic and bounded by the budget — no
+  human step.
 - Merchant x402 leg: after the funding leg is complete, the agent resumes the
   same payment id and retries the original merchant request with `X-PAYMENT`.
   Do not treat a new 402 probe or a new MCP session as a resume.
@@ -480,14 +491,15 @@ await fetch('https://paid-api.example.com/data', {
 
 For MCP/SSE x402 tools, keep the same MCP session and JSON-RPC payload where the
 merchant requires it: initialize, retain `mcp-session-id`, send the original
-`tools/call`, parse the 402 challenge, wait for approval if needed, then resume
-with the same `payment_id` and retry the original `tools/call` with
-`X-PAYMENT`. Use a stable `idempotencyKey` for the user intent so fresh merchant
-quotes or sessions do not become duplicate Haven approval requests.
+`tools/call`, parse the 402 challenge, wait for the funding leg to confirm if
+the payment is bridged, then resume with the same `payment_id` and retry the
+original `tools/call` with `X-PAYMENT`. Use a stable `idempotencyKey` for the
+user intent so fresh merchant quotes or sessions do not become duplicate Haven
+payments.
 
 See [`examples/mcp-x402-sse.ts`](./examples/mcp-x402-sse.ts) for a complete
 MCP flow with initialize, `mcp-session-id`, JSON-RPC `tools/call`, quote
-inspection, user approval, saved resume state, and final retry.
+inspection, saved resume state, and final retry.
 
 ## Error Handling
 

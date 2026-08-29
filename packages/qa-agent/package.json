@@ -11,18 +11,11 @@
     "build": "tsup",
     "seed": "tsx src/seed.ts",
     "qa:dev": "tsx src/run.ts",
-    "pilot:rig": "tsx src/pilot/rig-hello-userop.ts",
-    "pilot:provision": "tsx src/pilot/provision-pilot-safe.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "pilot:policies": "tsx src/pilot/policy-scenarios.ts",
-    "pilot:compare": "tsx src/pilot/compare-rails.ts",
-    "pilot:enable-agent-session": "tsx src/pilot/enable-agent-session.ts",
-    "pilot:dod-payment": "tsx src/pilot/dod-payment.ts",
     "pilot:x402-7710-buyer": "tsx src/pilot/x402-7710-buyer.ts",
     "pilot:delegation-spike": "tsx src/pilot/delegation-budget-spike.ts",
-    "pilot:provision-hybrid": "tsx src/pilot/provision-hybrid.ts",
-    "pilot:create-dod-agent": "tsx src/pilot/create-dod-agent.ts"
+    "pilot:provision-hybrid": "tsx src/pilot/provision-hybrid.ts"
   },
   "keywords": [
     "haven",

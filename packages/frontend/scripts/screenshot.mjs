@@ -104,8 +104,8 @@
  * before any script runs (the same keys the app and e2e fixtures use), so
  * authenticated routes render without a real login. Data: Haven-API requests
  * are answered by a route-keyed POPULATED dataset (a funded account, three
- * agents on both rails, transactions, one pending approval, contacts, agent
- * activity + spend stats) so
+ * agents on both rails, transactions, contacts, agent activity + spend
+ * stats) so
  * lists, tables and amounts render realistically — that's what the
  * design-reviewer pass judges. Anything not explicitly keyed falls back to a
  * benign empty shape — which carries every collection key the hooks read, so
@@ -137,6 +137,7 @@ import { resolveToken } from '@haven_ai/core'
 import { makeAllowanceChainFixture } from './allowance-chain-fixture.mjs'
 import { spawn } from 'node:child_process'
 import { rm, stat, writeFile } from 'node:fs/promises'
+import net from 'node:net'
 import { setTimeout as sleep } from 'node:timers/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -338,6 +339,13 @@ export const FIXTURE_USER = {
 const ADDR = {
   recipient: '0x9f8f72aA9304c8B593d555F12eF6589cC3A579A2',
   delegate: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
+  // #2194: agent-research's OWN delegate EOA. A SECOND address rather than a
+  // reuse of `delegate` above, because the DB refuses the reuse:
+  // `017_agent_connection_setups.ts:55-56` puts a partial UNIQUE index on
+  // `(user_id, lower(delegate_address)) WHERE delegate_address IS NOT NULL AND
+  // status != 'revoked'`, and both fixture agents are active under the one
+  // FIXTURE_USER.
+  researchDelegate: '0x7A3f5c1E9b2D4A86F0c7e5138D9A4b62c0e1F37d',
   merchant: '0x6B175474E89094C44Da98b954EedeAC495271d0F',
   contact: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
 }
@@ -377,14 +385,71 @@ export const FIXTURE_AGENTS = [
   {
     id: 'agent-research', name: 'Research agent',
     description: 'Pays for x402 research APIs within a weekly budget',
-    delegate_address: null, safe_id: FIXTURE_SAFE.id,
+    // #2194: a REAL delegate address, and the null it replaces was not a
+    // neutral placeholder — it was a state no write path can produce, which
+    // silently made this agent's recovery banner unreachable in production
+    // while the capture showed one.
+    //
+    //   Nothing can create it. Every writer of `agents.delegate_address`
+    //   requires a non-null one: `POST /agents` 400s on a missing or invalid
+    //   address (`routes/agents.ts:180-182`) before `INSERT_AGENT_WITH_KEY_SQL`
+    //   (`infra/repositories/agents.ts:384`), and the connector path types
+    //   `delegateAddress: string` on `insertPendingAgent`
+    //   (`infra/repositories/agent-connection-setups.ts:378-390`). No UPDATE
+    //   anywhere sets the column back to NULL — not revoke, not pause, not
+    //   archive; the re-key path swaps one address for another
+    //   (`infra/repositories/agent-rekeys.ts:517`). The column is nullable only
+    //   because migration `000_initial.ts:40` added it to a table that already
+    //   had rows, so NULL is a pre-column legacy artefact — which is what the
+    //   route's 422 exists for, and what `agent-retired` below keeps carrying.
+    //
+    //   This agent in particular cannot be one. It is seeded with CONFIRMED
+    //   x402 payment intents (`pay-1`, `pay-4`), and `payment_intents`
+    //   declares `delegate_address VARCHAR(42) NOT NULL`
+    //   (`000_initial.ts:82` — NOT the same-named column on the legacy
+    //   `self_sign_payment_intents` table) — an intent records the delegate it
+    //   was signed for. An agent that has paid provably had one.
+    //
+    //   What the null actually did: `routes/agents.ts:140-142` answers 422
+    //   "Agent has no delegate address" for it, `useDelegateBalance`'s catch
+    //   turns that into `balance = null`, and `hasRecoverableUsdc` is false —
+    //   so PRODUCTION renders no "Recoverable funds" banner on this agent at
+    //   all. The capture rendered one only because
+    //   `/agents/:id/delegate-balance` was unkeyed in `fixtureFor` and
+    //   `FIXTURE_EMPTY_FALLBACK` has no `usdc_atomic`, making `undefined !== '0'`
+    //   true. Both halves are fixed together, below and in `fixtureFor`.
+    delegate_address: ADDR.researchDelegate, safe_id: FIXTURE_SAFE.id,
     safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     safe_chain_id: FIXTURE_SAFE.chain_id, account_type: 'delegator_hybrid',
     api_key_prefix: 'hvn_a1b2c3', status: 'active',
     created_at: '2026-06-02T10:00:00.000Z',
     // #1878: a NAMED pair — the case multi-agent wiring exists for.
     mcp_server_name: 'haven-research',
-    mcp_last_seen_at: '2026-07-10T08:12:00.000Z', allowances: [],
+    mcp_last_seen_at: '2026-07-10T08:12:00.000Z',
+    // #2147: NOT decoration and not a second switch — the SAME open
+    // `merchant_retry_rejected_after_payment` reconciliation event that gives
+    // `pay-4` its `payment_attention_reason` below. Both routes that serve an
+    // agent row compute this as `EXISTS(… mpre.event_type = '…' AND
+    // mpre.status = 'open')` over that agent's payment intents
+    // (`infra/repositories/agents.ts:186-192` list, `:206-212` single), so a
+    // fixture seeding the activity row and leaving this false would claim the
+    // event both exists and does not — a contradiction no backend can serve.
+    // It renders `AgentCard`'s "Stranded funds on delegate" notice
+    // (`components/agent-panel/AgentCard.tsx:202`) on /agents.
+    has_stranded_funds: true,
+    // #2106: the DERIVED projection of this agent's active delegation, exactly
+    // as `rails/delegation-budget-view.ts` builds it on the delegation rail
+    // (250 USDC / 604800s → `allowance_amount` + `reset_period_min` in
+    // minutes). Not decoration: `AgentDetailClient` derives the token list it
+    // hands `DelegationBudgetCard` from THIS array, so an agent with a
+    // delegation but an empty `allowances` renders its budget as raw atomic
+    // units ("250000000 per week") — a state the product cannot produce,
+    // because the projection is what fills the array in the first place.
+    allowances: [{
+      id: 'alw-research', agent_id: 'agent-research',
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      token_symbol: 'USDC', allowance_amount: '250.000000', reset_period_min: 10080,
+    }],
   },
   {
     id: 'agent-ops', name: 'Ops agent',
@@ -407,11 +472,30 @@ export const FIXTURE_AGENTS = [
   {
     id: 'agent-retired', name: 'Data-feed agent',
     description: 'Paused while the vendor contract renews',
+    // #2194: the null STAYS here, deliberately, and it is the only one left.
+    // `routes/agents.ts:140-142` answers 422 "Agent has no delegate address"
+    // for exactly this row, and `fixtureFor` now serves that 422 rather than
+    // letting the generic fallback answer 200 — so both branches of
+    // `useDelegateBalance` are seeded by the fixture instead of one being
+    // reached by accident. See the note on `agent-research` above for why the
+    // state is a pre-column legacy artefact (`000_initial.ts:40`) rather than
+    // something a current write path can produce: this agent is seeded with no
+    // payment intents, so nothing else contradicts it.
     delegate_address: null, safe_id: FIXTURE_SAFE.id,
     safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     safe_chain_id: FIXTURE_SAFE.chain_id, account_type: 'delegator_hybrid',
     api_key_prefix: 'hvn_g7h8i9', status: 'paused',
-    created_at: '2026-04-30T10:00:00.000Z', mcp_last_seen_at: null, allowances: [],
+    created_at: '2026-04-30T10:00:00.000Z', mcp_last_seen_at: null,
+    // #2106: a PAUSED agent whose on-chain delegation is still live. That
+    // combination is deliberate evidence, not an oversight — pausing an agent
+    // in Haven does not revoke what it signed, so `/custody` must still show
+    // the budget as constraining spend. Projection matches its delegation
+    // (500 USDC / 86400s), same rule as agent-research above.
+    allowances: [{
+      id: 'alw-retired', agent_id: 'agent-retired',
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      token_symbol: 'USDC', allowance_amount: '500.000000', reset_period_min: 1440,
+    }],
   },
 ]
 
@@ -432,7 +516,12 @@ export const FIXTURE_OVERVIEW = {
   totals: { usd: 12_640.55, eur: 11_690.21 },
   change: { available: true, usdAmount: 214.3, eurAmount: 198.2, usdPercent: 1.7, eurPercent: 1.7 },
   metrics: { connectedAgents: 2, monthlyAgentSpendUsd: 482.5, monthlyAgentSpendEur: 446.3, successfulTransactions: 37, activeAccounts: 1 },
-  actionableApprovals: 1, pendingApprovals: 1,
+  // #2120: 0, not 1. `routes/dashboard.ts:84` hardcodes `actionableApprovals
+  // = 0` (and mirrors it into `pendingApprovals`) — the queue died with the
+  // AllowanceModule rail and `approval_requests` is dropped. Both fields
+  // survive only for wire compatibility, so any non-zero seed here
+  // photographs a number the product cannot produce.
+  actionableApprovals: 0, pendingApprovals: 0,
   onboardingProgress: { hasFirstAgentPayment: true },
   agents: FIXTURE_AGENTS.map((a) => ({
     id: a.id, name: a.name, status: a.status, safeId: a.safe_id,
@@ -453,13 +542,31 @@ export const FIXTURE_AGENT_ACTIVITY = [
     type: 'payment', id: 'pay-1', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     amount_raw: '25000000', amount: '25.00', to: ADDR.merchant,
-    reason: null, status: 'executed', tx_hash: `0x${'a1'.repeat(32)}`,
+    // #2120: 'confirmed', not 'executed'. `payment_intents.status` is only
+    // ever written pending_signature | submitted | confirmed | failed |
+    // expired; 'executed' was an `approval_requests` status, and it only
+    // rendered "Sent" here because the deleted APPROVAL_STATUS map caught it.
+    reason: null, status: 'confirmed', tx_hash: `0x${'a1'.repeat(32)}`,
     source: 'x402', x402_resource_url: 'https://api.example.dev/reports',
     x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_SAFE.chain_id,
     safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
-    confirmed_at: '2026-07-10T08:20:00.000Z', payment_proof_status: 'verified',
-    payment_flow_status: 'paid', payment_attention_reason: null,
+    // #2126: BOTH fields were fabricated. `payment_proof_status` mirrors
+    // `machine_payment_evidence.proof_status`, whose only constructible values
+    // are `payment_confirmed | merchant_response_observed |
+    // protocol_receipt_attached` (`modules/mpp/evidence.ts:38-41`; the column
+    // default is `'payment_confirmed'`, `db/migrations/014_machine_payment_evidence.ts:13`).
+    // 'verified' is not one of them and no write site can produce it.
+    // `payment_flow_status` is DERIVED per row by the route, never read —
+    // `routes/agent-activity.ts:50-55` feeds `machinePaymentLifecycle` with
+    // rail=source, paymentStatus=status, paymentProofStatus, and
+    // reconciliationEventType. For rail 'x402' (in MACHINE_PAYMENT_RAILS,
+    // `packages/core/src/machine-payment-lifecycle.ts:9`), status 'confirmed',
+    // no reconciliation event, and a proof status that is neither
+    // 'protocol_receipt_attached' nor 'merchant_response_observed' (:44-49),
+    // the function falls through to `:51` and returns 'confirming_merchant'.
+    confirmed_at: '2026-07-10T08:20:00.000Z', payment_proof_status: 'payment_confirmed',
+    payment_flow_status: 'confirming_merchant', payment_attention_reason: null,
     created_at: '2026-07-10T08:18:00.000Z',
   },
   {
@@ -468,12 +575,25 @@ export const FIXTURE_AGENT_ACTIVITY = [
     next_action: 'settle', error_code: null, status_code: 200,
     created_at: '2026-07-10T08:17:00.000Z',
   },
+  // #2120: the `type: 'approval'` / `status: 'pending'` row that stood here is
+  // deleted. `routes/agent-activity.ts` has built this list from
+  // `payment_intents` + MCP tool invocations only since #2055 — the
+  // approval feed entries went with the dropped table — so the row seeded an
+  // activity kind no backend can emit, and every design-review capture of
+  // /agents/[agentId] rendered it as an "Approval request … Needs approval".
+  // #2120: a REACHABLE failure, seeded where the fabricated approval row used
+  // to sit. `haven-design-reviewer` observed that with the approval row gone
+  // the standing capture only ever showed success badges, so the danger tone
+  // and `activityTitle`'s `status === 'failed'` branch had no rendered
+  // evidence. Every field is what the route would emit for a failed intent:
+  // no tx hash, no confirmation, and `payment_flow_status: null` because
+  // `machinePaymentLifecycle` returns null for a non-machine rail AND for any
+  // status other than 'confirmed' (packages/core/src/machine-payment-lifecycle.ts:30-35).
   {
-    type: 'approval', id: 'appr-1', agent_id: 'agent-research', agent_name: 'Research agent',
+    type: 'payment', id: 'pay-3', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-    amount_raw: '750000000', amount: '750.00', to: ADDR.recipient,
-    reason: 'Quarterly vendor invoice exceeds the daily budget',
-    status: 'pending', tx_hash: null, source: 'api',
+    amount_raw: '12000000', amount: '12.00', to: ADDR.recipient,
+    reason: null, status: 'failed', tx_hash: null, source: 'api',
     x402_resource_url: null, x402_merchant_address: null, chain_id: FIXTURE_SAFE.chain_id,
     safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     explorer_url: null, confirmed_at: null, payment_proof_status: null,
@@ -484,13 +604,19 @@ export const FIXTURE_AGENT_ACTIVITY = [
     type: 'payment', id: 'pay-2', agent_id: 'agent-research', agent_name: 'Research agent',
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     amount_raw: '4500000', amount: '4.50', to: ADDR.recipient,
-    reason: null, status: 'executed', tx_hash: `0x${'b2'.repeat(32)}`,
+    reason: null, status: 'confirmed', tx_hash: `0x${'b2'.repeat(32)}`,  // #2120: see pay-1
     source: 'api', x402_resource_url: null, x402_merchant_address: null,
     chain_id: FIXTURE_SAFE.chain_id,
     safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'b2'.repeat(32)}`,
+    // #2126: null, not 'paid'. `source: 'api'` is not in
+    // `MACHINE_PAYMENT_RAILS` (`x402 | mpp_demo | mpp_crypto | spt`,
+    // `packages/core/src/machine-payment-lifecycle.ts:9`), so the first branch
+    // (`:30-32`) returns `{ paymentFlowStatus: null, … }` before any proof
+    // status is consulted. A non-machine rail can NEVER carry a non-null flow
+    // status — 'paid' was unreachable for this row by construction.
     confirmed_at: '2026-07-09T14:02:00.000Z', payment_proof_status: null,
-    payment_flow_status: 'paid', payment_attention_reason: null,
+    payment_flow_status: null, payment_attention_reason: null,
     created_at: '2026-07-09T14:01:00.000Z',
   },
   {
@@ -499,12 +625,172 @@ export const FIXTURE_AGENT_ACTIVITY = [
     next_action: null, error_code: null, status_code: 200,
     created_at: '2026-07-09T11:30:00.000Z',
   },
+  // #2147: the `needs_attention` state, which NO row seeded — leaving both its
+  // badge AND a second rendered surface (the "Recoverable funds" banner's
+  // specific copy branch, `AgentDetailClient.tsx:634-636`) unphotographed
+  // anywhere in the capture suite. The mirror of #2120/#2126: those two seeded
+  // states the product cannot reach; this one is a state the product CAN reach
+  // that the evidence rig never rendered, so the reviewer judging that banner
+  // had only ever seen half of it.
+  //
+  // Every field is derived from the code that produces it, not chosen to make
+  // the badge appear. The state is ONE open `merchant_retry_rejected_after_payment`
+  // reconciliation event — an x402 payment that settled on-chain while the
+  // merchant refused the retry (`packages/sdk/src/merchant-completion.ts:127-136`
+  // posts it with a literal `rail: 'x402'`) — and the reconciliation endpoint
+  // that records it refuses everything else:
+  //
+  //   status  'confirmed' — `modules/mpp/reconciliation.ts:40-48` answers 409
+  //                         ("Reconciliation events require a confirmed payment")
+  //                         for any other status. Also what `machinePaymentLifecycle`
+  //                         needs to get past `machine-payment-lifecycle.ts:33-35`.
+  //   tx_hash  non-null   — same guard, same 409; the event stores
+  //                         `payment.tx_hash.toLowerCase()` (`reconciliation.ts:73`),
+  //                         so an attention row without a hash cannot exist.
+  //   source  'x402'      — `COALESCE(pi.payment_rail, pi.source, 'direct')`
+  //                         (`infra/repositories/agent-activity.ts:96`), and a
+  //                         machine rail per `machine-payment-lifecycle.ts:9`.
+  //                         The event's `rail` must equal the intent's
+  //                         (`reconciliation.ts:54-58`, else 409).
+  //   payment_proof_status
+  //           'payment_confirmed' — the settlement-time base row writes that
+  //                         literal (`infra/repositories/machine-payments.ts:49`;
+  //                         column default, migration `014:13`). The only writer
+  //                         that raises it is the agent-reported attach
+  //                         (`modules/mpp/evidence.ts:196-200`), and on this path
+  //                         the SDK throws instead of attaching
+  //                         (`merchant-completion.ts:137-145`). It is also inert
+  //                         for the derivation: `:37-42` returns before the
+  //                         proof-status branch at `:44-49`.
+  //   payment_flow_status / payment_attention_reason — NOT restated: they are
+  //                         what `machinePaymentLifecycle` returns at
+  //                         `machine-payment-lifecycle.ts:37-41` for the inputs
+  //                         above, and `screenshot-fixture.test.ts` re-derives
+  //                         them with that same shared function.
+  //   explorer_url        — `routes/agent-activity.ts:78` builds it from
+  //                         `tx_hash`, so a hash without a link is impossible.
+  //
+  // The same open event is what `LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL` /
+  // `FIND_AGENT_FOR_USER_ALL_STATUSES_SQL` compute `has_stranded_funds` from
+  // (`infra/repositories/agents.ts:186-192`, `:206-212`), which is why
+  // `agent-research` carries that flag above — one event, both consequences.
+  {
+    type: 'payment', id: 'pay-4', agent_id: 'agent-research', agent_name: 'Research agent',
+    token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    amount_raw: '8000000', amount: '8.00', to: ADDR.merchant,
+    reason: null, status: 'confirmed', tx_hash: `0x${'c3'.repeat(32)}`,
+    source: 'x402', x402_resource_url: 'https://api.example.dev/datasets',
+    x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_SAFE.chain_id,
+    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    explorer_url: `https://sepolia.basescan.org/tx/0x${'c3'.repeat(32)}`,
+    confirmed_at: '2026-07-09T09:16:00.000Z', payment_proof_status: 'payment_confirmed',
+    payment_flow_status: 'needs_attention',
+    payment_attention_reason: 'merchant_retry_rejected_after_payment',
+    created_at: '2026-07-09T09:15:00.000Z',
+  },
 ]
+
+// ── The delegate EOA's on-chain balance (#2194) ──────────────────────────────
+//
+// `GET /agents/:id/delegate-balance` (`routes/agents.ts:127-168`) is what
+// `useDelegateBalance` reads and what the "Recoverable funds in agent wallet"
+// banner is gated on (`AgentDetailClient.tsx:630`, via
+// `hasRecoverableUsdc = Boolean(balance && balance.usdc_atomic !== '0')`,
+// `hooks/useDelegateBalance.ts:88`). It was NOT keyed in `fixtureFor`, so it
+// fell through to `FIXTURE_EMPTY_FALLBACK` — which carries neither
+// `usdc_atomic` nor `usdc` — and `undefined !== '0'` is true. The banner
+// rendered from a body with no balance in it, on an agent the real route
+// would have answered 422 for. The screenshot looked exactly right; that is
+// the whole difficulty of this defect class, and why the guard below asserts
+// the response SHAPE rather than the rendered outcome.
+//
+// The amount is DERIVED, not chosen. Both fields come off the same seeded
+// event that gives `agent-research` its attention row and its
+// `has_stranded_funds` flag:
+//
+//   usdc_atomic  = the intent's `amount_raw`. On the EIP-3009 two-leg x402
+//                  shape, `payTo` IS the agent's own delegate EOA — that is
+//                  what selects the funding leg (`deriveFundingShape`,
+//                  `modules/x402/scheme-selection.ts:56-58`) — so the Safe
+//                  transfers the intent amount TO the delegate and the
+//                  merchant then pulls it. On
+//                  `merchant_retry_rejected_after_payment` the merchant never
+//                  pulls: the SDK throws "x402 retry failed after Haven funded
+//                  the delegate wallet" (`packages/sdk/src/merchant-completion.ts:137-145`)
+//                  after recording the event. The funded amount stays put.
+//   usdc         = the intent's `amount` (`amount_human`), and they are equal
+//                  by CONSTRUCTION rather than by coincidence: the route
+//                  formats with `formatTokenValue(usdcAtomic, 6)`
+//                  (`routes/agents.ts:165`) and the intent's human string is
+//                  `formatTokenValue(amountRaw, tokenConfig.decimals)`
+//                  (`modules/x402/authorize.ts:66`) on the same atomic value
+//                  and the same 6 decimals. One function, one input.
+//
+// `eth` / `eth_atomic` are zero. The recovery path this banner points at is
+// the gasless `haven_sweep_delegate` (see `useDelegateBalance`'s own note),
+// and nothing on the x402 funding leg sends native value to the delegate —
+// so a delegate that has ONLY ever been funded by a rejected x402 retry holds
+// USDC and nothing else. Note the human string is `'0'`, not `'0.00'`:
+// `formatTokenValue` returns early on a zero raw value
+// (`domain/tokens.ts:37`), and the two-decimal padding at `:44` is never
+// reached.
+const STRANDED_INTENT = FIXTURE_AGENT_ACTIVITY.find(
+  (row) => row.payment_attention_reason === 'merchant_retry_rejected_after_payment',
+)
+if (!STRANDED_INTENT) {
+  // A fixture that lost the attention row would otherwise seed `undefined`
+  // amounts here and re-create the exact defect #2194 is about, one layer in.
+  throw new Error(
+    'screenshot fixture: no open merchant_retry_rejected_after_payment row in ' +
+      'FIXTURE_AGENT_ACTIVITY — the delegate balance below is derived from it (#2194)',
+  )
+}
+
+/** The route's 422, verbatim (`routes/agents.ts:140-142`). */
+export const DELEGATE_BALANCE_NO_DELEGATE = { error: 'Agent has no delegate address' }
+
+/**
+ * Keyed by agent id. Every agent in `FIXTURE_AGENTS` has an entry, so the
+ * generic fallback can never answer this endpoint again — which is the
+ * mechanism that produced the bug, not just this instance of it.
+ */
+export const FIXTURE_DELEGATE_BALANCES = {
+  // The recoverable-funds incident, and the ONLY agent that renders the banner.
+  'agent-research': {
+    delegate_address: ADDR.researchDelegate,
+    safe_address: FIXTURE_SAFE.safe_address,
+    chain_id: FIXTURE_SAFE.chain_id,
+    eth: '0',
+    eth_atomic: '0',
+    usdc: STRANDED_INTENT.amount,
+    usdc_atomic: STRANDED_INTENT.amount_raw,
+    usdc_address: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,
+  },
+  // A delegate that holds nothing — the ordinary steady state, and the
+  // CONTROL for the row above: `hasRecoverableUsdc` is false here for the
+  // reason the product says it is ('0' === '0'), not because a key is missing.
+  'agent-ops': {
+    delegate_address: ADDR.delegate,
+    safe_address: FIXTURE_SAFE.safe_address,
+    chain_id: FIXTURE_SAFE.chain_id,
+    eth: '0',
+    eth_atomic: '0',
+    usdc: '0',
+    usdc_atomic: '0',
+    usdc_address: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,
+  },
+  // `agent-retired` has no delegate address, so the route never reaches the
+  // balance reads — it answers 422 at `routes/agents.ts:140-142`. Served as a
+  // real 422 by `fixtureFor` below.
+  'agent-retired': null,
+}
+
 export const FIXTURE_AGENT_STATS = {
   all_time: [{ token: 'USDC', total_spent: '482.50', tx_count: 37 }],
   today: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
   this_week: [{ token: 'USDC', total_spent: '109.75', tx_count: 6 }],
-  pending_approvals: 1,
+  // #2120: 0, not 1 — `routes/agent-activity.ts:129` hardcodes it.
+  pending_approvals: 0,
 }
 
 const FIXTURE_CONTACTS = [
@@ -567,6 +853,59 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
     }
   }
+  if (pathname.startsWith('/agents/') && pathname.endsWith('/delegate-balance')) {
+    // #2194. Keyed for EVERY fixture agent — the point is not that this one
+    // path now answers correctly, it is that the generic fallback can no
+    // longer answer it at all. `FIXTURE_EMPTY_FALLBACK` cannot say "this
+    // endpoint is not seeded": it says 200 with a body that has no
+    // `usdc_atomic`, and `undefined !== '0'` reads as YES.
+    const agentId = pathname.slice('/agents/'.length, -'/delegate-balance'.length)
+    if (!(agentId in FIXTURE_DELEGATE_BALANCES)) return null
+    const balance = FIXTURE_DELEGATE_BALANCES[agentId]
+    // A seeded null is the route's OWN 422, not an absent fixture. Served as a
+    // real failure so the app's real error path runs — `useDelegateBalance`'s
+    // catch, which turns it into "nothing to recover" (`:52-54`).
+    return balance ?? httpError(422, DELEGATE_BALANCE_NO_DELEGATE)
+  }
+  if (pathname.startsWith('/agents/') && pathname.endsWith('/delegations')) {
+    // #2106: the delegation rail's actual spend authority, as
+    // `GET /agents/:id/delegations` returns it. `/custody` renders this on a
+    // `delegator_hybrid` account instead of the retired AllowanceModule read,
+    // so the capture has to carry both recipient states — PINNED (an
+    // AllowedCalldataEnforcer caveat) and open — or the rendered review never
+    // sees the branch that was wrong.
+    if (pathname === `/agents/${FIXTURE_AGENTS[0].id}/delegations`) {
+      return {
+        delegations: [{
+          id: 'dlg-1', chain_id: FIXTURE_SAFE.chain_id,
+          token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          recipient_address: ADDR.merchant,
+          delegation_hash: '0x' + '4d'.repeat(32),
+          version: 1, status: 'active',
+          budget_atomic: '250000000', period_seconds: 604_800,
+          start_date: '2026-06-02T10:00:00.000Z',
+          expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
+          created_at: '2026-06-02T10:00:00.000Z',
+        }],
+      }
+    }
+    if (pathname === `/agents/${FIXTURE_AGENTS[2].id}/delegations`) {
+      return {
+        delegations: [{
+          id: 'dlg-2', chain_id: FIXTURE_SAFE.chain_id,
+          token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          recipient_address: null,
+          delegation_hash: '0x' + '5e'.repeat(32),
+          version: 2, status: 'active',
+          budget_atomic: '500000000', period_seconds: 86_400,
+          start_date: '2026-05-18T10:00:00.000Z',
+          expires_at: Math.floor(Date.UTC(2027, 4, 18) / 1000),
+          created_at: '2026-05-18T10:00:00.000Z',
+        }],
+      }
+    }
+    return { delegations: [] }
+  }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/passport')) {
     // Agent Passport status (#1072). Only agent-research carries one — the
     // other fixture agents render the "no passport, opt in" state, which is
@@ -609,18 +948,365 @@ function slug(route) {
   return route.replace(/^\//, '').replace(/\//g, '_') || 'root'
 }
 
-async function waitForServer(url, timeoutMs = 90_000) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url, { redirect: 'manual' })
-      if (res.status < 500) return
-    } catch {
-      /* not up yet */
-    }
-    await sleep(1000)
+export function firstLine(text) {
+  return String(text).split('\n')[0].trim()
+}
+
+/**
+ * The one line that says whether this run produced evidence (#2108).
+ *
+ * It exists because of how the harness is actually invoked. `npm run screenshot
+ * ... | tail -30` reports **`tail`'s** exit code, so the shell sees 0 while the
+ * run failed — a false green that has now misled several sessions, including
+ * the one that filed this issue. An exit code does not survive a pipe; a line
+ * of stdout does. `RESULT` is greppable on purpose, and it is the LAST thing
+ * printed so a `tail` of any depth catches it.
+ *
+ * Pure and exported so a test can pin both colours — a formatter that can only
+ * produce "ok" would restate the defect it is here to remove.
+ */
+export function formatRunResult(ok, detail) {
+  return ok ? `screenshot: RESULT ok — ${detail}` : `screenshot: RESULT FAILED — ${detail}`
+}
+
+function printRunResult(ok, detail) {
+  const line = formatRunResult(ok, detail)
+  // Deliberately stdout in both cases: a reader piping to `tail` or `head` is
+  // usually capturing stdout only, and the failing colour is the one they most
+  // need to survive that pipe.
+  console.log(line)
+}
+
+/**
+ * The measured cold `next dev` compile in this repo, in seconds (#2108).
+ *
+ * Not a guess and not a round number: repeated first-boot runs on a worktree
+ * with no `.next/` land between these two values under normal agent load. It
+ * is exported because three things have to agree about it — the default
+ * budget, the failure message that tells the reader what "too slow" is being
+ * measured against, and the test that pins the default above it. A constant
+ * that lives in one of the three and is retyped into the other two drifts.
+ */
+export const COLD_COMPILE_RANGE_S = { min: 315, max: 448 }
+
+/**
+ * Two budgets, because readiness is two events, not one (#2108).
+ *
+ * The bug this replaces was a SINGLE 90s deadline covering both, set roughly
+ * 3.5–5x below the thing it was measuring, so the capture harness could not
+ * succeed on a cold worktree at all. The lazy fix is a bigger constant, and it
+ * is wrong in the other direction: one 500s deadline makes a dev server that
+ * will NEVER come up take eight minutes to say so, and the message it finally
+ * prints is the same one a slow-but-healthy compile prints.
+ *
+ * They are separated because the two events have different orders of
+ * magnitude AND different causes:
+ *
+ *   listenTimeoutMs   `next dev` BINDING its port. This is process startup —
+ *                     seconds, cold or warm, because binding happens before
+ *                     any compilation. 90s was always the right order of
+ *                     magnitude for this; it was only ever the wrong one for
+ *                     the event below. Exceeding it means a startup failure,
+ *                     which is a different remedy from "wait longer".
+ *
+ *   readyTimeoutMs    that listening server ANSWERING, which is the webpack
+ *                     compile. This is the 315–448s event. The budget is
+ *                     ~2.2x the measured maximum: enough headroom for a
+ *                     genuinely contended machine, and affordable ONLY
+ *                     because the failures that are not slowness — the
+ *                     process dying, the port never opening — are detected by
+ *                     progress rather than by waiting this budget out.
+ *
+ * Both are overridable (`SCREENSHOT_LISTEN_TIMEOUT_MS`,
+ * `SCREENSHOT_READY_TIMEOUT_MS`) so a slower machine needs no code edit.
+ */
+export const READINESS_DEFAULTS = {
+  listenTimeoutMs: 90_000,
+  // Rounded to whole seconds: `COLD_COMPILE_RANGE_S.max * 2.2 * 1000` is 985600.0000000001
+  // in float, and a budget that prints with a fractional millisecond invites the
+  // reader to wonder what else about it is accidental.
+  readyTimeoutMs: Math.round(COLD_COMPILE_RANGE_S.max * 2.2) * 1_000,
+  progressIntervalMs: 15_000,
+}
+
+/**
+ * A budget that cannot fit the thing it measures, named as such.
+ *
+ * Returns the problems as strings rather than throwing, so the same predicate
+ * is usable as a warning at runtime and as an assertion in a test. It has to
+ * be able to say NO for a plausible-looking number — a floor that only ever
+ * says yes is the defect this whole issue is an instance of — so the test
+ * feeds it the old 90_000 and requires it to object.
+ */
+export function readinessBudgetProblems(budgets) {
+  const problems = []
+  if (budgets.readyTimeoutMs < COLD_COMPILE_RANGE_S.max * 1000) {
+    problems.push(
+      `readyTimeoutMs=${budgets.readyTimeoutMs}ms is below the MEASURED cold \`next dev\` compile ` +
+        `in this repo (${COLD_COMPILE_RANGE_S.min}–${COLD_COMPILE_RANGE_S.max}s) — a cold worktree ` +
+        'will fail during compilation, for a reason that has nothing to do with the page being captured',
+    )
   }
-  throw new Error(`dev server did not become ready at ${url} within ${timeoutMs}ms`)
+  if (budgets.listenTimeoutMs >= budgets.readyTimeoutMs) {
+    problems.push(
+      `listenTimeoutMs=${budgets.listenTimeoutMs}ms is not shorter than readyTimeoutMs=${budgets.readyTimeoutMs}ms — ` +
+        'a dev server that never binds its port would then take the full cold-start budget to report, ' +
+        'which is the failure mode the split exists to avoid',
+    )
+  }
+  return problems
+}
+
+/**
+ * Resolve the budgets from the environment. Pure in `env` so it is testable.
+ *
+ * A malformed override THROWS rather than falling back to the default: silently
+ * ignoring `SCREENSHOT_READY_TIMEOUT_MS=6OO000` (letter O) would produce exactly
+ * the confusing timeout this issue is about, with the reader certain they had
+ * raised it.
+ */
+export function resolveReadinessBudgets(env = process.env) {
+  const read = (name, fallback) => {
+    const raw = env[name]
+    if (raw === undefined || raw === '') return fallback
+    const n = Number(raw)
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+      throw new Error(`${name} must be a positive whole number of milliseconds; got ${JSON.stringify(raw)}`)
+    }
+    return n
+  }
+  return {
+    listenTimeoutMs: read('SCREENSHOT_LISTEN_TIMEOUT_MS', READINESS_DEFAULTS.listenTimeoutMs),
+    readyTimeoutMs: read('SCREENSHOT_READY_TIMEOUT_MS', READINESS_DEFAULTS.readyTimeoutMs),
+    progressIntervalMs: READINESS_DEFAULTS.progressIntervalMs,
+  }
+}
+
+/**
+ * The failure messages, as data, in one place.
+ *
+ * Every one of them names the CAUSE and the REMEDY, because the message this
+ * replaces named neither: "did not become ready within 90000ms" sent several
+ * sessions looking for a broken page, a port collision, or Playwright — the
+ * three things it was NOT. Pure and exported so the tests can pin the words a
+ * reader is going to act on, rather than trusting that a message exists.
+ */
+export function describeReadinessFailure(kind, ctx) {
+  const prewarm =
+    'Or pre-warm a server yourself and point the harness at it:\n' +
+    `      npm run dev -w packages/frontend -- --hostname 127.0.0.1 --port ${ctx.port ?? '<port>'}\n` +
+    `      SCREENSHOT_BASE_URL=http://127.0.0.1:${ctx.port ?? '<port>'} npm run screenshot -w packages/frontend -- <route>\n` +
+    '    The #1800 identity check still runs on that server, so the PNGs are still provably this worktree.'
+  if (kind === 'process-exited') {
+    return (
+      `dev server PROCESS EXITED (code ${ctx.exitCode}) after ${ctx.elapsedS}s — this is NOT a timeout.\n` +
+      `    Cause: \`npm run dev\` in ${ctx.cwdLabel ?? 'packages/frontend'} could not stay up. Nothing was ever listening on ${ctx.url}.\n` +
+      '    Remedy: run that command by hand in this worktree and read its output. A missing `npm install`, an\n' +
+      '    unbuilt `@haven_ai/core` (`npm run build -w packages/core`), or an occupied port are the usual reasons.'
+    )
+  }
+  if (kind === 'never-listened') {
+    return (
+      `dev server never opened a socket on ${ctx.url} within ${ctx.budgetMs}ms (${Math.round(ctx.budgetMs / 1000)}s).\n` +
+      '    Cause: the `next dev` process is alive but has not BOUND its port. That is a startup failure, not a slow\n' +
+      `    compile — a compiling server binds its port within seconds and only then spends ${COLD_COMPILE_RANGE_S.min}–${COLD_COMPILE_RANGE_S.max}s compiling.\n` +
+      '    Remedy: run `npm run dev -w packages/frontend` by hand and read its output. If this machine really is that\n' +
+      '    slow to start, raise SCREENSHOT_LISTEN_TIMEOUT_MS.'
+    )
+  }
+  if (kind === 'stopped-listening') {
+    return (
+      `dev server at ${ctx.url} accepted a connection and then STOPPED listening after ${ctx.elapsedS}s.\n` +
+      '    Cause: the server died mid-compile — an out-of-memory kill or a crash in `next dev`, not a slow page.\n' +
+      '    Remedy: run `npm run dev -w packages/frontend` by hand; the crash prints there and is discarded here\n' +
+      '    (the harness spawns it with stdio ignored).'
+    )
+  }
+  return (
+    `dev server at ${ctx.url} is LISTENING but did not answer within ${ctx.budgetMs}ms (${Math.round(ctx.budgetMs / 1000)}s).\n` +
+    `    Cause: a cold \`next dev\` compile in this repo measures ${COLD_COMPILE_RANGE_S.min}–${COLD_COMPILE_RANGE_S.max}s. This run exceeded even the\n` +
+    '    budget above it, so the compile is either far slower than measured (a contended machine) or genuinely stuck.\n' +
+    '    Remedy: raise SCREENSHOT_READY_TIMEOUT_MS.\n' +
+    `    ${prewarm}`
+  )
+}
+
+/**
+ * The port to dial for `url`, defaulted by scheme.
+ *
+ * `new URL('http://127.0.0.1').port` is the empty string, and `Number('')` is
+ * **0** — not NaN. `net.connect({ port: 0 })` can never succeed, so a portless
+ * `SCREENSHOT_BASE_URL` would have failed with `never opened a socket` against a
+ * server that was listening perfectly well: this fix's own defect class, from the
+ * other side. Neither live caller can hit it today (the spawn path always builds
+ * `http://127.0.0.1:${port}`, and every documented pre-warm example carries a
+ * port) — but nothing forbids a portless override, so it is defaulted rather
+ * than left to depend on that. Exported for the guard, because an edge this
+ * quiet is only real if something drives it.
+ */
+export function portOf(url) {
+  const parsed = new URL(url)
+  if (parsed.port) return Number(parsed.port)
+  return parsed.protocol === 'https:' ? 443 : 80
+}
+
+/** Is anything accepting TCP connections there? Deliberately not an HTTP request:
+ *  a bare connect does not ask a compiling Next dev server to do any work. */
+export function probeListeningDefault(url, timeoutMs = 2000) {
+  const { hostname, port } = new URL(url)
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: hostname, port: portOf(url) })
+    const done = (answer) => {
+      socket.destroy()
+      resolve(answer)
+    }
+    socket.setTimeout(timeoutMs)
+    socket.once('connect', () => done(true))
+    socket.once('timeout', () => done(false))
+    socket.once('error', () => done(false))
+  })
+}
+
+/**
+ * Ask the server for an answer, but only for `timeoutMs`.
+ *
+ * The bound is not politeness, it is what makes progress reporting possible.
+ * A `fetch` to a Next dev server that is mid-compile does not fail and does not
+ * return — it HANGS until the compile finishes. An unbounded call therefore
+ * parks the readiness loop inside one await for the entire compile, so nothing
+ * ticks, nothing re-checks the socket, and the run is silent for five minutes:
+ * exactly the "is it working or is it hung?" ambiguity #2108 is about, faithfully
+ * reproduced by the code meant to remove it.
+ *
+ * Caught by running it, NOT by the unit tests — the injected `probeAnswering`
+ * in `capture-readiness.test.ts` threw instantly, so the fake was more
+ * cooperative than the real thing and the progress assertion passed against a
+ * loop that could not tick in production. Hence `probeAnsweringIsBounded` below,
+ * which tests the real probe rather than a stand-in.
+ *
+ * Re-requesting a route that is still compiling is safe: Next dev dedupes
+ * compilation per route, so each attempt joins the same in-flight build.
+ */
+async function probeAnsweringDefault(url, timeoutMs = 10_000) {
+  const res = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) })
+  return res.status
+}
+
+/**
+ * Does the real answering probe give up in bounded time? Exported so the guard
+ * can assert it against a socket that accepts and then says nothing forever —
+ * the shape a compiling `next dev` presents. A progress ticker downstream of an
+ * unbounded await is a ticker that never ticks.
+ */
+export async function probeAnsweringIsBounded(url, timeoutMs) {
+  const startedAt = Date.now()
+  try {
+    await probeAnsweringDefault(url, timeoutMs)
+    return { threw: false, elapsedMs: Date.now() - startedAt }
+  } catch {
+    return { threw: true, elapsedMs: Date.now() - startedAt }
+  }
+}
+
+/**
+ * Wait for the spawned dev server, measuring PROGRESS rather than only a deadline (#2108).
+ *
+ * The sequence, and why each step is a step:
+ *
+ *   1. The child process is watched THROUGHOUT. If it exits, the wait ends
+ *      immediately with `process-exited` — a dead server is reported in
+ *      seconds, whatever budget was configured. This is what makes a large
+ *      cold-compile budget affordable.
+ *   2. Phase A waits for the port to accept a connection, on the SHORT budget.
+ *      Binding is startup, not compilation.
+ *   3. Phase B waits for that listening server to answer, on the LONG budget,
+ *      and re-checks the socket between attempts so a mid-compile crash is
+ *      reported as `stopped-listening` rather than waiting the budget out.
+ *   4. Progress is printed on a fixed interval in both phases, so a five-minute
+ *      wait is visibly a wait. The old version printed nothing for 90 seconds
+ *      and then failed, which is indistinguishable from a hang and is part of
+ *      why this kept being misdiagnosed.
+ *
+ * Every collaborator is injectable so the phases are testable without a real
+ * server: a readiness check that can only be exercised by waiting five minutes
+ * for a real compile is a check nobody runs.
+ */
+export async function waitForServer(url, opts = {}) {
+  const {
+    child = null,
+    budgets = resolveReadinessBudgets(),
+    probeListening = probeListeningDefault,
+    probeAnswering = probeAnsweringDefault,
+    pollIntervalMs = 1000,
+    sleepFn = sleep,
+    now = Date.now,
+    log = console.log,
+    cwdLabel,
+  } = opts
+
+  const port = (() => {
+    try {
+      return new URL(url).port || undefined
+    } catch {
+      return undefined
+    }
+  })()
+  const started = now()
+  const elapsedS = () => Math.round((now() - started) / 1000)
+  let lastProgressAt = started
+  const progress = (line) => {
+    if (now() - lastProgressAt < budgets.progressIntervalMs) return
+    lastProgressAt = now()
+    log(`screenshot: ${line} (${elapsedS()}s elapsed)`)
+  }
+  const fail = (kind, ctx) => {
+    const err = new Error(describeReadinessFailure(kind, { url, port, cwdLabel, elapsedS: elapsedS(), ...ctx }))
+    err.readinessFailure = kind
+    return err
+  }
+  // `exitCode` is non-null once the child has exited; `signalCode` covers a kill.
+  const childDead = () => child && (child.exitCode !== null || child.signalCode != null)
+
+  // Phase A — did it bind a port?
+  const listenDeadline = started + budgets.listenTimeoutMs
+  let listening = false
+  while (now() < listenDeadline) {
+    if (childDead()) throw fail('process-exited', { exitCode: child.exitCode ?? child.signalCode })
+    if (await probeListening(url)) {
+      listening = true
+      break
+    }
+    progress(`waiting for \`next dev\` to bind ${url}`)
+    await sleepFn(pollIntervalMs)
+  }
+  if (!listening) {
+    if (childDead()) throw fail('process-exited', { exitCode: child.exitCode ?? child.signalCode })
+    throw fail('never-listened', { budgetMs: budgets.listenTimeoutMs })
+  }
+  log(
+    `screenshot: dev server is listening on ${url} after ${elapsedS()}s — now waiting for the first compile ` +
+      `(measured cold: ${COLD_COMPILE_RANGE_S.min}–${COLD_COMPILE_RANGE_S.max}s, budget ${Math.round(budgets.readyTimeoutMs / 1000)}s)`,
+  )
+
+  // Phase B — is it answering?
+  const readyDeadline = started + budgets.readyTimeoutMs
+  while (now() < readyDeadline) {
+    if (childDead()) throw fail('process-exited', { exitCode: child.exitCode ?? child.signalCode })
+    try {
+      const status = await probeAnswering(url)
+      if (status < 500) {
+        log(`screenshot: dev server answered ${status} after ${elapsedS()}s`)
+        return
+      }
+    } catch {
+      /* still compiling, or the connection was dropped — the socket check below decides which */
+    }
+    if (childDead()) throw fail('process-exited', { exitCode: child.exitCode ?? child.signalCode })
+    if (!(await probeListening(url))) throw fail('stopped-listening', {})
+    progress('dev server is listening and still compiling — this is the cold `next dev` compile, not a hang')
+    await sleepFn(pollIntervalMs)
+  }
+  throw fail('not-answering', { budgetMs: budgets.readyTimeoutMs })
 }
 
 /**
@@ -765,6 +1451,21 @@ export const CHAIN_FED_ROUTES = [
   {
     pattern: /^\/custody(\/|$)/,
     reads: 'useOnChainAllowances — SafeControlCard reads the module and delegates at render',
+    // #2106: `/custody` became CONDITIONALLY chain-fed. It renders one of two
+    // cards per account, and only the legacy Safe one mounts
+    // `useOnChainAllowances`; the delegation-rail card reads
+    // `/accounts/hybrid/:address/signers` and `/agents/:id/delegations` over
+    // the API and touches the chain not at all. So on an all-delegation-rail
+    // account — which, since #1984, is every new account — zero chain reads is
+    // the CORRECT observation, not the empty-surface defect this guard exists
+    // to catch.
+    //
+    // The route stays listed rather than being deleted: the legacy branch
+    // still reads at render, and dropping the entry would retire the guard for
+    // the rail that still needs it. Instead a capture may declare itself
+    // legitimately silent, and must say which rail makes it so.
+    silentWhen: 'every account rendered is on the delegation rail (account_type ' +
+      "'delegator_hybrid'), whose card issues no chain read",
   },
 ]
 
@@ -862,12 +1563,47 @@ export function abortChainWatch() {
   chainWatch = null
 }
 
-export function endChainWatch() {
+/**
+ * End the watch and report every chain-fed page that issued no read.
+ *
+ * `expectedSilentRoutes` (#2106) lets ONE capture declare that a specific
+ * chain-fed route is legitimately silent for it. It exists because `/custody`
+ * stopped being unconditionally chain-fed: it renders a per-account card, and
+ * only the legacy Safe branch reads the chain at render.
+ *
+ * Deliberately narrow, so it cannot become a way to wave the guard through:
+ *
+ *  - It is per capture AND per route — never a global flag, and never "this
+ *    scenario reads no chain at all".
+ *  - The route must still be declared chain-fed AND carry a `silentWhen`
+ *    reason, so the exemption is anchored to a written explanation of which
+ *    state makes silence correct rather than to a bare boolean.
+ *  - A declared-silent route that DID read is reported too (below). That
+ *    direction matters as much: it catches the day the delegation card starts
+ *    reading the chain and this declaration quietly stops being true.
+ */
+export function endChainWatch(expectedSilentRoutes = []) {
   const watch = chainWatch
   chainWatch = null
   if (!watch) return
+  const expected = (pathname) =>
+    expectedSilentRoutes.some((p) => (p instanceof RegExp ? p.test(pathname) : p === pathname))
   for (const [pathname, page] of watch.pages) {
-    if (page.observed > 0) continue
+    const declaredSilent = expected(pathname)
+    if (page.observed > 0) {
+      if (declaredSilent) {
+        CHAIN_SILENT_CAPTURES.push({
+          capture: watch.label,
+          viewport: watch.viewport,
+          route: pathname,
+          reads: page.reads,
+          unexpectedRead: `declared chain-silent, but issued ${page.observed} read(s) ` +
+            `(${[...page.methods].join(', ')}) — the declaration is stale`,
+        })
+      }
+      continue
+    }
+    if (declaredSilent) continue
     CHAIN_SILENT_CAPTURES.push({
       capture: watch.label,
       viewport: watch.viewport,
@@ -1079,6 +1815,18 @@ async function newFixtureContext(browser, vp, scenario) {
     if (api === '/auth/me') return json(FIXTURE_USER)
     if (api === '/user/safes') return json({ safes: FIXTURE_USER.safes })
     const populated = fixtureFor(api + search)
+    // #2194: the SAME `instanceof` check the scenario branch above makes, for
+    // the same reason and one layer down. `fixtureFor` can now seed a route's
+    // own failure (the delegate-balance 422), and `json()` would serve that
+    // marker object as a 200 whose body happens to have an `error` key — a
+    // fixture that looks like it is seeding an error state and is not.
+    if (populated instanceof ScenarioHttpError) {
+      return route.fulfill({
+        status: populated.status,
+        contentType: 'application/json',
+        body: JSON.stringify(populated.body),
+      })
+    }
     if (populated !== null) return json(populated)
     // Anything unkeyed → a benign empty shape carrying every collection
     // key the hooks read, so a missing key never throws (e.g. a hook that
@@ -1293,6 +2041,32 @@ export { makeAllowanceChainFixture }
 // disagree would photograph a contradiction the product cannot actually produce.
 // The delegate set is exactly the managed one for the same reason — seeding a
 // stranger here would render an "unmanaged delegate" warning in every capture.
+//
+// ── Why `agent-research`'s delegate is NOT here (#2194) ──────────────────────
+//
+// It has one now, and it still does not belong in this list. `getDelegates` is
+// the AllowanceModule's own registry — written by `addDelegate` on the LEGACY
+// Safe rail, which #1440/#2020 retired. A `delegator_hybrid` agent's spend
+// authority is a delegation grant (`GET /agents/:id/delegations`), and nothing
+// ever registers its delegate with the module. `agent-ops` is the one fixture
+// agent on that legacy rail (`account_type: null`), so it is the one entry.
+//
+// This is not a technicality about a registry nobody reads. `useOnChainAllowances`
+// keys its map off THIS list, not off the `managedDelegates` argument
+// (`hooks/useOnChainAllowances.ts:110-127`), and `AgentPanel.tsx:174-176` hands
+// each card `onChainData.get(delegateKey)?.allowances`. Adding `agent-research`
+// here would therefore render an AllowanceModule budget on its card — and
+// `makeAllowanceChainFixture` answers `getTokenAllowance` from `rows` WITHOUT
+// consulting the delegate argument, so the budget it rendered would be
+// `agent-ops`'s 500 USDC / daily, next to its own 250 USDC / weekly delegation.
+// Two spend limits for one agent, from two retired-and-live rails at once.
+//
+// Absent, `onChainData.get()` returns undefined and the card renders no
+// AllowanceModule row, which is what the delegation rail actually looks like.
+// No unmanaged-delegate warning either: `useAgentPanelState.ts:261-271`
+// subtracts the MANAGED set from the on-chain one, and a delegate that is not
+// on-chain cannot be in that difference. `chain-fed-capture-guard.test.ts`
+// pins both halves.
 export const SHARED_CHAIN_ROWS = [
   {
     token: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,
@@ -2064,7 +2838,9 @@ export const SCENARIOS = {
             skill_installed: true,
             restart_required: true,
           },
-          approval: { status: 'pending', safe_tx_hash: null, tx_hash: null },
+          // #2120: `approval.status` is `agent_connection_setups.approval_status`,
+          // written only as 'not_started' | 'submitted' | 'proposed' | 'confirmed'.
+          approval: { status: 'not_started', safe_tx_hash: null, tx_hash: null },
         }
       }
       // A reachable signer, or `ready` is false and the screen shows the
@@ -2228,7 +3004,9 @@ export const SCENARIOS = {
             skill_installed: true,
             restart_required: true,
           },
-          approval: { status: 'pending', safe_tx_hash: null, tx_hash: null },
+          // #2120: `approval.status` is `agent_connection_setups.approval_status`,
+          // written only as 'not_started' | 'submitted' | 'proposed' | 'confirmed'.
+          approval: { status: 'not_started', safe_tx_hash: null, tx_hash: null },
         }
       }
       return undefined
@@ -2310,7 +3088,8 @@ export const SCENARIOS = {
             skill_installed: false,
             restart_required: true,
           },
-          approval: { status: 'active', safe_tx_hash: null, tx_hash: null },
+          // #2120: see above — 'active' is not a producible approval_status.
+          approval: { status: 'confirmed', safe_tx_hash: null, tx_hash: null },
         }
       }
       return undefined
@@ -2460,6 +3239,94 @@ export const SCENARIOS = {
         .getByText('This is not the wallet that controls this account', { exact: false })
         .waitFor({ timeout: 15_000 })
       await shoot(popover, 'popover')
+    },
+  },
+  'custody-delegation-rail': {
+    description: '/custody rendered for a DELEGATION-rail account (#2106)',
+    // The account the shared fixture already describes (`account_type:
+    // 'delegator_hybrid'`), but with the chain answering HONESTLY for that
+    // rail: a Hybrid DeleGator has no AllowanceModule, so `isModuleEnabled`
+    // is FALSE. The shared chain fixture answers true — correct for the
+    // legacy Safe every other capture seeds, and impossible here.
+    //
+    // That distinction is the whole point of this scenario. A plain route
+    // capture of `/custody` inherits the shared `true` and photographs a
+    // delegation-rail account being told its spend control is the Safe
+    // AllowanceModule — which is a real defect, but NOT the one #2106
+    // describes, and it hides the two sentences the issue is actually about
+    // ("AllowanceModule not enabled" / "No on-chain agent allowances on this
+    // Safe"). Those only render when the module reads false, so the before/
+    // after pair has to be taken here or it proves nothing.
+    //
+    // `moduleEnabled: false` makes `useOnChainAllowances` return early, so no
+    // delegate or allowance read is reached and none needs seeding.
+    chain: makeAllowanceChainFixture({
+      chainId: FIXTURE_SAFE.chain_id,
+      safeAddress: FIXTURE_SAFE.safe_address,
+      delegates: [],
+      rows: [],
+      moduleEnabled: false,
+    }),
+    // The delegation-rail card mounts no chain hook at all — its proof comes
+    // from `/accounts/hybrid/:address/signers` and `/agents/:id/delegations`.
+    // Zero reads on `/custody` is therefore the correct observation HERE, and
+    // only here: the legacy scenario below leaves the guard armed, and if this
+    // card ever starts reading the chain the declaration is reported as stale.
+    expectedSilentRoutes: [/^\/custody(\/|$)/],
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/custody`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      // Wait on the page's own heading rather than either branch's copy: this
+      // scenario is run against BOTH the pre-fix and post-fix page, so a wait
+      // keyed to one branch's wording would fail half the pair by design.
+      await page.getByRole('heading', { name: 'Custody', level: 1 }).waitFor({ timeout: 30_000 })
+      await shoot(page.locator('#main-content'), 'page')
+    },
+  },
+  'custody-legacy-rail': {
+    description: '/custody rendered for a LEGACY Safe-rail account (#2106)',
+    // #2106 rail-branches `/custody` on `account_type`. The DELEGATION branch
+    // is what a plain `npm run screenshot -- /custody` captures, because the
+    // shared fixture's account is `delegator_hybrid`. The legacy branch is
+    // therefore unreachable by route capture, and "the other branch is
+    // unchanged" is exactly the claim that needs a picture rather than an
+    // argument by symmetry — so this scenario puts the same account on the
+    // other rail and shoots the same page.
+    //
+    // Only `/auth/me`, `/user/safes` and the Safe details read are overridden.
+    // The chain fixture is inherited: `answerSharedChainRead` already answers
+    // `isModuleEnabled` → true with one 500-USDC daily row, which is what the
+    // legacy card is supposed to render.
+    api(apiPath) {
+      const legacySafe = { ...FIXTURE_SAFE, account_type: 'safe' }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [legacySafe] }
+      if (apiPath === '/user/safes') return { safes: [legacySafe] }
+      if (apiPath.startsWith(`/safe/${FIXTURE_SAFE.safe_address}/details`)) {
+        // Two owners, threshold 2 — the owners/threshold proof is the part of
+        // this page that was ALWAYS true on this rail, so the capture has to
+        // show it populated rather than the empty-fallback "— / 0".
+        return {
+          address: FIXTURE_SAFE.safe_address,
+          owners: [APPROVER_WALLET, APPROVER_UNKNOWN],
+          threshold: 2,
+          nonce: 12,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/custody`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      // Wait on the legacy branch's OWN copy, not on a generic heading: a run
+      // that somehow served the delegation branch fails here instead of
+      // shooting the wrong card under this scenario's name.
+      await page
+        .getByText('Owners (control this Safe — Haven is not one)', { exact: false })
+        .waitFor({ timeout: 30_000 })
+      await shoot(page.locator('#main-content'), 'page')
     },
   },
   'modal-migrations': {
@@ -2679,6 +3546,13 @@ async function main() {
   // Resolved BEFORE retention runs, because the archived run's manifest records
   // which branch/commit displaced it.
   const identity = buildRunIdentity(worktreeIdentity(ROOT))
+  // Resolved here, not at the spawn, so a malformed override fails before the
+  // run does any work — and so a budget too small for a cold compile is called
+  // out at the top of the log rather than 90 seconds later as a mystery timeout.
+  const readinessBudgets = resolveReadinessBudgets()
+  for (const problem of readinessBudgetProblems(readinessBudgets)) {
+    console.warn(`⚠ screenshot: ${problem}`)
+  }
   console.log(`screenshot: worktree ${identity.worktree}`)
   console.log(
     `screenshot: branch ${identity.branch} @ ${identity.commit.slice(0, 12)}${identity.dirty ? ' (dirty working tree)' : ''}`,
@@ -2775,7 +3649,9 @@ async function main() {
       server.on('exit', (code) => {
         if (code && code !== 0 && code !== null) console.error(`dev server exited ${code}`)
       })
-      await waitForServer(BASE_URL)
+      // The child handle is passed so the wait can end the moment `next dev`
+      // dies, instead of waiting out a budget sized for a cold compile (#2108).
+      await waitForServer(BASE_URL, { child: server, budgets: readinessBudgets, cwdLabel: path.relative(process.cwd(), ROOT) || ROOT })
     } else {
       console.log(`screenshot: capturing an already-running server at ${BASE_URL}`)
     }
@@ -3011,7 +3887,7 @@ async function main() {
           // (#1971).
           abortChainWatch()
         }
-        endChainWatch()
+        endChainWatch(scenario.expectedSilentRoutes ?? [])
         await scenarioContext.close()
       }
     }
@@ -3265,21 +4141,25 @@ async function main() {
     )
     for (const m of viewportMismatches) console.error(`  ${m.file}`)
   }
-  if (
-    viewportMismatches.length > 0 ||
-    gotoFailures.length > 0 ||
-    deletedCaptures.length > 0 ||
-    CHAIN_READ_GAPS.length > 0 ||
-    CHAIN_SILENT_CAPTURES.length > 0
-  ) {
+  const failures = [
+    viewportMismatches.length > 0 && `${viewportMismatches.length} PNG(s) not named after any resolved viewport`,
+    gotoFailures.length > 0 && `${gotoFailures.length} route(s) failed to navigate`,
+    deletedCaptures.length > 0 && `${deletedCaptures.length} capture(s) deleted as unusable`,
+    CHAIN_READ_GAPS.length > 0 && `${CHAIN_READ_GAPS.length} chain-fed route(s) issued no on-chain reads`,
+    CHAIN_SILENT_CAPTURES.length > 0 && `${CHAIN_SILENT_CAPTURES.length} silent chain-fed capture(s)`,
+  ].filter(Boolean)
+  if (failures.length > 0) {
+    printRunResult(false, failures.join('; '))
     process.exit(1)
   }
+  printRunResult(true, `${captured.length} PNG(s) in ${path.relative(process.cwd(), OUT_DIR) || OUT_DIR}`)
 }
 
 // Run only as a CLI (fixtureFor is imported by tests).
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
     console.error('screenshot failed:', err instanceof Error ? err.message : err)
+    printRunResult(false, err instanceof Error ? firstLine(err.message) : String(err))
     process.exit(1)
   })
 }

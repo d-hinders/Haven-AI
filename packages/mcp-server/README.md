@@ -63,9 +63,11 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_list_receipts` | `GET /machine-payments/receipts` | no |
 | `haven_sweep_delegate` | gasless stranded-funds sweep prepare/submit | no — relays signed sweep |
 
-`haven_pay` returns `{ payment_id, payload_hash, expires_at }` in-budget, or
-`{ status: "pending_approval", payload_hash: null }` when the amount exceeds the
-on-chain allowance (nothing to sign; the user approves in Haven).
+`haven_pay` returns `{ payment_id, payload_hash, expires_at }` in-budget. A
+payment outside the agent's on-chain budget, recipient pin or expiry is declined
+during prepare — before any money moves and before there is anything to sign.
+Haven holds no approval queue, so nothing is held back for a human to sign off
+later.
 
 ### x402 paid MCP tool flow
 

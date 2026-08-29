@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
   - docs/operations/dev-environment.md
-last-verified: "2026-08-10" # re-verified for #1266 demo merchant x402 settlement selection/canary posture
+last-verified: "2026-08-29" # #2150: the "Migration availability" bullet re-read against the migration runner on this branch — the hand-run out-of-band pre-build is no longer the only way to get `CREATE INDEX CONCURRENTLY` past the runner's `BEGIN`/`COMMIT`, so it is demoted to a fallback behind the in-repo `transactional = false` opt-out, and the deploy-verification step gains the one failure state the opt-out introduces (a migration left `status = 'running'`, which stops the backend booting until an operator acts). Scope: those two bullets only — QA, npm, rollback and the merge-commit rule were not re-verified. Prior: #2151: the migration checklist re-read for hot-table lock availability; adds the lock-duration question and its pre-build/low-traffic mitigations. Prior: re-verified for #1266 demo merchant x402 settlement selection/canary posture
 ---
 
 # Promoting `dev → main` (production release)
@@ -52,6 +52,18 @@ for how the environments are wired, see
 - [ ] **Migrations:** list every migration included since the last promotion.
       Confirm each is **forward-only / safe on existing rows**, and that a
       **prod DB snapshot** exists before they run on deploy.
+- [ ] **Migration availability:** does any migration build an index, rewrite a
+      table, or otherwise hold a lock on a hot table? If so, record the expected
+      lock duration and mitigation. Since #2150 the first choice is in the repo,
+      not in an operator's hands: a migration that declares
+      `export const transactional = false` runs outside the runner's
+      transaction, so it can build with `createIndexConcurrently()` and block no
+      writes at all. Read `packages/backend/src/db/migrate.ts`'s header before
+      accepting one — it trades rollback for detection. The older mitigations
+      remain the fallback for a migration that does **not** declare it:
+      pre-build the index under the same name, out of band with
+      `CREATE INDEX CONCURRENTLY`, so the deploy's `IF NOT EXISTS` is a no-op,
+      or use a low-traffic deployment window.
 - [ ] **No dev-only config leaks into prod:** production leaves
       `NEXT_PUBLIC_HAVEN_ENV` unset (no `DEV` badge) and keeps its own
       secrets / relayer key / RPCs (these live on the platforms, not in code —
@@ -73,7 +85,13 @@ for how the environments are wired, see
       PR goes DIRTY with mass conflicts (this happened with #1152 → #1172, and
       took a `-s ours` reconcile merge, #1173, to repair).
 - [ ] Watch the **prod deploys** finish (Railway backend / MCP, Vercel frontend)
-      and confirm the **migrations applied cleanly** to the prod DB.
+      and confirm the **migrations applied cleanly** to the prod DB. A backend
+      that refuses to boot with *"Migration … was left INCOMPLETE by an earlier
+      run"* means a **non-transactional** migration (#2150) died part-way: its
+      statements were not rolled back, and the error itself carries the two
+      recovery statements. Do not restart hoping it clears — it will not, by
+      design. Decide from the schema whether to finish it by hand or undo it,
+      then run the matching statement.
 - [ ] **Prod smoke:** load the prod app (no `DEV` badge), check login + balances,
       and run one small real payment / x402 happy path as a canary.
 - [ ] Watch prod error logs for a few minutes. If anything is off, **roll back**

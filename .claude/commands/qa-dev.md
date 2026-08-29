@@ -27,8 +27,16 @@ Run each goal through the actual tools. Record the outcome (pass/fail + what you
 
 6. **Within-budget payment** — pay the demo-merchant x402 call for an amount **within** the remaining budget (`haven_pay_x402`). Expect: it **settles** and a receipt is produced.
 7. **Over-budget** — use direct `haven_pay` for an amount **larger than the
-   remaining budget**. Expect: it is **queued for approval, not executed** (no
-   settlement). Confirm it did not silently spend.
+   remaining budget**. Expect: it is **refused before it becomes signable** — no
+   settlement, and **nothing queued**. Confirm it did not silently spend.
+   *(Do not record a refusal as a failure. There is no approval queue on the
+   delegation rail — the budget's on-chain caveat enforcers decline an
+   over-budget payment, and since #2055 there is no queue for one to wait in.
+   The refusal IS the pass. This step told a QA agent to expect
+   the payment to be held for a human until #2103,
+   which is exactly backwards: an agent following it recorded the correct
+   behaviour as a FAIL. Its deterministic sibling is the `over-budget-refused`
+   harness leg — renamed from `over-budget-queue` by #2016 for the same reason.)*
 8. **Over max price** — make a priced call **above the configured max price**. Expect the `PRICE_EXCEEDS_MAX` rejection — not a settlement.
 9. **Receipts** — `haven_list_receipts` for recent activity, then `haven_verify_receipt` on the within-budget payment from step 6. Expect the receipt verifies.
 

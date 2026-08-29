@@ -15,7 +15,9 @@ import {
   assertServerSlugAvailable,
   defaultCredentialRoot,
   preflightCredentialStorage,
+  writeConnectOutcomeRecord,
   writeCredentialFiles,
+  CONNECT_OUTCOME_FILENAME,
   type StoredCredentialPaths,
 } from './storage.js'
 import {
@@ -26,11 +28,16 @@ import {
 } from './runtime-install.js'
 import { normalizeRuntime, resolveRuntimeSelection, runtimeProfile, runtimeVerificationInstruction, RUNTIME_FLAG_VALUES, RUNTIME_FLAG_VALUE_LIST, type RuntimeId, type RuntimeProfile } from './runtime-registry.js'
 import { ConnectError } from './connect-error.js'
-import { resolveRuntimeByInstalledClientPrompt } from './installed-clients.js'
+import {
+  installedClientHint,
+  resolveRuntimeByInstalledClientPrompt,
+  scanInstalledClients,
+  type InstalledClientHint,
+} from './installed-clients.js'
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
-export const CONNECTOR_VERSION = '0.1.30-alpha.0'
+export const CONNECTOR_VERSION = '0.1.31-alpha.0'
 
 export interface ConnectOptions {
   setupToken: string
@@ -98,6 +105,29 @@ export interface ConnectOutcome {
   delegate_address?: string
   setup_challenge_expires_at?: string
   /**
+   * #2173, additive within schema_version 1. Both are present on a completed
+   * run and absent on `failedConnectOutcome`, which by construction has
+   * neither a registration nor a credential scan behind it.
+   *
+   * `hosted_mcp_url` is the endpoint Connect wired this run up to — written
+   * into the runtime's MCP config, or, on a manual runtime that Connect cannot
+   * configure, printed as the endpoint to enter by hand. It is deliberately
+   * NOT the `--api` backend URL: the hosted MCP
+   * server is a separate deployment, and an automation caller comparing the
+   * two used to read that intentional topology as an environment mismatch. It
+   * is non-secret — the same string already sits in the user's own config file
+   * — and carries no credential; the API key travels beside it in a header.
+   *
+   * `superseded_agent_ids` is the #1688 heads-up made structural: previously
+   * it was prose on stderr, so a `--json` caller could not see that the run it
+   * just completed left older agents alive with their own keys. Empty on a
+   * clean first run. An empty list is NOT proof of a clean machine — a scan
+   * that cannot read the credential root also yields an empty list, and the
+   * connector prefers that to failing a completed setup.
+   */
+  hosted_mcp_url?: string
+  superseded_agent_ids?: readonly string[]
+  /**
    * #2091, additive within schema_version 1: `message` is the redacted human
    * refusal (automation used to get code + next_action and nothing to act
    * on), and `allowed_runtimes` carries the valid `--runtime` retry values on
@@ -110,6 +140,21 @@ export interface ConnectOutcome {
     next_action: string
     message?: string
     allowed_runtimes?: readonly string[]
+    /**
+     * #2174, additive within schema_version 1. What the installed-client scan
+     * found on THIS machine, narrowing a `runtime_undetermined` retry from the
+     * nine-value `allowed_runtimes` menu to what is actually here.
+     *
+     * A hint an agent may echo back as `--runtime`, never a selection: the
+     * outcome stays `failed` with `rerun_connect_with_explicit_runtime`, and
+     * the connector never proceeds on it (#1719's populates-never-selects
+     * invariant). Absent when the scan found nothing OR could not run —
+     * both are honestly "no finding"; neither is a claim the machine is bare.
+     * `suggested_runtime` appears only when one candidate is unambiguously
+     * top, so it is never the winner of an arbitrary tiebreak.
+     */
+    installed_clients?: readonly string[]
+    suggested_runtime?: string
   }
 }
 
@@ -131,6 +176,19 @@ export interface ConnectDeps {
   isTty?: boolean
   /** Overridable so the #1719 installed-client prompt is testable without readline. */
   promptRuntime?: () => Promise<RuntimeId>
+  /**
+   * Overridable so the #2173 recovery-record write is testable without a real
+   * credential directory — and so a FAILING writer can be injected to prove
+   * that a broken record write never fails a completed setup.
+   */
+  writeOutcomeRecord?: typeof writeConnectOutcomeRecord
+  /**
+   * Overridable so the #2174 refusal hint is testable without depending on
+   * which agent clients happen to be installed on the machine running the
+   * suite — and so a THROWING scan can be injected to prove the refusal
+   * degrades to its un-hinted shape.
+   */
+  scanInstalledClients?: typeof scanInstalledClients
 }
 
 export interface ConnectResult {
@@ -142,7 +200,96 @@ export interface ConnectResult {
   outcome: ConnectOutcome
 }
 
+/**
+ * What a failing run has to hand back to the wrapper below (#2173).
+ *
+ * The failure record has to reach the same recovery file as the success
+ * record, and the only place the credential directory exists is inside the
+ * run. Reporting it into this box as soon as it exists keeps the whole body
+ * un-indented; the wrapper writes the failure outcome there and re-throws the
+ * error unchanged.
+ *
+ * A refusal that happens BEFORE credentials are written — `runtime_undetermined`,
+ * an expired setup challenge, the Node floor — leaves the box empty by
+ * construction. There is no directory to write into, and nothing was created
+ * that a caller could need to recover.
+ */
+interface ConnectRunTrace {
+  directory?: string
+  runtime?: string
+}
+
+/**
+ * The failure record a run already built, keyed on the error it threw (#2173).
+ *
+ * The run knows the RESOLVED runtime; a caller reconstructing the record from
+ * the same error knows only the raw `--runtime` hint, and detection can
+ * override that hint (#1672). Without this, one failed run could persist
+ * `runtime: claude-code` to the recovery file and print `runtime: cursor` on
+ * stdout — two records for one run, which is precisely the "the file is
+ * exactly what was emitted" guarantee the recovery file rests on.
+ *
+ * A WeakMap rather than a property on the error: nothing is mutated, nothing
+ * can be serialized into a message by accident, and the entry dies with the
+ * error it describes.
+ */
+const failureOutcomesByError = new WeakMap<object, ConnectOutcome>()
+
+/**
+ * The failure record for an error thrown by `runConnect` — the run's own, when
+ * it built one, and a freshly derived record otherwise (a rejection that never
+ * entered the run at all, such as an argument-parse refusal, or an injected
+ * one in a test).
+ */
+export function failureOutcomeFor(runtimeHint: string | undefined, error: unknown): ConnectOutcome {
+  if (error !== null && typeof error === 'object') {
+    const recorded = failureOutcomesByError.get(error)
+    if (recorded) return recorded
+  }
+  return failedConnectOutcome(runtimeHint, error)
+}
+
 export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}): Promise<ConnectResult> {
+  const trace: ConnectRunTrace = {}
+  try {
+    return await executeConnect(options, deps, trace)
+  } catch (err) {
+    // Built ONCE, from the resolved runtime, then both persisted and handed to
+    // the caller — so the file and the stdout line can never disagree. Derived
+    // even when there is no directory to write into: the caller still prints
+    // it, and the resolved runtime is the true answer either way.
+    const outcome = failedConnectOutcome(trace.runtime ?? options.runtime, err)
+    if (err !== null && typeof err === 'object') failureOutcomesByError.set(err, outcome)
+    if (trace.directory) await recordConnectOutcome(deps, trace.directory, outcome)
+    throw err
+  }
+}
+
+/**
+ * Park the terminal outcome where a caller that lost the stream can read it.
+ *
+ * Best-effort, and the swallow lives HERE rather than in the writer: the setup
+ * has already either succeeded or failed for its own reason by the time this
+ * runs, and neither verdict may be changed by a filesystem write that exists
+ * only as a convenience.
+ */
+async function recordConnectOutcome(
+  deps: ConnectDeps,
+  directory: string,
+  outcome: ConnectOutcome,
+): Promise<string | undefined> {
+  try {
+    return await (deps.writeOutcomeRecord ?? writeConnectOutcomeRecord)(directory, outcome)
+  } catch {
+    return undefined
+  }
+}
+
+async function executeConnect(
+  options: ConnectOptions,
+  deps: ConnectDeps,
+  trace: ConnectRunTrace,
+): Promise<ConnectResult> {
   // FIRST, before anything with a side effect (#1161).
   //
   // This runs ahead of the setup-token resolve, the storage preflight, key
@@ -191,6 +338,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     promptForRuntime: runtimeSelectionPrompt(options, deps),
   })
   if (!selection.runtime) {
+    const hint = await installedClientHintFor(deps)
     throw new ConnectError(
       'runtime_undetermined',
       'Could not determine the agent runtime: nothing was detected in this environment and no --runtime was given. ' +
@@ -198,6 +346,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
         `--runtime <name>, naming the harness you are running in — one of: ${RUNTIME_FLAG_VALUES} ` +
         '(the aliases cowork, codex and openclaw are accepted too). Do not guess: if your harness is ' +
         'not one of those, use --runtime other, which stores the credentials and prints the manual MCP steps. ' +
+        installedClientProse(hint) +
         'Nothing was written and the Haven setup token is still unused.',
       'rerun_connect_with_explicit_runtime',
       // #2091: the values must ride structurally too. The backend's setup
@@ -206,10 +355,16 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
       // every automation run in an undetected runtime (Codex in the field:
       // npx needs network, Codex runs network commands unsandboxed, and the
       // unsandboxed path carries none of the CODEX_* detection vars).
-      { allowedRuntimes: RUNTIME_FLAG_VALUE_LIST },
+      //
+      // #2174: the list alone still leaves the retry a nine-value guess. The
+      // scan below narrows it to what is actually on this machine — as a
+      // HINT. It does not select, and this stays a refusal: see
+      // `installedClientHint`.
+      { allowedRuntimes: RUNTIME_FLAG_VALUE_LIST, ...hint },
     )
   }
   const runtime = selection.runtime
+  trace.runtime = runtime
   const installCapabilities = runtimeInstallCapabilities(runtime)
 
   if (options.localMcp) {
@@ -333,6 +488,8 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     x402BindingSigner: setup.x402_binding_signer ?? undefined,
     warn: log,
   })
+  // From here on a failure has somewhere to leave its verdict (#2173).
+  trace.directory = credentialPaths.directory
   log(`Stored Haven identity credential locally: ${credentialPaths.identityPath}`)
   log(`Stored local signer credential locally: ${credentialPaths.signerPath}`)
   log(`Stored non-secret agent orientation locally: ${credentialPaths.agentPath}`)
@@ -408,12 +565,13 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   // started before this run keeps spending as that agent. Name the superseded
   // agents here, at the moment the user is watching, with the one action only
   // they can take. Connect never revokes or deletes credentials itself.
+  let supersededAgentIds: string[] = []
   try {
-    const supersededIds = await listOtherAgentIds(options.credentialsDir, credentialPaths.directory)
-    if (supersededIds.length > 0) {
+    supersededAgentIds = await listOtherAgentIds(options.credentialsDir, credentialPaths.directory)
+    if (supersededAgentIds.length > 0) {
       log('')
       log(
-        `Heads-up: this setup created a NEW agent. Your previous agent(s) — ${supersededIds.join(', ')} — ` +
+        `Heads-up: this setup created a NEW agent. Your previous agent(s) — ${supersededAgentIds.join(', ')} — ` +
           'still exist with their own keys, and any host that was already running keeps acting as them.',
       )
       log(
@@ -425,7 +583,11 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
       )
     }
   } catch {
-    // Best-effort — never let the heads-up break a completed setup.
+    // Best-effort — never let the heads-up break a completed setup. The
+    // outcome's `superseded_agent_ids` then reports the empty list, the same
+    // thing a genuinely clean machine reports: a scan that could not run is
+    // not evidence, and the field's doc comment says so rather than letting a
+    // caller read emptiness as a guarantee.
   }
 
   // Report the completed runtime state before polling for budget approval.
@@ -473,23 +635,39 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
 
   printNextSteps(runtimeInstall, log, approval)
 
+  const outcome = completionOutcome({
+    runtimeInstall,
+    delegateAddress: registration.delegate_address,
+    hostedMcpUrl: registration.hosted_mcp_url,
+    supersededAgentIds,
+    setupChallengeExpiresAt: setup.challenge.expires_at,
+    approvalRequired: registration.agent_status === 'pending_approval',
+  })
+
+  // #2173: park the verdict on disk before returning it. A harness whose watch
+  // window closed during the cold signer install gets the same object here that
+  // it missed on stdout — including the restart instruction and the read-only
+  // verification sequence. The FILENAME only: the credential directory is
+  // deliberately withheld from `--json` output, and naming it on the progress
+  // stream would put back what `redactPaths` takes out.
+  if (await recordConnectOutcome(deps, credentialPaths.directory, outcome)) {
+    log(`Saved this run's outcome to ${CONNECT_OUTCOME_FILENAME} in the agent's credential directory.`)
+  }
+
   return {
     setupId: registration.setup_id,
     agentId: registration.agent_id,
     delegateAddress: registration.delegate_address,
     credentialPaths,
-    outcome: completionOutcome({
-      runtimeInstall,
-      delegateAddress: registration.delegate_address,
-      setupChallengeExpiresAt: setup.challenge.expires_at,
-      approvalRequired: registration.agent_status === 'pending_approval',
-    }),
+    outcome,
   }
 }
 
 export function completionOutcome(input: {
   runtimeInstall: RuntimeInstallResult
   delegateAddress: string
+  hostedMcpUrl?: string
+  supersededAgentIds?: readonly string[]
   setupChallengeExpiresAt?: string
   approvalRequired: boolean
 }): ConnectOutcome {
@@ -525,12 +703,62 @@ export function completionOutcome(input: {
     delegate_address: /^0x[0-9a-fA-F]{40}$/.test(input.delegateAddress)
       ? shortAddress(input.delegateAddress)
       : '[delegate-address-redacted]',
+    // The endpoint Connect wrote into the runtime's MCP config, verbatim — the
+    // same string that already sits in the user's own config file. Passed
+    // through the secret filter anyway: this is the automation contract, the
+    // value is server-supplied, and belts are cheap (the #1589 stance).
+    ...(input.hostedMcpUrl ? { hosted_mcp_url: redactSecrets(input.hostedMcpUrl) } : {}),
+    // Always emitted on a completed run, empty list included: "no superseded
+    // agents" is a fact a caller needs, and an omitted key would be
+    // indistinguishable from an older connector that never reported it.
+    superseded_agent_ids: input.supersededAgentIds ?? [],
     ...(input.setupChallengeExpiresAt ? { setup_challenge_expires_at: input.setupChallengeExpiresAt } : {}),
     ...(runtimeInstall.errorCode
       ? { error: { code: runtimeInstall.errorCode, next_action: nextAction } }
       : {}),
   }
   return outcome
+}
+
+/**
+ * The installed-client scan, as a hint on the `runtime_undetermined` refusal
+ * (#2174).
+ *
+ * Best-effort and read-only: `scanInstalledClients` does filesystem existence
+ * checks and nothing else, and this runs at a point where no setup token has
+ * been resolved and no key or credential exists. A scan that throws degrades
+ * to the un-hinted refusal rather than replacing a precise refusal with a
+ * filesystem error — the caller's problem is still "name your runtime", and
+ * an `EACCES` on someone's home directory must not bury that.
+ *
+ * Returns `{}` rather than an empty list when the scan found nothing, so the
+ * refusal carries no `installed_clients` key at all: "the scan found none" and
+ * "the scan could not run" are both honestly represented by absence, whereas
+ * an empty array would assert a finding neither case made.
+ */
+async function installedClientHintFor(deps: ConnectDeps): Promise<Partial<InstalledClientHint>> {
+  try {
+    const candidates = await (deps.scanInstalledClients ?? scanInstalledClients)({ env: deps.env })
+    const hint = installedClientHint(candidates)
+    return hint.installedClients.length > 0 ? hint : {}
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * The same finding in the prose channel, so the human and machine refusals
+ * cannot say different things about the same machine. Phrased as evidence
+ * ("Haven can see …"), never as an instruction to use it: the retry is still
+ * the agent's explicit choice.
+ */
+function installedClientProse(hint: Partial<InstalledClientHint>): string {
+  const found = hint.installedClients ?? []
+  if (found.length === 0) return ''
+  const suggestion = hint.suggestedRuntime
+    ? ` The likeliest is ${hint.suggestedRuntime}, but Haven will not choose for you — pass it yourself if it is right.`
+    : ' Haven will not choose between them for you.'
+  return `Haven can see these agent clients installed here, likeliest first: ${found.join(', ')}.${suggestion} `
 }
 
 /**
@@ -612,6 +840,12 @@ export function failedConnectOutcome(runtimeHint: string | undefined, error: unk
       ...(error instanceof ConnectError && message ? { message: redactForAutomation(message) } : {}),
       ...(error instanceof ConnectError && error.details.allowedRuntimes
         ? { allowed_runtimes: error.details.allowedRuntimes }
+        : {}),
+      ...(error instanceof ConnectError && error.details.installedClients?.length
+        ? { installed_clients: error.details.installedClients }
+        : {}),
+      ...(error instanceof ConnectError && error.details.suggestedRuntime
+        ? { suggested_runtime: error.details.suggestedRuntime }
         : {}),
     },
   }

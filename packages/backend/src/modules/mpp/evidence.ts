@@ -30,6 +30,7 @@ import { getTokenBalance } from '../../rails/allowance-module.js'
 import { quoteFee, recordSettledFee } from '../fee/index.js'
 import { feedSettledPaymentBestEffort } from '../reporting/index.js'
 import { isProtocolPaymentRail } from './rail-dispatch.js'
+import { observeErc7710Settlement } from '../x402/settlement-observed.js'
 import type { EvidenceBody, MppHandlerResult } from './types.js'
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
@@ -39,7 +40,17 @@ export type PaymentProofStatus =
   | 'merchant_response_observed'
   | 'protocol_receipt_attached'
 
-type MachinePaymentReferenceKind = 'payment_intent' | 'approval_request'
+/**
+ * #2085: narrowed to the only constructible value. `FIND_INTENT_FOR_EVIDENCE_SQL`
+ * selects `'payment_intent'::TEXT AS kind` as a literal FROM `payment_intents`,
+ * and #2055 dropped `approval_requests`. Pinned by
+ * `infra/repositories/__tests__/approval-kind-unconstructible.test.ts`.
+ *
+ * This narrows what evidence is WRITTEN. It does not touch the read side:
+ * migration 070 dropped the table with CASCADE and deliberately left historical
+ * evidence rows holding `approval_request_id`, which `mapEvidence` still needs.
+ */
+type MachinePaymentReferenceKind = 'payment_intent'
 
 export interface MachinePaymentEvidenceSource {
   id: string
@@ -57,6 +68,10 @@ export interface MachinePaymentEvidenceSource {
   status: string
   source?: string | null
   payment_rail?: string | null
+  /** #2092: the authorizing rail — the erc7710 completion seam guards on it. */
+  execution_rail?: string | null
+  /** #2092: authorize time — the origin of the erc7710 settlement window. */
+  created_at?: string | null
   payment_resource_url?: string | null
   x402_resource_url?: string | null
   merchant_address?: string | null
@@ -130,12 +145,7 @@ interface PaymentIntentEvidenceRow extends MachinePaymentEvidenceSource {
   tx_hash: string
 }
 
-interface ApprovalRequestEvidenceRow extends MachinePaymentEvidenceSource {
-  kind: 'approval_request'
-  tx_hash: string
-}
-
-type ProtocolPaymentEvidenceRow = PaymentIntentEvidenceRow | ApprovalRequestEvidenceRow
+type ProtocolPaymentEvidenceRow = PaymentIntentEvidenceRow
 
 interface EvidenceLogger {
   warn: (payload: Record<string, unknown>, message: string) => void
@@ -161,14 +171,8 @@ function referenceKindForPayment(intent: MachinePaymentEvidenceSource): MachineP
   return intent.kind ?? 'payment_intent'
 }
 
-function referenceColumnForPayment(intent: MachinePaymentEvidenceSource): 'payment_intent_id' | 'approval_request_id' {
-  return referenceKindForPayment(intent) === 'approval_request'
-    ? 'approval_request_id'
-    : 'payment_intent_id'
-}
-
-function expectedStatusForPayment(intent: MachinePaymentEvidenceSource): string {
-  return referenceKindForPayment(intent) === 'approval_request' ? 'executed' : 'confirmed'
+function expectedStatusForPayment(_intent: MachinePaymentEvidenceSource): string {
+  return 'confirmed'
 }
 
 function normalizeJson(value: Record<string, unknown> | string | null | undefined): string | null {
@@ -205,9 +209,11 @@ export async function recordMachinePaymentEvidenceBase(
 
   const resourceUrl = resourceUrlForPayment(intent)
   if (!resourceUrl) return
-  const referenceColumn = referenceColumnForPayment(intent)
-  const paymentIntentId = referenceColumn === 'payment_intent_id' ? intent.id : null
-  const approvalRequestId = referenceColumn === 'approval_request_id' ? intent.id : null
+  const paymentIntentId = intent.id
+  // #2085: a NEW evidence row is always anchored to a payment intent. The
+  // COLUMN survives with historical values (migration 070) and `mapEvidence`
+  // still reads it — only this write branch is gone.
+  const approvalRequestId = null
 
   // Book-time FX (migration 026): captured here, at settlement, and never
   // overwritten (the COALESCE in the repository's upsert). A pricing outage
@@ -219,7 +225,6 @@ export async function recordMachinePaymentEvidenceBase(
   const fxAt = sek ? new Date().toISOString() : null
 
   await upsertEvidenceBase({
-    referenceColumn,
     paymentIntentId,
     approvalRequestId,
     agentId: intent.agent_id,
@@ -327,8 +332,38 @@ export async function attachMachinePaymentEvidence(
     throw new Error('merchant_status_invalid')
   }
 
-  const payment = await findProtocolPaymentForEvidence(input.agentId, input.paymentId)
+  let payment = await findProtocolPaymentForEvidence(input.agentId, input.paymentId)
   if (!payment) return null
+
+  // #2092: the scheme-agnostic completion seam. On erc7710 direct settlement
+  // the MERCHANT redeems the delegation chain, so Haven never learns the
+  // settlement hash on its own and the intent sits at `submitted` — which the
+  // gate below would reject, leaving the whole scheme without evidence, and so
+  // invisible to the Fortnox feed, `GET /receipts`, merchant-receipt capture
+  // and transaction history.
+  //
+  // Rather than teaching each consumer about schemes, complete the intent HERE
+  // from the hash the agent just reported — after verifying it on-chain — so
+  // that from the next line onwards an erc7710 payment is indistinguishable
+  // from a 3009 one and the pipeline below runs unchanged.
+  //
+  // `observeErc7710Settlement` is a no-op for every other shape, so eip3009
+  // and the legacy rail reach the gate below exactly as before.
+  const observation = await observeErc7710Settlement(payment, input.txHash)
+  if (observation.outcome === 'unverified') {
+    // Fail closed: the intent is still `submitted` and no evidence exists.
+    throw new Error(
+      observation.retryable ? 'settlement_unobservable' : 'settlement_unverified',
+    )
+  }
+  if (observation.outcome === 'confirmed') {
+    // Re-read rather than patch the in-memory row: `confirmed_at` is the
+    // database's NOW(), and it is copied onto the evidence row below.
+    const reloaded = await findProtocolPaymentForEvidence(input.agentId, input.paymentId)
+    if (!reloaded) return null
+    payment = reloaded
+  }
+
   if (payment.status !== expectedStatusForPayment(payment) || !payment.tx_hash) {
     throw new Error('payment_not_confirmed')
   }
@@ -352,9 +387,7 @@ export async function attachMachinePaymentEvidence(
   await recordMachinePaymentEvidenceBase(payment)
 
   const proofStatus = proofStatusForAttach(input)
-  const referenceColumn = referenceColumnForPayment(payment)
   const evidence = await attachEvidenceProof<MachinePaymentEvidenceRow>({
-    referenceColumn,
     paymentId: payment.id,
     agentId: input.agentId,
     proofStatus,
@@ -369,7 +402,7 @@ export async function attachMachinePaymentEvidence(
   })
 
   if (evidence) {
-    await resolveReconciliationForPayment(referenceColumn, payment.id, input.agentId)
+    await resolveReconciliationForPayment(payment.id, input.agentId)
 
     // Post-settlement delegate reconciliation (#716, epic #713): a settle
     // proof just arrived, so for standard x402 (funding went to the agent's
@@ -378,7 +411,6 @@ export async function attachMachinePaymentEvidence(
     // the sweep/monitor to discover later. Best-effort — a flaky RPC must
     // never fail the proof attach.
     if (
-      referenceColumnForPayment(payment) === 'payment_intent_id' &&
       (payment.payment_rail ?? payment.source) === 'x402' &&
       (proofStatus === 'protocol_receipt_attached' || proofStatus === 'merchant_response_observed')
     ) {
@@ -436,6 +468,17 @@ export async function reconcileDelegateResidueAfterSettlement(
  * Wire-shape a `machine_payment_evidence` row for an agent response. Strips
  * the raw proof-header VALUES (`payment_proof_header`, `protocol_receipt_header`)
  * — those are Haven-internal verification material, never echoed back.
+ *
+ * ## `approval_request_id` here is LIVE — do not delete it (#2085)
+ *
+ * Nothing writes it any more, which makes it look like the dead code #2085
+ * removed elsewhere in this file. It is not. Migration 070 dropped
+ * `approval_requests` with `DROP TABLE ... CASCADE` **specifically so that
+ * evidence rows would survive** — its own header calls the alternative an FK
+ * hazard that would cascade away proof-of-payment records. Historical rows
+ * therefore still carry `approval_request_id`, and it is the only anchor they
+ * have: removing the fallback below would return `payment_id: null` for every
+ * pre-#2055 approval-era receipt an agent asks about.
  */
 export function mapEvidence(row: MachinePaymentEvidenceRow) {
   return {
@@ -526,6 +569,31 @@ export async function attachEvidenceHandler(
     const marker = err instanceof Error ? err.message : String(err)
     if (marker === 'payment_not_confirmed') {
       return { statusCode: 409, body: { error: 'Evidence requires a confirmed payment' } }
+    }
+    // #2092: the erc7710 completion seam refused. Distinct statuses because
+    // the remedies differ — 503 says "the chain could not be read, or the
+    // transaction is not mined yet; report it again", while 409 says "that
+    // transaction does not settle this payment, and reporting it again will
+    // not change that". Neither confirmed anything.
+    if (marker === 'settlement_unobservable') {
+      return {
+        statusCode: 503,
+        body: {
+          error:
+            'The reported settlement transaction could not be verified on-chain yet — ' +
+            'the payment is unchanged; retry once it is mined',
+        },
+      }
+    }
+    if (marker === 'settlement_unverified') {
+      return {
+        statusCode: 409,
+        body: {
+          error:
+            'The reported settlement transaction does not match this payment on-chain — ' +
+            'the payment was not confirmed',
+        },
+      }
     }
     if (marker === 'tx_hash_mismatch') {
       return { statusCode: 409, body: { error: 'txHash does not match payment intent' } }

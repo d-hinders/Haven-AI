@@ -21,7 +21,7 @@ covers:
   - .github/workflows/qa-live.yml
   - .claude/commands/qa-dev.md
   - .claude/commands/qa-explore-ui.md
-last-verified: "2026-08-25" # #2016: the money-flow scenario rows named an approval QUEUE for over-budget. That queue was legacy-rail-only and no longer exists anywhere (#1986/#1989) — over-budget now REVERTS on-chain during gas estimation, so a tester following the old row would have recorded a correct refusal as a failure. Both over-budget rows rewritten, and each now asks for the ENFORCER named in the revert reason: a bare 502 is also what a bundler outage looks like. Scope: those two rows only; the rest of the template was NOT re-verified. Prior: #1768: canonical commands re-read against `packages/frontend/package.json` — `test:e2e:gate` replaces the desktop/full pair, `test:e2e:mobile` added. Prior: re-verified for #1227 (db-mock ratchet joins the gates) — no claim here affected
+last-verified: "2026-08-27" # #2097: a file this template `covers:` by exact path (`docs/operations/e2e-qa-runbook.md`) was re-verified — the CSV export row notes the new `initiator` column; the run template itself is unchanged. Scope: that covered-file relationship only. Prior: #2103: the Cleanup And Residual State checklist asked a run to confirm "Pending approvals were rejected, completed, or explicitly recorded" — residual state that cannot exist, so the item was unanswerable-or-n/a on every run. Removed. The money-flow scenario rows are untouched (they were corrected for #2082 in this same file and are accurate). Scope: that one checkbox. Prior: #2082: the x402 over-budget row's parenthetical asserted that erc7710 does NOT refuse at authorize and is enforced only at merchant redemption — true when #2016 wrote it, false now: the erc7710 branch refuses 403 `delegation_budget_exceeded` pre-funding. The clause is dropped and a row for the new thirteenth leg (`x402-erc7710-over-budget-rejected`) is added, with the evidence column naming `error_code`/`remaining_atomic` because a bare 403 is also what a MISSING delegation returns. Scope: those two rows only; nothing else in this file was re-verified. Prior: #2016: the money-flow scenario rows named an approval QUEUE for over-budget. That queue was legacy-rail-only and no longer exists anywhere (#1986/#1989) — over-budget now REVERTS on-chain during gas estimation, so a tester following the old row would have recorded a correct refusal as a failure. Both over-budget rows rewritten, and each now asks for the ENFORCER named in the revert reason: a bare 502 is also what a bundler outage looks like. Scope: those two rows only; the rest of the template was NOT re-verified. Prior: #1768: canonical commands re-read against `packages/frontend/package.json` — `test:e2e:gate` replaces the desktop/full pair, `test:e2e:mobile` added. Prior: re-verified for #1227 (db-mock ratchet joins the gates) — no claim here affected
 ---
 
 <!--
@@ -124,7 +124,8 @@ Record one row per deterministic or manual scenario.
 |---|---|---|---|---|---|---|
 | within-budget direct settle | Settles and is logged | pass/fail/skip | | | | |
 | over-budget direct refusal | Refused by the on-chain caveat enforcer before it becomes signable; never auto-executed (#2016 — there is no approval queue on the delegation rail) | pass/fail/skip | | | Record the enforcer named in the revert reason, not just the 502 | |
-| x402 over-budget reject | Rejects with no signable intent, on the EIP-3009 funding leg (#2016 — erc7710 does NOT refuse at authorize; it is enforced at merchant redemption) | pass/fail/skip | | | Record the enforcer named in the revert reason | |
+| x402 over-budget reject | Rejects with no signable intent, on the EIP-3009 funding leg (#2016) | pass/fail/skip | | | Record the enforcer named in the revert reason | |
+| x402 erc7710 over-budget reject | Rejects with no signable intent on the erc7710 direct-settlement scheme too — HTTP 403 `delegation_budget_exceeded` before a settlement child, an intent row or a relayer-paid delegate deploy exists (#2082). Until then erc7710 did NOT refuse at authorize and the budget was reached only at merchant redemption | pass/fail/skip | | | Record `error_code` and `remaining_atomic`, not just the 403 — a bare 403 is also what a MISSING delegation returns | |
 | x402 settle | Funding and merchant settlement complete | pass/fail/skip | | | | |
 | x402 sweep recovery | Stranded USDC at or above the sweep floor returns to the originating Haven wallet; dust below the floor is left on the delegate | pass/fail/skip | | | Record actual chain and `below_min`/floor state | |
 
@@ -153,7 +154,6 @@ empty relayer or unavailable preview.
 
 Mark cleanup items `n/a` when the run mode created no live state.
 
-- [ ] Pending approvals were rejected, completed, or explicitly recorded.
 - [ ] Stranded delegate funds were swept or explicitly recorded with owner and
   follow-up.
 - [ ] Post-run Safe/delegate balances and remaining allowance were captured.

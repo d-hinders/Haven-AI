@@ -44,6 +44,30 @@ import { decodeBase64Json } from './base64.js'
 
 const MERCHANT_BODY_SNIPPET_LIMIT = 1000
 
+/**
+ * Evidence-report retry policy for a RETRYABLE refusal (#2117).
+ *
+ * The backend already distinguishes two refusals on `POST
+ * /machine-payments/evidence` and says so in the status code: `503`
+ * (`settlement_unobservable`) means "the chain could not be read, or the
+ * settlement is not mined yet — report it again", and `409` means "that is a
+ * settled no". The SDK discarded that distinction in a bare `catch {}`,
+ * treating both as best-effort silence — so on erc7710, where the reported hash
+ * is the ONLY thing that produces an evidence row, a transaction that simply
+ * had not been mined yet at report time meant the payment never reached the
+ * user's books at all.
+ *
+ * Bounded, and terminal on anything that is not a 503: a retry loop against a
+ * settled no is just noise, and the total wait has to stay far under any
+ * caller's patience because the paid resource is already in hand. Four attempts
+ * over ~7s of backoff covers the mine-latency case this exists for without ever
+ * becoming a reason a completed payment feels slow.
+ */
+const EVIDENCE_RETRY_DELAYS_MS = [1_000, 2_000, 4_000]
+
+/** The backend's retryable refusal — see `modules/mpp/evidence.ts`. */
+const EVIDENCE_RETRYABLE_STATUS = 503
+
 export type PaymentPoster = <T>(path: string, body: Record<string, unknown>) => Promise<T>
 export type PaymentStatusReader = (paymentId: string) => Promise<PaymentStatusResult>
 export type AgentReader = () => Promise<{ delegateAddress?: string }>
@@ -55,6 +79,8 @@ export interface MerchantCompletionOptions {
   getAgent: AgentReader
   delegateAddress: string | undefined
   x402Wallet: string | undefined
+  /** Injectable only so tests do not spend the real backoff. */
+  sleep?: (ms: number) => Promise<void>
 }
 
 export class MerchantCompletion {
@@ -64,8 +90,10 @@ export class MerchantCompletion {
   private readonly getAgent: AgentReader
   private readonly delegateAddress: string | undefined
   private readonly x402Wallet: string | undefined
+  private readonly sleep: (ms: number) => Promise<void>
 
   constructor(options: MerchantCompletionOptions) {
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
     this.post = options.post
     this.merchantTransport = options.merchantTransport
     this.getPaymentStatus = options.getPaymentStatus
@@ -328,8 +356,7 @@ export class MerchantCompletion {
     protocolReceiptHeaderName?: string
     protocolReceiptHeader?: string
   }): Promise<void> {
-    try {
-      await this.post('/machine-payments/evidence', {
+    const body = {
         paymentId: input.paymentId,
         rail: input.rail,
         txHash: input.txHash,
@@ -344,10 +371,24 @@ export class MerchantCompletion {
         protocolReceiptPayload: input.protocolReceiptHeader
           ? parseProtocolReceiptHeader(input.protocolReceiptHeader)
           : undefined,
-      })
-    } catch {
-      // Evidence reporting is best-effort. The paid resource response remains
-      // the caller-visible result when merchant retry succeeded.
+    }
+
+    // Still best-effort in the sense that matters — nothing here may change
+    // the caller-visible outcome, because the resource is already paid for and
+    // delivered. What changed (#2117) is that a RETRYABLE refusal is no longer
+    // swallowed identically to a terminal one. On erc7710 this report is the
+    // only thing that produces an evidence row, and therefore the only thing
+    // that puts the payment in the user's books.
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await this.post('/machine-payments/evidence', body)
+        return
+      } catch (err) {
+        const retryable =
+          err instanceof HavenApiError && err.statusCode === EVIDENCE_RETRYABLE_STATUS
+        if (!retryable || attempt >= EVIDENCE_RETRY_DELAYS_MS.length) return
+        await this.sleep(EVIDENCE_RETRY_DELAYS_MS[attempt])
+      }
     }
   }
 }

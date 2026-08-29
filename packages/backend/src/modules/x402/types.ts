@@ -55,16 +55,6 @@ export interface X402AuthorizeBody {
   /** #1307: optional MCP merchant-call context, stored for settle-leg rehydration. */
   mcpCallContext?: X402McpCallContextInput
 }
-
-export interface X402ApprovalRow {
-  id: string
-  status: string
-  token_symbol: string
-  amount_human: string
-  expires_at: string
-  machine_challenge_id: string | null
-}
-
 /** A route-serializable {statusCode, body} pair — orchestration returns this instead of touching `reply` directly. */
 export interface X402HandlerResult {
   code: number

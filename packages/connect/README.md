@@ -93,7 +93,7 @@ minutes. Two rules follow:
 2. **Tombstone a directory before (or instead of) deleting it:**
 
    ```
-   npx @haven_ai/connect@alpha --tombstone ~/.haven/agents/<id> --reason "superseded"
+   npx @haven_ai/connect@alpha --tombstone ~/.haven/agents/<directory> --reason "superseded" --json
    ```
 
    This replaces the directory's signer wrapper with a diagnostic that logs the
@@ -102,6 +102,47 @@ minutes. Two rules follow:
    `--doctor`. It touches no key material and revokes nothing — revoke the
    agent on the Haven agent page yourself. Delete the tombstone only once every
    long-lived host has been restarted.
+
+   **Pass a real DIRECTORY, not an agent id.** A named agent lives at its wiring
+   slug, which never equals its agent id — so `~/.haven/agents/<agent-id>` does
+   not exist for one, and the command refuses with
+   `tombstone_directory_not_found` having retired nothing. List `~/.haven/agents`
+   or read the `directory` values out of `--doctor --json`.
+
+   Under `--json`, success is `{"tombstoned": true, …}` on stdout with exit 0,
+   and a refusal is `{"tombstoned": false, "error": {"code", "next_action"}}`
+   with exit 1 — so check the result rather than assuming silence means success
+   (#2175). The `message` field is present only for connector-authored refusals;
+   an unexpected filesystem error keeps its raw text on stderr alone.
+
+### Unwiring an agent (`--unwire`, #2169)
+
+Connect has always been able to *write* a pair into a runtime config and never
+able to *erase* one — so a "reset" left the old `mcp_servers` pair and (on
+Hermes) the `MCP_HAVEN_API_KEY` dotenv line behind, and the runtime quoted as
+one agent while signing as another. `--unwire` is the erase half:
+
+```
+npx @haven_ai/connect@alpha --unwire ~/.haven/agents/<directory> [--reason "..."]
+npx @haven_ai/connect@alpha --unwire --name research [--reason "..."]
+```
+
+It tombstone-first (so a stale long-lived host still hears `HAVEN-TOMBSTONE`,
+never a masked `ENOENT`), then removes THAT agent's hosted + signer pair from
+every runtime config it appears in (Hermes YAML, Codex TOML, the Cursor / VS
+Code / Insiders / Claude Desktop JSON configs), plus the Hermes dotenv API-key
+line — bare `MCP_HAVEN_API_KEY` or named `MCP_HAVEN_<SLUG>_API_KEY`. Finally it
+tears down the target directory's local key material (signer key, any abandoned
+re-key, the stored API key) so `--doctor` reports `retired`, not the
+still-spend-capable `superseded`; the #2155 tombstone mirror keeps the record.
+
+An **unnamed** pair (`haven` / `haven-signer`) is shared by every unnamed agent
+and is only removed when this directory's wrapper is the one the config
+launches (or its key is the one the Hermes env holds) — otherwise `--unwire`
+**refuses** rather than unwire a different, working agent. Nothing is ever
+revoked on the backend; `connect reports, the user decides` (#1688) survives,
+and revocation stays an owner action on the Haven agent page. Restart every
+long-lived host afterwards, as with any retirement.
 
 ### Structured output for automation
 
@@ -113,16 +154,47 @@ budget-approval wait so the record is emitted promptly; approve in the Haven
 dashboard whenever ready and verify later with the read-only `haven_get_agent`
 tool. The object includes runtime/topology status,
 probe result, activation and next-action guidance, approval state/expiry (null
-when the backend does not provide an approval expiry), and the two
-read-only verification tools. It contains no API key, private key, credential
+when the backend does not provide an approval expiry), the two
+read-only verification tools, `hosted_mcp_url`, and `superseded_agent_ids`. It
+contains no API key, private key, credential
 contents, full credential paths, or full delegate address. The same redacted
 object is available to library callers as `runConnect(...).outcome`; the older
 fields remain for additive compatibility.
+
+`hosted_mcp_url` is the hosted MCP endpoint this run wired up — **not** the
+backend URL you passed as `--api`. The hosted MCP server is a separate
+deployment, so the two differing is intended topology, not an environment
+mismatch. It is non-secret: the same string goes into your own MCP config file,
+and the API key travels beside it in a header.
+
+`superseded_agent_ids` lists the other agent directories on this machine. A
+re-run mints a NEW agent and retires nothing, so those older agents still hold
+live API and signing keys — revoke them on the Haven agent page if you meant to
+replace them. Empty on a clean first run; an empty list is not a guarantee,
+since a scan that cannot read the credential root also yields one rather than
+failing a completed setup.
 
 For a recoverable install, configuration, probe, consent, or manual-runtime
 condition, inspect `error.code` and `error.next_action`, then follow the safe
 next action. A failed setup emits `outcome: "failed"` with a stable error code;
 it never presents credential material as a recovery diagnostic.
+
+### Recovering the record after a lost stream
+
+Connect also writes its terminal outcome to `last-connect-outcome.json` in the
+agent's credential directory (`~/.haven/agents/<slug-or-agent-id>/`) — the same
+object, pretty-printed, for every terminal state. **If your harness stopped
+watching before the connector finished, read that file rather than guessing
+from your runtime's MCP listing.** A first run downloads and installs the
+signer, which can take several minutes on a cold cache; a command harness that
+gives up during it sees the install heartbeat as the last line and never the
+verdict. The setup usually finished.
+
+A refusal that happens before any credentials are written (an undetermined
+runtime, an expired setup challenge, an unsupported Node) writes no file,
+because nothing was created that could need recovering. The write is
+best-effort and never changes the verdict: a setup that completed stays
+completed even if the record could not be written.
 
 If the setup challenge expires, return to Haven to start a fresh connection and
 rerun Connect. If a runtime write, installation, or probe fails, follow the

@@ -15,9 +15,14 @@
  * Unknown fields are ignored by today's loader, so the superset is safe.
  *
  * Important: `budget_summary` is a SNAPSHOT at creation time. The user can
- * change allowances later in Haven, and the on-chain Safe AllowanceModule is
- * the authoritative gate either way. Tools that need live data should call
- * `haven_get_allowances` against Haven's API.
+ * change the budget later in Haven, and the on-chain policy is the
+ * authoritative gate either way — on the delegation rail that is the budget
+ * delegation's caveat enforcers. (#2107: this said "the on-chain Safe
+ * AllowanceModule", which #2106 had already corrected in this file's OUTPUT
+ * without correcting the comment describing it. The census strips comments by
+ * design, so nothing would ever have flagged it — fixed here because adding
+ * this file to the guard asserts it is clean, and that assertion should be
+ * true of the whole file rather than only the part the scanner reads.)
  */
 
 import { getChainConfig } from '@/lib/chains'
@@ -141,14 +146,22 @@ export function buildAgentCredential(input: HandoffInput): AgentCredentialArtifa
         'Windows (PowerShell): ' +
         '`icacls path\\to\\this\\file.json /inheritance:r /grant:r "$env:UserName:R"`. ' +
         'Do not store this file in cloud-synced folders (iCloud, Dropbox, OneDrive) or shared dotfile repositories.',
+      // #2106: this note named the Safe AllowanceModule to every agent on
+      // every rail, and it lands in `~/.haven/*.json` rather than staying in
+      // the browser. On the delegation rail the authority is a signed budget
+      // delegation whose caveat enforcers refuse an out-of-policy payment
+      // on-chain; the AllowanceModule rail is retired (#1440). The claim that
+      // is true on both — the on-chain policy is the gate, this file is a
+      // stale-able snapshot — is stated WITHOUT naming a primitive, so the
+      // note cannot go false again the next time a rail changes.
       budget_summary:
-        'budget_summary is a snapshot of the on-chain Safe AllowanceModule limits at credential ' +
-        'creation. The on-chain limits are the authoritative gate. If you change allowances in ' +
-        'Haven later, this snapshot will be stale; the agent will still be constrained by the ' +
-        'updated on-chain limits.',
+        'budget_summary is a snapshot of this agent’s on-chain spend authority at credential ' +
+        'creation. The on-chain policy is the authoritative gate — a payment outside it is ' +
+        'refused on-chain, not by this file. If you change the budget in Haven later, this ' +
+        'snapshot will be stale; the agent stays constrained by the updated on-chain policy.',
       refresh:
         'You can update the budget in Haven without regenerating this credential. The same api_key ' +
-        'and delegate_key continue to work; only the on-chain allowances change.',
+        'and delegate_key continue to work; only the on-chain policy changes.',
     },
   }
 

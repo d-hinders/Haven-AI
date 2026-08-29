@@ -143,6 +143,54 @@ describe('the silent-capture guard', () => {
     expect(CHAIN_SILENT_CAPTURES.map((c) => c.route)).toEqual(['/custody'])
   })
 
+  /**
+   * #2106 made `/custody` conditionally chain-fed: it renders a per-account
+   * card and only the LEGACY Safe branch mounts `useOnChainAllowances`. The
+   * delegation-rail card proves custody from two API reads and touches the
+   * chain not at all, so zero reads is correct there — but only there.
+   *
+   * Both directions are pinned, because an exemption that only ever says "fine"
+   * is the kind of guard this repo keeps finding already broken.
+   */
+  describe('a capture may declare a route legitimately chain-silent (#2106)', () => {
+    it('does not report a declared-silent route that made no read', () => {
+      beginChainWatch('scenario:custody-delegation-rail', 'desktop')
+      noteChainWatchNavigation(`${BASE}/custody`)
+      endChainWatch([/^\/custody(\/|$)/])
+      expect(CHAIN_SILENT_CAPTURES).toEqual([])
+    })
+
+    it('still reports a route the capture did NOT declare', () => {
+      // The declaration is per route: silence on /custody must not buy
+      // silence on /agents in the same capture.
+      beginChainWatch('scenario:custody-delegation-rail', 'desktop')
+      noteChainWatchNavigation(`${BASE}/custody`)
+      noteChainWatchNavigation(`${BASE}/agents`)
+      endChainWatch([/^\/custody(\/|$)/])
+      expect(CHAIN_SILENT_CAPTURES.map((c) => c.route)).toEqual(['/agents'])
+    })
+
+    it('reports a declared-silent route that DID read — the declaration is stale', () => {
+      // The direction that keeps this honest. The day the delegation card
+      // starts reading the chain, the exemption stops being true and must
+      // fail rather than quietly widen.
+      beginChainWatch('scenario:custody-delegation-rail', 'desktop')
+      noteChainWatchNavigation(`${BASE}/custody`)
+      noteChainReadObserved('eth_call')
+      endChainWatch([/^\/custody(\/|$)/])
+      expect(CHAIN_SILENT_CAPTURES).toHaveLength(1)
+      expect(CHAIN_SILENT_CAPTURES[0].route).toBe('/custody')
+      expect(CHAIN_SILENT_CAPTURES[0].unexpectedRead).toMatch(/declared chain-silent/i)
+    })
+
+    it('leaves the guard armed for a capture that declares nothing', () => {
+      beginChainWatch('scenario:custody-legacy-rail', 'desktop')
+      noteChainWatchNavigation(`${BASE}/custody`)
+      endChainWatch()
+      expect(CHAIN_SILENT_CAPTURES.map((c) => c.route)).toEqual(['/custody'])
+    })
+  })
+
   it('a read seen after the watch closed does not excuse the capture it left behind', () => {
     // Per-context bookkeeping: `endChainWatch` closes the window. A read seen
     // after it belongs to nothing, and must not retroactively clear a capture
@@ -249,14 +297,73 @@ describe('the shared chain fixture', () => {
     expect(decodeAbiParameters(parseAbiParameters('bool'), data)[0]).toBe(true)
   })
 
-  it('discovers exactly the MANAGED delegate — a stranger here would render an unmanaged-delegate warning in every capture', () => {
+  /** The on-chain delegate set the AllowanceModule fixture reports. */
+  const onChainDelegates = (): string[] => {
     const data = call(allowanceModule, sel('function getDelegates(address,uint48,uint8) view returns (address[],uint48)'))
     const [delegates] = decodeAbiParameters(parseAbiParameters('address[], uint48'), data)
-    const managed = (FIXTURE_AGENTS as { delegate_address: string | null }[])
-      .map((a) => a.delegate_address)
-      .filter((d): d is string => Boolean(d))
-      .map((d) => d.toLowerCase())
-    expect((delegates as string[]).map((d) => d.toLowerCase())).toEqual(managed)
+    return (delegates as string[]).map((d) => d.toLowerCase())
+  }
+
+  type FixtureAgent = { id: string; delegate_address: string | null; account_type: string | null }
+  const fixtureAgents = FIXTURE_AGENTS as unknown as FixtureAgent[]
+
+  it('discovers no STRANGER — an unlisted delegate would render an unmanaged-delegate warning in every capture', () => {
+    // The invariant this guard has always been about, stated as what it is: a
+    // CONTAINMENT, not an equality. `useAgentPanelState.ts:261-271` builds
+    // `unmanagedDelegates` by subtracting the managed set (every non-null
+    // `delegate_address` the API fixture serves) from the on-chain set, so an
+    // on-chain delegate Haven does not know about is what puts an
+    // `UnmanagedDelegateCard` into every `/agents` capture.
+    const managed = new Set(
+      fixtureAgents
+        .map((a) => a.delegate_address)
+        .filter((d): d is string => Boolean(d))
+        .map((d) => d.toLowerCase()),
+    )
+    const chainDelegates = onChainDelegates()
+    expect(chainDelegates.length).toBeGreaterThan(0) // non-vacuity: an empty set contains nothing
+    for (const delegate of chainDelegates) {
+      expect(managed.has(delegate)).toBe(true)
+    }
+  })
+
+  it('lists exactly the LEGACY-rail delegates — the module is the retired rail\'s registry, not a roster of every agent', () => {
+    // #2194 replaced an equality against EVERY non-null fixture delegate. That
+    // was true only while the one agent with a delegate address happened to be
+    // the legacy-rail one, and it broke the moment `agent-research` — a
+    // `delegator_hybrid` agent — honestly got the delegate address its x402
+    // payment intents prove it has.
+    //
+    // `getDelegates` is written by the AllowanceModule's own `addDelegate`, on
+    // the Safe rail #1440/#2020 retired. A delegation-rail agent's authority is
+    // a delegation grant; nothing registers its delegate with the module. And
+    // the difference is RENDERED, not bookkeeping: `useOnChainAllowances` keys
+    // its map off this list rather than off its `managedDelegates` argument
+    // (`hooks/useOnChainAllowances.ts:110-127`), and `makeAllowanceChainFixture`
+    // answers `getTokenAllowance` from `rows` without consulting the delegate
+    // argument — so a delegation-rail delegate listed here would render the
+    // LEGACY agent's 500 USDC / daily budget on its card
+    // (`AgentPanel.tsx:174-176`), beside its own 250 USDC / weekly delegation.
+    const legacyRail = fixtureAgents
+      .filter((a) => a.account_type === null && a.delegate_address)
+      .map((a) => (a.delegate_address as string).toLowerCase())
+    expect(legacyRail.length).toBeGreaterThan(0) // non-vacuity, both directions
+    expect(onChainDelegates()).toEqual(legacyRail)
+  })
+
+  it('leaves every DELEGATION-rail delegate off-chain, so no card renders two spend limits', () => {
+    // The complement of the test above, asserted rather than implied — the
+    // shape #2194 was filed about is a value that is legal for its type and
+    // impossible for its path, and a one-sided equality does not say which
+    // side moved.
+    const delegationRail = fixtureAgents
+      .filter((a) => a.account_type === 'delegator_hybrid' && a.delegate_address)
+      .map((a) => (a.delegate_address as string).toLowerCase())
+    expect(delegationRail.length).toBeGreaterThan(0)
+    const chainDelegates = new Set(onChainDelegates())
+    for (const delegate of delegationRail) {
+      expect(chainDelegates.has(delegate)).toBe(false)
+    }
   })
 
   it('serves the SAME USDC address the API fixture serves — one token, not two', () => {

@@ -5,7 +5,7 @@ covers:
   - packages/backend/src/platform/leader-lock.ts
   - packages/backend/src/rails/hybrid-provisioning.ts
   - packages/backend/src/infra/relayer.ts
-last-verified: "2026-08-25" # #2055: the split-out note records both halves resolved (#2020 shipped; approval_requests dropped). Prior: #1743: the "single point of stall" exception's closing line flips — the same-nonce cancel is no longer "a new mechanism, deliberately not built" but the encoded, operator-triggered `ops:cancel-stuck-attest` (Option A; trigger stays human by owner decision, execution through the outbound pipeline). Only that paragraph re-verified in this pass. Prior: #1990: the "Allowance-nonce coordination" subsection said the inert `allowance_nonce_watermarks` table would go when "#1990's job" of dropping tables came round. It would not have: #1990 scoped three named tables and this was never one of them, and #1990 then shipped narrower still — only `safe_approver_metadata`, with `agent_allowances` and `approval_requests` split out to #2020/#2021 after enumeration found live readers on both. The subsection now records the table as inert with NO tracked removal issue, and flags #1993's residue sweep as the likelier home. Scope: that one sentence — the multi-replica lesson, the two-tier fix, the outbound queue, rate-limit counters and the deploy lock were not re-verified. Prior: #1987: the "Allowance-nonce coordination" subsection described machinery this slice DELETED (the coordinator, the watermark repository, `readSharedWatermark`, the structural test, all four call sites, and `generateTransferHash`) entirely in the present tense — rewritten past-tense behind an explicit deleted-banner, and kept rather than removed because the multi-replica lesson outlives the rail. Records that the `allowance_nonce_watermarks` TABLE survives and is now inert until #1990. Other subsections (outbound queue, rate-limit counters, deploy lock) re-read and unaffected. Prior: #1745: the "single point of stall" entry drops the ordering constraint it carried — no duplicate attest is queued while the stuck one is live — and records that the operator's same-nonce cancel now completes issuance by itself. The blocked-lane trade itself is unchanged. Prior: #1735: the "self-healing on the queue lane" claim gains its exception — a stuck `passport_attest` is deliberately NOT fee-replaced (a replacement orphans the hash #1043 recovery is keyed off), so that lane blocks until an operator acts; cross-ref to the #1745 ordering constraint. Prior: #1722: the deploy lock's connection hold now has a real ceiling — the confirmation wait is `tx.wait(1, 120_000)`, bracketed under the bump worker's 180 s adoption age, and expiry hands the tx to that worker instead of marking the record failed. The rest of the accept (burst threshold, fail-open scoping, the 502 shape) re-read and unchanged. Prior: #1680: rate-limit counters join the list of things multiple replicas now handle — the plugin's in-process store made the real ceiling max × replicas, fixed with a shared Postgres tier (fail-open, 250 ms deadline, leader-gated sweep) on the same pattern as the #718 nonce watermark. Prior: #1559: queue-lane nonce correctness is DB-arbitrated (submitRecorded stamp-before-broadcast); multi-replica correctness now gated only on the Safe-bound legacy sites (#1440); #1558 bump worker noted on the stall point
+last-verified: "2026-08-29" # #2150: the "What multiple replicas already handle" list gains boot-time migrations — the runner's new non-transactional lane is the third advisory-lock user in the codebase, and the ONLY one whose waiter must poll rather than block (a blocking waiter holds a snapshot that deadlocks the peer's `CREATE INDEX CONCURRENTLY`, 40P01, reproduced in test before the fix). Scope: that one bullet plus the `leader-lock.ts` key-registry note it depends on; the two-tier nonce narrative, outbound queue, rate-limit counters, deploy lock and Accepted-cost section were NOT re-verified. Prior: #2084: the "Allowance-nonce coordination" deleted-banner said the `allowance_nonce_watermarks` TABLE "is still there and is now inert" with "no tracked removal issue" — migration 071 drops it, so the banner now records the drop and names the live `payment_intents.allowance_nonce` COLUMN as the thing a bare grep conflates with it. The Operating-notes bullet calling the table "disposable … needs no backup policy of its own" is removed: a dropped table has no backup posture. Scope: that banner and that bullet only — the two-tier fix narrative below the banner is unchanged historical record, and the outbound queue, rate-limit counters and deploy lock were not re-verified. Prior: #2055: the split-out note records both halves resolved (#2020 shipped; approval_requests dropped). Prior: #1743: the "single point of stall" exception's closing line flips — the same-nonce cancel is no longer "a new mechanism, deliberately not built" but the encoded, operator-triggered `ops:cancel-stuck-attest` (Option A; trigger stays human by owner decision, execution through the outbound pipeline). Only that paragraph re-verified in this pass. Prior: #1990: the "Allowance-nonce coordination" subsection said the inert `allowance_nonce_watermarks` table would go when "#1990's job" of dropping tables came round. It would not have: #1990 scoped three named tables and this was never one of them, and #1990 then shipped narrower still — only `safe_approver_metadata`, with `agent_allowances` and `approval_requests` split out to #2020/#2021 after enumeration found live readers on both. The subsection now records the table as inert with NO tracked removal issue, and flags #1993's residue sweep as the likelier home. Scope: that one sentence — the multi-replica lesson, the two-tier fix, the outbound queue, rate-limit counters and the deploy lock were not re-verified. Prior: #1987: the "Allowance-nonce coordination" subsection described machinery this slice DELETED (the coordinator, the watermark repository, `readSharedWatermark`, the structural test, all four call sites, and `generateTransferHash`) entirely in the present tense — rewritten past-tense behind an explicit deleted-banner, and kept rather than removed because the multi-replica lesson outlives the rail. Records that the `allowance_nonce_watermarks` TABLE survives and is now inert until #1990. Other subsections (outbound queue, rate-limit counters, deploy lock) re-read and unaffected. Prior: #1745: the "single point of stall" entry drops the ordering constraint it carried — no duplicate attest is queued while the stuck one is live — and records that the operator's same-nonce cancel now completes issuance by itself. The blocked-lane trade itself is unchanged. Prior: #1735: the "self-healing on the queue lane" claim gains its exception — a stuck `passport_attest` is deliberately NOT fee-replaced (a replacement orphans the hash #1043 recovery is keyed off), so that lane blocks until an operator acts; cross-ref to the #1745 ordering constraint. Prior: #1722: the deploy lock's connection hold now has a real ceiling — the confirmation wait is `tx.wait(1, 120_000)`, bracketed under the bump worker's 180 s adoption age, and expiry hands the tx to that worker instead of marking the record failed. The rest of the accept (burst threshold, fail-open scoping, the 502 shape) re-read and unchanged. Prior: #1680: rate-limit counters join the list of things multiple replicas now handle — the plugin's in-process store made the real ceiling max × replicas, fixed with a shared Postgres tier (fail-open, 250 ms deadline, leader-gated sweep) on the same pattern as the #718 nonce watermark. Prior: #1559: queue-lane nonce correctness is DB-arbitrated (submitRecorded stamp-before-broadcast); multi-replica correctness now gated only on the Safe-bound legacy sites (#1440); #1558 bump worker noted on the stall point
 ---
 
 # Backend Scaling
@@ -34,6 +34,45 @@ may now run more than one, and the relayer is what still caps throughput.**
   lock — the *request* can still fail, because whatever made the lock
   unavailable can hit the guarded work too. What the hold costs, and why it is
   accepted anyway, is worked through in *Accepted cost* below.
+- **Boot-time migrations, since [#2150](https://github.com/d-hinders/Haven-AI/issues/2150).**
+  Every replica calls `runMigrations()` before it listens. In the ordinary
+  (transactional) lane Postgres arbitrates the race for free: the loser's
+  `INSERT` into `schema_migrations` hits the primary key and its whole
+  transaction rolls back. A migration that declares `transactional = false`
+  has no transaction to lose, so both replicas would otherwise start the same
+  `CREATE INDEX CONCURRENTLY`; that lane holds a third advisory lock
+  (`NON_TRANSACTIONAL_LOCK_KEY`, `db/migrate.ts`) across the step and re-reads
+  its bookkeeping row inside the lock, so the loser observes `applied` and
+  skips.
+
+  **Its waiter POLLS with `pg_try_advisory_lock` rather than blocking, and
+  that is not interchangeable with the two locks above.** A blocking
+  `pg_advisory_lock()` runs in its own implicit transaction, so a waiting
+  replica holds a live snapshot for the whole wait — and
+  `CREATE INDEX CONCURRENTLY` on the replica holding the lock must wait for
+  exactly such transactions before it can finish. Both sides wait for each
+  other and Postgres kills one with `40P01 deadlock detected`. That is the
+  *normal* outcome of two replicas booting into the same non-transactional
+  migration, not a rare race; it was reproduced by the concurrent-boot test on
+  its first run, with the blocking form in place. `runIfLeader` and
+  `withKeyedAdvisoryLock` are unaffected — neither is ever held across a
+  `CONCURRENTLY` build.
+
+  **A non-transactional migration can also be slow for reasons that are not
+  about migrations.** `CREATE INDEX CONCURRENTLY` finishes by waiting out every
+  transaction holding a snapshot older than its own, **database-wide** — so an
+  unrelated long-running query or a slow request on another replica delays the
+  build, bounded only by the runner's 15-minute wait. No locking scheme can fix
+  that (you cannot quiesce unrelated traffic for an index build). Check
+  `pg_stat_activity` for old transactions before suspecting the runner.
+
+  The failure mode this lane introduces is deliberate and operator-visible: a
+  migration that dies part-way leaves `schema_migrations.status = 'running'`,
+  and the next boot REFUSES to start rather than retrying blind. On a fleet
+  that means every replica stays down until an operator runs one of the two
+  recovery statements the error prints. See
+  [`promoting-dev-to-main.md`](./promoting-dev-to-main.md) and the header of
+  `packages/backend/src/db/migrate.ts`.
 - **Allowance-nonce coordination on every legacy-rail sign-hash builder —
   DELETED (#1987), retained here as the record of a solved problem**
   ([#718](https://github.com/d-hinders/Haven-AI/issues/718),
@@ -46,16 +85,20 @@ may now run more than one, and the relayer is what still caps throughput.**
   > builders, and every one of the four call sites — together with
   > `generateTransferHash` itself. It went with the AllowanceModule rail's
   > execution half, which #1986 had already fail-closed at HTTP 410. **The
-  > `allowance_nonce_watermarks` TABLE is still there and is now inert**, and
-  > **has no tracked removal issue**. #1990 was never going to drop it: that
-  > slice scoped three named tables, this was not one of them, and #1990
-  > shipped narrower still — dropping only `safe_approver_metadata`, with
-  > `agent_allowances` and `approval_requests` split out to #2020 and #2021 (both since resolved: #2020 retired the allowances surface; #2055 dropped `approval_requests`)
-  > after enumeration found live readers on both. Whether this table wants
-  > its own slice or belongs on #1993's residue sweep is an open call; do not
-  > assume someone owns it. The
-  > delegation rail has no equivalent problem: it has no allowance nonce, and
-  > its budget is metered on-chain by the caveat enforcers.
+  > `allowance_nonce_watermarks` TABLE has since been dropped too** —
+  > **#2084**, migration `071_drop_allowance_nonce_watermarks`. It got its own
+  > slice in the end rather than riding #1993's residue sweep. (#1990 was
+  > never going to drop it: that slice scoped three named tables, this was not
+  > one of them, and #1990 shipped narrower still — dropping only
+  > `safe_approver_metadata`, with `agent_allowances` and `approval_requests`
+  > split out to #2020 and #2021, both since resolved: #2020 retired the
+  > allowances surface; #2055 dropped `approval_requests`.) Nothing named here
+  > exists in the schema any more. The live `payment_intents.allowance_nonce`
+  > COLUMN is a different thing and is untouched — a bare
+  > `grep allowance_nonce` conflates the two, which is the one trap #2084
+  > recorded and pinned with a test. The delegation rail has no equivalent
+  > problem: it has no allowance nonce, and its budget is metered on-chain by
+  > the caveat enforcers.
   >
   > This subsection is kept rather than deleted because the multi-replica
   > lesson outlives the rail — a process-local `Map` is correct for exactly
@@ -376,9 +419,6 @@ Whoever picks this up should read the interaction with two existing pieces:
 ## Operating notes
 
 - Replica count is a Railway setting; nothing in the code reads it.
-- `allowance_nonce_watermarks` is disposable. Losing it degrades to the
-  pre-#718 in-process behaviour, never to incorrectness — so it needs no backup
-  policy of its own.
 - **The riskier direction is a row that is too HIGH, not a missing one.** The
   write is backed by a single confirmation, so a reorg (or an RPC reporting a
   nonce from a dropped block, or two environments sharing a database) can

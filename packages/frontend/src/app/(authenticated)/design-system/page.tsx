@@ -1421,12 +1421,16 @@ export default function DesignSystemPage() {
                     dropped between the two stages. For two of the three demo
                     rows that costs nothing visible, because the title already
                     says it ("x402 payment BY RESEARCH ASSISTANT"); for the
-                    first row it is a real loss — "Received payment" is
-                    initiated by "You" and nothing else on the row says so.
-                    That is an acceptable trade here (the narrow layout drops
-                    the initiator outright) but it IS a loss, and a showcase
-                    whose job is to teach the collapse pattern should not
-                    claim otherwise.
+                    first row it is a real loss — a human-initiated payment's
+                    initiator ("You") rests on the cell, and nothing else on
+                    the row says so. That is an acceptable trade here (the
+                    narrow layout drops the initiator outright) but it IS a
+                    loss, and a showcase whose job is to teach the collapse
+                    pattern should not claim otherwise. The first demo row is
+                    deliberately a HUMAN-initiated payment (#2097: 'You' is
+                    reserved for `initiatedBy: 'human'`; agent rows carry the
+                    agent name) — the only shape for which the initiator cell
+                    may read 'You'.
                     WHY THE DATE IS NOT HANDED BACK EARLIER. It was MEASURED,
                     not judged: restoring the Date column at a 973px container
                     (a 1024px viewport is 718px, but 1023px and 1279px are
@@ -1453,13 +1457,13 @@ export default function DesignSystemPage() {
             <Table.Body>
               {[
                 {
-                  title: 'Received payment',
-                  from: 'Acme Operations',
-                  to: 'Operating wallet',
+                  title: 'Payment sent',
+                  from: 'Operating wallet',
+                  to: 'Acme Operations',
                   initiator: 'You',
                   date: '12m ago',
                   value: '500.00',
-                  direction: 'in' as const,
+                  direction: 'out' as const,
                   failed: false,
                 },
                 {

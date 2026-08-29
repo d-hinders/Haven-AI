@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { composeDescription, toolDescriptions } from './tool-descriptions.js'
+import { AgentPaymentNextAction } from './types.js'
+import { readFileSync } from 'node:fs'
 
 describe('shared Haven tool descriptions', () => {
   it('routes allowance and budget questions to the allowance lookup', () => {
@@ -93,15 +95,70 @@ describe('shared Haven tool descriptions', () => {
   it('teaches agents to read the structured nextAction on payment tools, not memorise tool names', () => {
     // Each payment tool's nextActionGuidance must reference the structured
     // nextAction enum the agent will see on the response, so the agent
-    // branches on machine-readable data instead of prose. We anchor on the
-    // x402 retry action; presence of that string in the composed description
-    // means the description is doing the right thing.
+    // branches on machine-readable data instead of prose.
+    //
+    // #2131 REWROTE THIS ASSERTION, and the reason is the point. It used to
+    // anchor on the literal `nextAction=retry_original_x402_request`. The
+    // intent was right; the anchor died. Nothing emits that value — the
+    // backend's `paymentIntentState` never returns it, and the SDK's
+    // `executed` mapping reads a status the backend cannot produce since
+    // #2055 dropped `approval_requests`. So this test REQUIRED the
+    // descriptions to keep telling agents to wait on a signal that never
+    // arrives: the stale guidance was enforced, not merely un-noticed.
+    //
+    // The lesson is not "pick a better literal" — any single value can die
+    // the same way. Anchor on the SHAPE (a structured nextAction is
+    // referenced) and require the referenced value to be a declared member of
+    // the taxonomy, so a typo or a deleted enum member still fails, without
+    // hard-coding one value's fate into the test.
+    const declared = new Set<string>(Object.values(AgentPaymentNextAction))
+
     for (const key of ['payX402', 'payX402OneShot'] as const) {
       const desc = composeDescription(toolDescriptions[key])
+      // Character class includes digits: `retry_original_x402_request` is today the
+      // ONLY taxonomy value containing one, so `[a-z_]+` alone would truncate it to
+      // `retry_original_x` — still failing the membership check, but by accident
+      // rather than by design, and silently wrong for any future value with a digit.
+      const referenced = [...desc.matchAll(/nextAction=([a-z0-9_]+)/g)].map((m) => m[1])
+
       expect(
-        desc,
-        `${key} should reference nextAction=retry_original_x402_request so the agent reads the structured field`,
-      ).toContain('nextAction=retry_original_x402_request')
+        referenced,
+        `${key} should reference at least one structured nextAction=<value> so the agent reads the machine-readable field instead of prose`,
+      ).not.toHaveLength(0)
+
+      for (const value of referenced) {
+        expect(
+          declared,
+          `${key} references nextAction=${value}, which is not a member of AgentPaymentNextAction`,
+        ).toContain(value)
+      }
+    }
+  })
+
+  it('#2145: resumeX402 gates on the structured retry_original_x402_request trigger, and no other tool tells an agent to wait for one', () => {
+    // #2145 gave `retry_original_x402_request` a real producer
+    // (agent-payment-status.ts emits it when the funding leg confirmed but no
+    // merchant response was ever recorded). resumeX402's guidance must name it
+    // as the gate an agent checks before calling the tool. No OTHER tool
+    // description should tell an agent to wait for a resume signal mid-call —
+    // the pay tools perform the merchant retry themselves and only need to
+    // mention the trigger as a crash-recovery fallback, which they do via
+    // "resume" prose, not by claiming the value is unreachable.
+    const resumeDesc = composeDescription(toolDescriptions.resumeX402)
+    expect(resumeDesc).toContain('nextAction=retry_original_x402_request')
+    expect(resumeDesc.toLowerCase()).not.toContain('not currently reachable')
+    expect(resumeDesc.toLowerCase()).not.toContain('nothing emits')
+
+    for (const [key, entry] of Object.entries(toolDescriptions)) {
+      const composed = composeDescription(entry).toLowerCase()
+      expect(
+        composed,
+        `${key} must not claim retry_original_x402_request is unreachable — #2145 gave it a producer`,
+      ).not.toContain('not currently reachable')
+      expect(
+        composed,
+        `${key} must not claim nothing emits a resume trigger — #2145 gave it a producer`,
+      ).not.toContain('nothing emits')
     }
   })
 
@@ -139,5 +196,59 @@ describe('shared Haven tool descriptions', () => {
     expect(desc).toContain('product name, category, or description term')
     expect(desc).toContain('NOT authoritative')
     expect(desc).toContain('Never creates a payment, signature, or approval')
+  })
+})
+
+describe('#2145: the shipped SDK README presents retry_original_x402_request as a live, gated trigger', () => {
+  /**
+   * `packages/sdk` ships README.md on npm, and its next-action table and
+   * resume section are integrator-facing copy that nothing renders — so it
+   * drifts silently. Precedent for guarding it this way:
+   * `packages/mcp/src/consent.test.ts` pins load-bearing README sentences
+   * after #2086 found that README still showing retired copy long after the
+   * renderer moved on ("Nothing checked it, so nothing said so").
+   *
+   * #2131 froze this README as documenting the trigger as unreachable; #2145
+   * gave the backend a real producer (agent-payment-status.ts:
+   * `nextAction=retry_original_x402_request` after Haven's funding leg
+   * confirms and the merchant leg was never reported, inside a grace window).
+   * This guard pins the OPPOSITE claim: the README must present the trigger
+   * as live and tell an agent to gate on it, and must not still carry the old
+   * unavailability language.
+   */
+  it('documents retry_original_x402_request as a live, gated resume trigger', () => {
+    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
+
+    // The old unavailability claims must not survive the rewrite.
+    expect(readme).not.toMatch(/Resume is not\s+currently available/)
+    expect(readme).not.toContain('has no producer')
+    expect(readme).not.toMatch(/nothing emits (that|the) value/i)
+
+    // The live claim must be present, and must tell the agent to gate on the
+    // structured field rather than on message prose.
+    expect(readme).toMatch(/Resume is reachable again/)
+    expect(readme).toContain("nextAction: 'retry_original_x402_request'")
+    expect(readme.toLowerCase()).toContain('gate on')
+
+    // The next-action table row for the trigger must describe the real
+    // condition (funding confirmed, merchant leg never reported) and the
+    // real remedy (call resumeX402Payment / getResumeState), not the old
+    // "no longer produced" framing other genuinely-retired rows still use.
+    const tableRowMatch = readme.match(/\| `retry_original_x402_request` \|([^|]*)\|/)
+    expect(tableRowMatch, 'expected a next-action table row for retry_original_x402_request').not.toBeNull()
+    const tableRow = tableRowMatch![1]
+    expect(tableRow).toContain('funding leg confirmed')
+    expect(tableRow).toContain('resumeX402Payment()')
+    expect(tableRow.toLowerCase()).not.toContain('no longer produced')
+
+    // Genuinely-retired rows in the same table must keep their retirement
+    // framing — this test is about ONE row's status changing, not about
+    // relaxing the guard for the whole table.
+    expect(readme).toContain(
+      '`wait_for_user_approval` | **No longer produced — nothing maps to it.**',
+    )
+    expect(readme).toContain(
+      '`wait_for_user_to_complete_payment` | **No longer produced — nothing maps to it.**',
+    )
   })
 })

@@ -37,6 +37,15 @@ export interface PaymentStatus {
   details?: string
 }
 
+/** The agent-facing recovery verdict from GET /machine-payments/:id/status. */
+export interface MachinePaymentStatus {
+  payment_id?: string
+  status?: string
+  phase?: string
+  next_action?: string
+  message?: string
+}
+
 export interface X402AuthorizeResult {
   /** Present only when the request produced a signable/executable intent. */
   payment_id?: string
@@ -46,6 +55,15 @@ export interface X402AuthorizeResult {
   phase?: string
   shortfall?: number | string
   remaining_allowance?: number | string
+  /**
+   * Present on the #2082 erc7710 over-budget refusal (403
+   * `delegation_budget_exceeded`): the live remaining period budget and the
+   * shortfall, atomic units. The leg compares `remaining_atomic` against the
+   * number it derived the request from — a refusal quoting some other budget
+   * is a refusal about some other delegation.
+   */
+  remaining_atomic?: string
+  shortfall_atomic?: string
   /** Present on a delegation-rail 502: the bundler/simulation failure (#2016). */
   details?: string
   /** erc7710 direct settlement (#1064): the child-delegation typed data the delegate signs. */
@@ -75,6 +93,8 @@ export interface X402AuthorizeBody {
   network: string // CAIP-2 (e.g. eip155:84532) or x402 network name
   /** Echoed to the merchant in the v2 header — pass the QUOTED value (#1064). */
   maxTimeoutSeconds?: number
+  /** Stable caller key for the original authorization and its resume (#2159). */
+  idempotencyKey?: string
   /** #1058: the challenge entry's extra.facilitatorAddresses, forwarded
    *  VERBATIM — pins the settlement child's redeemer caveat and rides the
    *  header echo (the v2 matcher requires it as a subset). */
@@ -191,6 +211,15 @@ export class HavenApi {
 
   getPayment(id: string): Promise<ApiResponse<PaymentStatus>> {
     return this.call('GET', `/payments/${id}`)
+  }
+
+  /**
+   * The status projection an agent must follow after an x402 funding leg.
+   * It deliberately exposes the server-derived `next_action`, rather than
+   * inferring recovery from a confirmed funding transaction.
+   */
+  getMachinePaymentStatus(id: string): Promise<ApiResponse<MachinePaymentStatus>> {
+    return this.call('GET', `/machine-payments/${id}/status`)
   }
 
   authorizeX402(body: X402AuthorizeBody): Promise<ApiResponse<X402AuthorizeResult>> {

@@ -16,7 +16,7 @@ covers:
   - packages/demo-merchant-mcp/package.json
   - .github/workflows/publish.yml
   - scripts/release-bump.mjs
-last-verified: "2026-08-25" # #1992: the non-custody paragraph re-based from Safe to the Hybrid DeleGator + signed-delegation model, and every claim the retirement falsified corrected against source: the Core Model diagram and the "two on-chain policy rails" line, the quickstart (step 5 walked the reader into `POST /safe/deploy`, which answers 410 - it is now the passkey Hybrid flow), the How-It-Works architecture and its 6 numbered steps, the payment-API table, the security-model and key-management tables, the Tech Stack rows, and two code-fence examples: the payment-intent response still showed the LEGACY signing shape (`components.safe`, `nonce`, "raw ECDSA") where the live route returns `signature_scheme: 'eip712_userop'` + `typed_data`, and the over-budget paragraph promised a `202 pending_approval` that no code path can now create. Scope: those sections, plus two the first draft of this note failed to name (haven-doc-reviewer caught the omission): the `RELAYER_PRIVATE_KEY` row in the env-var table ("relayed Safe/module transactions" -> "relayed transactions") and the `packages/backend` / `packages/frontend` rows in the repo table. The REST of the env-var table, the SDK snippets and the token tables were not re-verified. Prior: #1988: the Approvers paragraph and its API-table row described a surface this diff deletes — Haven no longer constructs an owner-change transaction, and the routes 404. Both corrected in place rather than left as a promise; the non-custody framing is strengthened, not softened, because owner management moving entirely to the user's own key IS the non-custody claim. The Safe-inflow row now says the 410s have nothing behind them. Scope: those three places; no other README claim re-verified. Prior: #1702: the delegate-key-loss answer here was the PRE-#1694 one — "pause or revoke the agent and create a new key path". Epic #1694 made a delegation-rail agent's key REPLACEABLE (re-key: same agent, new key, budget remainder and period boundary carried), so the guidance is now split by rail rather than stated as one blanket answer. Found by the cross-epic doc sweep #1702's acceptance criteria asked for, not by the coupling gate — no `covers:` glob connects this file to `routes/agent-rekey.ts`. Scope: that one sentence in the credential paragraph; the rest of the README was not re-verified. Prior: #1328 — /demo/mpp/* retired from the endpoints table
+last-verified: "2026-08-27" # #2105: the agent-payment section claimed a `202`/`pending_approval` could still be returned as "an idempotent replay of an approval row created before the Safe rail was retired". It cannot: #2055 dropped `approval_requests`, so no row is left to replay, and #2105 removed the `202` from the published contract on POST /payments entirely. The sentence told an integrator to keep a dead branch alive and is replaced with the negative statement. Caught by haven-doc-reviewer. Scope: that paragraph; the surrounding sign_data guidance was re-read and is correct (and the spec now agrees with it). Prior: #1992: the non-custody paragraph re-based from Safe to the Hybrid DeleGator + signed-delegation model, and every claim the retirement falsified corrected against source: the Core Model diagram and the "two on-chain policy rails" line, the quickstart (step 5 walked the reader into `POST /safe/deploy`, which answers 410 - it is now the passkey Hybrid flow), the How-It-Works architecture and its 6 numbered steps, the payment-API table, the security-model and key-management tables, the Tech Stack rows, and two code-fence examples: the payment-intent response still showed the LEGACY signing shape (`components.safe`, `nonce`, "raw ECDSA") where the live route returns `signature_scheme: 'eip712_userop'` + `typed_data`, and the over-budget paragraph promised a `202 pending_approval` that no code path can now create. Scope: those sections, plus two the first draft of this note failed to name (haven-doc-reviewer caught the omission): the `RELAYER_PRIVATE_KEY` row in the env-var table ("relayed Safe/module transactions" -> "relayed transactions") and the `packages/backend` / `packages/frontend` rows in the repo table. The REST of the env-var table, the SDK snippets and the token tables were not re-verified. Prior: #1988: the Approvers paragraph and its API-table row described a surface this diff deletes — Haven no longer constructs an owner-change transaction, and the routes 404. Both corrected in place rather than left as a promise; the non-custody framing is strengthened, not softened, because owner management moving entirely to the user's own key IS the non-custody claim. The Safe-inflow row now says the 410s have nothing behind them. Scope: those three places; no other README claim re-verified. Prior: #1702: the delegate-key-loss answer here was the PRE-#1694 one — "pause or revoke the agent and create a new key path". Epic #1694 made a delegation-rail agent's key REPLACEABLE (re-key: same agent, new key, budget remainder and period boundary carried), so the guidance is now split by rail rather than stated as one blanket answer. Found by the cross-epic doc sweep #1702's acceptance criteria asked for, not by the coupling gate — no `covers:` glob connects this file to `routes/agent-rekey.ts`. Scope: that one sentence in the credential paragraph; the rest of the README was not re-verified. Prior: #1328 — /demo/mpp/* retired from the endpoints table
 ---
 
 # Haven
@@ -59,7 +59,7 @@ This is a TypeScript monorepo:
 
 | Package | Description |
 |---|---|
-| `packages/backend` | Fastify API for auth, Haven wallets, agents, payments, x402/MPP, receipts, the Fortnox reporting feed, and OpenAPI (the legacy approval queue is readable and rejectable only — retired with the Safe rail, #1440) |
+| `packages/backend` | Fastify API for auth, Haven wallets, agents, payments, x402/MPP, receipts, the Fortnox reporting feed, and OpenAPI (the legacy approval queue is gone entirely — its route was deregistered and its table dropped by #2055) |
 | `packages/frontend` | Next.js dashboard for Haven accounts, Haven wallets, agent rules, connect-agent handoff, and activity |
 | `packages/sdk` | `@haven_ai/sdk` for direct agent integrations, tool definitions, x402/MPP quote/pay/resume helpers, and payment state handling |
 | `packages/mcp` | `@haven_ai/mcp` local stdio MCP server that reads a local credential file and signs locally |
@@ -184,7 +184,7 @@ The credential contains an agent API key and a delegate signing key. Haven store
 
 Most users connect an agent through the dashboard's **Connect your agent** flow. The hosted MCP path sends only the API key to the hosted MCP endpoint; the delegate signing key stays local with the runtime or `@haven_ai/signer`.
 
-Developers can also integrate directly with `@haven_ai/sdk`. The SDK wraps direct payments, quote-first x402/MPP flows, manual approval resume state, and ready-made tool definitions for Claude/OpenAI-style tool calling.
+Developers can also integrate directly with `@haven_ai/sdk`. The SDK wraps direct payments, quote-first x402/MPP flows, and ready-made tool definitions for Claude/OpenAI-style tool calling.
 
 ### Install
 
@@ -373,7 +373,7 @@ Dashboard endpoints use the signed-in user's JWT. The OpenAPI contract is served
 | Agent payments | API key | `/payments`, `/payments/:id/sign`, `/payments/:id`, `/payments` |
 | Agent info | API key | `/machine-payments/agent`, `/machine-payments/allowances`, `/machine-payments/receipts`, `/machine-payments/:id/status`, resume-state endpoints |
 | x402 | API key or protocol challenge | `/x402` (the legacy internal `mpp_demo` flow at `/demo/mpp/*` and `POST /machine-payments/authorize` is retired — the latter now refuses with HTTP 410, #1328) |
-| Activity | JWT | `/agent-activity/*` for payments, approvals, MCP tool calls, pending counts, and last activity |
+| Activity | JWT | `/agent-activity/*` for payments, MCP tool calls, and last activity |
 
 ### Payment intent request
 
@@ -388,7 +388,7 @@ POST /payments
 
 **Sign `sign_data.typed_data` verbatim, never the bare `hash`.** The account validates the typed data, not the 4337 hash; `@haven_ai/sdk` and the MCP signer do this for you.
 
-There is **no over-budget approval queue** on the delegation rail. A request outside the budget, recipient pin or expiry **reverts during on-chain gas estimation** — it does not become a pending approval. A `202` with `status: "pending_approval"` is now only ever an idempotent replay of an approval row created before the Safe rail was retired (#1440); no code path creates a new one.
+There is **no over-budget approval queue** on the delegation rail. A request outside the budget, recipient pin or expiry **reverts during on-chain gas estimation** — it does not become a pending approval. There is **no `202` on this route**: #2055 dropped the `approval_requests` table, so no row is left to replay, and #2105 removed the response from the published contract. Do not keep a `pending_approval` branch alive.
 
 ### Payment intent response
 
@@ -494,7 +494,7 @@ Haven-AI/
 - **TypeScript** throughout (backend + frontend)
 - **Fastify** — backend API
 - **Next.js 15** — frontend dashboard
-- **PostgreSQL** — agents, policies, payment intents, receipts, audit trail (plus the retired rail's approval rows, kept readable until #1990 drops them)
+- **PostgreSQL** — agents, policies, payment intents, receipts, audit trail
 - **Safe + AllowanceModule** — legacy rail, **retired** (#1440): reads and owner-signed relay only, no `@safe-global/protocol-kit`
 - **MetaMask smart-accounts-kit + permissionless** — Hybrid DeleGator delegation rail
 - **wagmi + viem** — wallet connection + blockchain interaction

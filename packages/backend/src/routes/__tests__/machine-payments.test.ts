@@ -295,38 +295,6 @@ describe('machine payment routes', () => {
     }
   }
 
-  function executedApproval(overrides: Record<string, unknown> = {}) {
-    return {
-      id: PAYMENT_ID,
-      kind: 'approval_request',
-      agent_id: AGENT.id,
-      user_id: AGENT.user_id,
-      safe_address: AGENT.safe_address,
-      chain_id: 8453,
-      token_symbol: 'USDC',
-      token_address: USDC,
-      to_address: RECIPIENT.toLowerCase(),
-      amount_raw: '10000',
-      amount_human: '0.01',
-      tx_hash: TX_HASH,
-      status: 'executed',
-      payment_rail: 'mpp_demo',
-      source: 'mpp_demo',
-      payment_resource_url: challenge.resource,
-      x402_resource_url: null,
-      merchant_address: RECIPIENT.toLowerCase(),
-      machine_challenge_id: challenge.challengeId,
-      machine_idempotency_key: 'mpp_demo:test',
-      machine_metadata: JSON.stringify({
-        protocol: 'mpp',
-        network: challenge.network.name,
-        description: challenge.description,
-      }),
-      executed_at: '2026-05-15T12:00:00.000Z',
-      ...overrides,
-    }
-  }
-
   it('returns the authenticated agent identity for MCP clients', async () => {
     primeDb(AUTH)
 
@@ -800,7 +768,7 @@ describe('machine payment routes', () => {
   // (null)` — `findApprovalStatusRow` is gone, so there is no approval
   // fallback left to prime a route for; an id that resolves neither is 404
   // on the intent lookup alone.
-  it('does not return status for another agent payment or approval', async () => {
+  it('does not return status for another agent payment', async () => {
     primeDb(AUTH, intentStatusRow(null))
 
     const response = await app.inject({
@@ -810,7 +778,10 @@ describe('machine payment routes', () => {
     })
 
     expect(response.statusCode).toBe(404)
-    expect(response.json()).toEqual({ error: 'Payment or approval request not found' })
+    // #2085: the body named an approval request that cannot exist. The
+    // assertion on the NEXT line — that no query touches `approval_requests`
+    // — is the one carrying the weight, and it is unchanged.
+    expect(response.json()).toEqual({ error: 'Payment not found' })
     expect(sqlCalls().some((c) => /approval_requests/i.test(c.sql))).toBe(false)
   })
 

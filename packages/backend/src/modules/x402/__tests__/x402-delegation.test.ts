@@ -28,6 +28,10 @@ const signedBudget = { ...buildBudgetDelegation(budget()), signature: ('0x' + 'a
 function req(overrides: Record<string, unknown> = {}) {
   return {
     chainId: 84532,
+    // #2094: the child is salted from the intent id. Fixed here so these
+    // assertions stay about caveats and payload shape; the salt's own
+    // behaviour is covered by settlement-child-uniqueness.test.ts.
+    intentId: '00000000-0000-4000-8000-000000000830',
     delegateAccountAddress: DELEGATE_ACCT,
     budgetDelegation: signedBudget,
     asset: USDC as `0x${string}`,

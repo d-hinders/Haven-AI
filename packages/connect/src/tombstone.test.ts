@@ -9,15 +9,18 @@
  * revokes.
  */
 import { describe, it, expect } from 'vitest'
+import { ConnectError, isConnectError } from './connect-error.js'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   TOMBSTONE_FILENAME,
   TOMBSTONE_MARKER,
+  defaultTombstonesDir,
   readAgentTombstone,
+  readTombstoneRecords,
   writeAgentTombstone,
 } from './tombstone.js'
 
@@ -36,6 +39,11 @@ async function retiredDirectory() {
   return dir
 }
 
+/** Isolated mirror root so tests never touch the real ~/.haven/tombstones. */
+async function tempTombstonesDir() {
+  return mkdtemp(join(tmpdir(), 'haven-tombstones-'))
+}
+
 describe('the tombstone script, run as the host would run it (#1681)', () => {
   it('MUTATION PROOF: exits 1 with the full diagnosis on stderr — marker, agent, reason, restart-every-host, doctor', async () => {
     const dir = await retiredDirectory()
@@ -45,6 +53,7 @@ describe('the tombstone script, run as the host would run it (#1681)', () => {
       reason: 'superseded by re-run',
       replacedBy: 'agent-new',
       retiredAt: '2026-08-21T10:00:00.000Z',
+      tombstonesDir: await tempTombstonesDir(),
     })
 
     const wrapper = join(dir, 'bin', 'haven-signer.mjs')
@@ -75,7 +84,7 @@ describe('the tombstone script, run as the host would run it (#1681)', () => {
 
   it('the script and TOMBSTONE.json carry no secret material', async () => {
     const dir = await retiredDirectory()
-    await writeAgentTombstone({ directory: dir, agentId: AGENT, reason: 'reset' })
+    await writeAgentTombstone({ directory: dir, agentId: AGENT, reason: 'reset', tombstonesDir: await tempTombstonesDir() })
 
     for (const file of [join(dir, 'bin', 'haven-signer.mjs'), join(dir, TOMBSTONE_FILENAME)]) {
       const content = await readFile(file, 'utf8')
@@ -89,7 +98,7 @@ describe('the tombstone script, run as the host would run it (#1681)', () => {
     const identityBefore = await readFile(join(dir, 'identity.json'), 'utf8')
     const signerBefore = await readFile(join(dir, 'signer.json'), 'utf8')
 
-    await writeAgentTombstone({ directory: dir, agentId: AGENT, reason: 'reset' })
+    await writeAgentTombstone({ directory: dir, agentId: AGENT, reason: 'reset', tombstonesDir: await tempTombstonesDir() })
 
     expect(await readFile(join(dir, 'identity.json'), 'utf8')).toBe(identityBefore)
     expect(await readFile(join(dir, 'signer.json'), 'utf8')).toBe(signerBefore)
@@ -97,7 +106,7 @@ describe('the tombstone script, run as the host would run it (#1681)', () => {
 
   it('works on a directory whose bin/ was already deleted — the keys-already-gone reset shape', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-tombstone-bare-'))
-    await writeAgentTombstone({ directory: dir, agentId: AGENT, reason: 'reset' })
+    await writeAgentTombstone({ directory: dir, agentId: AGENT, reason: 'reset', tombstonesDir: await tempTombstonesDir() })
 
     const script = await readFile(join(dir, 'bin', 'haven-signer.mjs'), 'utf8')
     expect(script).toContain(TOMBSTONE_MARKER)
@@ -107,10 +116,15 @@ describe('the tombstone script, run as the host would run it (#1681)', () => {
 describe('readAgentTombstone', () => {
   it('round-trips what writeAgentTombstone recorded', async () => {
     const dir = await retiredDirectory()
+    const mirror = await tempTombstonesDir()
     const written = await writeAgentTombstone({
       directory: dir, agentId: AGENT, reason: 'reset', retiredAt: '2026-08-21T10:00:00.000Z',
+      tombstonesDir: mirror,
     })
-    expect(await readAgentTombstone(dir)).toEqual(written)
+    // recordPath is the surviving mirror's path, not part of the in-place record
+    const { recordPath, ...inPlace } = written
+    expect(recordPath).toBe(join(mirror, `${AGENT}.json`))
+    expect(await readAgentTombstone(dir)).toEqual(inPlace)
   })
 
   it('is null for an un-tombstoned directory and for a corrupt tombstone', async () => {
@@ -126,13 +140,21 @@ describe('readAgentTombstone', () => {
 describe('review hardening (#1681 findings 1 and 3)', () => {
   it('MUTATION PROOF: a secret pasted into --reason is redacted before it is persisted or embedded', async () => {
     const dir = await retiredDirectory()
+    const mirror = await tempTombstonesDir()
     await writeAgentTombstone({
       directory: dir,
       agentId: AGENT,
       reason: 'leaked key sk_agent_leakedvalue123, rotated',
       replacedBy: 'agent-new sk_agent_alsoleaked1',
+      tombstonesDir: mirror,
     })
-    for (const file of [join(dir, 'bin', 'haven-signer.mjs'), join(dir, TOMBSTONE_FILENAME)]) {
+    const files = [
+      join(dir, 'bin', 'haven-signer.mjs'),
+      join(dir, TOMBSTONE_FILENAME),
+      // the surviving mirror must carry the same redaction discipline
+      join(mirror, `${AGENT}.json`),
+    ]
+    for (const file of files) {
       const content = await readFile(file, 'utf8')
       expect(content).not.toContain('sk_agent_leakedvalue123')
       expect(content).not.toContain('sk_agent_alsoleaked1')
@@ -143,7 +165,69 @@ describe('review hardening (#1681 findings 1 and 3)', () => {
   it('refuses a directory that does not exist — a typo must not mint a fake retirement', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-tombstone-typo-'))
     await expect(
-      writeAgentTombstone({ directory: join(dir, 'no-such-agent'), agentId: AGENT, reason: 'x' }),
+      writeAgentTombstone({ directory: join(dir, 'no-such-agent'), agentId: AGENT, reason: 'x', tombstonesDir: await tempTombstonesDir() }),
     ).rejects.toThrow(/Not a directory/)
+  })
+
+  // #2175: the refusal an automating caller actually hits. A `haven-reset`
+  // agent built the path from the AGENT ID while the directory was slug-named
+  // (#1696), so this fired — and with only a bare Error to go on, the caller
+  // could not tell "wrong path" from any other reason nothing was retired.
+  it('refuses with a stable code and says WHY the path may be wrong', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-tombstone-code-'))
+    const error = await writeAgentTombstone({
+      directory: join(dir, 'agt_1b8d4f60'),
+      agentId: AGENT,
+      reason: 'haven-reset',
+      tombstonesDir: await tempTombstonesDir(),
+    }).catch((err: unknown) => err)
+
+    expect(isConnectError(error)).toBe(true)
+    expect((error as ConnectError).code).toBe('tombstone_directory_not_found')
+    expect((error as ConnectError).nextAction).toBe('retry_with_an_existing_agent_directory')
+    // The message has to name the slug-vs-id trap, because that is the one
+    // thing the caller cannot deduce from "not a directory".
+    expect((error as ConnectError).message).toMatch(/named by their wiring SLUG/)
+    expect((error as ConnectError).message).toMatch(/will not exist for a named agent/)
+  })
+})
+
+describe('tombstone mirror (#1681 follow-up — record survives OUTSIDE the retired dir)', () => {
+  it('writes a surviving record next to the in-place one and returns its path', async () => {
+    const dir = await retiredDirectory()
+    const mirror = await tempTombstonesDir()
+    const info = await writeAgentTombstone({ directory: dir, agentId: AGENT, reason: 'reset', tombstonesDir: mirror })
+
+    const recordPath = join(mirror, `${AGENT}.json`)
+    expect(info.recordPath).toBe(recordPath)
+    const parsed = JSON.parse(await readFile(recordPath, 'utf8')) as { agent_id: string; reason: string }
+    expect(parsed.agent_id).toBe(AGENT)
+    expect(parsed.reason).toBe('reset')
+  })
+
+  it('readTombstoneRecords still lists a retiree whose directory was then DELETED — the case the in-place record cannot cover', async () => {
+    const dir = await retiredDirectory()
+    const mirror = await tempTombstonesDir()
+    await writeAgentTombstone({ directory: dir, agentId: AGENT, reason: 'reset', tombstonesDir: mirror })
+
+    // what a retirement flow does next: delete the whole agent directory
+    await rm(dir, { recursive: true, force: true })
+
+    const records = await readTombstoneRecords(mirror)
+    expect(records).toHaveLength(1)
+    expect(records[0].agent_id).toBe(AGENT)
+    expect(records[0].recordPath).toBe(join(mirror, `${AGENT}.json`))
+  })
+
+  it('returns an empty list for a missing records root and ignores non-json/corrupt entries', async () => {
+    const mirror = await tempTombstonesDir()
+    expect(await readTombstoneRecords(mirror)).toEqual([])
+    await writeFile(join(mirror, 'scrap.txt'), 'x')
+    await writeFile(join(mirror, 'broken.json'), 'not json')
+    expect(await readTombstoneRecords(mirror)).toEqual([])
+  })
+
+  it('defaultTombstonesDir lives outside the per-agent dirs, under ~/.haven', () => {
+    expect(defaultTombstonesDir()).toMatch(/\.haven[/\\]tombstones$/)
   })
 })

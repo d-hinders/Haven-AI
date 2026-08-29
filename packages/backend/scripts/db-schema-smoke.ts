@@ -173,14 +173,12 @@ import {
   REFRESH_STALE_X402_INTENT_SQL,
 } from '../src/infra/repositories/x402-authorizations.js'
 import {
-  ATTACH_EVIDENCE_FOR_APPROVAL_SQL,
   ATTACH_EVIDENCE_FOR_INTENT_SQL,
   CLAIM_PREPARED_SWEEP_SQL,
   EXPIRE_PREPARED_SWEEP_SQL,
   FIND_EVIDENCE_ANCHOR_FOR_AGENT_SQL,
   FIND_INTENT_EVIDENCE_SOURCE_SQL,
   FIND_INTENT_FOR_EVIDENCE_SQL,
-  FIND_RECONCILIATION_EVENT_FOR_APPROVAL_SQL,
   FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL,
   FIND_RECONCILIATION_INTENT_SQL,
   FIND_SWEEP_BY_ID_SQL,
@@ -194,12 +192,9 @@ import {
   MARK_SWEEP_FAILED_SQL,
   MARK_SWEEP_SUBMITTED_SQL,
   RELEASE_SWEEP_CLAIM_SQL,
-  RESOLVE_RECONCILIATION_FOR_APPROVAL_SQL,
   RESOLVE_RECONCILIATION_FOR_INTENT_SQL,
   RESOLVE_STRANDED_EVENTS_FOR_AGENT_SQL,
-  UPSERT_EVIDENCE_BASE_FOR_APPROVAL_SQL,
   UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL,
-  UPSERT_RECONCILIATION_EVENT_FOR_APPROVAL_SQL,
   UPSERT_RECONCILIATION_EVENT_FOR_INTENT_SQL,
   LOAD_RECEIPT_UNDERLAG_SOURCE_SQL,
 } from '../src/infra/repositories/machine-payments.js'
@@ -380,10 +375,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'auth: login credentials read by email', sql: FIND_USER_CREDENTIALS_BY_EMAIL_SQL },
   { name: 'auth: /me profile read by id', sql: FIND_USER_PROFILE_BY_ID_SQL },
   { name: 'auth: session safes payload (carries account_type, #1069)', sql: LIST_SESSION_SAFES_FOR_USER_SQL },
-  // #1987: the cross-replica allowance-nonce watermark smoke (#718) went with
-  // the AllowanceModule rail's execution half. The `allowance_nonce_watermarks`
-  // TABLE is deliberately left in place — dropping tables is #1990, and this
-  // slice drops no schema.
   { name: 'outbound: enqueue a tx', sql: ENQUEUE_OUTBOUND_TX_SQL },
   { name: 'outbound: claim next per chain', sql: CLAIM_NEXT_OUTBOUND_TX_SQL },
   { name: 'outbound: mark broadcast', sql: MARK_OUTBOUND_TX_BROADCAST_SQL },
@@ -669,20 +660,15 @@ const QUERIES: SmokeQuery[] = [
   { name: 'x402: settle flip to submitted (#976 ordering)', sql: MARK_INTENT_SUBMITTED_FOR_SETTLEMENT_SQL },
   // machine-payment evidence / reconciliation / sweeps / merchant receipts:
   { name: 'evidence: base upsert anchored on intent', sql: UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL },
-  { name: 'evidence: base upsert anchored on approval', sql: UPSERT_EVIDENCE_BASE_FOR_APPROVAL_SQL },
   { name: 'evidence: intent source read (optional agent scope)', sql: FIND_INTENT_EVIDENCE_SOURCE_SQL },
   { name: 'evidence: intent source read (agent-scoped)', sql: FIND_INTENT_FOR_EVIDENCE_SQL },
   { name: 'evidence: proof attach on intent', sql: ATTACH_EVIDENCE_FOR_INTENT_SQL },
-  { name: 'evidence: proof attach on approval', sql: ATTACH_EVIDENCE_FOR_APPROVAL_SQL },
   { name: 'evidence: receipts list with settlement-scheme join (#1063)', sql: LIST_EVIDENCE_RECEIPTS_SQL },
   { name: 'evidence: intent settlement-fields echo (#1118)', sql: GET_INTENT_SETTLEMENT_FIELDS_SQL },
   { name: 'reconciliation: intent lookup', sql: FIND_RECONCILIATION_INTENT_SQL },
   { name: 'reconciliation: event upsert keyed on intent', sql: UPSERT_RECONCILIATION_EVENT_FOR_INTENT_SQL },
-  { name: 'reconciliation: event upsert keyed on approval', sql: UPSERT_RECONCILIATION_EVENT_FOR_APPROVAL_SQL },
   { name: 'reconciliation: event reload keyed on intent', sql: FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL },
-  { name: 'reconciliation: event reload keyed on approval', sql: FIND_RECONCILIATION_EVENT_FOR_APPROVAL_SQL },
   { name: 'reconciliation: resolve on settle proof (intent)', sql: RESOLVE_RECONCILIATION_FOR_INTENT_SQL },
-  { name: 'reconciliation: resolve on settle proof (approval)', sql: RESOLVE_RECONCILIATION_FOR_APPROVAL_SQL },
   { name: 'reconciliation: resolve stranded flags after sweep', sql: RESOLVE_STRANDED_EVENTS_FOR_AGENT_SQL },
   { name: 'sweeps: prepared insert', sql: INSERT_PREPARED_SWEEP_SQL },
   { name: 'sweeps: find by nonce (tenant-scoped)', sql: FIND_SWEEP_BY_NONCE_SQL },

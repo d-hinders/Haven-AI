@@ -18,7 +18,7 @@ covers:
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
-last-verified: "2026-08-25" # #2038: the tooltip checklist line gains touch and the composite-control limit. Verified ONLY that line, against `ui/Tooltip.tsx` and the two e2e suites that measure it. NOT a re-read of this file. Prior: #1989: the app-shell review checklist told reviewers to verify the "Approvals badge"; the sidebar entry and its live badge are deleted with the Safe rail. Scope: that one checklist line — no other claim in this file was re-read. Prior: the haven-reviewer rule is unconditional (owner decision 2026-08-21) — this file scoped it to a risk list, which is the licence three skips in one session were drawn from. AGENTS.md is canonical. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-27" # #2097: files this doc `covers:` by exact path were re-verified — `docs/product/design-system.md` and `docs/product/screen-recipes.md` both record the reserved-`You` initiator rule; the review checklist itself is unchanged. Scope: those covered-file relationships only. Prior: #2102: the Haven-domain component list named "approvals" as a surface those components are reused for. The approvals screen was deleted by #1989 and its route deregistered by #2055. Scope: that one bullet. Prior: #2038: the tooltip checklist line gains touch and the composite-control limit. Verified ONLY that line, against `ui/Tooltip.tsx` and the two e2e suites that measure it. NOT a re-read of this file. Prior: #1989: the app-shell review checklist told reviewers to verify the "Approvals badge"; the sidebar entry and its live badge are deleted with the Safe rail. Scope: that one checklist line — no other claim in this file was re-read. Prior: the haven-reviewer rule is unconditional (owner decision 2026-08-21) — this file scoped it to a risk list, which is the licence three skips in one session were drawn from. AGENTS.md is canonical. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Haven AI UX Review
@@ -54,7 +54,7 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
 ## Visual System
 
 - Existing primitives in `packages/frontend/src/components/ui` are reused before adding new styles.
-- Haven-domain components in `packages/frontend/src/components/haven` are reused for agent budget, wallet identity, approvals, and risk explanations.
+- Haven-domain components in `packages/frontend/src/components/haven` are reused for agent budget, wallet identity, and risk explanations.
 - Authenticated pages use `PageHeader` unless the route has a deliberate special layout.
 - Dashboard compact previews use `TransactionActivityRow`. Semantic transaction
   lists, including card/compact account and agent histories, use the appropriate

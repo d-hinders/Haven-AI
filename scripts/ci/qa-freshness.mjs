@@ -116,6 +116,184 @@ export function moneyPathFiles(files, globs) {
 }
 
 /**
+ * Semver as `scripts/release-bump.mjs` writes it, including the `-alpha.N`
+ * prerelease form every Haven release has used. No capture groups — the shapes
+ * below number their own.
+ */
+const SEMVER = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?`
+
+/**
+ * The `export const <NAME>_VERSION` constants `release-bump.mjs` writes into a
+ * file this gate reasons about. Today that is exactly one: its
+ * SOURCE_VERSION_CONSTANTS list writes SIGNER_VERSION into
+ * packages/signer/src/server.ts, and the other four (MCP_VERSION,
+ * HOSTED_SERVER_VERSION, CONNECTOR_VERSION, CLI_VERSION) land in packages that
+ * are not on the money-path perimeter.
+ *
+ * Named literally rather than matched as `[A-Z0-9_]*_VERSION`, because a
+ * generic pattern would be wider than the writer it claims to be derived from —
+ * unforced widening on a safety gate. If release-bump ever writes another
+ * constant into a money-path file, this gate fires until someone adds it here.
+ * That is the intended friction: re-derive by intersecting release-bump.mjs's
+ * SOURCE_VERSION_CONSTANTS with the `globs` in .github/money-path-globs.json.
+ */
+const RELEASE_BUMP_VERSION_CONSTANTS = ['SIGNER_VERSION']
+
+/**
+ * The ONLY line shapes a release bump writes into a money-path file, each
+ * paired with the SYMBOL it addresses. The symbol is what makes this a check
+ * for a version *bump* rather than for a version-*shaped* line — see
+ * `isVersionOnlyDiff`.
+ */
+const VERSION_ONLY_LINE_SHAPES = [
+  {
+    // export const SIGNER_VERSION = '0.1.31-alpha.0'
+    re: new RegExp(
+      String.raw`^\s*export const (${RELEASE_BUMP_VERSION_CONSTANTS.join('|')})\s*=\s*(['"])${SEMVER}\2;?\s*$`,
+    ),
+    symbol: (m) => `const:${m[1]}`,
+  },
+  {
+    //   "version": "0.1.31-alpha.0",
+    re: new RegExp(String.raw`^\s*"version":\s*"${SEMVER}",?\s*$`),
+    symbol: () => 'pkg:version',
+  },
+  {
+    //     "@haven_ai/sdk": "0.1.31-alpha.0",
+    re: new RegExp(String.raw`^\s*"(@haven_ai/[a-z0-9-]+)":\s*"${SEMVER}",?\s*$`),
+    symbol: (m) => `dep:${m[1]}`,
+  },
+]
+
+/** The symbol a changed line addresses, or null if it is not a version line. */
+function versionLineSymbol(line) {
+  for (const shape of VERSION_ONLY_LINE_SHAPES) {
+    const m = shape.re.exec(line)
+    if (m) return shape.symbol(m)
+  }
+  return null
+}
+
+/**
+ * Does a single file's unified diff consist of NOTHING but a release-bump
+ * rewriting version strings in place?
+ *
+ * ## Why this exists (#2164)
+ *
+ * Every release bump rewrites `SIGNER_VERSION` into
+ * `packages/signer/src/server.ts` and the version field in
+ * `packages/signer/package.json` — both money-path files. That write always
+ * lands AFTER the last green money-flow run, so the freshness gate refused
+ * every release promotion by construction, and the only way through was
+ * `qa-override`. A named escape hatch used on every release stops being an
+ * escape hatch and becomes the route; the gate would then be off on exactly the
+ * promotions that ship new signing code. See the `0.1.31-alpha.0` cut.
+ *
+ * ## Why shape alone is NOT enough (review finding on this issue)
+ *
+ * A first version of this checked only that every changed line LOOKED like a
+ * version assignment. That answers "are these lines version-shaped", not "is
+ * this a version bump", and three behavioural edits slipped through it: a
+ * deletion of the constant with nothing replacing it; a dependency identity
+ * swap (`"@haven_ai/sdk"` removed, `"@haven_ai/mcp"` added) which retargets what
+ * the signer depends on; and a rename of the constant itself. Each line was
+ * independently well-shaped, so per-line matching excused all three.
+ *
+ * So the rule is PAIRING, not shape: every changed line must address a known
+ * symbol, and WITHIN EACH HUNK the multiset of symbols removed must equal the
+ * multiset added. An in-place bump satisfies that by construction (same symbol
+ * on both sides of the same hunk); a deletion, an addition, a rename and a swap
+ * all fail it, because a symbol appears on one side only. Per-hunk rather than
+ * per-file because a symbol moved between two locations nets to zero across the
+ * file while being a real change at both ends.
+ *
+ * ## Fail-closed
+ *
+ * Excusing by PATH (`packages/signer/**`) or by author/branch/commit message
+ * would be the permissive direction. One unrecognised line, one unpaired
+ * symbol, an empty diff, or an unreadable one, and the answer is false: this
+ * function may only ever answer "provably an in-place version bump".
+ *
+ * Deliberately blind to diff METADATA — `diff --git`, `index`, `old mode`,
+ * `rename from/to`, `similarity index` — since none of those start with `+`/`-`.
+ * A real rename surfaces the whole file as added content, which fails the
+ * pairing check anyway; a mode flip is not something release-bump does.
+ */
+export function isVersionOnlyDiff(diffText) {
+  if (typeof diffText !== 'string' || diffText.trim() === '') return false
+
+  // Split into hunks. Pairing is checked WITHIN each hunk, never across the
+  // file: two unrelated hunks whose symbols happen to net to zero are not a
+  // bump. The case that forced this (review, round two) is a dependency moved
+  // between sections — `"@haven_ai/sdk"` removed from `dependencies` in one
+  // hunk and added to `devDependencies` in another. File-wide multiset equality
+  // excuses it; per-hunk equality refuses it. That move changes what ships when
+  // the signer is installed, and `release-bump.mjs` never produces it — its
+  // dep-pin writer edits a value in place inside whichever section already
+  // holds the key.
+  const hunks = []
+  let current = null
+  for (const line of diffText.split('\n')) {
+    if (line.startsWith('@@')) {
+      current = []
+      hunks.push(current)
+      continue
+    }
+    if (current === null) continue // file headers ahead of the first hunk
+    current.push(line)
+  }
+  if (hunks.length === 0) return false
+
+  let changedLines = 0
+  for (const hunk of hunks) {
+    const removed = []
+    const added = []
+    for (const line of hunk) {
+      // Drop file headers (`+++ b/x`, `--- a/x`); everything else starting with
+      // a single +/- is a real changed line.
+      if (!(line.startsWith('+') || line.startsWith('-'))) continue
+      if (line.startsWith('+++') || line.startsWith('---')) continue
+      const symbol = versionLineSymbol(line.slice(1))
+      if (symbol === null) return false
+      ;(line.startsWith('-') ? removed : added).push(symbol)
+    }
+    changedLines += removed.length + added.length
+
+    // Multiset equality within the hunk: an in-place bump rewrites the same
+    // symbols on both sides. A pure delete, a pure add, a rename, a dependency
+    // swap, or a move to another part of the file each leave a symbol unmatched.
+    if (removed.length !== added.length) return false
+    const sortedRemoved = [...removed].sort()
+    const sortedAdded = [...added].sort()
+    if (!sortedRemoved.every((sym, i) => sym === sortedAdded[i])) return false
+  }
+
+  return changedLines > 0
+}
+
+/**
+ * Split money-path files into the ones that carry behaviour and the ones whose
+ * whole diff is a release-bump version string. `diffFor` returns a file's
+ * unified diff, or null when git cannot answer — null is treated as behavioural,
+ * so an uncomputable diff can never excuse a file.
+ */
+export function partitionVersionOnly(files, diffFor) {
+  const behavioural = []
+  const versionOnly = []
+  for (const file of files) {
+    let diffText = null
+    try {
+      diffText = diffFor(file)
+    } catch {
+      diffText = null
+    }
+    if (isVersionOnlyDiff(diffText)) versionOnly.push(file)
+    else behavioural.push(file)
+  }
+  return { behavioural, versionOnly }
+}
+
+/**
  * Decide whether a promotion may proceed.
  *
  * Fails CLOSED on anything it cannot establish: a missing run, an unparseable
@@ -379,6 +557,26 @@ function changedFilesSince(runSha, headSha) {
   }
 }
 
+/**
+ * One money-path file's unified diff between the QA run's commit and the head.
+ * `--unified=0` keeps context lines out of the answer, so `isVersionOnlyDiff`
+ * only ever sees genuinely changed lines. Returns null when git cannot answer;
+ * the caller treats null as behavioural.
+ */
+function fileDiffSince(runSha, headSha, file) {
+  if (!runSha) return null
+  try {
+    return execFileSync('git', ['diff', '--unified=0', `${runSha}..${headSha}`, '--', file], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+    })
+  } catch (err) {
+    console.error(`qa-freshness: could not diff ${file}: ${err.message}`)
+    return null
+  }
+}
+
 function mergeBase(a, b) {
   try {
     return execFileSync('git', ['merge-base', a, b], { cwd: ROOT, encoding: 'utf8' }).trim()
@@ -435,7 +633,26 @@ function main() {
     resolveMergeBaseWithMain: () => mergeBase('origin/main', headSha),
   })
   const changed = changedFilesSince(base, headSha)
-  const changedMoneyPathFiles = changed === null ? null : moneyPathFiles(changed, globs)
+  let changedMoneyPathFiles = changed === null ? null : moneyPathFiles(changed, globs)
+
+  // #2164: a money-path file whose entire diff is a release-bump version string
+  // carries no behaviour, so it cannot make a green run stale. Reported rather
+  // than silently dropped — an exclusion nobody can see is how a gate quietly
+  // stops meaning what its name says.
+  if (changedMoneyPathFiles !== null && changedMoneyPathFiles.length > 0) {
+    const { behavioural, versionOnly } = partitionVersionOnly(
+      changedMoneyPathFiles,
+      (file) => fileDiffSince(base, headSha, file),
+    )
+    if (versionOnly.length > 0) {
+      console.log(
+        `qa-freshness: ${versionOnly.length} money-path file(s) changed only a release-bump ` +
+          `version string and are not treated as uncovered (#2164):\n` +
+          versionOnly.map((f) => `  - ${f}`).join('\n'),
+      )
+    }
+    changedMoneyPathFiles = behavioural
+  }
 
   const result = evaluate({
     sourceBranch,

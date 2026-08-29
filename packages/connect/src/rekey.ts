@@ -45,6 +45,7 @@ import { writeHostedRuntimeConfig } from './runtime-install.js'
 import { prepareSignerRuntime } from './signer-runtime.js'
 import { generateDelegateKey } from './key.js'
 import { redactSecrets } from './redact.js'
+import { REKEY_FINISH_NEEDS_API_KEY } from './rekey-messages.js'
 import { serverNamesFor } from './server-names.js'
 import {
   REKEY_PENDING_TTL_MS,
@@ -170,7 +171,7 @@ export async function finishRekey(
 ): Promise<RekeyFinishResult> {
   const now = deps.now ?? (() => Date.now())
   if (!options.newApiKey) {
-    throw new Error('--rekey-finish needs --api-key <key> — the one the Haven agent page showed once.')
+    throw new Error(REKEY_FINISH_NEEDS_API_KEY)
   }
   const stored = await readStoredCredentials(
     options.serverName,

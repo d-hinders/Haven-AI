@@ -385,6 +385,221 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         const withAttention = new Set(attentionRows().map((r) => r.agent_id))
         expect([...withAttention].sort()).toEqual([...flagged].sort())
       })
+
+      // ── The banner's GATE, not just its copy (#2194) ─────────────────────
+      //
+      // #2147 photographed the "Recoverable funds in agent wallet" banner's
+      // unsettled-payment copy branch and reported, in the same PR, that the
+      // capture did not prove what it looked like it proved: the banner is
+      // gated on `hasRecoverableUsdc` = `Boolean(balance && balance.usdc_atomic
+      // !== '0')` (`hooks/useDelegateBalance.ts:88`), and
+      // `/agents/:id/delegate-balance` was UNKEYED — so it fell through to
+      // `FIXTURE_EMPTY_FALLBACK`, which has no `usdc_atomic`, and `undefined
+      // !== '0'` rendered the banner from a body with no balance in it.
+      //
+      // This is the subtlest member of the #2120/#2126/#2147 family. Those
+      // seeded states the product cannot reach. Here the state IS reachable —
+      // the fixture reached it by a route the API cannot take, and the PNG is
+      // indistinguishable either way. So these guards assert the RESPONSE, not
+      // the rendered outcome.
+      const agentIds = () => (FIXTURE_AGENTS as { id: string }[]).map((a) => a.id)
+      const balanceFor = (id: string) =>
+        fixtureFor(`/agents/${id}/delegate-balance`) as
+          | (Record<string, unknown> & { usdc_atomic?: string })
+          | ScenarioHttpError
+          | null
+
+      it('keys /agents/:id/delegate-balance for EVERY fixture agent — the #2194 gap', () => {
+        // Non-vacuity for the rest, and the guard against regressing to the
+        // mechanism itself rather than to this one instance of it: a `null`
+        // here is the fallback answering, and the fallback cannot say "not
+        // seeded" — it says 200 with a body that has no `usdc_atomic`.
+        expect(agentIds().length).toBeGreaterThan(0)
+        for (const id of agentIds()) {
+          expect([id, balanceFor(id)]).not.toEqual([id, null])
+        }
+        expect(FIXTURE_EMPTY_FALLBACK).not.toHaveProperty('usdc_atomic')
+      })
+
+      it('answers 422 for exactly the agents the route would refuse', () => {
+        // `routes/agents.ts:140-142` — `if (!agent.delegate_address) return
+        // reply.code(422).send({ error: 'Agent has no delegate address' })`.
+        // Both directions: a null delegate MUST 422, and an agent that has one
+        // must NOT, or the fixture is answering for a different agent than the
+        // one it names.
+        const agents = FIXTURE_AGENTS as { id: string; delegate_address: string | null }[]
+        for (const agent of agents) {
+          const answer = balanceFor(agent.id)
+          if (agent.delegate_address === null) {
+            expect(answer).toBeInstanceOf(ScenarioHttpError)
+            expect(answer as ScenarioHttpError).toMatchObject({
+              status: 422,
+              body: { error: 'Agent has no delegate address' },
+            })
+          } else {
+            expect([agent.id, answer instanceof ScenarioHttpError]).toEqual([agent.id, false])
+          }
+        }
+      })
+
+      it('serves the exact field set the route builds, and nothing else', () => {
+        // `routes/agents.ts:159-167` returns these eight keys; the named
+        // `DelegateBalance` schema (`openapi/spec.ts:6516-6528`) requires all
+        // eight. A missing one is how this bug worked — `usdc_atomic` absent
+        // reads as "not zero" — and an EXTRA one is a field the generated type
+        // does not have, i.e. a shape the frontend could not have been written
+        // against.
+        const expected = [
+          'chain_id', 'delegate_address', 'eth', 'eth_atomic',
+          'safe_address', 'usdc', 'usdc_address', 'usdc_atomic',
+        ]
+        const served = agentIds()
+          .map((id) => [id, balanceFor(id)] as const)
+          .filter(([, b]) => b !== null && !(b instanceof ScenarioHttpError))
+        expect(served.length).toBeGreaterThan(0)
+        for (const [id, body] of served) {
+          expect([id, Object.keys(body as object).sort()]).toEqual([id, expected])
+        }
+      })
+
+      it('derives the stranded amount from the open reconciliation event, rather than restating it', () => {
+        // The delegate holds what the funding leg put there and the merchant
+        // never pulled. On the EIP-3009 two-leg x402 shape `payTo` IS the
+        // agent's own delegate EOA — that is what selects the funding leg
+        // (`modules/x402/scheme-selection.ts:56-58`) — and on
+        // `merchant_retry_rejected_after_payment` the SDK throws "x402 retry
+        // failed after Haven funded the delegate wallet"
+        // (`packages/sdk/src/merchant-completion.ts:137-145`) after recording
+        // the event. So the balance is the intent's own amount, and an amount
+        // chosen freely here would photograph a number no incident produced.
+        const rows = attentionRows()
+        expect(rows.length).toBeGreaterThan(0)
+        for (const row of rows) {
+          // `agent_id` is optional on the wire type; an attention row without
+          // one could not have been joined to an agent at all.
+          expect([row.id, typeof row.agent_id]).toEqual([row.id, 'string'])
+          const body = balanceFor(row.agent_id as string) as Record<string, unknown>
+          expect(body).not.toBeInstanceOf(ScenarioHttpError)
+          expect([row.id, body.usdc_atomic]).toEqual([row.id, row.amount_raw])
+          // `usdc` and `amount_human` are equal by CONSTRUCTION, not
+          // coincidence: `routes/agents.ts:165` formats with
+          // `formatTokenValue(usdcAtomic, 6)` and the intent's human string is
+          // `formatTokenValue(amountRaw, tokenConfig.decimals)`
+          // (`modules/x402/authorize.ts:66`) — one function, one atomic input,
+          // the same six decimals.
+          expect([row.id, body.usdc]).toEqual([row.id, row.amount])
+        }
+      })
+
+      it('renders the AMOUNT-bearing sentence, not the degraded fallback', () => {
+        // `strandedSummary` (`AgentDetailClient.tsx:296-300`) needs
+        // `usdc_atomic !== '0'` AND a truthy `usdc`, or the banner degrades to
+        // "Recover **it** to your Haven wallet" (#1098 made that deliberate:
+        // "Recover undefined USDC" is worse). The real route always returns
+        // both as strings, so the degraded branch is what a PARTIAL response
+        // looks like — and it is the branch #2147's capture actually showed,
+        // because the fallback supplied neither field. This guard is why the
+        // amount-bearing sentence now has rendered evidence.
+        const rows = attentionRows()
+        expect(rows.length).toBeGreaterThan(0)
+        for (const row of rows) {
+          expect([row.id, typeof row.agent_id]).toEqual([row.id, 'string'])
+          const body = balanceFor(row.agent_id as string) as { usdc_atomic: string; usdc: string }
+          expect([row.id, body.usdc_atomic !== '0']).toEqual([row.id, true]) // hasRecoverableUsdc
+          expect([row.id, Boolean(body.usdc)]).toEqual([row.id, true]) // strandedSummary
+        }
+      })
+
+      it('describes the agent it is keyed by — every echoed field, not just the amounts', () => {
+        // `haven-reviewer`'s should-fix, applied, and it is the shape #2194 is
+        // about one field further out: `chain_id: 1` or another agent's
+        // `delegate_address` here is union-legal, path-impossible (the route
+        // echoes `agent.delegate_address`, `agent.safe_address` and
+        // `agent.safe_chain_id ?? DEFAULT_CHAIN_ID` — `routes/agents.ts:143,159-162`
+        // — it cannot answer for a different agent or a different chain), and
+        // the reviewer's own mutations of both left all 77 tests green.
+        //
+        // Latent rather than live TODAY: `AgentDetailClient` reads the delegate
+        // and chain off the AGENT record, not off this body
+        // (`AgentDetailClient.tsx:302,310`), so nothing currently renders these
+        // three. `SweepClient.tsx:13` already types `delegate_address` off this
+        // response though, so "no consumer" is a fact about today's callers,
+        // not a property of the shape. Pinned now rather than after the first
+        // caller reads it.
+        const agents = FIXTURE_AGENTS as {
+          id: string
+          delegate_address: string | null
+          safe_address: string
+          safe_chain_id: number
+        }[]
+        const usdcAddress = (fixtureFor('/agents/agent-research/delegate-balance') as {
+          usdc_address: string
+        }).usdc_address
+        // One token per chain: the SAME address the API fixture's allowance
+        // rows carry, which `chain-fed-capture-guard` pins to the shared
+        // registry. Two USDC addresses in one fixture is a contradiction the
+        // deployment cannot serve.
+        expect(typeof usdcAddress).toBe('string')
+        let checked = 0
+        for (const agent of agents) {
+          const body = balanceFor(agent.id)
+          if (body === null || body instanceof ScenarioHttpError) continue
+          checked += 1
+          expect([agent.id, body.delegate_address]).toEqual([agent.id, agent.delegate_address])
+          expect([agent.id, body.safe_address]).toEqual([agent.id, agent.safe_address])
+          expect([agent.id, body.chain_id]).toEqual([agent.id, agent.safe_chain_id])
+          expect([agent.id, body.usdc_address]).toEqual([agent.id, usdcAddress])
+        }
+        expect(checked).toBeGreaterThan(0)
+      })
+
+      it('formats every human amount the way formatTokenValue actually would', () => {
+        // The #2197 reviewer's finding, applied to a numeric field: a value can
+        // be union-legal — any string satisfies `type: 'string'` — path-
+        // impossible, and RENDER. `'0.00'` for an empty delegate is exactly
+        // that: `formatTokenValue` returns early on a zero raw value
+        // (`domain/tokens.ts:37`) and never reaches the two-decimal padding at
+        // `:44`, so the route emits `'0'`. Asserted as the emitter's two
+        // properties rather than a copy of it: a port of the function here
+        // would be a second implementation free to drift.
+        const bodies = agentIds()
+          .map((id) => [id, balanceFor(id)] as const)
+          .filter(([, b]) => b !== null && !(b instanceof ScenarioHttpError)) as [
+          string,
+          Record<string, string>,
+        ][]
+        expect(bodies.length).toBeGreaterThan(0)
+        for (const [id, body] of bodies) {
+          for (const [human, atomic, decimals] of [
+            [body.eth, body.eth_atomic, 18],
+            [body.usdc, body.usdc_atomic, 6],
+          ] as [string, string, number][]) {
+            if (atomic === '0') {
+              expect([id, human]).toEqual([id, '0'])
+              continue
+            }
+            // Non-zero: at least two decimal places (`:44`), at most six
+            // (`:46`), and the string must re-parse to the atomic value it
+            // claims to format.
+            //
+            // `haven-reviewer`'s nit, applied: reconstruct via the INTEGER and
+            // FRACTIONAL halves separately. Concatenating the whole string and
+            // padding by `decimals - frac.length` is only correct while the
+            // integer part is a single non-zero digit — for `'0.005'` it keeps
+            // the leading `'0'` and produces one digit too many, a FALSE
+            // failure on a correctly formatted value. Nothing seeded here is
+            // sub-unit today, which is exactly why it would have been found by
+            // a future amount rather than by this run.
+            const [int = '', frac = ''] = human.split('.')
+            expect([id, frac.length >= 2 && frac.length <= 6]).toEqual([id, true])
+            const reconstructed = (
+              BigInt(int) * 10n ** BigInt(decimals) +
+              BigInt(frac.padEnd(decimals, '0'))
+            ).toString()
+            expect([id, reconstructed]).toEqual([id, atomic])
+          }
+        }
+      })
     })
 
     it('carries `activity` in the generic empty fallback', () => {

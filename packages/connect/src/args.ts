@@ -1,5 +1,6 @@
 import { CONNECTOR_VERSION, type ConnectOptions } from './runtime.js'
 import { assertValidServerSlug } from './server-names.js'
+import { REKEY_FINISH_NEEDS_API_KEY } from './rekey-messages.js'
 
 export interface ParsedCli {
   options: ConnectOptions
@@ -132,7 +133,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       )
     }
     if (rekey.phase === 'finish' && !newApiKey) {
-      throw new Error('--rekey-finish needs --api-key <key> — the one the Haven agent page showed once.')
+      throw new Error(REKEY_FINISH_NEEDS_API_KEY)
     }
     return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey }
   }

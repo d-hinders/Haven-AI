@@ -339,6 +339,13 @@ export const FIXTURE_USER = {
 const ADDR = {
   recipient: '0x9f8f72aA9304c8B593d555F12eF6589cC3A579A2',
   delegate: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
+  // #2194: agent-research's OWN delegate EOA. A SECOND address rather than a
+  // reuse of `delegate` above, because the DB refuses the reuse:
+  // `017_agent_connection_setups.ts:55-56` puts a partial UNIQUE index on
+  // `(user_id, lower(delegate_address)) WHERE delegate_address IS NOT NULL AND
+  // status != 'revoked'`, and both fixture agents are active under the one
+  // FIXTURE_USER.
+  researchDelegate: '0x7A3f5c1E9b2D4A86F0c7e5138D9A4b62c0e1F37d',
   merchant: '0x6B175474E89094C44Da98b954EedeAC495271d0F',
   contact: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
 }
@@ -378,7 +385,39 @@ export const FIXTURE_AGENTS = [
   {
     id: 'agent-research', name: 'Research agent',
     description: 'Pays for x402 research APIs within a weekly budget',
-    delegate_address: null, safe_id: FIXTURE_SAFE.id,
+    // #2194: a REAL delegate address, and the null it replaces was not a
+    // neutral placeholder — it was a state no write path can produce, which
+    // silently made this agent's recovery banner unreachable in production
+    // while the capture showed one.
+    //
+    //   Nothing can create it. Every writer of `agents.delegate_address`
+    //   requires a non-null one: `POST /agents` 400s on a missing or invalid
+    //   address (`routes/agents.ts:180-182`) before `INSERT_AGENT_WITH_KEY_SQL`
+    //   (`infra/repositories/agents.ts:384`), and the connector path types
+    //   `delegateAddress: string` on `insertPendingAgent`
+    //   (`infra/repositories/agent-connection-setups.ts:378-390`). No UPDATE
+    //   anywhere sets the column back to NULL — not revoke, not pause, not
+    //   archive; the re-key path swaps one address for another
+    //   (`infra/repositories/agent-rekeys.ts:517`). The column is nullable only
+    //   because migration `000_initial.ts:40` added it to a table that already
+    //   had rows, so NULL is a pre-column legacy artefact — which is what the
+    //   route's 422 exists for, and what `agent-retired` below keeps carrying.
+    //
+    //   This agent in particular cannot be one. It is seeded with CONFIRMED
+    //   x402 payment intents (`pay-1`, `pay-4`), and `payment_intents`
+    //   declares `delegate_address VARCHAR(42) NOT NULL`
+    //   (`002_self_sign_payment_intents.ts:18`) — an intent records the
+    //   delegate it was signed for. An agent that has paid provably had one.
+    //
+    //   What the null actually did: `routes/agents.ts:140-142` answers 422
+    //   "Agent has no delegate address" for it, `useDelegateBalance`'s catch
+    //   turns that into `balance = null`, and `hasRecoverableUsdc` is false —
+    //   so PRODUCTION renders no "Recoverable funds" banner on this agent at
+    //   all. The capture rendered one only because
+    //   `/agents/:id/delegate-balance` was unkeyed in `fixtureFor` and
+    //   `FIXTURE_EMPTY_FALLBACK` has no `usdc_atomic`, making `undefined !== '0'`
+    //   true. Both halves are fixed together, below and in `fixtureFor`.
+    delegate_address: ADDR.researchDelegate, safe_id: FIXTURE_SAFE.id,
     safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     safe_chain_id: FIXTURE_SAFE.chain_id, account_type: 'delegator_hybrid',
     api_key_prefix: 'hvn_a1b2c3', status: 'active',
@@ -432,6 +471,15 @@ export const FIXTURE_AGENTS = [
   {
     id: 'agent-retired', name: 'Data-feed agent',
     description: 'Paused while the vendor contract renews',
+    // #2194: the null STAYS here, deliberately, and it is the only one left.
+    // `routes/agents.ts:140-142` answers 422 "Agent has no delegate address"
+    // for exactly this row, and `fixtureFor` now serves that 422 rather than
+    // letting the generic fallback answer 200 — so both branches of
+    // `useDelegateBalance` are seeded by the fixture instead of one being
+    // reached by accident. See the note on `agent-research` above for why the
+    // state is a pre-column legacy artefact (`000_initial.ts:40`) rather than
+    // something a current write path can produce: this agent is seeded with no
+    // payment intents, so nothing else contradicts it.
     delegate_address: null, safe_id: FIXTURE_SAFE.id,
     safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     safe_chain_id: FIXTURE_SAFE.chain_id, account_type: 'delegator_hybrid',
@@ -640,6 +688,102 @@ export const FIXTURE_AGENT_ACTIVITY = [
     created_at: '2026-07-09T09:15:00.000Z',
   },
 ]
+
+// ── The delegate EOA's on-chain balance (#2194) ──────────────────────────────
+//
+// `GET /agents/:id/delegate-balance` (`routes/agents.ts:127-168`) is what
+// `useDelegateBalance` reads and what the "Recoverable funds in agent wallet"
+// banner is gated on (`AgentDetailClient.tsx:630`, via
+// `hasRecoverableUsdc = Boolean(balance && balance.usdc_atomic !== '0')`,
+// `hooks/useDelegateBalance.ts:88`). It was NOT keyed in `fixtureFor`, so it
+// fell through to `FIXTURE_EMPTY_FALLBACK` — which carries neither
+// `usdc_atomic` nor `usdc` — and `undefined !== '0'` is true. The banner
+// rendered from a body with no balance in it, on an agent the real route
+// would have answered 422 for. The screenshot looked exactly right; that is
+// the whole difficulty of this defect class, and why the guard below asserts
+// the response SHAPE rather than the rendered outcome.
+//
+// The amount is DERIVED, not chosen. Both fields come off the same seeded
+// event that gives `agent-research` its attention row and its
+// `has_stranded_funds` flag:
+//
+//   usdc_atomic  = the intent's `amount_raw`. On the EIP-3009 two-leg x402
+//                  shape, `payTo` IS the agent's own delegate EOA — that is
+//                  what selects the funding leg (`deriveFundingShape`,
+//                  `modules/x402/scheme-selection.ts:56-58`) — so the Safe
+//                  transfers the intent amount TO the delegate and the
+//                  merchant then pulls it. On
+//                  `merchant_retry_rejected_after_payment` the merchant never
+//                  pulls: the SDK throws "x402 retry failed after Haven funded
+//                  the delegate wallet" (`packages/sdk/src/merchant-completion.ts:137-145`)
+//                  after recording the event. The funded amount stays put.
+//   usdc         = the intent's `amount` (`amount_human`), and they are equal
+//                  by CONSTRUCTION rather than by coincidence: the route
+//                  formats with `formatTokenValue(usdcAtomic, 6)`
+//                  (`routes/agents.ts:165`) and the intent's human string is
+//                  `formatTokenValue(amountRaw, tokenConfig.decimals)`
+//                  (`modules/x402/authorize.ts:66`) on the same atomic value
+//                  and the same 6 decimals. One function, one input.
+//
+// `eth` / `eth_atomic` are zero. The recovery path this banner points at is
+// the gasless `haven_sweep_delegate` (see `useDelegateBalance`'s own note),
+// and nothing on the x402 funding leg sends native value to the delegate —
+// so a delegate that has ONLY ever been funded by a rejected x402 retry holds
+// USDC and nothing else. Note the human string is `'0'`, not `'0.00'`:
+// `formatTokenValue` returns early on a zero raw value
+// (`domain/tokens.ts:37`), and the two-decimal padding at `:44` is never
+// reached.
+const STRANDED_INTENT = FIXTURE_AGENT_ACTIVITY.find(
+  (row) => row.payment_attention_reason === 'merchant_retry_rejected_after_payment',
+)
+if (!STRANDED_INTENT) {
+  // A fixture that lost the attention row would otherwise seed `undefined`
+  // amounts here and re-create the exact defect #2194 is about, one layer in.
+  throw new Error(
+    'screenshot fixture: no open merchant_retry_rejected_after_payment row in ' +
+      'FIXTURE_AGENT_ACTIVITY — the delegate balance below is derived from it (#2194)',
+  )
+}
+
+/** The route's 422, verbatim (`routes/agents.ts:140-142`). */
+export const DELEGATE_BALANCE_NO_DELEGATE = { error: 'Agent has no delegate address' }
+
+/**
+ * Keyed by agent id. Every agent in `FIXTURE_AGENTS` has an entry, so the
+ * generic fallback can never answer this endpoint again — which is the
+ * mechanism that produced the bug, not just this instance of it.
+ */
+export const FIXTURE_DELEGATE_BALANCES = {
+  // The recoverable-funds incident, and the ONLY agent that renders the banner.
+  'agent-research': {
+    delegate_address: ADDR.researchDelegate,
+    safe_address: FIXTURE_SAFE.safe_address,
+    chain_id: FIXTURE_SAFE.chain_id,
+    eth: '0',
+    eth_atomic: '0',
+    usdc: STRANDED_INTENT.amount,
+    usdc_atomic: STRANDED_INTENT.amount_raw,
+    usdc_address: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,
+  },
+  // A delegate that holds nothing — the ordinary steady state, and the
+  // CONTROL for the row above: `hasRecoverableUsdc` is false here for the
+  // reason the product says it is ('0' === '0'), not because a key is missing.
+  'agent-ops': {
+    delegate_address: ADDR.delegate,
+    safe_address: FIXTURE_SAFE.safe_address,
+    chain_id: FIXTURE_SAFE.chain_id,
+    eth: '0',
+    eth_atomic: '0',
+    usdc: '0',
+    usdc_atomic: '0',
+    usdc_address: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,
+  },
+  // `agent-retired` has no delegate address, so the route never reaches the
+  // balance reads — it answers 422 at `routes/agents.ts:140-142`. Served as a
+  // real 422 by `fixtureFor` below.
+  'agent-retired': null,
+}
+
 export const FIXTURE_AGENT_STATS = {
   all_time: [{ token: 'USDC', total_spent: '482.50', tx_count: 37 }],
   today: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
@@ -707,6 +851,20 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
       owner_address: null,
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
     }
+  }
+  if (pathname.startsWith('/agents/') && pathname.endsWith('/delegate-balance')) {
+    // #2194. Keyed for EVERY fixture agent — the point is not that this one
+    // path now answers correctly, it is that the generic fallback can no
+    // longer answer it at all. `FIXTURE_EMPTY_FALLBACK` cannot say "this
+    // endpoint is not seeded": it says 200 with a body that has no
+    // `usdc_atomic`, and `undefined !== '0'` reads as YES.
+    const agentId = pathname.slice('/agents/'.length, -'/delegate-balance'.length)
+    if (!(agentId in FIXTURE_DELEGATE_BALANCES)) return null
+    const balance = FIXTURE_DELEGATE_BALANCES[agentId]
+    // A seeded null is the route's OWN 422, not an absent fixture. Served as a
+    // real failure so the app's real error path runs — `useDelegateBalance`'s
+    // catch, which turns it into "nothing to recover" (`:52-54`).
+    return balance ?? httpError(422, DELEGATE_BALANCE_NO_DELEGATE)
   }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/delegations')) {
     // #2106: the delegation rail's actual spend authority, as
@@ -1656,6 +1814,18 @@ async function newFixtureContext(browser, vp, scenario) {
     if (api === '/auth/me') return json(FIXTURE_USER)
     if (api === '/user/safes') return json({ safes: FIXTURE_USER.safes })
     const populated = fixtureFor(api + search)
+    // #2194: the SAME `instanceof` check the scenario branch above makes, for
+    // the same reason and one layer down. `fixtureFor` can now seed a route's
+    // own failure (the delegate-balance 422), and `json()` would serve that
+    // marker object as a 200 whose body happens to have an `error` key — a
+    // fixture that looks like it is seeding an error state and is not.
+    if (populated instanceof ScenarioHttpError) {
+      return route.fulfill({
+        status: populated.status,
+        contentType: 'application/json',
+        body: JSON.stringify(populated.body),
+      })
+    }
     if (populated !== null) return json(populated)
     // Anything unkeyed → a benign empty shape carrying every collection
     // key the hooks read, so a missing key never throws (e.g. a hook that
@@ -1870,6 +2040,32 @@ export { makeAllowanceChainFixture }
 // disagree would photograph a contradiction the product cannot actually produce.
 // The delegate set is exactly the managed one for the same reason — seeding a
 // stranger here would render an "unmanaged delegate" warning in every capture.
+//
+// ── Why `agent-research`'s delegate is NOT here (#2194) ──────────────────────
+//
+// It has one now, and it still does not belong in this list. `getDelegates` is
+// the AllowanceModule's own registry — written by `addDelegate` on the LEGACY
+// Safe rail, which #1440/#2020 retired. A `delegator_hybrid` agent's spend
+// authority is a delegation grant (`GET /agents/:id/delegations`), and nothing
+// ever registers its delegate with the module. `agent-ops` is the one fixture
+// agent on that legacy rail (`account_type: null`), so it is the one entry.
+//
+// This is not a technicality about a registry nobody reads. `useOnChainAllowances`
+// keys its map off THIS list, not off the `managedDelegates` argument
+// (`hooks/useOnChainAllowances.ts:110-127`), and `AgentPanel.tsx:174-176` hands
+// each card `onChainData.get(delegateKey)?.allowances`. Adding `agent-research`
+// here would therefore render an AllowanceModule budget on its card — and
+// `makeAllowanceChainFixture` answers `getTokenAllowance` from `rows` WITHOUT
+// consulting the delegate argument, so the budget it rendered would be
+// `agent-ops`'s 500 USDC / daily, next to its own 250 USDC / weekly delegation.
+// Two spend limits for one agent, from two retired-and-live rails at once.
+//
+// Absent, `onChainData.get()` returns undefined and the card renders no
+// AllowanceModule row, which is what the delegation rail actually looks like.
+// No unmanaged-delegate warning either: `useAgentPanelState.ts:261-271`
+// subtracts the MANAGED set from the on-chain one, and a delegate that is not
+// on-chain cannot be in that difference. `chain-fed-capture-guard.test.ts`
+// pins both halves.
 export const SHARED_CHAIN_ROWS = [
   {
     token: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,

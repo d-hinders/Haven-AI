@@ -386,6 +386,17 @@ export const FIXTURE_AGENTS = [
     // #1878: a NAMED pair — the case multi-agent wiring exists for.
     mcp_server_name: 'haven-research',
     mcp_last_seen_at: '2026-07-10T08:12:00.000Z',
+    // #2147: NOT decoration and not a second switch — the SAME open
+    // `merchant_retry_rejected_after_payment` reconciliation event that gives
+    // `pay-4` its `payment_attention_reason` below. Both routes that serve an
+    // agent row compute this as `EXISTS(… mpre.event_type = '…' AND
+    // mpre.status = 'open')` over that agent's payment intents
+    // (`infra/repositories/agents.ts:186-192` list, `:206-212` single), so a
+    // fixture seeding the activity row and leaving this false would claim the
+    // event both exists and does not — a contradiction no backend can serve.
+    // It renders `AgentCard`'s "Stranded funds on delegate" notice
+    // (`components/agent-panel/AgentCard.tsx:202`) on /agents.
+    has_stranded_funds: true,
     // #2106: the DERIVED projection of this agent's active delegation, exactly
     // as `rails/delegation-budget-view.ts` builds it on the delegation rail
     // (250 USDC / 604800s → `allowance_amount` + `reset_period_min` in
@@ -564,6 +575,69 @@ export const FIXTURE_AGENT_ACTIVITY = [
     tool_name: 'haven_get_allowances', payment_id: null, result_status: 'ok',
     next_action: null, error_code: null, status_code: 200,
     created_at: '2026-07-09T11:30:00.000Z',
+  },
+  // #2147: the `needs_attention` state, which NO row seeded — leaving both its
+  // badge AND a second rendered surface (the "Recoverable funds" banner's
+  // specific copy branch, `AgentDetailClient.tsx:634-636`) unphotographed
+  // anywhere in the capture suite. The mirror of #2120/#2126: those two seeded
+  // states the product cannot reach; this one is a state the product CAN reach
+  // that the evidence rig never rendered, so the reviewer judging that banner
+  // had only ever seen half of it.
+  //
+  // Every field is derived from the code that produces it, not chosen to make
+  // the badge appear. The state is ONE open `merchant_retry_rejected_after_payment`
+  // reconciliation event — an x402 payment that settled on-chain while the
+  // merchant refused the retry (`packages/sdk/src/merchant-completion.ts:127-136`
+  // posts it with a literal `rail: 'x402'`) — and the reconciliation endpoint
+  // that records it refuses everything else:
+  //
+  //   status  'confirmed' — `modules/mpp/reconciliation.ts:40-48` answers 409
+  //                         ("Reconciliation events require a confirmed payment")
+  //                         for any other status. Also what `machinePaymentLifecycle`
+  //                         needs to get past `machine-payment-lifecycle.ts:33-35`.
+  //   tx_hash  non-null   — same guard, same 409; the event stores
+  //                         `payment.tx_hash.toLowerCase()` (`reconciliation.ts:73`),
+  //                         so an attention row without a hash cannot exist.
+  //   source  'x402'      — `COALESCE(pi.payment_rail, pi.source, 'direct')`
+  //                         (`infra/repositories/agent-activity.ts:96`), and a
+  //                         machine rail per `machine-payment-lifecycle.ts:9`.
+  //                         The event's `rail` must equal the intent's
+  //                         (`reconciliation.ts:54-58`, else 409).
+  //   payment_proof_status
+  //           'payment_confirmed' — the settlement-time base row writes that
+  //                         literal (`infra/repositories/machine-payments.ts:49`;
+  //                         column default, migration `014:13`). The only writer
+  //                         that raises it is the agent-reported attach
+  //                         (`modules/mpp/evidence.ts:196-200`), and on this path
+  //                         the SDK throws instead of attaching
+  //                         (`merchant-completion.ts:137-145`). It is also inert
+  //                         for the derivation: `:37-42` returns before the
+  //                         proof-status branch at `:44-49`.
+  //   payment_flow_status / payment_attention_reason — NOT restated: they are
+  //                         what `machinePaymentLifecycle` returns at
+  //                         `machine-payment-lifecycle.ts:37-41` for the inputs
+  //                         above, and `screenshot-fixture.test.ts` re-derives
+  //                         them with that same shared function.
+  //   explorer_url        — `routes/agent-activity.ts:78` builds it from
+  //                         `tx_hash`, so a hash without a link is impossible.
+  //
+  // The same open event is what `LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL` /
+  // `FIND_AGENT_FOR_USER_ALL_STATUSES_SQL` compute `has_stranded_funds` from
+  // (`infra/repositories/agents.ts:186-192`, `:206-212`), which is why
+  // `agent-research` carries that flag above — one event, both consequences.
+  {
+    type: 'payment', id: 'pay-4', agent_id: 'agent-research', agent_name: 'Research agent',
+    token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    amount_raw: '8000000', amount: '8.00', to: ADDR.merchant,
+    reason: null, status: 'confirmed', tx_hash: `0x${'c3'.repeat(32)}`,
+    source: 'x402', x402_resource_url: 'https://api.example.dev/datasets',
+    x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_SAFE.chain_id,
+    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    explorer_url: `https://sepolia.basescan.org/tx/0x${'c3'.repeat(32)}`,
+    confirmed_at: '2026-07-09T09:16:00.000Z', payment_proof_status: 'payment_confirmed',
+    payment_flow_status: 'needs_attention',
+    payment_attention_reason: 'merchant_retry_rejected_after_payment',
+    created_at: '2026-07-09T09:15:00.000Z',
   },
 ]
 export const FIXTURE_AGENT_STATS = {

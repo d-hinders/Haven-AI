@@ -308,6 +308,62 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           ])
         }
       })
+
+      /**
+       * #2147 — the attention half of the same describe block, extending it
+       * rather than standing a parallel one beside it.
+       *
+       * The `derives, rather than restates` test above round-trips
+       * `payment_attention_reason` back in as `reconciliationEventType`, so it
+       * proves the seeded PAIR is self-consistent. What it structurally cannot
+       * see is whether the reconciliation event could have been recorded at
+       * all: `machinePaymentLifecycle` never learns the tx hash, and the
+       * endpoint that writes the event refuses on exactly that. So the
+       * preconditions are asserted here, against
+       * `modules/mpp/reconciliation.ts`.
+       */
+      const attentionRows = () =>
+        seededPaymentRows().filter(
+          (r) => r.payment_attention_reason === 'merchant_retry_rejected_after_payment',
+        )
+
+      it('seeds the needs_attention state at all — the #2147 gap', () => {
+        // Non-vacuity for the two assertions below, and the guard against
+        // silently regressing to the state this issue was filed about: with no
+        // attention row, `needs_attention`'s badge and the "Recoverable funds"
+        // banner's specific copy branch (`AgentDetailClient.tsx:634-636`) have
+        // no rendered evidence anywhere in the capture suite.
+        const rows = attentionRows()
+        expect(rows.length).toBeGreaterThan(0)
+        expect(rows.map((r) => r.payment_flow_status)).toEqual(rows.map(() => 'needs_attention'))
+      })
+
+      it('seeds an attention row the reconciliation endpoint would have accepted', () => {
+        // `handleReconciliationEvent` (`modules/mpp/reconciliation.ts:40-48`)
+        // answers 409 "Reconciliation events require a confirmed payment"
+        // unless BOTH hold, and stores `payment.tx_hash.toLowerCase()` (`:73`).
+        // An attention row missing either describes an event that could never
+        // have been written, however consistent its derived pair looks.
+        for (const row of attentionRows()) {
+          expect([row.id, row.status, row.tx_hash != null]).toEqual([row.id, 'confirmed', true])
+        }
+      })
+
+      it('agrees with the agent row that the reconciliation event is open', () => {
+        // One event, two reads. `has_stranded_funds` is
+        // `EXISTS(… event_type = 'merchant_retry_rejected_after_payment' AND
+        // status = 'open')` over the agent's intents
+        // (`infra/repositories/agents.ts:186-192`, `:206-212`) — the same row
+        // the activity feed derives `payment_attention_reason` from. A fixture
+        // where the two disagree serves a contradiction no backend can.
+        const flagged = new Set(
+          (FIXTURE_AGENTS as { id: string; has_stranded_funds?: boolean }[])
+            .filter((a) => a.has_stranded_funds)
+            .map((a) => a.id),
+        )
+        const withAttention = new Set(attentionRows().map((r) => r.agent_id))
+        expect([...withAttention].sort()).toEqual([...flagged].sort())
+      })
     })
 
     it('carries `activity` in the generic empty fallback', () => {

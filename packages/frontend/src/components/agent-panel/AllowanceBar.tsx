@@ -124,9 +124,32 @@ export function AllowanceBar({
   )
 }
 
+/**
+ * The placeholder shown while `useOnChainAllowances` is still reading the
+ * chain for this token.
+ *
+ * `role="status" aria-busy="true"` is not decoration (#2204). Two readers need
+ * it and neither had it:
+ *
+ *   - a screen reader, which was given a bare "loading..." with no live region
+ *     and no busy state, so the row announced nothing when it resolved;
+ *   - the capture harness, which cannot otherwise tell this row apart from a
+ *     resolved one. `/agents` photographed with all three cards on this
+ *     placeholder is 40 CSS px shorter than the same page resolved, clears the
+ *     #2036 content floor comfortably (886 chars / 147 elements against a floor
+ *     of 30 / 6), and produces a PNG that looks entirely healthy. The busy flag
+ *     is the app SAYING it is not finished, which is what
+ *     `resolveContentSettled` now refuses to capture over.
+ */
 export function AllowanceBarSkeleton({ symbol }: { symbol: string }) {
   return (
-    <div className="flex items-center gap-2 text-xs">
+    <div
+      className="flex items-center gap-2 text-xs"
+      role="status"
+      aria-busy="true"
+      aria-live="polite"
+      aria-label={`Loading ${symbol} budget`}
+    >
       <span className="text-[var(--v2-ink-2)]">{symbol}</span>
       <div className="flex-1 h-[3px] bg-[var(--v2-surface-2)] rounded-full" />
       <span className="text-[var(--v2-ink-3)] animate-pulse">loading...</span>

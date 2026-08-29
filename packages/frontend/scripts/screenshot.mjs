@@ -223,6 +223,9 @@ const KEEP_RUNS = resolveKeepRuns(ARGS, process.env)
  *   'blank-below-fold'     the PNG came back empty below the first viewport
  *   'still-loading'        the shell mounted, the ROUTE never did (#2036) — the
  *                          one cause whose PNG looks entirely healthy
+ *   'partially-loading'    the route rendered but part of it is still loading
+ *                          (#2204) — the PNG looks healthy AND clears the #2036
+ *                          floor; the only tell is that it is short
  *   'unknown'              anything else, never silently folded into the above
  */
 export function describeDeletedCapture(err, { route, viewport, file, written = true }) {
@@ -1442,6 +1445,47 @@ const CHAIN_READ_GAPS = []
  * adds the sixteenth; routes change rarely, and the property being asserted is
  * a property of the screen, not of the story told about it.
  */
+/**
+ * Captures allowed to hold `aria-busy="true"` content at shutter time (#2204).
+ *
+ * `resolveContentSettled` refuses a route whose content region still says part
+ * of itself is loading, because that is what an 80px-short `/agents` capture
+ * looks like from the inside. One surface breaks that rule legitimately:
+ * `/design-system` renders loading states AS CONTENT — its skeleton showcase is
+ * permanently busy, correctly, and always will be.
+ *
+ * Deliberately the same narrow shape as #2197's `expectedSilentRoutes`, for the
+ * same reason — an exemption list is one edit away from being the way the guard
+ * gets waved through:
+ *
+ *  - it is per ROUTE, never a global flag and never per run;
+ *  - each entry carries a written `reason`, so the exemption is anchored to an
+ *    explanation rather than to a bare boolean;
+ *  - it SELF-EXPIRES. A declared-tolerant route that turns out to hold no busy
+ *    element is reported (`stale_busy_declarations`), so the day the showcase
+ *    stops rendering a skeleton this stops claiming it does.
+ *
+ * Adding a route here is almost always the wrong fix. The right one is to mark
+ * the placeholder `aria-busy` where it lives — which is an accessibility fix
+ * the loading state needed anyway — and let the guard wait for it to clear.
+ */
+export const BUSY_TOLERANT_CAPTURES = [
+  {
+    pattern: /^\/design-system$/,
+    reason:
+      'the skeleton/loading-state showcase renders aria-busy regions as documented CONTENT, ' +
+      'so they never resolve and never should',
+  },
+]
+
+/** Declared-tolerant captures that held no busy element — the declaration is stale. */
+export const STALE_BUSY_DECLARATIONS = []
+
+/** Is this capture allowed to be busy, and why? `null` when it is not. */
+export function busyToleranceFor(pathname) {
+  return BUSY_TOLERANT_CAPTURES.find((entry) => entry.pattern.test(pathname)) ?? null
+}
+
 export const CHAIN_FED_ROUTES = [
   {
     pattern: /^\/agents(\/|$)/,
@@ -1722,6 +1766,42 @@ async function newFixtureContext(browser, vp, scenario) {
   // the app's own read path, gate branch and rendering are all real. It is not
   // a hook for stubbing component state, and a scenario that needs one should
   // be re-examined rather than served here.
+  // ── The lever that makes the #2204 race happen on demand ──────────────────
+  //
+  // A guard that has only ever been seen to pass is not evidence. This
+  // reproduces the genuinely-unpainted page the busy check exists to refuse:
+  // it stalls each JSON-RPC read CLIENT-SIDE, before the request is issued.
+  //
+  // The stall has to be on THIS side of the wire, and finding that out cost a
+  // diagnosis worth recording. Delaying the ANSWER (inside the route handler)
+  // reproduces nothing at all: the request is in flight the whole time, so
+  // `waitUntil: 'networkidle'` simply waits it out and the capture is correct
+  // — measured at 500 / 2000 / 6000ms, all three came back at the healthy
+  // 1936px. Stalling BEFORE the fetch leaves the page creates a window with no
+  // in-flight request, `networkidle` fires into it, and the shutter lands on
+  // `useOnChainAllowances` still loading. That is also the real mechanism: the
+  // hook issues four SEQUENTIAL reads, and under load the client-side gap
+  // between two of them can exceed networkidle's 500ms threshold on its own —
+  // which is why the bad run is 1 in 4 on a busy machine and 0 in 10 on an
+  // idle one.
+  //
+  // Diagnostic only, and it says so: it is off unless asked for, and it is
+  // deliberately not a `scenario` field, because nothing committed should ever
+  // capture through it.
+  const chainStallMs = Number(process.env.SCREENSHOT_CHAIN_STALL_MS ?? 0)
+  if (chainStallMs > 0) {
+    await context.addInitScript((ms) => {
+      const original = window.fetch
+      window.fetch = async (input, init) => {
+        const body = typeof init?.body === 'string' ? init.body : ''
+        if (body.includes('"jsonrpc"')) {
+          await new Promise((resolve) => setTimeout(resolve, ms))
+        }
+        return original(input, init)
+      }
+    }, chainStallMs)
+  }
+
   const seeded = scenario?.seed?.()
   if (seeded) {
     await context.addInitScript((entries) => {
@@ -3752,10 +3832,12 @@ async function main() {
         // Un-clips the h-screen/overflow-hidden shell so `fullPage` paints the
         // whole route, then reads the PNG back and refuses a blank one (#1738).
         try {
+          const busyTolerance = busyToleranceFor(routePath)
           const { shell, content } = await captureFullPage(page, {
             path: file,
             label: `${routePath} · ${vp.name}`,
             viewportDevicePx: vp.height * DEVICE_SCALE_FACTOR,
+            ...(busyTolerance ? { allowBusy: true } : {}),
           })
           captured.push(path.relative(ROOT, file))
           if (content) {
@@ -3764,8 +3846,19 @@ async function main() {
               viewport: vp.name,
               chars: content.chars,
               elements: content.elements,
+              busy: content.busy ?? 0,
               waited_ms: content.waitedMs,
             })
+            // The exemption's expiry date (#2204). A route declared
+            // busy-tolerant that held nothing busy is a declaration nobody has
+            // re-read; say so rather than carry it forever.
+            if (busyTolerance && !(content.busy > 0)) {
+              STALE_BUSY_DECLARATIONS.push({
+                route: routePath,
+                viewport: vp.name,
+                reason: busyTolerance.reason,
+              })
+            }
             if (content.raced) {
               contentRaced.push({ route: routePath, viewport: vp.name, waitedMs: content.waitedMs })
             }
@@ -3950,6 +4043,9 @@ async function main() {
         // failing runs.
         content_settle: contentSettles,
         content_waits: contentRaced,
+        // Busy-tolerance declarations (#2204) that turned out not to be needed
+        // — the exemption's own expiry notice.
+        stale_busy_declarations: STALE_BUSY_DECLARATIONS,
         // Retention, recorded so the live manifest can be read as "this is the
         // current run, and here is where the one before it went" (#1888). A
         // reader who finds PNGs under `previous/` can tell from HERE that they
@@ -4006,11 +4102,24 @@ async function main() {
   }
   if (contentSettles.length > 0) {
     console.log(
-      `\nℹ route content confirmed present at capture time (#2036) — floor is ` +
-        `${MIN_CONTENT_CHARS} chars / ${MIN_CONTENT_ELEMENTS} elements in "${SCROLL_SHELL_ROOT}":`,
+      `\nℹ route content confirmed present AND FINISHED at capture time (#2036/#2204) — floor is ` +
+        `${MIN_CONTENT_CHARS} chars / ${MIN_CONTENT_ELEMENTS} elements in "${SCROLL_SHELL_ROOT}", ` +
+        `and nothing in it may still be aria-busy:`,
     )
     for (const e of contentSettles) {
-      console.log(`  [${e.route} · ${e.viewport}] ${e.chars} chars, ${e.elements} elements`)
+      console.log(
+        `  [${e.route} · ${e.viewport}] ${e.chars} chars, ${e.elements} elements` +
+          (e.busy > 0 ? `, ${e.busy} still-busy element(s) — tolerated by declaration` : ''),
+      )
+    }
+  }
+  if (STALE_BUSY_DECLARATIONS.length > 0) {
+    console.log(
+      `\n⚠ ${STALE_BUSY_DECLARATIONS.length} busy-tolerance declaration(s) were not needed — ` +
+        `BUSY_TOLERANT_CAPTURES in scripts/screenshot.mjs is stale (#2204):`,
+    )
+    for (const e of STALE_BUSY_DECLARATIONS) {
+      console.log(`  [${e.route} · ${e.viewport}] held no aria-busy element — declared because: ${e.reason}`)
     }
   }
   for (const line of formatDeletionReport(deletedCaptures)) console.error(line)

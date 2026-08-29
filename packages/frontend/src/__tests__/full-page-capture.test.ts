@@ -570,6 +570,9 @@ type ContentProbe = {
   renderedChars: number
   contentChars: number | null
   contentElements: number | null
+  /** How many `[aria-busy="true"]` elements the region still holds (#2204). */
+  contentBusy?: number | null
+  contentBusyLabels?: string[]
 }
 
 /**
@@ -613,6 +616,43 @@ const AGENTS_PARTIAL: ContentProbe = {
   renderedChars: 2_600,
   contentChars: 105,
   contentElements: 30,
+}
+
+/**
+ * The #2204 pair, MEASURED on `#main-content` at 1280 against the shared
+ * fixture on a pre-warmed server — not constructed.
+ *
+ * `AGENTS_CHAIN_PENDING` is the capture that was reported as 1856px in 1 of 4
+ * otherwise identical runs: `useOnChainAllowances` has not answered, so all
+ * three `AgentCard`s show `AllowanceBarSkeleton` instead of a budget. It is 40
+ * CSS px shorter than `AGENTS_RESOLVED` (872 vs 912), which at
+ * `deviceScaleFactor: 2` is exactly the 80 device px in the report.
+ *
+ * The numbers are the whole point: 886 chars in 147 elements is 29x and 24x
+ * above the #2036 floors. Nothing measuring quantity can tell these two apart,
+ * which is why the discriminator has to be the app's own busy flag.
+ */
+const AGENTS_CHAIN_PENDING: ContentProbe = {
+  found: true,
+  docScrollHeight: 872,
+  viewportHeight: 800,
+  renderedChars: 2_800,
+  contentChars: 886,
+  contentElements: 147,
+  contentBusy: 3,
+  contentBusyLabels: ['Loading USDC budget', 'Loading USDC budget', 'Loading USDC budget'],
+}
+
+/** The same route, same fixture, same server — resolved. */
+const AGENTS_RESOLVED: ContentProbe = {
+  found: true,
+  docScrollHeight: 912,
+  viewportHeight: 800,
+  renderedChars: 2_900,
+  contentChars: 1_022,
+  contentElements: 157,
+  contentBusy: 0,
+  contentBusyLabels: [],
 }
 
 /**
@@ -754,16 +794,83 @@ describe('judgeContentSettled', () => {
     expect(verdict.reason).toBe('settled')
   })
 
-  it('states its own boundary: a PARTIALLY rendered route still passes', () => {
+  it('states its own boundary: a partial route with NO busy marker still passes', () => {
     // Not an aspiration — a limit, asserted so it cannot quietly stop being
     // true and so nobody reads this guard as more than it is. `/agents` was
     // measured at 105 chars / 30 elements under load average ~490, mid-render;
-    // warm it is 851/138. This guard's claim is "the route rendered SOMETHING",
-    // never "the route rendered everything". The second question needs
-    // per-route named content and is separate work.
+    // warm it is 851/138.
+    //
+    // #2204 NARROWED this boundary rather than removing it. A partial render
+    // that MARKS itself busy is now refused (below); this fixture predates that
+    // marker and carries none, so the quantity floors are still all there is to
+    // judge it by and it still passes. That is the honest statement of the
+    // guard's reach: it catches a loading state the app admits to, not one it
+    // renders silently. The remedy for the next such state is to mark the
+    // placeholder `aria-busy`, which is an accessibility fix in its own right.
     const verdict = judgeContentSettled(AGENTS_PARTIAL)
 
     expect(verdict.settled).toBe(true)
+  })
+
+  // ── #2204: the partially-painted capture that photographs as a healthy one ──
+
+  it('refuses /agents caught with its chain-fed budgets still loading', () => {
+    const verdict = judgeContentSettled(AGENTS_CHAIN_PENDING)
+
+    expect(verdict.settled).toBe(false)
+    expect(verdict.reason).toBe('partially-loaded')
+    expect(verdict.busy).toBe(3)
+    // The labels survive into the verdict because the refusal quotes them: a
+    // reader has to learn WHAT was still loading, not just that something was.
+    expect(verdict.busyLabels).toContain('Loading USDC budget')
+  })
+
+  it('proves quantity alone cannot tell the two /agents states apart', () => {
+    // The reason this guard exists at all, asserted rather than argued. If
+    // either of these ever fails, the #2036 floor could have caught #2204 and
+    // this whole mechanism is redundant.
+    expect(AGENTS_CHAIN_PENDING.contentChars!).toBeGreaterThan(MIN_CONTENT_CHARS * 20)
+    expect(AGENTS_CHAIN_PENDING.contentElements!).toBeGreaterThan(MIN_CONTENT_ELEMENTS * 20)
+    expect(judgeContentSettled({ ...AGENTS_CHAIN_PENDING, contentBusy: 0 }).settled).toBe(true)
+
+    // And the difference it hides is the reported one: 912 - 872 = 40 CSS px,
+    // 80 device px at deviceScaleFactor 2 — 1936px against 1856px.
+    expect(AGENTS_RESOLVED.docScrollHeight - AGENTS_CHAIN_PENDING.docScrollHeight).toBe(40)
+  })
+
+  it('says YES to the same route once its budgets resolved — the positive control', () => {
+    // Without this, `busy > 0` could be `true` unconditionally and every
+    // negative test above would still pass while the harness captured nothing.
+    const verdict = judgeContentSettled(AGENTS_RESOLVED)
+
+    expect(verdict.settled).toBe(true)
+    expect(verdict.reason).toBe('settled')
+  })
+
+  it('reads only aria-busy="true" — a resolved region is not a busy one', () => {
+    // Several surfaces bind `aria-busy={loading}`. A probe that counted the
+    // ATTRIBUTE rather than the value would refuse every one of them forever.
+    expect(judgeContentSettled({ ...AGENTS_RESOLVED, contentBusy: 0 }).settled).toBe(true)
+  })
+
+  it('keeps #2036 name for an EMPTY region even when it is also busy', () => {
+    // Order matters for the remedy printed to the reader: an empty region is
+    // "the route never rendered", and sending that to the #2204 message would
+    // point at a busy marker when the real answer is a cold chunk compile.
+    const verdict = judgeContentSettled({ ...DASHBOARD_LOADING, contentBusy: 1 })
+
+    expect(verdict.reason).toBe('still-loading')
+  })
+
+  it('lets a declared busy-tolerant capture through — /design-system by name', () => {
+    // `/design-system` renders loading states AS CONTENT; its skeleton showcase
+    // is permanently aria-busy and correctly so.
+    const verdict = judgeContentSettled(AGENTS_CHAIN_PENDING, { allowBusy: true })
+
+    expect(verdict.settled).toBe(true)
+    // The count still survives, so the run can report the declaration as STALE
+    // the day the showcase stops rendering one.
+    expect(verdict.busy).toBe(3)
   })
 })
 
@@ -811,6 +918,80 @@ describe('resolveContentSettled', () => {
     // The floor is quoted, so the reader can judge the margin without opening
     // the source.
     expect(error.message).toContain(`${MIN_CONTENT_CHARS} characters`)
+  })
+
+  it('waits out a busy region and reports it as a wait, not a failure (#2204)', async () => {
+    // The RETRY, and the only one this design has. A chain read that answers
+    // late is a slow machine, not a broken route: the poll loop absorbs it and
+    // the capture is correct. What is deliberately absent is a retry of the
+    // whole capture after the wait expires — that would turn a genuine
+    // slow-paint regression into a green run whose PNG came from attempt two,
+    // with nothing in `.screenshots/` saying so.
+    const page = fakeContentPage([AGENTS_CHAIN_PENDING, AGENTS_CHAIN_PENDING, AGENTS_RESOLVED])
+
+    const result = await resolveContentSettled(page, { timeoutMs: 5_000, pollMs: 1 })
+
+    expect(result.settled).toBe(true)
+    expect(result.raced).toBe(true)
+    expect(result.polls).toBe(2)
+    expect(result.chars).toBe(AGENTS_RESOLVED.contentChars)
+    expect(result.busy).toBe(0)
+  })
+
+  it('REFUSES a region that stays busy, with its own cause and the labels', async () => {
+    // The falsifiability case: this is exactly the state a live run produces
+    // under `SCREENSHOT_CHAIN_STALL_MS`, and exactly the state that used to be
+    // written to disk as `agents-desktop.png` at 1856px with `RESULT ok`.
+    const page = fakeContentPage([AGENTS_CHAIN_PENDING])
+
+    const error = await resolveContentSettled(page, {
+      timeoutMs: 20,
+      pollMs: 1,
+      label: '/agents · desktop',
+    }).catch((e) => e)
+
+    expect(error.name).toBe('ContentNotSettledError')
+    // A cause of its OWN — folding this into 'still-loading' would send every
+    // reader to the #2036 remedy for a failure whose remedy is different.
+    expect(error.captureCause).toBe('partially-loading')
+    expect(error.message).toContain('/agents · desktop')
+    expect(error.message).toContain('aria-busy')
+    expect(error.message).toContain('Loading USDC budget')
+    // The numbers that make this failure invisible to the #2036 floor are
+    // quoted, so the reader can see why the older guard passed it.
+    expect(error.message).toContain('886 character(s)')
+    expect(error.message).toContain('147 element(s)')
+  })
+
+  it('captures the same state when the caller declares it busy-tolerant', async () => {
+    const page = fakeContentPage([AGENTS_CHAIN_PENDING])
+
+    const result = await resolveContentSettled(page, {
+      timeoutMs: 20,
+      pollMs: 1,
+      allowBusy: true,
+    })
+
+    expect(result.settled).toBe(true)
+    expect(result.busy).toBe(3)
+  })
+
+  it('judges per page: one busy capture in a sweep refuses exactly one', async () => {
+    // The failure `unanswered_chain_reads` had to have designed out of it in
+    // review (#1996) and that #2036 pinned with this same shape: a healthy
+    // neighbour must not excuse a bad capture, and a bad one must not condemn
+    // the sweep.
+    const sweep = [AGENTS_RESOLVED, AGENTS_CHAIN_PENDING, DASHBOARD_RENDERED]
+    const verdicts = await Promise.all(
+      sweep.map((probe) =>
+        resolveContentSettled(fakeContentPage([probe]), { timeoutMs: 20, pollMs: 1 }).then(
+          () => 'captured',
+          (e) => e.captureCause,
+        ),
+      ),
+    )
+
+    expect(verdicts).toEqual(['captured', 'partially-loading', 'captured'])
   })
 
   it('accepts a probe the caller already took instead of re-probing', async () => {

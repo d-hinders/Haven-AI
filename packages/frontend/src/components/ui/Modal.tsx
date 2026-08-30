@@ -1,7 +1,7 @@
 'use client'
 
 import { X } from 'lucide-react'
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { Icon } from './Icon'
 import { useScrollEdgeCue } from '@/hooks/useScrollEdgeCue'
 

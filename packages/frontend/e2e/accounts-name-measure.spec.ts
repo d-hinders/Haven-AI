@@ -576,6 +576,96 @@ test('/accounts: the hover actions reserve their own width and never cover the n
 })
 
 /**
+ * The COMPOUND state — one badge AND one action on the same card.
+ *
+ * Raised by `haven-reviewer` as a coverage gap, and it was right: every other
+ * test here puts the seeded active+default account on card one (both badges,
+ * NEITHER button, since both are gated on `!isActive` / `!safe.is_default`)
+ * and a neither-active-nor-default account on card two (no badges, BOTH
+ * buttons). So the two extremes were measured and the middle was not — even
+ * though badge visibility and action visibility are independent predicates,
+ * and the middle is the ordinary state for anyone whose active account is not
+ * their default one.
+ *
+ * This fixture makes the ACTIVE account the non-default one, which renders
+ * both halves of the middle at once:
+ *
+ *   card A (active, not default)  -> `Active` badge + the star button alone
+ *   card B (default, not active)  -> `default` badge + "Set active" alone
+ *
+ * and asserts on both that the badge is on the name's line, the button never
+ * covers the name, and the reservation is still exactly what the button
+ * measures — a single 26px star reserves 26px, not the 102.6px of a full pair
+ * and not the 48px of the old `pr-12`. That last reading is the one no other
+ * test in this file can produce, because nowhere else does a card render a
+ * PARTIAL actions block.
+ */
+test('/accounts: a card with one badge and one action reserves only that action', async ({ page }) => {
+  test.slow()
+  // Short names, and the arithmetic is the reason. The compound state has
+  // LESS room than either extreme, which is not obvious and which the first
+  // version of this test got wrong: card A carries a 58.2px badge AND a 26px
+  // star, so at 1280 the name may measure at most 265 - 26 - 8 - 58.2 - 8 =
+  // 164.8px before the badge wraps; card B carries a 52.1px badge and the
+  // 72.6px "Set active" button, leaving 124.3px. `Operating wallet Europe`
+  // (~182px) exceeded card A's budget and wrapped the badge — correctly, per
+  // #2223, but it is not the state this test is about.
+  const ACTIVE_NOT_DEFAULT = ORDINARY_NAME
+  const DEFAULT_NOT_ACTIVE = 'Imported Safe'
+  await mockHavenApi(page)
+  await seedAuthenticatedSession(page)
+  await serveAccounts(page, [
+    // `seedAuthenticatedSession` pins `safe-main` as the active account, so
+    // giving it `is_default: false` is what produces the split.
+    { ...testSafe, name: ACTIVE_NOT_DEFAULT, is_default: false },
+    { ...SECOND_SAFE, name: DEFAULT_NOT_ACTIVE, is_default: true },
+  ])
+
+  for (const width of WIDTHS) {
+    await page.setViewportSize({ width, height: 900 })
+    await openAccounts(page)
+
+    for (const [name, badge] of [
+      [ACTIVE_NOT_DEFAULT, 'Active'],
+      [DEFAULT_NOT_ACTIVE, 'default'],
+    ] as const) {
+      const achievedOpacity = await hoverCardUntilActionsVisible(page, name)
+      const reading = await readCardSettled(page, name)
+
+      // Exactly one badge, and it is the one this card's state earns.
+      expect(reading.badges, `@${width}px: "${name}" renders ${JSON.stringify(reading.badges)}`).toEqual([badge])
+      expect(
+        overlapOf(reading.badgeRects[badge], reading.nameRect).y,
+        `@${width}px: the ${badge} badge (y ${reading.badgeRects[badge].y}) is not on the name's line (y ${reading.nameRect.y})`,
+      ).toBeGreaterThanOrEqual(reading.badgeRects[badge].h)
+
+      // Exactly one action, actually hovered, and not over the name.
+      expect(reading.actionsRect, `@${width}px: "${name}" renders no actions`).not.toBeNull()
+      expect(
+        achievedOpacity,
+        `@${width}px: the actions on "${name}" are at opacity ${achievedOpacity} — hover did not engage`,
+      ).toBeGreaterThan(0.9)
+      const over = overlapOf(reading.actionsRect!, reading.nameRect)
+      expect(
+        +(over.x * over.y).toFixed(1),
+        `@${width}px: the hovered action covers ${over.x}x${over.y}px of "${name}"'s box`,
+      ).toBe(0)
+
+      // And the reservation tracks the PARTIAL block. A `pr-*` step cannot do
+      // this: whatever number it held would be right for at most one of the
+      // three action combinations this card can render.
+      const accounted = reading.rowInner + reading.actionsRect!.w
+      expect(
+        reading.cardInner - accounted,
+        `@${width}px: ${reading.cardInner}px of card holds a ${reading.rowInner}px name row + a ${reading.actionsRect!.w}px actions block`,
+      ).toBeLessThanOrEqual(12)
+
+      await page.mouse.move(0, 0)
+    }
+  }
+})
+
+/**
  * The state the #2223 defect hid behind, asserted so the fixes are provably
  * free here. With one account neither badge renders and the card is both
  * active and default, so no hover actions render either — this must read

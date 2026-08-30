@@ -33,6 +33,7 @@ import {
   parseFrontMatter,
   globToRegExp,
 } from './validate-frontmatter.mjs'
+import { packageDocRecords } from './package-docs.mjs'
 
 function arg(name) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
@@ -442,6 +443,13 @@ async function main() {
       satisfiedBy: parsed.data['satisfied-by'] || [],
     })
   }
+
+  // #2088: governed `packages/**` READMEs. They carry no front-matter — five of
+  // them are published npm landing pages — so their records come from the
+  // manifest in `package-docs.mjs`. All are advisory (`contract: false`): the
+  // point is to put a drifting package README in front of a reviewer, not to
+  // fail every PR that touches `packages/sdk/src/**`.
+  docs.push(...packageDocRecords())
 
   const docsByPath = new Map(docs.map((d) => [d.doc, d]))
   const findings = implicatedDocs(changed, docs, { strict, added })

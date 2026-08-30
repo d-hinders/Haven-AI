@@ -100,8 +100,16 @@ const FOCUSABLE =
  */
 const INTERACTIVE_ANCESTOR = `${FOCUSABLE}, [role="link"], [role="button"], [role="menuitem"], [role="tab"], [role="option"], label`
 
-/** Keep-inside-the-viewport gutter for the bubble, in px. */
-const VIEWPORT_MARGIN = 8
+/**
+ * Keep-inside-the-viewport gutter for a floating overlay, in px.
+ *
+ * Exported since #2067 so the wallet menu's height bound uses THIS number
+ * rather than a second one of its own. Two clamping idioms that must agree is
+ * how this class of bug returns: the bubble clamps horizontally against it,
+ * `WalletPopover` clamps vertically against it, and there is one place to
+ * change if the gutter ever moves.
+ */
+export const VIEWPORT_MARGIN = 8 // design-system-exempt: a shared px constant, not a primitive — nothing to showcase
 
 /**
  * How long a touch suppresses the mouse path, in ms.

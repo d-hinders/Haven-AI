@@ -143,6 +143,17 @@ test('a broken cron is NOT masked by a fresh green PR run', () => {
   assert.equal(result.findings[0].kind, 'stale')
 })
 
+test('a pull_request run whose head branch IS `dev` still does not count', () => {
+  // The mutation that exposed this: disabling the event filter survived the
+  // whole suite, because every pull_request fixture also had a feature-branch
+  // head, so the BRANCH filter was silently doing the work. This is the real
+  // case — a `dev → main` promotion PR has head branch `dev`, and this
+  // workflow's paths filter can match it. Only the event check separates it
+  // from a genuine scheduled run.
+  const runs = [run({ event: 'pull_request', headBranch: 'dev' })]
+  assert.deepEqual(selectQualifyingRuns(runs, GUARD), [])
+})
+
 test('a WORKFLOW_DISPATCH on a default branch does count', () => {
   // A deliberate manual re-run against dev really does prove the thing, and
   // refusing it would leave no way to clear the issue after a fix.

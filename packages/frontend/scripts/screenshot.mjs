@@ -2363,6 +2363,66 @@ const answerBudgetChainRead = makeAllowanceChainFixture({
 })
 
 export const SCENARIOS = {
+  /**
+   * #2043: the agent list with NOTHING unrecorded — the note's absent half.
+   *
+   * The present half needs no scenario: the shared fixture's `agent-retired`
+   * carries no `mcp_server_name` at all, so the plain `/agents` route capture
+   * already shows the hoisted explanation. The conditional IS the design, and
+   * a capture that only ever shows the note present proves half of it — a
+   * note that rendered unconditionally would look identical.
+   *
+   * ── Why this override is reachable, per field (#2205/#2227/#2233) ────────
+   *
+   * Only ONE field changes, and only on `agent-retired`:
+   *
+   * | field | value | why the product can produce it |
+   * |---|---|---|
+   * | `mcp_server_name` | `'haven-data-feed'` | `normalizeMcpServerName` accepts it: 15 chars (≤64) and matching `/^haven(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/` (`backend/src/routes/agent-connection-setups.ts:143-149`). Written once at `POST /agent-connection-setups/register`. |
+   *
+   * The combination with this agent's OTHER fields is reachable too, which is
+   * the check #2233 was filed over:
+   *
+   * | co-field | value | compatible because |
+   * |---|---|---|
+   * | `mcp_last_seen_at` | `null` | the name is written at REGISTRATION; `mcp_last_seen_at` is written by MCP tool calls. An agent wired with a current connector that has not yet called a tool has exactly this pair. |
+   * | `status` | `'paused'` | pausing is a Haven-side status flip; it neither writes nor clears `mcp_server_name` (`infra/repositories/agents.ts:472-481` — "This UPDATE never touches mcp_server_name"). |
+   * | `delegate_address` | `null` | orthogonal: a pre-column legacy artefact on this agent, unrelated to the wiring label. Unchanged from the shared fixture. |
+   *
+   * Nothing else in `FIXTURE_AGENTS` is touched: `agent-research` and
+   * `agent-ops` already carry recorded names, which is why they are not
+   * overridden here.
+   */
+  'mcp-name-all-recorded': {
+    description:
+      'The /agents list with every agent reporting an MCP server name — the hoisted "not recorded" explanation must be ABSENT (#2043)',
+    api(apiPath) {
+      if (apiPath === '/agents') {
+        return {
+          agents: FIXTURE_AGENTS.map((a) =>
+            a.mcp_server_name ? a : { ...a, mcp_server_name: 'haven-data-feed' },
+          ),
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      // Wait for EVERY card, not the first: the claim is about the whole list,
+      // so a capture that raced the third card would be evidence of nothing —
+      // and "no note" is exactly what a half-rendered list also looks like.
+      for (const name of ['Research agent', 'Ops agent', 'Data-feed agent']) {
+        await page.getByText(name, { exact: true }).first().waitFor({ timeout: 20_000 })
+      }
+      // Positive control for the absence: the three recorded names are on
+      // screen, so the list really did render its MCP row.
+      await page.getByText('haven-data-feed', { exact: true }).first().waitFor({ timeout: 20_000 })
+
+      await shoot(page.locator('main').first(), 'list')
+    },
+  },
   'design-system-buttons': {
     description:
       'The Buttons and badges card on /design-system — variants, the size scale, and the tap-target note',

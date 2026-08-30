@@ -200,15 +200,62 @@ function proofStatusForAttach(input: AttachMachinePaymentEvidenceInput): Payment
   return 'merchant_response_observed'
 }
 
+/**
+ * Why a `machine_payment_evidence` row did NOT get written (#2213).
+ *
+ * The seam used to return `void` and every refusal above looked identical from
+ * the outside: a silent no-op. That was survivable for the callers it was
+ * written for — `POST /payments` and the attach path call it optimistically on
+ * rows that may not be evidence-bearing at all — and NOT survivable for the
+ * settlement sweeper, which calls it having just flipped an intent
+ * `submitted → confirmed` and cannot undo that. See the sweeper's own comment.
+ *
+ * The distinction the type encodes is the crux, and it is not the same
+ * distinction everywhere:
+ *
+ * - `not_applicable` — **nothing to record.** The payment is not an
+ *   evidence-bearing settled protocol payment: wrong rail, or not settled yet.
+ *   These are the deliberate early returns; a caller polling an unsettled row
+ *   is behaving correctly and must not be told anything failed.
+ * - `failed` — **should have a row, does not.** For an x402 intent
+ *   `resource_url` is written at authorize time and is NOT NULL on the evidence
+ *   table, so a missing one means the row is unwritable, permanently. Likewise
+ *   an intent that cannot be re-read, or a write that threw.
+ *
+ * Note that "nothing to record" is caller-relative. A caller that has already
+ * established the preconditions — as the sweeper has — should treat ANY
+ * non-`recorded` outcome as a failure, because for it there is no legitimate
+ * "nothing to record" left.
+ */
+export type EvidenceRecordOutcome =
+  | { status: 'recorded' }
+  | { status: 'not_applicable'; reason: 'not_protocol_rail' | 'not_settled' }
+  | { status: 'failed'; reason: 'missing_resource_url' | 'intent_not_found' | 'write_threw' }
+
 export async function recordMachinePaymentEvidenceBase(
   intent: MachinePaymentEvidenceSource,
-): Promise<void> {
+): Promise<EvidenceRecordOutcome> {
   const rail = railForPayment(intent)
-  if (!isProtocolPaymentRail(rail)) return
-  if (intent.status !== expectedStatusForPayment(intent) || !intent.tx_hash) return
+  // Nothing to record: evidence is a protocol-payment concept, and callers on
+  // the generic payment path reach this with plain sends.
+  if (!isProtocolPaymentRail(rail)) {
+    return { status: 'not_applicable', reason: 'not_protocol_rail' }
+  }
+  // Nothing to record YET: evidence is settlement-time proof. An unsettled
+  // intent is not a failure, it is a row whose turn has not come.
+  if (intent.status !== expectedStatusForPayment(intent) || !intent.tx_hash) {
+    return { status: 'not_applicable', reason: 'not_settled' }
+  }
 
   const resourceUrl = resourceUrlForPayment(intent)
-  if (!resourceUrl) return
+  // FAILED, not "nothing to record": `machine_payment_evidence.resource_url` is
+  // NOT NULL, so a settled protocol payment without one can never reach the
+  // accounting feed. Historically the only reachable silent no-op after a
+  // successful confirm, and therefore the exact fail-forever gap #2117 exists
+  // to close — credit to PR #2134 (PhilipEriksson) for naming it.
+  if (!resourceUrl) {
+    return { status: 'failed', reason: 'missing_resource_url' }
+  }
   const paymentIntentId = intent.id
   // #2085: a NEW evidence row is always anchored to a payment intent. The
   // COLUMN survives with historical values (migration 070) and `mapEvidence`
@@ -273,36 +320,47 @@ export async function recordMachinePaymentEvidenceBase(
   // Fire-and-forget + idempotent: never blocks or delays settlement, inert
   // unless the hosted reporting feed is available for this user.
   feedSettledPaymentBestEffort(intent.user_id, intent.id)
+
+  return { status: 'recorded' }
 }
 
 export async function recordMachinePaymentEvidenceBaseById(
   paymentIntentId: string,
   agentId?: string,
-): Promise<void> {
+): Promise<EvidenceRecordOutcome> {
   const intent = await findIntentEvidenceSource(paymentIntentId, agentId ?? null)
-  if (intent) await recordMachinePaymentEvidenceBase(intent)
+  // FAILED, not "nothing to record": the caller named a payment id, so a row
+  // that cannot be re-read (deleted, or not scoped to this agent) means the
+  // evidence write cannot happen for a payment the caller believes exists.
+  if (!intent) return { status: 'failed', reason: 'intent_not_found' }
+  return await recordMachinePaymentEvidenceBase(intent)
 }
 
 export async function tryRecordMachinePaymentEvidenceBaseById(
   paymentIntentId: string,
   agentId?: string,
   log?: EvidenceLogger,
-): Promise<void> {
+): Promise<EvidenceRecordOutcome> {
   try {
-    await recordMachinePaymentEvidenceBaseById(paymentIntentId, agentId)
+    return await recordMachinePaymentEvidenceBaseById(paymentIntentId, agentId)
   } catch (err) {
     if (log) {
       log.warn(
         { err, paymentIntentId, agentId },
         'Machine payment evidence recording failed after confirmed payment',
       )
-      return
+      return { status: 'failed', reason: 'write_threw' }
     }
 
     console.warn(
       'Machine payment evidence recording failed after confirmed payment',
       { paymentIntentId, agentId, err },
     )
+    // #2213: still SWALLOWED — the "try" contract is that a caller on the
+    // settlement hot path is never blocked by evidence recording. What changed
+    // is that the swallow is no longer invisible: the failure is reported
+    // through the return value, so a caller that cares can act on it.
+    return { status: 'failed', reason: 'write_threw' }
   }
 }
 

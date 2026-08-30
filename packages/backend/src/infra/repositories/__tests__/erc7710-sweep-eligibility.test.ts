@@ -29,7 +29,10 @@
 import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
-import { findSweepableErc7710Intents } from '../x402-authorizations.js'
+import {
+  findEvidenceOrphanedErc7710Intents,
+  findSweepableErc7710Intents,
+} from '../x402-authorizations.js'
 import {
   SWEEP_MAX_CANDIDATES_PER_TICK,
   SWEEP_MIN_AGE_SECONDS,
@@ -111,6 +114,28 @@ async function seedIntent(seed: IntentSeed): Promise<string> {
     ],
   )
   return result.rows[0].id
+}
+
+/** A minimal `machine_payment_evidence` row — enough to satisfy the NOT NULLs. */
+async function seedEvidence(intentId: string, agentId: string, userId: string): Promise<void> {
+  await db.query(
+    `INSERT INTO machine_payment_evidence
+       (payment_intent_id, agent_id, user_id, rail, tx_hash, chain_id, resource_url,
+        payer_address, settlement_address, token_symbol, token_address,
+        amount_raw, amount_human)
+     VALUES ($1, $2, $3, 'x402', $4, 84532, 'https://merchant.example/paid',
+             '0x00000000000000000000000000000000000000f1',
+             '0x00000000000000000000000000000000000000aa', 'USDC',
+             '0x036cbd53842c5426634e7929541ec2318f3dcf7e', '100000', '0.10')`,
+    [intentId, agentId, userId, `0x${String(++seq).padStart(64, 'e')}`.slice(0, 66)],
+  )
+}
+
+async function orphanIds(
+  args: readonly [number, number, number] = PROD_ARGS,
+): Promise<string[]> {
+  const rows = await findEvidenceOrphanedErc7710Intents(args[0], args[1], args[2])
+  return rows.map((r) => r.id)
 }
 
 async function sweepIds(
@@ -277,5 +302,66 @@ describeDb('erc7710 sweep eligibility (#2117 candidate query, absorbed from #213
     ] as const) {
       expect(row[column], `column ${column} must be selected`).toBeTruthy()
     }
+  })
+  // ── #2213: the recovery query, the complement of the one above ──────────
+  //
+  // `FIND_EVIDENCE_ORPHANED_ERC7710_INTENTS_SQL` is what makes a failed
+  // evidence write recoverable rather than permanent. The forward query above
+  // demands `status = 'submitted' AND tx_hash IS NULL`; this one demands the
+  // exact opposite pair plus "no evidence row", so between them a settled
+  // erc7710 payment is in one working set or the other until it is booked.
+  // That complementarity is the guarantee, so it is asserted as one.
+
+  it('POSITIVE CONTROL: a confirmed erc7710 intent with no evidence row is a recovery candidate under the PRODUCTION bounds', async () => {
+    const { agentId, userId } = await seedOwner()
+    const orphan = await seedIntent({
+      agentId, userId, status: 'confirmed', txHash: `0x${'c'.repeat(64)}`,
+    })
+    // The same row WITH its evidence row is not an orphan — without this half,
+    // every completed payment would be re-fed to the accounting tool forever.
+    const booked = await seedIntent({
+      agentId, userId, status: 'confirmed', txHash: `0x${'d'.repeat(64)}`,
+    })
+    await seedEvidence(booked, agentId, userId)
+
+    expect(await orphanIds()).toEqual([orphan])
+    // …and it is NOT in the forward set: that is precisely why a confirm with
+    // a failed evidence write used to be unreachable by every retry path.
+    expect(await sweepIds()).toEqual([])
+  })
+
+  it('excludes every row that is not a settled, unbooked erc7710 payment inside the horizon', async () => {
+    const { agentId, userId } = await seedOwner()
+    const CONFIRMED = { status: 'confirmed', txHash: `0x${'c'.repeat(64)}` }
+    const orphan = await seedIntent({ agentId, userId, ...CONFIRMED })
+
+    // One row per conjunct, each the baseline except the field named.
+    await seedIntent({ agentId, userId, status: 'submitted', txHash: null })
+    // A SUBMITTED intent that already carries a hash — the eip3009 in-flight
+    // state `MARK_INTENT_SUBMITTED_FOR_SETTLEMENT_SQL` writes. It is excluded by
+    // `status = 'confirmed'` ALONE, so without this row that conjunct is masked
+    // by `tx_hash IS NOT NULL` and a widened status predicate survives. Booking
+    // evidence for it would put money in the accounts before Haven has verified
+    // the settlement — the one thing worse than a missing row.
+    await seedIntent({ agentId, userId, status: 'submitted', txHash: `0x${'a'.repeat(64)}` })
+    await seedIntent({ agentId, userId, status: 'failed', txHash: `0x${'c'.repeat(64)}` })
+    await seedIntent({ agentId, userId, status: 'confirmed', txHash: null })
+    await seedIntent({ agentId, userId, ...CONFIRMED, scheme: 'eip3009' })
+    await seedIntent({ agentId, userId, ...CONFIRMED, scheme: null })
+    await seedIntent({ agentId, userId, ...CONFIRMED, executionRail: 'safe' })
+    await seedIntent({ agentId, userId, ...CONFIRMED, source: 'direct', paymentRail: null })
+    await seedIntent({ agentId, userId, ...CONFIRMED, createdOffsetSec: -(SWEEP_MIN_AGE_SECONDS - 30) })
+    await seedIntent({
+      agentId, userId, ...CONFIRMED,
+      createdOffsetSec: -(SWEEP_RECOVERY_HORIZON_SECONDS + 600),
+    })
+    // Deliberately NOT excluded: `delegation_hash IS NULL`. The forward query
+    // needs the hash as its lookup key; recovery needs nothing from the chain,
+    // so a pre-#2094 payment that WAS confirmed by an agent report and lost its
+    // evidence write is recoverable here. Narrowing this to sweep-confirmed
+    // rows would make recovery depend on which path dug the hole.
+    const preSalt = await seedIntent({ agentId, userId, ...CONFIRMED, delegationHash: null })
+
+    expect((await orphanIds()).sort()).toEqual([orphan, preSalt].sort())
   })
 })

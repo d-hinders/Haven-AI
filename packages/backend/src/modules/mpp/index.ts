@@ -41,6 +41,7 @@ export {
   recordMachinePaymentEvidenceBaseById,
   tryRecordMachinePaymentEvidenceBaseById,
   reconcileDelegateResidueAfterSettlement,
+  type EvidenceRecordOutcome,
   type MachinePaymentEvidenceRow,
   type MachinePaymentEvidenceSource,
 } from './evidence.js'

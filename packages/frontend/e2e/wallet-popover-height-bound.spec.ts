@@ -117,7 +117,7 @@ async function readGeometry(page: Page) {
   return page.evaluate(() => {
     const el = document.querySelector('[role="dialog"][aria-label="Wallet menu"]') as HTMLElement
     const box = el.getBoundingClientRect()
-    const scroller = el.firstElementChild as HTMLElement
+    const scroller = el.querySelector('[data-wallet-menu-scroll]') as HTMLElement
     const buttons = el.querySelectorAll('button')
     const last = buttons[buttons.length - 1] as HTMLElement
     return {
@@ -185,7 +185,9 @@ test('what the bound pushes out of view is still reachable — by keyboard and b
   // the whole point of the bound is that the menu no longer leaves the screen,
   // so the viewport is the wrong ruler for what the clamp hid.
   const before = await hidden.evaluate((el) => {
-    const scroller = el.closest('[role="dialog"]')!.firstElementChild as HTMLElement
+    const scroller = el.closest('[role="dialog"]')!.querySelector(
+      '[data-wallet-menu-scroll]',
+    ) as HTMLElement
     const s = scroller.getBoundingClientRect()
     const b = el.getBoundingClientRect()
     return { clipped: b.bottom > s.bottom || b.top < s.top }
@@ -196,7 +198,9 @@ test('what the bound pushes out of view is still reachable — by keyboard and b
   await hidden.focus()
 
   const after = await hidden.evaluate((el) => {
-    const scroller = el.closest('[role="dialog"]')!.firstElementChild as HTMLElement
+    const scroller = el.closest('[role="dialog"]')!.querySelector(
+      '[data-wallet-menu-scroll]',
+    ) as HTMLElement
     const s = scroller.getBoundingClientRect()
     const b = el.getBoundingClientRect()
     const style = getComputedStyle(scroller)
@@ -236,7 +240,7 @@ test('what the bound pushes out of view is still reachable — by keyboard and b
   // `el.focus()` scrolls it programmatically and the keyboard path survives a
   // change that strands every mouse and touch user. A wheel gesture is the
   // assertion that discriminates them.
-  const scroller = popover.locator('> div').first()
+  const scroller = popover.locator('[data-wallet-menu-scroll]')
   await scroller.evaluate((el) => {
     el.scrollTop = 0
   })
@@ -246,6 +250,31 @@ test('what the bound pushes out of view is still reachable — by keyboard and b
   await expect
     .poll(async () => scroller.evaluate((el) => el.scrollTop))
     .toBeGreaterThan(0)
+
+  expect(pageErrors).toEqual([])
+})
+
+test('the clamped menu SAYS there is more above the actions, and stops once there is not (#2067)', async ({
+  page,
+}) => {
+  const pageErrors: string[] = []
+  page.on('pageerror', (e) => pageErrors.push(String(e)))
+
+  await page.setViewportSize({ width: 844, height: 390 })
+  const popover = await openTallestWalletMenu(page)
+
+  // haven-design-reviewer on this PR: the clamped box ended mid-line on
+  // "Network: Base" with no gradient and no scrollbar thumb, which reads as
+  // truncated rather than scrollable. This is Modal's own cue (#1893), reused.
+  const cue = popover.locator('[data-wallet-menu-scroll-cue]')
+  await expect(cue).toBeVisible()
+
+  // And it is a CUE, not decoration: scroll to the end and it goes away.
+  const scroller = popover.locator('[data-wallet-menu-scroll]')
+  await scroller.evaluate((el) => {
+    el.scrollTop = el.scrollHeight
+  })
+  await expect(cue).toHaveCount(0)
 
   expect(pageErrors).toEqual([])
 })

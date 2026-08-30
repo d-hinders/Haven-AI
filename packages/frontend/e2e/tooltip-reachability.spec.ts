@@ -5,7 +5,7 @@
  *
  * Defect 2 — a `whitespace-nowrap` bubble with no width cap — is a text-layout
  * fact, and jsdom has no layout engine. There, a three-word label and a
- * 167-character one produce identical evidence, which is precisely how the
+ * 169-character one produce identical evidence, which is precisely how the
  * defect shipped: every gate the repo has either cannot see a closed tooltip
  * (the pixel gates, the rendered design review) or cannot measure an open one
  * (the unit suite). **This is the only assertion in the repo that fails on
@@ -13,12 +13,29 @@
  *
  * ## Why `/agents` and not a `/design-system` demo
  *
- * `AgentCard` passes `McpServerName` an agent with no recorded server name and
- * `McpServerName` hands `Tooltip` the 167-character sentence below — the
- * longest label any caller passes today, and defect 2's live instance.
- * #1924's rule applies: a showcase would photograph whatever the showcase
- * author wrote, not what the product passes. `testAgent` carries no
- * `mcp_server_name`, so the "not recorded" branch renders with no override.
+ * #1924's rule: a showcase would measure whatever the showcase author wrote,
+ * not what the product passes. So the label under test has to be one a real
+ * call site can hand `Tooltip`.
+ *
+ * ### The label changed in #2043, and the reason is worth keeping
+ *
+ * This test used to hover `McpServerName`'s null branch, whose 169-character
+ * sentence was the longest label any caller passed. **#2043 deleted that
+ * tooltip**: the copy explained an absence, it was essential rather than
+ * elaboration, and `AgentCard`'s composite `role="link"` meant no keyboard or
+ * touch user could ever reach it. It is visible text above the agent list now.
+ *
+ * The primitive's width contract did not change with it, so the test moves to
+ * the longest label the product **can** pass rather than disappearing. That is
+ * `McpServerName`'s OTHER tooltip — the one #2043 deliberately kept — at the
+ * longest server name the backend will store: `normalizeMcpServerName`
+ * refuses anything over 64 characters or outside
+ * `/^haven(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/`
+ * (`backend/src/routes/agent-connection-setups.ts:143-149`), and the label
+ * appends the derived signer half, so `MAX_LENGTH_PAIR_LABEL` below is the
+ * ceiling, not a number someone liked. The name is served by a per-test route
+ * override rather than added to the shared fixture: a maximum-length name is a
+ * legal edge, not what the default capture should photograph.
  *
  * ## Why a desktop project at a phone width
  *
@@ -68,12 +85,34 @@ import {
   dismissMobileSidebar,
   mockHavenApi,
   seedAuthenticatedSession,
+  testAgent,
   unexpectedBrowserErrors,
 } from './fixtures/haven-api'
 
-/** The live long label, from `McpServerName`'s null branch. */
-const LONG_LABEL =
-  'Haven records this when an agent connects with a current version of the connector. Agents connected earlier keep working exactly as they are — only the label is missing.'
+/**
+ * The longest `mcp_server_name` the backend will store: 64 characters, and
+ * every character legal under `MCP_SERVER_NAME_RE`. Hyphenated rather than one
+ * unbroken run because that is the shape the connector produces — and because
+ * a single 64-character token would prove `break-words` rather than the cap.
+ */
+const MAX_LENGTH_SERVER_NAME = 'haven-research-eu-west-invoices-vendor-payments-team-two-alpha13'
+
+/** Asserted, not trusted: the ceiling is the point of this fixture. */
+if (MAX_LENGTH_SERVER_NAME.length !== 64) {
+  throw new Error(
+    `the max-length fixture must be exactly 64 characters, got ${MAX_LENGTH_SERVER_NAME.length}`,
+  )
+}
+
+/**
+ * What `McpServerName` hands `Tooltip` for that name — the longest label any
+ * call site in the product can produce (~153 characters). Built with the
+ * component's own pair rule rather than pasted, so a change to either side of
+ * the naming rule reaches this test.
+ */
+const MAX_LENGTH_PAIR_LABEL = `MCP servers: ${MAX_LENGTH_SERVER_NAME} and haven-signer-${MAX_LENGTH_SERVER_NAME.slice(
+  'haven-'.length,
+)}`
 
 /** The narrowest phone width in the support matrix, and 390 beside it. */
 const NARROW_WIDTHS = [320, 390] as const
@@ -108,14 +147,25 @@ test.describe('Tooltip width and keyboard reach (#2038)', () => {
     await seedAuthenticatedSession(page)
   })
 
-  test('the 167-character label wraps inside a phone viewport instead of one unbroken bar', async ({
+  test('the longest label the product can pass wraps inside a phone viewport instead of one unbroken bar', async ({
     page,
   }) => {
     const browserErrors = collectBrowserErrors(page)
 
+    // Registered after `mockHavenApi`, so this handler wins for `/agents`.
+    await page.route('**/api/agents', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          agents: [{ ...testAgent, mcp_server_name: MAX_LENGTH_SERVER_NAME }],
+        }),
+      })
+    })
+
     await page.setViewportSize({ width: NARROW_WIDTHS[0], height: 800 })
     await page.goto('/agents')
-    const trigger = page.getByText('not recorded').first()
+    const trigger = page.getByText(MAX_LENGTH_SERVER_NAME).first()
     await expect(trigger).toBeVisible()
 
     for (const width of NARROW_WIDTHS) {
@@ -125,7 +175,7 @@ test.describe('Tooltip width and keyboard reach (#2038)', () => {
       await trigger.hover()
 
       const bubble = page.locator('[role="tooltip"]')
-      await expect(bubble).toHaveText(LONG_LABEL)
+      await expect(bubble).toHaveText(MAX_LENGTH_PAIR_LABEL)
       const box = await bubble.boundingBox()
       if (!box) throw new Error(`the open tooltip must have a box to measure at ${width}px`)
 

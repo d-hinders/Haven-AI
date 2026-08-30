@@ -6,6 +6,7 @@ import { useAgentPanelState } from '@/hooks/useAgentPanelState'
 import ConnectAgentModal from './ConnectAgentModal'
 import EditAgentModal from './EditAgentModal'
 import { AgentCard } from './agent-panel/AgentCard'
+import { MCP_NOT_RECORDED_NOTE, hasUnrecordedMcpServerName } from './agent-panel/McpServerName'
 import { BotIcon } from './agent-panel/agent-display'
 import { UnmanagedDelegateCard } from './agent-panel/UnmanagedDelegateCard'
 import { Button } from './ui/Button'
@@ -166,6 +167,30 @@ export default function AgentPanel() {
       {/* Agent list */}
       {(agents.length > 0 || unmanagedDelegates.length > 0) && (
         <div className="space-y-4">
+          {/*
+            #2043: the `not recorded` explanation, ONCE, as visible text, and
+            only when a card on screen actually says `not recorded`.
+
+            #2017's shape (PR #2039), matched rather than re-invented — see
+            `MCP_NOT_RECORDED_NOTE` for why this copy cannot live in the
+            `Tooltip` it came from, and why the OTHER tooltip in the same
+            component stays.
+
+            The predicate reads the cards that are RENDERED, not every agent
+            Haven holds: removed agents are collapsed behind a toggle, so
+            counting them while they are hidden would put a note above the list
+            explaining a label that is nowhere on the page. Expanding Removed
+            reveals both together, which is the honest pairing.
+          */}
+          {hasUnrecordedMcpServerName([
+            ...visibleAgents,
+            ...(panel.showRemovedAgents ? removedAgents : []),
+          ]) && (
+            <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              {MCP_NOT_RECORDED_NOTE}
+            </p>
+          )}
+
           {/* Managed agents */}
           {visibleAgents.length > 0 && (
             <div className="grid items-start gap-4 lg:grid-cols-2">

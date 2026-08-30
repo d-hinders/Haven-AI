@@ -1,18 +1,10 @@
 'use client'
 
 import { X } from 'lucide-react'
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { Icon } from './Icon'
+import { useScrollEdgeCue } from '@/hooks/useScrollEdgeCue'
 
-/**
- * Sub-pixel slack for the "is there more below" test.
- *
- * `scrollHeight` and `clientHeight` are integers while `scrollTop` is
- * fractional under a non-integer device pixel ratio, so a body scrolled fully
- * to the end can report a remainder just under 1. Anything at or below this is
- * the end of the scroll, not content hiding under the fold.
- */
-const SCROLL_END_EPSILON_PX = 1
 
 const widthClasses = {
   sm: 'max-w-sm',
@@ -67,13 +59,14 @@ export function Modal({
   const panelRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
-  const [hasContentBelow, setHasContentBelow] = useState(false)
+  const hasContentBelow = useScrollEdgeCue(bodyRef, open)
 
   /**
-   * The continuation cue (#1893), measured rather than declared by the caller.
-   *
-   * Two structural facts about this component make the obvious shortcuts wrong,
-   * so they are written down here instead of being rediscovered:
+   * The continuation cue (#1893). The MEASUREMENT lives in
+   * `useScrollEdgeCue` — extracted on its second occurrence (#2067/#901, the
+   * wallet menu) — including why its observers are pointed at the box's
+   * children. What stays here is what is specific to THIS component's shape,
+   * because both facts have already misled a guard:
    *
    * 1. **`role="dialog"` is on the `fixed inset-0` WRAPPER below, not on the
    *    scrolling body.** The wrapper never scrolls. A guard that reaches for
@@ -86,48 +79,10 @@ export function Modal({
    *    about. The overlay is absolutely positioned against a wrapper that
    *    contains only the scroll box, which is why that wrapper exists.
    *
-   * The condition is pure geometry — `scrollHeight > clientHeight + scrollTop`
-   * — so a dialog whose content grows after mount (the re-key flow's residual
-   * and resume banners do exactly that) is correct without any caller opting
-   * in. `ResizeObserver` alone would not see that growth: the scroll box is a
-   * flex child with a fixed height, so its own border box never changes when
-   * its content does. Hence the observer is pointed at the CHILDREN too, and a
-   * `MutationObserver` re-points it when the child list changes.
+   * The condition stays pure geometry, so a dialog whose content grows after
+   * mount (the re-key flow's residual and resume banners do exactly that) is
+   * correct without any caller opting in.
    */
-  useEffect(() => {
-    if (!open) return
-    const body = bodyRef.current
-    if (!body) return
-
-    const measure = () => {
-      setHasContentBelow(
-        body.scrollHeight - body.clientHeight - body.scrollTop > SCROLL_END_EPSILON_PX,
-      )
-    }
-
-    const resizeObserver = new ResizeObserver(measure)
-    const observeChildren = () => {
-      resizeObserver.disconnect()
-      resizeObserver.observe(body)
-      for (const child of Array.from(body.children)) resizeObserver.observe(child)
-    }
-
-    const mutationObserver = new MutationObserver(() => {
-      observeChildren()
-      measure()
-    })
-
-    observeChildren()
-    measure()
-    body.addEventListener('scroll', measure, { passive: true })
-    mutationObserver.observe(body, { childList: true, subtree: true, characterData: true })
-
-    return () => {
-      body.removeEventListener('scroll', measure)
-      resizeObserver.disconnect()
-      mutationObserver.disconnect()
-    }
-  }, [open])
 
   useEffect(() => {
     if (!open) return

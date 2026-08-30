@@ -119,6 +119,14 @@ export const FIXTURE_BLOCK_TIMESTAMP = Math.floor(Date.parse('2026-07-10T09:00:0
  * @param {object} opts
  * @param {number} opts.chainId Chain the seeded Safe lives on; resolves the
  *   AllowanceModule address from the shared registry.
+ * @param {readonly { safeAddress: string, delegates: readonly string[], rows: readonly { token: string, amount: bigint, spent: bigint, resetTimeMin: number, lastResetMin?: number }[], moduleEnabled?: boolean }[]} [opts.accounts]
+ *   SEVERAL accounts on one chain (#2202). Every read is routed to the account
+ *   it names — `isModuleEnabled` by the call's `to`, the three module reads by
+ *   their first (Safe) argument — so one fixture can answer for a user who
+ *   holds both a delegation-rail account and a legacy Safe, which is what
+ *   `/custody` renders a card each for. Mutually exclusive with the four flat
+ *   fields below, which are the single-account sugar this desugars into; pass
+ *   one form or the other, never both.
  * @param {string} opts.safeAddress The Safe `isModuleEnabled` is called on.
  * @param {readonly string[]} opts.delegates Delegate addresses `getDelegates`
  *   reports.
@@ -144,28 +152,90 @@ export const FIXTURE_BLOCK_TIMESTAMP = Math.floor(Date.parse('2026-07-10T09:00:0
  *   was supposed to prove. With `false`, `useOnChainAllowances` returns early
  *   and none of the other reads below is reached.
  */
-export function makeAllowanceChainFixture({ chainId, safeAddress, delegates, rows, moduleEnabled = true }) {
+export function makeAllowanceChainFixture(opts) {
+  const { chainId } = opts
   const allowanceModule = getChainData(chainId).contracts.allowanceModule
+
+  // ── One chain, possibly SEVERAL accounts (#2202) ───────────────────────────
+  //
+  // A user holds a set of `user_safes` rows, and since #2202 the shared
+  // screenshot fixture describes two: a `delegator_hybrid` account (no
+  // AllowanceModule) and the legacy Safe `agent-ops` actually lives on. Both
+  // are read in ONE capture — `/custody` renders a card per account and only
+  // the legacy card mounts `useOnChainAllowances` — so a fixture that can
+  // answer for only one address throws on the other and the run fails with
+  // "the app is reading a different contract than the fixture describes".
+  //
+  // The flat single-account form is unchanged and is still what every other
+  // caller uses; `accounts` is the general form it desugars into.
+  const accounts = (
+    opts.accounts ?? [
+      {
+        safeAddress: opts.safeAddress,
+        delegates: opts.delegates,
+        rows: opts.rows,
+        moduleEnabled: opts.moduleEnabled,
+      },
+    ]
+  ).map((a) => ({ ...a, moduleEnabled: a.moduleEnabled ?? true }))
+
+  const bySafe = new Map(accounts.map((a) => [a.safeAddress.toLowerCase(), a]))
+  const seeded = accounts.map((a) => a.safeAddress).join(', ')
+
+  /**
+   * The account a read is about.
+   *
+   * `isModuleEnabled` is called ON the Safe, so its subject is the call's `to`.
+   * The three module reads are called on the shared AllowanceModule and take
+   * the Safe as their FIRST argument, so their subject is read out of the
+   * calldata — the same "read it from the wire rather than assume it"
+   * discipline `getTokenAllowance` already applies to its token argument, and
+   * for the same reason: with two accounts, a positional assumption answers one
+   * account's budget for the other and the PNG looks fine.
+   */
+  const accountFor = (address, readName) => {
+    const account = bySafe.get((address ?? '').toLowerCase())
+    if (!account) {
+      throw new Error(
+        `${readName} was called for Safe ${address} but this fixture seeds ${seeded} — ` +
+          'the app is reading a different contract than the fixture describes',
+      )
+    }
+    return account
+  }
+
+  /** The first `address` argument of a call, right-aligned in its 32-byte word. */
+  const safeArgOf = (data) => `0x${data.slice(10).slice(24, 64)}`
 
   /** The reads `useOnChainAllowances` makes, by signature rather than hand-cut hex. */
   const READS = {
     isModuleEnabled: {
       signature: 'function isModuleEnabled(address) view returns (bool)',
-      // `isModuleEnabled` is called ON THE SAFE; the rest on the module.
-      to: safeAddress,
-      returns: () => encodeAbiParameters(parseAbiParameters('bool'), [moduleEnabled]),
+      // `isModuleEnabled` is called ON THE SAFE; the rest on the module. `to`
+      // is therefore per-account and is validated by `accountFor` instead of
+      // the fixed-address check below.
+      to: null,
+      returns: (data, to) =>
+        encodeAbiParameters(parseAbiParameters('bool'), [
+          accountFor(to, 'isModuleEnabled').moduleEnabled,
+        ]),
     },
     getDelegates: {
       signature: 'function getDelegates(address,uint48,uint8) view returns (address[],uint48)',
       to: allowanceModule,
-      returns: () =>
-        encodeAbiParameters(parseAbiParameters('address[], uint48'), [delegates, 0]),
+      returns: (data) =>
+        encodeAbiParameters(parseAbiParameters('address[], uint48'), [
+          accountFor(safeArgOf(data), 'getDelegates').delegates,
+          0,
+        ]),
     },
     getTokens: {
       signature: 'function getTokens(address,address) view returns (address[])',
       to: allowanceModule,
-      returns: () =>
-        encodeAbiParameters(parseAbiParameters('address[]'), [rows.map((r) => r.token)]),
+      returns: (data) =>
+        encodeAbiParameters(parseAbiParameters('address[]'), [
+          accountFor(safeArgOf(data), 'getTokens').rows.map((r) => r.token),
+        ]),
     },
     // Native-balance read on Multicall3 itself (#2073). A scenario with a
     // `connectedWallet` mounts RainbowKit against a live wagmi connection,
@@ -187,6 +257,10 @@ export function makeAllowanceChainFixture({ chainId, safeAddress, delegates, row
       // exactly the silent duplicate a positional fixture would produce.
       returns: (data) => {
         const token = `0x${data.slice(10).slice(64 * 2 + 24, 64 * 3)}`
+        // The Safe is the FIRST argument, the token the third — both read out
+        // of the calldata, so neither the account nor the token can come back
+        // as some other account's row (#2202).
+        const { rows } = accountFor(safeArgOf(data), 'getTokenAllowance')
         const row = rows.find((r) => r.token.toLowerCase() === token.toLowerCase())
         if (!row) throw new Error(`getTokenAllowance for an unseeded token ${token}`)
         // Slot 3 is `lastResetMin`, and it decides whether the UI shows a
@@ -220,13 +294,19 @@ export function makeAllowanceChainFixture({ chainId, safeAddress, delegates, row
   function answerEthCall(to, data) {
     const read = SELECTORS.get(data.slice(0, 10))
     if (!read) return undefined
-    if ((to ?? '').toLowerCase() !== read.to.toLowerCase()) {
+    // A `null` `to` means the read is addressed to one of the seeded SAFES
+    // rather than to a single fixed contract (`isModuleEnabled`, #2202); its
+    // `returns` validates the address through `accountFor` and raises the same
+    // "different contract" refusal for a stranger. Everything else is pinned to
+    // one address and is checked here, BEFORE any calldata is parsed — the
+    // wrong-contract case must fail on the address, not on garbage arguments.
+    if (read.to !== null && (to ?? '').toLowerCase() !== read.to.toLowerCase()) {
       throw new Error(
         `${read.name} was called on ${to} but this fixture seeds it on ${read.to} — ` +
           'the app is reading a different contract than the fixture describes',
       )
     }
-    return read.returns(data)
+    return read.returns(data, to)
   }
 
   /**

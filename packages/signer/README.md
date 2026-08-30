@@ -74,10 +74,11 @@ const { paymentHeader } = await signer.buildX402PaymentHeader(
 )
 ```
 
-`signPaymentHash(hash)` (raw ECDSA over a legacy AllowanceModule
-funding/transfer hash) and `signX402FundingHash(hash, expected)` are still
-exported for v1 contexts. `signSweepAuthorization(input)` signs the gasless
-sweep.
+The signer also exposes `signPaymentHash(hash)` (raw ECDSA over a legacy
+AllowanceModule funding/transfer hash) and `signX402FundingHash(hash, expected)`
+for v1 contexts, and `signSweepAuthorization(input)` for the gasless sweep. All
+five are methods on the object `createEdgeSigner` returns, not standalone
+exports.
 
 ## Orchestration
 
@@ -159,7 +160,15 @@ what a payload means; they re-derive it.
 - **A binding version it does not understand.** The refusal is machine-readable
   — `code`, `supported_versions`, `received_version`, `fallback` — and names
   updating the signer as the fix.
-- **A sweep that does not pay out to your own account.**
+- **A sweep that does not move funds out of this delegate's own key** — the
+  `from` check is unconditional. The **destination** check is not, and this is
+  the one asymmetry in this list: the signer compares the sweep's `to` against
+  the account address **only when the local credential records one**
+  (`safe_address`). Run with `HAVEN_DELEGATE_KEY` alone — or with a credential
+  whose `safe_address` is absent — and there is no local value to compare
+  against, so the destination is authenticated by Haven's binding signature and
+  the token/chain canonicality check, but not independently re-derived. Prefer
+  a credential file that carries the account address.
 
 ## Custody
 

@@ -85,6 +85,13 @@ export const GOVERNED_PACKAGE_DOCS = [
     // was corrected here and filed as #2242: "the signer makes no network
     // calls", untrue since #1263's authenticated read-only sign-context fetch;
     // #2242 stays open for the same claim's copy in `credentials.ts` JSDoc.
+    // The new "What the signer refuses to sign" list is written to the
+    // asymmetry the code actually has, not the one the code's own comment
+    // claims: the sweep `from` check is unconditional, the `to` check fires
+    // only when the local credential carries `safe_address` (`core.ts`,
+    // `signSweepAuthorization`). Raised as a blocking `haven-doc-reviewer`
+    // finding on this branch and corrected before merge; the same
+    // overstatement in that function’s step-2 comment is filed as #2247.
     // NOT re-verified in this pass, and deliberately carried forward
     // unchanged: the "Connect Agent 2 may create the signer credential file
     // locally during setup" paragraph under Custody — it describes

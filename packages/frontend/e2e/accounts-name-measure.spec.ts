@@ -28,8 +28,9 @@
  *   2. an UNBOUNDED name still truncates, but against the CONTAINER: its
  *      measure is >= 95% of the row's own content width, so the ellipsis is
  *      the row running out of card, not the row paying for two pills;
- *   3. the badges are still rendered in both cases, so neither result was
- *      bought by removing the chrome.
+ *   3. the badges are still VISIBLY rendered in both cases — laid out, with
+ *      non-zero width — so neither result was bought by removing the chrome
+ *      or by taking it out of flow.
  *
  * (2) is deliberately expressed as a FRACTION of the measured row rather than
  * a pixel count: the switcher's width depends on how many accounts exist and
@@ -109,7 +110,18 @@ async function readName(page: Page, accountName: string): Promise<NameReading> {
     if (!h3) throw new Error(`the card labelled "${label}" renders no name`)
     const row = h3.parentElement!
     const padRight = parseFloat(getComputedStyle(row).paddingRight) || 0
+    // VISIBLY rendered, not merely present in the DOM. `haven-reviewer`
+    // defeated a text-only version of this check with its own mutation: drop
+    // `flex-wrap` AND give both badges `sr-only`, and all three tests passed —
+    // `position: absolute` takes them out of flex flow, so the `h3` gets the
+    // whole row exactly as a real wrap would, while their text nodes stay
+    // queryable. That is a layout no sighted user gets, and the check that was
+    // supposed to say "the result was not bought by deleting the chrome" could
+    // not see it. `getClientRects()` is the same visibility filter
+    // `transaction-title-measure.spec.ts` uses; the width test is what rules
+    // out a zero-size box.
     const badges = Array.from(row.querySelectorAll('span'))
+      .filter((el) => el.getClientRects().length > 0 && el.getBoundingClientRect().width > 0)
       .map((el) => (el.textContent ?? '').trim())
       .filter((t) => t === 'Active' || t === 'default')
     return {

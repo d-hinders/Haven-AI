@@ -462,14 +462,24 @@ describeDb('erc7710 sweep eligibility (#2117 candidate query, absorbed from #213
  * optional on `NewMachineIntent`), fails no query, and produces payments the
  * sweep drops in SQL without counting or logging them — the exact silence
  * #2214 describes, arriving through the door the invariant currently blocks.
+ *
+ * The enclosing call is delimited by PAREN DEPTH, not by a line regex. The
+ * first draft matched the closing `})` on its own line, which the independent
+ * reviewer defeated with the idiomatic two-argument form
+ * `insertMachineIntent({ … }, db)`: `}, db)` never matched, the forward walk ran
+ * past the end of the call, and a `delegationHash:` belonging to some LATER
+ * function in the same file marked the writer bound. That is a false GREEN in
+ * exactly the shape this guard exists to catch — a transactional erc7710 writer
+ * is the natural next one to be added — so the boundary is now computed rather
+ * than recognised, and a call whose extent cannot be resolved is reported as
+ * UNBOUND (a red) instead of scanned past.
  */
 describe('#2214: every production writer of settlement_scheme=erc7710 also writes delegation_hash', () => {
   const SRC = fileURLToPath(new URL('../../../', import.meta.url))
   const SCHEME_WRITE = /settlement_scheme\s*:\s*'erc7710'/
   /** Prose quoting the literal is not a writer — this rule is documented. */
   const COMMENT = /^\s*(\/\/|\*|\/\*)/
-  const CALL_OPEN = /\b(createPaymentIntent|insertMachineIntent)\(\{/
-  const CALL_CLOSE = /^\s*\}\)/
+  const CALL_NAME = /\b(createPaymentIntent|insertMachineIntent)\s*\($/
 
   function sourceFiles(dir: string): string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -479,30 +489,60 @@ describe('#2214: every production writer of settlement_scheme=erc7710 also write
     })
   }
 
+  /**
+   * The character range of the intent-insert call enclosing `at`, or null when
+   * there is none. Null is a FAILURE for the caller, never a pass: "I could not
+   * work out which call this belongs to" and "it sets delegationHash" are
+   * different answers, and only one of them is safe.
+   */
+  function enclosingCall(src: string, at: number): { from: number; to: number } | null {
+    // Nearest `insertMachineIntent(` / `createPaymentIntent(` at or before the
+    // match. Its `(` opens the call.
+    let open = -1
+    for (let i = at; i >= 0; i--) {
+      if (src[i] === '(' && CALL_NAME.test(src.slice(Math.max(0, i - 40), i + 1))) {
+        open = i
+        break
+      }
+    }
+    if (open === -1) return null
+
+    // Forward to the paren that closes it. This is what the reviewer's
+    // `}, db)` case needs: the call ends at its own `)`, wherever the argument
+    // object happened to end.
+    let depth = 0
+    for (let i = open; i < src.length; i++) {
+      if (src[i] === '(') depth += 1
+      else if (src[i] === ')') {
+        depth -= 1
+        if (depth === 0) {
+          // The backward walk can land on an unrelated earlier call; if the
+          // match is not actually inside this one, we have not found it.
+          return at > open && at < i ? { from: open, to: i } : null
+        }
+      }
+    }
+    return null
+  }
+
   it('finds the writers, and each one is inside an intent insert that sets delegationHash', () => {
     const writers: { file: string; line: number; boundToHash: boolean }[] = []
 
     for (const file of sourceFiles(SRC)) {
-      const lines = readFileSync(file, 'utf8').split('\n')
+      const src = readFileSync(file, 'utf8')
+      const lines = src.split('\n')
+      let offset = 0
       lines.forEach((text, i) => {
+        const lineStart = offset
+        offset += text.length + 1
         if (!SCHEME_WRITE.test(text) || COMMENT.test(text)) return
 
-        // Walk out to the enclosing intent-insert call, then across its whole
-        // argument object. Both bounds matter: without the backward walk a bare
-        // metadata literal elsewhere would be judged, and without the forward
-        // walk a `delegationHash` belonging to the NEXT call would satisfy it.
-        let open = i
-        while (open >= 0 && !CALL_OPEN.test(lines[open])) open -= 1
-        let close = i
-        while (close < lines.length && !CALL_CLOSE.test(lines[close])) close += 1
-
+        const call = enclosingCall(src, lineStart + text.search(SCHEME_WRITE))
         writers.push({
           file: file.slice(SRC.length),
           line: i + 1,
           boundToHash:
-            open >= 0 &&
-            close < lines.length &&
-            lines.slice(open, close + 1).some((l) => /\bdelegationHash\s*:/.test(l)),
+            call !== null && /\bdelegationHash\s*:/.test(src.slice(call.from, call.to + 1)),
         })
       })
     }
@@ -518,5 +558,38 @@ describe('#2214: every production writer of settlement_scheme=erc7710 also write
       'an erc7710 intent written without delegationHash is dropped by the sweep candidate query ' +
         'in SQL — never completed, and never counted or logged as residue either (#2214)',
     ).toEqual([])
+  })
+
+  it('resolves the two-argument call form the first draft scanned straight past', () => {
+    // The reviewer's counterexample, as a fixture rather than as a mutation, so
+    // the boundary bug cannot come back silently. Both shapes must be judged on
+    // their OWN argument object: the first has no `delegationHash` and the
+    // trailing `delegationHash:` belongs to a later function, which is exactly
+    // what the line-regex version credited it with.
+    const src = [
+      `await insertMachineIntent({`,
+      `  metadata: { settlement_scheme: 'erc7710' },`,
+      `}, db)`,
+      ``,
+      `function unrelated() {`,
+      `  return insertMachineIntent({ delegationHash: other, metadata: {} })`,
+      `}`,
+    ].join('\n')
+
+    const at = src.indexOf("settlement_scheme: 'erc7710'")
+    const call = enclosingCall(src, at)
+    expect(call, 'the two-argument call must still resolve').not.toBeNull()
+    expect(
+      /\bdelegationHash\s*:/.test(src.slice(call!.from, call!.to + 1)),
+      'the later function\'s delegationHash must not count for this writer',
+    ).toBe(false)
+
+    // …and the same scanner still says YES when the hash really is there, so
+    // "reports unbound, always" cannot pass either.
+    const bound = `await insertMachineIntent({\n  metadata: { settlement_scheme: 'erc7710' },\n  delegationHash: h,\n}, db)`
+    const boundAt = bound.indexOf("settlement_scheme: 'erc7710'")
+    const boundCall = enclosingCall(bound, boundAt)
+    expect(boundCall).not.toBeNull()
+    expect(/\bdelegationHash\s*:/.test(bound.slice(boundCall!.from, boundCall!.to + 1))).toBe(true)
   })
 })

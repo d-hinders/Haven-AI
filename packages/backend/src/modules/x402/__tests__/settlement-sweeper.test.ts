@@ -66,6 +66,7 @@ import {
   SWEEP_RECOVERY_HORIZON_SECONDS,
   UNRESOLVED_REMEDY,
 } from '../settlement-sweeper.js'
+import { openapiSpec } from '../../../openapi/spec.js'
 import { observeErc7710Settlement } from '../settlement-observed.js'
 import { attachMachinePaymentEvidence } from '../../mpp/evidence.js'
 
@@ -378,9 +379,15 @@ describeDb('passive erc7710 settlement sweep (#2117)', () => {
       }),
       expect.stringContaining('cannot attribute'),
     )
-    // The remedy has to be actionable, not reassuring: it must name the route
-    // an operator can actually call.
-    expect(UNRESOLVED_REMEDY).toContain('POST /machine-payments/evidence')
+    // The remedy has to be actionable, not reassuring: it must name a route the
+    // API actually SERVES. Checked against `openapiSpec.paths` rather than
+    // against the constant's own text — the reviewer's finding — so renaming or
+    // removing the route turns this red while the constant is untouched, which
+    // is the only thing that makes naming a route in an alert worth anything.
+    const named = Object.keys(openapiSpec.paths).filter((p) => UNRESOLVED_REMEDY.includes(p))
+    expect(named, 'the remedy must name a route the API actually serves').toEqual([
+      '/machine-payments/evidence',
+    ])
   })
 
   it('does NOT surface a payment whose settlement window is still open — it is not late yet', async () => {

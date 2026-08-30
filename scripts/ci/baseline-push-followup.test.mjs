@@ -163,10 +163,16 @@ describe('buildComment — carries what a first-time reader needs', () => {
   })
 
   test('carries the diagnose-before-regenerating warning where the dispatcher reads it', () => {
-    // #1777's third scope bullet: the --update-snapshots=all trap blessed a
-    // broken render on #1772. The workflow header comment says this, and the
-    // header comment is not where anyone was looking.
-    assert.match(body, /update-snapshots=all/)
+    // #1777's third scope bullet: the regeneration trap blessed a broken render
+    // on #1772. The workflow header comment says this, and the header comment is
+    // not where anyone was looking.
+    //
+    // #2218 narrowed the default from `all` to `changed`, which does NOT retire
+    // this warning — a broken render fails comparison, so `changed` rewrites it
+    // too. Both modes must stay named here, or the reader concludes the safer
+    // default made diagnosis optional.
+    assert.match(body, /update-snapshots=changed/)
+    assert.match(body, /\ball\b/)
     assert.match(body, /horizontal cut/)
   })
 
@@ -303,7 +309,7 @@ describe('parked runs — the approve-don\'t-push recovery', () => {
     assert.match(body, /conclusion: ?`?action_required/)
   })
 
-  test('tells the dispatcher NOT to re-dispatch — that re-runs --update-snapshots=all', () => {
+  test('tells the dispatcher NOT to re-dispatch — the baselines are already pushed', () => {
     const body = buildComment({ repo: 'o/r', branch: 'b', sha: 'abc123', runUrl: 'u', parked: [] })
     assert.match(body, /Do not re-dispatch/)
   })

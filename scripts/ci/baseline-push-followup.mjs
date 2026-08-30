@@ -199,7 +199,7 @@ gh api repos/${repo}/commits/${short}/check-runs                 # total_count: 
 gh api "repos/${repo}/actions/runs?head_sha=${sha}&status=action_required"   # the parked runs
 \`\`\`
 
-**This is expected, not a fault in your branch.** The dispatch run is red for the same reason this comment exists — a green run that leaves a PR unmergeable is worse than a red one. **Do not re-dispatch**; the baselines are already pushed, and regeneration runs \`--update-snapshots=all\` again.
+**This is expected, not a fault in your branch.** The dispatch run is red for the same reason this comment exists — a green run that leaves a PR unmergeable is worse than a red one. **Do not re-dispatch**; the baselines are already pushed, and a re-dispatch just regenerates them again.
 
 #### Recovery — approve, don't push
 
@@ -225,7 +225,7 @@ If you would rather not force-push, \`git commit --allow-empty -m "chore: trigge
 
 #### While you are here — did you diagnose before you dispatched?
 
-Regeneration runs with \`--update-snapshots=all\`, which **blesses whatever renders without comparing anything**. If you dispatched this before diagnosing a failing visual diff, it has just made a possibly-broken render the expected state (this happened on #1772). Scan the diff PNG by row before you trust it: a clean horizontal cut or a size-mismatch line is a **height change** — a real defect — while a continuous colour difference at unchanged dimensions is drift.
+Regeneration defaults to \`--update-snapshots=changed\`, which rewrites only baselines that **fail** comparison (#2218) — but a broken render is precisely what fails comparison, so this still makes a possibly-broken render the expected state if you dispatched before diagnosing (that happened on #1772). If you chose mode \`all\`, it is stronger than that: \`all\` **blesses whatever renders without comparing anything**. Either way, scan the diff PNG by row before you trust it: a clean horizontal cut or a size-mismatch line is a **height change** — a real defect — while a continuous colour difference at unchanged dimensions is drift. The run's *Baseline change audit* summary lists every baseline that moved, with before/after blob hashes.
 
 <sub>Posted by \`scripts/ci/baseline-push-followup.mjs\` (#1777).</sub>`
 }

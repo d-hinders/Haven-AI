@@ -47,7 +47,7 @@
  *
  *   @1280  BOTH arms go red on unchanged `dev`. The band name is ellipsised at
  *          75.9% of its row; the unbounded name occupies the same 196.7px.
- *   @390   only the UNBOUNDED arm goes red (85.9% of a 444px row). The band
+ *   @390   only the UNBOUNDED arm goes red (86.0% of a 444px row). The band
  *          name measures 256.2px against a row that offers 381.5px even with
  *          the pill, so it fits and is not ellipsised — it is BELOW this
  *          width's band, not evidence that this width was checked by it.
@@ -87,8 +87,8 @@ const UNBOUNDED_NAME = 'European entity nightly data-feed reconciliation and rep
 /**
  * A truncated name must fill essentially the whole row. 0.95 rather than 1.0
  * only absorbs sub-pixel rounding: when the name is alone on its flex line its
- * measure IS the line. The defect reads 75.9% at 1280 and 85.9% at 390, so
- * nothing sits near the threshold — but note how much closer 85.9% is than
+ * measure IS the line. The defect reads 75.9% at 1280 and 86.0% at 390, so
+ * nothing sits near the threshold — but note how much closer 86.0% is than
  * `/accounts`' 49.9%, which is the whole "one pill, not two" difference.
  */
 const MIN_TRUNCATED_SHARE_OF_ROW = 0.95

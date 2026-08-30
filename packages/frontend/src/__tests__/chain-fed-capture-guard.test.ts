@@ -36,7 +36,10 @@ import {
   abortChainWatch,
   makeAllowanceChainFixture,
   answerSharedChainRead,
+  answerLegacyRailChainRead,
   FIXTURE_SAFE,
+  FIXTURE_LEGACY_SAFE,
+  FIXTURE_USER,
   FIXTURE_AGENTS,
 } from '../../scripts/screenshot.mjs'
 import { decodeAbiParameters, encodeAbiParameters, parseAbiParameters, toFunctionSelector } from 'viem'
@@ -284,22 +287,69 @@ describe('the shared chain fixture', () => {
   }
   const sel = (sig: string) => toFunctionSelector(sig)
 
+  // ── #2202: TWO accounts, and the reads are keyed per account ───────────────
+  //
+  // `makeAllowanceChainFixture` checks each call's `to` against the address it
+  // was built for and throws on a mismatch, so these two are not
+  // interchangeable — which is the point. The shared account is
+  // `delegator_hybrid` and has no AllowanceModule; `agent-ops`'s own account is
+  // the legacy Safe that does. Before #2202 one fixture answered for both,
+  // because one agent claimed a rail its account did not have.
+  const LEGACY = FIXTURE_LEGACY_SAFE as { chain_id: number; safe_address: string }
+
   const call = (to: string, data: string) =>
     answerSharedChainRead('eth_call', [{ to, data }]) as `0x${string}`
+  const callLegacy = (to: string, data: string) =>
+    answerLegacyRailChainRead('eth_call', [{ to, data }]) as `0x${string}`
 
   it('is seeded on the SHARED fixture\'s own chain — the one #1971 gave a transport', () => {
     expect(answerSharedChainRead('eth_chainId', [])).toBe(`0x${chainId.toString(16)}`)
     expect(chainId).toBe(84532)
+    // Both accounts are the same user's, on the same chain — a second chain
+    // here would make the account switch a chain switch too, and the capture
+    // would be evidence about the wrong thing.
+    expect(LEGACY.chain_id).toBe(chainId)
+    expect(LEGACY.safe_address.toLowerCase()).not.toBe(SAFE.safe_address.toLowerCase())
   })
 
-  it('reports the AllowanceModule enabled on the shared fixture Safe', () => {
+  it('reports NO AllowanceModule on the shared DELEGATION-rail account', () => {
+    // #2106 recorded this as impossible and overrode it per-scenario; #2202
+    // makes the shared answer itself honest. A Hybrid DeleGator is not a Safe
+    // and has no modules, so `true` here is a state the account cannot reach —
+    // and it is the read that gates every other one in `useOnChainAllowances`,
+    // so a wrong answer here silently invents a whole legacy rail.
     const data = call(SAFE.safe_address, sel('function isModuleEnabled(address) view returns (bool)'))
+    expect(decodeAbiParameters(parseAbiParameters('bool'), data)[0]).toBe(false)
+  })
+
+  it('reports the AllowanceModule enabled on the LEGACY account that actually has one', () => {
+    const data = callLegacy(
+      LEGACY.safe_address,
+      sel('function isModuleEnabled(address) view returns (bool)'),
+    )
     expect(decodeAbiParameters(parseAbiParameters('bool'), data)[0]).toBe(true)
   })
 
-  /** The on-chain delegate set the AllowanceModule fixture reports. */
+  /**
+   * The Safe argument every AllowanceModule read carries, encoded as the app
+   * sends it.
+   *
+   * #2202: these calls used to be made with a BARE selector, because the
+   * fixture answered one account and ignored its arguments. It routes by the
+   * Safe now, so the calldata has to carry one — which is also what
+   * `useOnChainAllowances` actually puts on the wire, so the test got closer to
+   * the app rather than further from it.
+   */
+  const safeArg = (safe: string) =>
+    encodeAbiParameters(parseAbiParameters('address'), [safe as `0x${string}`]).slice(2)
+
+  /** The on-chain delegate set the LEGACY account's AllowanceModule reports. */
   const onChainDelegates = (): string[] => {
-    const data = call(allowanceModule, sel('function getDelegates(address,uint48,uint8) view returns (address[],uint48)'))
+    const data = callLegacy(
+      allowanceModule,
+      sel('function getDelegates(address,uint48,uint8) view returns (address[],uint48)') +
+        safeArg(LEGACY.safe_address),
+    )
     const [delegates] = decodeAbiParameters(parseAbiParameters('address[], uint48'), data)
     return (delegates as string[]).map((d) => d.toLowerCase())
   }
@@ -334,6 +384,23 @@ describe('the shared chain fixture', () => {
     // `delegator_hybrid` agent — honestly got the delegate address its x402
     // payment intents prove it has.
     //
+    // ── #2202: the rail predicate was itself path-impossible ────────────────
+    //
+    // #2194 wrote this filter as `account_type === null`, and #2205 carried it
+    // forward and named the rework as residual risk. Both were reading the
+    // fixture's own literal rather than the column. `user_safes.account_type`
+    // is `VARCHAR(32) NOT NULL DEFAULT 'safe'` under
+    // `CHECK (account_type IN ('safe','delegator_hybrid'))`
+    // (`041_hybrid_accounts.ts:29`, `:38`) — so `null` is not a value the
+    // column can hold, and the LEGACY rail is `'safe'`. The old predicate
+    // matched only because `agent-ops` carried the impossible literal #2202
+    // removed; it selected the right row for the wrong reason, and it would
+    // have selected NOTHING against any honest fixture.
+    //
+    // The `toBeGreaterThan(0)` below is what makes that a failure rather than
+    // a silent pass: a predicate that matches nothing must not read as "no
+    // delegation-rail delegate is on-chain, therefore green".
+    //
     // `getDelegates` is written by the AllowanceModule's own `addDelegate`, on
     // the Safe rail #1440/#2020 retired. A delegation-rail agent's authority is
     // a delegation grant; nothing registers its delegate with the module. And
@@ -345,10 +412,83 @@ describe('the shared chain fixture', () => {
     // LEGACY agent's 500 USDC / daily budget on its card
     // (`AgentPanel.tsx:174-176`), beside its own 250 USDC / weekly delegation.
     const legacyRail = fixtureAgents
-      .filter((a) => a.account_type === null && a.delegate_address)
+      .filter((a) => a.account_type === 'safe' && a.delegate_address)
       .map((a) => (a.delegate_address as string).toLowerCase())
     expect(legacyRail.length).toBeGreaterThan(0) // non-vacuity, both directions
     expect(onChainDelegates()).toEqual(legacyRail)
+  })
+
+  it('gives every fixture agent an account_type the COLUMN can hold — no third state', () => {
+    // The shape #2202 was: a value that is legal for the TypeScript type
+    // (`account_type?: string | null`, `core/src/api-types.ts:2818`) and
+    // impossible for the column behind it. The wire type is nullable for one
+    // real reason — `agents.safe_id` is nullable (`000_initial.ts:209`) and
+    // every read is a LEFT JOIN (`infra/repositories/agents.ts:194`, `:214`,
+    // `:228`), so an agent with NO account answers null for all four `us.*`
+    // fields at once. That is the ONLY null-producing path, and it takes the
+    // safe identity with it.
+    //
+    // So the rule is not "account_type is non-null". It is: an agent that
+    // names an account reports that account's rail, and an agent that names
+    // none reports null for the whole joined row. Anything else is a response
+    // no backend can serve.
+    for (const agent of fixtureAgents as (FixtureAgent & {
+      safe_id: string | null
+      safe_address: string | null
+      safe_name: string | null
+      safe_chain_id: number | null
+    })[]) {
+      if (agent.safe_id === null) {
+        expect(agent.account_type, `${agent.id}: no safe, so the join finds no row`).toBeNull()
+        expect(agent.safe_address).toBeNull()
+        expect(agent.safe_name).toBeNull()
+        expect(agent.safe_chain_id).toBeNull()
+        continue
+      }
+      expect(
+        agent.account_type,
+        `${agent.id}: joins a user_safes row, so account_type is that row's — ` +
+          "CHECK (account_type IN ('safe','delegator_hybrid'))",
+      ).toMatch(/^(safe|delegator_hybrid)$/)
+      // The other three come from the SAME joined row, so a populated identity
+      // beside a null rail is the exact contradiction #2202 removed.
+      expect(agent.safe_address).not.toBeNull()
+      expect(agent.safe_name).not.toBeNull()
+      expect(agent.safe_chain_id).not.toBeNull()
+    }
+  })
+
+  it('lets ONE safe answer ONE account_type — the #2202 contradiction, stated directly', () => {
+    // `account_type` is not an agent column: it is `us.account_type` off the
+    // joined row. Two agents on one `safe_id` therefore cannot report two
+    // different rails, however plausible each row looks on its own.
+    const bySafe = new Map<string, Set<string | null>>()
+    for (const agent of fixtureAgents as (FixtureAgent & { safe_id: string | null })[]) {
+      if (!agent.safe_id) continue
+      const seen = bySafe.get(agent.safe_id) ?? new Set()
+      seen.add(agent.account_type)
+      bySafe.set(agent.safe_id, seen)
+    }
+    expect(bySafe.size).toBeGreaterThan(0)
+    for (const [safeId, values] of bySafe) {
+      expect(
+        [...values],
+        `safe ${safeId} is joined by agents claiming ${values.size} different account_types`,
+      ).toHaveLength(1)
+    }
+
+    // …and each of those agrees with what `/auth/me` says about the same safe,
+    // which is the independent source that made `agent-ops` the odd row out.
+    const safesById = new Map(
+      (FIXTURE_USER as unknown as { safes: { id: string; account_type: string }[] }).safes.map(
+        (s) => [s.id, s.account_type],
+      ),
+    )
+    for (const [safeId, values] of bySafe) {
+      expect(safesById.get(safeId), `safe ${safeId} is not in /auth/me's safes list`).toBe(
+        [...values][0],
+      )
+    }
   })
 
   it('leaves every DELEGATION-rail delegate off-chain, so no card renders two spend limits', () => {
@@ -367,7 +507,11 @@ describe('the shared chain fixture', () => {
   })
 
   it('serves the SAME USDC address the API fixture serves — one token, not two', () => {
-    const data = call(allowanceModule, sel('function getTokens(address,address) view returns (address[])'))
+    const data = callLegacy(
+      allowanceModule,
+      sel('function getTokens(address,address) view returns (address[])') +
+        safeArg(LEGACY.safe_address),
+    )
     const [tokens] = decodeAbiParameters(parseAbiParameters('address[]'), data)
     expect((tokens as string[]).map((t) => t.toLowerCase())).toEqual([
       usdcAddress(chainId).toLowerCase(),
@@ -384,11 +528,11 @@ describe('the shared chain fixture', () => {
     // The two sources render side by side on AgentPanel. A fixture whose chain
     // and API disagree photographs a contradiction the product cannot produce.
     const encoded = encodeAbiParameters(parseAbiParameters('address,address,address'), [
-      SAFE.safe_address as `0x${string}`,
+      LEGACY.safe_address as `0x${string}`,
       '0x0000000000000000000000000000000000000000',
       usdcAddress(chainId) as `0x${string}`,
     ]).slice(2)
-    const data = call(
+    const data = callLegacy(
       allowanceModule,
       sel('function getTokenAllowance(address,address,address) view returns (uint256[5])') + encoded,
     )
@@ -404,12 +548,63 @@ describe('the shared chain fixture', () => {
     expect(Number(resetTimeMin)).toBe(apiAllowance.reset_period_min)
   })
 
+  it('routes each account\'s reads by the SAFE they name, not by call order (#2202)', () => {
+    // The shared fixture answers for BOTH accounts now, because one capture
+    // reads both: `/custody` renders a card per account and only the legacy
+    // one mounts `useOnChainAllowances`. The hazard a multi-account fixture
+    // introduces is answering account A's budget for account B — which renders
+    // perfectly and is wrong, this issue's own defect class one layer down.
+    //
+    // So: the SAME selector, on the SAME module, differing only in its Safe
+    // argument, must come back different.
+    const delegatesFor = (safe: string): string[] => {
+      const data = answerSharedChainRead('eth_call', [
+        {
+          to: allowanceModule,
+          data:
+            sel('function getDelegates(address,uint48,uint8) view returns (address[],uint48)') +
+            safeArg(safe),
+        },
+      ]) as `0x${string}`
+      const [delegates] = decodeAbiParameters(parseAbiParameters('address[], uint48'), data)
+      return (delegates as string[]).map((d) => d.toLowerCase())
+    }
+
+    expect(delegatesFor(LEGACY.safe_address)).toEqual(
+      fixtureAgents
+        .filter((a) => a.account_type === 'safe' && a.delegate_address)
+        .map((a) => (a.delegate_address as string).toLowerCase()),
+    )
+    // The delegation account has no AllowanceModule at all, so its registry is
+    // empty — and crucially NOT the legacy account's list.
+    expect(delegatesFor(SAFE.safe_address)).toEqual([])
+    expect(delegatesFor(SAFE.safe_address)).not.toEqual(delegatesFor(LEGACY.safe_address))
+
+    // `isModuleEnabled` is the other axis — addressed to the Safe rather than
+    // carrying it as an argument — and it must disagree across the two.
+    const moduleOn = (safe: string) =>
+      decodeAbiParameters(
+        parseAbiParameters('bool'),
+        answerSharedChainRead('eth_call', [
+          { to: safe, data: sel('function isModuleEnabled(address) view returns (bool)') },
+        ]) as `0x${string}`,
+      )[0]
+    expect(moduleOn(LEGACY.safe_address)).toBe(true)
+    expect(moduleOn(SAFE.safe_address)).toBe(false)
+
+    // And a Safe the fixture does not describe is refused rather than handed
+    // whichever account happens to be first.
+    expect(() => delegatesFor('0x00000000000000000000000000000000000000aa')).toThrow(
+      /different contract/,
+    )
+  })
+
   it('refuses a read aimed at the wrong contract rather than answering it plausibly', () => {
     // A selector collision or a read aimed elsewhere must fail loudly — an
     // answer for the wrong address is the same class of photogenic wrong answer
     // this whole change is about.
     expect(() =>
-      call('0x0000000000000000000000000000000000000dead', sel('function getTokens(address,address) view returns (address[])')),
+      callLegacy('0x0000000000000000000000000000000000000dead', sel('function getTokens(address,address) view returns (address[])')),
     ).toThrow(/reading a different contract/)
   })
 

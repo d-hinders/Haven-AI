@@ -70,7 +70,34 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/signer/src/**'],
-    'last-verified': '2026-06-03',
+    // #2243: first real verification pass since #2088 seeded this date. Every
+    // claim in the body re-read against `packages/signer/src/**` and rewritten
+    // where it had drifted: the tool table (two tools -> the four in
+    // `SignerToolName`), `haven_x402_authorize` (a deprecated alias for
+    // `haven_pay_x402_quote`, `mcp-server/src/tools.ts:81`), the
+    // `{ payment_id }`-only preferred call (#1263/#1355), the retired
+    // `funds Safe -> delegate EOA` leg (#1440/#1986), the entirely absent
+    // erc7710 scheme and its local caveat verification (#1455/#1476/#2041),
+    // the payer-delegate guard (#1690), the version-compatibility handshake
+    // (#1155 — referenced, deliberately NOT restated as numbers, since the
+    // constants in `core.ts` are the single source), the Node >= 22 floor and
+    // the `npx @haven_ai/connect@alpha` install path. A FALSE SECURITY CLAIM
+    // was corrected here and filed as #2242: "the signer makes no network
+    // calls", untrue since #1263's authenticated read-only sign-context fetch;
+    // #2242 stays open for the same claim's copy in `credentials.ts` JSDoc.
+    // The new "What the signer refuses to sign" list is written to the
+    // asymmetry the code actually has, not the one the code's own comment
+    // claims: the sweep `from` check is unconditional, the `to` check fires
+    // only when the local credential carries `safe_address` (`core.ts`,
+    // `signSweepAuthorization`). Raised as a blocking `haven-doc-reviewer`
+    // finding on this branch and corrected before merge; the same
+    // overstatement in that function’s step-2 comment is filed as #2247.
+    // NOT re-verified in this pass, and deliberately carried forward
+    // unchanged: the "Connect Agent 2 may create the signer credential file
+    // locally during setup" paragraph under Custody — it describes
+    // `packages/connect`, which is outside this doc's `covers:` and was not
+    // read.
+    'last-verified': '2026-08-30',
   },
   {
     doc: 'packages/mcp/README.md',

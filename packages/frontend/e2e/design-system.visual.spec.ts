@@ -171,10 +171,18 @@ const SIDEBAR_MIN_VIEWPORT_WIDTH = 1024
  * rather than look identical to no diff at all. The answer taken here is to
  * remove the gap instead of instrumenting it: with measured jitter at 0 and a
  * budget of 500, "tolerated but nonzero" is a 1..500 pixel window that nothing
- * real fits in. The companion half is in the regeneration workflow, which now
- * runs `--update-snapshots=all`: a bare `--update-snapshots` means "changed",
- * which re-applies THIS tolerance, so sub-budget drift used to be not merely
- * un-failed but un-refreshable.
+ * real fits in. The companion half is in the regeneration workflow, which can
+ * be dispatched with `--update-snapshots=all`: `changed` re-applies THIS
+ * tolerance, so sub-budget drift is not merely un-failed but un-refreshable
+ * under it.
+ *
+ * #2218 moved that from the workflow's hardcoded default to an explicit `mode`
+ * input, because `all` blesses whatever rendered without comparing anything and
+ * so re-blessed a PASSING baseline on #2217 (max channel delta 1, 180 px). The
+ * default is now `changed` and `all` is the declared exception — which is the
+ * right shape for the paragraph above: the un-refreshable window is real, and
+ * it is also a 1..500 pixel window that nothing real fits in, so it should cost
+ * a deliberate choice rather than be open on every dispatch.
  */
 const FULL_PAGE_MAX_DIFF_PIXELS = 500
 const TOP_BAR_MAX_DIFF_PIXELS = 100

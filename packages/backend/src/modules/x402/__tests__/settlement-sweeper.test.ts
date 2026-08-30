@@ -55,6 +55,15 @@ import { buildSettlementDelegation } from '../x402-delegation.js'
 import { buildBudgetDelegation } from '../../../rails/delegation-policy.js'
 import { getDelegationContracts } from '../../../rails/delegation-contracts.js'
 import { runSettlementSweepTick, resetSettlementSweepBackoff } from '../settlement-sweeper.js'
+import {
+  findEvidenceOrphanedErc7710Intents,
+  findSweepableErc7710Intents,
+} from '../../../infra/repositories/x402-authorizations.js'
+import {
+  SWEEP_MAX_CANDIDATES_PER_TICK,
+  SWEEP_MIN_AGE_SECONDS,
+  SWEEP_RECOVERY_HORIZON_SECONDS,
+} from '../settlement-sweeper.js'
 import { observeErc7710Settlement } from '../settlement-observed.js'
 import { attachMachinePaymentEvidence } from '../../mpp/evidence.js'
 
@@ -129,7 +138,7 @@ async function seedAgent(): Promise<{ agentId: string; userId: string }> {
 async function unreportedPayment(
   agentId: string,
   userId: string,
-  opts: { ageSec?: number; id?: string; delegationHash?: string } = {},
+  opts: { ageSec?: number; id?: string; delegationHash?: string; resourceUrl?: string | null } = {},
 ) {
   const id = opts.id ?? randomUUID()
   const built = buildSettlementDelegation({
@@ -157,7 +166,7 @@ async function unreportedPayment(
       id, agentId, userId, PAYER, TOKEN, MERCHANT, AMOUNT_RAW,
       `0x${String(++seq).padStart(64, 'c')}`.slice(0, 66),
       JSON.stringify({ settlement_scheme: 'erc7710' }),
-      RESOURCE,
+      opts.resourceUrl === undefined ? RESOURCE : opts.resourceUrl,
       opts.delegationHash ?? built.childHash,
       opts.ageSec ?? 120,
     ],
@@ -173,6 +182,21 @@ const readFees = async (id: string) =>
   (await db.query(`SELECT * FROM payment_fees WHERE payment_id = $1`, [id])).rows
 
 const silentLog = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() }
+
+/**
+ * The two working sets a production tick reads, under the bounds it actually
+ * passes. #2213 asserts membership of these directly, because "recoverable"
+ * is a property of the queries, not of a counter.
+ */
+const PROD_BOUNDS = [
+  SWEEP_MIN_AGE_SECONDS,
+  SWEEP_RECOVERY_HORIZON_SECONDS,
+  SWEEP_MAX_CANDIDATES_PER_TICK,
+] as const
+const sweepableIds = async () =>
+  (await findSweepableErc7710Intents(...PROD_BOUNDS)).map((r) => r.id)
+const orphanIds = async () =>
+  (await findEvidenceOrphanedErc7710Intents(...PROD_BOUNDS)).map((r) => r.id)
 
 /**
  * Point the mocked chain at one settlement transaction: the manager's log makes
@@ -225,7 +249,9 @@ describeDb('passive erc7710 settlement sweep (#2117)', () => {
 
     const result = await runSettlementSweepTick(silentLog)
 
-    expect(result).toMatchObject({ candidates: 1, confirmed: 1, refused: 0, chainsUnavailable: 0 })
+    expect(result).toMatchObject({
+      candidates: 1, confirmed: 1, evidencePushed: 1, evidenceFailed: 0, refused: 0, chainsUnavailable: 0,
+    })
 
     const intent = await readIntent(p.id)
     expect(intent.status).toBe('confirmed')
@@ -691,5 +717,136 @@ describeDb('passive erc7710 settlement sweep (#2117)', () => {
 
     const result = await runSettlementSweepTick(silentLog)
     expect(result.candidates).toBe(0)
+  })
+  // ── #2213: the confirm landed, the evidence row did not ─────────────────
+  //
+  // The defect this fixes: `sweepOne` called the evidence seam, could not see
+  // whether a row landed, and incremented `confirmed` + logged "completed an
+  // unreported erc7710 payment" either way. Because the confirm has already
+  // flipped `submitted → confirmed`, the intent leaves
+  // `FIND_SWEEPABLE_ERC7710_INTENTS_SQL` permanently, `observeErc7710Settlement`
+  // answers `not_applicable` to any later agent report, and the Fortnox
+  // backfill enumerates evidence ROWS — so the payment was settled, unbooked,
+  // unreachable, and reported as a success. #2117's own failure mode,
+  // re-created by #2117's fix, and silenced.
+  //
+  // The trigger used here is the one PR #2134 (PhilipEriksson) identified as
+  // the only reachable silent no-op after a successful confirm: a settled x402
+  // intent with no `resource_url`, which `machine_payment_evidence` requires
+  // NOT NULL and therefore can never be booked.
+
+  it('THE DEFECT: a confirm whose evidence write fails is NOT reported as completed, and stays recoverable', async () => {
+    const { agentId, userId } = await seedAgent()
+    // Everything the sweep needs to confirm, and nothing it needs to book.
+    const p = await unreportedPayment(agentId, userId, { resourceUrl: null })
+    chainCarries([p.built.child as never])
+
+    const result = await runSettlementSweepTick(silentLog)
+
+    // The state transition is real and is still counted as one...
+    expect(result.confirmed).toBe(1)
+    const intent = await readIntent(p.id)
+    expect(intent.status).toBe('confirmed')
+    expect(intent.tx_hash).toBe(SWEEP_TX)
+    // ...but it is NOT a completion, and must not be counted or logged as one.
+    expect(result.evidencePushed).toBe(0)
+    expect(result.evidenceFailed).toBe(1)
+    expect(await readEvidence(p.id)).toHaveLength(0)
+    expect(feedSettledPaymentBestEffort).not.toHaveBeenCalled()
+    expect(silentLog.info).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'Settlement sweep completed an unreported erc7710 payment',
+    )
+    expect(silentLog.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ paymentId: p.id, reason: 'missing_resource_url' }),
+      expect.stringContaining('no evidence row landed'),
+    )
+
+    // THE LOAD-BEARING ASSERTION, and the reason a louder log is not the fix:
+    // the payment is still inside a retry path. It has left the forward sweep
+    // for good — assert that too, so this is not mistaken for the old
+    // behaviour — and it is now reachable by the recovery pass instead.
+    expect(await sweepableIds()).not.toContain(p.id)
+    expect(await orphanIds()).toContain(p.id)
+  })
+
+  it('RECOVERY: the next tick writes the missing row once it can be written — no chain call needed', async () => {
+    const { agentId, userId } = await seedAgent()
+    const p = await unreportedPayment(agentId, userId, { resourceUrl: null })
+    chainCarries([p.built.child as never])
+    await runSettlementSweepTick(silentLog)
+    expect(await readEvidence(p.id)).toHaveLength(0)
+
+    // It is now an orphan. A tick that CANNOT yet write the row must say so
+    // every time — a permanently unwritable payment is retried until the
+    // horizon and warns on each attempt, which is the whole difference between
+    // a missing row that announces itself and one that reports success.
+    silentLog.warn.mockReset()
+    const stillStuck = await runSettlementSweepTick(silentLog)
+    expect(stillStuck.evidenceOrphaned).toBe(1)
+    expect(stillStuck.evidenceRecovered).toBe(0)
+    expect(silentLog.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ paymentId: p.id, reason: 'missing_resource_url' }),
+      expect.stringContaining('could not be written'),
+    )
+
+    // The operator (or a backfill) supplies what was missing.
+    await db.query(
+      `UPDATE payment_intents SET payment_resource_url = $2, x402_resource_url = $2 WHERE id = $1`,
+      [p.id, RESOURCE],
+    )
+    // The chain goes dark: the recovery pass must not need it. This payment is
+    // already attributed, so there is nothing left to scan or verify.
+    // …and having failed once, it is BACKED OFF, exactly as a fruitlessly
+    // scanned forward candidate is. Without this the recovery pass would
+    // re-attempt an unwritable payment on every tick for the full 24-hour
+    // horizon (~720 times), which is the cost schedule the forward sweep
+    // already refuses to pay.
+    const suppressed = await runSettlementSweepTick(silentLog)
+    expect(suppressed.evidenceOrphaned).toBe(0)
+    expect(suppressed.evidenceRecovered).toBe(0)
+    expect(suppressed.suppressed).toBeGreaterThanOrEqual(1)
+
+    // The backoff would otherwise hold this candidate back for a tick;
+    // production simply waits, the test does not.
+    resetSettlementSweepBackoff()
+    getLogs.mockReset().mockRejectedValue(new Error('rpc down'))
+    getBlock.mockReset().mockRejectedValue(new Error('rpc down'))
+    getTransactionReceipt.mockReset().mockRejectedValue(new Error('rpc down'))
+    feedSettledPaymentBestEffort.mockReset()
+
+    const result = await runSettlementSweepTick(silentLog)
+
+    expect(result.evidenceRecovered).toBe(1)
+    expect(result.evidenceOrphaned).toBe(0)
+    const evidence = await readEvidence(p.id)
+    expect(evidence).toHaveLength(1)
+    expect(evidence[0].tx_hash).toBe(SWEEP_TX)
+    expect(await readFees(p.id)).toHaveLength(1)
+    expect(feedSettledPaymentBestEffort).toHaveBeenCalledWith(userId, p.id)
+    // The hole is gone, so it is no longer a recovery candidate.
+    expect(await orphanIds()).not.toContain(p.id)
+  })
+
+  it('the recovery pass leaves a completed payment alone and never writes a second row', async () => {
+    const { agentId, userId } = await seedAgent()
+    const p = await unreportedPayment(agentId, userId)
+    chainCarries([p.built.child as never])
+
+    const first = await runSettlementSweepTick(silentLog)
+    expect(first).toMatchObject({ confirmed: 1, evidencePushed: 1, evidenceRecovered: 0 })
+
+    // A second tick sees a confirmed intent that already HAS its row. It must
+    // not be an orphan, or every completed payment would be re-fed forever.
+    expect(await orphanIds()).not.toContain(p.id)
+    feedSettledPaymentBestEffort.mockReset()
+    const second = await runSettlementSweepTick(silentLog)
+
+    expect(second).toMatchObject({
+      candidates: 0, confirmed: 0, evidencePushed: 0, evidenceFailed: 0,
+      evidenceRecovered: 0, evidenceOrphaned: 0,
+    })
+    expect(await readEvidence(p.id)).toHaveLength(1)
+    expect(feedSettledPaymentBestEffort).not.toHaveBeenCalled()
   })
 })

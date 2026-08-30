@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/infra/repositories/reporting-feed-syncs.ts
   - packages/frontend/src/app/(authenticated)/reporting/page.tsx
   - packages/frontend/src/hooks/useReporting.ts
-last-verified: "2026-08-27" # #2117: re-read the "flow, end to end" section only — its residual-gap paragraph named #2117 as open, which the passive settlement sweep closed; replaced with the sweep's entry and the three narrower residuals it deliberately leaves. The verification, troubleshooting and recovery sections were NOT re-read in this pass. Prior 2026-08-26 #2092: re-read the "flow, end to end" section only — the entry condition was stated as "x402 funding confirmation or MPP receipt", which excluded erc7710 by construction and was the doc-level shadow of the bug; corrected, with the scheme-agnostic entry and its residual gap named. The verification, troubleshooting and recovery sections were NOT re-read in this pass. Prior 2026-08-13: feed live-verified end-to-end on a real user account (entitlement grant -> connect -> x402 purchase -> pushed w/ invoice number -> read-back "Registered"); added the Fortnox first-visit UI-wizard gotcha. Prior same-day: #1365 recovery gaps
+last-verified: "2026-08-30" # #2213: re-read the "flow, end to end" section only — added the fourth cause of a settled payment missing from Fortnox (a confirm whose evidence write failed), its two warn log lines, the evidencePushed/evidenceFailed/evidenceRecovered counters, and the operator fix for missing_resource_url, backoff-corrected against SCAN_BACKOFF_MAX_MS rather than a flat "next tick"; also corrected the pre-existing implication that a later agent report is structurally refused (it is not — nothing prompts one). The verification, troubleshooting and recovery sections were NOT re-read in this pass. Prior 2026-08-27 #2117: re-read the "flow, end to end" section only — its residual-gap paragraph named #2117 as open, which the passive settlement sweep closed; replaced with the sweep's entry and the three narrower residuals it deliberately leaves. The verification, troubleshooting and recovery sections were NOT re-read in this pass. Prior 2026-08-26 #2092: re-read the "flow, end to end" section only — the entry condition was stated as "x402 funding confirmation or MPP receipt", which excluded erc7710 by construction and was the doc-level shadow of the bug; corrected, with the scheme-agnostic entry and its residual gap named. The verification, troubleshooting and recovery sections were NOT re-read in this pass. Prior 2026-08-13: feed live-verified end-to-end on a real user account (entitlement grant -> connect -> x402 purchase -> pushed w/ invoice number -> read-back "Registered"); added the Fortnox first-visit UI-wizard gotcha. Prior same-day: #1365 recovery gaps
 ---
 
 # Fortnox reporting feed — operations runbook
@@ -86,6 +86,42 @@ window has closed:
 If a settled payment is missing from Fortnox, that warning line is where to
 look; see
 [`04-x402-payment-sequence.md` § Completing a settlement nobody reported](../architecture/04-x402-payment-sequence.md).
+
+**A fourth cause, and the one that used to be silent (#2213).** Completing a
+payment is two writes — the intent flips `submitted → confirmed`, then the
+`machine_payment_evidence` row is written — and only the first is guaranteed. A
+confirm whose evidence write fails leaves a payment that is settled, has a hash,
+and has no feed row: it is out of the sweep's candidate query for good, and
+"Sync now" cannot see it either, because the backfill enumerates evidence rows.
+Until #2213 nothing automated reached it again — and the tick logged it as a
+completion, so nobody had a reason to look. (An agent re-posting the same hash to
+`POST /machine-payments/evidence` would in fact still have completed it; the gap
+was that nothing prompts a second report, and on the plain-HTTP flow the agent
+has no hash to re-post.)
+
+Two log lines now distinguish it, and a recovery pass retries it every tick:
+
+- `Settlement sweep confirmed an erc7710 payment but no evidence row landed` —
+  `warn`, carries `paymentId` and a `reason`. The tick's counters separate
+  `confirmed` (the state transition) from `evidencePushed` (the completion) and
+  `evidenceFailed`.
+- `Settled erc7710 payment is confirmed with no evidence row and the row could
+  not be written` — `warn`, emitted by the recovery pass on each attempt it
+  cannot satisfy.
+
+Almost every cause is transient (a database blip, a lost connection) and the
+next tick closes it — `evidenceRecovered` counts those. The one that is not is
+`reason: "missing_resource_url"`: `machine_payment_evidence.resource_url` is NOT
+NULL, so a settled x402 intent whose `payment_resource_url` and
+`x402_resource_url` are both null can never be booked. **Operator fix:** set the
+intent's resource URL to the merchant resource the payment paid for; the next
+recovery attempt that is not suppressed then writes the row and fires the feed.
+That is within one 2-minute tick only if the row has failed once — the recovery
+pass backs a repeatedly-failing payment off exponentially, to a ceiling of one
+hour (`SCAN_BACKOFF_MAX_MS`), so a payment that has been stuck for a while may
+wait up to an hour after the fix. Restarting the leader clears the in-memory
+backoff if that wait is not acceptable. After 24 hours the payment leaves the
+recovery horizon and needs a manual evidence write.
 
 **No longer a gap (#2094):** two of a user's own look-alike erc7710 payments —
 same merchant, token, amount and authorize second — used to be *individually*

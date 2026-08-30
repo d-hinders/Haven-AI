@@ -1097,7 +1097,9 @@ index is never used, because "hash absent from a truncated range" is
 indistinguishable from "not settled".
 
 **Accepted residual gaps.** Three, and all three stay `submitted` with no
-evidence row rather than being guessed at. Each is logged as an operational
+evidence row rather than being guessed at. (A *fourth* state — `confirmed` with
+no evidence row — is not in this list because it is not accepted: see the
+recovery pass below.) Each is logged as an operational
 warning once its settlement window has closed, so the residue is visible rather
 than silent:
 
@@ -1117,6 +1119,55 @@ by posting the settlement hash to `POST /machine-payments/evidence`; and since
 (`settlement_unobservable`) — it retries with bounded backoff, so a settlement
 that simply had not been mined yet at report time no longer costs the payment
 its place in the books.
+
+**The confirm and the evidence row are two writes, and the second one can fail
+(#2213).** Completing a payment means flipping the intent `submitted →
+confirmed` and then writing the `machine_payment_evidence` row that the
+accounting feed enumerates. These cannot be one transaction and cannot be
+reordered: `recordMachinePaymentEvidenceBase` refuses any intent that is not
+already `confirmed` with a `tx_hash`, so evidence is settlement-time proof by
+construction, and the write ends in a fire-and-forget call to the reporting feed
+that no rollback could take back. Nor should the confirm be undone — it records
+a true fact about the chain, and reverting it would re-open the replay/ambiguity
+surface that the CAS exists to close.
+
+The consequence is a fourth state, distinct from the three residuals above: a
+payment that is `confirmed` with a hash and has **no evidence row**. It has left
+the candidate query (`status = 'submitted'`) for good, and the feed's backfill
+selects from evidence ROWS, so "Sync now" cannot see it either. Before #2213
+nothing automated could reach it again, while the tick logged it as a
+completion.
+
+Be precise about the one path that was not closed: an agent re-posting the same
+hash to `POST /machine-payments/evidence` WOULD still complete it —
+`observeErc7710Settlement` answers `not_applicable` on an already-confirmed
+intent, and `attachMachinePaymentEvidence` falls through to
+`recordMachinePaymentEvidenceBase` and writes the row. The gap was never that a
+retry would be refused; it was that nothing prompts one. The sweep reported
+success, so no operator had a reason to look, and on the plain-HTTP flow (#2041)
+the agent never had the hash to re-post in the first place.
+
+Two things changed. The evidence seam now **reports** whether a row landed
+(`recorded` / `not_applicable` / `failed`), so the tick counts `evidencePushed`
+and `evidenceFailed` apart from the state transition `confirmed`, and a failure
+is a `warn`, never the completion log. And a **recovery pass** runs each tick
+over `FIND_EVIDENCE_ORPHANED_ERC7710_INTENTS_SQL` — confirmed erc7710 intents
+with no evidence row, inside the same 24-hour horizon — and writes the missing
+row. It touches no chain: those payments are already attributed. It re-derives
+the hole from state rather than from a remembered failure, so it also recovers a
+hole dug by the agent-reported path, and it is not scoped to `delegation_hash IS
+NOT NULL` because recovery needs no lookup key. The one thing it cannot fix is a
+settled payment with no `resource_url`, which `machine_payment_evidence`
+requires NOT NULL: that is retried until the horizon and warned on every
+attempt, so it announces itself rather than reporting success.
+
+The distinction the seam draws is the crux. "Nothing to record" (wrong rail, not
+settled yet) is a correct answer to a speculative caller and must not read as a
+failure; "failed to record" (no resource URL, intent unreadable, write threw)
+means a payment that should be in the books is not. Collapsing the two is how
+the silence got there. At the sweep's own call site there is no legitimate
+"nothing to record" left — it has just established every precondition itself —
+so it treats every non-`recorded` outcome as a failure.
 
 ### What the settlement child delegation actually constrains
 

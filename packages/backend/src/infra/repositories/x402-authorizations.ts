@@ -525,6 +525,62 @@ export interface SweepableSettlementRow {
   machine_metadata: Record<string, unknown> | string | null
 }
 
+/**
+ * The recovery half of the sweep (#2213): an erc7710 intent that IS confirmed
+ * and has a hash, but that no `machine_payment_evidence` row references.
+ *
+ * This population exists because the two writes cannot be one transaction. The
+ * evidence write structurally REQUIRES the confirm to have landed first —
+ * `recordMachinePaymentEvidenceBase` refuses anything not already `confirmed`
+ * with a `tx_hash` — so a confirm that succeeds followed by an evidence write
+ * that fails leaves a payment that is settled, booked nowhere, and (before this
+ * query) outside every AUTOMATED retry path: it had left
+ * `FIND_SWEEPABLE_ERC7710_INTENTS_SQL`'s `status = 'submitted'`, and the Fortnox
+ * backfill enumerates evidence ROWS, so an absent row is invisible to it too.
+ * A manual agent re-report would still have completed it — the gap was that
+ * nothing prompts one, least of all a tick that logged success.
+ *
+ * Deliberately NOT scoped to sweep-confirmed intents. The orphan condition is
+ * the same fact however the confirm happened — an agent-reported settlement
+ * whose evidence write threw lands here identically — and narrowing it would
+ * make recovery depend on which path created the hole.
+ *
+ * Bounded by the same recovery horizon as the forward sweep, so a permanently
+ * unwritable row (a missing `resource_url`) is retried for a day and logged,
+ * not retried forever.
+ */
+export const FIND_EVIDENCE_ORPHANED_ERC7710_INTENTS_SQL = `SELECT id, agent_id, chain_id, safe_address,
+                to_address, token_symbol, token_address, amount_raw, amount_human,
+                status, tx_hash, delegation_hash, created_at,
+                source, payment_rail, execution_rail, machine_metadata
+           FROM payment_intents pi
+          WHERE status = 'confirmed'
+            AND tx_hash IS NOT NULL
+            AND COALESCE(payment_rail, source) = 'x402'
+            AND execution_rail = 'delegation'
+            AND machine_metadata->>'settlement_scheme' = 'erc7710'
+            AND created_at <= NOW() - ($1 * interval '1 second')
+            AND created_at >= NOW() - ($2 * interval '1 second')
+            AND NOT EXISTS (
+                  SELECT 1 FROM machine_payment_evidence mpe
+                   WHERE mpe.payment_intent_id = pi.id
+                )
+          ORDER BY created_at ASC
+          LIMIT $3`
+
+export async function findEvidenceOrphanedErc7710Intents(
+  minAgeSeconds: number,
+  recoveryHorizonSeconds: number,
+  limit: number,
+  db: Executor = pool,
+): Promise<SweepableSettlementRow[]> {
+  const result = await db.query<SweepableSettlementRow>(
+    FIND_EVIDENCE_ORPHANED_ERC7710_INTENTS_SQL,
+    [minAgeSeconds, recoveryHorizonSeconds, limit],
+  )
+  return result.rows
+}
+
 export async function findSweepableErc7710Intents(
   minAgeSeconds: number,
   recoveryHorizonSeconds: number,

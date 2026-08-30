@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   recordMachinePaymentEvidenceBase,
+  recordMachinePaymentEvidenceBaseById,
+  tryRecordMachinePaymentEvidenceBaseById,
   type MachinePaymentEvidenceSource,
 } from '../evidence.js'
 
@@ -199,6 +201,54 @@ describe('recordMachinePaymentEvidenceBase', () => {
     expect(mockFeedSettledPaymentBestEffort).not.toHaveBeenCalled()
   })
 
+  // ── #2213: each early return, classified ────────────────────────────────
+  //
+  // The test above pins that all four return WITHOUT writing. It cannot pin
+  // WHY, and before #2213 there was no why to pin: all four were the same
+  // silent `return`, indistinguishable from a successful write to any caller.
+  //
+  // Three of them are "nothing to record" — the payment is not (yet) an
+  // evidence-bearing settled protocol payment, and a caller reaching them is
+  // behaving correctly. One is "failed to record": `resource_url` is NOT NULL
+  // on `machine_payment_evidence`, so a settled x402 payment without one can
+  // never enter the accounting feed. Collapsing that fourth case into the
+  // other three is the defect #2213 fixes; separating them is the whole point,
+  // so each is asserted on its own rather than as a set.
+
+  it('NOTHING TO RECORD: a non-protocol rail is not_applicable, not a failure', async () => {
+    await expect(
+      recordMachinePaymentEvidenceBase(payment({ payment_rail: 'manual', source: 'manual' })),
+    ).resolves.toEqual({ status: 'not_applicable', reason: 'not_protocol_rail' })
+  })
+
+  it('NOTHING TO RECORD: an unsettled status is not_applicable — evidence is settlement-time proof', async () => {
+    await expect(
+      recordMachinePaymentEvidenceBase(payment({ status: 'pending_signature' })),
+    ).resolves.toEqual({ status: 'not_applicable', reason: 'not_settled' })
+  })
+
+  it('NOTHING TO RECORD: a missing tx hash is not_applicable — the row whose turn has not come', async () => {
+    await expect(
+      recordMachinePaymentEvidenceBase(payment({ tx_hash: null })),
+    ).resolves.toEqual({ status: 'not_applicable', reason: 'not_settled' })
+  })
+
+  it('FAILED: a settled protocol payment with no resource URL can never be booked — the #2213 gap', async () => {
+    await expect(
+      recordMachinePaymentEvidenceBase(payment({
+        payment_resource_url: null,
+        x402_resource_url: null,
+      })),
+    ).resolves.toEqual({ status: 'failed', reason: 'missing_resource_url' })
+  })
+
+  it('POSITIVE CONTROL: a complete settled protocol payment reports recorded', async () => {
+    await expect(recordMachinePaymentEvidenceBase(payment())).resolves.toEqual({
+      status: 'recorded',
+    })
+    expect(mockQuery).toHaveBeenCalledOnce()
+  })
+
   it('uses the payment intent conflict target and id column for payment intent evidence', async () => {
     await recordMachinePaymentEvidenceBase(payment({ kind: 'payment_intent' }))
 
@@ -226,5 +276,43 @@ describe('recordMachinePaymentEvidenceBase', () => {
     expect(sql).toContain('ON CONFLICT (payment_intent_id)')
     expect(sql).not.toContain('ON CONFLICT (approval_request_id)')
     expect(params[1]).toBeNull()
+  })
+})
+
+/**
+ * #2213: the two wrappers between a caller and the seam. Each had its own
+ * silent no-op, and each is now classified — `intent_not_found` and
+ * `write_threw` are FAILURES: the caller named a payment id it believes exists,
+ * so neither is "nothing to record".
+ *
+ * `tryRecord…` still SWALLOWS the throw — that contract is deliberate and
+ * unchanged, so a settlement is never blocked by evidence recording. What
+ * changed is that the swallow is now reportable.
+ */
+describe('#2213 evidence-recording wrappers report failure', () => {
+  it('FAILED: recordMachinePaymentEvidenceBaseById on an unreadable intent is intent_not_found', async () => {
+    // No mock needed and none wanted: the suite default already answers every
+    // query with zero rows, which IS "no such intent for this agent". Nothing
+    // here depends on call order, so nothing here mocks positionally (#1227).
+    await expect(
+      recordMachinePaymentEvidenceBaseById('33333333-3333-3333-3333-333333333333'),
+    ).resolves.toEqual({ status: 'failed', reason: 'intent_not_found' })
+  })
+
+  it('FAILED: tryRecord… still swallows a throw, but now reports write_threw', async () => {
+    const log = { warn: vi.fn() }
+    // Blanket, not positional: every query in this test fails, which is the
+    // shape of the outage being characterised.
+    mockQuery.mockRejectedValue(new Error('connection terminated'))
+
+    await expect(
+      tryRecordMachinePaymentEvidenceBaseById(
+        '33333333-3333-3333-3333-333333333333',
+        '11111111-1111-1111-1111-111111111111',
+        log,
+      ),
+    ).resolves.toEqual({ status: 'failed', reason: 'write_threw' })
+    // Swallowed, not rethrown — and warned, exactly as before.
+    expect(log.warn).toHaveBeenCalledOnce()
   })
 })

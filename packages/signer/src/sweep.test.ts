@@ -114,6 +114,41 @@ describe('signSweepAuthorization', () => {
     ).rejects.toThrow(/`to` does not match the Safe/)
   })
 
+  // #2247: `expectedSafe` is absent whenever no account address reaches the
+  // signer — `HAVEN_DELEGATE_KEY` set without `HAVEN_SAFE_ADDRESS` (the README
+  // quickstart), a credential whose `safe_address` is null, or an embedder
+  // calling `resolveEdgeSigner({ delegateKey })`. These two pin what that costs
+  // and what still holds, so neither can be changed silently.
+  it('signs with `expectedSafe` absent even when `to` is not the credential Safe', async () => {
+    const signer = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    // A destination that the `expectedSafe`-supplied test above refuses.
+    const elsewhere = '0x000000000000000000000000000000000000bEEF'
+    const auth = baseAuthorization({ to: elsewhere })
+    expect(elsewhere.toLowerCase()).not.toBe(SAFE.toLowerCase())
+    const { signature } = await signer.signSweepAuthorization({
+      authorization: auth,
+      expectedAuth: await bindingFor(auth),
+      // expectedSafe deliberately omitted — the local `to` comparison does not run.
+    })
+    const recovered = await recoverSweepAddress(auth, signature)
+    expect(recovered.toLowerCase()).toBe(DELEGATE.toLowerCase())
+  })
+
+  it('still pins `to` to the Haven binding when `expectedSafe` is absent', async () => {
+    const signer = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    // Haven bound a sweep to the Safe; the authorization presented for signing
+    // redirects `to`. With no local Safe to compare against, the binding
+    // signature is the only thing left standing — and it must still refuse.
+    const bound = baseAuthorization()
+    const redirected = baseAuthorization({ to: '0x000000000000000000000000000000000000bEEF' })
+    await expect(
+      signer.signSweepAuthorization({
+        authorization: redirected,
+        expectedAuth: await bindingFor(bound),
+      }),
+    ).rejects.toThrow(/does not match the authorization/)
+  })
+
   it('rejects a binding whose message does not match the authorization', async () => {
     const signer = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
     const auth = baseAuthorization()

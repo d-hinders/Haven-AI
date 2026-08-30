@@ -41,6 +41,20 @@ const REPORT_WITHOUT_FLAG = reportOf([
   ...REQUIRED_PROOF_CASES.map((t) => CASE(t, 'skipped')),
 ])
 
+test('REQUIRED_PROOF_CASES is pinned to BOTH cases, spelled out independently here', () => {
+  // Every other assertion in this file iterates REQUIRED_PROOF_CASES, so
+  // SHRINKING that array makes them all weaker without failing any of them —
+  // measured: a mutation deleting the blocking control survived the whole
+  // suite. The literals below are therefore written out again rather than
+  // derived, so dropping either half is red. Deleting the blocking control
+  // would leave the job watching only the polled case, which is the
+  // unfalsifiable-green shape #2208 exists to prevent.
+  assert.deepEqual(REQUIRED_PROOF_CASES, [
+    'PROOF: a BLOCKING waiter deadlocks a concurrent CREATE INDEX CONCURRENTLY (40P01)',
+    'PROOF: the POLLED waiter does not — the same build completes VALID',
+  ])
+})
+
 test('the flag-set report is the only one that counts as proof', () => {
   const result = evaluate({ report: REPORT_WITH_FLAG })
   assert.equal(result.ok, true)

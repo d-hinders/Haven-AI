@@ -324,6 +324,198 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.queryByText('Recoverable funds in agent wallet')).not.toBeInTheDocument()
   })
 
+
+  // ── The recoverable-funds surface: #2203 / #2195 / #2196 ─────────────────
+  //
+  // All three were filed by reviewers on PRs #2197 and #2205, which gave this
+  // banner its first rendered evidence. They are guarded together because they
+  // are one surface: the tap target, the sentence, and the link to the rows.
+
+  const STRANDED_TAIL =
+    'funded on-chain but didn’t reach the merchant, leaving money in your agent’s wallet.'
+
+  /** A balance the route could actually serve, with a caller-chosen figure. */
+  function mockRecoverable(usdc: string, usdcAtomic: string) {
+    mockUseDelegateBalance.mockReturnValue({
+      balance: {
+        delegate_address: '0x2222222222222222222222222222222222222222',
+        safe_address: SAFE.safe_address,
+        chain_id: 8453,
+        eth: '0',
+        eth_atomic: '0',
+        usdc,
+        usdc_atomic: usdcAtomic,
+        usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      },
+      hasStranded: true,
+      hasRecoverableUsdc: true,
+      loading: false,
+      refetch: vi.fn(),
+    })
+  }
+
+  /** An activity row the reconciliation endpoint would have accepted (#2197). */
+  function unsettledRow(id: string, amount: string) {
+    return {
+      type: 'payment' as const,
+      id,
+      agent_id: 'agent-1',
+      token: 'USDC',
+      token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      amount,
+      to: '0x9999999999999999999999999999999999999999',
+      status: 'confirmed' as const,
+      tx_hash: '0x' + id.padEnd(64, 'a'),
+      source: 'x402',
+      explorer_url: 'https://basescan.org/tx/0x' + id,
+      payment_flow_status: 'needs_attention' as const,
+      payment_attention_reason: 'merchant_retry_rejected_after_payment' as const,
+      created_at: '2026-05-30T00:00:00Z',
+    }
+  }
+
+  function mockUnsettled(rows: ReturnType<typeof unsettledRow>[]) {
+    mockUseAgentActivity.mockReturnValue({ activity: rows, stats: null, loading: false })
+  }
+
+  /**
+   * The banner's own subtree, found STRUCTURALLY.
+   *
+   * `ApprovalRequiredBanner` renders `<h3>{title}</h3>` and the body as
+   * siblings inside one div, so the heading's parent is the banner content.
+   * Deliberately not located by class string: this helper's whole job is to
+   * check class strings, and #1811/#1820's rule is that a gate must not also
+   * TRUST the thing it is under contract to check.
+   */
+  function bannerBody(): HTMLElement {
+    return screen.getByRole('heading', { name: 'Recoverable funds in agent wallet' })
+      .parentElement as HTMLElement
+  }
+
+  it('routes the Recover funds CTA through Button so it inherits the 44px tap target (#2203)', () => {
+    mockRecoverable('8.00', '8000000')
+    mockUnsettled([unsettledRow('1', '8.00')])
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    const cta = screen.getByRole('link', { name: 'Recover funds to your Haven wallet' })
+    expect(cta).toHaveAttribute('href', '/agents/agent-1/sweep')
+    // `Button`'s SIZE_CLASS.sm + TAP_TARGET_CLASS.sm (#1726): a 36px painted
+    // control whose hit area is extended to 44px by a transparent ::after.
+    // The old markup was `px-2.5 py-1 text-xs` — ~24 CSS px, measured on the
+    // 390px capture in #2205.
+    expect(cta.className).toContain('h-9')
+    expect(cta.className).toContain('after:h-11')
+    expect(cta.className).not.toContain('py-1 text-xs')
+  })
+
+  it('gives EVERY control in the recoverable-funds banner the tap target, not just the CTA (#2203)', () => {
+    mockRecoverable('8.00', '8000000')
+    mockUnsettled([unsettledRow('1', '8.00')])
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    const controls = Array.from(bannerBody().querySelectorAll('a, button'))
+    // Both of them: the recovery CTA and #2196's review affordance. A fix that
+    // lands one at spec while its neighbour stays at 24px is half a fix.
+    expect(controls).toHaveLength(2)
+    for (const control of controls) {
+      expect(
+        control.className,
+        `banner control "${control.textContent?.trim()}" has no 44px tap target`,
+      ).toContain('after:h-11')
+    }
+  })
+
+  /**
+   * `haven-design-reviewer` on this change: rendered against the banner's
+   * `--v2-warning-soft` fill, a chrome-less `tertiary` Button read as prose
+   * rather than as a control. It must carry RESTING affordance, not only a
+   * hover state — a control you cannot see is not a connection (#2196).
+   */
+  it('gives the review affordance resting chrome, so it reads as a control (#2196)', () => {
+    mockRecoverable('8.00', '8000000')
+    mockUnsettled([unsettledRow('1', '8.00')])
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    const review = screen.getByRole('button', { name: 'Review the payment' })
+    // `Button`'s ghost variant — a white fill and a hairline, the same variant
+    // the one other Button inside an ApprovalRequiredBanner uses
+    // (`ReceiveFundsModal`'s "Refresh page").
+    expect(review.className).toContain('bg-white')
+    expect(review.className).toContain('border-[var(--v2-border-strong)]')
+    // `tertiary` is `bg-transparent` with no border — the shape that failed.
+    expect(review.className).not.toContain('bg-transparent')
+  })
+
+  it('uses the SHARED cause clause on the detail banner, singular for one event (#2195)', () => {
+    mockRecoverable('8.00', '8000000')
+    mockUnsettled([unsettledRow('1', '8.00')])
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.getByText(new RegExp(`A payment was ${STRANDED_TAIL}`.replace(/[.]/g, '\\.')))).toBeInTheDocument()
+    expect(screen.getByText(/Recover 8\.00 USDC to your Haven wallet\./)).toBeInTheDocument()
+  })
+
+  it('goes plural when a second event coexists — nothing bounds the list at one (#2195)', () => {
+    mockRecoverable('20.00', '20000000')
+    mockUnsettled([unsettledRow('1', '8.00'), unsettledRow('2', '12.00')])
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.getByText(new RegExp(`2 payments were ${STRANDED_TAIL}`.replace(/[.]/g, '\\.')))).toBeInTheDocument()
+    expect(screen.queryByText(/^A payment was funded/)).not.toBeInTheDocument()
+  })
+
+  it('keeps the generic sentence when the wallet holds funds with no flagged payment (#2195)', () => {
+    mockRecoverable('8.00', '8000000')
+    mockUnsettled([])
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.getByText(/Your agent’s wallet is holding funds that weren’t spent\./)).toBeInTheDocument()
+    // Nothing to point at, so no review affordance is offered.
+    expect(screen.queryByRole('button', { name: /^Review the/ })).not.toBeInTheDocument()
+  })
+
+  it('offers a way from the banner to the rows that caused it, labelled with the count (#2196)', () => {
+    const scrollIntoView = vi.fn()
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView
+    mockRecoverable('8.00', '8000000')
+    mockUnsettled([unsettledRow('1', '8.00')])
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    // The anchor exists on the page, not only in the link's href.
+    expect(document.getElementById('agent-activity')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review the payment' }))
+    expect(scrollIntoView).toHaveBeenCalled()
+  })
+
+  it('counts the rows it promises — the review label is plural-aware too (#2196)', () => {
+    mockRecoverable('20.00', '20000000')
+    mockUnsettled([unsettledRow('1', '8.00'), unsettledRow('2', '12.00')])
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.getByRole('button', { name: 'Review the 2 payments' })).toBeInTheDocument()
+  })
+
+  /**
+   * The honesty guard for #2196, and the reason the link is navigational.
+   *
+   * The banner's figure is the delegate EOA's live USDC BALANCE; the rows are
+   * payment intents. Nothing apportions the balance to an intent, so a banner
+   * that named an individual payment's amount would be asserting a link the
+   * data cannot support. Here the balance (20.00) is neither seeded payment's
+   * amount, and the banner must print only the balance.
+   */
+  it('never attributes the recoverable balance to a specific payment (#2196)', () => {
+    mockRecoverable('20.00', '20000000')
+    mockUnsettled([unsettledRow('1', '8.00'), unsettledRow('2', '12.00')])
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    const text = bannerBody().textContent ?? ''
+    expect(text).toContain('Recover 20.00 USDC to your Haven wallet.')
+    expect(text).not.toContain('8.00')
+    expect(text).not.toContain('12.00')
+  })
+
   it('uses the activity row wallet name for historical payment movement', () => {
     mockUseAgentActivity.mockReturnValue({
       activity: [

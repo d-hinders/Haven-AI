@@ -119,3 +119,31 @@ describe('Button tap targets (#1726)', () => {
     expect(tapTargetHeightPx(classes)).toBeGreaterThanOrEqual(COMFORTABLE_TAP_TARGET_PX)
   })
 })
+
+/**
+ * #2203. The recoverable-funds CTA was a hand-rolled `<a>` at ~24 CSS px on
+ * the money-recovery path — the one CTA inside an `ApprovalRequiredBanner`
+ * that was not already a `Button`. Moving it onto the primitive used to cost
+ * it its `aria-label`, so the prop exists; these pin that it survives on BOTH
+ * branches, since the CTA takes the link branch and its neighbour does not.
+ */
+describe('Button accessible name (#2203)', () => {
+  it('carries an aria-label on the button branch', () => {
+    render(<Button aria-label="Recover funds to your Haven wallet">Recover funds</Button>)
+    expect(screen.getByRole('button', { name: 'Recover funds to your Haven wallet' })).toBeTruthy()
+  })
+
+  it('carries an aria-label on the link branch', () => {
+    render(
+      <Button href="/agents/a/sweep" aria-label="Recover funds to your Haven wallet">
+        Recover funds
+      </Button>,
+    )
+    expect(screen.getByRole('link', { name: 'Recover funds to your Haven wallet' })).toBeTruthy()
+  })
+
+  it('falls back to the visible label when none is given', () => {
+    render(<Button>Recover funds</Button>)
+    expect(screen.getByRole('button', { name: 'Recover funds' })).toBeTruthy()
+  })
+})

@@ -7,6 +7,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import type { Agent } from '@/hooks/useAgents'
+import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
+
+/** Escape a copy string for use inside a text-matching RegExp. */
+function escapeRe(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
 vi.mock('../RemoveAgentDialog', () => ({
   RemoveAgentDialog: () => <div data-testid="remove-agent-dialog" />,
@@ -54,6 +60,49 @@ function renderCard(agent: Agent, { canUseWalletActions = true } = {}) {
   )
   return { onRestore }
 }
+
+/**
+ * #2195: the stranded-funds notice on this card and the recoverable-funds
+ * banner on `/agents/[agentId]` describe ONE reconciliation event, one click
+ * apart, and used to say it in two different sentences with two different
+ * titles. The core clause now comes from `lib/stranded-funds-copy.ts`.
+ *
+ * These assertions compare the render against that module ON PURPOSE — the
+ * claim under test is "this surface renders the SHARED clause", so importing
+ * it is what makes a re-divergence fail. The independently-restated literal
+ * lives where it belongs: `stranded-funds-copy.test.ts` pins the words, and
+ * `e2e/agent-panel-states.visual.spec.ts` pins the title.
+ */
+describe('AgentCard stranded-funds notice (#2195)', () => {
+  it('uses the shared title and the shared cause clause', () => {
+    renderCard(agentFixture({ has_stranded_funds: true } as Partial<Agent>))
+    expect(screen.getByText(STRANDED_FUNDS_TITLE)).toBeTruthy()
+    expect(screen.getByText(new RegExp(escapeRe(strandedFundsCause(null))))).toBeTruthy()
+  })
+
+  /**
+   * The information-richness half of #2195, made structural.
+   *
+   * `has_stranded_funds` is a bare SQL `EXISTS(...)` in both agent-row reads
+   * (`repositories/agents.ts`), so this surface can prove the state exists and
+   * nothing more. It must not borrow the detail banner's count or amount — it
+   * has neither — so its clause is the count-free one.
+   */
+  it('makes no claim it cannot support: no count, no amount, from a boolean EXISTS', () => {
+    renderCard(agentFixture({ has_stranded_funds: true } as Partial<Agent>))
+    const notice = screen.getByText(STRANDED_FUNDS_TITLE).parentElement as HTMLElement
+    const text = notice.textContent ?? ''
+    expect(text).toContain('At least one payment')
+    expect(text).not.toMatch(/\bA payment was\b/)
+    expect(text).not.toMatch(/\d+ payments were/)
+    expect(text).not.toMatch(/USDC/)
+  })
+
+  it('shows nothing when the agent has no open reconciliation event', () => {
+    renderCard(agentFixture())
+    expect(screen.queryByText(STRANDED_FUNDS_TITLE)).toBeNull()
+  })
+})
 
 describe('AgentCard action-row matrix (#1402)', () => {
   it('active delegation agent: Remove shown, Safe Revoke hidden', () => {

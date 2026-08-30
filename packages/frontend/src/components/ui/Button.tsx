@@ -99,6 +99,17 @@ type ButtonProps = {
    * Ignored on the `href` branch below: an anchor has no form owner.
    */
   form?: string
+  /**
+   * Accessible name, when the visible label alone is not the whole story
+   * (#2203). Added so a call site that already carried one on a hand-rolled
+   * `<a>` can move onto this primitive without dropping it — which is how the
+   * recoverable-funds CTA came to be hand-rolled and 24px tall in the first
+   * place: routing through `Button` used to cost an attribute.
+   *
+   * Keep it a SUPERSET of the visible label rather than a replacement for it
+   * (WCAG 2.5.3 Label in Name) — a voice-control user says what they can see.
+   */
+  'aria-label'?: string
   disabled?: boolean
   onClick?: ButtonHTMLAttributes<HTMLButtonElement>['onClick']
   variant?: Variant
@@ -114,6 +125,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   rel,
   type = 'button',
   form,
+  'aria-label': ariaLabel,
   disabled,
   onClick,
   variant = 'primary',
@@ -135,14 +147,14 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 
   if (!href) {
     return (
-      <button ref={ref} type={type} form={form} disabled={disabled} onClick={onClick} className={classes}>
+      <button ref={ref} type={type} form={form} aria-label={ariaLabel} disabled={disabled} onClick={onClick} className={classes}>
         {content}
       </button>
     )
   }
 
   return (
-    <Link href={href} target={target} rel={rel} className={classes}>
+    <Link href={href} target={target} rel={rel} aria-label={ariaLabel} className={classes}>
       {content}
     </Link>
   )

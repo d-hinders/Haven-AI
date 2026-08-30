@@ -29,7 +29,7 @@
  *
  * ## The composite-card trigger changed in #2043
  *
- * It used to be the `not recorded` label and its 167-character explanation.
+ * It used to be the `not recorded` label and its 169-character explanation.
  * **That tooltip is gone**: the copy was essential rather than elaboration —
  * it explains an absence, and its whole job is to stop a user concluding the
  * agent is broken — so a trigger this primitive can never make reachable was

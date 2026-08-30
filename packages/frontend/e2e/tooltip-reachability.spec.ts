@@ -5,7 +5,7 @@
  *
  * Defect 2 — a `whitespace-nowrap` bubble with no width cap — is a text-layout
  * fact, and jsdom has no layout engine. There, a three-word label and a
- * 167-character one produce identical evidence, which is precisely how the
+ * 169-character one produce identical evidence, which is precisely how the
  * defect shipped: every gate the repo has either cannot see a closed tooltip
  * (the pixel gates, the rendered design review) or cannot measure an open one
  * (the unit suite). **This is the only assertion in the repo that fails on
@@ -19,7 +19,7 @@
  *
  * ### The label changed in #2043, and the reason is worth keeping
  *
- * This test used to hover `McpServerName`'s null branch, whose 167-character
+ * This test used to hover `McpServerName`'s null branch, whose 169-character
  * sentence was the longest label any caller passed. **#2043 deleted that
  * tooltip**: the copy explained an absence, it was essential rather than
  * elaboration, and `AgentCard`'s composite `role="link"` meant no keyboard or

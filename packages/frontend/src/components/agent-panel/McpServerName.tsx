@@ -45,7 +45,7 @@ export function signerNameFor(hosted: string): string {
  *
  * ### Why it cannot stay in a tooltip
  *
- * It used to be a 167-character `Tooltip` label on the `not recorded` span.
+ * It used to be a 169-character `Tooltip` label on the `not recorded` span.
  * #2038 made `Tooltip` reachable by keyboard and touch, but only where the
  * trigger is nobody else's control, and this call site is **structurally
  * excluded** rather than merely missed: `AgentCard` wraps the whole card in a

@@ -97,81 +97,134 @@ function SafeCard({
         ['--v2-stagger-delay' as string]: `${staggerIndex * 60}ms`,
       }}
     >
-      {/* Active + default actions — stop link navigation for nested buttons. */}
-      <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-        {!isActive && (
-          <button
-            type="button"
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSetActive() }}
-            className="rounded-md px-2 py-1 text-xs font-medium text-[var(--v2-brand)] hover:bg-[var(--v2-brand-soft)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-            aria-label={`Set ${safe.name} as active`}
-          >
-            Set active
-          </button>
-        )}
-        {!safe.is_default && (
-          <button
-            type="button"
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSetDefault() }}
-            className="p-1.5 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-            aria-label={`Set ${safe.name} as default`}
-          >
-            <Icon icon={Star} className="w-3.5 h-3.5" />
-          </button>
-        )}
-      </div>
-
       {/*
-        Header — name + active / default chips.
+        Header — the account's identity, and the two actions that act on it.
 
-        `flex-wrap` is the load-bearing class here, not decoration (#2223). The
-        account name is the primary identifier on this screen — with two
-        accounts it is the ONLY thing telling the cards apart — and the badges
-        are chrome. Without wrapping, both badges are `flex-shrink-0` and the
-        `h3` is the only compressible item in the row, so the row paid for the
-        chrome out of the identity: measured on the two-account fixture,
-        "Operating wallet" rendered as "Operatin…" at 1280 and "Operating
-        wal…" at 390, on a name of seventeen characters.
+        TWO COLUMNS, and the split is the fix for #2236. The actions used to be
+        `absolute top-3 right-3` over the card, with the title row buying them
+        room via a hand-picked `pr-12`. Measured on the two-account fixture at
+        1280: the actions block is **102.6px** ("Set active" 72.6 + gap 4 +
+        the star 26) and overhangs the card's content box by 10.9px, so an
+        honest reservation was ~92px against the 48px actually written — and
+        on hover the buttons painted a **42.7 x 14px** region of the account
+        name's own box (46.6 x 18px at 390). Widening `pr-12` to ~92px was the
+        obvious fix and the wrong one: it takes that width back from the name
+        on EVERY line and on EVERY card, which is what #2223 exists to stop.
 
-        Wrapping puts the badge that does not fit on a second line instead.
-        That is the idiom this repo already uses for the same title-plus-badge
-        shape — `TransactionActivityRow` (#1833) and `PageHeader`, and the
-        detail page for this very entity (`AccountDetailClient`) — rather than
-        a third one for one screen.
+        So the reservation is DERIVED instead of guessed: the actions live in
+        normal flow as this row's second column, `flex-shrink-0`, and reserve
+        exactly what they measure. Nothing can drift when a label changes, and
+        the reservation is now CONDITIONAL — `pr-12` was paid on every card,
+        including the active+default one where neither button renders at all
+        (both are gated on `!isActive` / `!safe.is_default`), so that card was
+        losing 48px of name to buttons that did not exist.
 
-        `truncate` STAYS, and `min-w-0` says so explicitly. Names are
-        user-supplied and unbounded, so a last-resort bound is still required;
-        what changes is that it is now a bound against the CONTAINER, reached
-        only when the name alone cannot fit, instead of a standing tax paid so
-        two pills can sit beside it. `title` hands the full name back on hover
-        in that case, matching `TransactionsTable`; the card's `aria-label`
-        already carries it for assistive tech either way.
+        The name still gets the wrapping row from #2223 — `flex-wrap` around a
+        `min-w-0 truncate` `h3` — inside the first column, so a name too long
+        for the row still truncates against the CONTAINER rather than against
+        the chrome. `min-w-0 flex-1` is what lets that column shrink at all.
+
+        What this trade COSTS, stated rather than buried: on a card that DOES
+        render both actions the title row's content drops from a nominal 217px
+        to 154.4px at 1280. That nominal 217 was never honest — 42.7px of it
+        was painted over whenever the pointer was on the card — but 62.6px is
+        a real give, and it is the price of the name never being occluded. It
+        is paid only on cards that are neither active nor default.
+
+        On the card both issues photograph — active AND default, so neither
+        button renders — the same change hands the row all 265px instead of
+        217, which is what lets #2235's badge pair sit beside the name at all.
+        #2223's 126.9px full-name render there is preserved, not regressed.
       */}
-      <div className="mb-2 flex flex-wrap items-center gap-2 pr-12">
-        <h3
-          title={safe.name}
-          className="min-w-0 truncate text-base font-semibold text-[var(--v2-ink)]"
-        >
-          {safe.name}
-        </h3>
-        {showActiveBadge && (
-          <span className="inline-flex flex-shrink-0 items-center gap-1 rounded bg-[var(--v2-success-soft)] px-1.5 py-0.5 text-xs font-medium text-[var(--v2-success)]">
-            <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--v2-success)]" />
-            Active
-          </span>
-        )}
-        {showDefaultBadge && (
-          <span className="flex-shrink-0 rounded bg-[var(--v2-brand-soft)] px-1.5 py-0.5 text-xs font-medium text-[var(--v2-brand)]">
-            default
-          </span>
+      <div className="mb-2 flex items-start gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <h3
+            title={safe.name}
+            className="min-w-0 truncate text-base font-semibold text-[var(--v2-ink)]"
+          >
+            {safe.name}
+          </h3>
+          {/*
+            ONE badge group, not two siblings — this is #2235's fix.
+
+            #2223 made this row wrap so the name stops paying for its chrome.
+            With two independent `flex-shrink-0` badges the row then broke
+            BETWEEN them, so `Active` stayed beside the name and `default`
+            landed alone on a line of its own, immediately above the caption.
+            `haven-design-reviewer`, verbatim: "a single small pill stranded on
+            its own line … doesn't read as intentional hierarchy — it reads
+            like whatever didn't fit fell down."
+
+            Grouping them makes the badges one wrappable item, so the row can
+            only break in front of the PAIR. Either both sit beside the name or
+            both move under it as a badge row — there is no arrangement left in
+            which one pill is orphaned.
+
+            WHY NOT THE CAPTION LINE, which is what #2235 proposed. It was
+            rendered rather than reasoned about, and it does not fit: on the
+            standing capture fixture the caption already measures ~255px of a
+            265px card at 1280 (`● Base Sepolia` is 145px, not the 54px a
+            mainnet `Base` label would be), so adding `default · ` overflowed
+            it and left a dangling `·` at the end of line one with "Added 4mo
+            ago" alone below. That is the same defect the issue is about, moved
+            down one row. The measurement is in the PR body; the arrangement
+            below is what the card can actually hold.
+          */}
+          {(showActiveBadge || showDefaultBadge) && (
+            <span className="inline-flex flex-shrink-0 items-center gap-2">
+              {showActiveBadge && (
+                <span className="inline-flex flex-shrink-0 items-center gap-1 rounded bg-[var(--v2-success-soft)] px-1.5 py-0.5 text-xs font-medium text-[var(--v2-success)]">
+                  <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--v2-success)]" />
+                  Active
+                </span>
+              )}
+              {showDefaultBadge && (
+                <span className="flex-shrink-0 rounded bg-[var(--v2-brand-soft)] px-1.5 py-0.5 text-xs font-medium text-[var(--v2-brand)]">
+                  default
+                </span>
+              )}
+            </span>
+          )}
+        </div>
+
+        {/*
+          Rendered only when it has something to render, so an active+default
+          card reserves nothing. Buttons stop link navigation for themselves.
+        */}
+        {(!isActive || !safe.is_default) && (
+          <div className="flex flex-shrink-0 items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+            {!isActive && (
+              <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSetActive() }}
+                className="rounded-md px-2 py-1 text-xs font-medium text-[var(--v2-brand)] hover:bg-[var(--v2-brand-soft)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                aria-label={`Set ${safe.name} as active`}
+              >
+                Set active
+              </button>
+            )}
+            {!safe.is_default && (
+              <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSetDefault() }}
+                className="p-1.5 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                aria-label={`Set ${safe.name} as default`}
+              >
+                <Icon icon={Star} className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         )}
       </div>
 
       {/* Caption — network + age. Replaces the raw 0x address that was too
-          technical for an at-a-glance overview. */}
-      <div className="mb-5 flex items-center gap-2 text-xs text-[var(--v2-ink-3)]">
+          technical for an at-a-glance overview. `flex-wrap` because this line
+          is already close to full at the 3-up breakpoint: `● Base Sepolia · Added
+          4mo ago` measures ~255px in a 265px card, which is exactly why
+          #2235's `default` could not join it. */}
+      <div className="mb-5 flex flex-wrap items-center gap-2 text-xs text-[var(--v2-ink-3)]">
         <NetworkPill chainId={safe.chain_id ?? DEFAULT_CHAIN_ID} />
-        <span aria-hidden="true">{'·'}</span>
+        <span aria-hidden="true">{'\u00b7'}</span>
         <span>Added {timeAgo(safe.created_at)}</span>
       </div>
 

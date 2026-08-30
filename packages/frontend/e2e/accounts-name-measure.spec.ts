@@ -110,18 +110,33 @@ async function readName(page: Page, accountName: string): Promise<NameReading> {
     if (!h3) throw new Error(`the card labelled "${label}" renders no name`)
     const row = h3.parentElement!
     const padRight = parseFloat(getComputedStyle(row).paddingRight) || 0
-    // VISIBLY rendered, not merely present in the DOM. `haven-reviewer`
+    // Laid out AS CHROME, not merely present in the DOM. `haven-reviewer`
     // defeated a text-only version of this check with its own mutation: drop
     // `flex-wrap` AND give both badges `sr-only`, and all three tests passed —
     // `position: absolute` takes them out of flex flow, so the `h3` gets the
     // whole row exactly as a real wrap would, while their text nodes stay
-    // queryable. That is a layout no sighted user gets, and the check that was
-    // supposed to say "the result was not bought by deleting the chrome" could
-    // not see it. `getClientRects()` is the same visibility filter
-    // `transaction-title-measure.spec.ts` uses; the width test is what rules
-    // out a zero-size box.
+    // queryable. A layout no sighted user gets, invisible to the very check
+    // that exists to say "this was not bought by deleting the chrome".
+    //
+    // A first attempt at the fix — `getClientRects().length > 0` plus a
+    // non-zero width — did NOT kill it, and that is worth writing down rather
+    // than quietly replacing: Tailwind's `sr-only` is `position:absolute` at
+    // 1x1px with `clip`, so it IS laid out and it DOES have width. All three
+    // conditions below are needed, and each rules out one half of that
+    // mutation: `getClientRects()` for display:none, `position: static` for
+    // anything pulled out of the row's flow, and a real pill width for the
+    // 1px box. 24px is measured, not guessed: the rendered pills are 58.2px
+    // (`Active`) and 52.1px (`default`) at BOTH widths, and `sr-only` is 1px
+    // — so the threshold sits with ~2x headroom on one side and 24x on the
+    // other. (The 6px sibling is `Active`'s status dot, which the text filter
+    // below drops anyway.)
     const badges = Array.from(row.querySelectorAll('span'))
-      .filter((el) => el.getClientRects().length > 0 && el.getBoundingClientRect().width > 0)
+      .filter(
+        (el) =>
+          el.getClientRects().length > 0 &&
+          getComputedStyle(el).position === 'static' &&
+          el.getBoundingClientRect().width >= 24,
+      )
       .map((el) => (el.textContent ?? '').trim())
       .filter((t) => t === 'Active' || t === 'default')
     return {

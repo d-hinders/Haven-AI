@@ -11,6 +11,7 @@ import {
 import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit'
 import { Info, TriangleAlert, Wallet } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { VIEWPORT_MARGIN } from '@/components/ui/Tooltip'
 import { useAccount, useDisconnect } from 'wagmi'
 import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
@@ -291,6 +292,14 @@ interface PopoverProps {
  * the component with the props forced, the way the primitive gallery already
  * photographs states no user flow reaches.
  */
+/**
+ * The `mt-2` offset between the trigger's bottom edge and the popover's top,
+ * in px. Read here rather than measured because the popover's own rect is what
+ * the bound is being computed FOR — measuring it would feed the clamp its own
+ * clamped output.
+ */
+const POPOVER_ANCHOR_GAP = 8
+
 export function WalletPopover({
   primary,
   secondary,
@@ -309,6 +318,7 @@ export function WalletPopover({
   const popoverRef = useRef<HTMLDivElement>(null)
   const { disconnectAsync } = useDisconnect()
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null)
+  const [maxHeight, setMaxHeight] = useState<number | null>(null)
   const copyTimerRef = useRef<number | null>(null)
 
   // Cancel the copy-reset timer on unmount so it never fires into a dead component.
@@ -338,6 +348,52 @@ export function WalletPopover({
       window.removeEventListener('mousedown', handler)
     }
   }, [open, onClose, anchorRef])
+
+  /**
+   * Bound the menu against the VIEWPORT, not a pixel count (#2067).
+   *
+   * `absolute top-full` gives the popover no height limit at all, so its box is
+   * whatever its content happens to be — and the #1952 disclosure's content has
+   * changed twice in a week (#2069, #2072). Measured on `origin/dev` at the
+   * tallest app-reachable state (marker-less disclosure + a connected wallet's
+   * secondary section) the box is 430px: comfortably inside 1280x800 and
+   * 390x844, and 93px PAST the bottom of an 844x390 landscape phone. The app
+   * shell scrolls `main`, not the document (`(authenticated)/layout.tsx`), and
+   * this header is `position: relative` inside it — so nothing the user can do
+   * brings that overhang back. The Disconnect button was measured below the
+   * fold with `document.documentElement.scrollHeight === window.innerHeight`.
+   *
+   * The clamp follows the two idioms already in the repo rather than adding a
+   * third: `VIEWPORT_MARGIN` is Tooltip's own gutter, imported (#2038), and the
+   * flex + `min-h-0 flex-1 overflow-y-auto` body below is Modal's scroll
+   * structure (#1893).
+   *
+   * `null` — no bound — when there is no live anchor to measure from. That is
+   * the `/design-system` illustration, which passes `anchorRef={{ current: null }}`:
+   * a static showcase inside a scrolling page needs no viewport clamp, and
+   * leaving it unbounded is also what keeps the committed pixel baselines still.
+   */
+  useEffect(() => {
+    if (!open) return
+    const measure = () => {
+      const anchor = anchorRef.current
+      if (!anchor) {
+        setMaxHeight(null)
+        return
+      }
+      const top = anchor.getBoundingClientRect().bottom + POPOVER_ANCHOR_GAP
+      setMaxHeight(Math.max(0, window.innerHeight - top - VIEWPORT_MARGIN))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    // Capture phase: the app shell scrolls an inner element, not the document,
+    // so a bubbling listener on `window` would never hear it.
+    window.addEventListener('scroll', measure, true)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('scroll', measure, true)
+    }
+  }, [open, anchorRef])
 
   if (!open) return null
 
@@ -391,9 +447,24 @@ export function WalletPopover({
       ref={popoverRef}
       role={presentational ? 'group' : 'dialog'}
       aria-label="Wallet menu"
-      className="absolute right-0 top-full mt-2 w-72 z-50 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-xl shadow-modal overflow-hidden"
+      className="absolute right-0 top-full mt-2 flex w-72 flex-col z-50 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-xl shadow-modal overflow-hidden"
+      style={maxHeight === null ? undefined : { maxHeight }}
     >
-      <div className="p-4 border-b border-[var(--v2-border)]">
+      {/*
+        The scroll box, per Modal's structure (#1893): `min-h-0` so the flex
+        item may shrink below its content, `flex-1` so it absorbs whatever the
+        clamp leaves, `overflow-y-auto` so the remainder stays REACHABLE rather
+        than clipped. The action buttons below are deliberately OUTSIDE it —
+        Switch/Disconnect are the reason the menu is open, and they stay put.
+
+        Focus survives this: the Copy buttons inside remain in the tab order,
+        and the browser scrolls a focused element into view on its own, so
+        keyboard reachability is unchanged. Their `focus-visible:ring-2` paints
+        OUTSIDE the border box (#1873) and is not clipped, because this box
+        clips at its PADDING edge and `p-4` leaves 16px of gutter for a 2px
+        ring — measured in `wallet-popover-height-bound.spec.ts`, not assumed.
+      */}
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 border-b border-[var(--v2-border)]">
         {unavailablePasskey && (
           <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
             This account uses a passkey that is not available here.
@@ -451,7 +522,7 @@ export function WalletPopover({
         {secondary && renderAddressSection(secondary, true)}
       </div>
 
-      <div className="p-2">
+      <div className="shrink-0 p-2">
         <button
           type="button"
           disabled={switching}

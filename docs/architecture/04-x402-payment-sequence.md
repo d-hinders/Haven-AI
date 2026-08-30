@@ -31,7 +31,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-28" # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-30" # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -1119,6 +1119,35 @@ by posting the settlement hash to `POST /machine-payments/evidence`; and since
 (`settlement_unobservable`) — it retries with bounded backoff, so a settlement
 that simply had not been mined yet at report time no longer costs the payment
 its place in the books.
+
+**That remedy now travels with the alert (#2214).** The residual warning used to
+end at "it will not reach the accounting feed", which overstated the situation
+in the same way #2213's PR found one level down: it is the *sweep* that is
+stuck, not the payment. The agent-reported path runs the same verifier with
+`requireDelegationBound` **off**, so it does not need the manager log the scan
+could not find (gap 1) and is not bounded by the recovery horizon (gap 3). The
+log therefore carries a `remedy` field naming that route, because an alert about
+a dead end is an alert operators learn to scroll past.
+
+**The one exclusion that happens in SQL, and why it is not a fourth residual.**
+`FIND_SWEEPABLE_ERC7710_INTENTS_SQL` requires `delegation_hash IS NOT NULL`,
+upstream of the tick — so a row it dropped would be neither completed nor
+counted in `unresolved` nor logged, missing both halves of "complete what can be
+attributed, and log the rest loudly". @PhilipEriksson raised exactly that on PR
+#2134 and #2136 pinned the behaviour. It is not a live gap, because the
+population is unconstructible rather than merely empty: the sole production
+writer of `settlement_scheme = 'erc7710'` sets `delegation_hash` in the *same*
+`insertMachineIntent` call — one INSERT, both columns — and has done so since
+#830 introduced the erc7710 path (2026-07-10), not since #2094 (2026-08-27).
+What #2094 changed is the child's **salt**, so a pre-#2094 intent carries the
+old constant-salt hash, is a candidate, is scanned, and is counted and logged
+like any other; when a look-alike twin makes it unattributable it appears above
+as residual gap 2. So `delegation_hash IS NOT NULL` is defence in depth over an
+empty set. A counter or census for it would report zero forever; what is pinned
+instead — from both directions, in
+[`erc7710-sweep-eligibility.test.ts`](../../packages/backend/src/infra/repositories/__tests__/erc7710-sweep-eligibility.test.ts)
+— is the invariant that keeps the set empty, so a second writer added without a
+`delegationHash` fails a test rather than silently losing payments.
 
 **The confirm and the evidence row are two writes, and the second one can fail
 (#2213).** Completing a payment means flipping the intent `submitted →

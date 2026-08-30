@@ -20,6 +20,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { REPO_ROOT, ROOT_DOCS, walk, parseFrontMatter } from './validate-frontmatter.mjs'
+import { GOVERNED_PACKAGE_DOCS } from './package-docs.mjs'
 
 function arg(name) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
@@ -72,6 +73,26 @@ async function main() {
       doc: rel,
       lastVerified,
       contract: parsed.data.contract === 'true',
+      commits: commits.length,
+      latest: commits[0],
+    })
+  }
+
+  // #2088: governed `packages/**` READMEs rank alongside `docs/**`. Their
+  // metadata comes from the manifest rather than front-matter, but the staleness
+  // question is identical — how much covered code moved since the last
+  // verification — and excluding them is what let a package README describe
+  // three impossible QA legs for weeks (#1992).
+  for (const entry of GOVERNED_PACKAGE_DOCS) {
+    if (entry.status === 'archived') continue
+    const lastVerified = entry['last-verified']
+    if (!entry.covers?.length || !lastVerified) continue
+    const commits = commitsSince(entry.covers, lastVerified)
+    if (commits.length === 0) continue
+    findings.push({
+      doc: entry.doc,
+      lastVerified,
+      contract: false,
       commits: commits.length,
       latest: commits[0],
     })

@@ -255,9 +255,10 @@ async function main() {
     //
     // Scope, stated so the green is not over-read: this only reaches the files
     // `docFiles` enumerates — `docs/**` plus the four root gravity files. A
-    // Markdown file under `packages/**` has no front-matter at all and is
-    // outside the docs-quality system entirely; that is a separate, visible gap
-    // (#2078), not one this rule closes.
+    // Markdown file under `packages/**` has no front-matter at all; that was a
+    // separate, visible gap (#2088 — the number this comment originally got
+    // wrong), and it is closed one screen below by `checkPackageDocBoundary`,
+    // which is a boundary check rather than an extension of this rule.
     if (covers.length === 0 && !emptyCoversNote(raw)) {
       errors.push(
         `${rel}: \`covers: []\` needs an inline reason — write ` +
@@ -282,13 +283,27 @@ async function main() {
     }
   }
 
+  // #2088: the `packages/**` boundary. Not an extension of the front-matter
+  // rules above — these files deliberately carry no front-matter (five of them
+  // are published npm landing pages) and are governed from a manifest instead.
+  // What is enforced is that every one of them has DECLARED a side.
+  const { checkPackageDocBoundary } = await import('./package-docs.mjs')
+  errors.push(...checkPackageDocBoundary(allFiles))
+
   if (errors.length) {
     console.error(`\n✗ Front-matter validation failed (${errors.length} issue(s)):\n`)
     for (const e of errors) console.error(`  - ${e}`)
     console.error('\nSee docs/contributing/docs-quality-system.md for the schema.\n')
     process.exit(1)
   }
+  const { GOVERNED_PACKAGE_DOCS, EXEMPT_PACKAGE_DOCS, enumeratePackageDocs } = await import(
+    './package-docs.mjs'
+  )
   console.log(`✓ Front-matter valid across ${docFiles.length} docs.`)
+  console.log(
+    `✓ packages/** Markdown boundary declared for ${enumeratePackageDocs(allFiles).length} file(s): ` +
+      `${GOVERNED_PACKAGE_DOCS.length} governed, ${Object.keys(EXEMPT_PACKAGE_DOCS).length} exempt (#2088).`,
+  )
 }
 
 // Only run the CLI when executed directly (`node validate-frontmatter.mjs`),

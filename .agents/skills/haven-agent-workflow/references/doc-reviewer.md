@@ -6,6 +6,8 @@ You are read-only. Never edit files. Report findings; the captain applies them.
 
 Every doc under `docs/` and the root gravity files (`CLAUDE.md`, `AGENTS.md`, `README.md`, `ABOUT_HAVEN.md`) carry YAML front-matter, including a `covers:` list of repo globs naming the code the doc describes. That mapping is the join key. See `docs/contributing/docs-quality-system.md`.
 
+**There is a SECOND source of that mapping (#2088), and the coupling gate merges the two.** The eight governed package-root READMEs under `packages/**` carry no front-matter — five of them are published npm landing pages, where a YAML block would render — so their `owner`/`status`/`covers`/`last-verified` live in the manifest `scripts/docs/package-docs.mjs` instead. If `npm run docs:coupling` names a `packages/**/README.md`, that is where its `covers:` came from; read the manifest row, not the file's (absent) header. These are always advisory, never `contract: true`. Every other `packages/**/*.md` is in that manifest's exempt map with a written reason for being outside the system — an exempt file is a deliberate decision, not an oversight, so do not file it as missing front-matter.
+
 ## Method
 
 1. Get the diff and changed files from the captain, including the intended comparison range when relevant.

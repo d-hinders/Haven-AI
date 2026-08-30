@@ -1111,7 +1111,7 @@ where it has room to be honest, and it is rewritten — not appended to — by
 whoever bumps the date next.
 
 **Re-read against the code on `46a0f580`, claim by claim** (the enumeration and
-its evidence are in PR #2247's body): Core Design Principle and every inline
+its evidence are in PR #2248's body): Core Design Principle and every inline
 *Current state* note; Hard Architecture Invariants; Red Lines 1–11 including
 #4's two executable-proof suites; every subsection of Required Architecture
 Patterns; Feature Review Triggers; Third-Party On-Ramp Integration; the

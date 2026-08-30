@@ -119,6 +119,53 @@
  * All three are logged as they age past the horizon, and all three are recorded
  * in `docs/architecture/04-x402-payment-sequence.md` and
  * `docs/operations/fortnox-reporting-feed.md`.
+ *
+ * **None of the three is unrecoverable, and the log must not imply it is.**
+ * What the sweep cannot do is attribute them WITHOUT BEING TOLD. An agent (or
+ * an operator holding its credential) that still has the merchant's settlement
+ * hash completes any of them by re-reporting it to
+ * `POST /machine-payments/evidence`: that path runs the same verifier with
+ * `requireDelegationBound` OFF, so checks 1–7 plus the database's replay and
+ * ambiguity guards carry the attribution and a route with no decodable manager
+ * log — gap 1 — completes normally. It is not horizon-bound either, so gap 3
+ * is reachable indefinitely. This is the same overstatement #2213's PR
+ * corrected one level up ("unreachable by any retry" was too strong there for
+ * exactly this reason), and it is why the `unresolved` warn below names the
+ * remedy: a loud log about a situation with no remedy trains people to ignore
+ * logs, which is worse than silence.
+ *
+ * ## The fourth "gap" that is not one (#2214)
+ *
+ * @PhilipEriksson raised, on PR #2134 and confirmed by execution under #2136,
+ * that `FIND_SWEEPABLE_ERC7710_INTENTS_SQL`'s `delegation_hash IS NOT NULL`
+ * excludes its population in SQL — upstream of `sweepOne` — so those rows are
+ * neither completed NOR counted in `unresolved` NOR logged. Both halves of
+ * "complete what can be attributed, and log the rest loudly" miss them. The
+ * observation about the code is exactly right.
+ *
+ * The population it describes, however, **cannot be constructed.** The sole
+ * production writer of `machine_metadata->>'settlement_scheme' = 'erc7710'` is
+ * `delegation-authorize.ts`, and it passes `delegationHash: built.childHash`
+ * two lines below `settlement_scheme: 'erc7710'` in the SAME
+ * `insertMachineIntent` call — one INSERT, both columns, non-null since #830
+ * (2026-07-10), the commit that introduced the erc7710 path itself rather than
+ * since #2094. Nothing UPDATEs `machine_metadata` or nulls `delegation_hash`
+ * afterwards. So `settlement_scheme = 'erc7710' AND delegation_hash IS NULL` is
+ * empty on every environment and always has been, and the conjunct is
+ * defence-in-depth over an empty set rather than a filter that drops live rows.
+ * A census, a counter or a distinct residue bucket for it would be an elaborate
+ * mechanism reporting zero forever — its own defect. What IS pinned instead, in
+ * `infra/repositories/__tests__/erc7710-sweep-eligibility.test.ts`, is the
+ * invariant that makes the set empty, so a second writer added without a
+ * `delegationHash` goes red rather than silently invisible.
+ *
+ * What #2094 actually changed for pre-existing rows is the SALT, not the
+ * presence of a hash: a pre-#2094 intent carries the old constant-salt child
+ * hash, IS a candidate, IS scanned, and IS counted and logged — as residual
+ * gap 2 above when a look-alike twin makes it unattributable. And the
+ * `delegation_hash IS NULL` rows that DO exist — pre-#2094 payments an agent
+ * confirmed by report, whose evidence write then failed — are already covered
+ * by the recovery pass, whose query deliberately omits the conjunct.
  */
 import {
   findEvidenceOrphanedErc7710Intents,
@@ -199,6 +246,19 @@ const SCAN_BACKOFF_BASE_MS = SETTLEMENT_SWEEP_INTERVAL_MS
 const SCAN_BACKOFF_MAX_MS = 60 * 60 * 1000
 
 const scanBackoff = new Map<string, { attempts: number; nextAttemptAtMs: number }>()
+
+/**
+ * What an operator can actually DO about an unattributable settled payment
+ * (#2214). Exported so the log's promise and the test that pins it are one
+ * string: an alert that names no remedy is an alert people learn to ignore,
+ * and this one has a real remedy because the agent-reported completion path
+ * does not carry the sweep's `requireDelegationBound` constraint.
+ */
+export const UNRESOLVED_REMEDY =
+  'Re-report the merchant settlement transaction hash to POST /machine-payments/evidence ' +
+  'with this agent\'s credential. That path verifies the same transfer (checks 1-7) without ' +
+  'requiring the DelegationManager log this scan could not find, and is not bounded by the ' +
+  'sweep recovery horizon.'
 
 /** Test seam: the backoff is process-lifetime state, so a suite must reset it. */
 export function resetSettlementSweepBackoff(): void {
@@ -583,8 +643,16 @@ async function sweepOne(
           chainId: row.chain_id,
           delegationHash: row.delegation_hash,
           reason: found === AMBIGUOUS ? 'ambiguous_redemption' : 'no_manager_log',
+          // #2214: the remedy travels with the alert. This log used to state a
+          // dead end — "it will not reach the accounting feed", full stop —
+          // which is both an overstatement and the shape of alert people learn
+          // to scroll past. The sweep is what is stuck, not the payment: the
+          // agent-reported path runs the same verifier with
+          // `requireDelegationBound` OFF, so it does not need the manager log
+          // this scan could not find, and it is not horizon-bound.
+          remedy: UNRESOLVED_REMEDY,
         },
-        'Settled erc7710 payment is past its settlement window and still unattributable — it will not reach the accounting feed',
+        'Settled erc7710 payment is past its settlement window and the sweep cannot attribute it — it is not in the accounting feed until an agent re-reports its settlement hash',
       )
     }
     return

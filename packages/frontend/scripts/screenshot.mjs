@@ -523,11 +523,27 @@ export const FIXTURE_AGENTS = [
     // which reported nothing at all.
     mcp_server_name: 'haven',
     mcp_last_seen_at: '2026-07-09T16:40:00.000Z',
-    allowances: [{
-      id: 'alw-1', agent_id: 'agent-ops',
-      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-      token_symbol: 'USDC', allowance_amount: '500.000000', reset_period_min: 1440,
-    }],
+    // #2224: EMPTY, and this is derived rather than chosen. A legacy-rail
+    // agent's `allowances` array is filled by nothing: `GET /agents` returns
+    // `agent.account_type === 'delegator_hybrid' ? derived : []`
+    // (`backend/src/routes/agents.ts:92-98`), `GET /agents/:id` does the same
+    // (`:113-121`), and the `agent_allowances` read surface it used to mirror
+    // is RETIRED — the four LIST_* projections are deleted
+    // (`infra/repositories/agents.ts:232-237`, #1440/#2020) and the write
+    // routes answer 410. So the 500 USDC / daily row this used to carry was
+    // path-impossible for the same reason `account_type: null` was (#2202):
+    // union-legal on the wire type, emitted by nothing.
+    //
+    // It was also RENDERED — that is what makes it the #2205 shape rather than
+    // dead data. `AgentCard.showConfiguredFallback` turned it into a budget row
+    // on `/agents`, and #2224's own evidence table was built on that row. The
+    // card now shows "No agent budget configured" for this agent, which is what
+    // the retired rail actually looks like.
+    //
+    // The delegation-rail agents keep their arrays: theirs are the derived
+    // projection of an active delegation, which is the one thing that fills
+    // this field (see the note on `agent-research`).
+    allowances: [],
   },
   {
     id: 'agent-retired', name: 'Data-feed agent',
@@ -2182,12 +2198,20 @@ export { makeAllowanceChainFixture }
 // `delegator_hybrid` one, which is the account that actually has an
 // AllowanceModule.
 //
-// The USDC row deliberately MATCHES `agent-ops`'s API allowance (500.000000 /
-// 1440min, `FIXTURE_AGENTS`) rather than inventing a second number. The two
-// sources render side by side on AgentPanel, and a fixture whose chain and API
-// disagree would photograph a contradiction the product cannot actually produce.
-// The delegate set is exactly the managed one for the same reason — seeding a
-// stranger here would render an "unmanaged delegate" warning in every capture.
+// #2224: the USDC row used to be justified as MATCHING `agent-ops`'s API
+// allowance (500.000000 / 1440min) so the two would not photograph a
+// contradiction where they render side by side. That reason is retired with
+// the row: a legacy-rail agent's `allowances` array is `[]` on every read
+// (`backend/src/routes/agents.ts:92-98`, `:113-121`), so there is no API figure
+// left to agree or disagree with, and this is now the SOLE source for the
+// legacy account's budget — it is what `/custody`'s AllowanceModule table
+// renders. The numbers are kept rather than re-picked so the committed
+// captures do not move for a reason unrelated to what changed; the guard that
+// used to cross-check them against the API now pins them against this
+// declaration, which is what it was always really proving.
+//
+// The delegate set is exactly the managed one — seeding a stranger here would
+// render an "unmanaged delegate" warning in every capture.
 //
 // ── Why `agent-research`'s delegate is NOT here (#2194) ──────────────────────
 //
@@ -3607,29 +3631,40 @@ export const SCENARIOS = {
       // …and on the ON-CHAIN row, which is the other half of what the old
       // impossible value was buying.
       //
-      // Waiting on the AMOUNT would prove nothing: `agent-ops`'s DB allowance
-      // is also 500 USDC, so "500" renders identically whether the module
-      // answered or the card fell back to `ConfiguredAllowanceRow`. The two
-      // branches are told apart by their own copy — `AllowanceBar` ends
-      // "… remaining" (`AllowanceBar.tsx:86-89`), the fallback says
-      // "Configured in Haven" (`:196`) — so this waits on the first and
-      // asserts the second is absent. A capture that quietly took the fallback
-      // would otherwise be indistinguishable from the on-chain one, which is
-      // this whole issue's defect class wearing a different hat.
+      // Waiting on the AMOUNT would prove nothing: the AllowanceModule row is
+      // 500 USDC, so "500" renders identically whether the module answered or
+      // the card took some other branch. The branches are told apart by their
+      // own copy — `AllowanceBar` ends "… remaining"
+      // (`AllowanceBar.tsx:86-89`) — so this waits on that and asserts the
+      // not-answered branch is absent. A capture that quietly took the other
+      // branch would otherwise be indistinguishable from the on-chain one,
+      // which is this whole issue's defect class wearing a different hat.
+      //
+      // #2224 changed WHICH branch the failure would be. This used to check
+      // for "Configured in Haven", the `ConfiguredAllowanceRow` caption, on
+      // the reasoning that a failed module read falls back to the agent's DB
+      // allowances. It cannot: `agent-ops` is on the legacy rail, so
+      // `routes/agents.ts:92-98` serves it `allowances: []` and
+      // `showConfiguredFallback` is unreachable for this card. With no
+      // fallback to take, a module read that does not answer renders
+      // "No agent budget configured" (`AgentCard.tsx`), and that is what is
+      // asserted absent now — the honest discriminator for the branch the
+      // product can actually reach.
+      //
       // SCOPED to the Ops card, and that scoping is the guard working rather
-      // than a convenience: the first version asserted "Configured in Haven"
-      // was absent from the PAGE and failed, because the two DELEGATION-rail
-      // agents render exactly that and are right to — their authority is a
-      // grant, not an AllowanceModule row. A page-wide absence check was
-      // asking the wrong question, and it is the on-chain half of THIS card
-      // that the old impossible value was buying. `AgentCard`'s root carries
+      // than a convenience: the first version made its absence check
+      // page-wide and failed, because the two DELEGATION-rail agents legitimately
+      // render the granted-budget row — their authority is a grant, not an
+      // AllowanceModule row. A page-wide absence check was asking the wrong
+      // question, and it is the on-chain half of THIS card that the old
+      // impossible value was buying. `AgentCard`'s root carries
       // `role="link"` + `aria-label="View <name>"` (`AgentCard.tsx:123-127`).
       const opsCard = page.getByRole('link', { name: 'View Ops agent' })
       await opsCard.getByText(/remaining/i).first().waitFor({ timeout: 30_000 })
-      if (await opsCard.getByText('Configured in Haven').count()) {
+      if (await opsCard.getByText('No agent budget configured').count()) {
         throw new Error(
-          'agents-legacy-rail: the Ops card fell back to the Haven-configured ' +
-            'budget — the AllowanceModule read did not answer for the active account',
+          'agents-legacy-rail: the Ops card rendered no budget at all — the ' +
+            'AllowanceModule read did not answer for the active account',
         )
       }
       await shoot(page.locator('#main-content'), 'page')

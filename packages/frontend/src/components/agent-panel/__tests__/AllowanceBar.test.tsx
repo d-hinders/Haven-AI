@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import type { AgentAllowance } from '@/hooks/useAgents'
 import type { AllowanceInfo } from '@/lib/allowance-module'
-import { AllowanceBar, ConfiguredAllowanceRow } from '../AllowanceBar'
+import { AllowanceBar, ConfiguredAllowanceRow, GRANTED_BUDGET_CAPTION } from '../AllowanceBar'
 
 const CHAIN_ID = 84532
 const TOKEN = ('0x' + '33'.repeat(20)) as `0x${string}`
@@ -171,8 +171,8 @@ describe('ConfiguredAllowanceRow — configuration, not measurement (#1846)', ()
     const bigText = big.container.textContent ?? ''
     const smallText = small.container.textContent ?? ''
 
-    expect(bigText).toContain('Configured in Haven')
-    expect(smallText).toContain('Configured in Haven')
+    expect(bigText).toContain('Enforced on-chain')
+    expect(smallText).toContain('Enforced on-chain')
     expect(
       bigText,
       'the row must still vary with the configured envelope — dropping the ' +
@@ -180,6 +180,61 @@ describe('ConfiguredAllowanceRow — configuration, not measurement (#1846)', ()
     ).not.toBe(smallText)
     expect(bigText).toContain('500')
     expect(smallText).toContain('25')
+  })
+})
+
+/**
+ * #2224: the caption must describe where the limit is ENFORCED, not who
+ * happens to be holding a copy of it.
+ *
+ * The row's input is `agent.allowances`, and both agent reads fill that array
+ * from `deriveDelegationAllowances` — the projection of the agent's ACTIVE
+ * `agent_delegations` rows (`backend/src/routes/agents.ts:92-98`, `:113-121`;
+ * `rails/delegation-budget-view.ts`). A legacy-rail agent gets `[]` outright
+ * (`infra/repositories/agents.ts:232-237`, #1440/#2020), so this component
+ * cannot render one at all. The number is therefore always the terms of a
+ * signed delegation enforced on-chain by the caveat enforcers — never a
+ * Haven-held figure — and "Configured in Haven" inverted the claim `/custody`
+ * exists to make.
+ *
+ * ── Why the assertion is written both ways ──────────────────────────────────
+ *
+ * Asserting only that "Enforced on-chain" is present would go green with the
+ * old caption still rendered beside it, which is a half-fix that photographs
+ * as a fix. The banned-phrasing assertion is what makes the removal part of
+ * the contract.
+ *
+ * The expected string is RESTATED here rather than imported from the
+ * component, for the reason `agent-panel-states.visual.spec.ts` restates the
+ * banner titles: a test that imports the string it is checking asserts nothing
+ * about it. `GRANTED_BUDGET_CAPTION` is imported only to prove the exported
+ * constant and the rendered output are the same string, so a future call site
+ * reusing the constant cannot drift from what is pinned here.
+ */
+describe('ConfiguredAllowanceRow — the caption names on-chain enforcement (#2224)', () => {
+  it('says the budget is enforced on-chain, in /custody’s words', () => {
+    const { container } = render(
+      <ConfiguredAllowanceRow allowance={configured()} chainId={CHAIN_ID} />,
+    )
+    expect(container.textContent ?? '').toContain('Enforced on-chain')
+    expect(
+      GRANTED_BUDGET_CAPTION,
+      'the exported caption and the string this test pins have diverged — a second ' +
+        'call site reusing the constant would render something this file never checked',
+    ).toBe('Enforced on-chain')
+  })
+
+  it('no longer claims Haven holds the limit', () => {
+    const { container } = render(
+      <ConfiguredAllowanceRow allowance={configured()} chainId={CHAIN_ID} />,
+    )
+    const text = container.textContent ?? ''
+    // The exact old caption, and the weaker claim it belongs to. `/custody`
+    // says these limits are "enforced on-chain by your account, not by Haven's
+    // database"; a budget row on the same screen family must not say the
+    // opposite about the same delegation.
+    expect(text).not.toContain('Configured in Haven')
+    expect(text).not.toMatch(/\bin Haven\b/)
   })
 })
 

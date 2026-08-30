@@ -1,8 +1,7 @@
 'use client'
 
-import { CirclePause, TriangleAlert } from 'lucide-react'
 import { McpServerName } from './McpServerName'
-import { Icon } from '@/components/ui/Icon'
+import { ApprovalRequiredBanner } from '@/components/haven/ApprovalRequiredBanner'
 import { useState, useMemo, type KeyboardEvent, type MouseEvent } from 'react'
 import { type Agent } from '@/hooks/useAgents'
 import { type AllowanceInfo } from '@/lib/allowance-module'
@@ -188,22 +187,51 @@ export function AgentCard({
           </p>
       </div>
 
+      {/* ── Both notices go through `ApprovalRequiredBanner` (#2216) ───────────
+          These were two hand-rolled copies of the primitive's shape, a few
+          lines apart in this file, painting TITLE AND BODY in
+          `--v2-warning` while the primitive reserves the tint for the icon
+          badge and keeps prose in `--v2-ink` / `--v2-ink-2`. Same words as the
+          agent-detail banners one click away, two colour voices.
+
+          Restyling the two to imitate the primitive was rejected: it leaves
+          three implementations of one visual idea, which is how these diverged
+          in the first place, and the pattern-absorption preflight (#901) says
+          extract on the SECOND occurrence — this file was already at two, and
+          the primitive existed. Adopting it inherits the ink rule, the icon
+          badge, the tone ladder and the 10px frame instead of re-typing any of
+          them.
+
+          `--v2-warning` is scoped to "402 Payment Required, pending review"
+          (`docs/product/design-system.md` § 1, restated in § Local hint
+          marker), which is a reason the tint belongs on a severity MARKER and
+          not on a paragraph.
+
+          The tones are the ones `AgentDetailClient` already passes for the
+          same two facts (`:666`, `:674`) — `neutral` for paused, `warning` for
+          stranded. Paused is not 402/pending-review, and the card has not lost
+          its amber: the header's status pill and the bot tile both still paint
+          it. Choosing anything else here would leave one fact rendered two
+          ways on two screens the card's own link navigates between, which is
+          exactly the #2195 defect this is the styling half of. */}
+      {/* The BODY still diverges from the detail page's ("Existing wallet
+          rules stay in place", `AgentDetailClient.tsx:667`) and that is
+          deferred, not overlooked — filed as #2230. Picking which noun is
+          right is a copy decision about what a Haven-side pause leaves
+          standing (the signed delegation, enforced on-chain), and #2195's own
+          resolution is the precedent for how: one shared clause in `src/lib/`,
+          not two hand-maintained strings that happen to agree. */}
       {isPaused && (
-        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-warning/20 rounded-lg">
-          <Icon icon={CirclePause} className="h-3.5 w-3.5 text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-xs font-medium text-[var(--v2-warning)]">Paused in Haven</p>
-            <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
-              New agent payments are blocked until you resume this agent. Existing network permissions stay in place.
-            </p>
-          </div>
+        <div className="mb-3">
+          <ApprovalRequiredBanner title="Paused in Haven" tone="neutral" density="compact">
+            New agent payments are blocked until you resume this agent. Existing network permissions stay in place.
+          </ApprovalRequiredBanner>
         </div>
       )}
 
       {agent.has_stranded_funds && (
-        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-warning/20 rounded-lg">
-          <Icon icon={TriangleAlert} className="h-3.5 w-3.5 text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
+        <div className="mb-3">
+          <ApprovalRequiredBanner title={STRANDED_FUNDS_TITLE} tone="warning" density="compact">
             {/* #2195: title and cause clause are the SHARED ones — this card and
                 the agent-detail banner are one click apart and used to name the
                 same reconciliation event two different ways. The count is `null`
@@ -219,14 +247,13 @@ export function AgentCard({
                 (`haven-design-reviewer` on this change, measured off the 390
                 capture — it also corrected my desktop-only "2 to 3 lines"
                 reading; the real growth at 390 was 3 to 4). */}
-            <p className="text-xs font-medium text-[var(--v2-warning)]">{STRANDED_FUNDS_TITLE}</p>
-            <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
+            <span>
               {strandedFundsCause(null)}{' '}
               <a href={`/agents/${agent.id}`} className="underline underline-offset-2">
                 View agent to recover these funds.
               </a>
-            </p>
-          </div>
+            </span>
+          </ApprovalRequiredBanner>
         </div>
       )}
 

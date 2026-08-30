@@ -25,7 +25,17 @@ import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../../db.js'
 import { describeDb, initDbHarness, resetDb, WORKER_SCHEMA } from '../db-harness.js'
 
-/** Every table the DATABASE says lives in this worker's schema. */
+/**
+ * Every table the DATABASE says lives in this worker's schema, with its row
+ * count — in ONE round trip.
+ *
+ * The obvious shape (a `COUNT(*)` query per table) is 38 round trips and
+ * counting, which under the ordinary parallel load of a full backend run is
+ * enough to push this test past vitest's 5 s default on its own. That would
+ * make the file a flake of exactly the kind #2211 exists to remove, and
+ * "raise the timeout" is the answer this issue rejects — so the census is one
+ * `UNION ALL` built from the catalog instead.
+ */
 async function tableCensus(): Promise<Array<{ table: string; rows: number }>> {
   const { rows: tables } = await db.query<{ tablename: string }>(
     `SELECT tablename FROM pg_tables
@@ -33,15 +43,15 @@ async function tableCensus(): Promise<Array<{ table: string; rows: number }>> {
       ORDER BY tablename`,
     [WORKER_SCHEMA],
   )
-  const counts = await Promise.all(
-    tables.map(async ({ tablename }) => {
-      const { rows } = await db.query<{ n: string }>(
-        `SELECT COUNT(*)::text AS n FROM ${WORKER_SCHEMA}."${tablename}"`,
-      )
-      return { table: tablename, rows: Number(rows[0].n) }
-    }),
-  )
-  return counts
+  if (tables.length === 0) return []
+  const census = tables
+    .map(
+      ({ tablename }) =>
+        `SELECT '${tablename}' AS t, (SELECT COUNT(*) FROM ${WORKER_SCHEMA}."${tablename}") AS n`,
+    )
+    .join(' UNION ALL ')
+  const { rows } = await db.query<{ t: string; n: string }>(census)
+  return rows.map((r) => ({ table: r.t, rows: Number(r.n) }))
 }
 
 /**
@@ -112,8 +122,12 @@ describeDb('resetDb leaves the worker schema genuinely clean (#2211)', () => {
   })
 
   it('restarts sequences that a test advanced, as RESTART IDENTITY did', async () => {
+    // Dropped FIRST, not only in `finally`. A worker schema outlives the run
+    // that created it, so a probe left behind by a killed test would otherwise
+    // poison this file forever — as one did while #2211 was being written.
+    await db.query(`DROP TABLE IF EXISTS ${WORKER_SCHEMA}.reset_identity_probe`)
     await db.query(
-      `CREATE TABLE IF NOT EXISTS ${WORKER_SCHEMA}.reset_identity_probe (
+      `CREATE TABLE ${WORKER_SCHEMA}.reset_identity_probe (
          id BIGSERIAL PRIMARY KEY, note TEXT
        )`,
     )
@@ -139,6 +153,13 @@ describeDb('resetDb leaves the worker schema genuinely clean (#2211)', () => {
     // `planDeleteOrder` returns null here, so resetDb takes the pre-#2211
     // TRUNCATE path. Created and dropped inside this test: left behind, the
     // cycle would put EVERY later reset in the run on the fallback path.
+    // Same self-healing drop, and here it matters more: a cycle left behind
+    // puts EVERY later reset in the worker on the TRUNCATE fallback — correct,
+    // but slow enough to time the rest of the file out. That happened once
+    // during #2211, from a test killed by an unrelated timeout.
+    await db.query(
+      `DROP TABLE IF EXISTS ${WORKER_SCHEMA}.cycle_b, ${WORKER_SCHEMA}.cycle_a`,
+    )
     await db.query(`
       CREATE TABLE ${WORKER_SCHEMA}.cycle_a (id INT PRIMARY KEY, b_id INT);
       CREATE TABLE ${WORKER_SCHEMA}.cycle_b (id INT PRIMARY KEY, a_id INT);

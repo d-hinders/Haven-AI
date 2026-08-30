@@ -343,7 +343,18 @@ export function createEdgeSigner(
       //    hosted server can't get the delegate to sign a transfer to an attacker.
       assertSweepBinding(authorization, expectedAuth, options.x402BindingSigner)
 
-      // 2. Funds can only leave the delegate's own key, and only to its own Safe.
+      // 2. Funds can only leave the delegate's OWN key — that half is
+      //    unconditional. The DESTINATION half is not, and the difference
+      //    matters here more than anywhere else in this file (#2247):
+      //    `expectedSafe` is threaded from the local credential's
+      //    `safe_address`, which is absent when the signer runs on
+      //    `HAVEN_DELEGATE_KEY` alone (`resolveSignerRuntime`'s fast path
+      //    returns before credentials are ever loaded) or when the credential
+      //    records no account address. With no local value there is nothing to
+      //    re-derive `to` against, so the destination rests entirely on Haven's
+      //    binding signature (step 1) plus the canonical-USDC token/chain
+      //    assertion (step 3): AUTHENTICATED, but not independently verified by
+      //    this signer. Supply the account address to get the local check.
       if (!sameAddress(authorization.from, delegateAddress)) {
         throw new HavenSigningError(
           'Sweep authorization `from` does not match this delegate address.',

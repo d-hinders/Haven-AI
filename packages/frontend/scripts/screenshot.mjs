@@ -321,6 +321,45 @@ export const APPROVER_PASSKEY = '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2'
 export const APPROVER_WALLET = '0x5B1869D9A4C187F2Eaa108F3062412ECf0526B24'
 export const APPROVER_UNKNOWN = '0x9A7f6E2b1c4D8e05F3a2B9c6D1e8F40b3C5a7D91'
 
+/**
+ * `agent-ops`'s OWN account — a genuinely legacy-rail Safe (#2202).
+ *
+ * Why this exists rather than a second `account_type` on the shared safe:
+ * `account_type` is not an agent column. Every agent-row read selects it as
+ * `us.account_type` off the joined `user_safes` row
+ * (`LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL` and
+ * `FIND_AGENT_FOR_USER_ALL_STATUSES_SQL`,
+ * `infra/repositories/agents.ts:183`/`:203` with `LEFT JOIN user_safes us ON
+ * a.safe_id = us.id` at `:194`/`:214`; likewise
+ * `FIND_DELEGATE_AGENT_FOR_USER_SQL` at `:226-228`). ONE safe answers ONE
+ * `account_type`, so three agents sharing `FIXTURE_SAFE.id` cannot report two
+ * different values — which is what they did until #2202.
+ *
+ * And the value is `'safe'`, not `null`. Migration
+ * `041_hybrid_accounts.ts:29` adds the column `VARCHAR(32) NOT NULL DEFAULT
+ * 'safe'` with `CHECK (account_type IN ('safe','delegator_hybrid'))` at `:38`,
+ * so `null` is not in the column's domain at all. The only way `us.account_type`
+ * comes back null is the LEFT JOIN finding no row — `agents.safe_id` is
+ * nullable (`000_initial.ts:209`) — and then `us.safe_address`, `us.name` and
+ * `us.chain_id` are null in the SAME row. `agent-ops` populated all three while
+ * claiming a null `account_type`, so its old value was impossible independently
+ * of the shared-safe contradiction. `railOf` reads anything-but-`delegator_hybrid`
+ * as the legacy rail (`lib/custody-rail.ts:37-38`), which is why the lie was
+ * invisible: `null` and `'safe'` render identically.
+ *
+ * A second account is a REACHABLE state, not a workaround: `user_safes` is
+ * per-user with an `is_default` flag, and the active-account switcher (#625)
+ * is how a user moves between them.
+ */
+export const FIXTURE_LEGACY_SAFE = {
+  id: 'safe-legacy-fixture',
+  name: 'Imported Safe',
+  safe_address: '0x3333333333333333333333333333333333333333',
+  chain_id: FIXTURE_SAFE.chain_id,
+  is_default: false,
+  created_at: '2026-04-20T10:00:00.000Z',
+}
+
 export const FIXTURE_USER = {
   id: 'user-fixture',
   name: 'Screenshot Fixture',
@@ -331,7 +370,14 @@ export const FIXTURE_USER = {
   // page's Backup & recovery card (#1089) has something real to render,
   // without perturbing FIXTURE_SAFE's identity shape (pinned against the e2e
   // fixture by fixture-shape-parity.test.ts).
-  safes: [{ ...FIXTURE_SAFE, account_type: 'delegator_hybrid' }],
+  //
+  // #2202: the legacy account is listed BESIDE it rather than replacing it.
+  // `agent-ops` lives on that one, so the user really does hold the safe its
+  // agent row names — the join above has a row to find, and it answers 'safe'.
+  safes: [
+    { ...FIXTURE_SAFE, account_type: 'delegator_hybrid' },
+    { ...FIXTURE_LEGACY_SAFE, account_type: 'safe' },
+  ],
   currency_preference: 'USD',
   created_at: '2026-05-01T10:00:00.000Z',
 }
@@ -461,9 +507,16 @@ export const FIXTURE_AGENTS = [
   {
     id: 'agent-ops', name: 'Ops agent',
     description: 'Recurring vendor payments',
-    delegate_address: ADDR.delegate, safe_id: FIXTURE_SAFE.id,
-    safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
-    safe_chain_id: FIXTURE_SAFE.chain_id, account_type: null,
+    // #2202: the LEGACY-rail agent, now on a legacy-rail ACCOUNT. It used to
+    // carry `account_type: null` while pointing at `FIXTURE_SAFE` — the safe
+    // the two `delegator_hybrid` agents share and that `FIXTURE_USER.safes`
+    // independently calls `delegator_hybrid`. All four `us.*` fields below come
+    // from ONE joined row, so they must describe one account; see
+    // `FIXTURE_LEGACY_SAFE` for why the value is `'safe'` and why `null` was
+    // impossible rather than merely inconsistent.
+    delegate_address: ADDR.delegate, safe_id: FIXTURE_LEGACY_SAFE.id,
+    safe_address: FIXTURE_LEGACY_SAFE.safe_address, safe_name: FIXTURE_LEGACY_SAFE.name,
+    safe_chain_id: FIXTURE_LEGACY_SAFE.chain_id, account_type: 'safe',
     api_key_prefix: 'hvn_d4e5f6', status: 'active',
     created_at: '2026-05-18T10:00:00.000Z',
     // #1878: the BARE pair, reported — must not read like the agent below,
@@ -776,15 +829,21 @@ export const FIXTURE_DELEGATE_BALANCES = {
   // A delegate that holds nothing — the ordinary steady state, and the
   // CONTROL for the row above: `hasRecoverableUsdc` is false here for the
   // reason the product says it is ('0' === '0'), not because a key is missing.
+  // #2202: `safe_address` and `chain_id` follow the agent to its OWN account.
+  // The route echoes `agent.safe_address` and `agent.safe_chain_id` off the
+  // joined `user_safes` row (`routes/agents.ts:161`, `:162`), so this body must
+  // name the safe THIS agent is on — the shared one would claim the delegate
+  // belongs to an account it has nothing to do with. Caught by #2205's own
+  // echoed-field guard when `agent-ops` moved, which is what that guard is for.
   'agent-ops': {
     delegate_address: ADDR.delegate,
-    safe_address: FIXTURE_SAFE.safe_address,
-    chain_id: FIXTURE_SAFE.chain_id,
+    safe_address: FIXTURE_LEGACY_SAFE.safe_address,
+    chain_id: FIXTURE_LEGACY_SAFE.chain_id,
     eth: '0',
     eth_atomic: '0',
     usdc: '0',
     usdc_atomic: '0',
-    usdc_address: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,
+    usdc_address: resolveToken(FIXTURE_LEGACY_SAFE.chain_id, 'USDC').address,
   },
   // `agent-retired` has no delegate address, so the route never reaches the
   // balance reads — it answers 422 at `routes/agents.ts:140-142`. Served as a
@@ -858,6 +917,26 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
       chain_id: FIXTURE_SAFE.chain_id,
       owner_address: null,
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+    }
+  }
+  if (pathname === `/safe/${FIXTURE_LEGACY_SAFE.safe_address}/details`) {
+    // #2202. `/custody` renders `SafeControlCard` for the legacy account, and
+    // that card reads its owners and threshold from here (`useSafeDetails`).
+    // Unkeyed, it fell to `FIXTURE_EMPTY_FALLBACK` and the card photographed
+    // "Threshold: of 0" — an owner-less Safe, which is not a state a Safe can
+    // be in: `000_initial.ts` never creates one, and a deployed Safe with a
+    // zero threshold could not have been deployed. Same mechanism #2194/#2205
+    // fixed for `/agents/:id/delegate-balance`, on the endpoint this issue's
+    // own second account newly reaches — the fallback cannot say "not seeded",
+    // it says 200 with the fields missing and the UI renders the gap as data.
+    //
+    // Two owners at threshold 2, matching what `custody-legacy-rail` seeds for
+    // the same card, so the two captures of one card agree.
+    return {
+      address: FIXTURE_LEGACY_SAFE.safe_address,
+      owners: [APPROVER_WALLET, APPROVER_UNKNOWN],
+      threshold: 2,
+      nonce: 12,
     }
   }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/delegate-balance')) {
@@ -2085,12 +2164,19 @@ export { makeAllowanceChainFixture }
 
 // ── The SHARED fixture's chain answers (#1971) ───────────────────────────────
 //
-// On the shared fixture's own chain (84532), for the shared fixture's own Safe,
-// seeded from the shared fixture's own agent. `agent-ops` is the one fixture
-// agent on the LEGACY rail (`account_type: null`) with a `delegate_address`, and
-// both are required: `EditAgentModal` hides the whole budget half on
-// `delegator_hybrid` (#1079, `showBudgetFields`) and `useOnChainAllowances` keys
-// its map by delegate.
+// On the shared fixture's own chain (84532), seeded from the shared fixture's
+// own agent. `agent-ops` is the one fixture agent on the LEGACY rail with a
+// `delegate_address`, and both are required: `EditAgentModal` hides the whole
+// budget half on `delegator_hybrid` (#1079, `showBudgetFields`) and
+// `useOnChainAllowances` keys its map by delegate.
+//
+// #2202: the rail marker is `account_type: 'safe'`, not `null` — migration
+// `041_hybrid_accounts.ts:29` makes the column `NOT NULL DEFAULT 'safe'` under
+// `CHECK (account_type IN ('safe','delegator_hybrid'))`, so `null` was never a
+// value a `user_safes` row could hold. These rows now hang off `agent-ops`'s
+// OWN account (`FIXTURE_LEGACY_SAFE`) rather than off the shared
+// `delegator_hybrid` one, which is the account that actually has an
+// AllowanceModule.
 //
 // The USDC row deliberately MATCHES `agent-ops`'s API allowance (500.000000 /
 // 1440min, `FIXTURE_AGENTS`) rather than inventing a second number. The two
@@ -2106,7 +2192,8 @@ export { makeAllowanceChainFixture }
 // Safe rail, which #1440/#2020 retired. A `delegator_hybrid` agent's spend
 // authority is a delegation grant (`GET /agents/:id/delegations`), and nothing
 // ever registers its delegate with the module. `agent-ops` is the one fixture
-// agent on that legacy rail (`account_type: null`), so it is the one entry.
+// agent on that legacy rail (`account_type: 'safe'`, #2202), so it is the one
+// entry — and since #2202 the list hangs off ITS account, not the shared one.
 //
 // This is not a technicality about a registry nobody reads. `useOnChainAllowances`
 // keys its map off THIS list, not off the `managedDelegates` argument
@@ -2132,12 +2219,71 @@ export const SHARED_CHAIN_ROWS = [
     resetTimeMin: 1440,
   },
 ]
+/**
+ * The SHARED account's chain answers — a delegation-rail account, answered as one.
+ *
+ * #2202 moved `agent-ops` and its AllowanceModule off this account, and that
+ * settled a question #2106 had already raised and worked around. `FIXTURE_SAFE`
+ * is `delegator_hybrid`; a Hybrid DeleGator is not a Safe and has no
+ * AllowanceModule, so `isModuleEnabled → true` is a state this account cannot
+ * reach. `custody-delegation-rail` said exactly that ("The shared chain fixture
+ * answers true — correct for the legacy Safe every other capture seeds, and
+ * impossible here") and overrode it scenario-locally, because while `agent-ops`
+ * claimed `account_type: null` there appeared to be a legacy account behind the
+ * shared safe. There is not, and now it says so.
+ *
+ * `useOnChainAllowances` still ISSUES the `isModuleEnabled` read and then
+ * returns early, so `/agents` remains a genuinely chain-fed capture rather than
+ * a silent one — the read happens and is answered, it just answers "no module".
+ */
+// BOTH accounts, because a capture reads both. `/custody` renders one card per
+// account (#2106) and only the legacy card mounts `useOnChainAllowances`, so a
+// single-account answer throws on the other address and fails the run — which
+// is how this was found rather than reasoned about.
 export const answerSharedChainRead = makeAllowanceChainFixture({
   chainId: FIXTURE_SAFE.chain_id,
-  safeAddress: FIXTURE_SAFE.safe_address,
-  delegates: [ADDR.delegate],
-  rows: SHARED_CHAIN_ROWS,
+  accounts: [
+    // The delegation-rail account: no module, and therefore no delegates or
+    // rows to reach — `useOnChainAllowances` returns after the first read.
+    { safeAddress: FIXTURE_SAFE.safe_address, delegates: [], rows: [], moduleEnabled: false },
+    // `agent-ops`'s legacy Safe: the one that really has an AllowanceModule.
+    {
+      safeAddress: FIXTURE_LEGACY_SAFE.safe_address,
+      delegates: [ADDR.delegate],
+      rows: SHARED_CHAIN_ROWS,
+    },
+  ],
 })
+
+/**
+ * The LEGACY account's chain answers, for whichever Safe address is on the
+ * legacy rail in a given scenario (#2202).
+ *
+ * One factory call parameterised by the safe, because two scenarios need the
+ * same legacy answers at two different addresses: `agents-legacy-rail` seeds
+ * `agent-ops`'s own `FIXTURE_LEGACY_SAFE`, and `custody-legacy-rail` re-rails
+ * the SHARED account and so needs them at `FIXTURE_SAFE`'s address.
+ * `makeAllowanceChainFixture` checks the call's `to` against the address it was
+ * built for, so a single shared instance would throw for one of them rather
+ * than quietly answer the wrong account.
+ */
+export const legacyRailChainFor = (safe) =>
+  makeAllowanceChainFixture({
+    chainId: safe.chain_id,
+    safeAddress: safe.safe_address,
+    delegates: [ADDR.delegate],
+    rows: SHARED_CHAIN_ROWS,
+  })
+
+/**
+ * `agent-ops`'s own account alone.
+ *
+ * Exported for `chain-fed-capture-guard.test.ts`, which asserts the legacy
+ * answers in isolation. Scenarios do NOT need it: `answerSharedChainRead`
+ * above already answers for both of the fixture's accounts, so a scenario that
+ * only changes which one is ACTIVE inherits the right answers.
+ */
+export const answerLegacyRailChainRead = legacyRailChainFor(FIXTURE_LEGACY_SAFE)
 
 // ── EditAgentModal's on-chain budget list (#1935) ────────────────────────────
 //
@@ -2154,7 +2300,19 @@ const BUDGET_CHAIN_ID = 8453
 const BUDGET_USDC = resolveToken(BUDGET_CHAIN_ID, 'USDC').address
 const BUDGET_NATIVE = '0x0000000000000000000000000000000000000000'
 
-const BUDGET_FIXTURE_SAFE = { ...FIXTURE_SAFE, chain_id: BUDGET_CHAIN_ID }
+// #2202: derived from the LEGACY account, not from the shared `delegator_hybrid`
+// one. This scenario photographs `EditAgentModal`'s AllowanceModule budget list,
+// which `showBudgetFields` renders only for a NON-`delegator_hybrid` agent
+// (#1079) — so the account behind it has to be the legacy one or the capture is
+// of an empty modal. It used to inherit `FIXTURE_SAFE`, which carries no
+// `account_type` at all and therefore read as legacy only by `railOf`'s
+// "anything else" fallback (`lib/custody-rail.ts:37-38`). The rail is now
+// stated rather than fallen into.
+const BUDGET_FIXTURE_SAFE = {
+  ...FIXTURE_LEGACY_SAFE,
+  chain_id: BUDGET_CHAIN_ID,
+  account_type: 'safe',
+}
 
 /** The shared fixture's LEGACY-rail agent, moved onto the same chain as its account. */
 const BUDGET_FIXTURE_AGENT = {
@@ -3354,9 +3512,17 @@ export const SCENARIOS = {
     // other rail and shoots the same page.
     //
     // Only `/auth/me`, `/user/safes` and the Safe details read are overridden.
-    // The chain fixture is inherited: `answerSharedChainRead` already answers
-    // `isModuleEnabled` → true with one 500-USDC daily row, which is what the
-    // legacy card is supposed to render.
+    //
+    // #2202: the chain answer is no longer INHERITED. It used to be, because
+    // `answerSharedChainRead` answered `isModuleEnabled` → true — but it
+    // answered that for the shared `delegator_hybrid` account, which cannot
+    // have an AllowanceModule at all. That was the chain-side half of the same
+    // contradiction, and #2106 had already recorded it as impossible while
+    // working around it in `custody-delegation-rail`. The shared answer now
+    // says "no module", so this scenario states its own legacy answers
+    // explicitly — at `FIXTURE_SAFE`'s address, because it re-rails the SHARED
+    // account rather than switching to `agent-ops`'s.
+    chain: legacyRailChainFor(FIXTURE_SAFE),
     api(apiPath) {
       const legacySafe = { ...FIXTURE_SAFE, account_type: 'safe' }
       if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [legacySafe] }
@@ -3383,6 +3549,85 @@ export const SCENARIOS = {
       await page
         .getByText('Owners (control this Safe — Haven is not one)', { exact: false })
         .waitFor({ timeout: 30_000 })
+      await shoot(page.locator('#main-content'), 'page')
+    },
+  },
+  'agents-legacy-rail': {
+    description:
+      '/agents with the LEGACY account active — AgentCard\'s Revoke affordance and the on-chain AllowanceModule row (#2202)',
+    // ── Why this scenario had to exist before #2202 could be fixed ───────────
+    //
+    // `agent-ops` used to claim `account_type: null` while pointing at the
+    // shared `delegator_hybrid` safe. That impossible value was doing real
+    // work: `AgentCard.tsx:63` derives `isDelegationAgent` from it, and the
+    // rail decides which shutdown control the card offers — `Revoke` (the
+    // AllowanceModule teardown, `:349`) on the legacy rail, `Remove` (#1402,
+    // `:366`) on the delegation rail. A plain `/agents` capture photographed
+    // BOTH, from one account, because one of the three agents was lying.
+    //
+    // Giving `agent-ops` its own legacy account fixes the contradiction, but
+    // it does not by itself keep that evidence: `Revoke` also needs
+    // `canUseWalletActions`, which `AgentPanel.tsx:196` binds to
+    // `agentUsesActiveSafe` — an agent's wallet controls are gated to the
+    // ACTIVE account (`useAgentPanelState.ts:220-235`). So on a default
+    // capture, where the delegation account is active, `agent-ops` correctly
+    // renders as an off-active-account agent and the legacy control is absent.
+    //
+    // The honest way to keep the branch photographed is therefore to reach it
+    // the way a user does: SWITCH ACCOUNTS. That is what this scenario is —
+    // the same coherent fixture, seen from the other account, which is exactly
+    // what the account switcher (#625) exists for.
+    //
+    // Note what it does NOT override: no `api` hook at all. The fixture
+    // already serves both accounts on `/auth/me` and all three agents on
+    // `/agents`, so switching the active-account key is sufficient. A scenario
+    // that had to restate the agent list to make this render would be evidence
+    // that the fixture still disagreed with itself.
+    seed: () => ({ [SEED_STORAGE_KEYS.activeSafe]: FIXTURE_LEGACY_SAFE.id }),
+    // No `chain` override either: `answerSharedChainRead` answers for BOTH of
+    // the fixture's accounts (#2202), so the AllowanceModule reads that follow
+    // the active-account switch are already seeded. This scenario states one
+    // thing — which account is active — and everything else is the shared
+    // fixture, which is what makes it evidence about the fixture rather than
+    // about itself.
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      // Wait on the LEGACY control by name, not on a generic heading. If the
+      // active-account switch ever stops taking, or the rail branch flips,
+      // this run fails here instead of shooting the delegation rendering under
+      // this scenario's name — the same reasoning `custody-legacy-rail` states.
+      await page
+        .getByRole('button', { name: 'Revoke Ops agent' })
+        .waitFor({ timeout: 30_000 })
+      // …and on the ON-CHAIN row, which is the other half of what the old
+      // impossible value was buying.
+      //
+      // Waiting on the AMOUNT would prove nothing: `agent-ops`'s DB allowance
+      // is also 500 USDC, so "500" renders identically whether the module
+      // answered or the card fell back to `ConfiguredAllowanceRow`. The two
+      // branches are told apart by their own copy — `AllowanceBar` ends
+      // "… remaining" (`AllowanceBar.tsx:86-89`), the fallback says
+      // "Configured in Haven" (`:196`) — so this waits on the first and
+      // asserts the second is absent. A capture that quietly took the fallback
+      // would otherwise be indistinguishable from the on-chain one, which is
+      // this whole issue's defect class wearing a different hat.
+      // SCOPED to the Ops card, and that scoping is the guard working rather
+      // than a convenience: the first version asserted "Configured in Haven"
+      // was absent from the PAGE and failed, because the two DELEGATION-rail
+      // agents render exactly that and are right to — their authority is a
+      // grant, not an AllowanceModule row. A page-wide absence check was
+      // asking the wrong question, and it is the on-chain half of THIS card
+      // that the old impossible value was buying. `AgentCard`'s root carries
+      // `role="link"` + `aria-label="View <name>"` (`AgentCard.tsx:123-127`).
+      const opsCard = page.getByRole('link', { name: 'View Ops agent' })
+      await opsCard.getByText(/remaining/i).first().waitFor({ timeout: 30_000 })
+      if (await opsCard.getByText('Configured in Haven').count()) {
+        throw new Error(
+          'agents-legacy-rail: the Ops card fell back to the Haven-configured ' +
+            'budget — the AllowanceModule read did not answer for the active account',
+        )
+      }
       await shoot(page.locator('#main-content'), 'page')
     },
   },
@@ -3423,13 +3668,21 @@ export const SCENARIOS = {
     // and "Add funds" is unclickable. Measured, not assumed — the first run of
     // this scenario timed out waiting for the button while the unresolved
     // counterpart found it, because a missing chain_id happens to route the
-    // gate down a different branch. Dropping `account_type` puts the account on
-    // the Safe rail with no stored passkey, i.e. `no_signer`, which is a hero
-    // that offers its actions. Nothing about the modal under capture changes.
+    // gate down a different branch. Putting the account on the Safe rail
+    // (`account_type: 'safe'`) leaves it with no stored passkey, i.e.
+    // `no_signer`, which is a hero that offers its actions. Nothing about the
+    // modal under capture changes.
+    //
+    // #2202: this used to DROP `account_type` rather than set it. `railOf`
+    // reads the two identically (`lib/custody-rail.ts:37-38`), so nothing
+    // rendered differently — but an ABSENT `account_type` is not a state the
+    // API can serve: the column is `NOT NULL DEFAULT 'safe'`
+    // (`041_hybrid_accounts.ts:29`) and the wire type requires the field
+    // (`core/src/api-types.ts:10025`). The legacy rail has a name; this uses it.
     api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE }] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
       // Same both-endpoints reasoning as the unresolved twin below.
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -3475,7 +3728,10 @@ export const SCENARIOS = {
     // whether an account HAS a chain is a trap for the next scenario that
     // reaches for the other one, and the disagreement would be invisible.
     api(apiPath) {
-      const safeWithoutChain = { ...FIXTURE_SAFE }
+      // #2202: the rail is NAMED here too, exactly as its resolved twin names
+      // it — the pair is only evidence about `chain_id` if `chain_id` is the
+      // one thing that differs, and `screenshot-fixture.test.ts` pins that.
+      const safeWithoutChain = { ...FIXTURE_SAFE, account_type: 'safe' }
       delete safeWithoutChain.chain_id
       if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [safeWithoutChain] }
       if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
@@ -3497,11 +3753,12 @@ export const SCENARIOS = {
     description: 'Receive funds modal with a RESOLVED chain — the normal path (#1852)',
     // The resolved half of the #1852 pair. Same construction as `add-funds`
     // above and for the same reasons: the chain data is the shared fixture's
-    // (84532), and the ONE override is dropping `account_type` so the hero
-    // renders its action buttons instead of `PasskeyOtherDeviceNotice`.
+    // (84532), and the ONE override is the rail marker (`account_type: 'safe'`,
+    // #2202 — see `add-funds` for why it is SET rather than dropped) so the
+    // hero renders its action buttons instead of `PasskeyOtherDeviceNotice`.
     api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE }] }
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE }] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -3543,7 +3800,10 @@ export const SCENARIOS = {
     //
     // Same rail override as its twin, so the two differ by EXACTLY one field.
     api(apiPath) {
-      const safeWithoutChain = { ...FIXTURE_SAFE }
+      // #2202: the rail is NAMED here too, exactly as its resolved twin names
+      // it — the pair is only evidence about `chain_id` if `chain_id` is the
+      // one thing that differs, and `screenshot-fixture.test.ts` pins that.
+      const safeWithoutChain = { ...FIXTURE_SAFE, account_type: 'safe' }
       delete safeWithoutChain.chain_id
       if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [safeWithoutChain] }
       if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }

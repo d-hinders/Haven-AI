@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   fixtureFor,
   FIXTURE_AGENTS,
+  FIXTURE_USER,
   SEED_STORAGE_KEYS,
   FIXTURE_EMPTY_FALLBACK,
   SCENARIOS,
@@ -20,8 +21,28 @@ import { machinePaymentLifecycle } from '@haven_ai/core'
 
 const fx = fixtureFor as (apiPath: string, mode?: string) => Record<string, unknown> | null
 
+/** A scenario that HAS an `api` hook — the shape these assertions exercise. */
 type ScenarioShape = {
   api: (apiPath: string, method: string) => Record<string, unknown> | undefined
+}
+
+/**
+ * Look a scenario up and assert it actually has an `api` hook.
+ *
+ * The harness treats `api` as OPTIONAL — `scenario?.api?.(api, req.method())`
+ * (`screenshot.mjs:1917`) — and since #2202 one scenario genuinely has none:
+ * `agents-legacy-rail` changes which ACCOUNT is active (`seed`) rather than
+ * what the API answers. A blanket `SCENARIOS as Record<string, ScenarioShape>`
+ * therefore states something false about the registry. This says what each
+ * lookup actually needs, and fails by name if a scenario ever loses its hook
+ * instead of throwing `undefined is not a function` several lines later.
+ */
+const scenarioWithApi = (name: string): ScenarioShape => {
+  const scenario = (SCENARIOS as Record<string, Partial<ScenarioShape>>)[name]
+  if (typeof scenario?.api !== 'function') {
+    throw new Error(`scenario '${name}' has no api hook`)
+  }
+  return scenario as ScenarioShape
 }
 /** A scenario that shoots one surface at several states (#1725). */
 type StagedScenarioShape = ScenarioShape & {
@@ -98,9 +119,9 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(pinned.delegations[0].recipient_address).toMatch(/^0x/)
 
       // The open-recipient budget sits on `agent-retired`, not `agent-ops`:
-      // `agent-ops` is `account_type: null` (legacy Safe rail) and a legacy
-      // agent cannot hold a delegation at all. A fixture that gave it one
-      // would photograph a combination the product cannot produce.
+      // `agent-ops` is `account_type: 'safe'` (the legacy Safe rail, #2202)
+      // and a legacy agent cannot hold a delegation at all. A fixture that
+      // gave it one would photograph a combination the product cannot produce.
       const open = fx('/agents/agent-retired/delegations') as {
         delegations: { recipient_address: string | null }[]
       }
@@ -109,7 +130,14 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
 
     it('never gives a legacy-rail agent a delegation', () => {
       const legacy = FIXTURE_AGENTS.find((a) => a.id === 'agent-ops')
-      expect(legacy?.account_type).toBeNull()
+      // #2202: `'safe'`, not `null`. `user_safes.account_type` is
+      // `NOT NULL DEFAULT 'safe'` under
+      // `CHECK (account_type IN ('safe','delegator_hybrid'))`
+      // (`041_hybrid_accounts.ts:29`, `:38`), so the legacy rail IS `'safe'` —
+      // `null` was a value the column could never hold, and it only looked
+      // right because `railOf` reads anything-but-`delegator_hybrid` as legacy
+      // (`lib/custody-rail.ts:37-38`).
+      expect(legacy?.account_type).toBe('safe')
       expect(fx('/agents/agent-ops/delegations')).toEqual({ delegations: [] })
     })
 
@@ -421,6 +449,45 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect(FIXTURE_EMPTY_FALLBACK).not.toHaveProperty('usdc_atomic')
       })
 
+      it('keys /safe/:address/details for every LEGACY-rail account it serves (#2202)', () => {
+        // The same fallback mechanism as the #2194 gap above, on the endpoint
+        // this issue's second account newly reaches. `SafeControlCard` reads
+        // its owners and threshold from here, and `/custody` renders that card
+        // for every non-`delegator_hybrid` account — so an unkeyed answer is
+        // not "no data", it is 200 with `owners`/`threshold` missing, which the
+        // card renders as **"Threshold: of 0"**: an owner-less Safe, which no
+        // deployed Safe can be.
+        //
+        // Keyed off the rail rather than off a hardcoded address, so a THIRD
+        // legacy account added later fails here instead of photographing the
+        // empty fallback the way this one did before it was caught.
+        const legacySafes = (
+          FIXTURE_USER as unknown as { safes: { safe_address: string; account_type: string }[] }
+        ).safes.filter((s) => s.account_type !== 'delegator_hybrid')
+        expect(legacySafes.length).toBeGreaterThan(0) // non-vacuity
+        for (const safe of legacySafes) {
+          const details = fixtureFor(`/safe/${safe.safe_address}/details`) as {
+            owners?: string[]
+            threshold?: number
+          } | null
+          expect([safe.safe_address, details]).not.toEqual([safe.safe_address, null])
+          expect(details!.owners!.length).toBeGreaterThan(0)
+          // A Safe cannot require more approvals than it has owners, and a
+          // zero threshold is the shape the fallback produced.
+          expect(details!.threshold).toBeGreaterThan(0)
+          expect(details!.threshold).toBeLessThanOrEqual(details!.owners!.length)
+        }
+        // WHY the gap was silent rather than loud, stated exactly — and it is
+        // worse than "the fields are missing", which is what this assertion
+        // first claimed before it was run. The fallback carries `owners: []`,
+        // a real array of the right type, so `owners.length` is 0 instead of
+        // throwing; and `threshold` is absent, so it renders as a blank. That
+        // is the combination that produced "Threshold: of 0" — a well-formed
+        // answer describing a Safe nobody controls.
+        expect(FIXTURE_EMPTY_FALLBACK).toHaveProperty('owners', [])
+        expect(FIXTURE_EMPTY_FALLBACK).not.toHaveProperty('threshold')
+      })
+
       it('answers 422 for exactly the agents the route would refuse', () => {
         // `routes/agents.ts:140-142` — `if (!agent.delegate_address) return
         // reply.code(422).send({ error: 'Agent has no delegate address' })`.
@@ -620,15 +687,13 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
   })
 
   describe('scenarios (#1409)', () => {
-    const connect = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent']
-    const approve = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent-approve']
-    const approveLegacy = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent-approve-legacy']
-    const signerRemoval = (SCENARIOS as Record<string, ScenarioShape>)['account-signer-removal']
+    const connect = scenarioWithApi('connect-agent')
+    const approve = scenarioWithApi('connect-agent-approve')
+    const approveLegacy = scenarioWithApi('connect-agent-approve-legacy')
+    const signerRemoval = scenarioWithApi('account-signer-removal')
     // Cast the ENTRY, not the registry: `Record<string, StagedScenarioShape>`
     // would claim every scenario is staged, and only this one is.
-    const backupRecovery = (SCENARIOS as Record<string, ScenarioShape>)[
-      'account-backup-recovery'
-    ] as StagedScenarioShape
+    const backupRecovery = scenarioWithApi('account-backup-recovery') as StagedScenarioShape
 
     // The stage is module state in screenshot.mjs (the scenario's `run` resets
     // it per viewport for the same reason). Leaving it moved would make every
@@ -758,7 +823,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // kept the field would shoot the resolved screen under the unresolved
       // filename, which is exactly the confidently-wrong-evidence shape #1800
       // exists to prevent.
-      const unresolved = (SCENARIOS as Record<string, ScenarioShape>)['add-funds-unresolved-chain']
+      const unresolved = scenarioWithApi('add-funds-unresolved-chain')
       const me = unresolved.api('/auth/me', 'GET') as { safes: Record<string, unknown>[] }
       const list = unresolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
       for (const { safes } of [me, list]) {
@@ -768,7 +833,10 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         // a PRESENT address, so an empty safe would prove something else.
         expect(safes[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
         expect(safes[0].id).toBe(FIXTURE_SAFE_ID)
-        expect(safes[0]).not.toHaveProperty('account_type')
+        // #2202: the rail is named, and it matches the resolved twin's — the
+        // pair is evidence about `chain_id` only while `chain_id` is the one
+        // field that differs between them.
+        expect(safes[0].account_type).toBe('safe')
       }
       expect(unresolved.api('/agents', 'GET')).toBeUndefined()
     })
@@ -780,11 +848,18 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // rail override (dropping `account_type`, which exists purely so the hero
       // renders its action buttons instead of the passkey-on-another-device
       // notice).
-      const resolved = (SCENARIOS as Record<string, ScenarioShape>)['add-funds']
+      const resolved = scenarioWithApi('add-funds')
       const me = resolved.api('/auth/me', 'GET') as { safes: Record<string, unknown>[] }
       expect(me.safes).toHaveLength(1)
       expect(me.safes[0].chain_id).toBe(84532)
-      expect(me.safes[0]).not.toHaveProperty('account_type')
+      // #2202: the rail is now NAMED rather than expressed by absence. An
+      // absent `account_type` is not a state the API can serve — the column is
+      // `NOT NULL DEFAULT 'safe'` (`041_hybrid_accounts.ts:29`) — and `railOf`
+      // reads `'safe'` and `undefined` identically, so nothing rendered
+      // differently. What this still pins is that the override is the SAME on
+      // both halves of the pair, which is what makes `chain_id` the sole
+      // variable.
+      expect(me.safes[0].account_type).toBe('safe')
       // Both safe endpoints must agree — a fixture where one says 84532 and the
       // other says nothing is a trap for the next scenario that reads the other.
       const list = resolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
@@ -797,8 +872,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // surface. The pair is only evidence about the CHAIN if the chain is the
       // only thing that differs — and the unresolved capture only proves
       // suppression if its safe genuinely lacks `chain_id` on BOTH endpoints.
-      const resolved = (SCENARIOS as Record<string, ScenarioShape>)['receive-funds']
-      const unresolved = (SCENARIOS as Record<string, ScenarioShape>)['receive-funds-unresolved-chain']
+      const resolved = scenarioWithApi('receive-funds')
+      const unresolved = scenarioWithApi('receive-funds-unresolved-chain')
 
       for (const endpoint of ['/auth/me', '/user/safes']) {
         const r = resolved.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
@@ -813,8 +888,10 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect(u.safes[0].id).toBe(FIXTURE_SAFE_ID)
         // The rail override is the ONLY other difference from the shared
         // fixture, and both halves carry it, so `chain_id` is the sole variable.
-        expect(r.safes[0]).not.toHaveProperty('account_type')
-        expect(u.safes[0]).not.toHaveProperty('account_type')
+        // #2202: named rather than absent — see the #1844 pair above. Both
+        // halves carry it, which is the invariant this line is really for.
+        expect(r.safes[0].account_type).toBe('safe')
+        expect(u.safes[0].account_type).toBe('safe')
       }
       expect(resolved.api('/agents', 'GET')).toBeUndefined()
       expect(unresolved.api('/agents', 'GET')).toBeUndefined()
@@ -913,7 +990,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
      * right.
      */
     describe('retired-rail-account (#1989)', () => {
-      const legacy = (SCENARIOS as Record<string, ScenarioShape>)['retired-rail-account']
+      const legacy = scenarioWithApi('retired-rail-account')
 
       it('puts the SHARED fixture account on the legacy rail, changing only account_type', () => {
         const me = legacy.api('/auth/me', 'GET') as {

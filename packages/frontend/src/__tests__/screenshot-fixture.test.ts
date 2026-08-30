@@ -11,6 +11,9 @@ import {
   ScenarioHttpError,
 } from '../../scripts/screenshot.mjs'
 import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
+
+/** The account the harness makes active by default (`screenshot.mjs:1785`). */
+const DEFAULT_ACTIVE_SAFE_ID = 'safe-fixture'
 import {
   isMcpToolCallActivityItem,
   isPaymentActivityItem,
@@ -126,6 +129,50 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         delegations: { recipient_address: string | null }[]
       }
       expect(open.delegations[0].recipient_address).toBeNull()
+    })
+
+    it('seeds an ACTIVE account that exists, and the scenario switches to the legacy one (#2202)', () => {
+      // `haven-reviewer`'s finding, and it was right: `agents-legacy-rail` is
+      // the first scenario in the harness to use `seed`, and nothing checked
+      // the value. Mutating the seeded id to `FIXTURE_SAFE.id` — the wrong,
+      // DELEGATION-rail account — left the whole suite green. The scenario's
+      // own `run()` would have caught it, but no CI workflow executes the
+      // general screenshot harness, so it would merge and only surface when a
+      // human next took a capture: the "invisible until someone looks at the
+      // PNG" class this whole issue is about.
+      const safeIds = (FIXTURE_USER as unknown as { safes: { id: string }[] }).safes.map(
+        (s) => s.id,
+      )
+
+      // The harness's own default, seeded before any app code runs.
+      expect(safeIds).toContain(DEFAULT_ACTIVE_SAFE_ID)
+
+      const seeded = (
+        SCENARIOS as Record<string, { seed?: () => Record<string, string> }>
+      )['agents-legacy-rail'].seed!()
+      const activeId = seeded[ACTIVE_SAFE_STORAGE_KEY]
+
+      // It must name a REAL account…
+      expect(safeIds).toContain(activeId)
+      // …and specifically the LEGACY one, or the scenario photographs the
+      // delegation rendering under a name that promises the legacy rail.
+      const active = (
+        FIXTURE_USER as unknown as { safes: { id: string; account_type: string }[] }
+      ).safes.find((s) => s.id === activeId)
+      expect(active!.account_type).toBe('safe')
+      expect(activeId).not.toBe(DEFAULT_ACTIVE_SAFE_ID)
+    })
+
+    it('gives the user exactly ONE default account (#2202)', () => {
+      // Also `haven-reviewer`'s: two-default is union-legal, path-impossible
+      // and RENDERED (`AccountsOverviewClient.tsx` badges the default), and it
+      // survived the suite green under mutation. The app layer enforces a
+      // single default — `CLEAR_DEFAULT_SAFES_FOR_USER_SQL` runs before
+      // `SET_SAFE_DEFAULT_SQL` (`infra/repositories/user-safes.ts:160-163`) —
+      // so a second `is_default: true` is a state no write path leaves behind.
+      const safes = (FIXTURE_USER as unknown as { safes: { is_default: boolean }[] }).safes
+      expect(safes.length).toBeGreaterThan(1) // non-vacuity: one safe cannot disagree
+      expect(safes.filter((s) => s.is_default)).toHaveLength(1)
     })
 
     it('never gives a legacy-rail agent a delegation', () => {

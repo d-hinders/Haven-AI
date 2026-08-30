@@ -830,8 +830,12 @@ export const FIXTURE_DELEGATE_BALANCES = {
   // CONTROL for the row above: `hasRecoverableUsdc` is false here for the
   // reason the product says it is ('0' === '0'), not because a key is missing.
   // #2202: `safe_address` and `chain_id` follow the agent to its OWN account.
-  // The route echoes `agent.safe_address` and `agent.safe_chain_id` off the
-  // joined `user_safes` row (`routes/agents.ts:161`, `:162`), so this body must
+  // The route echoes `agent.safe_address` off the joined `user_safes` row
+  // (`routes/agents.ts:160`) and answers `chain_id` as
+  // `agent.safe_chain_id ?? DEFAULT_CHAIN_ID` (`:143`, echoed at `:161`) — the
+  // coalesce never fires for a real account, which always has a chain, but the
+  // read is not a bare echo and the citation should not say it is
+  // (`haven-reviewer`). So this body must
   // name the safe THIS agent is on — the shared one would claim the delegate
   // belongs to an account it has nothing to do with. Caught by #2205's own
   // echoed-field guard when `agent-ops` moved, which is what that guard is for.

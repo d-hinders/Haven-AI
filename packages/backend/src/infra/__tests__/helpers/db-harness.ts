@@ -31,8 +31,11 @@
  *   (dozens and growing — never a fixed number here, it goes stale; the
  *   first file per worker DOES pay the full run, which is why
  *   vitest.config.ts sets an explicit hookTimeout, #1372).
- * - `resetDb()` (call in `beforeEach`): truncates every table in the worker
- *   schema except `schema_migrations`, `RESTART IDENTITY CASCADE`.
+ * - `resetDb()` (call in `beforeEach`): empties every table in the worker
+ *   schema except `schema_migrations`, and restarts every advanced sequence.
+ *   Since #2211 it does that with foreign-key-ordered `DELETE`s rather than
+ *   `TRUNCATE`, because `TRUNCATE`'s cost is per-relation and therefore grew
+ *   with the migration count; coverage is unchanged. See `resetDb` below.
  *
  * ## When Postgres is absent
  *
@@ -230,11 +233,142 @@ export function initDbHarness(): Promise<void> {
 }
 
 /**
- * Truncate every table in the worker schema except `schema_migrations`.
- * Call from `beforeEach`. Truncation over per-test transaction wrapping is
- * deliberate (#1220): the code under test uses `withTransaction` itself, and
- * an outer wrapper would make real BEGIN/ROLLBACK behaviour untestable —
- * which is precisely a guarantee this epic exists to prove.
+ * A foreign-key edge inside the worker schema: `child` references `parent`.
+ * Only edges whose BOTH ends live in the worker schema are modelled — an
+ * edge pointing out of the schema constrains nothing about the order in
+ * which this harness empties tables it owns.
+ */
+export type FkEdge = { child: string; parent: string }
+
+/**
+ * Order `tables` so that every referencing table is emptied BEFORE the table
+ * it references, or return `null` when the foreign-key graph contains a cycle
+ * and no such order exists.
+ *
+ * This is the one derived thing in the reset path, and it is deliberately the
+ * SAFE kind of derived: it decides an ORDER over a table list that is always
+ * the complete list. A wrong answer here surfaces as a foreign-key violation
+ * from `resetDb()` — loudly, on the next run — never as a table quietly left
+ * dirty (#2208's lesson: an expectation derived from the thing it guards can
+ * be narrowed without failing anything; a coverage set that is not derived at
+ * all cannot).
+ *
+ * Self-references are skipped: a single `DELETE FROM t` removes every row at
+ * once, and `NO ACTION`/`CASCADE` self-edges are satisfied at statement end.
+ *
+ * Kahn's algorithm over edges child → parent, sources first.
+ */
+export function planDeleteOrder(tables: string[], edges: readonly FkEdge[]): string[] | null {
+  const parents = new Map<string, Set<string>>(tables.map((t) => [t, new Set<string>()]))
+  const inDegree = new Map<string, number>(tables.map((t) => [t, 0]))
+  for (const { child, parent } of edges) {
+    if (child === parent) continue
+    const childParents = parents.get(child)
+    if (!childParents || !parents.has(parent) || childParents.has(parent)) continue
+    childParents.add(parent)
+    inDegree.set(parent, (inDegree.get(parent) ?? 0) + 1)
+  }
+  const queue = tables.filter((t) => inDegree.get(t) === 0)
+  const order: string[] = []
+  while (queue.length > 0) {
+    const table = queue.shift() as string
+    order.push(table)
+    for (const parent of parents.get(table) as Set<string>) {
+      const remaining = (inDegree.get(parent) as number) - 1
+      inDegree.set(parent, remaining)
+      if (remaining === 0) queue.push(parent)
+    }
+  }
+  return order.length === tables.length ? order : null
+}
+
+/** Quote an identifier read back from the catalog. */
+function quote(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`
+}
+
+function qualify(table: string): string {
+  return `${WORKER_SCHEMA}.${quote(table)}`
+}
+
+type SchemaShape = { tables: string[]; fks: [string, string][]; sequences: string[] }
+
+/**
+ * Everything the reset needs about the worker schema, in ONE round trip:
+ * the tables to empty, the foreign-key edges that order them, and the
+ * sequences that have actually been advanced.
+ *
+ * Read fresh on every reset rather than cached, because test files legitimately
+ * CREATE tables in the worker schema (the harness smoke files do) and a cached
+ * shape would silently stop cleaning them.
+ */
+async function readSchemaShape(): Promise<SchemaShape> {
+  const { rows } = await db.query<SchemaShape>(
+    `SELECT
+       (SELECT coalesce(json_agg(t.tablename ORDER BY t.tablename), '[]'::json)
+          FROM pg_tables t
+         WHERE t.schemaname = $1 AND t.tablename <> 'schema_migrations') AS tables,
+       (SELECT coalesce(json_agg(json_build_array(child.relname, parent.relname)), '[]'::json)
+          FROM pg_constraint c
+          JOIN pg_class child ON child.oid = c.conrelid
+          JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
+          JOIN pg_class parent ON parent.oid = c.confrelid
+          JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+         WHERE c.contype = 'f'
+           AND child_ns.nspname = $1
+           AND parent_ns.nspname = $1) AS fks,
+       (SELECT coalesce(json_agg(s.sequencename), '[]'::json)
+          FROM pg_sequences s
+         WHERE s.schemaname = $1 AND s.last_value IS NOT NULL) AS sequences`,
+    [WORKER_SCHEMA],
+  )
+  return rows[0]
+}
+
+/**
+ * Empty every table in the worker schema except `schema_migrations`, and
+ * restart every sequence that has been advanced. Call from `beforeEach`.
+ *
+ * Emptying over per-test transaction wrapping is deliberate (#1220): the code
+ * under test uses `withTransaction` itself, and an outer wrapper would make
+ * real BEGIN/ROLLBACK behaviour untestable — which is precisely a guarantee
+ * this epic exists to prove.
+ *
+ * ## Why `DELETE`, not `TRUNCATE` (#2211)
+ *
+ * The reset covers EVERY table, so its cost used to be set by the migration
+ * count rather than by what the test wrote — and `TRUNCATE` costs roughly a
+ * fixed amount PER RELATION, because each truncated table and each of its
+ * indexes gets a fresh relfilenode. At 38 tables / 136 indexes that measured
+ * ~370 ms quiet, growing with every migration; the #2209 drift guard paid
+ * seven resets and timed out at 5 s under parallel load.
+ *
+ * `DELETE FROM` costs what the rows cost. A real-DB test leaves single-digit
+ * row counts behind, so emptying all 38 tables measured ~48 ms quiet against
+ * `TRUNCATE`'s ~371 ms, interleaved so catalog bloat and machine drift hit
+ * both arms equally (see #2211 for the loaded numbers). Coverage is
+ * identical — every table, every time — so nothing about isolation changes:
+ * `db-harness-reset-cleans-everything.test.ts` proves the post-reset census
+ * by enumerating `pg_tables`, not by trusting a list this file maintains.
+ *
+ * Two details `TRUNCATE ... RESTART IDENTITY CASCADE` gave for free and this
+ * path restores explicitly:
+ *
+ * - **Order.** `DELETE` enforces foreign keys, so referencing tables are
+ *   emptied first (`planDeleteOrder`). `CASCADE` did that implicitly. Most of
+ *   this schema's foreign keys are `ON DELETE CASCADE`, which would tolerate
+ *   almost any order — but not all of them are: `self_sign_agents.safe_id`
+ *   (001) and `agent_rekeys.initiated_by_user_id` (065) declare no action and
+ *   so default to `NO ACTION`. Those two are the reason the ordering is
+ *   load-bearing rather than decorative.
+ * - **Sequences.** `RESTART IDENTITY` reset them; an explicit
+ *   `ALTER SEQUENCE … RESTART` does it here, for the sequences that were
+ *   actually advanced.
+ *
+ * A foreign-key CYCLE has no valid delete order. That is not reachable in
+ * today's schema, but a future migration could introduce one, so the
+ * `TRUNCATE` path is kept as the fallback — chosen deterministically from
+ * `planDeleteOrder` returning `null`, never by swallowing an error.
  *
  * AWAITS `initDbHarness()` first, deliberately. The #1555/#1559 outbound
  * files called `initDbHarness()` bare at describe-registration time — the
@@ -251,11 +385,25 @@ export function initDbHarness(): Promise<void> {
  */
 export async function resetDb(): Promise<void> {
   await initDbHarness()
-  const { rows } = await db.query<{ tablename: string }>(
-    `SELECT tablename FROM pg_tables WHERE schemaname = $1 AND tablename <> 'schema_migrations'`,
-    [WORKER_SCHEMA],
+  const { tables, fks, sequences } = await readSchemaShape()
+  if (tables.length === 0) return
+
+  const order = planDeleteOrder(
+    tables,
+    fks.map(([child, parent]) => ({ child, parent })),
   )
-  if (rows.length === 0) return
-  const tables = rows.map((r) => `${WORKER_SCHEMA}."${r.tablename}"`).join(', ')
-  await db.query(`TRUNCATE ${tables} RESTART IDENTITY CASCADE`)
+  if (order === null) {
+    // No valid delete order exists. Fall back to the pre-#2211 shape, which
+    // does not need one.
+    await db.query(
+      `TRUNCATE ${tables.map(qualify).join(', ')} RESTART IDENTITY CASCADE`,
+    )
+    return
+  }
+
+  const statements = [
+    ...order.map((table) => `DELETE FROM ${qualify(table)};`),
+    ...sequences.map((sequence) => `ALTER SEQUENCE ${WORKER_SCHEMA}.${quote(sequence)} RESTART;`),
+  ]
+  await db.query(statements.join('\n'))
 }

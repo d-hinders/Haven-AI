@@ -52,11 +52,14 @@
  *          the pill, so it fits and is not ellipsised — it is BELOW this
  *          width's band, not evidence that this width was checked by it.
  *
- * The band is derived, not picked: a name is cut-though-it-fits exactly when it
- * measures more than `rowInner - pill - gap` and at most `rowInner`. At 1280
- * that is (196.5, 259]; at 390 it is (381.5, 444]. `BAND_NAME` at 256.2px sits
- * inside the first and below the second. No literal is written for the second
- * band on purpose: `/agents` cards do not shrink below ~399px of min-content at
+ * The band is derived, not picked — and since the first CI run, derived AT
+ * RUNTIME rather than written down. A name is cut-though-it-fits exactly when
+ * it measures more than `rowInner - pill - gap` and at most `rowInner`; on
+ * macOS at 1280 that is (196.5, 259], on CI's Linux renderer (192.5, 255]. The
+ * same literal string measures 256.2px on one and 274px on the other, so it is
+ * inside the band on a laptop and above it on CI — which is exactly how the
+ * first push went red. The band arm now cuts its own name to fit the row it
+ * actually measures. No literal is written for the 390 band on purpose: `/agents` cards do not shrink below ~399px of min-content at
  * any viewport (the footer's action row is the floor), so at 390 the card
  * overflows its own grid track and its width is content-derived and unstable —
  * a literal tuned to it would be a failure waiting for the next fixture edit.
@@ -69,12 +72,27 @@ import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession, testAgent
 const WIDTHS = [1280, 390] as const
 
 /**
- * Inside the 1280 band: longer than the 196.5px the pre-fix row left for it,
- * shorter than the 259px row itself. This is the string the issue's defect is
- * actually visible on — an ordinary, plausible agent name, not a pathological
- * one.
+ * The band name is DERIVED AT RUNTIME from this stem, not written as a literal
+ * — and that is a correction, not sophistication.
+ *
+ * The first version of this spec hard-coded "Nightly data-feed reconciliation
+ * agent", measured at 256.2px against a 259px row on macOS. On CI's Linux
+ * renderer the identical string measures **274px against a 255px row**: above
+ * the band, not inside it, so the name no longer fits and the claim below is
+ * not the claim the test means to make. The non-vacuity guard caught it and
+ * `Frontend browser smoke` went red on the first push — the guard doing its
+ * job, one renderer over. PR #2240 recorded the same hazard about its own
+ * `WRAPPING_NAME` band literal ("font-metric-dependent; a font change would
+ * move the string out of band"); the font did not change, the RENDERER did,
+ * and a literal cannot survive that.
+ *
+ * So the test now measures the actual rendered font and constructs a name that
+ * lands in the band on whatever machine is running it. The literal survives
+ * only as the STEM the name is cut from, which keeps the failure messages
+ * readable and the state plausible.
  */
-const BAND_NAME = 'Nightly data-feed reconciliation agent'
+const BAND_STEM =
+  'Nightly data-feed reconciliation agent for the European entity treasury operations desk'
 
 /**
  * Long enough that no arrangement of this card shows it whole at either width,
@@ -91,6 +109,9 @@ const UNBOUNDED_NAME = 'European entity nightly data-feed reconciliation and rep
  * nothing sits near the threshold — but note how much closer 86.0% is than
  * `/accounts`' 49.9%, which is the whole "one pill, not two" difference.
  */
+/** The control's name — arbitrary, and deliberately not the band's. */
+const ACTIVE_NAME = 'Nightly data-feed reconciliation agent'
+
 const MIN_TRUNCATED_SHARE_OF_ROW = 0.95
 
 /**
@@ -219,34 +240,93 @@ async function atWidth(page: Page, width: number) {
   await dismissMobileSidebar(page)
 }
 
+/**
+ * Find the longest prefix of `BAND_STEM` that fits the title row, measured in
+ * the page with the `h3`'s OWN computed font via canvas `measureText`.
+ *
+ * By construction that prefix lands in the band: it is at most `rowInner`
+ * wide (so the row has room for it) and adding one more character exceeds
+ * `rowInner` (so it is within one glyph of the row's full width, which is far
+ * more than the ~62px the pill and its gap take). `slack` absorbs the small,
+ * known disagreement between `measureText` and laid-out text; the result is
+ * re-measured AFTER rendering and re-checked against the band, so an estimate
+ * that lands wrong fails loudly with numbers instead of passing vacuously.
+ */
+async function bandNameFor(page: Page, currentName: string, rowInner: number, slack = 4): Promise<string> {
+  return page.evaluate(
+    ([label, stem, limit]) => {
+      const card = document.querySelector(`[role="link"][aria-label="View ${label}"]`)!
+      const h3 = card.querySelector('h3')!
+      const cs = getComputedStyle(h3)
+      const ctx = document.createElement('canvas').getContext('2d')!
+      ctx.font = `${cs.fontStyle} ${cs.fontVariant} ${cs.fontWeight} ${cs.fontSize} / ${cs.lineHeight} ${cs.fontFamily}`
+      const width = (t: string) => ctx.measureText(t).width
+      let lo = 1
+      let hi = (stem as string).length
+      while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2)
+        if (width((stem as string).slice(0, mid)) <= (limit as number)) lo = mid
+        else hi = mid - 1
+      }
+      // Never end on a space or a hyphen — the layout would not render the
+      // trailing glyph and the measured width would drift from the estimate.
+      let end = lo
+      while (end > 1 && /[\s-]$/.test((stem as string).slice(0, end))) end -= 1
+      return (stem as string).slice(0, end)
+    },
+    [currentName, BAND_STEM, rowInner - slack] as const,
+  )
+}
+
 test('/agents: a paused agent name the row has room for is not cut by the status pill', async ({ page }) => {
   test.slow()
+  let agents: unknown[] = [agentNamed(BAND_STEM, 'agent-band', 'paused')]
   await mockHavenApi(page)
-  await serveAgents(page, [agentNamed(BAND_NAME, 'agent-band', 'paused')])
+  await page.route('**/api/agents', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ agents }) })
+  })
   await seedAuthenticatedSession(page)
-  await openAgents(page, BAND_NAME)
+  await openAgents(page, BAND_STEM)
 
-  // 1280 only, and deliberately so: at 390 this string is BELOW the band (it
-  // fits beside the pill even on the broken row), so asserting it there would
-  // be a green that means nothing. The unbounded test below is what carries
-  // 390 — see the header.
+  // 1280 only, and deliberately so. At 390 the card's width is content-derived
+  // rather than grid-fixed (see the header, and #2251), so the row this band is
+  // computed against is not stable there. The unbounded test below is what
+  // carries 390.
   await atWidth(page, 1280)
-  const reading = await readSettled(page, BAND_NAME)
+  const stemReading = await readSettled(page, BAND_STEM)
 
-  // Non-vacuity, in both directions. The pill must be rendered as chrome —
-  // otherwise this passes for a layout that simply deleted it — and the name
-  // must genuinely be in the band, otherwise the claim below is about a string
-  // that would have fitted anyway.
-  expect(reading.pills, `@1280px: the title row renders ${JSON.stringify(reading.pills)} (widths ${JSON.stringify(reading.pillWidths)})`)
-    .toEqual(['paused'])
-  const pillRoom = reading.pillWidths[0] + 8
+  // Non-vacuity #1: the pill must be rendered AS CHROME, or everything below
+  // passes for a layout that simply deleted it.
+  expect(
+    stemReading.pills,
+    `@1280px: the title row renders ${JSON.stringify(stemReading.pills)} (widths ${JSON.stringify(stemReading.pillWidths)})`,
+  ).toEqual(['paused'])
+  const pillRoom = stemReading.pillWidths[0] + 8
+
+  const bandName = await bandNameFor(page, BAND_STEM, stemReading.rowInner)
+  agents = [agentNamed(bandName, 'agent-band', 'paused')]
+  await page.reload()
+  await page.getByRole('heading', { name: bandName, exact: true }).waitFor({ timeout: 60_000 })
+  await atWidth(page, 1280)
+  const reading = await readSettled(page, bandName)
+
+  expect(reading.pills, `@1280px: the title row renders ${JSON.stringify(reading.pills)}`).toEqual(['paused'])
+
+  // Non-vacuity #2, re-checked against the RENDERED measure rather than the
+  // canvas estimate: the name must genuinely be in this row's band, or the
+  // claim below is about a string that would have fitted anyway.
   expect(
     reading.natural,
-    `@1280px: "${BAND_NAME}" measures ${reading.natural}px, which is not inside this row's band ` +
-      `(${(reading.rowInner - pillRoom).toFixed(1)}, ${reading.rowInner}] — the name would fit beside the pill anyway, ` +
+    `@1280px: the derived name "${bandName}" measures ${reading.natural}px, which is not inside this row's ` +
+      `band (${(reading.rowInner - pillRoom).toFixed(1)}, ${reading.rowInner}] — the estimate landed wrong, ` +
       `so this test would prove nothing`,
   ).toBeGreaterThan(reading.rowInner - pillRoom)
-  expect(reading.natural).toBeLessThanOrEqual(reading.rowInner)
+  expect(
+    reading.natural,
+    `@1280px: the derived name "${bandName}" measures ${reading.natural}px against a ${reading.rowInner}px row — ` +
+      `it does not fit, so "the row had room for it" is not the claim under test`,
+  ).toBeLessThanOrEqual(reading.rowInner)
 
   // The defect, stated as the user sees it.
   expect(
@@ -289,13 +369,16 @@ test('/agents: an unbounded paused name truncates against the card, not against 
 test('/agents: an ACTIVE agent renders no pill and its name is unmoved', async ({ page }) => {
   test.slow()
   await mockHavenApi(page)
-  await serveAgents(page, [agentNamed(BAND_NAME, 'agent-active', 'active')])
+  // The name is irrelevant to this control's claim (it asserts "the name gets
+  // the row", whatever the row is), so it stays a plain literal rather than
+  // borrowing the band machinery above.
+  await serveAgents(page, [agentNamed(ACTIVE_NAME, 'agent-active', 'active')])
   await seedAuthenticatedSession(page)
-  await openAgents(page, BAND_NAME)
+  await openAgents(page, ACTIVE_NAME)
 
   for (const width of WIDTHS) {
     await atWidth(page, width)
-    const reading = await readSettled(page, BAND_NAME)
+    const reading = await readSettled(page, ACTIVE_NAME)
 
     // This is the state the defect hid behind — every agent in the standing
     // capture fixture but one is active, so the pill never renders and the name

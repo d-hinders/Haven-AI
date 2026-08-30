@@ -51,7 +51,7 @@ export function signerNameFor(hosted: string): string {
  * excluded** rather than merely missed: `AgentCard` wraps the whole card in a
  * composite `role="link"` with its own `tabIndex` and `onClick`
  * (`AgentCard.tsx:121-126`), which `Tooltip`'s `INTERACTIVE_ANCESTOR` check
- * matches (`Tooltip.tsx:101, 183-186`). A tab stop on the trigger would nest a
+ * matches (`Tooltip.tsx:101, 191-194`). A tab stop on the trigger would nest a
  * control inside a control; a tap would fire alongside the card's navigation
  * and strand a bubble over the destination. Both are worse than the defect, so
  * the primitive correctly refuses the job and no change to it can rescue this

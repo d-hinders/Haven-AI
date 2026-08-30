@@ -26,13 +26,17 @@
  * Zero mocks; real Postgres on the #1220 harness (#1219: assertions about what
  * the database does belong on the real DB).
  */
-import { beforeAll, beforeEach, expect, it } from 'vitest'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
   findEvidenceOrphanedErc7710Intents,
   findSweepableErc7710Intents,
 } from '../x402-authorizations.js'
+import { insertMachineIntent } from '../payment-intents.js'
 import {
   SWEEP_MAX_CANDIDATES_PER_TICK,
   SWEEP_MIN_AGE_SECONDS,
@@ -203,19 +207,28 @@ describeDb('erc7710 sweep eligibility (#2117 candidate query, absorbed from #213
     expect((await sweepIds()).sort()).toEqual([viaSource, viaPaymentRail].sort())
   })
 
-  it('a pre-#2094 intent (delegation_hash NULL) is excluded — silently, and that is a known consequence', async () => {
+  it('a delegation_hash NULL row is excluded — silently, upstream of every counter and log', async () => {
     const { agentId, userId } = await seedOwner()
     const bound = await seedIntent({ agentId, userId })
     await seedIntent({ agentId, userId, delegationHash: null })
 
     // `delegation_hash IS NOT NULL` is a hard requirement of the merged design:
     // the stored child hash IS the lookup key and there is no second path
-    // (`requireDelegationBound`). The consequence, raised by PR #2134's author,
-    // is that a pre-#2094 row can never be completed passively — AND, because
-    // the filter sits in the SQL rather than in the tick, it is never even
-    // counted as `unresolved`, so the sweeper's own "log the rest loudly as it
-    // ages out" complement does not reach it. Pinned here so the exclusion is
-    // a stated decision rather than an accident of the WHERE clause.
+    // (`requireDelegationBound`). @PhilipEriksson raised the consequence on PR
+    // #2134: because the filter sits in the SQL rather than in the tick, an
+    // excluded row is never even counted as `unresolved`, so the sweeper's own
+    // "log the rest loudly as it ages out" complement does not reach it.
+    //
+    // #2214 corrects this test's ORIGINAL title, which called the seeded row "a
+    // pre-#2094 intent". It is not one. `delegation_hash` has been written by
+    // the erc7710 authorize path since #830 introduced that path (2026-07-10),
+    // not since #2094 (2026-08-27) — what #2094 changed is the child's SALT, so
+    // a pre-#2094 intent carries the OLD constant-salt hash, is a candidate, is
+    // scanned, and is counted and logged like any other. The row below is
+    // seeded by raw INSERT and no production writer can produce it; the two
+    // tests under "#2214" at the end of this file pin exactly that. So what
+    // this test pins is the SQL's behaviour on a shape that must stay
+    // unreachable — not a live population.
     expect(await sweepIds()).toEqual([bound])
   })
 
@@ -363,5 +376,147 @@ describeDb('erc7710 sweep eligibility (#2117 candidate query, absorbed from #213
     const preSalt = await seedIntent({ agentId, userId, ...CONFIRMED, delegationHash: null })
 
     expect((await orphanIds()).sort()).toEqual([orphan, preSalt].sort())
+  })
+
+  // ── #2214: what makes the NULL-hash silence harmless ─────────────────────
+  //
+  // `delegation_hash IS NOT NULL` sits in the forward query's WHERE clause,
+  // upstream of `sweepOne`, so anything it removes is excluded from BOTH halves
+  // of the module's stated design — not completed, and not counted or logged as
+  // residue either. @PhilipEriksson raised that on PR #2134 and #2136 pinned
+  // the behaviour. What makes it acceptable is not a policy but an INVARIANT:
+  // no writer can produce such a row, so the conjunct removes nothing. An
+  // invariant that nothing checks is one refactor from being false and silent,
+  // which is the precise failure mode this whole line of issues is about, so it
+  // is checked here — from both directions.
+
+  it('POSITIVE CONTROL: the real erc7710 writer produces a row the candidate query returns', async () => {
+    const { agentId, userId } = await seedOwner()
+    const childHash = `0x${'7'.repeat(64)}`
+
+    // `delegation-authorize.ts`'s own argument object, trimmed to the fields
+    // this invariant is about. The point is that `settlement_scheme: 'erc7710'`
+    // and `delegationHash` enter through ONE call and land in ONE INSERT, so
+    // the first can never be persisted without the second.
+    const row = await insertMachineIntent({
+      agent: {
+        id: agentId,
+        user_id: userId,
+        safe_address: '0x00000000000000000000000000000000000000f1',
+        chain_id: 84532,
+        delegate_address: '0x00000000000000000000000000000000000000d1',
+      },
+      rail: 'x402',
+      payTo: '0x00000000000000000000000000000000000000aa',
+      tokenSymbol: 'USDC',
+      tokenAddress: '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+      amountRaw: 100000n,
+      amountHuman: '0.10',
+      allowanceNonce: 0,
+      signHash: childHash,
+      resourceUrl: 'https://merchant.example/paid',
+      category: null,
+      merchantAddress: '0x00000000000000000000000000000000000000aa',
+      challengeId: null,
+      idempotencyKey: `sweep-2214-${++seq}`,
+      metadata: { network: 'base-sepolia', settlement_scheme: 'erc7710' },
+      executionRail: 'delegation',
+      delegationHash: childHash,
+      budgetDelegationHash: `0x${'b'.repeat(64)}`,
+      preparedUserOp: '{}',
+      conflictTarget: 'x402_idempotency_key',
+    })
+    expect(row, 'the writer must have inserted a row').not.toBeNull()
+
+    const stored = await db.query<{ delegation_hash: string | null; scheme: string | null }>(
+      `SELECT delegation_hash, machine_metadata->>'settlement_scheme' AS scheme
+         FROM payment_intents WHERE id = $1`,
+      [row!.id],
+    )
+    expect(stored.rows[0].scheme).toBe('erc7710')
+    expect(stored.rows[0].delegation_hash, 'the erc7710 writer must persist a lookup key').toBe(
+      childHash,
+    )
+
+    // Lifecycle only. The writer inserts at `pending_signature`, and the sweep
+    // acts on `submitted` past its grace; neither column under test is touched.
+    await db.query(
+      `UPDATE payment_intents
+          SET status = 'submitted', created_at = NOW() - ($2 * interval '1 second')
+        WHERE id = $1`,
+      [row!.id, SWEEP_MIN_AGE_SECONDS + 60],
+    )
+
+    // The control that matters: every exclusion assertion in this file is also
+    // satisfied by a query that returns nothing, and the silence at issue is
+    // precisely a set that reports zero forever. This says the instrument can
+    // still say YES about a row the PRODUCTION writer built.
+    expect(await sweepIds()).toEqual([row!.id])
+  })
+})
+
+/**
+ * The other direction, and the one that actually catches the regression: no DB,
+ * because the risk is a SECOND writer of `settlement_scheme: 'erc7710'` added
+ * without a `delegationHash`. Such a writer breaks no type (the field is
+ * optional on `NewMachineIntent`), fails no query, and produces payments the
+ * sweep drops in SQL without counting or logging them — the exact silence
+ * #2214 describes, arriving through the door the invariant currently blocks.
+ */
+describe('#2214: every production writer of settlement_scheme=erc7710 also writes delegation_hash', () => {
+  const SRC = fileURLToPath(new URL('../../../', import.meta.url))
+  const SCHEME_WRITE = /settlement_scheme\s*:\s*'erc7710'/
+  /** Prose quoting the literal is not a writer — this rule is documented. */
+  const COMMENT = /^\s*(\/\/|\*|\/\*)/
+  const CALL_OPEN = /\b(createPaymentIntent|insertMachineIntent)\(\{/
+  const CALL_CLOSE = /^\s*\}\)/
+
+  function sourceFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) return entry.name === '__tests__' ? [] : sourceFiles(full)
+      return entry.isFile() && full.endsWith('.ts') && !full.endsWith('.test.ts') ? [full] : []
+    })
+  }
+
+  it('finds the writers, and each one is inside an intent insert that sets delegationHash', () => {
+    const writers: { file: string; line: number; boundToHash: boolean }[] = []
+
+    for (const file of sourceFiles(SRC)) {
+      const lines = readFileSync(file, 'utf8').split('\n')
+      lines.forEach((text, i) => {
+        if (!SCHEME_WRITE.test(text) || COMMENT.test(text)) return
+
+        // Walk out to the enclosing intent-insert call, then across its whole
+        // argument object. Both bounds matter: without the backward walk a bare
+        // metadata literal elsewhere would be judged, and without the forward
+        // walk a `delegationHash` belonging to the NEXT call would satisfy it.
+        let open = i
+        while (open >= 0 && !CALL_OPEN.test(lines[open])) open -= 1
+        let close = i
+        while (close < lines.length && !CALL_CLOSE.test(lines[close])) close += 1
+
+        writers.push({
+          file: file.slice(SRC.length),
+          line: i + 1,
+          boundToHash:
+            open >= 0 &&
+            close < lines.length &&
+            lines.slice(open, close + 1).some((l) => /\bdelegationHash\s*:/.test(l)),
+        })
+      })
+    }
+
+    // Positive control on the scanner itself. A walk that matched nothing —
+    // a moved directory, a renamed literal — would otherwise pass the
+    // assertion below vacuously, which is the same always-reports-zero defect
+    // the invariant exists to prevent.
+    expect(writers.length, 'the scan must actually find the erc7710 writer').toBeGreaterThan(0)
+
+    expect(
+      writers.filter((w) => !w.boundToHash),
+      'an erc7710 intent written without delegationHash is dropped by the sweep candidate query ' +
+        'in SQL — never completed, and never counted or logged as residue either (#2214)',
+    ).toEqual([])
   })
 })

@@ -87,6 +87,19 @@ If a settled payment is missing from Fortnox, that warning line is where to
 look; see
 [`04-x402-payment-sequence.md` § Completing a settlement nobody reported](../architecture/04-x402-payment-sequence.md).
 
+**None of the three is a dead end, and the warning now says so (#2214).** The
+line reads `Settled erc7710 payment is past its settlement window and the sweep
+cannot attribute it`, at `warn`, carrying `paymentId`, `agentId`, `chainId`,
+`reason` (`no_manager_log` or `ambiguous_redemption`) and a **`remedy`** field.
+**Operator fix:** have the agent re-report the merchant's settlement transaction
+hash to `POST /machine-payments/evidence` using its own credential. That path
+runs the same on-chain verifier without the sweep's `requireDelegationBound`
+constraint, so it does not need the manager log the scan could not find (cause
+1), and it is not bounded by the 24-hour recovery horizon (cause 3). Cause 2 is
+the one where a human decision is genuinely required first — two indistinguishable
+payments, and Haven will not pick. The remedy is in the log because a warning
+that names no action is a warning people learn to scroll past.
+
 **A fourth cause, and the one that used to be silent (#2213).** Completing a
 payment is two writes — the intent flips `submitted → confirmed`, then the
 `machine_payment_evidence` row is written — and only the first is guaranteed. A

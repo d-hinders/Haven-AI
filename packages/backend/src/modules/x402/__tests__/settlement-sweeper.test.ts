@@ -54,16 +54,19 @@ import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/hel
 import { buildSettlementDelegation } from '../x402-delegation.js'
 import { buildBudgetDelegation } from '../../../rails/delegation-policy.js'
 import { getDelegationContracts } from '../../../rails/delegation-contracts.js'
-import { runSettlementSweepTick, resetSettlementSweepBackoff } from '../settlement-sweeper.js'
 import {
   findEvidenceOrphanedErc7710Intents,
   findSweepableErc7710Intents,
 } from '../../../infra/repositories/x402-authorizations.js'
 import {
+  runSettlementSweepTick,
+  resetSettlementSweepBackoff,
   SWEEP_MAX_CANDIDATES_PER_TICK,
   SWEEP_MIN_AGE_SECONDS,
   SWEEP_RECOVERY_HORIZON_SECONDS,
+  UNRESOLVED_REMEDY,
 } from '../settlement-sweeper.js'
+import { openapiSpec } from '../../../openapi/spec.js'
 import { observeErc7710Settlement } from '../settlement-observed.js'
 import { attachMachinePaymentEvidence } from '../../mpp/evidence.js'
 
@@ -362,9 +365,29 @@ describeDb('passive erc7710 settlement sweep (#2117)', () => {
 
     expect(result.unresolved).toBe(1)
     expect(silentLog.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ paymentId: p.id, reason: 'no_manager_log' }),
-      expect.stringContaining('unattributable'),
+      expect.objectContaining({
+        paymentId: p.id,
+        reason: 'no_manager_log',
+        // #2214: and it says what to DO. Surfacing residue is only half of
+        // "log the rest loudly as it ages out" — an alert naming a dead end is
+        // an alert operators learn to scroll past, and this one is not a dead
+        // end: the agent-reported completion path runs the same verifier with
+        // `requireDelegationBound` OFF, so it does not need the manager log
+        // this scan could not find. Asserted on the exported constant so the
+        // promise and the log are one string.
+        remedy: UNRESOLVED_REMEDY,
+      }),
+      expect.stringContaining('cannot attribute'),
     )
+    // The remedy has to be actionable, not reassuring: it must name a route the
+    // API actually SERVES. Checked against `openapiSpec.paths` rather than
+    // against the constant's own text — the reviewer's finding — so renaming or
+    // removing the route turns this red while the constant is untouched, which
+    // is the only thing that makes naming a route in an alert worth anything.
+    const named = Object.keys(openapiSpec.paths).filter((p) => UNRESOLVED_REMEDY.includes(p))
+    expect(named, 'the remedy must name a route the API actually serves').toEqual([
+      '/machine-payments/evidence',
+    ])
   })
 
   it('does NOT surface a payment whose settlement window is still open — it is not late yet', async () => {

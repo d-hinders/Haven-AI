@@ -486,6 +486,19 @@ export async function confirmObservedSettlement(
  * stored child hash IS the lookup key. A row without one cannot be found by the
  * only attribution path the sweeper has, and there is no second path by design.
  *
+ * It is also, today, defence-in-depth over an EMPTY SET rather than a filter
+ * that drops live rows (#2214, from @PhilipEriksson's observation on PR #2134).
+ * The sole production writer of `settlement_scheme = 'erc7710'` —
+ * `modules/x402/delegation-authorize.ts` — sets `delegation_hash` in the SAME
+ * `insertMachineIntent` call, and has since #830 introduced the path; nothing
+ * UPDATEs `machine_metadata` or nulls the hash later. So this conjunct removes
+ * nothing that exists, which matters because it sits in SQL UPSTREAM of
+ * `sweepOne` and anything it DID remove would be silently excluded from the
+ * sweeper's `unresolved` counter and its "log the rest loudly" warn as well.
+ * That invariant is what makes the silence harmless, so the invariant — not a
+ * counter for a population that cannot occur — is what
+ * `__tests__/erc7710-sweep-eligibility.test.ts` pins.
+ *
  * Oldest first: the candidates nearest the horizon are the ones that lose their
  * last chance if a tick runs out of budget.
  */

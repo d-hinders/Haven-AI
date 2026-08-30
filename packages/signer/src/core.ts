@@ -346,11 +346,14 @@ export function createEdgeSigner(
       // 2. Funds can only leave the delegate's OWN key — that half is
       //    unconditional. The DESTINATION half is not, and the difference
       //    matters here more than anywhere else in this file (#2247):
-      //    `expectedSafe` is threaded from the local credential's
-      //    `safe_address`, which is absent when the signer runs on
-      //    `HAVEN_DELEGATE_KEY` alone (`resolveSignerRuntime`'s fast path
-      //    returns before credentials are ever loaded) or when the credential
-      //    records no account address. With no local value there is nothing to
+      //    `expectedSafe` is threaded from the local credential's account
+      //    address, so it is absent whenever no such address reaches this
+      //    process. Three ways that happens, all supported: `HAVEN_DELEGATE_KEY`
+      //    set without `HAVEN_SAFE_ADDRESS` (the README quickstart — the
+      //    credential IS loaded here, it just carries no account address); a
+      //    credential file whose `safe_address` is null; or an embedder calling
+      //    `resolveEdgeSigner({ delegateKey })`, whose fast path returns before
+      //    credentials are read at all. With no local value there is nothing to
       //    re-derive `to` against, so the destination rests entirely on Haven's
       //    binding signature (step 1) plus the canonical-USDC token/chain
       //    assertion (step 3): AUTHENTICATED, but not independently verified by

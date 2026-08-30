@@ -114,10 +114,11 @@ describe('signSweepAuthorization', () => {
     ).rejects.toThrow(/`to` does not match the Safe/)
   })
 
-  // #2247: `expectedSafe` is absent whenever the local credential records no
-  // account address — the documented `HAVEN_DELEGATE_KEY`-only path, or a
-  // credential whose `safe_address` is null. These two pin what that costs and
-  // what still holds, so neither can be changed silently.
+  // #2247: `expectedSafe` is absent whenever no account address reaches the
+  // signer — `HAVEN_DELEGATE_KEY` set without `HAVEN_SAFE_ADDRESS` (the README
+  // quickstart), a credential whose `safe_address` is null, or an embedder
+  // calling `resolveEdgeSigner({ delegateKey })`. These two pin what that costs
+  // and what still holds, so neither can be changed silently.
   it('signs with `expectedSafe` absent even when `to` is not the credential Safe', async () => {
     const signer = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
     // A destination that the `expectedSafe`-supplied test above refuses.
@@ -133,7 +134,7 @@ describe('signSweepAuthorization', () => {
     expect(recovered.toLowerCase()).toBe(DELEGATE.toLowerCase())
   })
 
-  it('still pins `to` to Haven’s binding when `expectedSafe` is absent', async () => {
+  it('still pins `to` to the Haven binding when `expectedSafe` is absent', async () => {
     const signer = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
     // Haven bound a sweep to the Safe; the authorization presented for signing
     // redirects `to`. With no local Safe to compare against, the binding

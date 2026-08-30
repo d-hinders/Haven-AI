@@ -121,9 +121,39 @@ function SafeCard({
         )}
       </div>
 
-      {/* Header — name + active / default chips */}
-      <div className="mb-2 flex items-center gap-2 pr-12">
-        <h3 className="truncate text-base font-semibold text-[var(--v2-ink)]">{safe.name}</h3>
+      {/*
+        Header — name + active / default chips.
+
+        `flex-wrap` is the load-bearing class here, not decoration (#2223). The
+        account name is the primary identifier on this screen — with two
+        accounts it is the ONLY thing telling the cards apart — and the badges
+        are chrome. Without wrapping, both badges are `flex-shrink-0` and the
+        `h3` is the only compressible item in the row, so the row paid for the
+        chrome out of the identity: measured on the two-account fixture,
+        "Operating wallet" rendered as "Operatin…" at 1280 and "Operating
+        wal…" at 390, on a name of seventeen characters.
+
+        Wrapping puts the badge that does not fit on a second line instead.
+        That is the idiom this repo already uses for the same title-plus-badge
+        shape — `TransactionActivityRow` (#1833) and `PageHeader`, and the
+        detail page for this very entity (`AccountDetailClient`) — rather than
+        a third one for one screen.
+
+        `truncate` STAYS, and `min-w-0` says so explicitly. Names are
+        user-supplied and unbounded, so a last-resort bound is still required;
+        what changes is that it is now a bound against the CONTAINER, reached
+        only when the name alone cannot fit, instead of a standing tax paid so
+        two pills can sit beside it. `title` hands the full name back on hover
+        in that case, matching `TransactionsTable`; the card's `aria-label`
+        already carries it for assistive tech either way.
+      */}
+      <div className="mb-2 flex flex-wrap items-center gap-2 pr-12">
+        <h3
+          title={safe.name}
+          className="min-w-0 truncate text-base font-semibold text-[var(--v2-ink)]"
+        >
+          {safe.name}
+        </h3>
         {showActiveBadge && (
           <span className="inline-flex flex-shrink-0 items-center gap-1 rounded bg-[var(--v2-success-soft)] px-1.5 py-0.5 text-xs font-medium text-[var(--v2-success)]">
             <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--v2-success)]" />

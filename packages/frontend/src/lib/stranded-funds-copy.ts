@@ -70,11 +70,25 @@ export function strandedFundsCause(count: number | null): string {
  * ADDED around the shared core rather than by a reworded core. Two reasons the
  * location clause lives here and not on `AgentCard`:
  *
- * 1. On the detail banner the next sentence is *"Recover it to your Haven
- *    wallet."* whenever the balance has not fully loaded (`strandedSummary` is
- *    null — the #1098 partial-response guard). "It" needs "money in your
- *    agent's wallet" as its antecedent, so dropping the clause there would
- *    leave a dangling pronoun in a money warning.
+ * 1. The detail banner has a degraded branch that says *"Recover **it** to
+ *    your Haven wallet."* — `strandedSummary` null, the #1098 partial-response
+ *    guard — and "it" needs "money in your agent's wallet" as its antecedent.
+ *
+ *    **Be precise about what that argument is worth.** `haven-reviewer` traced
+ *    the contract and found **no path a well-formed response can take to reach
+ *    it today**: `DelegateBalance.usdc` is non-optional (`api-types.ts:2844`),
+ *    the handler computes `usdc` and `usdc_atomic` together in one
+ *    `formatTokenValue` call (`routes/agents.ts:127-168`), `formatTokenValue`
+ *    never returns empty for a nonzero atomic value (`domain/tokens.ts:33-49`),
+ *    and `useDelegateBalance` sets `balance` atomically. #1098's guard is
+ *    defensive code surviving an earlier response shape (`dda3c1ce`), and no
+ *    test anywhere exercises the branch.
+ *
+ *    So this is NOT "the dangling pronoun is reachable". It is: while that
+ *    defensive branch exists and renders "it", the sentence it depends on
+ *    should keep supplying the antecedent — cheap insurance on copy that is
+ *    good either way, not a demonstrated state. Reason 2 is the load-bearing
+ *    one.
  * 2. On `AgentCard` there is no such pronoun, the shared title already says
  *    "in agent wallet", and the link says "recover these funds" — so the
  *    clause was pure repetition that pushed the notice from three rendered

@@ -870,6 +870,16 @@ Tooltips must not hide essential instructions, money/risk information, or the on
 
 **Reachability, and its one deliberate limit (#2038).** The trigger takes focus and a tap only when it is nobody else's control — nothing focusable inside it, and no interactive element around it. Where the trigger already is (or sits inside) a button, link, or composite `role="link"` card, the primitive stays out of the way: adding a tab stop would nest one inside a single control, and adding a tap-toggle would fire alongside that control's own action and strand a bubble over whatever the tap opened. So a tooltip nested in a composite card — `McpServerName` inside `AgentCard` is the live case — remains **hover-only**, which is another way of saying its copy must not be essential.
 
+**Essential vs elaboration, worked on one component (#2043).** `McpServerName` carried BOTH kinds and is the clearest test the codebase has. Its `not recorded` branch held a 167-character explanation of an ABSENCE — there was no visible value for it to elaborate, and its whole job was to stop a user concluding their agent is broken. That is essential, so it moved to visible text: one sentence above the agent list, rendered only when some listed agent is unrecorded, following #2017's shape rather than inventing a second one. Its recorded branch kept its tooltip, and the difference is not a matter of degree:
+
+| ask | essential | elaboration |
+|---|---|---|
+| Is a value already on screen for it to expand? | no — it explains an absence | yes — the name is rendered |
+| Is the tooltip the only route to the fact? | yes | no — the sibling `CopyButton` yields it verbatim |
+| What does a user who never reaches it lose? | the reason a label is empty | a longer form of what they can already read |
+
+Reachability is the SYMPTOM, not the test. A tooltip the primitive can make reachable may still be the wrong home for essential copy, and this limit is only what makes the mistake unrecoverable here.
+
 A standalone trigger takes the same `focus-visible` ring as every other focusable control (`ring-2` + `ring-brand/80`) — this primitive is what made it focusable, so a bare browser outline beside `Table`'s and `Sidebar`'s rings on the same page would be its own defect. A touch also suppresses the mouse path for one second, not forever: browsers emit compatibility `mouseenter` shortly after a tap, which otherwise reopened a bubble the tap had just closed, but a permanent latch would kill hover on a touchscreen laptop after one incidental tap.
 
 **Width.** The bubble wraps inside `max-w-[min(20rem,calc(100vw-1rem))]` and is clamped back inside the viewport with an 8px gutter after layout. It was `whitespace-nowrap` with no cap until #2038: a 167-character label rendered 988px wide on a 320px screen. No pixel gate could see it, because a tooltip that is not open is in no screenshot.

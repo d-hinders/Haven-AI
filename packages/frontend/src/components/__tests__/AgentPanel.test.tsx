@@ -496,3 +496,134 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
     expect(screen.queryByText('Your agent is taking longer than expected')).not.toBeInTheDocument()
   })
 })
+
+/**
+ * #2043: the `not recorded` explanation, hoisted out of a hover-only tooltip.
+ *
+ * These assert what a USER experiences — the sentence is readable without
+ * hovering anything, and it is absent when nothing on screen says `not
+ * recorded` — rather than which element carries which class. The conditional
+ * IS the design here: a test that only proved the note present would prove
+ * half of it, and would stay green if the note rendered unconditionally.
+ */
+describe('AgentPanel — the "not recorded" explanation (#2043)', () => {
+  /** The live copy, imported so a reworded sentence cannot silently pass. */
+  let NOTE: string
+
+  beforeEach(async () => {
+    ;({ MCP_NOT_RECORDED_NOTE: NOTE } = await import('../agent-panel/McpServerName'))
+    mockUseAuth.mockReturnValue({ activeSafe: SAFE })
+    mockUseSafeDetails.mockReturnValue({ details: null })
+    mockUsePublicClient.mockReturnValue({})
+    mockUseActiveSigner.mockReturnValue(null)
+    mockUseOnChainAllowances.mockReturnValue({
+      data: new Map(),
+      chainTimeSec: null,
+      loading: false,
+      onChainDelegates: [],
+      refetch: vi.fn(),
+    })
+  })
+
+  function withAgents(agents: unknown[]) {
+    mockUseAgents.mockReturnValue({
+      agents,
+      loading: false,
+      revokeAgent: vi.fn(),
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      archiveAgent: vi.fn(),
+      unarchiveAgent: vi.fn(),
+      refetch: vi.fn(),
+    })
+  }
+
+  it('reads the explanation without hovering, focusing or tapping anything', () => {
+    withAgents([
+      baseAgent({ id: 'agent-1', name: 'Research agent', mcp_server_name: null }),
+    ])
+    render(<AgentPanel />)
+
+    // The label is on the card…
+    expect(screen.getByText('not recorded')).toBeInTheDocument()
+    // …and the sentence explaining it is already on the page. No pointer, no
+    // focus, no tap — which is the whole point: `AgentCard` is a composite
+    // `role="link"`, so a tooltip here can be reached by none of the three.
+    expect(screen.getByText(NOTE)).toBeInTheDocument()
+  })
+
+  it('leaves no tooltip on the label, so nothing depends on a hover that cannot happen', () => {
+    withAgents([
+      baseAgent({ id: 'agent-1', name: 'Research agent', mcp_server_name: null }),
+    ])
+    render(<AgentPanel />)
+
+    const label = screen.getByText('not recorded')
+    expect(label).not.toHaveAttribute('aria-describedby')
+    fireEvent.mouseEnter(label)
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+  })
+
+  it('says nothing when every listed agent has a recorded MCP server name', () => {
+    withAgents([
+      baseAgent({ id: 'agent-1', name: 'Research agent', mcp_server_name: 'haven-research' }),
+      baseAgent({
+        id: 'agent-2',
+        name: 'Ops agent',
+        delegate_address: '0x3333333333333333333333333333333333333333',
+        mcp_server_name: 'haven',
+      }),
+    ])
+    render(<AgentPanel />)
+
+    expect(screen.queryByText('not recorded')).not.toBeInTheDocument()
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument()
+  })
+
+  it('explains the state ONCE however many cards are in it', () => {
+    withAgents([
+      baseAgent({ id: 'agent-1', name: 'Research agent', mcp_server_name: null }),
+      baseAgent({
+        id: 'agent-2',
+        name: 'Ops agent',
+        delegate_address: '0x3333333333333333333333333333333333333333',
+        mcp_server_name: null,
+      }),
+      baseAgent({
+        id: 'agent-3',
+        name: 'Travel agent',
+        delegate_address: '0x4444444444444444444444444444444444444444',
+        mcp_server_name: null,
+      }),
+    ])
+    render(<AgentPanel />)
+
+    expect(screen.getAllByText('not recorded')).toHaveLength(3)
+    expect(screen.getAllByText(NOTE)).toHaveLength(1)
+  })
+
+  it('appears with the collapsed Removed list, not before it', () => {
+    // The only unrecorded agent is archived, so its card is behind the
+    // Removed toggle. A note above the list while that card is hidden would
+    // explain a label nowhere on the page.
+    withAgents([
+      baseAgent({ id: 'agent-1', name: 'Research agent', mcp_server_name: 'haven-research' }),
+      baseAgent({
+        id: 'agent-2',
+        name: 'Retired agent',
+        delegate_address: '0x3333333333333333333333333333333333333333',
+        archived_at: '2026-05-20T00:00:00Z',
+        mcp_server_name: null,
+      }),
+    ])
+    render(<AgentPanel />)
+
+    expect(screen.queryByText('not recorded')).not.toBeInTheDocument()
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Removed/ }))
+
+    expect(screen.getByText('not recorded')).toBeInTheDocument()
+    expect(screen.getByText(NOTE)).toBeInTheDocument()
+  })
+})

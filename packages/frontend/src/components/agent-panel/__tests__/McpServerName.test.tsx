@@ -10,7 +10,12 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { McpServerName, signerNameFor } from '../McpServerName'
+import {
+  MCP_NOT_RECORDED_NOTE,
+  McpServerName,
+  hasUnrecordedMcpServerName,
+  signerNameFor,
+} from '../McpServerName'
 
 describe('McpServerName', () => {
   it('shows the reported name', () => {
@@ -67,6 +72,43 @@ describe('McpServerName', () => {
       fireEvent.click(screen.getByRole('button', { name: /copy mcp server name/i })),
     ).not.toThrow()
     expect(screen.getByText('haven-work')).toBeInTheDocument()
+  })
+
+  /**
+   * #2043: the null branch carries the LABEL and nothing else. Its
+   * explanation is hoisted to one note above the list (`AgentPanel`), because
+   * `AgentCard`'s composite `role="link"` means no tooltip here is reachable
+   * by keyboard or touch — see `MCP_NOT_RECORDED_NOTE`.
+   */
+  it('puts no explanation behind a hover a keyboard or touch user cannot perform', () => {
+    render(<McpServerName value={null} />)
+    const label = screen.getByText('not recorded')
+    expect(label).not.toHaveAttribute('aria-describedby')
+    fireEvent.mouseEnter(label)
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+    // The sentence is not merely un-tooltipped, it is not in this component
+    // at all — one home for it, above the list.
+    expect(document.body.textContent).not.toContain(MCP_NOT_RECORDED_NOTE)
+  })
+
+  it('still elaborates a RECORDED name on hover — that copy is elaboration, not the fact itself', () => {
+    // The distinction #2043 turns on. The name is already visible and already
+    // copyable; the tooltip adds its untruncated form and the derived signer
+    // half. Nothing here is reachable only through the tooltip.
+    render(<McpServerName value="haven-research" />)
+    fireEvent.mouseEnter(screen.getByText('haven-research'))
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      'MCP servers: haven-research and haven-signer-research',
+    )
+  })
+
+  it('flags a list as unrecorded on the same falsiness test the label uses', () => {
+    // One predicate for the note and the label, so they cannot disagree.
+    expect(hasUnrecordedMcpServerName([{ mcp_server_name: 'haven' }])).toBe(false)
+    expect(hasUnrecordedMcpServerName([{ mcp_server_name: null }])).toBe(true)
+    expect(hasUnrecordedMcpServerName([{}])).toBe(true)
+    expect(hasUnrecordedMcpServerName([{ mcp_server_name: 'haven' }, { mcp_server_name: null }])).toBe(true)
+    expect(hasUnrecordedMcpServerName([])).toBe(false)
   })
 
   it('derives the signer half for both pair shapes', () => {

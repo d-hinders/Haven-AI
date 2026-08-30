@@ -131,6 +131,7 @@ vi.mock('@/components/transactions/TransactionsTable', () => ({
   ),
 }))
 
+import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import AgentDetailClient from '../AgentDetailClient'
 
 const SAFE = {
@@ -806,6 +807,25 @@ describe('AgentDetailClient last-activity metadata', () => {
     render(<AgentDetailClient agentId="agent-1" />)
     expect(screen.queryByRole('button', { name: 'Remove agent' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Revoke agent budget' })).toBeInTheDocument()
+  })
+
+  /**
+   * #2230: this banner's sentence is the one BOTH surfaces render.
+   *
+   * `AgentCard.test.tsx` proves the card reads `lib/agent-pause-copy.ts`;
+   * that says nothing about this page, which is where the sentence came from.
+   * Both halves are needed, because the divergence #2230 is about could
+   * reappear by either surface re-hardcoding — and the module is only a
+   * mechanism until both ends actually read it.
+   *
+   * Compared against the module rather than a literal, on purpose: the words
+   * themselves are pinned once, in `lib/__tests__/agent-pause-copy.test.ts`.
+   */
+  it('renders the SHARED paused banner sentence, not a second copy of it (#2230)', () => {
+    mockAgentWith({ status: 'paused' })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getByRole('heading', { name: AGENT_PAUSED_TITLE })).toBeInTheDocument()
+    expect(screen.getByText(AGENT_PAUSED_BODY)).toBeInTheDocument()
   })
 
   it('offers Remove (archive leg) on a revoked legacy agent (#1402)', () => {

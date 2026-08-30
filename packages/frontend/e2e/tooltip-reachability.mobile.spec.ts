@@ -109,6 +109,16 @@ test.describe('Tooltip on touch (#2038)', () => {
       })
     })
 
+    // WARM THE DESTINATION FIRST, then come back and do the real thing.
+    //
+    // The tap navigates to `/agents/[agentId]`, and a cold `next dev` compile
+    // of that route costs 30-60s — more than this test's whole budget. That is
+    // an environment fact, not a claim about the primitive, and paying it
+    // inside the measured window is what made this test fail 2 runs in 3 and
+    // then again on a fresh server. Compiling it up front takes the compile
+    // out of the assertion's way without weakening anything the test claims:
+    // the tap, the navigation and the bubble check below are unchanged.
+    await page.goto(`/agents/${testAgent.id}`)
     await page.goto('/agents')
     await dismissMobileSidebar(page)
 

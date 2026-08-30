@@ -130,10 +130,24 @@ test.describe('Tooltip on touch (#2038)', () => {
     // own claim and is covered by `hosted-mcp.spec.ts`; asserting it here
     // would only add a route compile to this test's critical path.)
     await trigger.tap()
-    // Scoped to THIS label rather than to `[role="tooltip"]` at large: the tap
-    // navigates, and the emulated pointer lands wherever the next page puts
-    // it, so a bare role count can be reddened by a tooltip belonging to the
-    // destination screen.
+
+    // Let the navigation ARRIVE before asserting, rather than racing it.
+    //
+    // Not a convenience: a locator assertion issued mid-navigation resolves to
+    // `undefined` and burns its whole timeout "waiting for navigation to
+    // finish", which is a flake keyed to how long the destination route takes
+    // to compile — observed failing 2 runs in 3 on a cold `/agents/[agentId]`.
+    // Arriving first is also the STRONGER claim, and the one the test is
+    // actually about: `Tooltip` portals its bubble to `document.body` and this
+    // is a client-side route change, so a bubble opened by the tap would
+    // SURVIVE the navigation and hang over the destination. That is the
+    // failure this test exists to catch, and it is only observable once the
+    // destination is there.
+    await page.waitForURL(/\/agents\/[^/]+$/, { timeout: 30_000 })
+
+    // Scoped to THIS label rather than to `[role="tooltip"]` at large: the
+    // emulated pointer lands wherever the next page puts it, so a bare role
+    // count can be reddened by a tooltip belonging to the destination screen.
     await expect(page.locator('[role="tooltip"]', { hasText: CARD_PAIR_LABEL })).toHaveCount(0)
   })
 })

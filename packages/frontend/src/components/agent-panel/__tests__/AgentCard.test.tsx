@@ -226,8 +226,12 @@ describe('AgentCard paused notice copy (#2230)', () => {
       screen.getByRole('heading', { name: /Pause Research agent\?/ }),
       'the pause dialog did not open, so the absence check below is vacuous',
     ).toBeTruthy()
-    expect((container.textContent ?? '') + (document.body.textContent ?? '')).not.toContain(
-      'network permissions',
+    // Case-INSENSITIVE, on `haven-reviewer`'s own mutation: it reintroduced
+    // the divergence as "Network Permissions" and the `toContain` form stayed
+    // green. Nobody types that by accident, but a guard whose only job is to
+    // catch one phrase should not be defeatable by the shift key.
+    expect((container.textContent ?? '') + (document.body.textContent ?? '')).not.toMatch(
+      /network permissions/i,
     )
   })
 })

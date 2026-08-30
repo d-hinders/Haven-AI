@@ -41,6 +41,7 @@ import {
   FIXTURE_LEGACY_SAFE,
   FIXTURE_USER,
   FIXTURE_AGENTS,
+  SHARED_CHAIN_ROWS,
 } from '../../scripts/screenshot.mjs'
 import { decodeAbiParameters, encodeAbiParameters, parseAbiParameters, toFunctionSelector } from 'viem'
 import { getChainData, resolveToken } from '@haven_ai/core'
@@ -491,6 +492,49 @@ describe('the shared chain fixture', () => {
     }
   })
 
+  it('gives an `allowances` array ONLY to a delegation-rail agent — the legacy read surface is retired (#2224)', () => {
+    // The same defect class as `account_type: null`, one field over, and it
+    // was RENDERED: `agent-ops` (`account_type: 'safe'`) carried a 500 USDC /
+    // daily allowance row that no backend read can produce, and
+    // `AgentCard.showConfiguredFallback` turned it into a budget row on
+    // `/agents` — the row #2224's own evidence table was built on.
+    //
+    // Both agent reads fill this field the same way and neither consults
+    // `agent_allowances`:
+    //
+    //   GET /agents      `account_type === 'delegator_hybrid' ? derived : []`
+    //                    (`backend/src/routes/agents.ts:92-98`)
+    //   GET /agents/:id  the same branch (`:113-121`)
+    //
+    // where `derived` is `deriveDelegationAllowances` projecting the agent's
+    // ACTIVE `agent_delegations` rows (`rails/delegation-budget-view.ts`). The
+    // `agent_allowances` read surface is deleted outright — the four LIST_*
+    // projections are gone (`infra/repositories/agents.ts:232-237`,
+    // #1440/#2020) and the write routes answer 410.
+    //
+    // So the direction matters and both halves are asserted: a legacy-rail
+    // agent MUST have an empty array (nothing fills it), and a delegation-rail
+    // agent with a budget MUST have a non-empty one (the projection is what
+    // fills it — an agent with a delegation and an empty array renders its
+    // budget as raw atomic units, the state #2106 recorded).
+    const withAllowances = FIXTURE_AGENTS as unknown as (FixtureAgent & {
+      allowances: unknown[]
+    })[]
+    // Non-vacuity, both directions: a guard that finds no agent of either rail
+    // must not read as green.
+    expect(withAllowances.some((a) => a.account_type === 'safe')).toBe(true)
+    expect(withAllowances.some((a) => a.account_type === 'delegator_hybrid')).toBe(true)
+    for (const agent of withAllowances) {
+      if (agent.account_type === 'delegator_hybrid') continue
+      expect(
+        agent.allowances,
+        `${agent.id}: account_type '${agent.account_type}' is not the delegation rail, so ` +
+          `routes/agents.ts serves []. A non-empty array here is union-legal, path-impossible ` +
+          `and rendered as a budget row on /agents.`,
+      ).toEqual([])
+    }
+  })
+
   it('leaves every DELEGATION-rail delegate off-chain, so no card renders two spend limits', () => {
     // The complement of the test above, asserted rather than implied — the
     // shape #2194 was filed about is a value that is legal for its type and
@@ -516,17 +560,45 @@ describe('the shared chain fixture', () => {
     expect((tokens as string[]).map((t) => t.toLowerCase())).toEqual([
       usdcAddress(chainId).toLowerCase(),
     ])
-    // The API fixture's own allowance row for agent-ops.
-    const apiAllowance = (FIXTURE_AGENTS as { id: string; allowances: { token_address: string }[] }[])
-      .find((a) => a.id === 'agent-ops')!.allowances[0]!
-    expect(apiAllowance.token_address.toLowerCase()).toBe(
-      usdcAddress(chainId).toLowerCase(),
-    )
+    // #2224: this used to cross-check the chain's token against `agent-ops`'s
+    // API allowance row. That row is gone — a legacy-rail agent's `allowances`
+    // array is `[]` on every read — so the cross-check is replaced rather than
+    // deleted, against the source that is still there: every token any fixture
+    // agent states a budget in must be the SAME registry USDC this chain
+    // fixture serves. One token across the fixture is the invariant the old
+    // assertion was reaching for through `agent-ops`; it just no longer has to
+    // go through a row that cannot exist.
+    const apiTokens = (FIXTURE_AGENTS as { allowances: { token_address: string }[] }[])
+      .flatMap((a) => a.allowances)
+      .map((x) => x.token_address.toLowerCase())
+    expect(apiTokens.length, 'no fixture agent states a budget at all — vacuous').toBeGreaterThan(0)
+    for (const token of apiTokens) {
+      expect(token).toBe(usdcAddress(chainId).toLowerCase())
+    }
   })
 
-  it('agrees with the API fixture on the AMOUNT and the PERIOD', () => {
-    // The two sources render side by side on AgentPanel. A fixture whose chain
-    // and API disagree photographs a contradiction the product cannot produce.
+  it('answers the AMOUNT and PERIOD it was declared with, over the real wire', () => {
+    // #2224: this used to assert the chain answer equalled `agent-ops`'s API
+    // allowance, on the reasoning that the two render side by side and must not
+    // photograph a contradiction. The API side of that pair is gone (see the
+    // token test above), and with it the contradiction — the legacy account's
+    // budget now has exactly one source.
+    //
+    // What the assertion was ACTUALLY proving survives, and is stated directly:
+    // the fixture's ABI encoding round-trips. `makeAllowanceChainFixture`
+    // encodes `SHARED_CHAIN_ROWS` into `uint256[5]` return data and the app
+    // decodes it with viem; a wrong encoding is swallowed by
+    // `useOnChainAllowances` into an empty map and renders as a plausible empty
+    // card, so nothing else would say so. Anchored on the exported declaration
+    // rather than on pasted literals, so the numbers stay in one place.
+    //
+    // Be exact about what this is and is not, because the old and new versions
+    // look alike and guarantee different things (`haven-reviewer` on this
+    // change). It is a ROUND-TRIP proof of the encoder — a wrong slot order or
+    // a wrong scale in `allowance-chain-fixture.mjs` still fails it. It is NOT
+    // a cross-source consistency proof: the second, independently authored
+    // source it used to compare against no longer exists, because the API side
+    // is now correctly always `[]`.
     const encoded = encodeAbiParameters(parseAbiParameters('address,address,address'), [
       LEGACY.safe_address as `0x${string}`,
       '0x0000000000000000000000000000000000000000',
@@ -539,13 +611,15 @@ describe('the shared chain fixture', () => {
     const [row] = decodeAbiParameters(parseAbiParameters('uint256[5]'), data)
     const [amount, , resetTimeMin] = row as unknown as bigint[]
 
-    const apiAllowance = (FIXTURE_AGENTS as {
-      id: string
-      allowances: { allowance_amount: string; reset_period_min: number }[]
-    }[]).find((a) => a.id === 'agent-ops')!.allowances[0]!
+    const declared = (SHARED_CHAIN_ROWS as {
+      token: string
+      amount: bigint
+      resetTimeMin: number
+    }[]).find((r) => r.token.toLowerCase() === usdcAddress(chainId).toLowerCase())
+    expect(declared, 'SHARED_CHAIN_ROWS declares no USDC row — vacuous').toBeDefined()
 
-    expect(amount).toBe(BigInt(Math.round(Number(apiAllowance.allowance_amount) * 1e6)))
-    expect(Number(resetTimeMin)).toBe(apiAllowance.reset_period_min)
+    expect(amount).toBe(declared!.amount)
+    expect(Number(resetTimeMin)).toBe(declared!.resetTimeMin)
   })
 
   it('routes each account\'s reads by the SAFE they name, not by call order (#2202)', () => {

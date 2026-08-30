@@ -161,7 +161,48 @@ export function AllowanceBarSkeleton({ symbol }: { symbol: string }) {
 }
 
 /**
- * DB-configured allowance row, shown when on-chain data is unavailable.
+ * The agent's granted budget, rendered from the `agent.allowances` array.
+ *
+ * ── What the number actually is, and why the caption changed (#2224) ─────────
+ *
+ * This row was captioned **"Configured in Haven"**, which says Haven holds the
+ * limit. Traced to the code that emits the value, that is false on every path
+ * that can reach this component today:
+ *
+ *   - `GET /agents` and `GET /agents/:id` fill `allowances` from
+ *     `deriveDelegationAllowances` (`backend/src/routes/agents.ts:85-98` and
+ *     `:113-121`), which is `rails/delegation-budget-view.ts` projecting the
+ *     agent's **ACTIVE `agent_delegations` rows** — `budget_atomic` →
+ *     `allowance_amount`, `period_seconds / 60` → `reset_period_min`. Those are
+ *     the terms of a delegation the user SIGNED, enforced by the caveat
+ *     enforcers during redemption. That file's own header says it: *"Read/
+ *     reporting path ONLY: enforcement stays the on-chain delegation."*
+ *   - A legacy-rail agent gets `allowances: []` outright — the `agent_allowances`
+ *     read surface is retired (#1440/#2020, `infra/repositories/agents.ts:232-237`),
+ *     so no row renders here at all and the card shows "No agent budget
+ *     configured".
+ *
+ * So the array is never a Haven-side policy mirror. It is an on-chain-enforced
+ * envelope, reported. The caption inverted the one claim Haven makes everywhere
+ * else — `/custody` exists to say the limit is enforced by the account and not
+ * by Haven's database.
+ *
+ * **The wording is not new.** `/custody` already labels this exact data
+ * "Agent spend authority (enforced on-chain)" (`custody/page.tsx:249-251`,
+ * `:427`) and states the honesty caveat that applies here unchanged: *"These
+ * are the terms of the delegation you signed"* (`:314-316`) — the signed terms,
+ * not a fresh chain read. Inventing a third phrasing for one fact is the defect
+ * #2195 just fixed one surface over, so this reuses `/custody`'s.
+ *
+ * ── Why the "fallback" framing in the old header was wrong too ───────────────
+ *
+ * It said "shown when on-chain data is unavailable". On the delegation rail —
+ * the base for new accounts — this is the ORDINARY rendering, on the active
+ * account as much as off it: `useOnChainAllowances` reads the Safe
+ * AllowanceModule's delegate registry, a delegation-rail agent is not in it, so
+ * `onChainData.get(delegate)` is undefined and `AgentCard`'s
+ * `showConfiguredFallback` branch runs every time. `AllowanceBar` above is the
+ * legacy rail's meter, not the primary and not the general case.
  *
  * **Deliberately renders no bar (#1846).** `AgentAllowance` carries
  * `allowance_amount` and `reset_period_min` and nothing else — there is no
@@ -169,11 +210,23 @@ export function AllowanceBarSkeleton({ symbol }: { symbol: string }) {
  * used to sit here was `h-full w-full`: the same 3px geometry as `AllowanceBar`
  * above, permanently pegged at 100%, a meter that renders identically whatever
  * is true. It read as "fully spent" (or as a live meter that happens to be
- * pegged) when what is actually known is only the configured envelope.
+ * pegged) when what is actually known is only the granted envelope.
  *
  * If a spend figure ever reaches this shape, render `AllowanceBar` — do not
  * reintroduce a track here. `AllowanceBar.test.tsx` pins the split.
+ *
+ * The component keeps its name: it is named for its INPUT (the configured
+ * `allowances` projection), not for the claim it makes about it, and the claim
+ * was the defect.
  */
+/**
+ * The caption, exported so the test can assert the rendered string without
+ * restating it, and so a future third surface reuses it rather than minting a
+ * fourth phrasing. The independently-restated literal lives in
+ * `AllowanceBar.test.tsx`, which is what can catch an unintended copy change.
+ */
+export const GRANTED_BUDGET_CAPTION = 'Enforced on-chain'
+
 export function ConfiguredAllowanceRow({
   allowance,
   chainId,
@@ -193,7 +246,7 @@ export function ConfiguredAllowanceRow({
           {allowance.reset_period_min > 0 ? ` ${reset}` : ''}
         </span>
       </div>
-      <p className="text-xs text-[var(--v2-ink-3)]">Configured in Haven</p>
+      <p className="text-xs text-[var(--v2-ink-3)]">{GRANTED_BUDGET_CAPTION}</p>
     </div>
   )
 }

@@ -40,7 +40,7 @@ function agentFixture(overrides: Partial<Agent> = {}): Agent {
 
 function renderCard(agent: Agent, { canUseWalletActions = true } = {}) {
   const onRestore = vi.fn()
-  render(
+  const { container } = render(
     <AgentCard
       agent={agent}
       onChainAllowances={null}
@@ -58,7 +58,7 @@ function renderCard(agent: Agent, { canUseWalletActions = true } = {}) {
       canUseWalletActions={canUseWalletActions}
     />,
   )
-  return { onRestore }
+  return { onRestore, container }
 }
 
 /**
@@ -101,6 +101,80 @@ describe('AgentCard stranded-funds notice (#2195)', () => {
   it('shows nothing when the agent has no open reconciliation event', () => {
     renderCard(agentFixture())
     expect(screen.queryByText(STRANDED_FUNDS_TITLE)).toBeNull()
+  })
+})
+
+/**
+ * #2216: both of this card's notices are `ApprovalRequiredBanner`, not two
+ * hand-rolled copies of its shape.
+ *
+ * ── What is asserted here, and what is deliberately not ─────────────────────
+ *
+ * The defect was a COLOUR one — title and body painted `--v2-warning` where
+ * the primitive keeps prose in `--v2-ink` / `--v2-ink-2` and reserves the tint
+ * for the icon badge. jsdom resolves no stylesheet, so a colour claim cannot
+ * be made honestly in this file; it is made where it can be, against computed
+ * style on a real render, in `e2e/agent-panel-states.visual.spec.ts`.
+ *
+ * What IS user-experienced and checkable here is the structural half, and it
+ * is not a proxy for the colour: the hand-rolled notices titled themselves
+ * with a `<p>`, so a screen-reader user got two untitled paragraphs where the
+ * agent-detail banners for the same two facts announce headings. Asserting the
+ * heading role is therefore a claim about the accessibility tree in its own
+ * right — and it happens to be unsatisfiable without the primitive, which is
+ * what makes it the adoption guard too.
+ *
+ * The `<p>` absence assertion is the other half. Without it a card that
+ * rendered the primitive AND kept a hand-rolled copy beside it would pass:
+ * the heading would be found and the old paragraph would still be on screen.
+ */
+describe('AgentCard warning callouts use the shared primitive (#2216)', () => {
+  const CALLOUTS = [
+    { label: 'paused', title: 'Paused in Haven', overrides: { status: 'paused' } },
+    {
+      label: 'stranded',
+      title: STRANDED_FUNDS_TITLE,
+      overrides: { has_stranded_funds: true },
+    },
+  ] as const
+
+  for (const callout of CALLOUTS) {
+    it(`titles the ${callout.label} notice with a heading, as ApprovalRequiredBanner does`, () => {
+      renderCard(agentFixture(callout.overrides as Partial<Agent>))
+      expect(screen.getByRole('heading', { name: callout.title })).toBeTruthy()
+    })
+
+    it(`leaves no hand-rolled ${callout.label} copy beside it`, () => {
+      const { container } = renderCard(agentFixture(callout.overrides as Partial<Agent>))
+      const paragraphTitles = Array.from(container.querySelectorAll('p')).filter(
+        (p) => (p.textContent ?? '').trim() === callout.title,
+      )
+      expect(
+        paragraphTitles.length,
+        `the ${callout.label} notice is still titled by a <p> — either the primitive was ` +
+          `not adopted, or a hand-rolled copy survives beside it`,
+      ).toBe(0)
+    })
+  }
+
+  /**
+   * The stacked case, because the two notices are independent (an agent can
+   * accumulate stranded funds while active and then be paused) and a
+   * per-notice assertion cannot see a card that adopted the primitive for one
+   * and left the other hand-rolled — which is precisely the inconsistency
+   * #2216 says a partial fix would create INSIDE one card.
+   */
+  it('adopts it for BOTH notices at once, not one of the two', () => {
+    const { container } = renderCard(
+      agentFixture({ status: 'paused', has_stranded_funds: true } as Partial<Agent>),
+    )
+    const headings = Array.from(container.querySelectorAll('h3')).map((h) =>
+      (h.textContent ?? '').trim(),
+    )
+    // The agent's own name is an `h3` too, so it is expected here — listing it
+    // rather than filtering it out keeps this an exact-set assertion, which is
+    // what fails when a third untitled notice appears.
+    expect(headings).toEqual(['Research agent', 'Paused in Haven', STRANDED_FUNDS_TITLE])
   })
 })
 

@@ -3,7 +3,8 @@
  *
  * `test:visual` is the single entry point for both halves of the pixel gate:
  * the blocking *Design visual regression* CI job runs it, and the **Update
- * visual baselines** workflow runs it with `--update-snapshots=all`. Until
+ * visual baselines** workflow runs it with `--update-snapshots=<mode>` (#2218:
+ * `changed` by default, `all` only when explicitly dispatched). Until
  * #1863 it named ONE file explicitly:
  *
  *   playwright test e2e/design-system.visual.spec.ts --project=chromium-desktop

@@ -2,21 +2,67 @@
 #
 # Baselines MUST be Linux-rendered (CI is the judge; macOS fonts differ), so
 # intended visual changes are accepted by dispatching this workflow on the PR
-# branch: it rebuilds, reruns the visual spec with --update-snapshots=ALL, and
+# branch: it rebuilds, reruns the visual specs with --update-snapshots, and
 # commits the new baselines back to the branch — where they show up as a
 # reviewable image diff in the PR. This is also how the very first baseline
 # set was bootstrapped.
 #
-# `=all` is load-bearing and not a stylistic choice — see the note on the
-# Regenerate step below (#1760). Because `all` blesses whatever renders without
-# comparing anything, DIAGNOSE A FAILING DIFF BEFORE DISPATCHING THIS: scan the
-# diff PNG by row (a clean horizontal cut or a size-mismatch line is a height
-# change; a continuous colour difference at unchanged dimensions is drift).
-# Regenerating first is how a broken render becomes the expected state.
+# Just dispatch it. The defaults are the safe ones and the ordinary case needs
+# no inputs at all — see the `mode` input below for the one case that does.
+#
+# DIAGNOSE A FAILING DIFF BEFORE DISPATCHING THIS, in either mode: scan the diff
+# PNG by row (a clean horizontal cut or a size-mismatch line is a height change;
+# a continuous colour difference at unchanged dimensions is drift). Regenerating
+# first is how a broken render becomes the expected state.
 name: Update visual baselines
 
 on:
   workflow_dispatch:
+    inputs:
+      # #2218. This was a hardcoded `all`, and `all` is why a dispatch aimed at
+      # one baseline could silently re-bless others.
+      #
+      # In the installed Playwright (1.60.0), the two values are not variations
+      # on a theme — they take different code paths in
+      # `playwright/lib/matchers/expect.js`:
+      #
+      #   changed  the baseline is passed in as `expected`, the comparison runs
+      #            WITH the spec's `threshold` / `maxDiffPixels`, and the file is
+      #            rewritten only when that comparison FAILS.
+      #   all      `expected: undefined` is passed instead, so no comparison
+      #            happens at all, and the file is rewritten whenever the bytes
+      #            differ.
+      #
+      # (A bare `--update-snapshots` with no value means `changed` — the flag's
+      # `preset` in `playwright/lib/program.js`. Running with no flag at all
+      # means `missing`.)
+      #
+      # Measured cost of `all` being the default, on PR #2217: a dispatch that
+      # regenerated one deliberately-changed baseline also rewrote
+      # `unmanaged-delegate-card-desktop.png` — max channel delta 1, a one-pixel
+      # column at x=0, 180 px of 266,448, its test passing, its fixture seeding
+      # `agents: []` so the changed component never rendered in it. Caught only
+      # because a human diffed all 22 blob hashes; reverted in `02e3b719`.
+      #
+      # `all` is kept, because #1760 needs it: `changed` re-applies the gate's
+      # tolerance, so drift that sits UNDER budget is not merely un-failed but
+      # un-refreshable — that is the mechanical reason #1760's 2,084-pixel stale
+      # TopBar band survived every regeneration anyone dispatched, each of which
+      # reported "Baselines unchanged — nothing to commit." The gate's tolerance
+      # decides what FAILS; it must not permanently decide what can be REFRESHED.
+      #
+      # So the unsafe mode stays reachable and stops being the default, and the
+      # audit step below watches it.
+      mode:
+        description: 'changed = rewrite only baselines that FAIL comparison (default). all = rewrite on any byte difference; needs `expected`, and blesses renders nobody compared.'
+        type: choice
+        default: changed
+        options: [changed, all]
+      expected:
+        description: 'Baselines you expect to move, comma/newline separated (names or paths). Optional under `changed`; REQUIRED under `all`, where `*` means "accept a full refresh".'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -87,33 +133,53 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: packages/frontend
 
-      # `=all`, NOT the bare flag (#1760). Playwright reads a bare
-      # `--update-snapshots` as `changed`, and `changed` still runs the
-      # comparison WITH the spec's tolerance applied: a capture that differs
-      # from its baseline but stays under budget takes the "matching" path and
-      # is NOT rewritten (playwright/lib/matchers/expect.js — `if (!errorMessage)
-      # … return helper.handleMatching()`).
+      # The mode is the dispatch input, defaulting to `changed`. The full
+      # comparison of the two values, and why `all` survives at all, is on the
+      # `mode` input at the top of this file — it belongs where the person
+      # choosing it is looking, not here.
       #
-      # That made sub-tolerance drift permanently un-refreshable, which is the
-      # mechanical reason #1760's stale baselines survived every regeneration
-      # anyone dispatched. Measured on 2026-08-22: the committed mobile baseline
-      # differed from the live render by 2,084 pixels — all of them inside the
-      # 56px TopBar band — and a bare `--update-snapshots` run left the file
-      # untouched and reported "Baselines unchanged — nothing to commit."
+      # `--update-snapshots=` is deliberately written with an explicit value
+      # rather than as a bare flag: a bare `--update-snapshots` resolves to
+      # `changed` today by way of the flag's `preset`, which is a Playwright
+      # implementation detail this workflow should not be betting on.
       #
-      # `all` skips the comparison entirely (it passes `expected: undefined`) and
-      # rewrites whenever the bytes differ, which is what "regenerate" has always
-      # meant here. The gate's tolerance decides what FAILS; it must not also
-      # decide what can be refreshed.
+      # The input reaches the shell through `env:` and a quoted variable, never
+      # through `${{ }}` interpolated into the `run:` body. `type: choice` is a
+      # UI convenience — the dispatch API does not enforce the option list —
+      # so an interpolated `mode` would be an arbitrary caller-supplied string
+      # pasted into a shell command. Playwright then rejects anything outside
+      # its own `choices`, so a bogus value fails the step instead of running.
       - name: Regenerate baselines
-        run: npm run test:visual -w packages/frontend -- --update-snapshots=all
+        run: npm run test:visual -w packages/frontend -- --update-snapshots="$UPDATE_MODE"
         env:
+          UPDATE_MODE: ${{ inputs.mode }}
           CI: 1
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
           NEXT_TELEMETRY_DISABLED: 1
 
+      # #2218. Runs BEFORE the commit, so a baseline this dispatch did not come
+      # for is never pushed in the first place.
+      #
+      # It always emits the blob-hash delta of every baseline that moved — the
+      # audit that caught #2217, now performed by the workflow instead of by
+      # whoever remembered. It fails the run only when the dispatcher declared an
+      # `expected` set and something outside it moved, or when `all` was chosen
+      # with nothing declared. The default one-dispatch path stays green with no
+      # inputs; a guard that fires on every dispatch gets routed around, and
+      # routing around this one means `--update-snapshots` on a laptop, which is
+      # worse than where we started. Rationale and tests: scripts/ci/baseline-audit.mjs
+      # and its `node --test` sibling (run by ci.yml).
+      - name: Audit which baselines moved
+        id: audit
+        env:
+          UPDATE_MODE: ${{ inputs.mode }}
+          EXPECTED_BASELINES: ${{ inputs.expected }}
+        run: node scripts/ci/baseline-audit.mjs
+
       - name: Commit baselines to the branch
         id: commit
+        env:
+          AUDIT_TRAILER: ${{ steps.audit.outputs.trailer }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -122,7 +188,10 @@ jobs:
             echo "Baselines unchanged — nothing to commit."
             echo "committed=false" >> "$GITHUB_OUTPUT"
           else
-            git commit -m "chore: regenerate /design-system visual baselines (Linux-rendered)"
+            # The audit's one-line delta rides in the commit message, so the
+            # answer to "which baselines did this dispatch move, and from which
+            # blobs" outlives the run's log-retention window.
+            git commit -m "chore: regenerate /design-system visual baselines (Linux-rendered)" -m "$AUDIT_TRAILER"
             git push
             echo "committed=true" >> "$GITHUB_OUTPUT"
             echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"

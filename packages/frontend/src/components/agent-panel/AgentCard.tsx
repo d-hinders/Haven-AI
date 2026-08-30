@@ -7,6 +7,7 @@ import { type Agent } from '@/hooks/useAgents'
 import { type AllowanceInfo } from '@/lib/allowance-module'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
+import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
 import ConfirmDialog from '../ConfirmDialog'
 import { RemoveAgentDialog } from './RemoveAgentDialog'
@@ -140,8 +141,40 @@ export function AgentCard({
             <BotIcon size={16} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-[var(--v2-ink)] truncate">
+            {/* #2237: the title row WRAPS, so the name stops paying for the
+                status pill. Same idiom as `components/haven/
+                TransactionActivityRow.tsx` (#1833), `WalletIdentityBlock.tsx`
+                and, since #2223, the `/accounts` card — `flex flex-wrap
+                items-center gap-2` around a `min-w-0 truncate` name.
+
+                This is a REAL defect here, not only an inconsistency, and it
+                was measured before it was fixed. At 1280 this row's content is
+                259px and the `paused` pill is 54.5px + an 8px gap. Without
+                `flex-wrap` the pill is the row's incompressible item, so the
+                name is capped at 196.7px whatever it says — "Nightly data-feed
+                reconciliation agent" measures 256.2px, FITS the row, and was
+                still rendered ellipsised at 75.9% of it. Every name past
+                196.5px truncated 62.5px earlier than the card required.
+
+                WHAT WRAPPING COSTS, stated rather than buried. When the pill
+                does move down, the title row grows one line: 20px -> 48px, and
+                the card 332px -> 360px. That cost is confined to the card that
+                wraps, because `AgentPanel`'s grid is `items-start` — unlike
+                `/accounts`, whose `align-items: stretch` propagated #2223's
+                wrap to the whole grid row as 28px of dead whitespace. Nothing
+                else on this row can pay: at most ONE pill renders (`!isActive`),
+                so there is no badge pair to orphan (#2235) and no hover-action
+                reservation to derive (#2236) — both of #2240's fixes are
+                inapplicable here, which is why this stayed a separate issue.
+
+                `min-w-0` on the `h3` is redundant given `truncate`
+                (`overflow: hidden` already resolves `min-width: auto` to 0, and
+                removing it alone leaves the geometry suite green — mutated and
+                measured). It is written anyway because all three sibling
+                surfaces write it, and an idiom that is only sometimes complete
+                is the thing this issue is about. */}
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="min-w-0 truncate text-sm font-semibold text-[var(--v2-ink)]">
                 {agent.name}
               </h3>
               {!isActive ? (
@@ -214,17 +247,16 @@ export function AgentCard({
           it. Choosing anything else here would leave one fact rendered two
           ways on two screens the card's own link navigates between, which is
           exactly the #2195 defect this is the styling half of. */}
-      {/* The BODY still diverges from the detail page's ("Existing wallet
-          rules stay in place", `AgentDetailClient.tsx:667`) and that is
-          deferred, not overlooked — filed as #2230. Picking which noun is
-          right is a copy decision about what a Haven-side pause leaves
-          standing (the signed delegation, enforced on-chain), and #2195's own
-          resolution is the precedent for how: one shared clause in `src/lib/`,
-          not two hand-maintained strings that happen to agree. */}
+      {/* #2230 (the BODY half #2216 deferred): title and body now come from
+          `lib/agent-pause-copy.ts`, shared with the detail page's banner one
+          click away. The card used to say "Existing network permissions stay
+          in place" where the detail page said "Existing wallet rules" — the
+          detail page's wording was TAKEN rather than a third one written, for
+          the usage / register / accuracy reasons recorded in that module. */}
       {isPaused && (
         <div className="mb-3">
-          <ApprovalRequiredBanner title="Paused in Haven" tone="neutral" density="compact">
-            New agent payments are blocked until you resume this agent. Existing network permissions stay in place.
+          <ApprovalRequiredBanner title={AGENT_PAUSED_TITLE} tone="neutral" density="compact">
+            {AGENT_PAUSED_BODY}
           </ApprovalRequiredBanner>
         </div>
       )}
@@ -476,12 +508,16 @@ export function AgentCard({
       body={
         <div className="space-y-3">
           <p>
-            Pausing stops this agent from creating new payments through Haven right away, without changing its network permissions.
+            {/* #2230: the same noun as the banner above and the detail page.
+                Leaving "network permissions" here would have replaced a
+                divergence BETWEEN two screens with one INSIDE a single file,
+                for the same fact — a strictly worse version of the defect. */}
+            Pausing stops this agent from creating new payments through Haven right away, without changing its wallet rules.
           </p>
           <div className="rounded-lg border border-brand/15 bg-[var(--v2-brand-soft)] px-3 py-3 text-[var(--v2-ink-2)]">
             <p className="text-xs font-medium text-[var(--v2-brand)] mb-1">What stays the same</p>
             <p className="text-xs leading-relaxed">
-              The agent&apos;s network permissions remain in place. You can resume this agent later without reconnecting or reconfiguring it.
+              The agent&apos;s wallet rules remain in place. You can resume this agent later without reconnecting or reconfiguring it.
             </p>
           </div>
           <p className="text-xs text-[var(--v2-ink-2)]">

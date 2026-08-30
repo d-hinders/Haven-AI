@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import type { Agent } from '@/hooks/useAgents'
+import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
 
 /** Escape a copy string for use inside a text-matching RegExp. */
@@ -175,6 +176,63 @@ describe('AgentCard warning callouts use the shared primitive (#2216)', () => {
     // rather than filtering it out keeps this an exact-set assertion, which is
     // what fails when a third untitled notice appears.
     expect(headings).toEqual(['Research agent', 'Paused in Haven', STRANDED_FUNDS_TITLE])
+  })
+})
+
+/**
+ * #2230: the paused notice's WORDS, not just its shape.
+ *
+ * #2216 made this card and the agent-detail banner agree on `tone` for the
+ * same fact, on the argument that leaving one fact rendered two ways across
+ * the link the card itself provides is the #2195 defect. The bodies still
+ * disagreed — "Existing NETWORK PERMISSIONS stay in place" here, "Existing
+ * WALLET RULES stay in place" there. The detail page's wording was TAKEN
+ * rather than a third written; `lib/agent-pause-copy.ts` records why.
+ *
+ * These assertions compare the render against that module on purpose, exactly
+ * as the #2195 block above does: the claim under test is "this surface renders
+ * the SHARED sentence", so importing it is what makes a re-divergence fail.
+ * The independently-restated literals live in `agent-pause-copy.test.ts`, and
+ * the detail page's half is asserted in its own test file — one surface
+ * proving it reads the module says nothing about the other.
+ */
+describe('AgentCard paused notice copy (#2230)', () => {
+  it('renders the shared title and the shared body', () => {
+    renderCard(agentFixture({ status: 'paused' } as Partial<Agent>))
+    expect(screen.getByRole('heading', { name: AGENT_PAUSED_TITLE })).toBeTruthy()
+    expect(screen.getByText(new RegExp(escapeRe(AGENT_PAUSED_BODY)))).toBeTruthy()
+  })
+
+  /**
+   * The card's OTHER account of a pause — the confirm dialog — has to use the
+   * same noun.
+   *
+   * Converging the banner alone would have replaced a divergence BETWEEN two
+   * screens with one INSIDE a single file, describing the same fact two
+   * paragraphs apart: strictly worse than what #2230 was filed about. The
+   * dialog's prose is hand-maintained rather than shared (it says more than
+   * the banner and is not a candidate for one clause), so this is the cheap
+   * literal guard the rework caps explicitly keep — a blanket `not.toContain`
+   * on a phrase this file now has no legitimate use for, not an assertion that
+   * interprets a sentence.
+   */
+  it('says the same thing in the pause dialog — no "network permissions" anywhere on this card', () => {
+    const { container } = renderCard(agentFixture({ status: 'active' } as Partial<Agent>))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause Research agent' }))
+    // Non-vacuity: the dialog must actually be open, or this passes on an
+    // empty haystack — which is how a `not.toContain` guard goes quietly
+    // useless.
+    expect(
+      screen.getByRole('heading', { name: /Pause Research agent\?/ }),
+      'the pause dialog did not open, so the absence check below is vacuous',
+    ).toBeTruthy()
+    // Case-INSENSITIVE, on `haven-reviewer`'s own mutation: it reintroduced
+    // the divergence as "Network Permissions" and the `toContain` form stayed
+    // green. Nobody types that by accident, but a guard whose only job is to
+    // catch one phrase should not be defeatable by the shift key.
+    expect((container.textContent ?? '') + (document.body.textContent ?? '')).not.toMatch(
+      /network permissions/i,
+    )
   })
 })
 

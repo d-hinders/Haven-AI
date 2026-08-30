@@ -25,6 +25,7 @@ import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
 import { formatAgentLastActivityTitle, formatAgentLastActivityValue } from '@/lib/agent-last-seen'
+import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import {
   STRANDED_FUNDS_TITLE,
   reviewStrandedPaymentsLabel,
@@ -663,8 +664,14 @@ export default function AgentDetailClient({ agentId }: Props) {
 
       {isPaused ? (
         <div className="mt-4">
-          <ApprovalRequiredBanner title="Paused in Haven" tone="neutral" density="compact">
-            New agent payments are blocked until you resume this agent. Existing wallet rules stay in place.
+          {/* #2230: title and body come from `lib/agent-pause-copy.ts`, shared
+              with `AgentCard`'s banner one click away. This page's wording is
+              the one that was TAKEN — the card said "network permissions" for
+              the same fact; see that module for why this one is the settled
+              phrasing. The rendered sentence here is byte-identical to what
+              stood before. */}
+          <ApprovalRequiredBanner title={AGENT_PAUSED_TITLE} tone="neutral" density="compact">
+            {AGENT_PAUSED_BODY}
           </ApprovalRequiredBanner>
         </div>
       ) : null}

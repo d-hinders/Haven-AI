@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -372,8 +373,15 @@ export function WalletPopover({
    * the `/design-system` illustration, which passes `anchorRef={{ current: null }}`:
    * a static showcase inside a scrolling page needs no viewport clamp, and
    * leaving it unbounded is also what keeps the committed pixel baselines still.
+   *
+   * `useLayoutEffect`, not `useEffect` (haven-reviewer on this PR). A passive
+   * effect runs AFTER paint, so at a viewport where the clamp actually bites
+   * the browser could paint one unbounded 430px frame and then snap to the
+   * clamped height — a visible pop-in, on exactly the geometry this change
+   * exists to fix. The anchor is already mounted when this runs, so its rect
+   * is available synchronously and there is no cost to measuring before paint.
    */
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return
     const measure = () => {
       const anchor = anchorRef.current

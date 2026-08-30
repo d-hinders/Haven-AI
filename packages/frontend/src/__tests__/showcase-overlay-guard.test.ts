@@ -47,6 +47,13 @@
  * - a copy held open some other way — `useState(true)`, a `defaultOpen`/
  *   `forceOpen`-shaped prop, or a component that simply renders its overlay body
  *   unconditionally — is invisible here;
+ * - a TAUTOLOGICAL gate reads as a real one. The exemption below is syntactic:
+ *   any ancestor `{cond ? … }` / `{cond && … }` counts, whether or not `cond` can
+ *   ever be false. `{true && <X open />}` and a ternary whose BOTH branches render
+ *   the same unwrapped overlay open are both accepted, and a review pass on #2002
+ *   confirmed that by running them. Deciding otherwise means evaluating the
+ *   condition, which a source scan cannot do; the honest statement is that this
+ *   guard refuses the careless shape, not a deliberately disguised one;
  * - a wrapper supplied by a COMPONENT rather than by an inline JSX element would
  *   be reported as a violation, because the ancestor walk only sees JSX in these
  *   files. That errs toward red, which is the safe direction for a guard;
@@ -135,6 +142,11 @@ function isSuppressingWrapper(node: OpeningLike): boolean {
  * counts as one. A `.map()` or any other expression does NOT exempt an element:
  * a static array of open popovers is still permanently open, and an unknown
  * shape should land in the red set rather than quietly leave it.
+ *
+ * The exemption is SYNTACTIC and stops there: `{true && <X open />}` is accepted
+ * even though nothing about it is conditional. See "What this guard cannot see"
+ * above — that blind spot is named rather than papered over, because evaluating
+ * the condition is not something a source scan can do.
  */
 function isUnconditionallyRendered(node: ts.Node): boolean {
   for (let current = node.parent; current; current = current.parent) {

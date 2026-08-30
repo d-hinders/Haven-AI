@@ -1,0 +1,67 @@
+name: Scheduled guard freshness
+
+# Makes a scheduled CI guard's ABSENCE detectable (#2208).
+#
+# A scheduled job that silently stops running looks exactly like a passing one:
+# a renamed workflow file, an edited cron, an expired token, a changed default
+# branch, or GitHub disabling schedules after 60 days of repo inactivity all end
+# with "the last thing anybody saw was green". `db-concurrency-proof.yml` is
+# nightly and non-gating, so nothing else would ever notice.
+#
+# ## Why this is driven by `push`, not by a cron of its own
+#
+# A cron watching a cron dies with it — the repo-level causes above take both at
+# once. The load-bearing trigger here is therefore a push to `main`/`dev`, which
+# this repository emits on every merge and cannot stop emitting while it is
+# being worked on. The weekly cron is a floor for quiet periods, not the
+# mechanism.
+#
+# The complementary, faster layer lives in `scripts/ci/db-concurrency-proof.test.mjs`
+# and `scripts/ci/guard-freshness.test.mjs`, which run on EVERY pull request via
+# ci.yml's dependency-free `Repo CI config checks` job and assert that each
+# registered workflow file, each required test-case title and the env gate are
+# all still where the nightly points. Renaming something goes red at PR time;
+# this workflow covers the slower "it ran, then it stopped".
+#
+# Report-only: it never fails the build. The signal is an issue labelled
+# `ci-health` + `code-quality` — the second label puts it in the ship-next
+# queue, so staleness becomes a work item rather than a red square on unrelated
+# work, which is how a nightly gets muted.
+
+on:
+  push:
+    branches: [main, dev]
+  schedule:
+    - cron: '27 7 * * 1' # Mondays 07:27 UTC — a floor, not the mechanism.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read # reads other workflows' run history
+  issues: write
+
+concurrency:
+  group: guard-freshness
+  cancel-in-progress: true
+
+jobs:
+  freshness:
+    name: Report scheduled-guard freshness
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      # Dependency-free by design — no `npm ci`. A watchdog that can be taken
+      # out by an install failure is a watchdog that reports green when it is
+      # broken, which is the defect it exists to catch.
+      - name: Evaluate registered guards
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/guard-freshness.mjs

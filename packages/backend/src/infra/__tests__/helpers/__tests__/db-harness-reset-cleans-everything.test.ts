@@ -45,12 +45,22 @@ async function tableCensus(): Promise<Array<{ table: string; rows: number }>> {
 }
 
 /**
- * Rows across the foreign-key graph — a parent, its child, and a grandchild —
- * so the delete ORDER is exercised, not just the coverage. Named literally:
- * these three are the positive control, and shrinking them would weaken the
- * control visibly rather than silently.
+ * The positive control, named as independent literals so shrinking it weakens
+ * the control visibly rather than silently.
+ *
+ * Two shapes, and the second is the one that makes the control SHARP:
+ *
+ * - `users` → `agents` → `agent_allowances` is a foreign-key chain, so it
+ *   exercises the delete ORDER, not just the coverage.
+ * - `rate_limit_counters` is deliberately a table that **no cascade can
+ *   reach** — it has no foreign key at all, so nothing empties it as a side
+ *   effect of emptying something else. Without it, dropping a table from the
+ *   reset's coverage is invisible here: `ON DELETE CASCADE` cleans up the
+ *   dropped child anyway, and the census still passes. (Measured — mutation
+ *   M1 of #2211 removed `agent_allowances` from the reset's table list and
+ *   survived the first version of this file for exactly that reason.)
  */
-const SEEDED_TABLES = ['users', 'agents', 'agent_allowances'] as const
+const SEEDED_TABLES = ['users', 'agents', 'agent_allowances', 'rate_limit_counters'] as const
 
 async function seed(): Promise<void> {
   const user = await db.query<{ id: string }>(
@@ -65,6 +75,11 @@ async function seed(): Promise<void> {
     `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount)
      VALUES ($1, '0x0000000000000000000000000000000000000001', 'USDC', '1')`,
     [agent.rows[0].id],
+  )
+  await db.query(
+    `INSERT INTO rate_limit_counters (key, count, expires_at)
+     VALUES ($1, 1, NOW() + INTERVAL '1 hour')`,
+    [`reset-census-${Date.now()}-${Math.random()}`],
   )
 }
 

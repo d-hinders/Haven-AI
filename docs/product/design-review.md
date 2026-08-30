@@ -18,7 +18,7 @@ covers:
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
-last-verified: "2026-08-27" # #2097: files this doc `covers:` by exact path were re-verified — `docs/product/design-system.md` and `docs/product/screen-recipes.md` both record the reserved-`You` initiator rule; the review checklist itself is unchanged. Scope: those covered-file relationships only. Prior: #2102: the Haven-domain component list named "approvals" as a surface those components are reused for. The approvals screen was deleted by #1989 and its route deregistered by #2055. Scope: that one bullet. Prior: #2038: the tooltip checklist line gains touch and the composite-control limit. Verified ONLY that line, against `ui/Tooltip.tsx` and the two e2e suites that measure it. NOT a re-read of this file. Prior: #1989: the app-shell review checklist told reviewers to verify the "Approvals badge"; the sidebar entry and its live badge are deleted with the Safe rail. Scope: that one checklist line — no other claim in this file was re-read. Prior: the haven-reviewer rule is unconditional (owner decision 2026-08-21) — this file scoped it to a risk list, which is the licence three skips in one session were drawn from. AGENTS.md is canonical. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-30" # #2002: § *Final Verification* — the "Inspect `/design-system`" line said inspect and stopped there, which is the substitution this checklist most needs to refuse: a reviewer who looked at the showcase can believe they reviewed the component. It now names what a showcase cannot show and sends behaviour review to the real call site, pointing at the new `design-system.md` § 6 rule. Verified ONLY that one bullet, against a fresh census of `/design-system` (one permanently-open showcase, `WalletPopover`, two instances; every other overlay trigger-driven). No other line in this file was re-read — the #2038 tooltip bullet above it was left exactly as it stands. Prior: #2097: files this doc `covers:` by exact path were re-verified — `docs/product/design-system.md` and `docs/product/screen-recipes.md` both record the reserved-`You` initiator rule; the review checklist itself is unchanged. Scope: those covered-file relationships only. Prior: #2102: the Haven-domain component list named "approvals" as a surface those components are reused for. The approvals screen was deleted by #1989 and its route deregistered by #2055. Scope: that one bullet. Prior: #2038: the tooltip checklist line gains touch and the composite-control limit. Verified ONLY that line, against `ui/Tooltip.tsx` and the two e2e suites that measure it. NOT a re-read of this file. Prior: #1989: the app-shell review checklist told reviewers to verify the "Approvals badge"; the sidebar entry and its live badge are deleted with the Safe rail. Scope: that one checklist line — no other claim in this file was re-read. Prior: the haven-reviewer rule is unconditional (owner decision 2026-08-21) — this file scoped it to a risk list, which is the licence three skips in one session were drawn from. AGENTS.md is canonical. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Haven AI UX Review
@@ -110,7 +110,14 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
 
 ## Final Verification
 
-- Inspect `/design-system` when adding or changing shared UI patterns.
+- Inspect `/design-system` when adding or changing shared UI patterns — and be
+  clear what that buys. The page is a rendering of a component's APPEARANCE, not
+  a test of its behaviour, and a showcase copy held permanently open (today only
+  `WalletPopover`'s two states) additionally skips mount/unmount, focus trapping,
+  focus return, Escape and scroll lock. Reviewing the showcase is not reviewing
+  the component: check behaviour at the real call site
+  ([`design-system.md`](./design-system.md) § 6 → *Showcase copies of overlays*,
+  [#2002](https://github.com/d-hinders/Haven-AI/issues/2002)).
 - Check at least one desktop and one mobile viewport for changed screens.
 - Capture rendered-screen evidence for any diff touching a rendered route or a
   shared primitive: `npm run screenshot -w packages/frontend -- <routes>`

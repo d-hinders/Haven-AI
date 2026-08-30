@@ -84,7 +84,7 @@
  * was, and is why (2) exists rather than a second literal name.
  */
 import { expect, test, type Page } from '@playwright/test'
-import { mockHavenApi, seedAuthenticatedSession, testSafe, testUser } from './fixtures/haven-api'
+import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession, testSafe, testUser } from './fixtures/haven-api'
 
 /** The name in the issue, and the shared capture fixture's own. 17 characters. */
 const ORDINARY_NAME = 'Operating wallet'
@@ -286,6 +286,12 @@ async function readCardSettled(page: Page, accountName: string): Promise<CardRea
  * "hover didn't happen" is how a geometry check becomes vacuous.
  */
 async function hoverCardUntilActionsVisible(page: Page, accountName: string): Promise<number> {
+  // Below `lg` the nav drawer overlays the grid and intercepts the hover, so
+  // `elementFromPoint` at a card's centre returns the `<nav>` and the card
+  // never enters `:hover`. This is the established fix (#1749) and the same
+  // call `tooltip-reachability.spec.ts:123` makes before its own hover — a
+  // no-op at 1280, which is why it lives here rather than at each call site.
+  await dismissMobileSidebar(page)
   const card = page.locator(`a[aria-label="${accountName}"]`)
   await card.scrollIntoViewIfNeeded()
   let opacity = 0
@@ -509,17 +515,10 @@ test('/accounts: the hover actions reserve their own width and never cover the n
     { ...testSafe, name: ORDINARY_NAME, is_default: true },
     { ...SECOND_SAFE, name: ACTION_CARD_NAME },
   ])
+  await openAccounts(page)
+
   for (const width of WIDTHS) {
-    // Set the viewport and RELOAD, rather than resizing a page that was laid
-    // out at the other width. Resizing 1280 -> 390 in place leaves the mobile
-    // navigation drawer mounted and covering the grid: `elementFromPoint` at
-    // the card's centre returns the `<nav>`, the card never enters `:hover`,
-    // and the actions stay at `opacity: 0`. That is a harness artefact of the
-    // resize, not a product defect — the other tests here never noticed it
-    // because a fixed overlay does not move the card's geometry, only its
-    // hit-testing. A pointer test has to load the width it is testing.
     await page.setViewportSize({ width, height: 900 })
-    await openAccounts(page)
 
     // (a) The action-bearing card, hovered.
     const achievedOpacity = await hoverCardUntilActionsVisible(page, ACTION_CARD_NAME)
@@ -621,9 +620,10 @@ test('/accounts: a card with one badge and one action reserves only that action'
     { ...SECOND_SAFE, name: DEFAULT_NOT_ACTIVE, is_default: true },
   ])
 
+  await openAccounts(page)
+
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: 900 })
-    await openAccounts(page)
 
     for (const [name, badge] of [
       [ACTIVE_NOT_DEFAULT, 'Active'],

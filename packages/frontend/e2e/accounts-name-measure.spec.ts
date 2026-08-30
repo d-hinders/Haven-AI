@@ -38,6 +38,23 @@
  *
  * The single-account case is asserted too — it is what the defect hid behind,
  * and it must stay unchanged.
+ *
+ * WHICH ARM CATCHES WHICH WIDTH, measured on unchanged `origin/dev` rather
+ * than assumed, because the two arms are NOT redundant:
+ *
+ *   @1280  (1) fails: "Operating wallet" ellipsised into 90.4px of a 217px
+ *          row — 41.7%. (2) fails at 49.9%.
+ *   @390   (1) PASSES: the same name measures 125.7px against a natural
+ *          126.9px in a 252px row, so at this project's deviceScaleFactor 1
+ *          it fits by about a pixel and is not ellipsised. (2) fails at
+ *          49.9%.
+ *
+ * So the mobile half of the defect is caught by the UNBOUNDED arm, not by the
+ * ordinary one — stated here so nobody reads a green (1) at 390 as evidence
+ * that 390 was ever checked by it. The capture harness renders 390 at
+ * deviceScaleFactor 2, where the same string DOES ellipsise ("Operating
+ * wal…", the issue's own reading); that one pixel is exactly how narrow the
+ * margin was, and is the reason (2) exists rather than a second literal name.
  */
 import { expect, test, type Page } from '@playwright/test'
 import { mockHavenApi, seedAuthenticatedSession, testSafe, testUser } from './fixtures/haven-api'

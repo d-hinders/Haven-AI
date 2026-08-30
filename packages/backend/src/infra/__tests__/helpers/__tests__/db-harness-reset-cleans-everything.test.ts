@@ -45,10 +45,14 @@ async function tableCensus(): Promise<Array<{ table: string; rows: number }>> {
   )
   if (tables.length === 0) return []
   const census = tables
-    .map(
-      ({ tablename }) =>
-        `SELECT '${tablename}' AS t, (SELECT COUNT(*) FROM ${WORKER_SCHEMA}."${tablename}") AS n`,
-    )
+    .map(({ tablename }) => {
+      // Escaped rather than interpolated raw. Every table here is plain
+      // snake_case today, but a census that would break on a name the harness
+      // handles fine is a census that stops being the independent check.
+      const literal = tablename.replace(/'/g, "''")
+      const identifier = tablename.replace(/"/g, '""')
+      return `SELECT '${literal}' AS t, (SELECT COUNT(*) FROM ${WORKER_SCHEMA}."${identifier}") AS n`
+    })
     .join(' UNION ALL ')
   const { rows } = await db.query<{ t: string; n: string }>(census)
   return rows.map((r) => ({ table: r.t, rows: Number(r.n) }))
@@ -119,6 +123,37 @@ describeDb('resetDb leaves the worker schema genuinely clean (#2211)', () => {
     // real schema, not an empty result set.
     expect(after.length).toBeGreaterThanOrEqual(before.length)
     expect(after.filter((t) => t.rows !== 0)).toEqual([])
+  })
+
+  it('leaves schema_migrations alone — the one table the reset must NOT empty', async () => {
+    // The census above cannot see this. It excludes `schema_migrations` with
+    // the same predicate the reset uses, so a reset that stopped excluding it
+    // would agree with a census that also stopped looking — #2208's shape,
+    // and the reviewer's finding on the first draft of this file.
+    //
+    // The failure is worse than a dirty table, too: wiping the applied-version
+    // rows makes the NEXT `initDbHarness()` replay migration 000 against a
+    // schema that already has the later DDL, which dies with a confusing
+    // "column ... does not exist" — in a LATER run, against a worker schema
+    // that outlives this one.
+    //
+    // So this asserts the invariant directly, against an expectation that is
+    // not derived from the reset: the versions recorded before a reset are
+    // still recorded after it.
+    const versionsBefore = await db.query<{ version: string }>(
+      `SELECT version FROM ${WORKER_SCHEMA}.schema_migrations ORDER BY version`,
+    )
+    // A vacuous pass is the risk here — an empty table survives any reset.
+    expect(versionsBefore.rows.length).toBeGreaterThan(0)
+
+    await resetDb()
+
+    const versionsAfter = await db.query<{ version: string }>(
+      `SELECT version FROM ${WORKER_SCHEMA}.schema_migrations ORDER BY version`,
+    )
+    expect(versionsAfter.rows.map((r) => r.version)).toEqual(
+      versionsBefore.rows.map((r) => r.version),
+    )
   })
 
   it('restarts sequences that a test advanced, as RESTART IDENTITY did', async () => {

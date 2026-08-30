@@ -355,7 +355,12 @@ async function readSchemaShape(): Promise<SchemaShape> {
  * path restores explicitly:
  *
  * - **Order.** `DELETE` enforces foreign keys, so referencing tables are
- *   emptied first (`planDeleteOrder`). `CASCADE` did that implicitly.
+ *   emptied first (`planDeleteOrder`). `CASCADE` did that implicitly. Most of
+ *   this schema's foreign keys are `ON DELETE CASCADE`, which would tolerate
+ *   almost any order — but not all of them are: `self_sign_agents.safe_id`
+ *   (001) and `agent_rekeys.initiated_by_user_id` (065) declare no action and
+ *   so default to `NO ACTION`. Those two are the reason the ordering is
+ *   load-bearing rather than decorative.
  * - **Sequences.** `RESTART IDENTITY` reset them; an explicit
  *   `ALTER SEQUENCE … RESTART` does it here, for the sequences that were
  *   actually advanced.

@@ -63,7 +63,7 @@ covers:
   - .github/workflows/publish.yml
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-26" # chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
+last-verified: "2026-08-30" # chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -168,8 +168,31 @@ Haven backend
 > Since #993 a retired rail's fail-closed refusal (HTTP 410,
 > nothing written) is decided and produced in ONE place
 > (`rails/execution-rail.ts`), and enforced at every agent-payment entry point
-> (/payments, sign, MPP authorize + replay, /machine-payments/send, x402
-> authorize) regardless of the account's permission/chain configuration.
+> — `POST /payments`, `POST /payments/:id/sign`, `POST /machine-payments/send`
+> and `POST /x402/authorize` — regardless of the account's permission/chain
+> configuration. `POST /machine-payments/authorize` is no longer one of these
+> and is a stronger answer, not a weaker one: since #1328 it refuses
+> **unconditionally** with 410 before the body is inspected, so it never
+> consults the rail seam at all (`routes/machine-payments.ts`). The
+> `modules/mpp/authorize.ts` orchestration it used to reach no longer exists
+> either: #1328 left it in place unreferenced, and #1987 (`bfd768d1`) then
+> deleted it with the rest of the AllowanceModule rail. Do not read the frozen
+> #1328 log entry below as current on this point — it says the module was
+> "kept, unreferenced", which was true when written and stopped being true two
+> slices later.
+>
+> One caveat, recorded rather than glossed ([#2245](https://github.com/d-hinders/Haven-AI/issues/2245)):
+> on `POST /x402/authorize` a caller-supplied `settlementScheme: 'erc7710'` or
+> `facilitatorAddresses` is validated by `modules/x402/scheme-selection.ts`
+> *above* the rail resolution, so a retired-rail account with that field set
+> gets a 400 instead of the 410 tombstone. The seam remains the only thing that
+> decides whether the account may **spend** — both answers are refusals, both
+> fail-closed with nothing read on-chain and nothing written — but it is not,
+> on that one route, the only thing that decides what the account is **told**,
+> and the alternative message asserts that the retired rail settles. Filed as a
+> code fix; the sentence above is written to be true of the spend decision,
+> which is what this document guards.
+>
 > Since #1986 (epic #1440) that covers BOTH retired rails — the session rail
 > (#834) and the legacy Safe AllowanceModule rail — so the delegation rail is
 > the only rail that can spend. The #1121 queued-approval carve-out is
@@ -195,6 +218,48 @@ Haven backend
 > explicit contract in the repository's header and on each function, and
 > unchanged from what the inline SQL did.
 
+> **Current state (2026-08-30, #2092/#2094/#2096/#2117/#2213):** Haven now runs
+> a **passive settlement observer** on the erc7710 path
+> (`modules/x402/settlement-sweeper.ts`), and it is worth stating plainly what
+> it is and is not, because a background job that completes payments is exactly
+> the shape a perimeter question should be asked of.
+>
+> Why it exists: on erc7710 direct settlement the *merchant* redeems the
+> delegation chain and Haven submits nothing, so an intent sits at `submitted`
+> until an agent reports the merchant's settlement hash. When no agent ever
+> does — the merchant returned no `PAYMENT-RESPONSE`, or the plain-HTTP flow
+> meant Haven never saw the header — the payment had no
+> `machine_payment_evidence` row, and a row is what the reporting feed
+> enumerates: settled money, permanently absent from the user's books (#2092).
+>
+> What the observer may do: read. It scans the pinned DelegationManager's
+> `RedeemedDelegation` logs, re-hashes the child delegation, and compares it to
+> the `delegation_hash` recorded at authorize time — where the child's salt is
+> `keccak256("haven-x402-settlement:" || <intent id>)`, made intent-unique by
+> #2094 so the lookup key is a pure function of the row. On a match it flips
+> the intent to `confirmed` and writes the evidence row.
+>
+> The perimeter argument. **It signs nothing, submits nothing, and moves
+> nothing** — the transfer it observes was authorised by the owner-signed
+> budget delegation and executed by the merchant's own redemption, before and
+> independently of Haven noticing. It only records a fact about the chain, and
+> the recording is bookkeeping, never authority: no delegation is created,
+> narrowed or widened by it, and it cannot make an unsettled payment settle.
+> Attribution is **fail-closed and has no second path** — the sweep never
+> proposes a candidate from transfer shape, it passes `requireDelegationBound`
+> so a shape-perfect transaction the manager did not name is still refused, and
+> two ambiguous look-alikes both stay `submitted` rather than either being
+> guessed at. On an accounting feed a confidently misattributed row is worse
+> than a missing one, so the design keeps today's good failure ("never wrong,
+> sometimes missing") rather than trading it. #2213 then closed the one way it
+> could lie about itself: the evidence write is observed, not fire-and-forget,
+> so the job can no longer report a completion whose row never landed, and a
+> recovery pass re-derives the hole from state. Under Red Line #9 this is
+> unchanged in kind — the row it produces feeds the same **non-asserting**
+> Fortnox supplier invoice, and it makes the "each settled payment is pushed"
+> claim below true for erc7710 payments, which it was not between #946 and
+> #2096.
+>
 > **Current state (2026-07-27, #976):** the erc7710 settle response carries a
 > `passport` reference — `{ attestation_uid, chain_id }`, plus an optional
 > convenience `verify_url` — or `null`. This is **outside the perimeter this
@@ -331,6 +396,23 @@ Preferred pattern:
 - Haven may mirror policies off-chain for UX and pre-validation.
 - Every account-originated spend must still be constrained by the delegation's on-chain caveat enforcers (period budget, recipient pin, expiry) — over-budget does not queue, it REVERTS, because the delegation rail has no approval queue. A delegate-to-merchant x402 transfer must be externally signed and bound to the exact authenticated payment context rather than authorised by Haven policy alone.
 - If a policy cannot be enforced on-chain, treat it as advisory pre-validation that may only NARROW what Haven constructs (the per-purchase `max_amount` cap is the model) — never as a gate whose passing authorises execution.
+
+**A worked instance of that last rule, on the preferred scheme (#2099).**
+`POST /x402/authorize`'s erc7710 branch now reads the selected budget
+delegation's live remaining period budget — the same
+`ERC20PeriodTransferEnforcer` read `GET /machine-payments/allowances` performs
+(#1145) — and answers `403 delegation_budget_exceeded` before the settlement
+child is built, before the intent row is written, and before the relayer-paid
+delegate deploy. Read it as the narrowing pattern, not as a new gate: the
+caveat stack is still the only thing that authorises anything, and the
+pre-check **fails open** three ways, each mutation-proven — a degraded read
+(`fromChain: false`) never refuses, a thrown read never refuses, and an
+unparseable value never refuses. `remaining == amount` is allowed, so the last
+payment of a period is not stranded behind a refusal the chain would not have
+made. What moved is *when* the refusal arrives, not *who* decides: before
+#2099 Haven handed the agent a signable header for an amount the enforcer
+would revert four round trips later, which made the invariant's own words
+false on the path #1450 prefers.
 
 **Executable proof (#2004).** This red line is asserted on every pull request by two
 complementary suites, and the split between them is the point — neither is sufficient
@@ -560,7 +642,7 @@ Implementation rule:
 
 **The dashboard's signing surfaces are rail-honest (#1079).** The signer layer types the two authorities apart: a Safe transaction can only be signed by a `SafeCapableSigner` (EOA or Safe passkey), never by a Hybrid account's passkey — the compiler enforces the exclusion at every remaining Safe-shaped call site, and Safe-only controls are hidden on delegation accounts rather than dead-ending at a signer they cannot use. #1989 has since deleted most legacy Safe surfaces outright; the type-level exclusion remains for the owner-signed remnant (`/safe/exec`-backed account management). This is a UI/type-layer hardening only; the on-chain authority model above is unchanged.
 
-**Where a setup flow marks an agent approved, Haven verifies the authority rather than accepting the client's word for it.** Both connect-setup approval routes work this way (`routes/agent-connection-setups.ts`): the delegation rail's `budget-approval` reads the agent's own active, owner-signed delegations, and the residual legacy `wallet-approval` reads the live AllowanceModule state on-chain (a verification read for retired-rail accounts only — the rail it approves can no longer spend, #1986). The latter takes an empty request body precisely so that no amount, recipient, or hash a caller supplies can influence the outcome, and it refuses when the signed budget's amount or period differs from the one the user reviewed. A pinned recipient is accepted where the reviewed budget was unpinned, because that is strictly narrower authority than the user approved (#1073). (#985 moved this route's SQL into `infra/repositories/agent-connection-setups.ts`; the verification itself — reading live AllowanceModule state, and reading the agent's own active owner-signed delegations — still runs in the route and is unchanged. The approval write is now one locked, guarded function, so the checks and the write it protects cannot be run apart.) Since #1074 a delegation-rail setup also refuses more than one allowance at CREATE — a multi-allowance setup could never satisfy this verification (only the first budget is ever granted), and a clean 400 with the remedy beats a permanently unapprovable setup; fail-closed either way.
+**Where a setup flow marks an agent approved, Haven verifies the authority rather than accepting the client's word for it.** Both connect-setup approval routes work this way (`routes/agent-connection-setups.ts`): the delegation rail's `budget-approval` reads the agent's own active, owner-signed delegations, and the residual legacy `wallet-approval` reads the live AllowanceModule state on-chain (a verification read for retired-rail accounts only — the rail it approves can no longer spend, #1986). No amount, recipient, or hash a caller supplies can influence the latter's outcome, and it refuses when the signed budget's amount or period differs from the one the user reviewed. Be exact about the mechanism, because an earlier telling of this line ("takes an empty request body") described a shape the route has not had since #1076: `WalletApprovalBody` does carry `chain_id`, `safe_address`, `allowance_module_address`, `delegate_address`, `tx_hash`, `safe_tx_hash`, `result` and `confirmation_status`. What makes the claim true is not their absence but their treatment — every identifying field is **equality-checked against the stored setup row** and a mismatch is a refusal rather than an input (`validateWalletApprovalBody`), while the authority decision itself (`tryVerifySetupAuthority`) reads the on-chain AllowanceModule state addressed **entirely from stored columns** and touches the request body nowhere. The hashes are recorded for audit; `confirmation_status` only chooses which non-active state a *failed* verification persists. A caller cannot name the Safe, the delegate, or the module it is checked against. A pinned recipient is accepted where the reviewed budget was unpinned, because that is strictly narrower authority than the user approved (#1073). (#985 moved this route's SQL into `infra/repositories/agent-connection-setups.ts`; the verification itself — reading live AllowanceModule state, and reading the agent's own active owner-signed delegations — still runs in the route and is unchanged. The approval write is now one locked, guarded function, so the checks and the write it protects cannot be run apart.) Since #1074 a delegation-rail setup also refuses more than one allowance at CREATE — a multi-allowance setup could never satisfy this verification (only the first budget is ever granted), and a clean 400 with the remedy beats a permanently unapprovable setup; fail-closed either way.
 
 **Connection setup never hands out another environment's hosted MCP endpoint (#1129).** The production hosted MCP URL is served as a built-in default only when the backend's own resolved public URL is the production host; any other deployment must set `HAVEN_HOSTED_MCP_URL` explicitly, or `/resolve` and `/register` refuse with an explicit configuration error naming the variable — raised before any state is written, so a misconfigured environment can neither consume the client's one-shot setup token nor leave a registration half-created, and an agent's credentials are never pointed at a different environment's backend. Fail-closed, same as the authority checks above.
 
@@ -612,7 +694,7 @@ Server key roles must remain narrow and distinct:
 
 - `RELAYER_PRIVATE_KEY` and per-chain `RELAYER_PRIVATE_KEY_<chainId>` keys fund gas and submit operations that are signed, or bounded, elsewhere: owner-signed Safe executions (`/safe/exec` — legacy account management and #1229 recovery), counterfactual DeleGator deployments (#860 — deploying an account grants no authority over it), and delegate-signed sweep transfers. A relayer key never supplies a spend signature and cannot authorise a payment by itself. (It also carries the disclosed #1985 dust-Safe ownership artifact recorded under Hard Architecture Invariants.)
 - `X402_BINDING_PRIVATE_KEY` signs the exact expected x402 authorization context, including the corresponding sweep context. It authenticates Haven-provided context; it does not sign the payment or spend funds.
-- The relayer additionally signs **L0 agent passport attestations** as *issuer* (epic #970). That is governance metadata, not spend authority: the transaction targets the pinned EAS contract, carries `value: 0`, encodes no transfer, and involves no user key, delegation, or allowance. It is triggered by the owner opting in — never by a payment — so it sits outside the payment paths entirely. The owner opts in from two entry points that run the identical eligibility check and fire-and-forget issuance path: `POST /agents`' `issue_passport` flag, and (#1072) an `issue_passport` flag recorded on the Connect Agent 2 setup at creation and acted on once `POST /agent-connection-setups/register` has created the agent row. Neither path can make issuance block, delay, or roll back agent creation/registration.
+- The relayer additionally signs **L0 agent passport attestations** as *issuer* (epic #970). That is governance metadata, not spend authority: the transaction targets the pinned EAS contract, carries `value: 0`, encodes no transfer, and involves no user key, delegation, or allowance. It is triggered by the owner opting in — never by a payment — so it sits outside the payment paths entirely. Since #2138 (owner decision 2026-08-27) issuance is also **delegation-rail only**: `modules/passport/issuance.ts` refuses a bound account on a retired rail, on the reasoning that a rail which cannot transact has no spending for an on-chain control to govern. Passports already issued on a legacy account are left alone and report `policyEnforcedOnchain: false` — a narrowing of where governance metadata may be created, with no effect on authority in either direction. The owner opts in from two entry points that run the identical eligibility check and fire-and-forget issuance path: `POST /agents`' `issue_passport` flag, and (#1072) an `issue_passport` flag recorded on the Connect Agent 2 setup at creation and acted on once `POST /agent-connection-setups/register` has created the agent row. Neither path can make issuance block, delay, or roll back agent creation/registration.
 - `PASSPORT_RECEIPT_SIGNING_KEY` signs merchant-facing verification receipts. Its address is published for pinning, it asserts only an agent's governance standing, and it is refused at boot if it matches the relayer key.
 - No key above may be reused as an agent, user, or unrestricted payment signer.
 - Vendor infrastructure credentials (bundler/sponsorship URLs) are read at one choke point and must never reach an error surface, a log line, or an API response. `redactVendorSecrets` covers the shapes vendors actually ship: `apikey=`/`api_key=`/`api-key=`/`key=`/`token=`/`secret=` query params, URL basic-auth, and key-in-path segments (#1061). A chain-scoped bundler URL is also asserted against the chain being served, so a misconfigured deployment fails as a config error rather than relaying at the wrong chain's endpoint.
@@ -647,6 +729,8 @@ The codebase should make it easy to prove:
 - Users can revoke permissions outside Haven.
 
 Add comments, docs, tests, and PR notes around these points when touching payment, agent authority, relaying, account setup, SDK, or demo payment flows.
+
+**The user-facing half of this is `/custody` (#2106), and the distinction it draws is the settled one.** The page separates what the chain enforces from what Haven merely asserts, and marks each claim accordingly rather than collapsing them into one reassurance: budget, period, expiry and any pinned recipient are badged on-chain enforced — "a payment outside them reverts on-chain instead of waiting for anyone's approval" — while a recipient that is only advisory on a given account is badged as such. Its framing is the wording to match when a new surface has to make this distinction: *"Proof that you — not Haven — control your funds. Your agents' limits are enforced on-chain by your account, not by Haven's database."* Before #2106 that page told delegation-rail users their agent had no on-chain limits, which was the invariant above stated backwards on the one screen built to demonstrate it. Reach for this phrasing rather than inventing another.
 
 ## Feature Review Triggers
 
@@ -745,11 +829,28 @@ Avoid wording like:
 - Haven gave you the private key.
 - Haven signs and settles the payment.
 
-Known compliance gap: `UsingYourAgentInfo.tsx` still uses "Haven signs and
-settles the payment" (the "gave you the private key" phrase is gone). Do not
-copy that wording into new surfaces; update that component in a product-copy
-change (#2063 is in flight on it) before treating the covered UI as compliant
-with this rule.
+**Known compliance gap — `UsingYourAgentInfo.tsx`, re-measured 2026-08-30
+([#2246](https://github.com/d-hinders/Haven-AI/issues/2246)).** This paragraph
+previously pointed at #2063 as in flight. #2063 closed on 2026-08-26 and the
+gap survived it: PR #2075 correctly de-queued that file's queue-and-approve
+framing, and touched neither avoid-listed phrase. Two are live, not one:
+
+- line 33 — "Haven **signs and settles the payment** automatically — within the
+  agent's remaining allowance." Both halves are wrong on the live rail, not
+  only the avoid-listed phrase: Haven signs nothing (#1138 — the local signer
+  holds the delegate key), and on erc7710 direct settlement the *merchant*
+  redeems the chain while Haven submits no settlement transaction at all.
+  "allowance" is retired-rail vocabulary for what is now an owner-signed
+  budget delegation.
+- lines 11-14 — "Haven **gave you a credential — a private key** plus a small
+  JSON file". The earlier telling of this paragraph said the "gave you the
+  private key" phrase was gone. The literal string is; the claim the avoid-list
+  exists to prevent is not, and it is the modal's opening sentence.
+
+Do not copy either wording into new surfaces. The component is `covers:`-mapped
+by this document, so it is inside the perimeter rather than incidental copy;
+treat the covered UI as compliant with this rule only once #2246 lands, and
+delete this paragraph in the same change.
 
 ## Preferred Architecture Summary
 
@@ -819,11 +920,24 @@ nobody re-checks.
 `scripts/ci/money-path.test.mjs` now asserts this front matter spans every
 runtime glob in [`.github/money-path-globs.json`](../../.github/money-path-globs.json).
 The two remaining gaps are **exempted explicitly, not silently**: widening a
-`contract: true` doc's `covers:` across `infra/chain/**` (11 files) and
-`infra/repositories/**` (49 files) makes every future PR touching those layers
-owe a CASP shard, which is a friction decision for this doc's owner rather than
-a drift fix. They sit in that test's `EXEMPT` map with their reasons; anything
-else added to the money-path list reddens CI on the day it lands.
+`contract: true` doc's `covers:` across `infra/chain/**` and
+`infra/repositories/**` makes every future PR touching those layers owe a CASP
+shard, which is a friction decision for this doc's owner rather than a drift
+fix. They sit in that test's `EXEMPT` map with their reasons; anything else
+added to the money-path list reddens CI on the day it lands.
+
+Their size is the whole friction argument, so state it with its measurement
+scope rather than as a bare number — the figures #1899 recorded ("11 files",
+"49 files") had no scope attached and one of them has since drifted. Measured
+on `46a0f580` against tracked files, excluding `__tests__/` and `*.test.ts`:
+**`infra/chain/**` is 11 files** (unchanged) and **`infra/repositories/**` is
+29** — 28 `.ts` modules plus that directory's `README.md`; 55 tracked files in
+all, so 26 of them are tests. Neither reading lands on 49, so the old figure
+either counted a scope nobody wrote down or has simply moved, and the number
+alone cannot say which. That is the point: requote it with its denominator or
+not at all. The `EXEMPT` map's own comments in
+`scripts/ci/money-path.test.mjs` carry the same two bare counts and drift the
+same way.
 
 Two consequences worth stating outright:
 
@@ -985,6 +1099,41 @@ which lifecycle transitions exist and what may trigger them, whether ownership
 is still re-derived server-side from the authenticated subject, whether API-key
 generation stays server-side, where the user JWT is stored and sent, and whether
 anything in the client began deciding rather than relaying.
+
+## Scope of the current `last-verified` (2026-08-30, #2244)
+
+The front-matter date is date-only by the #1496 chain reset, which leaves it
+unable to say **how much** of the document a re-verification covered. That
+matters more here than on an ordinary doc: this one is long, it is `contract:
+true`, and a bump read as covering the whole body when it covered a third of it
+is the failure a `last-verified` exists to prevent. So the scope lives here,
+where it has room to be honest, and it is rewritten — not appended to — by
+whoever bumps the date next.
+
+**Re-read against the code on `46a0f580`, claim by claim** (the enumeration and
+its evidence are in PR #2247's body): Core Design Principle and every inline
+*Current state* note; Hard Architecture Invariants; Red Lines 1–11 including
+#4's two executable-proof suites; every subsection of Required Architecture
+Patterns; Feature Review Triggers; Third-Party On-Ramp Integration; the
+Payment-Related Merge Checklist; Product Copy Rules; the Preferred Architecture
+Summary; and *What `covers:` must span* with its pinning test in
+`scripts/ci/money-path.test.mjs`.
+
+**Deliberately NOT covered by this date, each for a reason that is not
+laziness:**
+
+- **The historical bullet log below** — frozen as of 2026-08-12 by
+  construction. Re-verifying it would be re-litigating merged shards, which
+  `casp-changelog/README.md` forbids in as many words.
+- **The MiCA / ESMA / Finansinspektionen / EBA citations under *Regulatory
+  Context*** — these are legal claims, not code claims. Nothing in this pass
+  was a legal review, and a date that implied one would be worse than no date.
+- **The #1985 relayer-owned dust-Safe balances** — the four addresses, their
+  ~$0.14 in USDC and their per-delegate allowance state are live Base mainnet
+  reads. Operator work; unchanged here, and unverified here.
+- **The #832 exit story's live demonstration** — cross-referenced to
+  `docs/exit/README.md`, not re-executed. The claim that it *was* demonstrated
+  stands on that document, not on this pass.
 
 ## Verification log
 

@@ -61,6 +61,22 @@ export const SCHEDULED_GUARDS = [
     label: 'Advisory-lock deadlock proof (#2208)',
     maxAgeDays: 3,
     cadence: 'nightly',
+    // Which runs count as "the guard ran" (review finding on PR #2222).
+    //
+    // NOT any successful run. `db-concurrency-proof.yml` also has a narrow
+    // paths-filtered `pull_request` trigger, and those paths are precisely the
+    // files someone edits while working ON the guard — so a broken cron could
+    // be masked indefinitely by PR runs, and the healthy path would auto-close
+    // the staleness issue. Worse, a PR run can be GREEN on a branch that
+    // deliberately breaks the code (the proof branch used to red-test this very
+    // job), so a `pull_request` success is not even evidence about `dev`.
+    //
+    // `workflow_dispatch` counts: a deliberate manual run against the default
+    // branch does prove the thing. `pull_request` never does.
+    countedEvents: ['schedule', 'workflow_dispatch'],
+    // ...and only from the branches a dispatch is meaningful on. A dispatch on
+    // a feature branch proves something about that branch, not about `dev`.
+    countedBranches: ['dev', 'main'],
     why:
       'It is the only thing that re-proves end to end that a blocking advisory-lock waiter ' +
       'still deadlocks a concurrent CREATE INDEX CONCURRENTLY (40P01) and that the polled ' +
@@ -68,6 +84,32 @@ export const SCHEDULED_GUARDS = [
       'running, that guarantee rests on assertions about the cause only.',
   },
 ]
+
+/**
+ * The runs that count as this guard having run, newest timestamp first.
+ *
+ * Pure and exported so the event/branch scoping is a test rather than a line
+ * buried in an IO helper — it is the difference between a watchdog and a
+ * watchdog that a PR run can silence.
+ */
+export function selectQualifyingRuns(runs, guard) {
+  const events = guard.countedEvents
+  const branches = guard.countedBranches
+  return (Array.isArray(runs) ? runs : []).filter((r) => {
+    if (r?.status !== 'completed') return false
+    if (events && !events.includes(r?.event)) return false
+    if (branches && !branches.includes(r?.headBranch)) return false
+    return true
+  })
+}
+
+/** Newest `updatedAt`/`createdAt` in a run list, or null. */
+export function newestTimestamp(runs) {
+  const stamps = (Array.isArray(runs) ? runs : [])
+    .map((r) => r?.updatedAt || r?.createdAt)
+    .filter((t) => typeof t === 'string' && t.length > 0)
+  return stamps.length === 0 ? null : stamps.slice().sort().at(-1)
+}
 
 /**
  * `{ healthy, findings }` for a set of observations.
@@ -196,15 +238,16 @@ function observe(guard) {
     const raw = gh([
       'run', 'list',
       '--workflow', guard.workflow,
-      '--limit', '50',
-      '--json', 'conclusion,status,createdAt,updatedAt',
+      '--limit', '100',
+      '--json', 'conclusion,status,event,headBranch,createdAt,updatedAt',
     ])
-    const runs = JSON.parse(raw)
-    const completed = runs.filter((r) => r.status === 'completed')
-    const success = completed.filter((r) => r.conclusion === 'success')
-    const newest = (list) =>
-      list.map((r) => r.updatedAt || r.createdAt).sort().at(-1) ?? null
-    return { fileExists: true, lastSuccessAt: newest(success), lastRunAt: newest(runs) }
+    const qualifying = selectQualifyingRuns(JSON.parse(raw), guard)
+    const success = qualifying.filter((r) => r.conclusion === 'success')
+    return {
+      fileExists: true,
+      lastSuccessAt: newestTimestamp(success),
+      lastRunAt: newestTimestamp(qualifying),
+    }
   } catch (err) {
     console.error(`gh run list failed for ${guard.workflow}: ${err.message}`)
     return undefined // -> 'unobserved', which is a finding, not a pass
@@ -236,24 +279,52 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
       ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
       : undefined
 
-  // Self-heal the labels: `ci-health` names the subject, `code-quality` is what
-  // puts it in the ship-next queue. That second label is the notification
-  // decision — a nightly failure that only lands in a mailbox at 3am gets
-  // muted; one that becomes a queued work item gets picked up by whoever ships
-  // next, which is the behaviour actually wanted.
-  gh(['label', 'create', 'ci-health', '--color', 'b60205',
-      '--description', 'Automated: a scheduled CI guard is failing or has stopped running', '--force'])
+  // Every `gh` call below is wrapped, because this script runs on EVERY push to
+  // main/dev and its own file says it never fails the build. An unwrapped
+  // execFileSync throw on a rate limit or a transient network blip would make
+  // that false, and a watchdog that reds unrelated work is a watchdog somebody
+  // turns off (review finding on PR #2222).
+  const tryGh = (args, what) => {
+    try {
+      return gh(args)
+    } catch (err) {
+      console.error(`::warning::guard-freshness could not ${what}: ${err.message}`)
+      return null
+    }
+  }
 
-  const existing = JSON.parse(
-    gh(['issue', 'list', '--label', 'ci-health', '--state', 'open', '--limit', '10',
-        '--json', 'number,title']),
-  ).find((i) => i.title === ISSUE_TITLE)
+  // `ci-health` names the subject; `code-quality` is what puts the issue in the
+  // ship-next queue. That second label is the notification decision — a nightly
+  // failure that only lands in a mailbox at 3am gets muted; one that becomes a
+  // queued work item gets picked up by whoever ships next.
+  //
+  // Only self-healed on the path that is about to need it: on the common
+  // healthy push this is one fewer API call for nothing.
+  if (!result.healthy) {
+    tryGh(['label', 'create', 'ci-health', '--color', 'b60205', '--description',
+           'Automated: a scheduled CI guard is failing or has stopped running', '--force'],
+          'ensure the ci-health label exists')
+  }
+
+  const listed = tryGh(
+    ['issue', 'list', '--label', 'ci-health', '--state', 'open', '--limit', '20',
+     '--json', 'number,title'],
+    'list open ci-health issues',
+  )
+  let existing
+  try {
+    existing = listed ? JSON.parse(listed).find((i) => i.title === ISSUE_TITLE) : undefined
+  } catch (err) {
+    console.error(`::warning::guard-freshness could not parse the issue list: ${err.message}`)
+  }
 
   if (result.healthy) {
     if (existing) {
-      gh(['issue', 'comment', String(existing.number), '--body',
-          `Every registered guard is fresh again.\n\n\`\`\`\n${summary}\n\`\`\``])
-      gh(['issue', 'close', String(existing.number), '--reason', 'completed'])
+      tryGh(['issue', 'comment', String(existing.number), '--body',
+             `Every registered guard is fresh again.\n\n\`\`\`\n${summary}\n\`\`\``],
+            `comment on #${existing.number}`)
+      tryGh(['issue', 'close', String(existing.number), '--reason', 'completed'],
+            `close #${existing.number}`)
       console.log(`Closed #${existing.number} — guards recovered.`)
     }
     process.exit(0)
@@ -261,11 +332,11 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
 
   const body = renderIssueBody(result.findings, { runUrl })
   if (existing) {
-    gh(['issue', 'edit', String(existing.number), '--body', body])
+    tryGh(['issue', 'edit', String(existing.number), '--body', body], `update #${existing.number}`)
     console.log(`Updated #${existing.number}.`)
   } else {
-    gh(['issue', 'create', '--title', ISSUE_TITLE,
-        '--label', 'ci-health', '--label', 'code-quality', '--body', body])
+    tryGh(['issue', 'create', '--title', ISSUE_TITLE, '--label', 'ci-health',
+           '--label', 'code-quality', '--body', body], 'file the staleness issue')
   }
   // The reporter itself stays GREEN: the issue is the signal, and a permanently
   // red push-triggered check on `dev` would be noise on work that did not cause

@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, existsSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
   ROOT,
@@ -143,6 +145,47 @@ test('render names every required case and its status', () => {
   const text = render(evaluate({ report: REPORT_WITHOUT_FLAG }))
   for (const title of REQUIRED_PROOF_CASES) assert.ok(text.includes(title))
   assert.match(text, /\[skipped\]/)
+})
+
+// ---------------------------------------------------------------------------
+// The CLI's exit code. `evaluate()` being right is not the claim — the GitHub
+// Actions step goes red on the PROCESS exit code, and nothing above this line
+// executes that line. Found by the independent review of PR #2222: mutating
+// `process.exit(result.ok ? 0 : 1)` to a bare `process.exit(0)` left all
+// fifteen assertions above green while the job would have passed on a report
+// whose proof cases were skipped.
+// ---------------------------------------------------------------------------
+
+const SCRIPT = path.join(ROOT, 'scripts/ci/db-concurrency-proof.mjs')
+
+function runCli(report) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'proof-cli-'))
+  const file = path.join(dir, 'report.json')
+  if (report !== undefined) writeFileSync(file, JSON.stringify(report))
+  const r = spawnSync(process.execPath, [SCRIPT, file], { encoding: 'utf8' })
+  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') }
+}
+
+test('CLI exits 0 only when both proof cases actually ran and passed', () => {
+  const green = runCli(REPORT_WITH_FLAG)
+  assert.equal(green.code, 0)
+  assert.match(green.out, /ran and passed/)
+})
+
+test('CLI exits 1 on the skipped-but-green-vitest report', () => {
+  const red = runCli(REPORT_WITHOUT_FLAG)
+  assert.equal(red.code, 1)
+  assert.match(red.out, new RegExp(PROOF_ENV_FLAG))
+})
+
+test('CLI exits 1 when the report file does not exist at all', () => {
+  const missing = runCli(undefined)
+  assert.equal(missing.code, 1)
+})
+
+test('CLI exits 2 when invoked with no report argument', () => {
+  const r = spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8' })
+  assert.equal(r.status, 2)
 })
 
 // ---------------------------------------------------------------------------

@@ -8,8 +8,10 @@ import {
   SCHEDULED_GUARDS,
   ISSUE_TITLE,
   evaluate,
+  newestTimestamp,
   renderIssueBody,
   renderSummary,
+  selectQualifyingRuns,
 } from './guard-freshness.mjs'
 
 const NOW = Date.parse('2026-08-30T12:00:00Z')
@@ -95,6 +97,92 @@ test('the summary reports on healthy runs too, so silence never means unknown', 
   assert.match(text, /Every scheduled guard is fresh/)
   assert.ok(text.includes(GUARD.workflow))
   assert.match(text, /last success 0\.4d ago/)
+})
+
+// ---------------------------------------------------------------------------
+// Which runs count. This is the arm a PR run could otherwise silence.
+// ---------------------------------------------------------------------------
+
+const run = (over = {}) => ({
+  status: 'completed',
+  conclusion: 'success',
+  event: 'schedule',
+  headBranch: 'dev',
+  updatedAt: agoDays(0.4),
+  ...over,
+})
+
+test('a PULL_REQUEST run never counts as the guard having run', () => {
+  // The finding this closes (review of PR #2222): db-concurrency-proof.yml also
+  // has a paths-filtered pull_request trigger, and those paths are exactly the
+  // files someone edits while working ON the guard. Counting those successes
+  // would let a broken cron be masked indefinitely — and worse, a PR run can be
+  // green on a branch that deliberately breaks the code, which is how this very
+  // job was red-tested.
+  const runs = [run({ event: 'pull_request', headBranch: 'fix/whatever' })]
+  assert.deepEqual(selectQualifyingRuns(runs, GUARD), [])
+})
+
+test('a broken cron is NOT masked by a fresh green PR run', () => {
+  // End to end through evaluate(), because the two halves passing separately is
+  // not the claim.
+  const runs = [
+    run({ event: 'schedule', updatedAt: agoDays(11) }),
+    run({ event: 'pull_request', headBranch: 'fix/x', updatedAt: agoDays(0.1) }),
+  ]
+  const qualifying = selectQualifyingRuns(runs, GUARD)
+  const observations = {
+    [GUARD.workflow]: {
+      fileExists: true,
+      lastSuccessAt: newestTimestamp(qualifying.filter((r) => r.conclusion === 'success')),
+      lastRunAt: newestTimestamp(qualifying),
+    },
+  }
+  const result = evaluate({ observations, now: NOW })
+  assert.equal(result.healthy, false)
+  assert.equal(result.findings[0].kind, 'stale')
+})
+
+test('a WORKFLOW_DISPATCH on a default branch does count', () => {
+  // A deliberate manual re-run against dev really does prove the thing, and
+  // refusing it would leave no way to clear the issue after a fix.
+  assert.equal(selectQualifyingRuns([run({ event: 'workflow_dispatch' })], GUARD).length, 1)
+  assert.equal(selectQualifyingRuns([run({ event: 'workflow_dispatch', headBranch: 'main' })], GUARD).length, 1)
+})
+
+test('a dispatch on a FEATURE branch does not count', () => {
+  assert.deepEqual(
+    selectQualifyingRuns([run({ event: 'workflow_dispatch', headBranch: 'fix/2208-x' })], GUARD),
+    [],
+  )
+})
+
+test('an in-progress run does not count as a run', () => {
+  assert.deepEqual(selectQualifyingRuns([run({ status: 'in_progress' })], GUARD), [])
+})
+
+test('the registry actually scopes events and branches', () => {
+  // Deleting either field would make selectQualifyingRuns pass everything.
+  for (const guard of SCHEDULED_GUARDS) {
+    assert.ok(Array.isArray(guard.countedEvents) && guard.countedEvents.length > 0, guard.workflow)
+    assert.ok(!guard.countedEvents.includes('pull_request'), `${guard.workflow} counts PR runs`)
+    assert.ok(Array.isArray(guard.countedBranches) && guard.countedBranches.length > 0, guard.workflow)
+  }
+})
+
+test('newestTimestamp picks the newest and tolerates junk', () => {
+  assert.equal(newestTimestamp([]), null)
+  assert.equal(newestTimestamp(undefined), null)
+  assert.equal(newestTimestamp([{}, { updatedAt: '' }]), null)
+  assert.equal(
+    newestTimestamp([{ updatedAt: '2026-08-01T00:00:00Z' }, { updatedAt: '2026-08-29T00:00:00Z' }]),
+    '2026-08-29T00:00:00Z',
+  )
+  // createdAt is the fallback, not an override.
+  assert.equal(
+    newestTimestamp([{ createdAt: '2026-08-02T00:00:00Z', updatedAt: '2026-08-03T00:00:00Z' }]),
+    '2026-08-03T00:00:00Z',
+  )
 })
 
 // ---------------------------------------------------------------------------

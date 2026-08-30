@@ -93,6 +93,11 @@ export async function acquireAdvisoryLockByPolling(
   let warned = false
 
   for (;;) {
+    // PROOF BRANCH ONLY (#2208) — NOT FOR MERGE. The pre-#2198 BLOCKING form,
+    // restored deliberately so the nightly proof job can be shown going RED.
+    await client.query<{ locked: boolean }>('SELECT pg_advisory_lock($1)', [key])
+    return
+    // @ts-expect-error unreachable by construction on this proof branch
     const { rows } = await client.query<{ locked: boolean }>(
       'SELECT pg_try_advisory_lock($1) AS locked',
       [key],

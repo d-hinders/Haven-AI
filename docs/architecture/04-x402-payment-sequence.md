@@ -30,7 +30,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-31" # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-31" # #2291: corrected the #2290 paragraph in "Resuming An Authorized Payment", which named haven_sign_x402 -> haven_x402_sign_header as the working remedy — a sequence the one-shot's spent binding cannot serve. Scope: that paragraph. The rest of the section, and the decomposed/recommended flows elsewhere in this doc, were re-read against the corrected contract and are accurate as written. Prior: chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -872,12 +872,26 @@ and not about whether the user got what they paid for.
 
 **What is live since #2290: the signing leg the remedy depends on.** Until
 #2290 the trigger above was reachable and its cure was not. `haven_sign_x402`
-mints the `x402_binding` that `haven_x402_sign_header` requires, and it gets
-the bytes from `GET /x402/:id/sign-context` — which refused **every**
-`confirmed` intent with `409 already_executed`, regardless of what
-`next_action` had just told the agent to do. An agent following the documented
-remedy reached a dead end four calls in, with the funding leg already spent
-(live case: payment `d480c3e4`, 0.01 USDC on the delegate EOA).
+builds the merchant header, and it gets the bytes from
+`GET /x402/:id/sign-context` — which refused **every** `confirmed` intent with
+`409 already_executed`, regardless of what `next_action` had just told the
+agent to do. An agent following the documented remedy reached a dead end four
+calls in, with the funding leg already spent (live case: payment `d480c3e4`,
+0.01 USDC on the delegate EOA).
+
+> **Correction (#2291).** This paragraph originally said `haven_sign_x402`
+> "mints the `x402_binding` that `haven_x402_sign_header` requires" — naming a
+> sequence that cannot execute. `haven_sign_x402` is a **one-shot**: it calls
+> `buildX402PaymentHeader` internally, which consumes the binding on every exit
+> path, so the binding it returns is already spent and the follow-up call can
+> only refuse. On the resume path the header is the `payment_header` in
+> `haven_sign_x402`'s own result; retry the merchant with that.
+> `haven_x402_sign_header` is the successor to **`haven_sign`**, which records
+> the context without consuming it — that decomposed flow, shown elsewhere in
+> this document, is unaffected. Recorded rather than silently rewritten because
+> the identical claim was written into three places at once (here,
+> `RESUME_X402_DESCRIPTION`, and the guidance `reason`), which says more about
+> how easily the two tools are conflated than about any one of the three.
 
 The gate now opens for exactly the state described above and no other, because
 it reads the *same* predicate over the *same* derived row:

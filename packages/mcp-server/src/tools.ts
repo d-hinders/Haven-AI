@@ -532,10 +532,16 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'Returns { payment_id, payload_hash, expires_at, x402, signer_compatibility } — compact by default;',
   'include_signing_payload=true on a same-idempotency_key re-run returns the inline payload for an',
   'older signer. Over-budget is declined at prepare; nothing is ever held for later approval.',
-  'After signing and haven_submit confirms funding, build the header with haven_x402_sign_header and',
-  'retry the merchant YOURSELF — Haven never talks to this merchant and never holds the key.',
-  // #2292: appended, not rewritten — the line above is the whole reason a report tool has to
-  // exist, and until now the retry it prescribes had nowhere to put its result.
+  'The signer tool named in the response guidance (haven_sign_x402) returns payment_header INLINE',
+  'alongside the signature — it is a one-shot that spends its own binding building that',
+  'header, so do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
+  'signature via haven_submit, then retry the merchant YOURSELF with that payment_header —',
+  'Haven never talks to this merchant and never holds the key. The header is built before funding',
+  'confirms, so its validity window starts at signing: retry promptly, and on',
+  'PAYMENT_WINDOW_EXPIRED re-run this tool with the same idempotency_key.',
+  // #2292 re-attached to #2291's corrected chain: the merchant retry moved from
+  // haven_x402_sign_header to haven_sign_x402's inline header, but it is still the AGENT's
+  // retry — which is exactly why its outcome has nowhere to go without this call.
   'Then report the outcome with haven_report_x402_outcome.',
   'When the merchant advertises extra.assetTransferMethod "erc7710" and the account is on the',
   'delegation rail, this returns settlement_scheme "erc7710" instead: sign, then haven_submit with',
@@ -553,8 +559,13 @@ const PAY_X402_QUOTE_DESCRIPTION = [
 // restart". A binding is not optional — haven_x402_sign_header requires one —
 // and for a funded payment the fetch behind haven_sign was refused outright
 // (409 already_executed), so the sequence this tool pointed at could not be
-// completed at all. Both halves are fixed: the gate now serves this state, and
-// the description names the full order instead of an aside.
+// completed at all. #2290 opened that gate.
+// #2291: but #2290's replacement wording named the OTHER impossible order —
+// haven_sign_x402, then its binding into haven_x402_sign_header. The one-shot
+// spends its own binding building the header inline, so that second call can
+// only refuse. Corrected here to the one-shot contract: use the inline
+// payment_header. Recorded rather than silently reflowed because the same
+// contradiction has now been written into this file twice.
 const RESUME_X402_DESCRIPTION = [
   'Resume an authorized x402 payment: retrieve the signing context so the signer can rebuild the',
   'merchant payment header and the agent can retry the merchant.',
@@ -563,9 +574,10 @@ const RESUME_X402_DESCRIPTION = [
   'the process crashed between funding and the merchant retry. Any other nextAction reports a',
   'conflict instead of returning context; do not call this speculatively and do not pay again.',
   'Returns { payment_id, payment_required, x402 } in the haven_pay_x402_quote shape. Then call',
-  'haven_sign_x402 with this payment_id to mint an x402_binding — the funding leg is already spent,',
-  'so this signs nothing new on-chain and must not be re-submitted — and pass that binding to',
-  'haven_x402_sign_header to build the header. Retry the original resource_url with it.',
+  'haven_sign_x402 with this payment_id — the funding leg is already spent, so this signs nothing',
+  'new on-chain and its signature must not be re-submitted. Take payment_header from ITS result',
+  'and retry the original resource_url with it. Do NOT pass its x402_binding to',
+  'haven_x402_sign_header: that binding is already spent, and the call can only refuse.',
   // #2292: same obligation as the first-attempt path — a resumed retry Haven did not make is
   // just as unobservable as the original one.
   'Then report the outcome with haven_report_x402_outcome.',
@@ -584,17 +596,17 @@ const RESUME_X402_DESCRIPTION = [
 // which — and their arguments barely intersect (merchant_url / tool_name /
 // payment_header versus outcome / merchant_status). That is the mode flag
 // whose branches a caller has to learn, wearing the hat of deduplication.
-// #1591's description-byte ratchet is nearly spent (this addition leaves ~2
-// bytes of the 40% margin), so this description is deliberately terse: the
-// "why a separate tool" reasoning above is for maintainers and does not
-// belong in the served payload. What an agent needs is what it does, what to
-// pass, what changes, and what it cannot do.
+// Kept terse on purpose: the "why a separate tool" reasoning above is for
+// maintainers and does not belong in the served payload (#1591's per-tool
+// budget, which this description sits comfortably under). What an agent needs
+// is what it does, what to pass, what changes, and what it cannot do.
 const REPORT_X402_OUTCOME_DESCRIPTION = [
   'Report what a plain-HTTP x402 merchant answered to a retry YOU made; Haven never contacts it, so',
   'nothing else can. Pass payment_id, outcome ("accepted" for a 2xx, else "rejected"),',
   'merchant_status, optional merchant_body. A rejection surfaces stranded funds on your next',
   'haven_get_payment_status instead of a 15-minute wait. Evidence only, your own payments only: it',
-  'moves no money.',
+  'moves no money. Not for merchants Haven called for you — haven_complete_mcp_tool and',
+  'haven_settle_mcp_tool already record what they observed.',
 ].join(' ')
 
 const SWEEP_DELEGATE_DESCRIPTION = [
@@ -2001,12 +2013,20 @@ export function createToolHandlers(
               nextTool: 'mcp__haven-signer__haven_sign_x402',
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
+              // #2291: this said "relay via haven_submit and finish with
+              // haven_x402_sign_header", which next_tool made impossible —
+              // haven_sign_x402 is a one-shot that spends its own binding
+              // building the header, so the named successor could only refuse.
+              // One contract now, and it is the one the tool already implements.
               reason:
                 'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
                 'signer fetches payment_required itself; only if it reports the context carried ' +
-                'none, re-call with the payment_required you passed to this tool added VERBATIM). Then ' +
-                'relay via haven_submit and finish with ' +
-                'haven_x402_sign_header + the original merchant retry.',
+                'none, re-call with the payment_required you passed to this tool added VERBATIM). ' +
+                'It returns BOTH signature and payment_header. Relay signature via haven_submit, ' +
+                'then retry the original merchant URL yourself with payment_header. Do NOT call ' +
+                'haven_x402_sign_header: haven_sign_x402 already spent its binding building that ' +
+                'header, so that call can only refuse. The header is signed before funding ' +
+                'confirms, so retry promptly.',
               summary: {
                 payment_id: intent.paymentId,
                 status: intent.status,
@@ -2098,8 +2118,13 @@ export function createToolHandlers(
         }
 
         // Return the same signing context shape as haven_pay_x402_quote so the
-        // signer can call haven_x402_sign_header (or re-derive the binding via
-        // haven_sign if the binding was lost across a signer restart).
+        // signer can rebuild the merchant header from payment_id alone.
+        // #2291: this comment used to name haven_x402_sign_header here, which
+        // is the fourth place the pre-#2291 contract was written down. On this
+        // path the header comes from haven_sign_x402's own result — that
+        // one-shot spends its binding building it — and the description
+        // constant above (RESUME_X402_DESCRIPTION) is the agent-facing
+        // statement of the same thing.
         return {
           payment_id: state.paymentId,
           status: status.status,

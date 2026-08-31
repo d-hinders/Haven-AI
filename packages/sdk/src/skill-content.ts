@@ -139,8 +139,15 @@ merchant leg for you.
 recipient, amount, and token for a plain transfer. For an arbitrary,
 non-MCP x402 paywall: \`mcp__haven__haven_quote_x402\` to get a quote, then
 \`mcp__haven__haven_pay_x402_quote\` — follow the result's guidance fields
-first and sign in the local Haven signer. The pay tool performs the merchant
-retry itself, so do not wait on a signal while it runs. If the process
+first and sign in the local Haven signer. On THIS path Haven does not talk to
+the merchant: \`mcp__haven-signer__haven_sign_x402\` returns both
+\`signature\` and \`payment_header\`; relay \`signature\` with
+\`mcp__haven__haven_submit\`, then retry the paywalled URL yourself with
+\`payment_header\`. Do not pass that call's \`x402_binding\` to
+\`mcp__haven-signer__haven_x402_sign_header\` — the one-shot already spent it
+building the header, so the call can only refuse. (The SDK's own
+\`haven_pay_x402\` tool does perform the merchant retry itself; that tool is
+not part of the hosted MCP surface.) If the process
 crashes after payment, a later \`mcp__haven__haven_get_payment_status\` call
 may report \`nextAction: 'retry_original_x402_request'\` — only then call
 \`mcp__haven__haven_resume_x402_payment\` with the preserved resume state or

@@ -780,3 +780,84 @@ describe('Hosted MCP + Edge Signer integration', () => {
     expect(client.delegateAddress).toBeUndefined()
   })
 })
+
+/**
+ * #2291: walk the chain the hosted response actually EMITS, rather than a
+ * chain a test author retyped from the prose.
+ *
+ * The defect this exists to catch: `haven_pay_x402_quote` emitted
+ * `next_tool: haven_sign_x402` while the same response's `reason` said to
+ * finish with `haven_x402_sign_header`. Those are mutually exclusive —
+ * `haven_sign_x402` is a one-shot that builds the header itself and spends its
+ * own binding doing so, so the named successor could only refuse. Every
+ * surface read plausibly on its own; only following them in order breaks.
+ *
+ * So this test takes `next_tool` and `next_arguments` from the live response
+ * and dispatches on them, with no hardcoded tool name on the happy path. It
+ * asserts the emitted chain terminates in a usable merchant header, and — as
+ * its control — that the sequence the old guidance named genuinely cannot
+ * work, so this is a real constraint and not a tautology.
+ */
+describe('#2291 — the emitted guidance chain is executable', () => {
+  it('walks next_tool/next_arguments from the quote to a usable merchant header', async () => {
+    const havenKeyless = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const hostedHandlers = createHostedHandlers(havenKeyless)
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner) as unknown as Record<
+      string,
+      (args: Record<string, unknown>) => Promise<ToolPayload>
+    >
+
+    const quote = ok<{
+      payment_id: string
+      next_tool: string
+      next_tool_name: string
+      next_arguments: Record<string, unknown>
+      reason: string
+    }>(await hostedHandlers.haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }))
+
+    // Dispatch on what the response SAID, not on a name written here.
+    const handler = signerHandlers[quote.next_tool_name]
+    expect(handler, `hosted named a signer tool that does not exist: ${quote.next_tool}`).toBeTypeOf(
+      'function',
+    )
+
+    // What the response tells the agent to pass, asserted as emitted.
+    expect(quote.next_arguments).toEqual({ payment_id: quote.payment_id })
+
+    // That byte-free form has the signer FETCH its own context, which needs a
+    // provisioned agent identity on disk — out of scope here and covered by the
+    // sign-context tests. Executed through the documented fallback transport
+    // instead: same tool, same contract, context handed over rather than
+    // fetched. The tool under test is still the one the response NAMED; only
+    // how its context arrives differs, and that is not what this test asserts.
+    const expected = await makeX402ExpectedAuth()
+    const signed = ok<{ signature: string; x402_binding: string; payment_header?: string }>(
+      await handler({
+        payload_hash: FUNDING_HASH,
+        x402_expected: expected.snake,
+        payment_required: PAYMENT_REQUIRED,
+      }),
+    )
+    expect(signed.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+
+    // The terminal deliverable of this path is a merchant header. Under the
+    // one-shot contract it arrives INLINE — the agent needs no further signer
+    // call, which is exactly what the corrected guidance says.
+    expect(
+      signed.payment_header,
+      'the emitted chain must terminate in a merchant header the agent can retry with',
+    ).toBeTruthy()
+    expect(signed.payment_header!.length).toBeGreaterThan(0)
+
+    // CONTROL: the sequence the old guidance named. If this ever SUCCEEDS, the
+    // one-shot has stopped spending its binding and the assertion above stops
+    // proving anything — so the control is what keeps this test honest.
+    const oldGuidanceStep = await signerHandlers.haven_x402_sign_header({
+      payment_required: PAYMENT_REQUIRED,
+      x402_binding: signed.x402_binding,
+    })
+    expect(oldGuidanceStep.success).toBe(false)
+    expect(JSON.stringify(oldGuidanceStep)).toContain('already used')
+  })
+})

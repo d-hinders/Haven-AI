@@ -203,8 +203,12 @@ const SETS_V1_HEADER = new RegExp(
     // The header-mutating APIs, including a template-literal argument.
     `((?:\\.set|\\.append|\\.setHeader)\\(\\s*['"\`]X-PAYMENT['"\`])`,
     // Computed key, bracket assignment, or a header tuple: `['X-PAYMENT']:`,
-    // `headers['X-PAYMENT'] =`, `[['X-PAYMENT', token]]`.
-    `(\\[\\s*['"]X-PAYMENT['"]\\s*[,\\]])`,
+    // `headers['X-PAYMENT'] =`, `[['X-PAYMENT', token]]`. Backticks ARE
+    // accepted here, unlike the plain-key alternative above: inside brackets a
+    // template literal is valid key syntax, so ``[`X-PAYMENT`]: token`` is a
+    // real setting site rather than prose. Review demonstrated exactly that
+    // form slipping through when this class excluded backticks.
+    `(\\[\\s*['"\`]X-PAYMENT['"\`]\\s*[,\\]])`,
     // A curl example anywhere on the line.
     `(-H\\s+['"]?X-PAYMENT:)`,
     // A header line opening a Markdown code fence.

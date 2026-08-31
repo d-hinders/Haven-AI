@@ -62,6 +62,7 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_get_resume_state` | `GET /machine-payments/:id/status` as resume state | no |
 | `haven_list_receipts` | `GET /machine-payments/receipts` | no |
 | `haven_sweep_delegate` | gasless stranded-funds sweep prepare/submit | no — relays signed sweep |
+| `haven_report_x402_outcome` | `POST /machine-payments/reconciliation-events` (rejected) or `POST /machine-payments/evidence` (accepted) | no — records a caller-asserted outcome; contacts no merchant |
 
 `haven_pay` returns `{ payment_id, payload_hash, expires_at }` in-budget. A
 payment outside the agent's on-chain budget, recipient pin or expiry is declined
@@ -117,6 +118,36 @@ mcp__haven__haven_pay_mcp_tool
   -> mcp__haven-signer__haven_x402_sign_header
   -> mcp__haven__haven_complete_mcp_tool
 ```
+
+### Reporting a plain-HTTP merchant retry (#2292)
+
+On the plain-HTTP x402 path Haven never contacts the merchant — the agent
+retries it with the header the edge signer built. That is the keyless design
+working, and it means the outcome of that retry has to come back through a
+tool: `haven_report_x402_outcome`.
+
+```text
+mcp__haven__haven_pay_x402_quote
+  -> mcp__haven-signer__haven_sign_x402
+  -> (the agent's OWN retry of the merchant)
+  -> mcp__haven__haven_report_x402_outcome
+```
+
+`outcome: "rejected"` writes the same open
+`merchant_retry_rejected_after_payment` reconciliation event the SDK's own
+retry path writes, so `haven_get_payment_status` answers
+`funded_but_unsettled` / `sweep_stranded_funds` on the **next** call instead
+of after the 15-minute merchant-report grace window. `outcome: "accepted"`
+writes the merchant-response evidence row, so a delivered purchase stops
+reading as undelivered and never enters that window.
+
+The report is **evidence, not authority**. Haven does not verify the claim —
+verifying it would mean calling the merchant. What bounds it instead: the
+funding transaction and resource URL are read from the payment's own record
+rather than taken from the caller (so a report cannot be aimed elsewhere, and
+cannot confirm an intent), both backend routes resolve the payment scoped to
+the calling agent, the intent's status, amount and recipient are untouched,
+and the sweep is driven by the delegate's on-chain balance, not by this claim.
 
 The header-builder is intentionally at the edge: the EIP-3009 header is a
 delegate-key signature, so it cannot run on the keyless hosted server. Hosted

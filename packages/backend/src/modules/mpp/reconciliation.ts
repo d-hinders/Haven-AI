@@ -10,6 +10,7 @@
  */
 import {
   findReconciliationEvent,
+  hasMerchantResponseEvidence,
   findReconciliationIntent,
   upsertReconciliationEvent,
   type ReconciliationPaymentRow,
@@ -55,6 +56,48 @@ export async function handleReconciliationEvent(
   const paymentRail = payment.payment_rail ?? payment.source
   if (paymentRail !== rail) {
     return { statusCode: 409, body: { error: 'rail does not match payment intent' } }
+  }
+
+  // ── #2292: an acceptance is TERMINAL for this payment ────────────────────
+  //
+  // Precedence between contradictory merchant reports, decided once and here
+  // rather than left to fall out of the upsert's guard. Before this, the
+  // observable rule was incoherent: `reject → accept` resolved (the accept
+  // resolves the open event), `accept → reject` opened a stranded flag on a
+  // DELIVERED payment (nothing existed to resolve, so the INSERT simply
+  // won), and `reject → accept → reject` stayed resolved (the guard refuses
+  // to re-open). Three sequences, three different answers, none of them
+  // chosen.
+  //
+  // The chosen rule is that a recorded merchant RESPONSE outranks a later
+  // claim of rejection, in every order. Delivery is the stronger fact: an
+  // x402 merchant answers a re-request of a settled purchase idempotently
+  // (#1519), so a second retry that 402s after a first that delivered says
+  // something about the retry, not about whether the user got what they paid
+  // for. Raising `funded_but_unsettled` there would point the owner at a
+  // sweep for funds that are not stranded.
+  //
+  // Not scoped to the new reporting tool: `POST /reconciliation-events` is
+  // one route with one meaning, and a rule that held only for the client
+  // that happened to call it would be the divergence this is removing. The
+  // SDK's own `recordRetryRejected` swallows failures, so nothing on that
+  // path changes behaviour — it simply stops writing a flag that contradicts
+  // the evidence row it wrote a moment earlier.
+  if (
+    eventType === 'merchant_retry_rejected_after_payment' &&
+    (await hasMerchantResponseEvidence(payment.id, agentId))
+  ) {
+    return {
+      statusCode: 409,
+      body: {
+        error:
+          'A merchant response is already recorded for this payment, so a rejection is not ' +
+          'recorded over it. If the resource was genuinely not delivered, review the payment in ' +
+          'Haven rather than reporting again.',
+        payment_id: payment.id,
+        event_type: eventType,
+      },
+    }
   }
 
   // #2085: a NEW reconciliation event is always anchored to a payment intent.

@@ -48,6 +48,7 @@ const boundary: ClientBoundary = {
     'prepareX402Erc7710',
     'quoteMcpX402',
     'quoteX402',
+    'reportX402MerchantOutcome',
     'resumeAuthorizedX402',
     'resumeX402Payment',
     'settleX402Erc7710',
@@ -90,6 +91,7 @@ const boundary: ClientBoundary = {
     "async quoteX402(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<X402Quote>",
     "async resumeAuthorizedX402(input: ResumeAuthorizedX402Input): Promise<X402Receipt>",
     "async resumeX402Payment(input: ResumeX402PaymentInput | X402ResumeState): Promise<Response>",
+    "async reportX402MerchantOutcome(input: { paymentId: string; outcome: X402MerchantOutcome; merchantStatus: number; merchantBody?: string; }): Promise<X402MerchantOutcomeReport>",
     "async settleX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; } = {}): Promise<X402Erc7710Settlement>",
     "async submitCatalogEntry(resourceUrl: string, options: { website?: string; } = {}): Promise<HavenCatalogSubmission>",
     "async submitSignature(paymentId: string, signature: string): Promise<{ status: string; txHash?: string; }>",
@@ -540,6 +542,8 @@ describe('HavenClient structural boundary', () => {
       'X402McpCallContext',
       'X402McpTransport',
       'X402MerchantCallContext',
+      'X402MerchantOutcome', // #2292
+      'X402MerchantOutcomeReport', // #2292
       'X402PaymentHeaderContext',
       'X402PaymentOption',
       'X402PaymentRequired',

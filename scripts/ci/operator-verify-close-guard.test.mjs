@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   OPERATOR_VERIFY_LABEL,
   findViolations,
+  logicalLines,
   parseClosingRefs,
   renderReport,
   staysOpenEvidence,
@@ -126,6 +127,40 @@ test('the phrasings a real operator-verify author reaches for all register', () 
     const violations = findViolations({ body: `${line}\n\nCloses #5` })
     assert.equal(violations.length, 1, `expected a violation for: ${line}`)
   }
+})
+
+test('a HARD-WRAPPED declaration still registers (haven-reviewer, #2276)', () => {
+  // Markdown wraps at ~80 columns, so the issue number and the assertion often
+  // land on different physical lines. Line scoping missed this, and it is the
+  // backstop signal — the one that catches an author who declared the mode in
+  // writing and forgot the label, which is precisely what happened on #2268.
+  const body = [
+    'Issue #2268 will not be closed by this merge; it',
+    'stays open until an operator finishes the vendor dashboard step.',
+    '',
+    'Closes #2268',
+  ].join('\n')
+  const violations = findViolations({ body })
+  assert.equal(violations.length, 1)
+  assert.equal(violations[0].signal, 'self-contradiction')
+})
+
+test('unwrapping never joins across a new Markdown block or a finished sentence', () => {
+  // The opposite failure. Two neighbouring bullets, or two finished sentences,
+  // must stay separate — otherwise a body that mentions an issue in one bullet
+  // and says "stays open" about something else in the next starts failing PRs.
+  const bullets = ['- ships the code for #2276', '- #2268 stays open for an operator step'].join('\n')
+  assert.deepEqual(logicalLines(bullets), ['- ships the code for #2276', '- #2268 stays open for an operator step'])
+  assert.deepEqual(findViolations({ body: `${bullets}\n\nCloses #2276` }), [])
+
+  const finished = ['This closes out #2276.', 'A separate issue stays open for the operator.'].join('\n')
+  assert.equal(logicalLines(finished).length, 2)
+  assert.deepEqual(findViolations({ body: `${finished}\n\nCloses #2276` }), [])
+
+  // Table rows are their own blocks too.
+  const table = ['| #2276 | shipped |', '| #2268 | stays open |'].join('\n')
+  assert.equal(logicalLines(table).length, 2)
+  assert.deepEqual(findViolations({ body: `${table}\n\nCloses #2276` }), [])
 })
 
 test('negation is not read — "does not close #N" still counts as a closing ref', () => {

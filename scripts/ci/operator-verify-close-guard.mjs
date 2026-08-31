@@ -91,20 +91,48 @@ export function assertsStaysOpen(line) {
   return STAYS_OPEN_PHRASES.some((re) => re.test(line))
 }
 
+// Markdown line starts that begin a NEW block rather than continuing the
+// previous sentence: list bullets, ordered items, table rows, quotes, headings,
+// fences, rules.
+const BLOCK_START = /^(?:[-*+]\s|\d+[.)]\s|[|>#]|```|---|===)/
+
 /**
- * Lines that both mention `#<issue>` and assert it stays open.
+ * Logical sentences, with hard wraps undone.
  *
- * Scoped to a single line on purpose. A body-wide "does it mention
- * operator-verify anywhere" test would flag every pull request that merely
- * DISCUSSES the mode — including the one that introduced this guard — and a
- * check that fires on its own documentation gets muted.
+ * Markdown hard-wraps at ~80 columns, so "…#2268 will not be closed by this
+ * merge; it\nstays open until…" puts the number and the assertion on different
+ * physical lines. Line scoping missed exactly that — reproduced by
+ * `haven-reviewer` on this file's own review: a false negative in the one
+ * signal that needs no label, i.e. the backstop for the case that happened.
+ *
+ * Wrapped continuations are joined; a new Markdown block is never joined to the
+ * line above it, and neither is anything after sentence-final punctuation. That
+ * keeps the scope tight enough to avoid the opposite failure — a pull request
+ * that merely DISCUSSES operator-verify mode for some other issue, including
+ * the one that introduced this guard. A check that fires on its own
+ * documentation gets muted.
  */
+export function logicalLines(body) {
+  const out = []
+  for (const raw of String(body ?? '').split(/\r?\n/)) {
+    const line = raw.trim()
+    const previous = out[out.length - 1]
+    const continues =
+      line !== '' &&
+      previous !== undefined &&
+      previous !== '' &&
+      !BLOCK_START.test(line) &&
+      !/[.!?:]$/.test(previous)
+    if (continues) out[out.length - 1] = `${previous} ${line}`
+    else out.push(line)
+  }
+  return out
+}
+
+/** Sentences that both mention `#<issue>` and assert it stays open. */
 export function staysOpenEvidence(body, issue) {
   const mentions = new RegExp(`#${issue}\\b`)
-  return String(body ?? '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => mentions.test(line) && assertsStaysOpen(line))
+  return logicalLines(body).filter((line) => mentions.test(line) && assertsStaysOpen(line))
 }
 
 /**

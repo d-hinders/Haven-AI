@@ -1864,6 +1864,25 @@ describe('x402 sign-context funded-but-unsettled resume (#2290)', () => {
     expect(res.json().error_code).toBe('already_executed')
   })
 
+  it('a funded intent with no stored signing payload answers not_signable, not already_executed', async () => {
+    // The one path the `!fundedMerchantRetry` guard protects: the predicate
+    // holds, so the already-executed refusal is skipped, but the rebuild
+    // returns null because there is no prepared op to rebuild from. The
+    // fall-through then answers on STATUS. Pinned because it is otherwise an
+    // edit no test would catch (reviewer finding), not because this wording is
+    // the best possible one — `sign_context_unavailable` would describe it
+    // more precisely, and restructuring the fall-through to say so is not
+    // worth the risk on a path a confirmed eip3009 intent cannot reach: such
+    // an intent always carries the prepared op its funding leg was built from.
+    serve({ ...FUNDED_ROW, prepared_user_op: null }, statusRow())
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error_code).toBe('not_signable')
+  })
+
   it('a PENDING intent past its quote window still 410s — the funding leg is still bounded', async () => {
     // Criterion 3 relaxes the stale-window gate for FUNDED money only. An
     // unfunded quote that ran out must still expire, or the window would stop

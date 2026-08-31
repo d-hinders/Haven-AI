@@ -66,9 +66,18 @@ function tokenDecimalsForAllowance(allowance: AgentAllowance, chainId: number): 
  *
  * Nothing here can throw where the old `catch` was reachable. The remaining
  * throw is `tokenDecimals`' `getChainConfig` on an UNKNOWN chain id, and the
- * `catch` never protected the user from it: `AllowanceBar` calls the same
- * helper unguarded on the same `chainId` one row over, so an unknown chain
- * already fails the surrounding render. Parity, not a new failure mode.
+ * `catch` bought nothing real against it: `AllowanceBar` reaches the SAME
+ * unguarded helper on the same `chainId` under the same unregistered-chain
+ * precondition — more easily, in fact, since it does not need the symbol
+ * lookup to miss first. Stated precisely, because the review pass corrected a
+ * looser version of this sentence: the two are mutually exclusive branches in
+ * `AgentCard` (`hasNetworkAllowances ? AllowanceBar : ConfiguredAllowanceRow`),
+ * so this is parity of failure CLASS in a sibling branch, not a same-render
+ * proof that the crash already happens beside this row. The practical exposure
+ * is unchanged either way: `chainId` is app-controlled and bounded to the
+ * supported set before it reaches either component, never wire-controlled.
+ * Hardening `tokenDecimals`/`tokenSymbol` into total functions is a real but
+ * separate, pre-existing gap — deliberately not bundled into this fix.
  */
 export function formatConfiguredAllowance(allowance: AgentAllowance, chainId: number): string {
   return formatAllowanceAmount(

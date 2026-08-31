@@ -114,9 +114,10 @@ jobs:
       #
       # #2320 widened what it reads. GitHub honours the keyword in every commit
       # message that reaches the default branch and — via the squash subject — in
-      # the title, not only in the body. The guard proved that on itself: PR #2314
-      # wrote `Refs #2276` in its body, this step went green, and a commit message
-      # narrating the original incident closed #2268 a second time on the merge.
+      # the title, not only in the body. The guard proved that on itself: PR #2314's
+      # body closed only its own issue (#2276) and this step went green on it,
+      # while a commit message narrating the original incident closed #2268 a
+      # second time on the merge.
       # `gh pr view --json commits,title` covers those; the `pull-requests: read`
       # scope above is what reads them, so no permission change was needed.
       #

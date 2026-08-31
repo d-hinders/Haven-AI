@@ -30,8 +30,18 @@
 // keyword inside a code span in order to describe it. `dev` is the default
 // branch, the pull request landed as a merge commit, the message reached `dev`
 // verbatim, and GitHub closed #2268 **for the second time — by the change
-// written to prevent it.** CI was green, because the body it read said
-// `Refs #2276`.
+// written to prevent it.**
+//
+// CI was green because the body it read never named #2268 with a keyword at
+// all: `gh pr view 2314 --json closingIssuesReferences` on the merged pull
+// request returns `[#2276]` and nothing else, and #2276 is neither labelled nor
+// declared as staying open, so the guard had a true and complete answer about
+// the surface it was looking at, and no answer at all about the one that
+// mattered. (Stated carefully because the first draft of this comment — and
+// issue #2320's own summary — said the body "correctly said `Refs #2276`". It
+// did not; the merged body ends `Closes #2276`, correctly closing its OWN
+// issue. The `Refs #2276` trailer is on the COMMIT, which is how the two got
+// swapped. `haven-doc-reviewer` caught it against the live pull request.)
 //
 // The scanned sources are therefore every place whose text can reach `dev`:
 //
@@ -125,12 +135,26 @@
 //
 // ## How an author quotes the keyword without firing this guard (#2320/#2327)
 //
-// They do not, and the guard must not offer a way, because **GitHub does not
-// offer one**. Fenced code blocks and blockquotes do not help; #2320 is the
-// proof. If your text contains `Close` + `s` + a parseable `#<number>` and that
-// text reaches `dev`, the issue closes — so a guard that stayed quiet over a
-// fence would be green on the exact bytes that closed #2268, which is the
-// false-GREEN direction of the defect it exists to catch.
+// They do not, and the guard must not offer a way. If your text contains
+// `Close` + `s` + a parseable `#<number>` and that text reaches `dev`, treat the
+// issue as closed — so a guard that stayed quiet over a fence would be green on
+// bytes GitHub acts on, the false-GREEN direction of the defect it exists to
+// catch.
+//
+// Be precise about how much of that is measured, because the anecdote this
+// section originally rested on turned out to be wrong (see above):
+//
+//   * For **commit messages and the title**, fencing provably does not help.
+//     Neither is rendered as Markdown by anything, and `7f7102ff` closed #2268
+//     with the keyword inside a code span. Measured.
+//   * For the **body**, whether GitHub's `closingIssuesReferences` respects
+//     Markdown rendering is **not established here**, and the honest answer is
+//     that nobody on this change verified it. `haven-doc-reviewer` tried and
+//     could not construct a clean discriminating example. The guard assumes it
+//     does not, because that is the safe direction — over-firing costs one
+//     reworded sentence, and under-firing costs a silently closed issue, which
+//     is the asymmetry this whole file is built on. Do not restate the
+//     assumption as a finding.
 //
 // The escape is real, not notational: **write something GitHub does not parse.**
 //   * `Refs #2268` — the prescribed form, and what the report below recommends.
@@ -415,8 +439,8 @@ export function commitsFromGraphQL(connection) {
 function readCommits(pr, owner, name) {
   const commits = []
   let cursor = null
-  // Bounded: GitHub caps a pull request at 250 commits, so five pages is the
-  // ceiling and the loop cannot run away on a malformed `pageInfo`.
+  // Bounded so the loop cannot run away on a malformed `pageInfo`. Five pages
+  // of 100 is 500, comfortably above GitHub's 250-commit cap on a pull request.
   for (let page = 0; page < 5; page += 1) {
     const args = [
       'api', 'graphql',

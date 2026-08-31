@@ -45,7 +45,10 @@ const PR_2272_FIXED = PR_2272_EXCERPT.replace('Closes #2268', 'Refs #2268')
 // not make that distinction. `dev` is the default branch, PR #2314 landed as a
 // merge commit (`4a1f3114`), the message reached `dev` verbatim, and #2268 was
 // closed for the SECOND time — by the change written to prevent it — while this
-// guard reported green, because the body it read said `Refs #2276`.
+// guard reported green. Green because the body it read never named #2268 with a
+// keyword: the merged pull request's `closingIssuesReferences` is `[#2276]`
+// alone, its own issue, correctly closed. The guard had a true answer about the
+// surface it looked at and no answer about the one that mattered.
 //
 // Trimmed to the subject, the paragraph carrying the keyword, and the trailer;
 // the omitted middle is a bullet list about SKILL.md and the hooks.
@@ -123,11 +126,13 @@ test('POSITIVE CONTROL (#2320): the same commit also fails on the label alone', 
 })
 
 test('POSITIVE CONTROL (#2320): the body being correct does not excuse the commit', () => {
-  // PR #2314's actual shape: a body that correctly wrote `Refs #2276`, and a
-  // commit that closed #2268. This is the exact green-CI-plus-closed-issue
-  // combination the guard has to stop.
+  // PR #2314's actual shape: a body that closed only its OWN issue, #2276 —
+  // legitimately, with no label and no promise attached to it — and a commit
+  // that closed #2268 as well. This is the exact green-CI-plus-closed-issue
+  // combination the guard has to stop, and note that the body here is not
+  // merely innocent, it is a passing `Closes` that the guard must keep passing.
   const violations = findViolations({
-    body: 'Ships the guard.\n\nRefs #2276',
+    body: 'Ships the guard.\n\nCloses #2276',
     commits: [{ oid: '7f7102ff', message: COMMIT_7F7102FF }],
   })
   assert.equal(violations.length, 1)
@@ -180,10 +185,13 @@ test('REGRESSION (#2327): naming the mode is not asserting a state, in either di
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('there is NO escape from the keyword — a fence or a quote does not help', () => {
-  // GitHub parses fenced and quoted text. #2320 is the proof: `7f7102ff` wrote
-  // the keyword inside a code span, purely descriptively, and the issue closed.
-  // A guard that stayed quiet over a fence would be GREEN on the exact bytes
-  // that closed #2268 — the false-GREEN direction of the defect it guards.
+  // Measured for the surfaces that matter most: `7f7102ff` wrote the keyword
+  // inside a code span in a COMMIT MESSAGE — which nothing renders as Markdown —
+  // purely descriptively, and #2268 closed. Whether GitHub's body parse respects
+  // Markdown rendering is not established (see the source's escape-hatch note);
+  // the guard assumes it does not, because a guard that stayed quiet over a fence
+  // would be GREEN on bytes GitHub acts on, which is the false-GREEN direction of
+  // the defect it guards. Over-firing costs a reworded sentence.
   for (const quoted of [
     '```\nCloses #2268\n```',
     '> Closes #2268',

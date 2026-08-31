@@ -79,8 +79,9 @@ issue's post-merge state, not the name of the mode (#2327).
 
 Writing ABOUT the closing keyword? Use a form GitHub does not parse: `Refs #<n>`,
 a non-numeric placeholder like the ones above, or the number with no keyword in
-front of it. A code fence does NOT help — GitHub parses fenced text too, which is
-how #2268 was closed a second time (#2320).
+front of it. A code fence does NOT help: a fenced keyword in a commit message is
+how #2268 was closed a second time, and the guard reads a fenced keyword in the
+body the same way (#2320).
 -->
 
 

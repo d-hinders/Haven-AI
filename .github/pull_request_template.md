@@ -69,6 +69,20 @@ the merge gate stops here.
       keyword and closes the issue whatever this body says elsewhere, so a
       sentence promising it stays open does not survive it. Label the issue
       `operator-verify` as well — that is what the merge-time guard reads.
+      Use `Refs` in the **commit messages and the pull-request title** too: all
+      three reach `dev`, and a clean body does not excuse a commit (#2320).
+
+<!--
+Ticking `Closes` needs no justification, and you do not have to say that
+operator-verify mode is not the one — the guard reads assertions about an
+issue's post-merge state, not the name of the mode (#2327).
+
+Writing ABOUT the closing keyword? Use a form GitHub does not parse: `Refs #<n>`,
+a non-numeric placeholder like the ones above, or the number with no keyword in
+front of it. A code fence does NOT help — GitHub parses fenced text too, which is
+how #2268 was closed a second time (#2320).
+-->
+
 
 ## Merge Readiness
 

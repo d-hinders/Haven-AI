@@ -255,7 +255,23 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    **enforced, not merely written**: `scripts/ci/operator-verify-close-guard.mjs`
    runs inside the required *Docs front-matter & agent skills* check and fails a
    pull request whose closing keyword targets an issue labelled `operator-verify`,
-   or one this body itself says stays open.
+   or one the pull request itself says stays open.
+
+   **The body is not the only place the keyword counts (#2320).** GitHub honours it
+   in every **commit message** that reaches the default branch — `dev` is the
+   default here, a merge commit lands the messages verbatim and a squash lands them
+   concatenated — and, via the squash subject, in the **pull-request title**. The
+   guard reads all three. It had to learn this the hard way: PR #2314, which
+   introduced the guard, wrote `Refs #2276` in its body and closed #2268 anyway
+   from a commit message that merely *described* the original incident.
+
+   **To write ABOUT the keyword without emitting it, use a form GitHub does not
+   parse.** A code fence or a blockquote is not one — GitHub parses those too, which
+   is exactly how #2268 was closed a second time. The forms that work: `Refs #<n>`,
+   a non-numeric placeholder (`Closes #<n>`, as this line does), the issue number
+   with no keyword in front of it, or the keyword and the number in separate
+   sentences. There is deliberately **no opt-out marker**: the guard's constraint is
+   identical to GitHub's, so there is nothing an opt-out could truthfully assert.
 8. Monitor pull-request activity when the client supports it.
 
 ## Merge Gate
@@ -512,7 +528,9 @@ operator can run (funded testnet keys, vendor dashboards, live end-to-end runs):
    the issue without a closing keyword** (`Refs #<issue>`; see *Commit And Pull
    Request* step 7), or the merge closes the very issue this mode exists to keep open.
    Writing "the issue stays open" in the body does not survive `Closes` — the keyword
-   is the mechanism and the sentence is not.
+   is the mechanism and the sentence is not. **Check the commit messages and the
+   pull-request title as well** (#2320): they reach `dev` too, and a clean body does
+   not excuse them.
 2. Apply the **`operator-verify` label to the issue**, and post a numbered,
    copy-pasteable operator checklist on it (exact commands, env var names — never
    secret values — and the expected output of each step). The label is what makes

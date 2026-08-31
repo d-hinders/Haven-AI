@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Operator-verify close-keyword guard (#2276).
+// Operator-verify close-keyword guard (#2276, extended by #2320 + #2327).
 //
 // ## What it stops
 //
@@ -20,14 +20,49 @@
 // check and not another paragraph — a convention that nothing verifies is the
 // same class of defect as a test that cannot fail.
 //
+// ## Which surfaces GitHub actually parses (#2320)
+//
+// The first version of this guard read the pull-request BODY and nothing else,
+// and it was wrong about its own subject: GitHub honours closing keywords in
+// **commit messages that reach the default branch** too. It proved it on
+// itself. PR #2314 — the pull request that introduced this file — carried a
+// commit (`7f7102ff`) whose message narrated the original incident, quoting the
+// keyword inside a code span in order to describe it. `dev` is the default
+// branch, the pull request landed as a merge commit, the message reached `dev`
+// verbatim, and GitHub closed #2268 **for the second time — by the change
+// written to prevent it.** CI was green, because the body it read said
+// `Refs #2276`.
+//
+// The scanned sources are therefore every place whose text can reach `dev`:
+//
+//   * the pull-request **body** — GitHub's own `closingIssuesReferences`;
+//   * every **commit message** on the pull request. Both merge routes this
+//     repository allows carry them to `dev`: a merge commit lands them verbatim,
+//     and a squash lands them concatenated, because
+//     `squash_merge_commit_message` is `COMMIT_MESSAGES`;
+//   * the pull-request **title**, which is the indirect one:
+//     `squash_merge_commit_title` is `COMMIT_OR_PR_TITLE`, so on a multi-commit
+//     squash the title becomes the subject line of a commit on `dev` and is
+//     parsed there.
+//
+// Enumerated and checked, so the next reader does not have to re-derive it:
+// issue comments and review comments are **not** emitters — GitHub scopes
+// closing keywords to pull-request descriptions and commit messages — and no
+// automation in this repository closes an issue. Every `gh issue` call under
+// `.github/`, `scripts/`, `.claude/` and `.agents/` is `list`, `edit`, `create`
+// or `comment` (docs-audit, promotion-digest, db-concurrency-proof, qa-dev);
+// there is no `gh issue close`, no `issues.update`, and no `actions/github-script`
+// anywhere in the repository. The six workflows holding `issues: write` use it
+// to create or comment. Branch names are not parsed by anything.
+//
 // ## The two signals, and why both
 //
 //   1. **Label** — a closing keyword aimed at an issue labelled `operator-verify`
 //      (`.github/labels.yml`). This is the primary signal: it lives on the ISSUE,
-//      so it holds no matter how the pull-request body is phrased, and it survives
+//      so it holds no matter how the pull request is phrased, and it survives
 //      a body rewrite. The skill's *Operator-verify mode* step 2 applies it.
-//   2. **Self-contradiction** — a closing keyword aimed at an issue the body
-//      ITSELF says stays open. Needs no label, no API and no bookkeeping, and it
+//   2. **Self-contradiction** — a closing keyword aimed at an issue the pull
+//      request ITSELF says stays open. Needs no label, no bookkeeping, and it
 //      is the signal that catches the actual #2272 incident on its actual text.
 //      It is the backstop for the day someone declares the mode in writing and
 //      forgets the label — i.e. exactly what happened.
@@ -36,17 +71,80 @@
 // operator-verify mode has no label and writes no such sentence, so `Closes #N`
 // stays the default and this file is silent.
 //
+// ## The negation asymmetry between the two halves (#2327)
+//
+// The two halves ask questions of a different kind, and they must read negation
+// differently. Recording it here because the natural instinct is to make them
+// consistent, and consistency is the bug.
+//
+//   * The **closing-keyword** half asks *what will GitHub do?* It must mirror
+//     GitHub exactly, so it does NOT read negation: `does not close #5` really
+//     does close #5, and a keyword quoted inside a fence or a blockquote closes
+//     the issue just the same — that is precisely what happened in #2320. A test
+//     below pins this.
+//   * The **stays-open** half asks *what did the author assert?* That is a claim
+//     about intent with no GitHub behaviour behind it, and negation is the whole
+//     content of the sentence. It fired on PR #2326, whose body ticked
+//     `Closes #2295` and said, on the same line, "Not operator-verify mode; no
+//     outstanding human step." The guard failed the pull request **because the
+//     author declared the mode did not apply**: one red required check and a CI
+//     round trip on a pull request that had done nothing wrong.
+//
+// The fix is not a negation reader — reading "not" correctly is prose
+// interpretation, which ship-next § *Rework caps* rule 1 puts out of scope for
+// exactly this reason. It is that `operator-verify mode` was never an assertion
+// in the first place. Every other phrase in the list below names the issue's
+// post-merge STATE ("stays open", "must outlive the merge"); that one named a
+// MODE, and naming a mode says nothing about this issue. It also earned nothing:
+// a sentence that genuinely declares the mode for an issue reaches for a state
+// word too, and is caught by the state phrases. What it uniquely matched was
+// authors declaring the mode does NOT apply — which the pull-request template
+// invites, since its Issue Link section offers a `Closes` / `Refs` pair and the
+// natural way to justify ticking `Closes` is to say the other option is not it.
+// So it is gone, and the list is state assertions only.
+//
+// ## How an author quotes the keyword without firing this guard (#2320/#2327)
+//
+// They do not, and the guard must not offer a way, because **GitHub does not
+// offer one**. Fenced code blocks and blockquotes do not help; #2320 is the
+// proof. If your text contains `Close` + `s` + a parseable `#<number>` and that
+// text reaches `dev`, the issue closes — so a guard that stayed quiet over a
+// fence would be green on the exact bytes that closed #2268, which is the
+// false-GREEN direction of the defect it exists to catch.
+//
+// The escape is real, not notational: **write something GitHub does not parse.**
+//   * `Refs #2268` — the prescribed form, and what the report below recommends.
+//   * The keyword with a non-numeric placeholder: `Closes #<n>`. The
+//     pull-request template does this; so does this comment block.
+//   * The number with no keyword in front of it: `#2268 was closed twice`.
+//   * The keyword and the number in separate sentences.
+//
+// This file, its tests, its documentation and the pull request that shipped this
+// change all had to use those forms, and that is the point rather than an
+// inconvenience: the constraint the guard imposes is identical to the constraint
+// GitHub imposes, so obeying the guard is obeying the mechanism. A guard with an
+// opt-out marker would let an author assert "yes, GitHub will close this issue,
+// but I say it is fine" — which is never true in operator-verify mode, and
+// outside operator-verify mode the guard is silent anyway. There is no
+// legitimate use for one, so there is none.
+//
 // ## Known limits, stated rather than implied
 //
 //   * A body EDITED after the last CI run is not re-checked — `pull_request`
 //     here does not list the `edited` type, and adding it would re-run the whole
 //     required suite on every typo fix. The keyword is written when the PR is
-//     opened, which is when this runs.
+//     opened, which is when this runs. Commits pushed after it runs DO get a
+//     fresh run, so the commit half is better covered than the body half.
 //   * The label signal needs the issue's labels. Where `gh` cannot answer, the
-//     guard says so loudly and still runs the body signal; in CI it fails closed
+//     guard says so loudly and still runs the text signals; in CI it fails closed
 //     rather than reporting a clean bill of health.
 //   * It cannot make an issue that ALREADY merged with the keyword re-open. The
-//     remedy there is a human reopening it, as #2268 was.
+//     remedy there is a human reopening it, as #2268 was — twice.
+//   * A conventional-commit subject of the form `fix: #1234 something` parses as
+//     a closing reference, to GitHub and to this file alike. That is GitHub's
+//     behaviour, not a quirk here; `fix(scope): ...` does not.
+//   * The stays-open half is scoped to logical lines naming the issue, so a pull
+//     request that discusses some OTHER issue staying open is untouched.
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -62,9 +160,12 @@ const CLOSING_REF = new RegExp(
   'gi',
 )
 
-// A line that says, in the author's own words, that this issue outlives the
-// merge. Deliberately a small, literal list: anything that needs the guard to
-// INTERPRET a sentence is out of scope (ship-next § Rework caps, rule 1).
+// A line that says, in the author's own words, that THIS ISSUE outlives the
+// merge. Deliberately a small, literal list of STATE assertions: anything that
+// needs the guard to INTERPRET a sentence is out of scope (ship-next § Rework
+// caps, rule 1), and anything that merely names the mode rather than asserting
+// the state was the #2327 false positive. See the negation-asymmetry section
+// above before adding to this list.
 const STAYS_OPEN_PHRASES = [
   /\bstays?\s+open\b/i,
   /\bstay\s+open\b/i,
@@ -73,10 +174,9 @@ const STAYS_OPEN_PHRASES = [
   /\bkept?\s+open\b/i,
   /\bmust\s+outlive\s+the\s+merge\b/i,
   /\bdo(?:es)?\s+not\s+close\s+(?:this\s+|the\s+)?(?:issue|it|#\d+)\b/i,
-  /\boperator[-\s]verify\s+mode\b/i,
 ]
 
-/** Every issue number this body asks GitHub to close, deduplicated, in order. */
+/** Every issue number this text asks GitHub to close, deduplicated, in order. */
 export function parseClosingRefs(body) {
   const seen = []
   for (const match of String(body ?? '').matchAll(CLOSING_REF)) {
@@ -94,7 +194,15 @@ export function assertsStaysOpen(line) {
 // Markdown line starts that begin a NEW block rather than continuing the
 // previous sentence: list bullets, ordered items, table rows, quotes, headings,
 // fences, rules.
-const BLOCK_START = /^(?:[-*+]\s|\d+[.)]\s|[|>#]|```|---|===)/
+//
+// A heading is `#` FOLLOWED BY WHITESPACE (ATX). The first version tested a bare
+// `#`, which made every hard-wrapped line beginning with an issue reference —
+// `#2268, in its RELEASE comment and in its own body, then ended with` — look
+// like a heading and stop the unwrapping. That is the commonest wrap point there
+// is in this repository's prose, and it is why the real `7f7102ff` fixture did
+// not register until this was corrected: a synthetic string would never have
+// found it.
+const BLOCK_START = /^(?:[-*+]\s|\d+[.)]\s|#{1,6}(?:\s|$)|[|>]|```|---|===)/
 
 /**
  * Logical sentences, with hard wraps undone.
@@ -104,6 +212,7 @@ const BLOCK_START = /^(?:[-*+]\s|\d+[.)]\s|[|>#]|```|---|===)/
  * physical lines. Line scoping missed exactly that — reproduced by
  * `haven-reviewer` on this file's own review: a false negative in the one
  * signal that needs no label, i.e. the backstop for the case that happened.
+ * Commit messages wrap at 72 and make it more common, not less.
  *
  * Wrapped continuations are joined; a new Markdown block is never joined to the
  * line above it, and neither is anything after sentence-final punctuation. That
@@ -136,11 +245,53 @@ export function staysOpenEvidence(body, issue) {
 }
 
 /**
- * @param {{body: string, closingRefs?: number[], labelsByIssue?: Record<number, string[]>}} input
+ * Every text on a pull request whose closing keywords can reach the default
+ * branch, in the order a report should name them.
+ *
+ * `describe` is written to complete the sentence "…#N — <describe> says: …", so
+ * a reader is told WHICH surface to go and edit. On #2320 that mattered: the
+ * body was correct and the commit message was not, and a report saying only
+ * "this pull request says" would have sent the author to rewrite the wrong one.
+ *
+ * @param {{body?: string, title?: string, commits?: {oid?: string, message?: string}[]}} pr
+ */
+export function pullRequestSources({ body, title, commits = [] }) {
+  const sources = []
+  if (title) sources.push({ kind: 'title', describe: "this pull request's title", text: title })
+  if (body) sources.push({ kind: 'body', describe: 'this pull-request body', text: body })
+  for (const commit of commits) {
+    const short = String(commit.oid ?? '').slice(0, 8)
+    sources.push({
+      kind: 'commit',
+      describe: short ? `commit ${short}'s message` : 'a commit message',
+      text: commit.message ?? '',
+    })
+  }
+  return sources
+}
+
+/**
+ * @param {{
+ *   body?: string,
+ *   title?: string,
+ *   commits?: {oid?: string, message?: string}[],
+ *   closingRefs?: number[],
+ *   labelsByIssue?: Record<number, string[]>,
+ * }} input
  * @returns {{issue: number, signal: 'label'|'self-contradiction', evidence: string}[]}
  */
-export function findViolations({ body, closingRefs, labelsByIssue = {} }) {
-  const refs = closingRefs ?? parseClosingRefs(body)
+export function findViolations({ body, title, commits = [], closingRefs, labelsByIssue = {} }) {
+  const sources = pullRequestSources({ body, title, commits })
+
+  // The union across every emitter, plus whatever GitHub's own parse supplied.
+  // A closing reference is a closing reference wherever it is written; the
+  // source only matters for telling the author where to go and fix it.
+  const refs = []
+  for (const n of closingRefs ?? []) if (!refs.includes(n)) refs.push(n)
+  for (const source of sources) {
+    for (const n of parseClosingRefs(source.text)) if (!refs.includes(n)) refs.push(n)
+  }
+
   const violations = []
   for (const issue of refs) {
     const labels = labelsByIssue[issue] ?? []
@@ -152,12 +303,22 @@ export function findViolations({ body, closingRefs, labelsByIssue = {} }) {
       })
       continue
     }
-    const lines = staysOpenEvidence(body, issue)
-    if (lines.length > 0) {
+    // Deliberately across ALL sources rather than only the one holding the
+    // keyword: "the body promises #N stays open, a commit closes it" is the
+    // same defect as either one alone, and it is the shape #2320 produced.
+    let found
+    for (const source of sources) {
+      const lines = staysOpenEvidence(source.text, issue)
+      if (lines.length > 0) {
+        found = { source, line: lines[0] }
+        break
+      }
+    }
+    if (found) {
       violations.push({
         issue,
         signal: 'self-contradiction',
-        evidence: `this pull-request body says: "${lines[0]}"`,
+        evidence: `${found.source.describe} says: "${found.line}"`,
       })
     }
   }
@@ -173,9 +334,16 @@ export function renderReport(violations) {
     '',
     '`Closes #<n>` is a GitHub keyword: on merge it closes the issue whatever the',
     'body says elsewhere, so a sentence promising the issue stays open does not',
-    'survive it. Reference it without a closing keyword instead:',
+    'survive it. It is honoured in the pull-request body, in every commit message',
+    'that reaches the default branch, and — via the squash subject — in the title.',
+    'Reference it without a closing keyword instead:',
     '',
     ...violations.map((v) => `  Closes #${v.issue}  ->  Refs #${v.issue}`),
+    '',
+    'To write ABOUT the keyword without emitting it, use a form GitHub does not',
+    'parse: `Refs #<n>`, a non-numeric placeholder (`Closes #<n>`), or the number',
+    'with no keyword in front of it. A code fence does NOT help — GitHub parses',
+    'fenced text too, which is how #2268 was closed a second time (#2320).',
     '',
     'See .agents/skills/ship-next/SKILL.md § Commit And Pull Request, step 7.',
     'If the issue is NOT in operator-verify mode, remove the `operator-verify`',
@@ -192,11 +360,20 @@ function readPullRequest(pr) {
   // `closingIssuesReferences` is GitHub's OWN parse of the body — the same
   // computation that will run at merge time. Preferring it over the local regex
   // means the guard is asking the mechanism, not re-implementing it; the regex
-  // stays as the offline path and as a cross-check.
-  const view = JSON.parse(gh(['pr', 'view', String(pr), '--json', 'body,closingIssuesReferences']))
+  // stays as the offline path, as a cross-check, and as the ONLY reading
+  // available for the commit and title sources, which that field does not cover.
+  const view = JSON.parse(
+    gh(['pr', 'view', String(pr), '--json', 'body,title,commits,closingIssuesReferences']),
+  )
   const refs = (view.closingIssuesReferences ?? []).map((r) => r.number)
-  const local = parseClosingRefs(view.body)
-  return { body: view.body ?? '', closingRefs: [...new Set([...refs, ...local])] }
+  const commits = (view.commits ?? []).map((c) => ({
+    oid: c.oid,
+    // `gh` splits a commit message into headline and body. GitHub parses the
+    // whole message, so rejoin it — #2320's keyword was in the BODY of
+    // `7f7102ff`, several paragraphs below its subject line.
+    message: [c.messageHeadline, c.messageBody].filter(Boolean).join('\n\n'),
+  }))
+  return { body: view.body ?? '', title: view.title ?? '', commits, closingRefs: refs }
 }
 
 function readLabels(issues) {
@@ -217,13 +394,12 @@ function main(argv) {
   const pr = arg('--pr')
   const bodyFile = arg('--body-file')
 
-  let body = ''
-  let closingRefs
+  let input = {}
   let labelsByIssue = {}
 
   if (bodyFile) {
-    body = readFileSync(bodyFile, 'utf8')
-    closingRefs = parseClosingRefs(body)
+    const body = readFileSync(bodyFile, 'utf8')
+    input = { body }
     const labelled = (arg('--operator-verify-issues') ?? '')
       .split(',')
       .map((s) => Number(s.trim()))
@@ -231,9 +407,7 @@ function main(argv) {
     labelsByIssue = Object.fromEntries(labelled.map((n) => [n, [OPERATOR_VERIFY_LABEL]]))
   } else if (pr) {
     try {
-      const view = readPullRequest(pr)
-      body = view.body
-      closingRefs = view.closingRefs
+      input = readPullRequest(pr)
     } catch (error) {
       // Fail CLOSED in CI. A guard that reports "nothing found" when it could
       // not look is the false-GREEN direction of the very defect it guards.
@@ -246,32 +420,41 @@ function main(argv) {
       return 0
     }
     try {
-      labelsByIssue = readLabels(closingRefs)
+      labelsByIssue = readLabels(allClosingRefs(input))
     } catch (error) {
       const message = `operator-verify close guard: could not read issue labels (${error.message.trim()})`
       if (inCI) {
         console.error(`✖ ${message}`)
         return 1
       }
-      console.warn(`⚠ ${message} — label signal skipped; body signal still ran.`)
+      console.warn(`⚠ ${message} — label signal skipped; text signals still ran.`)
     }
   } else {
     console.error('usage: operator-verify-close-guard.mjs (--pr <number> | --body-file <path>)')
     return 2
   }
 
-  const violations = findViolations({ body, closingRefs, labelsByIssue })
+  const violations = findViolations({ ...input, labelsByIssue })
   if (violations.length > 0) {
     console.error(renderReport(violations))
     return 1
   }
-  const refs = closingRefs ?? []
+  const refs = allClosingRefs(input)
   console.log(
     refs.length === 0
-      ? '✓ operator-verify close guard: no closing keyword in this pull-request body.'
+      ? '✓ operator-verify close guard: no closing keyword in this pull request (body, title or commits).'
       : `✓ operator-verify close guard: ${refs.map((n) => `#${n}`).join(', ')} — none held open for an operator step.`,
   )
   return 0
+}
+
+/** The union of closing references across every emitter on the pull request. */
+export function allClosingRefs({ body, title, commits = [], closingRefs = [] }) {
+  const refs = [...closingRefs]
+  for (const source of pullRequestSources({ body, title, commits })) {
+    for (const n of parseClosingRefs(source.text)) if (!refs.includes(n)) refs.push(n)
+  }
+  return refs
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

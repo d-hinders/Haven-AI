@@ -2,15 +2,25 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   OPERATOR_VERIFY_LABEL,
+  allClosingRefs,
+  assertsStaysOpen,
   findViolations,
   logicalLines,
   parseClosingRefs,
+  pullRequestSources,
   renderReport,
   staysOpenEvidence,
 } from './operator-verify-close-guard.mjs'
 
-// The case this guard exists for, quoted VERBATIM from the body of PR #2272 as
-// it merged on 2026-08-31 (`gh pr view 2272 --json body`). Two lines out of a
+// ─────────────────────────────────────────────────────────────────────────────
+// The three real artifacts. Every one of them is prose a human reads correctly
+// and an early version of this guard read backwards, which is the whole
+// difficulty — a hand-written `Closes #123` proves far less. They are quoted
+// VERBATIM from the sources named, not paraphrased.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// (1) The case this guard exists for, quoted VERBATIM from the body of PR #2272
+// as it merged on 2026-08-31 (`gh pr view 2272 --json body`). Two lines out of a
 // long body: the one that promised the issue survives the merge, and the one
 // that closed it. GitHub's own parse of that same body still reports
 // `closingIssuesReferences: [#2268]`, which is what actually closed the issue.
@@ -25,9 +35,57 @@ const PR_2272_EXCERPT = [
 // The same body with the one-word fix the skill now prescribes.
 const PR_2272_FIXED = PR_2272_EXCERPT.replace('Closes #2268', 'Refs #2268')
 
+// (2) #2320 — the FALSE NEGATIVE, and the reason the commit half exists.
+//
+// Verbatim from `git log -1 --format=%B 7f7102ff`, the first commit of PR #2314
+// — the pull request that introduced this guard. It is a narrative paragraph
+// DESCRIBING the original incident, with the keyword quoted inside a code span
+// so a reader understands it is being discussed rather than invoked. GitHub does
+// not make that distinction. `dev` is the default branch, PR #2314 landed as a
+// merge commit (`4a1f3114`), the message reached `dev` verbatim, and #2268 was
+// closed for the SECOND time — by the change written to prevent it — while this
+// guard reported green, because the body it read said `Refs #2276`.
+//
+// Trimmed to the subject, the paragraph carrying the keyword, and the trailer;
+// the omitted middle is a bullet list about SKILL.md and the hooks.
+const COMMIT_7F7102FF = [
+  'fix(ship-next): make `Closes #<issue>` conditional and enforce it (#2276)',
+  '',
+  '`Closes #<n>` is a GitHub keyword, not prose: on merge it closes the issue',
+  "whatever the pull-request body says elsewhere. ship-next's operator-verify",
+  'mode — ship the code, keep the issue OPEN because a human still has a live',
+  'step — therefore instructed authors to do the exact thing it forbids one',
+  'section later, and the mechanism wins over the prose every time. It did:',
+  'PR #2272 said the issue stays open three times, in the operator checklist on',
+  '#2268, in its RELEASE comment and in its own body, then ended with',
+  '`Closes #2268`. The merge closed it.',
+  '',
+  'Refs #2276',
+].join('\n')
+
+// (3) #2327 — the FALSE POSITIVE.
+//
+// Verbatim from PR #2326's body as it was when the guard failed it, recovered
+// from GitHub's own edit history (`userContentEdits`, revision of
+// 2026-08-31T20:35:49Z; the author then rewrote the sentence to get past the
+// check, which is the workaround this fix removes). The line ticks the template's
+// `Closes` option and, in the same breath, says the operator-verify option is
+// NOT the one — and the guard failed the pull request BECAUSE of that denial.
+// Cost: one red required check and one CI round trip on a compliant PR.
+const PR_2326_ISSUE_LINK = [
+  '## Issue Link',
+  '',
+  '- [x] `Closes #2295` — the merge closes the issue. Not operator-verify mode; no outstanding human step.',
+  '',
+  'Closes #2295',
+].join('\n')
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Positive controls. If either of these goes green the instrument has stopped
+// being able to say yes, and every clean result below stops meaning anything.
+// ─────────────────────────────────────────────────────────────────────────────
+
 test('POSITIVE CONTROL: the real PR #2272 body is a violation', () => {
-  // If this ever goes green the instrument has stopped being able to say yes,
-  // and every clean result below stops meaning anything.
   const violations = findViolations({ body: PR_2272_EXCERPT })
   assert.equal(violations.length, 1)
   assert.equal(violations[0].issue, 2268)
@@ -35,21 +93,195 @@ test('POSITIVE CONTROL: the real PR #2272 body is a violation', () => {
   assert.match(violations[0].evidence, /#2268 stays open for it/)
 })
 
+test('POSITIVE CONTROL (#2320): the real commit 7f7102ff is a violation', () => {
+  // The regression that started #2320. The guard used to read only the body, so
+  // this text was invisible to it while GitHub acted on it.
+  const violations = findViolations({
+    commits: [{ oid: '7f7102ff754f1aec62b4dc2a1c45ab8786cb70ce', message: COMMIT_7F7102FF }],
+  })
+  assert.equal(violations.length, 1, 'the commit message must be read')
+  assert.equal(violations[0].issue, 2268)
+  assert.equal(violations[0].signal, 'self-contradiction')
+  // The report has to name the COMMIT, not "this pull request": on #2314 the
+  // body was correct and only the commit was wrong, so a report naming the body
+  // would have sent the author to rewrite the wrong surface.
+  assert.match(violations[0].evidence, /^commit 7f7102ff's message says:/)
+  assert.match(violations[0].evidence, /stays open/)
+})
+
+test('POSITIVE CONTROL (#2320): the same commit also fails on the label alone', () => {
+  // #2268 carries `operator-verify` today (applied after #2315 created the
+  // label). The primary signal must reach the commit source too, independently
+  // of any sentence in it.
+  const violations = findViolations({
+    commits: [{ oid: '7f7102ff', message: COMMIT_7F7102FF }],
+    labelsByIssue: { 2268: [OPERATOR_VERIFY_LABEL] },
+  })
+  assert.equal(violations.length, 1)
+  assert.equal(violations[0].signal, 'label')
+})
+
+test('POSITIVE CONTROL (#2320): the body being correct does not excuse the commit', () => {
+  // PR #2314's actual shape: a body that correctly wrote `Refs #2276`, and a
+  // commit that closed #2268. This is the exact green-CI-plus-closed-issue
+  // combination the guard has to stop.
+  const violations = findViolations({
+    body: 'Ships the guard.\n\nRefs #2276',
+    commits: [{ oid: '7f7102ff', message: COMMIT_7F7102FF }],
+  })
+  assert.equal(violations.length, 1)
+  assert.equal(violations[0].issue, 2268)
+})
+
+test('REGRESSION (#2327): PR #2326’s real body passes — denying the mode is not declaring it', () => {
+  // The false positive. Nothing about this body asks for an issue to survive the
+  // merge; it says the opposite, on the line the template invites it on.
+  assert.deepEqual(parseClosingRefs(PR_2326_ISSUE_LINK), [2295])
+  assert.deepEqual(
+    findViolations({ body: PR_2326_ISSUE_LINK }),
+    [],
+    'a body declaring the mode does NOT apply must not fail the guard',
+  )
+  assert.deepEqual(staysOpenEvidence(PR_2326_ISSUE_LINK, 2295), [])
+})
+
+test('REGRESSION (#2327): the label still wins over any phrasing of that same body', () => {
+  // The narrowing must not reach the primary signal. If #2295 really were an
+  // operator-verify issue, `Closes #2295` still fails however the body reads.
+  const violations = findViolations({
+    body: PR_2326_ISSUE_LINK,
+    labelsByIssue: { 2295: [OPERATOR_VERIFY_LABEL] },
+  })
+  assert.equal(violations.length, 1)
+  assert.equal(violations[0].signal, 'label')
+})
+
+test('REGRESSION (#2327): naming the mode is not asserting a state, in either direction', () => {
+  // The phrase `operator-verify mode` was removed from the assertion list, and
+  // the asymmetry is deliberate — see the file’s negation-asymmetry block.
+  // It earned nothing: a sentence that genuinely declares the mode reaches for a
+  // state word too (the next assertion), and what it uniquely matched was
+  // authors saying the mode does not apply.
+  assert.equal(assertsStaysOpen('#5 ships in operator-verify mode.'), false)
+  assert.equal(assertsStaysOpen('Not operator-verify mode; no outstanding human step.'), false)
+  assert.deepEqual(findViolations({ body: '#5 ships in operator-verify mode.\n\nCloses #5' }), [])
+
+  // …and the real declaration is still caught, because it asserts the STATE.
+  assert.equal(
+    findViolations({ body: '#5 stays OPEN in operator-verify mode for the checklist above.\n\nCloses #5' })
+      .length,
+    1,
+  )
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The escape hatch, decided rather than implied (#2320/#2327).
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('there is NO escape from the keyword — a fence or a quote does not help', () => {
+  // GitHub parses fenced and quoted text. #2320 is the proof: `7f7102ff` wrote
+  // the keyword inside a code span, purely descriptively, and the issue closed.
+  // A guard that stayed quiet over a fence would be GREEN on the exact bytes
+  // that closed #2268 — the false-GREEN direction of the defect it guards.
+  for (const quoted of [
+    '```\nCloses #2268\n```',
+    '> Closes #2268',
+    'the line `Closes #2268` in its message',
+    '    Closes #2268',
+  ]) {
+    assert.deepEqual(parseClosingRefs(quoted), [2268], `expected a closing ref in: ${quoted}`)
+  }
+})
+
+test('the escape is to write what GitHub does not parse, and these forms do not', () => {
+  // The forms the report recommends, and the ones this file, its docs and the
+  // pull request that shipped it all had to use. If any of these starts
+  // registering, the guard has become unusable in the pull requests that touch
+  // it — including its own.
+  for (const safe of [
+    'Refs #2268',
+    'Closes #<n>',
+    'Closes #<issue>',
+    '#2268 was closed a second time',
+    'the closing keyword, aimed at #2268',
+    'It closes issues. #2268 is one.',
+  ]) {
+    assert.deepEqual(parseClosingRefs(safe), [], `expected NO closing ref in: ${safe}`)
+  }
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The emitters (#2320).
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('every emitter whose text can reach the default branch is scanned', () => {
+  const kinds = pullRequestSources({
+    body: 'b',
+    title: 't',
+    commits: [{ oid: 'abc12345', message: 'm' }],
+  }).map((s) => s.kind)
+  assert.deepEqual(kinds, ['title', 'body', 'commit'])
+
+  // Each one alone produces the reference.
+  assert.deepEqual(allClosingRefs({ body: 'Closes #1' }), [1])
+  assert.deepEqual(allClosingRefs({ title: 'fix: closes #2 for good' }), [2])
+  assert.deepEqual(allClosingRefs({ commits: [{ oid: 'a', message: 'x\n\nCloses #3' }] }), [3])
+})
+
+test('the title is scanned because a squash makes it a commit subject on dev', () => {
+  // `squash_merge_commit_title` is `COMMIT_OR_PR_TITLE`, so on a multi-commit
+  // squash the pull-request title becomes the subject line of a commit on the
+  // default branch — where GitHub parses it. Indirect, but an emitter.
+  const violations = findViolations({
+    title: 'fix(ci): resolves #42',
+    body: '#42 stays open until the operator runs the live step.',
+  })
+  assert.equal(violations.length, 1)
+  assert.equal(violations[0].issue, 42)
+})
+
+test('refs are deduplicated across emitters and keep first-seen order', () => {
+  assert.deepEqual(
+    allClosingRefs({
+      body: 'Closes #10\nFixes #4',
+      commits: [{ oid: 'a', message: 'Closes #10' }, { oid: 'b', message: 'Closes #7' }],
+    }),
+    [10, 4, 7],
+  )
+})
+
+test('a stays-open promise in ONE emitter binds a keyword in ANOTHER', () => {
+  // The cross-source case, which is the shape #2320 produced in the wild: the
+  // author declares the issue survives in one place and emits the keyword in
+  // another. Neither surface is self-contradictory on its own.
+  const violations = findViolations({
+    body: 'Ships the code. #77 stays open for the vendor-dashboard step.',
+    commits: [{ oid: 'deadbeef', message: 'feat: ship it\n\nCloses #77' }],
+  })
+  assert.equal(violations.length, 1)
+  assert.equal(violations[0].signal, 'self-contradiction')
+  assert.match(violations[0].evidence, /^this pull-request body says:/)
+})
+
+test('an ordinary pull request is untouched by the new emitters', () => {
+  // Every surface populated, ordinary content, no label and no promise: silent.
+  assert.deepEqual(
+    findViolations({
+      title: 'fix(agents): rename a variable',
+      body: '## Summary\n\n- Rename a variable.\n\nCloses #1234',
+      commits: [{ oid: 'c0ffee00', message: 'fix(agents): rename a variable\n\nCloses #1234' }],
+    }),
+    [],
+  )
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Behaviour carried over from #2276, still pinned.
+// ─────────────────────────────────────────────────────────────────────────────
+
 test('the prescribed fix clears it — `Refs` is not a closing keyword', () => {
   assert.deepEqual(parseClosingRefs(PR_2272_FIXED), [])
   assert.deepEqual(findViolations({ body: PR_2272_FIXED }), [])
-})
-
-test('an ordinary pull request is untouched — `Closes` stays the default', () => {
-  const body = [
-    '## Summary',
-    '',
-    '- Rename a variable.',
-    '',
-    'Closes #1234',
-  ].join('\n')
-  assert.deepEqual(parseClosingRefs(body), [1234])
-  assert.deepEqual(findViolations({ body }), [])
 })
 
 test('the label signal holds regardless of how the body is phrased', () => {
@@ -122,7 +354,6 @@ test('the phrasings a real operator-verify author reaches for all register', () 
     '#5 is kept open for the dashboard step.',
     '#5 must outlive the merge.',
     'This pull request does not close #5 — an operator still has to run it.',
-    '#5 ships in operator-verify mode.',
   ]) {
     const violations = findViolations({ body: `${line}\n\nCloses #5` })
     assert.equal(violations.length, 1, `expected a violation for: ${line}`)
@@ -130,10 +361,12 @@ test('the phrasings a real operator-verify author reaches for all register', () 
 })
 
 test('a HARD-WRAPPED declaration still registers (haven-reviewer, #2276)', () => {
-  // Markdown wraps at ~80 columns, so the issue number and the assertion often
-  // land on different physical lines. Line scoping missed this, and it is the
-  // backstop signal — the one that catches an author who declared the mode in
-  // writing and forgot the label, which is precisely what happened on #2268.
+  // Markdown wraps at ~80 columns and commit messages at 72, so the issue number
+  // and the assertion often land on different physical lines. Line scoping
+  // missed this, and it is the backstop signal — the one that catches an author
+  // who declared the mode in writing and forgot the label, which is precisely
+  // what happened on #2268. It is also what makes the real `7f7102ff` fixture
+  // above register: its keyword and its "stays open" are three lines apart.
   const body = [
     'Issue #2268 will not be closed by this merge; it',
     'stays open until an operator finishes the vendor dashboard step.',
@@ -163,20 +396,36 @@ test('unwrapping never joins across a new Markdown block or a finished sentence'
   assert.deepEqual(findViolations({ body: `${table}\n\nCloses #2276` }), [])
 })
 
-test('negation is not read — "does not close #N" still counts as a closing ref', () => {
+test('negation is not read on the KEYWORD half — "does not close #N" still closes it', () => {
   // Neither this parser nor (as far as any of it is observable) GitHub's reads
   // the "not". Counting it is the SAFE direction: the cost of a false positive
   // here is one word changed in a pull-request body; the cost of a false zero
   // is a silently closed issue.
+  //
+  // This is the deliberate ASYMMETRY with the stays-open half above, which was
+  // narrowed by #2327 precisely because it is a claim about intent rather than a
+  // prediction of GitHub's behaviour. Do not "fix" them into agreement.
   assert.deepEqual(parseClosingRefs('This pull request does not close #5.'), [5])
 })
 
-test('a body with no closing keyword at all is clean, not an error', () => {
-  assert.deepEqual(findViolations({ body: 'No issue reference here.' }), [])
+test('a pull request with no closing keyword at all is clean, not an error', () => {
+  assert.deepEqual(
+    findViolations({ title: 'chore: tidy', body: 'No issue reference here.', commits: [{ oid: 'a', message: 'chore: tidy' }] }),
+    [],
+  )
 })
 
-test('the report names the concrete replacement, not just the prohibition', () => {
-  const report = renderReport(findViolations({ body: PR_2272_EXCERPT }))
-  assert.match(report, /Closes #2268\s+->\s+Refs #2268/)
-  assert.match(report, /\.agents\/skills\/ship-next\/SKILL\.md/)
+test('the report names the concrete replacement and the emitter that carried it', () => {
+  const bodyReport = renderReport(findViolations({ body: PR_2272_EXCERPT }))
+  assert.match(bodyReport, /Closes #2268\s+->\s+Refs #2268/)
+  assert.match(bodyReport, /\.agents\/skills\/ship-next\/SKILL\.md/)
+  // The escape-hatch answer is in the report, not only in the source comments:
+  // an author who trips this needs to be told how to write about it.
+  assert.match(bodyReport, /code fence does NOT help/)
+
+  const commitReport = renderReport(
+    findViolations({ commits: [{ oid: '7f7102ff', message: COMMIT_7F7102FF }] }),
+  )
+  assert.match(commitReport, /commit 7f7102ff's message/)
+  assert.match(commitReport, /every commit message/)
 })

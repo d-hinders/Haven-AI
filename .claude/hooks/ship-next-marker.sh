@@ -33,8 +33,9 @@
 #   * `*` otherwise (`/ship-next`, `label=…`, `epic=#…`, a freeform task) —
 #     the issue is not knowable until the skill selects it.
 #
-# The guard reads `Closes #N` off the pull request and clears the matching
-# token, falling back to one `*`. So a hand-rolled PR in a ship-next session
+# The guard reads `Closes #N` — or `Refs #N`, which is what an operator-verify
+# pull request writes instead (#2276) — off the pull request and clears the
+# matching token, falling back to one `*`. So a hand-rolled PR in a ship-next session
 # still warns, which was the point of consuming in the first place.
 #
 # ## Dedupe, and the limitation it leaves

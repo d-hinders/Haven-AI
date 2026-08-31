@@ -263,6 +263,25 @@ mktok sess1 222
 check "second Closes in the body can match" silent "$(prbody sess1 'Closes #111 and Closes #222')"
 mkrm sess1
 
+# 5b. `Refs #N` — the operator-verify form (#2276) — clears its token too.
+#     Such a PR deliberately carries no closing keyword, because GitHub would
+#     close the issue on merge whatever the body promises. Warning on it would
+#     be a false positive on a COMPLIANT pull request, which is the failure
+#     this whole guard is built to avoid.
+mktok sess1 2268
+check "Refs in the body clears the token" silent "$(prbody sess1 'Ships the code half. Refs #2268')"
+mkrm sess1
+
+#     …and the token is still per-issue: `Refs #999` must not clear #2268.
+mktok sess1 2268
+check "Refs for another issue does NOT clear the token" fire "$(prbody sess1 'Refs #999')"
+mkrm sess1
+
+#     A bare mention is still not a reference — no keyword, no match.
+mktok sess1 2268
+check "a bare #N still consumes nothing" fire "$(prbody sess1 'as in #2268, background reading')"
+mkrm sess1
+
 # 6. Writer: an argument that is not a bare number must never become a token.
 for badarg in '10 30' '1030 extra' '1030 1031'; do
   mkrm wsess

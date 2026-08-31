@@ -678,7 +678,7 @@ compensating controls:
    failed structurally); the delegate-balance monitor
    covers delegation-rail agents; the rail-agnostic sweep route recovers
    residuals to the **treasury Hybrid** (`agent.safe_address`), with the
-   1 USDC dust floor and sub-floor residuals visible in the ledger.
+   0.01 USDC recoverability floor and sub-floor residuals visible in the ledger.
 2. **Budget meters at the funding hop, not at settlement.** Verify-without-
    settle strands the amount on the EOA → sweep reconciles it; the budget
    consumption is honest (funds genuinely left the treasury).

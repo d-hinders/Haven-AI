@@ -66,10 +66,10 @@
  * USDC, so a treasury that did not move means the budget was not metered.
  *
  * Exact-amount funding then means a settled payment leaves the delegate EOA at
- * zero. The accepted criterion is *no stranding above the 1 USDC sweep floor*
- * (owner decision, 2026-07-18) — sub-floor dust is deliberate, since sweeping it
- * costs more gas than it recovers, but it must stay visible. This reports the
- * residual either way rather than asserting a bare zero.
+ * zero. The accepted criterion is *no stranding at or above the 0.01 USDC sweep
+ * floor* — sub-floor balances remain visible until later stranded funds bring
+ * them to the recovery threshold. This reports the residual either way rather
+ * than asserting a bare zero.
  *
  * ## What this scenario does NOT cover
  *
@@ -90,8 +90,8 @@ import { BASE_SEPOLIA_RPC, SEPOLIA_USDC } from '../lib/chain.js'
 // Circle's canonical Base Sepolia USDC (matches the SDK's CHAIN_USDC[84532]).
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 
-/** The backend's default sweep floor; residue below it is dust by design. */
-const DUST_FLOOR_ATOMIC = 1_000_000n // 1 USDC, 6 decimals
+/** The backend's default sweep floor; residue below it accumulates visibly. */
+const DUST_FLOOR_ATOMIC = 10_000n // 0.01 USDC, 6 decimals
 
 /**
  * The evidence row is written when the settlement proof is attached, which

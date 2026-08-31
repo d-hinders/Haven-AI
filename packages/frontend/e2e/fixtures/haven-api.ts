@@ -81,7 +81,10 @@ export const testAgent = {
   // legacy one either (`routes/agents.ts` returns `[]` there).
   allowances: [
     {
-      id: 'allowance-e2e',
+      // The derived row's `id` IS the delegation row's id
+      // (`deriveDelegationBudgets` maps `row.id` straight through), so the two
+      // must be the SAME literal — see the `/agents/:id/delegations` handler.
+      id: 'delegation-e2e',
       agent_id: 'agent-e2e',
       token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
       token_symbol: 'USDC',
@@ -552,6 +555,19 @@ export async function optDownToLegacyRail(page: Page) {
     if (path === '/agents') {
       await fulfillJson(route, {
         agents: [{ ...testAgent, account_type: 'safe', allowances: [] }],
+      })
+      return
+    }
+    // The dashboard's own copy of the same projection, and it empties for the
+    // same reason: `routes/dashboard.ts` fills `allowancesByAgent` from the
+    // derived delegation view only for a `delegator_hybrid` account and hands
+    // every other agent `[]`. Left on the shared fixture, an opted-down page
+    // would serve a 250 USDC budget row for an account the backend would
+    // answer with none — the very shape this helper exists to keep out.
+    if (path === '/dashboard/overview') {
+      await fulfillJson(route, {
+        ...dashboardOverview,
+        agents: dashboardOverview.agents.map((agent) => ({ ...agent, allowances: [] })),
       })
       return
     }

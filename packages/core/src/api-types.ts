@@ -1349,8 +1349,8 @@ export type paths = {
             cookie?: never;
         };
         /**
-         * One agent's payments, approvals and tool calls, newest first.
-         * @description A heterogeneous list discriminated by `type`: payment, approval, or mcp_tool_call. **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the three sources separately and the results are then merged and sorted, so this route can return up to three times `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.
+         * One agent's payments and tool calls, newest first.
+         * @description A heterogeneous list discriminated by `type`: payment or mcp_tool_call. (#2262: the third branch, `approval`, is gone — #2055 dropped `approval_requests` and this handler merges `payment_intents` and the MCP tool-call audit log, with no third source.) **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the two sources separately and the results are then merged and sorted, so this route can return up to twice `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.
          */
         get: operations["getAgentActivity"];
         put?: never;
@@ -1390,7 +1390,7 @@ export type paths = {
         };
         /**
          * Combined activity across every agent the caller owns.
-         * @description The same three entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` is always 0 since #2055 (the approval queue died with the Safe rail); the field survives for wire compatibility.
+         * @description The same two entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` is always 0 since #2055 (the approval queue died with the Safe rail); the field survives for wire compatibility.
          */
         get: operations["getActivityFeed"];
         put?: never;

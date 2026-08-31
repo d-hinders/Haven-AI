@@ -72,6 +72,7 @@
           - "packages/backend/src/rails/hybrid-signer-actions.ts"
           - "packages/backend/src/rails/hybrid-transfers.ts"
           - "packages/backend/src/rails/sweep.ts"
+          - "packages/backend/src/routes/agent-connection-setups.ts"
           - "packages/backend/src/routes/agent-delegations.ts"
           - "packages/backend/src/routes/agent-rekey.ts"
           - "packages/backend/src/routes/hybrid-accounts.ts"

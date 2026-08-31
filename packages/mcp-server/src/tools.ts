@@ -501,7 +501,7 @@ const QUOTE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
 
 const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
   summary:
-    'Final step of the decomposed x402 MCP purchase: deliver the signed X-PAYMENT header to the merchant and return the tool result.',
+    'Final step of the decomposed x402 MCP purchase: deliver the signed merchant payment header (both x402 wire names) and return the tool result.',
   behavior:
     'Pass payment_id and payment_header (from haven_x402_sign_header); merchant_url/tool_name/arguments/mcp_transport are optional — Haven rehydrates them by payment_id. Call only after haven_submit confirmed funding. The header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key. ' +
     'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true) when funding expired first; MERCHANT_REJECTED_AFTER_FUNDING means the delegate holds stranded funds — recover with haven_sweep_delegate.',
@@ -510,7 +510,7 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
 
 const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
   summary:
-    'Fast-path final step of the x402 MCP purchase: fund and settle in one call — relay the funding signature, then deliver the X-PAYMENT header and return the merchant tool result.',
+    'Fast-path final step of the x402 MCP purchase: fund and settle in one call — relay the funding signature, then deliver the merchant payment header (both x402 wire names) and return the merchant tool result.',
   behavior:
     'Pass payment_id, signature, and (EIP-3009 shape only) payment_header; merchant/tool fields are optional — rehydrated by payment_id. If funding does not confirm it returns { payment_id, settled: false, funding_status } without contacting the merchant. Echoes payment_id on every outcome for reconciliation via haven_list_receipts / haven_get_payment_status. ' +
     'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING — stranded funds, recover with haven_sweep_delegate.',
@@ -535,7 +535,8 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'The signer tool named in the response guidance (haven_sign_x402) returns payment_header INLINE',
   'alongside the signature — it is a one-shot that spends its own binding building that',
   'header, so do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
-  'signature via haven_submit, then retry the merchant YOURSELF with that payment_header —',
+  'signature via haven_submit, then retry the merchant YOURSELF with that payment_header,',
+  'setting BOTH PAYMENT-SIGNATURE (v2) and X-PAYMENT (v1) to it.',
   'Haven never talks to this merchant and never holds the key. The header is built before funding',
   'confirms, so its validity window starts at signing: retry promptly, and on',
   'PAYMENT_WINDOW_EXPIRED re-run this tool with the same idempotency_key.',
@@ -930,8 +931,9 @@ export function createToolHandlers(
               nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
               safeToContinue: true,
               reason:
-                'Retry the ORIGINAL merchant request yourself with this payment_header as the ' +
-                'X-PAYMENT header. Do NOT call haven_x402_sign_header: on this scheme Haven ' +
+                'Retry the ORIGINAL merchant request yourself, setting BOTH PAYMENT-SIGNATURE ' +
+                '(x402 v2) and X-PAYMENT (v1) to this payment_header. Do NOT call ' +
+                'haven_x402_sign_header: on this scheme Haven ' +
                 'assembled the header, there is nothing to build locally, and there is no funding ' +
                 'transaction to wait for or sweep — the merchant pulls from the treasury directly. ' +
                 'Do NOT call haven_resume_x402_payment either: nothing is pending, and that tool ' +
@@ -1982,7 +1984,8 @@ export function createToolHandlers(
                   "fetches the settlement child itself and verifies its caveats against Haven's " +
                   'signed context (#1455) before signing. Then call haven_submit with ' +
                   "settlement_scheme: 'erc7710' to receive the merchant payment_header, and retry " +
-                  'the original merchant request yourself with it as X-PAYMENT. Do NOT call ' +
+                  'the original merchant request yourself, setting BOTH PAYMENT-SIGNATURE ' +
+                  '(x402 v2) and X-PAYMENT (v1) to it. Do NOT call ' +
                   'haven_x402_sign_header: on this scheme Haven assembles the header and there is ' +
                   'no funding transaction to wait for.',
                 summary: {
@@ -3559,7 +3562,7 @@ async function preflightMcpPaymentHeader(haven: HavenClient, args: Record<string
     throw new HostedToolError({
       code: 'INVALID_PAYMENT_HEADER',
       message:
-        'The X-PAYMENT header did not match the funded x402 intent. No funding was relayed. ' +
+        'The signed payment header did not match the funded x402 intent. No funding was relayed. ' +
         'Recreate the header with the local signer from this payment_id, then retry.',
       statusCode: 400,
       paymentId: args.payment_id,

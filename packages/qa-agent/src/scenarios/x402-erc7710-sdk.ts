@@ -144,7 +144,12 @@ export const x402Erc7710Sdk: Scenario = {
     // ── 4. Merchant retry with the backend-assembled header ──────────────────
     const paid = await fetch(mcpUrl, {
       method: 'POST',
-      headers: { ...MCP_HEADERS, 'X-PAYMENT': settlement.paymentHeader },
+      headers: {
+        ...MCP_HEADERS,
+        // Both wire names, as a real agent must (#2330).
+        'PAYMENT-SIGNATURE': settlement.paymentHeader,
+        'X-PAYMENT': settlement.paymentHeader,
+      },
       body: mcpBody(2),
     })
     if (paid.status === 402) {

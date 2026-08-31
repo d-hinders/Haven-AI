@@ -5199,6 +5199,14 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
     // assembled by Haven on this path, never by haven_x402_sign_header.
     expect(res.data.reason).toContain("settlement_scheme: 'erc7710'")
     expect(res.data.reason).toContain('Do NOT call haven_x402_sign_header')
+    // #2330: this reason tells the agent to retry the merchant ITSELF, so it
+    // must name BOTH wire names. Review found the guard in
+    // x402-header-name-guidance.test.ts cannot reach a `reason` — it is built
+    // per-call inside the handler, not held in a static description record —
+    // and that the test header wrongly claimed this file already pinned it.
+    // It does now. A strict x402 v2 merchant reads only PAYMENT-SIGNATURE.
+    expect(res.data.reason).toContain('PAYMENT-SIGNATURE')
+    expect(res.data.reason).toContain('X-PAYMENT')
   })
 
   it('the optional-cap nudge still fires on the erc7710 branch', async () => {
@@ -5460,6 +5468,10 @@ describe('haven_submit — erc7710 settle (#2041)', () => {
     // erc7710 has no Haven-submitted transaction, so there is no hash to fake.
     expect(res.data.tx_hash).toBeNull()
     expect(res.data.next_action).toBe(AgentPaymentNextAction.RetryOriginalX402Request)
+    // #2330: the agent performs this retry, so the reason must name both wire
+    // names. Same gap as the erc7710 branch above — untested until review.
+    expect(res.data.reason).toContain('PAYMENT-SIGNATURE')
+    expect(res.data.reason).toContain('X-PAYMENT')
 
     // The signature went to settle, NOT to the funding relay.
     expect(calls.find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG })

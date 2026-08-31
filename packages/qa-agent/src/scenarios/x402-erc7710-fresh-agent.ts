@@ -167,7 +167,13 @@ export const x402Erc7710FreshAgent: Scenario = {
 
     const paid = await fetch(mcpUrl, {
       method: 'POST',
-      headers: { ...MCP_HEADERS, 'X-PAYMENT': settle.data.payment_header },
+      headers: {
+        ...MCP_HEADERS,
+        // Both wire names, as a real agent must: the demo merchant accepts the
+        // v1 alias, a strict x402 v2 merchant does not (#2330).
+        'PAYMENT-SIGNATURE': settle.data.payment_header,
+        'X-PAYMENT': settle.data.payment_header,
+      },
       body: mcpBody(2),
     })
     if (paid.status === 402) {

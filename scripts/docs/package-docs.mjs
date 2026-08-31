@@ -63,6 +63,12 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/sdk/src/**'],
+    // #2330: re-verified and EDITED (the two remaining manual-retry mentions
+    // only). #2292 corrected the header example in the resume section; two
+    // other spots still told the reader the agent "retries with X-PAYMENT" —
+    // the same v1-only instruction #2330 removed from the tool descriptions,
+    // and the same defect the epic opened on. Both now name the pair. Nothing
+    // else re-verified in this pass. Prior:
     // #2292: re-verified and EDITED (the "Resuming an x402 payment" section
     // only). The manual-retry examples showed the caller making the merchant
     // call and then nothing — which was accurate before this PR and is a
@@ -78,6 +84,13 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/signer/src/**'],
+    // #2330: re-verified and EDITED (every merchant-header mention). This was
+    // the most out-of-date surface found: six spots named X-PAYMENT alone,
+    // including two "agent: retry merchant with X-PAYMENT" lines in the
+    // orchestration blocks — the literal instruction #2330 exists to remove.
+    // The artifact is now "merchant payment header" and the two retry lines
+    // name both wire names, matching the tool descriptions this change fixed
+    // in packages/signer/src/tools.ts. Nothing else re-verified. Prior:
     // #2243: first real verification pass since #2088 seeded this date. Every
     // claim in the body re-read against `packages/signer/src/**` and rewritten
     // where it had drifted: the tool table (two tools -> the four in
@@ -133,7 +146,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/mcp-server/src/**'],
-    'last-verified': '2026-08-27',
+    // #2330: re-verified and EDITED (the two merchant-header mentions only).
+    // The sequence diagram and the signer paragraph both named X-PAYMENT alone
+    // while the hosted server has relayed both wire names since #2289. Scope:
+    // those two lines; the rest of the README was NOT re-verified.
+    'last-verified': '2026-08-31',
   },
   {
     // The #1992 file. Its prose is mostly about BACKEND behaviour — which

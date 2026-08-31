@@ -90,11 +90,20 @@ const sources = new Map(files.map((f) => [f, readFileSync(path.join(ROOT, f), 'u
  * Every offending file mapped to the retired paths it calls, `{}` when clean.
  *
  * Aggregate rather than one `it.each` case per file (haven-reviewer, #2261):
- * a per-file case reports only the FIRST offender and, at ~356 files × 2, added
- * ~714 near-identical greens — a third of the frontend suite's reported test
- * count, and enough extra wall-clock to tip four unrelated timing-sensitive
- * modal suites over their timeouts on a loaded machine. This form names every
- * offender at once and costs two tests.
+ * a per-file case reports only the FIRST offender, while this form names every
+ * offender at once. At ~356 files × 2 the per-file form also added ~714
+ * near-identical greens — a third of the frontend suite's reported test count —
+ * for two assertions' worth of information.
+ *
+ * It is NOT the reason four unrelated modal suites once timed out on this
+ * branch, and the first version of this comment said it was. The scan's own
+ * runtime is ~146ms against the ~214s difference that run showed, so it cannot
+ * account for more than a fraction of a second of it; the load was something
+ * else on the machine, and `DelegationSendModal`, `InfoModal`,
+ * `UnmanagedDelegateCard` and `Modal` are load-sensitive enough to time out
+ * under contention that #2261 neither created nor removes. Recorded here
+ * because a tidy causal story for a flake is how a latent flake gets closed
+ * as fixed; that one is tracked on its own issue.
  */
 function offenders(method: 'post' | 'put', retired: Set<string>): Record<string, string[]> {
   const found: Record<string, string[]> = {}

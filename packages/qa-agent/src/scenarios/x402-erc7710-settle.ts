@@ -4,7 +4,7 @@
  * The shape the architecture was chosen for: authorize builds a narrowed CHILD
  * delegation (exact amount, payee pin, short expiry) re-delegated from the
  * agent's open budget delegation; the delegate key signs it; settle wraps it
- * into the merchant `X-PAYMENT` header; the MERCHANT redeems the
+ * into the merchant payment header; the MERCHANT redeems the
  * [child, budget] chain on-chain and is paid treasury→merchant DIRECTLY.
  *
  * What this proves that nothing else does:
@@ -143,7 +143,7 @@ export const x402Erc7710Settle: Scenario = {
       return fail(`settle failed (${settle.status}): ${JSON.stringify(settle.data).slice(0, 200)}`)
     }
 
-    // ── 5. Merchant retry with X-PAYMENT — the merchant redeems on-chain ─────
+    // ── 5. Merchant retry, both header names — merchant redeems on-chain ────
     const paid = await fetch(mcpUrl, {
       method: 'POST',
       headers: {

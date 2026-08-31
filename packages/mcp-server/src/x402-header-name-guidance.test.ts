@@ -176,8 +176,42 @@ describe('#2330 — no agent-facing surface names the v1 header alone', () => {
  */
 const REPO_ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..')
 
-/** Setting the header: object-literal key, `.set(...)`, or a Markdown header line. */
-const SETS_V1_HEADER = /(['"`]X-PAYMENT['"`]\s*:)|(\.set\(\s*['"`]X-PAYMENT['"`])|(^\s*X-PAYMENT:\s*\S)/m
+/**
+ * Setting the header, in every shape review could construct. The first version
+ * matched an object-literal key, `.set(...)`, and a line-opening Markdown
+ * header — and review demonstrated a live miss by rewriting the `/protocols`
+ * sample to use `Headers.append`, which is not only a normal way to do this but
+ * a WORSE one for this bug, since `append` does not overwrite a stale value.
+ * Computed keys, bracket assignment, header tuple arrays and an inline
+ * `curl -H "X-PAYMENT: ..."` were the other confirmed blind spots. None had a
+ * live instance; the point is that a guard with known holes is the failure this
+ * whole issue is about, so the holes are closed rather than noted.
+ *
+ * It matches the header as a KEY, never as a value. `paymentProofHeaderName:
+ * 'X-PAYMENT'` RECORDS which name a merchant was sent — evidence, not an
+ * instruction — and a first draft that matched a bare quoted name flagged three
+ * such fixtures plus a doc comment. Over-matching would have been the more
+ * expensive mistake: a guard that cries wolf gets an allowlist entry per
+ * false positive until the allowlist is the real config.
+ */
+const SETS_V1_HEADER = new RegExp(
+  [
+    // Object-literal KEY: `{ 'X-PAYMENT': token }`. Quotes, not backticks —
+    // backticked mentions are prose, and a first draft that accepted them
+    // flagged three evidence fixtures and a doc comment in `client.ts`.
+    `(['"]X-PAYMENT['"]\\s*:)`,
+    // The header-mutating APIs, including a template-literal argument.
+    `((?:\\.set|\\.append|\\.setHeader)\\(\\s*['"\`]X-PAYMENT['"\`])`,
+    // Computed key, bracket assignment, or a header tuple: `['X-PAYMENT']:`,
+    // `headers['X-PAYMENT'] =`, `[['X-PAYMENT', token]]`.
+    `(\\[\\s*['"]X-PAYMENT['"]\\s*[,\\]])`,
+    // A curl example anywhere on the line.
+    `(-H\\s+['"]?X-PAYMENT:)`,
+    // A header line opening a Markdown code fence.
+    `(^\\s*X-PAYMENT:\\s*\\S)`,
+  ].join('|'),
+  'm',
+)
 
 const SCAN_ROOTS = ['packages', 'docs']
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.next', 'coverage', '.turbo'])
@@ -192,6 +226,13 @@ const ALLOWLIST = new Map<string, string>([
     'packages/sdk/src/mcp-merchant-transport.test.ts',
     'plants a STALE X-PAYMENT on the caller init to prove deliverPayment ' +
       'overwrites it — naming v1 alone is the point of the fixture',
+  ],
+  [
+    'packages/sdk/src/x402-payment-header-name.test.ts',
+    'same stale-header fixture as its sibling above. Listed explicitly because ' +
+      'review proved it was passing by COINCIDENCE — unrelated tests later in ' +
+      'the file happen to mention the v2 name, and redacting those made the ' +
+      'guard fail. An accidental pass is not coverage',
   ],
 ])
 

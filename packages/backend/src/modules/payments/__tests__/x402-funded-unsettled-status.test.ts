@@ -29,7 +29,11 @@
 import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
-import { getAgentPaymentStatus } from '../agent-payment-status.js'
+import {
+  getAgentPaymentStatus,
+  isFundedX402AwaitingMerchantLeg,
+} from '../agent-payment-status.js'
+import { findIntentStatusRow } from '../../../infra/repositories/payment-intents.js'
 import { type AgentContext } from '../../../middleware/agentAuth.js'
 
 let seq = 0
@@ -220,5 +224,60 @@ describeDb('#2145 — x402 eip3009 funded-but-undelivered status', () => {
     const status = await getAgentPaymentStatus(agent, paymentId)
     expect(status?.phase).toBe('payment_confirmed')
     expect(status?.next_action).toBe('none')
+  })
+})
+
+/**
+ * #2290: `GET /x402/:id/sign-context` opens its already-executed gate for the
+ * funded-but-undelivered state and no other. The remedy and the permission to
+ * act on it must be the SAME condition — #2145 shipped a `next_action` whose
+ * cure was unreachable, and a separately-worded second copy would just move
+ * that failure rather than remove it.
+ *
+ * So this asserts the biconditional over every state the seeds above cover,
+ * on real rows: the exported predicate is true exactly when the status
+ * endpoint answers `retry_original_x402_request`. Both sides read the same
+ * derived join, so a change to either that breaks the pairing fails here.
+ */
+describeDb('#2290 — the resume predicate agrees with the status remedy', () => {
+  beforeAll(initDbHarness)
+  beforeEach(resetDb)
+
+  const CASES: Array<{ name: string; seed: SeedOptions }> = [
+    { name: 'the crash shape (no evidence at all)', seed: { settlementScheme: 'eip3009', confirmedMinutesAgo: 60 } },
+    { name: 'base-only evidence, never upgraded', seed: { settlementScheme: 'eip3009', confirmedMinutesAgo: 60, evidenceProofStatus: 'payment_confirmed' } },
+    { name: 'merchant response observed', seed: { settlementScheme: 'eip3009', confirmedMinutesAgo: 60, evidenceProofStatus: 'merchant_response_observed' } },
+    { name: 'protocol receipt attached', seed: { settlementScheme: 'eip3009', confirmedMinutesAgo: 60, evidenceProofStatus: 'protocol_receipt_attached' } },
+    { name: 'merchant rejected the retry', seed: { settlementScheme: 'eip3009', confirmedMinutesAgo: 60, merchantRejected: true } },
+    { name: 'rejected AND never upgraded', seed: { settlementScheme: 'eip3009', confirmedMinutesAgo: 60, evidenceProofStatus: 'payment_confirmed', merchantRejected: true } },
+    { name: 'erc7710 (no funding leg)', seed: { settlementScheme: 'erc7710', confirmedMinutesAgo: 60 } },
+    { name: 'no settlement_scheme metadata', seed: { confirmedMinutesAgo: 60 } },
+    { name: 'inside the merchant-report grace window', seed: { settlementScheme: 'eip3009', confirmedMinutesAgo: 1 } },
+  ]
+
+  for (const { name, seed } of CASES) {
+    it(`agrees on: ${name}`, async () => {
+      const { agent, paymentId } = await seedConfirmedX402(seed)
+      const status = await getAgentPaymentStatus(agent, paymentId)
+      const row = await findIntentStatusRow(paymentId, agent.id)
+      expect(row).not.toBeNull()
+      expect(isFundedX402AwaitingMerchantLeg(row!)).toBe(
+        status?.next_action === 'retry_original_x402_request',
+      )
+    })
+  }
+
+  it('is false for the one state whose remedy is sweep, not resume', async () => {
+    // Guards the direction that matters: a merchant that was asked and said
+    // no must never be handed a fresh header to ask again with.
+    const { agent, paymentId } = await seedConfirmedX402({
+      settlementScheme: 'eip3009',
+      confirmedMinutesAgo: 60,
+      merchantRejected: true,
+    })
+    const status = await getAgentPaymentStatus(agent, paymentId)
+    expect(status?.next_action).toBe('sweep_stranded_funds')
+    const row = await findIntentStatusRow(paymentId, agent.id)
+    expect(isFundedX402AwaitingMerchantLeg(row!)).toBe(false)
   })
 })

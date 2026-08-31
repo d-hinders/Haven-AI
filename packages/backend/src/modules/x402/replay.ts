@@ -95,6 +95,33 @@ export async function delegationReplay(
   return rebuildDelegationSignContext(existing, agent)
 }
 
+export interface RebuildSignContextOptions {
+  /**
+   * #2290: rebuild for a FUNDED eip3009 intent whose merchant leg was never
+   * delivered. Two things change, and only for this caller:
+   *
+   * - `expires_at` is minted fresh instead of re-served from the row. The
+   *   stored value is the QUOTE window — it bounded signing the funding leg,
+   *   which already happened. Re-serving it hands the signer a context its
+   *   own `assertX402PaymentWindowOpen` refuses (`packages/signer/src/core.ts`),
+   *   so the rebuild would be dead on arrival for exactly the payments this
+   *   path exists to rescue. The merchant-side EIP-3009 validity window is a
+   *   separate clock the signer derives at signing time.
+   * - the instructions stop naming `POST /payments/:id/sign`. That leg is
+   *   spent; the remaining work is a merchant retry with a fresh header.
+   *
+   * Nothing else moves — same payload hash, same typed data, same digest
+   * commitment, and no write. Widening `expires_at` cannot re-fund: the
+   * funding UserOp is submitted and Haven refuses a second submit. The value
+   * it exposes is the delegate's existing balance, which is the money this
+   * path is trying to deliver to the merchant.
+   */
+  fundedMerchantRetry?: boolean
+}
+
+/** The quote window, matched to `INSERT_*_INTENT_SQL`'s `interval '10 minutes'`. */
+const MERCHANT_RETRY_WINDOW_MS = 10 * 60 * 1000
+
 /**
  * Rebuild the EXACT signing payload + a freshly Haven-signed expected context
  * for a stored delegation-rail x402 intent, purely from the row (#1263).
@@ -114,6 +141,7 @@ export async function delegationReplay(
 export async function rebuildDelegationSignContext(
   existing: Record<string, unknown>,
   agent: AgentContext,
+  options: RebuildSignContextOptions = {},
 ): Promise<X402HandlerResult | null> {
   if (existing.prepared_user_op == null) return null
   const url = (existing.x402_resource_url ?? existing.payment_resource_url) as string
@@ -153,11 +181,19 @@ export async function rebuildDelegationSignContext(
           to: existing.to_address,
           amount: existing.amount_raw,
         },
-        instructions:
-          'Sign sign_data.typed_data with your delegate (agent) key (EIP-712). Then POST ' +
-          `/payments/${existing.id}/sign with { signature } — the funding redemption moves ` +
-          'the exact amount to your delegate EOA; retry the merchant with your EIP-3009 header.',
+        instructions: options.fundedMerchantRetry
+          ? 'The funding leg for this payment already confirmed on-chain — do NOT submit it ' +
+            'again. Use x402_expected to mint an x402_binding, build a fresh EIP-3009 merchant ' +
+            'header from your delegate EOA balance, and retry the original resource_url.'
+          : 'Sign sign_data.typed_data with your delegate (agent) key (EIP-712). Then POST ' +
+            `/payments/${existing.id}/sign with { signature } — the funding redemption moves ` +
+            'the exact amount to your delegate EOA; retry the merchant with your EIP-3009 header.',
       }
+  // #2290: the funded retry signs against a freshly-derived window; every
+  // other caller re-serves the row's own quote window verbatim.
+  const expiresAt = options.fundedMerchantRetry
+    ? new Date(Date.now() + MERCHANT_RETRY_WINDOW_MS).toISOString()
+    : (existing.expires_at as string)
   const merchantTo = (existing.x402_merchant_address as string | null) ?? fundingTo
   // #1138: a replay re-issues the SAME sign_data, so it must re-issue
   // the same commitment — otherwise a replayed delegation-rail intent
@@ -171,7 +207,7 @@ export async function rebuildDelegationSignContext(
     amount: amountRaw,
     asset: tokenAddress,
     network,
-    expiresAt: existing.expires_at as string,
+    expiresAt,
     typedDataHash,
     // #1690: gated payer identity — {} until X402_EMIT_PAYER_CONTEXT=1.
     ...x402PayerContextFields(agent),
@@ -189,7 +225,7 @@ export async function rebuildDelegationSignContext(
     amount: amountRaw,
     asset: tokenAddress,
     network,
-    expires_at: existing.expires_at,
+    expires_at: expiresAt,
     ...(typedDataHash ? { typed_data_hash: typedDataHash } : {}),
     // #1690: mirror the signed context exactly — when the payer fields were
     // bound above, the wire must carry them or no signer can rebuild the
@@ -202,7 +238,7 @@ export async function rebuildDelegationSignContext(
     body: {
       payment_id: existing.id,
       status: existing.status,
-      expires_at: existing.expires_at,
+      expires_at: expiresAt,
       chain_id: agent.chain_id,
       safe_address: agent.safe_address,
       payer: agent.safe_address,

@@ -6244,17 +6244,25 @@ describe('#2145: the hosted resume description gates on the live retry trigger',
   })
 
   /**
-   * #2290: naming the trigger was only half of it. The remedy it points at
-   * runs through a binding, and haven_x402_sign_header cannot be reached
-   * without one — the description used to mention haven_sign only as an
-   * optional aside for a restarted signer, which is how the original reporter
-   * ended up at a dead end. Literal-only assertions: the tool names are the
-   * contract, and nothing here interprets a sentence.
+   * #2290 wrote this test to pin that the resume description names the binding
+   * step and not only the header step. The premise was wrong: it asserted the
+   * description mentions haven_sign_x402 AND haven_x402_sign_header AND
+   * x402_binding, which the CORRECTED #2291 wording also satisfies — the
+   * corrected text names all three in order to say "do NOT chain them". So the
+   * test went on passing across a contract reversal, proving only that three
+   * substrings appear somewhere (review finding).
+   *
+   * Rewritten to pin the contract rather than the vocabulary: the resume path
+   * ends at the one-shot's inline payment_header, and the description must say
+   * so explicitly. Still literal-only — nothing here interprets a sentence.
    */
-  it('names the binding step, not just the header step', () => {
+  it('points the resume path at the inline payment_header, not a second signer call', () => {
     const description = toolDescriptions.haven_resume_x402_payment
     expect(description).toContain('haven_sign_x402')
+    expect(description).toContain('payment_header')
+    // The load-bearing half: the impossible chain is named as forbidden, not
+    // as the next step. A revert to either earlier wording drops this literal.
+    expect(description).toContain('Do NOT pass its x402_binding to')
     expect(description).toContain('haven_x402_sign_header')
-    expect(description).toContain('x402_binding')
   })
 })

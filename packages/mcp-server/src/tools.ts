@@ -2060,8 +2060,13 @@ export function createToolHandlers(
         }
 
         // Return the same signing context shape as haven_pay_x402_quote so the
-        // signer can call haven_x402_sign_header (or re-derive the binding via
-        // haven_sign if the binding was lost across a signer restart).
+        // signer can rebuild the merchant header from payment_id alone.
+        // #2291: this comment used to name haven_x402_sign_header here, which
+        // is the fourth place the pre-#2291 contract was written down. On this
+        // path the header comes from haven_sign_x402's own result — that
+        // one-shot spends its binding building it — and the description
+        // constant above (RESUME_X402_DESCRIPTION) is the agent-facing
+        // statement of the same thing.
         return {
           payment_id: state.paymentId,
           status: status.status,

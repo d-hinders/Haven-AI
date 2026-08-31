@@ -198,6 +198,27 @@ describe('buildX402PaymentHeader', () => {
     ).rejects.toThrow('already used')
   })
 
+  it('a window-expired binding does not claim a header was built (#2291 review)', async () => {
+    // Review finding: every retirement path shared one "already used" message,
+    // so a client that naively retried after a PAYMENT_WINDOW_EXPIRED error was
+    // told to "retry the merchant with THAT header" — when the window closed
+    // BEFORE any header was built and no such header exists. A confident lie is
+    // worse than the vague message it replaced.
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(
+      FUNDING_HASH,
+      await expectedX402({ expiresAt: new Date(Date.now() - 60_000).toISOString() }),
+    )
+    // First call: the window check retires the binding.
+    await expect(
+      signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding),
+    ).rejects.toThrow(/window/i)
+    // Second call with the same id: names what actually happened.
+    await expect(
+      signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding),
+    ).rejects.toThrow('no header exists to retry with')
+  })
+
   it('reports an id it never held as unknown, not as re-use (#2291)', async () => {
     // The two refusals need opposite remedies, so a signer that cannot tell
     // them apart sends the caller to the wrong one — the #2291 report.

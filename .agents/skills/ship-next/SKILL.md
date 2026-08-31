@@ -270,7 +270,8 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    **To write ABOUT the keyword without emitting it, use a form GitHub does not
    parse.** A code fence or a blockquote is not one — a fenced keyword in a commit
    message is exactly how #2268 was closed a second time, and the guard treats
-   fenced text in the body the same way, on the safe side of an unverified case. The forms that work: `Refs #<n>`,
+   fenced text in the body the same way, on the safe side of an unverified case.
+   The forms that work: `Refs #<n>`,
    a non-numeric placeholder (`Closes #<n>`, as this line does), the issue number
    with no keyword in front of it, or the keyword and the number in separate
    sentences. There is deliberately **no opt-out marker**: the guard's constraint is

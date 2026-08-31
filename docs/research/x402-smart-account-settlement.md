@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/rails/allowance-module.ts
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/modules/mpp/**
-last-verified: "2026-08-25" # #1992: the Outcome block said EIP-3009 "remains the default on the legacy AllowanceModule rail (import-only)" and the body called that rail "now import-only" — both present-tense false. The rail is RETIRED (#1440): #1984 410s import too, #1986 fail-closes spending, #1987 deleted the executor. Marked in place per the #1451 precedent for this doc (mark supersession in the Outcome block, do not rewrite a dated investigation). Scope: those two sentences; the 2026-07 investigation itself is unchanged and was NOT re-verified. Prior: #1451: §1's "keep EIP-3009 as the production default" is superseded on the delegation rail by the #1450 owner decision (prefer erc7710 when the merchant advertises it); marked in the Outcome block rather than rewriting the historical investigation. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
+last-verified: "2026-08-31" # #2313: the LIVE #1450 banner — not the archived investigation below it — asserted "the legacy AllowanceModule rail is unchanged: EIP-3009 is not a preference there, it is the only scheme", presenting the retired two-leg as a live scheme choice. It is not unchanged and it has no scheme: #1986 answers 410 at `POST /x402/authorize` and `POST /x402` above the funding leg, #1987 deleted the orchestration and executor behind them, #2055 dropped `approval_requests` so the over-coverage middle branch has nothing to write. Both banner sentences corrected and the sections below explicitly scoped to past tense. Scope: the Outcome/Superseded banner only. NOT re-verified: §1-§8 of the investigation, which the doc's own banner already scopes as a decision record, nor the Permit2 or prototype-spec sections. Prior: #1992: the Outcome block said EIP-3009 "remains the default on the legacy AllowanceModule rail (import-only)" and the body called that rail "now import-only" — both present-tense false. The rail is RETIRED (#1440): #1984 410s import too, #1986 fail-closes spending, #1987 deleted the executor. Marked in place per the #1451 precedent for this doc (mark supersession in the Outcome block, do not rewrite a dated investigation). Scope: those two sentences; the 2026-07 investigation itself is unchanged and was NOT re-verified. Prior: #1451: §1's "keep EIP-3009 as the production default" is superseded on the delegation rail by the #1450 owner decision (prefer erc7710 when the merchant advertises it); marked in the Outcome block rather than rewriting the historical investigation. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Research — Smart-account-native x402 settlement (removing the funding leg)
@@ -24,8 +24,9 @@ last-verified: "2026-08-25" # #1992: the Outcome block said EIP-3009 "remains th
 > `packages/backend/src/modules/x402/x402-delegation.ts`,
 > `packages/backend/src/routes/x402.ts`), built on the MetaMask Hybrid
 > DeleGator (epic #821) rather than Safe-via-module. The Permit2 track was not
-> pursued. EIP-3009/delegate-EOA remains the default on the legacy
-> AllowanceModule rail (RETIRED since #1440 — see the note below); a
+> pursued. EIP-3009/delegate-EOA *was* the default on the legacy
+> AllowanceModule rail, which is RETIRED and cannot pay (#1440/#1986/#1987 —
+> see the note below); a
 > delegation-metered **EIP-3009 fallback
 > on the delegation rail** (for merchant reach) is **built** (per-payment scheme
 > selection; pinned budgets stay erc7710-only) —
@@ -38,8 +39,14 @@ last-verified: "2026-08-25" # #1992: the Outcome block said EIP-3009 "remains th
 > audited; what remains thin is how many facilitators have implemented it. The
 > owner decision reverses the default on that basis: prefer erc7710 whenever
 > the merchant advertises `extra.assetTransferMethod: "erc7710"`, with the 3009
-> bridge as the merchant-reach fallback. The legacy AllowanceModule rail is
-> unchanged — EIP-3009 is not a preference there, it is the only scheme.
+> bridge as the merchant-reach fallback. The legacy AllowanceModule rail has
+> **no** scheme: it is not a place where EIP-3009 is the only preference, it is
+> a rail that cannot pay at all. Since #1986 `POST /x402/authorize` and
+> `POST /x402` answer HTTP 410 for an `allowance_module` account, above the
+> funding leg, and #1987 deleted the orchestration and the executor behind
+> them; #2055 dropped `approval_requests`, so the two-leg's over-coverage
+> middle branch has nothing to write to either. Read every "legacy rail"
+> sentence below as past tense.
 > Facilitator adoption is still thin, which is why the fallback stays; §1's
 > reasoning about the funding leg being the source of the worst structural
 > properties is exactly the reasoning that carried the decision.

@@ -28,7 +28,7 @@
 
 - name: "money-path"
   color: "b60205"
-  description: "Payments, agent authority, allowances, or migrations — loads money.md (characterization tests + CASP)"
+  description: "Payments, agent authority, allowances, migrations — loads money.md (characterization + CASP)"
 
 - name: "promotion"
   color: "1d76db"
@@ -44,4 +44,4 @@
 # keyword targets an issue carrying it. Remove it when the operator step is done.
 - name: "operator-verify"
   color: "d93f0b"
-  description: "Issue must outlive the merge — a human operator step is still outstanding; PRs must use `Refs #<n>`, not `Closes`"
+  description: "Issue outlives the merge: an operator step is outstanding — use `Refs #<n>`, not `Closes`"

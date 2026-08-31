@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Haven — Your agent hit a 402</title>
+<meta name="description" content="HTTP 402 Payment Required means the resource is payable. Give your agent a budget — not your wallet — and it can pay standard x402 merchants, non-custodially, with on-chain limits." />
+<!--
+  Haven canonical 402 page (GTM Agent Discovery track, Phase 0).
+
+  DELIBERATELY SELF-CONTAINED AND STATIC, like /exit. This page is the human
+  landing for the highest-intent moment in the category: an agent (or its
+  operator) just met `402 Payment Required` and needs a payment method.
+
+  The agent-readable mirror of this content is /402.md — clean markdown,
+  token-cheap, listed in /llms.txt. Keep the two in sync when editing.
+-->
+<style>
+  :root { --navy:#1e1b4b; --navy-2:#241f5e; --indigo:#4f46e5; --ice:#c7d2fe; --ink:#1a1d21; --muted:#4b5563; --line:#e5e7eb; --bg:#ffffff; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Helvetica Neue",Helvetica,Arial,sans-serif; color:var(--ink); background:var(--bg); line-height:1.6; }
+  .hero { background:var(--navy); color:#fff; padding:56px 24px 48px; }
+  .wrap { max-width:760px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; margin-bottom:28px; }
+  .brand .mark { width:34px; height:34px; border-radius:8px; background:var(--indigo); display:flex; align-items:center; justify-content:center; font-weight:700; color:#fff; font-size:18px; }
+  .brand .name { font-weight:700; font-size:18px; letter-spacing:.01em; }
+  .kicker { font-size:12px; letter-spacing:.18em; text-transform:uppercase; color:var(--ice); opacity:.85; margin-bottom:10px; }
+  h1 { font-size:34px; line-height:1.2; margin:0 0 12px; letter-spacing:-.01em; }
+  .hero p { color:#d6d9f2; max-width:620px; margin:0; }
+  main { padding:36px 24px 56px; }
+  h2 { font-size:20px; margin:32px 0 10px; letter-spacing:-.005em; }
+  p { margin:10px 0; color:var(--ink); }
+  .muted { color:var(--muted); }
+  ol.steps { counter-reset:s; list-style:none; padding:0; margin:16px 0; }
+  ol.steps li { position:relative; padding:0 0 18px 52px; }
+  ol.steps li::before { counter-increment:s; content:counter(s,decimal-leading-zero); position:absolute; left:0; top:2px; width:36px; height:36px; border-radius:9px; background:var(--indigo); color:#fff; font-weight:700; font-size:14px; display:flex; align-items:center; justify-content:center; }
+  ol.steps b { display:block; margin-bottom:2px; }
+  pre { background:var(--navy-2); color:#e6e9ff; border-radius:10px; padding:14px 16px; overflow-x:auto; font-size:14px; margin:8px 0 4px; }
+  code { font-family:"SF Mono",Menlo,Consolas,monospace; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px; margin:14px 0; }
+  .card { border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .card b { display:block; margin-bottom:4px; }
+  .card p { margin:0; font-size:14px; color:var(--muted); }
+  a { color:var(--indigo); }
+  .cta { display:inline-block; background:var(--indigo); color:#fff; text-decoration:none; font-weight:700; border-radius:9px; padding:11px 18px; margin:6px 12px 6px 0; }
+  .cta.ghost { background:transparent; color:var(--indigo); border:1.5px solid var(--indigo); }
+  footer { border-top:1px solid var(--line); padding:20px 24px 40px; font-size:13px; color:var(--muted); }
+  footer .wrap { display:flex; flex-wrap:wrap; gap:16px; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="wrap">
+    <div class="brand"><div class="mark">H</div><div class="name">Haven</div></div>
+    <div class="kicker">HTTP 402 · Payment Required</div>
+    <h1>Your agent hit a paywall. That's not an error — it's a price.</h1>
+    <p><code>402 Payment Required</code> means the resource is payable, almost always via the x402 protocol: the response names an amount, a destination, and a network. An agent with a payment method retries and gets the resource. Haven gives your agent that method — <strong>with a budget, not a wallet.</strong></p>
+  </div>
+</div>
+
+<main>
+  <div class="wrap">
+    <h2>Fix it in three steps</h2>
+    <ol class="steps">
+      <li><b>Create a Haven account</b><span class="muted">One passkey prompt at <a href="https://app.haven.xyz">app.haven.xyz</a> — no seed phrase, non-custodial. Your funds stay in an account you control.</span></li>
+      <li><b>Create an agent and set its budget</b><span class="muted">For example 50 USDC per day, optionally pinned to one recipient. Anything outside the budget is refused on-chain — the agent cannot bypass the limit.</span></li>
+      <li><b>Connect the agent</b><span class="muted">Copy the connect command from the dashboard into the agent's environment:</span>
+        <pre><code>npx @haven_ai/connect@alpha</code></pre>
+        <span class="muted">It installs the Haven MCP runtime (hosted, keyless) and generates the agent's signing key locally — the key never leaves the machine. Then retry the 402: quoted against the live budget, signed locally, paid with a receipt.</span></li>
+    </ol>
+
+    <p><a class="cta" href="https://app.haven.xyz">Create an account</a> <a class="cta ghost" href="/402.md">Agent-readable version of this page</a></p>
+
+    <h2>Why owners allow it</h2>
+    <div class="cards">
+      <div class="card"><b>Agents are never wallets</b><p>The agent holds a revocable spending delegation on its owner's account — never funds, never keys.</p></div>
+      <div class="card"><b>On-chain refusal</b><p>Budgets are enforced by audited on-chain policy modules. An over-budget payment doesn't get flagged — it reverts.</p></div>
+      <div class="card"><b>Provable without Haven</b><p>Every budget can be inspected and revoked with a block explorer and your own wallet. <a href="/exit/">The exit tool</a> works even if Haven disappears.</p></div>
+      <div class="card"><b>Books itself</b><p>Every payment carries a receipt — agent, item, policy, on-chain proof — exportable to accounting.</p></div>
+    </div>
+
+    <h2>Works with standard x402 merchants today</h2>
+    <p class="muted">Haven settles via ERC-7710 delegated settlement natively and standard EIP-3009 transfer-with-authorization as the compatibility path — so a Haven agent with an open (unpinned) budget can pay any standard x402 merchant today, through one policy and audit layer. A budget pinned to one recipient settles via ERC-7710 only, by design. USDC on Base today; rail-neutral by design.</p>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Haven — the buy-side control layer for AI-agent payments</span>
+    <a href="/llms.txt">llms.txt</a>
+    <a href="https://www.npmjs.com/package/@haven_ai/sdk">SDK</a>
+    <a href="https://www.npmjs.com/package/@haven_ai/connect">Connect</a>
+    <a href="/exit/">Independent exit</a>
+  </div>
+</footer>
+
+</body>
+</html>

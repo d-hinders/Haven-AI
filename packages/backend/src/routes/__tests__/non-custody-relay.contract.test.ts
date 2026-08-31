@@ -33,11 +33,6 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() 
   mockQuery: vi.fn(),
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
-    getLatestBlockTimeSec: vi.fn(),
-    computeEffectiveAllowance: vi.fn(),
-    generateTransferHash: vi.fn(),
-    recoverSigner: vi.fn(),
-    executeAllowanceTransfer: vi.fn(),
   },
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
@@ -160,8 +155,11 @@ describe('non-custody: the relay is non-discretionary', () => {
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '1.00', eur: '0.92' })
   })
 
-  it('#1986 RETIREMENT: the legacy rail relays nothing — even the exact signed recipient/amount/token never reaches executeAllowanceTransfer', async () => {
-    allowanceMocks.recoverSigner.mockReturnValue(AGENT.delegate_address)
+  // #2307: the title used to end "never reaches executeAllowanceTransfer", and
+  // the body asserted it with a spy on that name. Neither the function nor the
+  // export exists (#1987), so the spy could not fail. The 410 and its verbatim
+  // body are the real assertions, and they do fail when the refusal is removed.
+  it('#1986 RETIREMENT: the legacy rail relays nothing — a fully signed legacy intent is refused, not relayed', async () => {
     primeDb(AUTH, intentById(legacySignedIntent()))
 
     const res = await app.inject({
@@ -173,7 +171,6 @@ describe('non-custody: the relay is non-discretionary', () => {
 
     expect(res.statusCode).toBe(410)
     expect(res.json().error).toBe(allowanceModuleRailRetired('intent').body.error)
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
   it('DELEGATION RAIL: relays the EXACT stored prepared UserOperation and signature — no substitution, no reconstruction', async () => {
@@ -196,8 +193,10 @@ describe('non-custody: the relay is non-discretionary', () => {
     expect(forwardedUserOp).toEqual(deserializeUserOp(delegationSignedIntent().prepared_user_op))
     expect(String(forwardedUserOp.callData).toLowerCase()).toContain(SIGNED_RECIPIENT.slice(2).toLowerCase())
     // The signature is stamped in unchanged:
+    // This IS the non-custody assertion: the agent's signature reached the
+    // chain byte-for-byte, with no Haven substitution. (#2307 removed a
+    // trailing `executeAllowanceTransfer` spy that added nothing — it watched
+    // a name the module does not export.)
     expect(forwardedSignature).toBe(USEROP_SIGNATURE)
-    // No Haven substitution via the legacy path either:
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 })

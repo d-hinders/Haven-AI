@@ -1268,6 +1268,8 @@ function buildSetupPrompt(command: string, apiUrl: string): string {
     '',
     command,
     '',
+    'Network access is expected: this command downloads the npm package and contacts the Haven API, so if your environment is sandboxed, run it with network access enabled or request network access escalation; that changes the execution environment, not the command, and is not a third command modification.',
+    '',
     'Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.',
     '',
     'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',

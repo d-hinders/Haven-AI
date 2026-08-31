@@ -20,7 +20,7 @@ const {
   sweepFloorAtomic,
 } = await import('../delegate-balance-monitor.js')
 
-const FLOOR = ethers.parseUnits('1', 6) // config default sweepMinUsdc='1'
+const FLOOR = ethers.parseUnits('0.01', 6) // config default sweepMinUsdc='0.01'
 
 function delegateRow(n: number, chainId = 8453) {
   return {
@@ -60,28 +60,28 @@ describe('scanDelegateBalances', () => {
       .mockResolvedValueOnce({ rows: [{ agent_id: 'agent-3' }] }) // agent-3 has a fresh payment
     mockGetTokenBalance
       .mockResolvedValueOnce(0n) // agent-1: clear
-      .mockResolvedValueOnce(ethers.parseUnits('0.4', 6)) // agent-2: dust
+      .mockResolvedValueOnce(ethers.parseUnits('0.004', 6)) // agent-2: dust
       .mockResolvedValueOnce(ethers.parseUnits('3', 6)) // agent-3: in_flight (fresh payment)
       .mockResolvedValueOnce(ethers.parseUnits('2', 6)) // agent-4: lingering
 
     const report = await scanDelegateBalances()
     expect(report.findings.map((f) => f.state)).toEqual(['clear', 'dust', 'in_flight', 'lingering'])
-    expect(report.dustTotalAtomic).toBe(ethers.parseUnits('0.4', 6))
+    expect(report.dustTotalAtomic).toBe(ethers.parseUnits('0.004', 6))
     expect(report.dustAlert).toBe(false) // default threshold 25 USDC
     expect(report.lingering).toHaveLength(1)
     expect(report.lingering[0].agentId).toBe('agent-4')
   })
 
   it('alerts when aggregate dust passes the threshold', async () => {
-    process.env.DELEGATE_DUST_ALERT_USDC = '1'
+    process.env.DELEGATE_DUST_ALERT_USDC = '0.01'
     mockQuery
       .mockResolvedValueOnce({ rows: [delegateRow(1), delegateRow(2), delegateRow(3)] })
       .mockResolvedValueOnce({ rows: [] })
-    // three delegates × 0.4 USDC dust = 1.2 ≥ 1.0 threshold
-    mockGetTokenBalance.mockResolvedValue(ethers.parseUnits('0.4', 6))
+    // three delegates × 0.004 USDC dust = 0.012 ≥ 0.01 threshold
+    mockGetTokenBalance.mockResolvedValue(ethers.parseUnits('0.004', 6))
 
     const report = await scanDelegateBalances()
-    expect(report.dustTotalAtomic).toBe(ethers.parseUnits('1.2', 6))
+    expect(report.dustTotalAtomic).toBe(ethers.parseUnits('0.012', 6))
     expect(report.dustAlert).toBe(true)
   })
 

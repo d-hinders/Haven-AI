@@ -143,7 +143,7 @@ describe('machine payment sweep routes', () => {
 
     it('builds an authorization and binding when funds are stranded above the floor', async () => {
       primeDb(AUTH_ROUTE)
-      allowanceMocks.getTokenBalance.mockResolvedValueOnce(2_000_000n) // 2 USDC ≥ 1 floor
+      allowanceMocks.getTokenBalance.mockResolvedValueOnce(2_000_000n) // 2 USDC ≥ 0.01 floor
       sweepMocks.buildSweepAuthorization.mockReturnValueOnce(AUTHZ)
       const expectedAuth = { version: 1, message: 'm', signature: '0xaa', signer: ATTACKER }
       sweepMocks.signSweepExpectedContext.mockResolvedValueOnce(expectedAuth)
@@ -156,6 +156,19 @@ describe('machine payment sweep routes', () => {
       expect(body.expected_auth).toEqual(expectedAuth)
       expect(body.amount).toBe('2.0')
       expect(body.amount_atomic).toBe('2000000')
+    })
+
+    it('builds an authorization when the balance is exactly the 0.01 USDC floor', async () => {
+      primeDb(AUTH_ROUTE)
+      allowanceMocks.getTokenBalance.mockResolvedValue(10_000n)
+      sweepMocks.buildSweepAuthorization.mockReturnValueOnce({ ...AUTHZ, value: '10000' })
+      sweepMocks.signSweepExpectedContext.mockResolvedValue({ version: 1 })
+
+      const res = await app.inject({ method: 'POST', url: '/machine-payments/sweep/prepare', headers })
+
+      expect(res.statusCode).toBe(201)
+      expect(res.json()).toMatchObject({ amount: '0.01', amount_atomic: '10000' })
+      expect(sweepMocks.buildSweepAuthorization).toHaveBeenCalledOnce()
     })
 
     it('sweeps a DELEGATION-rail agent to its treasury Hybrid — 3009-mode reconciliation (#946)', async () => {
@@ -190,7 +203,7 @@ describe('machine payment sweep routes', () => {
 
     it('leaves dust below the sweep floor un-swept (#700 floor)', async () => {
       primeDb(AUTH_ROUTE)
-      allowanceMocks.getTokenBalance.mockResolvedValueOnce(500_000n) // 0.5 USDC < 1 floor
+      allowanceMocks.getTokenBalance.mockResolvedValueOnce(5_000n) // 0.005 USDC < 0.01 floor
 
       const res = await app.inject({ method: 'POST', url: '/machine-payments/sweep/prepare', headers })
 
@@ -198,8 +211,12 @@ describe('machine payment sweep routes', () => {
       const body = res.json()
       expect(body.below_min).toBe(true)
       expect(body.authorization).toBeUndefined()
-      expect(body.amount).toBe('0.5')
-      expect(body.min_usdc).toBe('1')
+      expect(body.amount).toBe('0.005')
+      expect(body.amount_atomic).toBe('5000')
+      expect(body.min_usdc).toBe('0.01')
+      expect(body.message).toContain('0.005 USDC')
+      expect(body.message).toContain('0.01 USDC')
+      expect(body.message).toMatch(/additional stranded funds.*at least the floor/i)
     })
   })
 

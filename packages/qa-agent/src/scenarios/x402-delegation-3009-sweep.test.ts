@@ -112,7 +112,7 @@ describe('unmet precondition vs. real regression', () => {
   })
 
   it('SKIPS when the stranding is below the backend sweep floor', async () => {
-    mockPrepareSweep.mockResolvedValue({ below_min: true, min_usdc: '1' })
+    mockPrepareSweep.mockResolvedValue({ below_min: true, min_usdc: '0.01' })
     const r = await x402Delegation3009Sweep.run(ctx())
     expect(r.skipped).toBe(true)
     expect(r.detail).toMatch(/SWEEP_MIN_USDC=0/)
@@ -151,12 +151,25 @@ describe('the outcome is what is LEFT, not that submit returned', () => {
     // exactly the regression worth catching.
     mockPrepareSweep.mockResolvedValue({
       authorization: { from: DELEGATE, value: String(STRANDED) },
-      min_usdc: '1',
+      min_usdc: '0.01',
     })
-    mockBalanceOf.mockResolvedValue(STRANDED * 4n) // 2 USDC, above the 1 USDC floor
+    mockBalanceOf.mockResolvedValue(STRANDED * 4n) // 2 USDC, above the 0.01 USDC floor
     const r = await x402Delegation3009Sweep.run(ctx())
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/still holds .* stranding, not dust/)
+  })
+
+  it('uses the 0.01 USDC default when a successful prepare omits min_usdc', async () => {
+    // The successful backend shape does not include min_usdc. A stale 1 USDC
+    // fallback would classify this 0.5 USDC residual as harmless, hiding a
+    // failed sweep that is above the production floor.
+    mockPrepareSweep.mockResolvedValue({
+      authorization: { from: DELEGATE, value: String(STRANDED) },
+    })
+    mockBalanceOf.mockResolvedValue(STRANDED)
+    const r = await x402Delegation3009Sweep.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/0\.5 USDC.*0\.01 USDC floor/)
   })
 
   it('passes when the delegate is left below the floor', async () => {

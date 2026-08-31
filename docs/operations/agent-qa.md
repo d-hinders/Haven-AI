@@ -262,7 +262,7 @@ The deterministic harness runs fourteen scenarios in order:
 | `over-budget-refused` | An over-budget payment is refused **before it becomes signable**, by the on-chain caveat enforcer — HTTP 502 with no intent row. Renamed from `over-budget-queue` by #2016: that leg asserted `pending_approval`, and the approval queue was legacy-rail-only and no longer exists anywhere (#1986/#1989). A bare 502 is NOT accepted as proof — the amount is derived from a **live** enforcer read (a fallback reading or an exhausted budget fails the leg rather than passing it), a within-budget request against the same account must still be offered, and the ABI-encoded revert reason must decode to a **named caveat enforcer** |
 | `x402-over-budget-rejected` | The same refusal on the x402 **EIP-3009 funding leg**, with the same three discriminators. Re-based by #2016, which found it **passing for the wrong reason**: driven against the retired legacy identity it was satisfied by the rail-retirement 410, and would have passed with over-budget enforcement deleted outright. Its erc7710 sibling below closes what used to be flagged here as a known gap (#2082) |
 | `x402-erc7710-over-budget-rejected` | The same refusal on the **preferred** scheme (#2082). Until then the case did not exist to assert: erc7710 authorize returned 201 `pending_signature` WITH `sign_data` for ANY amount, so the #420 invariant's own words ("refused before it becomes signable") were FALSE on the path most payments take — measured live against dev 2026-08-25 and handed to #1993 rather than asserted around. The fail-fast pre-check refuses **HTTP 403 `delegation_budget_exceeded`** with no settlement child, no intent row and no relayer-paid delegate deploy. The discriminators are different from its 3009 sibling's, because the vacuous pass this shape invites is a different one: a bare 403 is ALSO what a MISSING delegation returns, so the leg requires the `error_code` AND requires the refusal's `remaining_atomic` to equal the live budget it derived the over-budget amount from, with a within-budget erc7710 authorize offered first as the control (and its `signature_scheme` checked, so a dispatch regression onto the funding leg cannot pass as this one). **What it does not claim:** that the CHAIN refuses the redemption — the caveat stack was always the gate and #2082 did not touch it; proving the redemption-side revert still needs a merchant that attempts one, and no leg does. Needs `QA_DELEGATION_AGENT_API_KEY`; **skips** without it |
-| `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and no residual may sit at or above the 1 USDC sweep floor. **Skips** without `QA_DELEGATION_*` |
+| `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and no residual may sit at or above the 0.01 USDC sweep floor. **Skips** without `QA_DELEGATION_*` |
 | `x402-delegation-3009-grace-resume` | Reproduces the #2145 crash shape against dev: the raw API authorizes and signs the EIP-3009 funding leg, then deliberately **does not** retry the merchant. After the Base-Sepolia-only `MERCHANT_REPORT_GRACE_MIN_OVERRIDE=0`, it requires `GET /machine-payments/:id/status` to answer `funded_but_unsettled` / `retry_original_x402_request`, then calls `resumeX402Payment()` through that real gate. The resumed purchase must debit the treasury and credit the merchant by the same amount, restoring the delegate to its starting balance; a failed post-funding path attempts a gasless sweep before reporting. The override is refused outside `HAVEN_DEPLOY_CHAIN_IDS=84532`; production remains 15 minutes. **Skips** without `QA_DELEGATION_*` |
 | `delegation-lifecycle` | Authority can be TAKEN AWAY: on a **throwaway per-run identity** (funded ~0.006 USDC from the standing delegation identity, then abandoned) — grant → activate (relayer-deploys) → within-budget payment settles → replace leaves **exactly one** active row (the #1053-finding-4 transactional-activate regression) → owner-signed revoke → the same payment shape is refused **403 "no active budget delegation"**, never a 502 (a 502 would mean authority was still offered to the chain). Ephemeral keys, all signing client-side |
 | `x402-erc7710-settle` | The delegation rail's PRIMARY x402 path: authorize (payTo = merchant) builds a narrowed child delegation, the delegate signs it, `POST /x402/:id/settle` wraps the header, and the MERCHANT redeems `[child, budget]` on-chain — treasury pays the merchant **directly**, budget metered by the settlement itself (treasury −amount exactly), **delegate EOA untouched** (no funding leg — the #713 stranded-funds class structurally absent). Needs `MERCHANT_X402_ERC7710=1` + `MERCHANT_ERC7710_DELEGATION_MANAGER` on the dev merchant; skips (→ run FAILS under #1066) with that exact remedy when the merchant is 3009-only |
@@ -1107,11 +1107,28 @@ for RPC propagation delay.
 ### Sweep left as dust below the floor
 
 The backend does not create a sweep authorization when the stranded USDC
-balance is **below** `SWEEP_MIN_USDC` (default `1`) — recovering dust would cost
-more relayer gas than it returns, so it is left on the delegate. The scenario
-returns `below_min: true` with the balance and floor. In dev this should not
+balance is **below** `SWEEP_MIN_USDC` (default `0.01`). Because recovery is a
+relayer-paid, gasless EIP-3009 transfer, this floor keeps ordinary 0.01 USDC
+x402 micropayments recoverable. A smaller balance remains on the delegate until
+additional stranded funds accumulate to at least the floor. The scenario returns
+`below_min: true` with the current balance and floor. In dev this should not
 happen (dev sets `SWEEP_MIN_USDC=0`); if it does, confirm the dev backend's
-floor is `0` rather than lowering the prod default.
+floor is `0` rather than changing the production default.
+
+### Exact-floor sweep verification for #2293
+
+Production acceptance is an operator step. Set the production backend's
+`SWEEP_MIN_USDC=0.01` (or remove a legacy `1` override), redeploy, and verify
+the effective value. Then use a delegate holding exactly `10000` atomic Base
+USDC (`0.01` USDC) and run the split-signer path: hosted
+`POST /machine-payments/sweep/prepare` (or `prepareSweep()`), local
+`haven_sign_sweep_delegate`, then hosted
+`POST /machine-payments/sweep/submit` (or `submitSweep()`). The local signer
+must be the only component handling the delegate key. Record HTTP 201 for
+prepare, HTTP 200 for submit, `amount_atomic: "10000"`, the returned
+transaction hash, a zero delegate balance, and the corresponding increase in
+the user's Haven wallet. Confirm the transaction on Base; do not put keys or
+other secrets in the run report.
 
 ### An x402 leg fails with `still HTTP 402 after payment`
 

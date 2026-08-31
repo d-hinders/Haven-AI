@@ -67,6 +67,7 @@ import {
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
+  X402_PAYMENT_HEADER_NAMES_SENT,
 } from './x402.js'
 import type {
   SweepAuthorization,
@@ -1370,7 +1371,7 @@ export class HavenClient {
           txHash: evidenceTxHash,
           resourceUrl: evidenceContext.resourceUrl,
           merchantStatus: surfaced.status,
-          paymentProofHeaderName: 'X-PAYMENT',
+          paymentProofHeaderName: X402_PAYMENT_HEADER_NAMES_SENT,
           paymentProofHeader: input.paymentHeader,
           protocolReceiptHeaderName: protocolReceiptHeader ? 'PAYMENT-RESPONSE' : undefined,
           protocolReceiptHeader,

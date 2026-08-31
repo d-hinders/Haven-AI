@@ -123,8 +123,10 @@ Source of truth:
 The SDK normalizes the merchant's 402 response into a `PaymentRequired` object.
 It accepts the v2 `PAYMENT-REQUIRED` header, the v1 `X-PAYMENT` challenge
 header, and a JSON-body fallback. When the delegate address is known, probes
-also send `x402-wallet`. The paid retry uses `X-PAYMENT`; a successful merchant
-response may include `PAYMENT-RESPONSE` evidence.
+also send `x402-wallet`. The paid retry sets **both** payment header names to
+the same value — the v2 `PAYMENT-SIGNATURE` and the v1 `X-PAYMENT` (#2289) — so
+a strict merchant on either version reads it; a successful merchant response may
+include `PAYMENT-RESPONSE` evidence.
 
 `quoteX402()`, `haven_quote_x402`, `haven_quote_mcp_tool`, and
 `haven_quote_catalog_purchase` are read-only. The MCP variants establish the
@@ -223,7 +225,7 @@ sequenceDiagram
     AM->>Safe: Transfer within approved budget
     API-->>SDK: Funding transaction
     SDK->>SDK: Wait for at least one confirmation
-    SDK->>Resource: Retry original request with X-PAYMENT
+    SDK->>Resource: Retry with PAYMENT-SIGNATURE + X-PAYMENT
     alt merchant accepts
       Resource-->>SDK: Success + optional PAYMENT-RESPONSE
       SDK-->>Agent: Merchant response
@@ -279,7 +281,7 @@ sequenceDiagram
     API-->>MCP: funding status
     Agent->>Signer: haven_x402_sign_header { payment_required, x402_binding }
     Signer-->>Agent: { payment_header }
-    Agent->>Resource: Retry with X-PAYMENT
+    Agent->>Resource: Retry with PAYMENT-SIGNATURE + X-PAYMENT
     Resource-->>Agent: 200 OK / merchant response
   else outside the on-chain budget
     API-->>MCP: refusal — no intent row, no payload_hash, nothing queued
@@ -318,7 +320,8 @@ haven_pay_x402_quote  → settlement child + settlement_scheme: "erc7710"
 haven_sign            → { payment_id } only; the signer fetches the child
 haven_submit          → { payment_id, signature, settlement_scheme: "erc7710" }
                         POST /x402/:id/settle → payment_header, tx_hash null
-agent retry           → X-PAYMENT: <payment_header>
+agent retry           → PAYMENT-SIGNATURE: <payment_header>
+                        X-PAYMENT:         <payment_header>   (v1 alias)
 ```
 
 There is no `haven_submit` funding relay to confirm and **no
@@ -424,10 +427,11 @@ The recommended three-call fast path for an x402-protected MCP tool is:
    the unsigned funding payload plus merchant/tool context.
 2. `haven_sign_x402` — the local signer signs the funding hash and creates the
    merchant-bound payment header.
-3. `haven_settle_mcp_tool` — hosted MCP relays the funding signature, waits for
-   confirmation, performs a fresh merchant MCP handshake, delivers the signed
-   header, and returns `agent_summary.purchase_summary` as the default report;
-   raw `result` remains optional merchant evidence.
+3. `haven_settle_mcp_tool` — hosted MCP resolves the merchant call context
+   (#2282, below), relays the funding signature, waits for confirmation,
+   performs a fresh merchant MCP handshake, delivers the signed header, and
+   returns `agent_summary.purchase_summary` as the default report; raw `result`
+   remains optional merchant evidence.
 
 **Hosted header preflight (#1398).** Before step 3 relays the funding
 signature, hosted MCP validates the bounded, signed `X-PAYMENT` header against
@@ -463,6 +467,40 @@ its window, exactly like #1263 — a row that already moved past
 `pending_signature` stays servable for however long merchant delivery takes,
 so a retry after a `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` timeout is never
 forced into a fresh, re-funding quote).
+
+**The context is resolved BEFORE anything is submitted (#2282).** On
+`haven_settle_mcp_tool` the resolution above runs ahead of the funding relay on
+the EIP-3009 bridge, and ahead of `POST /x402/:id/settle` on erc7710 — not
+inside the merchant-delivery helper, where it used to run. It had been correct
+and late: the `haven_pay_x402_quote` entry point stores no call context (that
+tool receives only the raw 402, and an x402 `PaymentRequired` carries a resource
+URL but no MCP tool name and no arguments), so a quote-first settle relayed and
+confirmed the funding userop and only then answered
+`MERCHANT_CALL_CONTEXT_UNAVAILABLE`, leaving a `funded_but_unsettled` intent
+this tool can no longer finish — a settle retry with explicit context relays
+funding again and is refused with `expected pending_signature`, which reads
+like "your context was fine". Resolved first, the identical refusal lands while
+the intent is still `pending_signature` with nothing spent, and the caller
+retries the SAME tool with explicit `merchant_url` / `tool_name` / `arguments`
+and it settles. Storing a context at `haven_pay_x402_quote` time was considered
+and rejected: the tool has no tool name or arguments to store, so accepting
+them optionally would leave every caller who omitted them in exactly the state
+this removes.
+
+**`mcp_transport` is snake_case at this boundary, and the other spelling is
+refused (#2282).** Hosted MCP tool arguments are snake_case
+(`{ handshake_required, source }`); the SDK type `X402McpTransport` and
+`POST /x402/authorize`'s `mcpCallContext.mcpTransport` are camelCase
+(`{ handshakeRequired, source }`). Both are authoritative at their own
+boundary and the hosted server bridges them. A caller reaching the tool
+boundary with the camelCase shape is REFUSED, with a message naming both
+spellings — the tool schema is strict (matching the `additionalProperties:
+false` it advertises) rather than stripping the unknown key, and the internal
+transport parser throws on a present-but-unrecognised transport instead of
+answering `undefined`, which is the value "no transport supplied" also
+produces. A rejection the caller can act on is worth more than a permissive
+parse: the failure mode being closed here is a caller unable to tell that their
+explicit-context retry was never seen.
 
 The decomposed alternative is:
 
@@ -821,7 +859,7 @@ print — which is exactly why the API-side mapping exists.
 | Payment target | Recipient address from agent intent | Merchant `payTo` from HTTP 402 challenge |
 | Amount units | Human decimal string | Atomic amount from x402 option |
 | Agent action after funding | None for direct confirmed payment | Retry original merchant/resource request |
-| Header sent to merchant | None | `X-PAYMENT` |
+| Header sent to merchant | None | `PAYMENT-SIGNATURE` **and** `X-PAYMENT`, same value (#2289) |
 | Payment authority | Delegate signature + on-chain allowance | Same for funding leg; EIP-3009 signature for merchant leg |
 | Restart recovery | Fetch payment status | Rehydrate stored x402 context by payment id (`getResumeState`); resume when status answers `retry_original_x402_request` (#2145) — see [Resuming An Authorized Payment](#resuming-an-authorized-payment) |
 

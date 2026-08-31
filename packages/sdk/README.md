@@ -125,7 +125,8 @@ if (apiResponse.status === 402) {
   const receipt = await haven.authorizeX402(paymentRequired, {
     idempotencyKey: 'paid-api-data-2026-05-22',
   })
-  // Retry with { 'X-PAYMENT': receipt.paymentHeader }
+  // Retry with BOTH names set to receipt.paymentHeader:
+  //   { 'PAYMENT-SIGNATURE': …, 'X-PAYMENT': … }   (v2 name, v1 name)
   console.log(receipt.explorerUrl)
 }
 ```
@@ -209,7 +210,7 @@ const response = await haven.payX402Quote(quote)
 const data = await response.json()
 ```
 
-Merchant-verified x402 retries use the official EIP-3009 `exact` scheme on Base USDC (`base` / `eip155:8453`) and send the payment as `X-PAYMENT`. Haven's older tx-hash proof helper remains exported for Haven-native integrations, but `haven.fetch()` does not send `PAYMENT-SIGNATURE`.
+Merchant-verified x402 retries use the official EIP-3009 `exact` scheme on Base USDC (`base` / `eip155:8453`). Since #2289 `haven.fetch()` sends the payment under **both** wire names with the same value — `PAYMENT-SIGNATURE` (the x402 v2 name) and `X-PAYMENT` (v1) — so a merchant on either version reads it. Haven's older tx-hash proof helper remains exported for Haven-native integrations; it is a different payload that happens to have shared the v2 name, and it is not what `haven.fetch()` sends.
 
 For standard x402, the `x402-wallet` identity is the agent delegate wallet, because that is the wallet that signs and settles the merchant payment. Integrations that scope access by Haven wallet/Safe address should use a Haven-native flow instead of standard merchant x402.
 
@@ -471,7 +472,8 @@ Think of bridged x402 as two separate legs:
   `txHash` describe this leg. It is automatic and bounded by the budget — no
   human step.
 - Merchant x402 leg: after the funding leg is complete, the agent resumes the
-  same payment id and retries the original merchant request with `X-PAYMENT`.
+  same payment id and retries the original merchant request with the payment
+  header, under both `PAYMENT-SIGNATURE` and `X-PAYMENT`.
   Do not treat a new 402 probe or a new MCP session as a resume.
 
 For manual HTTP stacks, use `resumeAuthorizedX402()` to get the merchant header

@@ -92,7 +92,7 @@ describe('erc7710 merchant completion reports evidence (#2092)', () => {
       txHash: SETTLEMENT_TX,
       resourceUrl: MERCHANT_URL,
       merchantStatus: 200,
-      paymentProofHeaderName: 'X-PAYMENT',
+      paymentProofHeaderName: 'PAYMENT-SIGNATURE, X-PAYMENT',
       paymentProofHeader: 'header-abc',
       protocolReceiptHeaderName: 'PAYMENT-RESPONSE',
     })

@@ -241,6 +241,37 @@ const NETWORK_TOKENS: Record<string, Record<string, { symbol: string; decimals: 
 // ── Parser ───────────────────────────────────────────────────────
 
 /**
+ * The x402 wire header names, in one place (#2289).
+ *
+ * v2 renamed all three; v1's only name was `X-PAYMENT`, used in BOTH
+ * directions. Haven had adopted the v2 names for everything it *reads* and
+ * kept the v1 name for the one thing it *writes*, which is how a strict v2
+ * merchant came to never see a payment header at all.
+ *
+ * Both outbound names are sent on every retry rather than switched on
+ * `x402Version` (owner decision, 2026-08-31): a v1 merchant ignores the name
+ * it does not know, a v2 merchant ignores the legacy one, and no version
+ * heuristic has to be right for a payment to land.
+ */
+/** v2 client→server payment payload. The name a strict v2 merchant reads. */
+export const X402_PAYMENT_HEADER_NAME = 'PAYMENT-SIGNATURE'
+/** v1 client→server payment payload; still accepted by most v2 merchants. */
+export const X402_LEGACY_PAYMENT_HEADER_NAME = 'X-PAYMENT'
+/** v2 server→client payment requirements. */
+export const X402_PAYMENT_REQUIRED_HEADER_NAME = 'PAYMENT-REQUIRED'
+/** v2 server→client settlement receipt. */
+export const X402_PAYMENT_RESPONSE_HEADER_NAME = 'PAYMENT-RESPONSE'
+/**
+ * What the evidence record's `paymentProofHeaderName` reports, v2 name first.
+ *
+ * Both names go on the wire, so recording only one would make the audit trail
+ * disagree with what was actually sent. Derived from the two constants rather
+ * than written out, so the record cannot drift from the request.
+ */
+export const X402_PAYMENT_HEADER_NAMES_SENT =
+  `${X402_PAYMENT_HEADER_NAME}, ${X402_LEGACY_PAYMENT_HEADER_NAME}`
+
+/**
  * Parse an HTTP 402 response into x402 PaymentRequired data.
  *
  * Supports:

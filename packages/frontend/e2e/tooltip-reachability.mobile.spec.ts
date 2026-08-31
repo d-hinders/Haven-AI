@@ -27,6 +27,21 @@
  *   So the primitive must NOT take that tap — asserted here as a real
  *   behaviour, not left as an intention in a comment.
  *
+ * ## The composite-card trigger changed in #2043
+ *
+ * It used to be the `not recorded` label and its 169-character explanation.
+ * **That tooltip is gone**: the copy was essential rather than elaboration —
+ * it explains an absence, and its whole job is to stop a user concluding the
+ * agent is broken — so a trigger this primitive can never make reachable was
+ * the wrong home for it. It is visible text above the agent list now (#2043,
+ * following #2017), and the card shows the bare label.
+ *
+ * The ancestry rule still has a live instance in the same card, and the test
+ * moves onto it: the RECORDED name's `MCP servers: … and …` tooltip, which
+ * #2043 kept precisely because it elaborates a value already on screen next
+ * to a `CopyButton` that is its sibling, not its child. So this file goes on
+ * proving the rule at the call site that motivated it.
+ *
  * The second test is the one that would go red if the ancestry rule were
  * dropped for a simpler "always toggle", which is the tempting version.
  */
@@ -36,6 +51,7 @@ import {
   dismissMobileSidebar,
   mockHavenApi,
   seedAuthenticatedSession,
+  testAgent,
   unexpectedBrowserErrors,
 } from './fixtures/haven-api'
 
@@ -43,9 +59,16 @@ import {
 const SAMPLE_ADDRESS = '0x8f4F0f6d712C5c5C9Bb02F4a5B5c0D7F462A6f4C'
 const SAMPLE_TRUNCATED = '0x8f4F…6f4C'
 
-/** The live long label, from `McpServerName`'s null branch. */
-const LONG_LABEL =
-  'Haven records this when an agent connects with a current version of the connector. Agents connected earlier keep working exactly as they are — only the label is missing.'
+/**
+ * The live composite-card label, from `McpServerName`'s RECORDED branch —
+ * `testAgent` carries no `mcp_server_name`, so the name is served by the
+ * per-test route override below and the label is built with the component's
+ * own pair rule rather than pasted.
+ */
+const CARD_SERVER_NAME = 'haven-research'
+const CARD_PAIR_LABEL = `MCP servers: ${CARD_SERVER_NAME} and haven-signer-${CARD_SERVER_NAME.slice(
+  'haven-'.length,
+)}`
 
 test.describe('Tooltip on touch (#2038)', () => {
   test.beforeEach(async ({ page }) => {
@@ -75,10 +98,31 @@ test.describe('Tooltip on touch (#2038)', () => {
   })
 
   test('a tap inside a composite card link is left to the card, not stolen', async ({ page }) => {
+    // Registered after `mockHavenApi`, so this handler wins for `/agents`.
+    await page.route('**/api/agents', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          agents: [{ ...testAgent, mcp_server_name: CARD_SERVER_NAME }],
+        }),
+      })
+    })
+
+    // WARM THE DESTINATION FIRST, then come back and do the real thing.
+    //
+    // The tap navigates to `/agents/[agentId]`, and a cold `next dev` compile
+    // of that route costs 30-60s — more than this test's whole budget. That is
+    // an environment fact, not a claim about the primitive, and paying it
+    // inside the measured window is what made this test fail 2 runs in 3 and
+    // then again on a fresh server. Compiling it up front takes the compile
+    // out of the assertion's way without weakening anything the test claims:
+    // the tap, the navigation and the bubble check below are unchanged.
+    await page.goto(`/agents/${testAgent.id}`)
     await page.goto('/agents')
     await dismissMobileSidebar(page)
 
-    const trigger = page.getByText('not recorded').first()
+    const trigger = page.getByText(CARD_SERVER_NAME).first()
     await expect(trigger).toBeVisible()
 
     // The rule is observable before the tap, which matters: "no tooltip
@@ -96,10 +140,24 @@ test.describe('Tooltip on touch (#2038)', () => {
     // own claim and is covered by `hosted-mcp.spec.ts`; asserting it here
     // would only add a route compile to this test's critical path.)
     await trigger.tap()
-    // Scoped to THIS label rather than to `[role="tooltip"]` at large: the tap
-    // navigates, and the emulated pointer lands wherever the next page puts
-    // it, so a bare role count can be reddened by a tooltip belonging to the
-    // destination screen.
-    await expect(page.locator('[role="tooltip"]', { hasText: LONG_LABEL })).toHaveCount(0)
+
+    // Let the navigation ARRIVE before asserting, rather than racing it.
+    //
+    // Not a convenience: a locator assertion issued mid-navigation resolves to
+    // `undefined` and burns its whole timeout "waiting for navigation to
+    // finish", which is a flake keyed to how long the destination route takes
+    // to compile — observed failing 2 runs in 3 on a cold `/agents/[agentId]`.
+    // Arriving first is also the STRONGER claim, and the one the test is
+    // actually about: `Tooltip` portals its bubble to `document.body` and this
+    // is a client-side route change, so a bubble opened by the tap would
+    // SURVIVE the navigation and hang over the destination. That is the
+    // failure this test exists to catch, and it is only observable once the
+    // destination is there.
+    await page.waitForURL(/\/agents\/[^/]+$/, { timeout: 30_000 })
+
+    // Scoped to THIS label rather than to `[role="tooltip"]` at large: the
+    // emulated pointer lands wherever the next page puts it, so a bare role
+    // count can be reddened by a tooltip belonging to the destination screen.
+    await expect(page.locator('[role="tooltip"]', { hasText: CARD_PAIR_LABEL })).toHaveCount(0)
   })
 })

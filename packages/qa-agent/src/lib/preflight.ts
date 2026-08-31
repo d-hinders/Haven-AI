@@ -160,12 +160,15 @@ export async function checkDelegateResidual(
 /**
  * What one full run costs the treasury, atomic USDC units.
  *
- * Derived, not invented: ~12 legs at 0.001 USDC each, plus the
- * `delegation-lifecycle` scenario's 0.002 USDC grant spend. Below this the run
- * CANNOT succeed — kept as a named constant so the next leg added to the
- * harness has one number to bump, next to the derivation it must keep true.
+ * Derived, not invented: 0.010 USDC for `within-budget-settle`; 0.007 USDC
+ * across the seven settling 0.001-USDC merchant legs (including #2159);
+ * 0.006 USDC stranded in `x402-erc7710-fresh-agent`; and 0.004 USDC net in
+ * `delegation-lifecycle` (0.006 funded less its 0.002 return). The sweep leg
+ * temporarily spends 0.001 USDC but returns it to this treasury. Below the
+ * 0.027-USDC total the run CANNOT succeed — keep this named derivation true
+ * whenever a scenario's standing-treasury debit changes.
  */
-export const TREASURY_RUN_COST_ATOMIC = 12n * 1_000n + 2_000n
+export const TREASURY_RUN_COST_ATOMIC = 27_000n
 
 /** The typical single leg's spend (0.001 USDC), for stating headroom in work. */
 const PER_LEG_ATOMIC = 1_000n

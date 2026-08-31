@@ -25,6 +25,12 @@ import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
 import { formatAgentLastActivityTitle, formatAgentLastActivityValue } from '@/lib/agent-last-seen'
+import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
+import {
+  STRANDED_FUNDS_TITLE,
+  reviewStrandedPaymentsLabel,
+  strandedFundsCauseWithLocation,
+} from '@/lib/stranded-funds-copy'
 import {
   agentStatusPresentation,
   paymentStatusPresentation,
@@ -250,6 +256,37 @@ interface Props {
   agentId: string
 }
 
+/**
+ * Anchor for the "Recent activity" section (#2196), mirroring
+ * `DELEGATION_BUDGET_CARD_ID`'s scroll-don't-open pattern in this same file.
+ *
+ * **What this link claims, and what it deliberately does not.** The
+ * recoverable-funds banner sits near the top of the page; the rows that carry
+ * the `Needs attention` badge are ~1200px below it at 1280, past two stat
+ * cards, the passport card and the whole budget card. Nothing connected them.
+ *
+ * The connection drawn here is NAVIGATIONAL — "the payments this warning is
+ * about are down there, and there are N of them". It is NOT attributive, and
+ * that is a fact about the data rather than a matter of taste:
+ *
+ * - The banner's figure is the delegate EOA's **live USDC balance**
+ *   (`GET /agents/:id/delegate-balance` → `routes/agents.ts`, an on-chain
+ *   `getTokenBalance` read). No field anywhere apportions that balance to a
+ *   payment intent, and none of `payment_intents`,
+ *   `machine_payment_reconciliation_events` or the activity projection carries
+ *   a per-intent stranded amount.
+ * - `unsettledPayments` can hold more than one row (the reconciliation upsert
+ *   is unique per `(payment_intent_id, event_type)`, not per agent), so there
+ *   is not always a "the" payment to point at.
+ * - A partially swept balance, or a balance left over from an earlier
+ *   incident, would make a per-payment claim simply false.
+ *
+ * So the banner does not say "this 8.00 USDC came from that payment", and the
+ * activity row does not grow a Recover button implying its own funds are the
+ * recoverable ones. Both would be inventing a link the data cannot support.
+ */
+const AGENT_ACTIVITY_SECTION_ID = 'agent-activity'
+
 type PendingAction = 'pause' | 'resume' | 'revoke' | 'restore' | null
 type ConfirmAction = 'revoke' | null
 
@@ -352,6 +389,12 @@ export default function AgentDetailClient({ agentId }: Props) {
   }
   const closeEdit = () => {
     setEditOpen(false)
+  }
+  // #2196: same mechanism as openUpdateBudget's delegation branch above.
+  const scrollToActivity = () => {
+    document
+      .getElementById(AGENT_ACTIVITY_SECTION_ID)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
@@ -621,32 +664,68 @@ export default function AgentDetailClient({ agentId }: Props) {
 
       {isPaused ? (
         <div className="mt-4">
-          <ApprovalRequiredBanner title="Paused in Haven" tone="neutral" density="compact">
-            New agent payments are blocked until you resume this agent. Existing wallet rules stay in place.
+          {/* #2230: title and body come from `lib/agent-pause-copy.ts`, shared
+              with `AgentCard`'s banner one click away. This page's wording is
+              the one that was TAKEN — the card said "network permissions" for
+              the same fact; see that module for why this one is the settled
+              phrasing. The rendered sentence here is byte-identical to what
+              stood before. */}
+          <ApprovalRequiredBanner title={AGENT_PAUSED_TITLE} tone="neutral" density="compact">
+            {AGENT_PAUSED_BODY}
           </ApprovalRequiredBanner>
         </div>
       ) : null}
 
       {hasRecoverableUsdc ? (
         <div className="mt-4">
-          <ApprovalRequiredBanner title="Recoverable funds in agent wallet" tone="warning" density="compact">
+          <ApprovalRequiredBanner title={STRANDED_FUNDS_TITLE} tone="warning" density="compact">
             <span>
+              {/* #2195: the cause clause is shared with `AgentCard` and count-aware
+                  here because this surface holds the LIST, not an EXISTS. */}
               {unsettledPayments.length > 0
-                ? 'A payment was funded on-chain but didn’t reach the merchant, leaving money in your agent’s wallet.'
+                ? strandedFundsCauseWithLocation(unsettledPayments.length)
                 : 'Your agent’s wallet is holding funds that weren’t spent.'}{' '}
               {strandedSummary
                 ? `Recover ${strandedSummary} to your Haven wallet.`
                 : 'Recover it to your Haven wallet.'}
             </span>
-            <div className="mt-2">
-              <a
+            {/* #2203: was a hand-rolled `<a className="px-2.5 py-1 text-xs">` —
+                a ~24 CSS px control on the money-recovery path, and the ONLY CTA
+                inside an `ApprovalRequiredBanner` in the product app that was not
+                already a `Button` (the others: `ReceiveFundsModal.tsx` "Refresh
+                page"). Routed through the primitive so it inherits #1726's 44px
+                tap-target overlay rather than restating the rule. Brand fill
+                rather than the old solid `--v2-warning`, matching the recovery
+                affordance in the same-tone banner in `RemoveAgentDialog.tsx`:
+                the banner carries the severity, the button carries the action. */}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button
                 href={`/agents/${agentId}/sweep`}
-                className="inline-flex items-center gap-1 rounded-md bg-[var(--v2-warning)] px-2.5 py-1 text-xs font-medium text-white hover:opacity-90 transition-opacity"
+                size="sm"
+                trailingIcon
                 aria-label="Recover funds to your Haven wallet"
               >
                 Recover funds
-                <Icon icon={ArrowRight} className="h-3 w-3" />
-              </a>
+              </Button>
+              {/* #2196: the connection between this warning and the rows that
+                  caused it — NAVIGATIONAL only, deliberately. See the comment on
+                  AGENT_ACTIVITY_SECTION_ID.
+
+                  `ghost`, not `tertiary`: `tertiary` is transparent with no
+                  resting chrome, so against the banner's `--v2-warning-soft`
+                  fill it read as prose rather than as a control
+                  (`haven-design-reviewer` on this change, off the 1280 and 390
+                  captures). `ghost` is also the variant the ONE other `Button`
+                  inside an `ApprovalRequiredBanner` uses — `ReceiveFundsModal`'s
+                  "Refresh page". It stays a `Button` rather than becoming an
+                  inline link so it keeps #1726's 44px hit area: a second
+                  control in this banner at 24px would be the defect #2203 was
+                  filed about, one row down. */}
+              {unsettledPayments.length > 0 ? (
+                <Button variant="ghost" size="sm" onClick={scrollToActivity}>
+                  {reviewStrandedPaymentsLabel(unsettledPayments.length)}
+                </Button>
+              ) : null}
             </div>
           </ApprovalRequiredBanner>
         </div>
@@ -801,7 +880,7 @@ export default function AgentDetailClient({ agentId }: Props) {
             />
           ) : null}
 
-          <div>
+          <div id={AGENT_ACTIVITY_SECTION_ID} className="scroll-mt-24">
             <div className="mb-4">
               <h2 className="text-base font-semibold text-[var(--v2-ink)]">Recent activity</h2>
               {/* #2120: was "Payments and approval requests from this agent." This list

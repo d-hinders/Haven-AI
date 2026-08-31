@@ -61,6 +61,30 @@
  * `expectEmptyState` does the same for the empty states: heading, body and the
  * exact action-button set.
  *
+ * ── #2216: the two banners are no longer structurally identical ──────────────
+ *
+ * The paragraph above was written when `AgentCard` hand-rolled both notices
+ * with the same wrapper classes and the same `warning-soft` fill. They now go
+ * through `ApprovalRequiredBanner` at the tones `AgentDetailClient` already
+ * passes for the same two facts — `neutral` for paused, `warning` for stranded
+ * — so they differ by frame as well as by icon and copy, and the titles are
+ * `h3` headings rather than `p`. Three things moved with that and each is
+ * recorded where it lives: the banner-title scan reads headings, the region
+ * locator climbs one more level to the primitive's root, and
+ * `expectKnownBannerCount` had to stop counting a single tone.
+ *
+ * ── The colour claim, which is the whole of #2216 ────────────────────────────
+ *
+ * The defect was that title AND body were painted `--v2-warning` where the
+ * primitive keeps prose in `--v2-ink` / `--v2-ink-2` and reserves the tint for
+ * the icon badge. That is a COMPUTED-STYLE fact and it is asserted as one
+ * (`expectInkProse`), not as a class string: a `text-[var(--v2-ink)]` class
+ * reads identically whether it compiled to a colour or to nothing (#1818), and
+ * a className assertion passes whether or not the rendering works. The
+ * baselines would catch a regression here too — but only against a re-blessed
+ * PNG, and only as "something moved", which is why the claim is also stated
+ * where it can name itself.
+ *
  * ── The icon-slot assertion, which is #1858's claim restated as a check ──────
  *
  * `expectIconWithinSlot` measures the rendered `svg` against the `h-5 w-5` span
@@ -177,8 +201,15 @@ const SNAPSHOT_OPTIONS = {
  * invisible to `expectCardBanners` until it is added here; the
  * `expectKnownBannerCount` guard below closes that, by counting banner-shaped
  * children independently and failing when the two disagree.
+ *
+ * #2195 renamed the stranded-funds banner ("Stranded funds on delegate" →
+ * "Recoverable funds in agent wallet", now shared with the agent-detail banner
+ * via `lib/stranded-funds-copy.ts`). The titles here stay RESTATED LITERALS and
+ * are deliberately NOT imported from that module: an independently written
+ * vocabulary is the only thing that can catch an unintended copy change, and a
+ * spec that imports the string it is checking asserts nothing about it.
  */
-const BANNER_TITLES = ['Paused in Haven', 'Stranded funds on delegate'] as const
+const BANNER_TITLES = ['Paused in Haven', 'Recoverable funds in agent wallet'] as const
 
 /**
  * This spec's OWN `/agents` and `/auth/me` payloads, layered over
@@ -490,16 +521,24 @@ function cardFor(page: Page, name: string) {
  * one too many, would produce a plausible capture that silently duplicates a
  * sibling baseline. An ordered set-equality assertion fails loudly instead.
  *
- * Scans ALL `<p>` descendants of the card, not just direct banner children —
+ * Scans ALL `<h3>` descendants of the card, not just direct banner children —
  * so it carries an implicit invariant: fixture copy (name, description,
  * safe_name, etc.) must never collide with a `BANNER_TITLES` string, or it
- * would be counted as a banner here.
+ * would be counted as a banner here. (The agent's own NAME is an `h3` and is
+ * fixture copy, so that invariant is now load-bearing rather than incidental:
+ * an agent literally named "Paused in Haven" would be miscounted.)
+ *
+ * `h3`, not `p` (#2216): `ApprovalRequiredBanner` renders its title as a
+ * heading. That is a real accessibility improvement over the hand-rolled
+ * paragraphs — the notices announce as headings the way the agent-detail
+ * banners for the same two facts already did — and it is what this scan now
+ * reads.
  */
 async function expectCardBanners(card: Locator, expected: readonly string[], label: string) {
   const present = await card.evaluate(
     (el, titles) =>
-      Array.from(el.querySelectorAll('p'))
-        .map((p) => p.textContent?.trim() ?? '')
+      Array.from(el.querySelectorAll('h3'))
+        .map((h) => h.textContent?.trim() ?? '')
         .filter((text) => (titles as string[]).includes(text)),
     BANNER_TITLES as unknown as string[],
   )
@@ -532,15 +571,32 @@ async function expectCardBanners(card: Locator, expected: readonly string[], lab
  * someone re-reads this file — which is the intended outcome, not a bug.
  */
 async function expectKnownBannerCount(card: Locator, expected: number, label: string) {
-  // COMPUTED background, not a class selector. A class-string locator would
-  // have the flaw this whole family keeps paying for — it reads identically
-  // whether the class compiled to a colour or to nothing (#1818) — and it
-  // would also make the cross-check depend on the very strings the capture is
-  // under contract to police. Resolving `--v2-warning-soft` on the card itself
-  // and comparing computed fills asks the question the eye asks.
-  const shaped = await card.evaluate((el) => {
+  // ── #2216 rewrote HOW this counts, not what it is for ──────────────────────
+  //
+  // It used to count direct children of the card whose computed background
+  // resolved to `--v2-warning-soft`. Both premises died with the primitive
+  // adoption: the notices are now wrapped in a spacing `div` (so they are not
+  // direct children), and they carry two different tones (so a single-token
+  // fill comparison could never see both). This is the outcome the old
+  // comment predicted — "if the banner styling is refactored this assertion
+  // fails and someone re-reads this file".
+  //
+  // The replacement counts the thing that is now structural and tone-agnostic:
+  // a banner is a titled notice, and `ApprovalRequiredBanner` titles itself
+  // with an `h3`. The card's own `h3` is the agent NAME, so the banner count is
+  // `h3` total minus one. That is strictly BROADER than what it replaced — the
+  // old count was blind to a third banner in any tone but warning, and said so
+  // itself; this one sees a notice at every rung of the tone ladder.
+  //
+  // The narrower thing it gives up — catching a hand-rolled tinted box that
+  // carries no title — is bought back by the second half below, which asserts
+  // that every warning-tinted element in the card IS a titled banner. So a
+  // re-hand-rolled warning callout fails whether or not it has a heading:
+  // titled, it moves the count; untitled, it fails the tint check.
+  const measured = await card.evaluate((el) => {
+    const headings = Array.from(el.querySelectorAll('h3'))
     const soft = getComputedStyle(el).getPropertyValue('--v2-warning-soft').trim()
-    if (!soft) return -1
+    if (!soft) return { titled: -1, strayTinted: -1 }
     // Transient scratch probe — appended, measured, and removed synchronously
     // within this `page.evaluate`. It MUST stay synchronous: moving this into
     // an async evaluate could leave the probe mounted in the DOM during a
@@ -550,21 +606,122 @@ async function expectKnownBannerCount(card: Locator, expected: number, label: st
     el.appendChild(probe)
     const resolved = getComputedStyle(probe).backgroundColor
     probe.remove()
-    return Array.from(el.children).filter(
-      (child) => getComputedStyle(child).backgroundColor === resolved,
-    ).length
+    // Callout-SHAPED, not merely warning-tinted. `--v2-warning-soft` is also
+    // the fill of the paused agent's status pill and of its bot-icon tile
+    // (`AgentCard.tsx` header) — both legitimately amber, neither a callout,
+    // and both present in the paused capture. What makes a callout is a tinted
+    // fill inside a BORDER, which is the shape the two hand-rolled notices had
+    // and the shape `ApprovalRequiredBanner` paints. Measured, not assumed:
+    // without the border term this check reddens on the paused card's own
+    // status pill.
+    const strayTinted = Array.from(el.querySelectorAll('*')).filter((node) => {
+      const s = getComputedStyle(node)
+      return (
+        s.backgroundColor === resolved && s.borderTopWidth !== '0px' && !node.querySelector('h3')
+      )
+    }).length
+    // Minus the card's own title, which is the agent name.
+    return { titled: headings.length - 1, strayTinted }
   })
   expect(
-    shaped,
+    measured.titled,
     `${label}: could not resolve --v2-warning-soft on the card — the token moved`,
   ).not.toBe(-1)
   expect(
-    shaped,
-    `${label}: found ${shaped} warning-tinted direct children of the card but ${expected} ` +
+    measured.titled,
+    `${label}: found ${measured.titled} titled notice(s) on the card but ${expected} ` +
       `known banner title(s). Either a banner was added to AgentCard without being added ` +
       `to BANNER_TITLES in this spec — add it AND give it its own capture, or this gate ` +
-      `reports coverage it does not have — or a banner's fill stopped resolving.`,
+      `reports coverage it does not have — or the card stopped titling one.`,
   ).toBe(expected)
+  expect(
+    measured.strayTinted,
+    `${label}: found ${measured.strayTinted} warning-tinted element(s) in the card that ` +
+      `contain no title. That is the hand-rolled callout shape #2216 replaced with ` +
+      `ApprovalRequiredBanner, growing back.`,
+  ).toBe(0)
+}
+
+/**
+ * The #2216 claim itself: the notice's prose is INK, and the warning tint is
+ * on the icon badge alone.
+ *
+ * Both halves matter and they fail differently. Asserting only "the title is
+ * ink" would pass a banner whose body was still tinted — which is half of the
+ * exact defect, since the filed finding was *title AND body*. Asserting only
+ * "nothing is warning-coloured" would pass a banner that lost its severity
+ * marker entirely, which is a different regression in the opposite direction.
+ *
+ * Resolved from the card's own custom properties rather than compared against
+ * pasted hex: a token that moves should move this assertion with it, and a
+ * token that stops resolving should fail it rather than silently compare two
+ * empty strings.
+ */
+async function expectInkProse(banner: Locator, tinted: boolean, label: string) {
+  const seen = await banner.evaluate((el) => {
+    const style = getComputedStyle(el)
+    const resolve = (token: string) => {
+      const raw = style.getPropertyValue(token).trim()
+      if (!raw) return ''
+      const probe = document.createElement('span')
+      probe.style.color = raw
+      el.appendChild(probe)
+      const out = getComputedStyle(probe).color
+      probe.remove()
+      return out
+    }
+    const heading = el.querySelector('h3')
+    const body = heading?.parentElement?.querySelector('div')
+    const badgeIcon = el.querySelector('svg')
+    return {
+      warning: resolve('--v2-warning'),
+      ink: resolve('--v2-ink'),
+      ink2: resolve('--v2-ink-2'),
+      title: heading ? getComputedStyle(heading).color : '',
+      body: body ? getComputedStyle(body).color : '',
+      badge: badgeIcon?.parentElement ? getComputedStyle(badgeIcon.parentElement).color : '',
+    }
+  })
+
+  expect(seen.warning, `${label}: --v2-warning did not resolve on this banner`).not.toBe('')
+  expect(seen.ink, `${label}: --v2-ink did not resolve on this banner`).not.toBe('')
+
+  expect(
+    seen.title,
+    `${label}: the notice TITLE is painted ${seen.title}, not --v2-ink (${seen.ink}). ` +
+      `That is the #2216 defect — the tint belongs on the icon badge, and ` +
+      `--v2-warning is scoped to 402/pending-review, not to prose.`,
+  ).toBe(seen.ink)
+  expect(
+    seen.body,
+    `${label}: the notice BODY is painted ${seen.body}, not --v2-ink-2 (${seen.ink2}). ` +
+      `The filed defect was title AND body — a fix that leaves the body tinted is half a fix.`,
+  ).toBe(seen.ink2)
+  expect(
+    seen.title,
+    `${label}: the notice title is still --v2-warning`,
+  ).not.toBe(seen.warning)
+  expect(
+    seen.body,
+    `${label}: the notice body is still --v2-warning`,
+  ).not.toBe(seen.warning)
+
+  // The other direction: a warning-toned notice must still CARRY the tint,
+  // on the badge. Without this, deleting the severity marker outright would
+  // satisfy every assertion above.
+  if (tinted) {
+    expect(
+      seen.badge,
+      `${label}: the icon badge is painted ${seen.badge}, not --v2-warning (${seen.warning}). ` +
+        `Moving the tint off the prose must not move it off the severity marker too.`,
+    ).toBe(seen.warning)
+  } else {
+    expect(
+      seen.badge,
+      `${label}: this notice is on the neutral rung of the tone ladder, matching what ` +
+        `AgentDetailClient passes for the same fact — its badge must not be warning-tinted.`,
+    ).not.toBe(seen.warning)
+  }
 }
 
 /**
@@ -892,6 +1049,11 @@ test.describe('agent panel empty states and card banners', () => {
       agent: agentState({ id: 'agent-paused', name: 'Paused agent', status: 'paused' }),
       banners: ['Paused in Haven'],
       title: 'Paused in Haven',
+      // #2216: `neutral`, the rung `AgentDetailClient:666` already passes for
+      // this same fact. Paused is not "402 Payment Required, pending review",
+      // which is what `--v2-warning` is scoped to
+      // (`docs/product/design-system.md` § 1).
+      tinted: false,
     },
     {
       slug: 'stranded',
@@ -903,8 +1065,11 @@ test.describe('agent panel empty states and card banners', () => {
         name: 'Stranded agent',
         has_stranded_funds: true,
       }),
-      banners: ['Stranded funds on delegate'],
-      title: 'Stranded funds on delegate',
+      banners: ['Recoverable funds in agent wallet'],
+      title: 'Recoverable funds in agent wallet',
+      // `warning`, matching `AgentDetailClient:674`. Money is sitting where it
+      // should not be — that is the pending-review rung.
+      tinted: true,
     },
   ] as const
 
@@ -939,7 +1104,7 @@ test.describe('agent panel empty states and card banners', () => {
     status: 'paused',
     has_stranded_funds: true,
   })
-  const STACKED_BANNERS = ['Paused in Haven', 'Stranded funds on delegate'] as const
+  const STACKED_BANNERS = ['Paused in Haven', 'Recoverable funds in agent wallet'] as const
 
   test('agent card warning banners — paused and stranded stack in order', async ({ page }) => {
     await seedPanel(page, { agents: [STACKED_AGENT] })
@@ -953,12 +1118,13 @@ test.describe('agent panel empty states and card banners', () => {
     // The two are siblings, so "stacked in order" is a DOM-order claim about
     // the card's own children — which is what the assertion above reads.
     // Pinning that they are genuinely two separate boxes rather than one:
+    // `h3`, not `p` (#2216) — the primitive titles itself with a heading.
     const boxes = await card.evaluate((el) =>
-      Array.from(el.querySelectorAll('p'))
-        .filter((p) =>
-          ['Paused in Haven', 'Stranded funds on delegate'].includes(p.textContent?.trim() ?? ''),
+      Array.from(el.querySelectorAll('h3'))
+        .filter((h) =>
+          ['Paused in Haven', 'Recoverable funds in agent wallet'].includes(h.textContent?.trim() ?? ''),
         )
-        .map((p) => Math.round(p.getBoundingClientRect().top)),
+        .map((h) => Math.round(h.getBoundingClientRect().top)),
     )
     expect(boxes.length, 'expected both banner titles on the card').toBe(2)
     expect(
@@ -979,13 +1145,29 @@ test.describe('agent panel empty states and card banners', () => {
       await expectCardBanners(card, seeded.banners, `AgentCard · ${seeded.slug}`)
       await expectKnownBannerCount(card, seeded.banners.length, `AgentCard · ${seeded.slug}`)
 
-      // The banner itself is the region: `p` -> inner `div` -> banner root.
-      // Located from its TITLE rather than from its classes, for the reason
-      // #1811/#1820 gave — the classes are what this gate is checking.
+      // The banner itself is the region. Located from its TITLE rather than
+      // from its classes, for the reason #1811/#1820 gave — the classes are
+      // what this gate is checking.
+      //
+      // THREE levels, not two (#2216). It used to be `p` -> inner `div` ->
+      // hand-rolled root; `ApprovalRequiredBanner` nests one deeper:
+      // `h3` -> content `div` -> `flex gap-3` row -> banner root. Getting this
+      // wrong does not error — it captures the flex row, which is the banner
+      // minus its frame and padding: a plausible PNG of not-quite-the-subject,
+      // which is this file's recurring failure mode. Asserted below rather
+      // than trusted: the region must be the element that PAINTS the frame.
       const banner = card
         .getByText(seeded.title, { exact: true })
-        .locator('xpath=../..')
+        .locator('xpath=../../..')
       await expect(banner).toHaveCount(1)
+      expect(
+        await banner.evaluate((el) => getComputedStyle(el).borderTopWidth),
+        `AgentCard · ${seeded.slug}: the located region paints no border, so it is not the ` +
+          `banner root — the xpath climb is one level short and the capture would be the ` +
+          `banner's contents without its frame.`,
+      ).not.toBe('0px')
+
+      await expectInkProse(banner, seeded.tinted, `AgentCard · ${seeded.slug}`)
 
       await expectNoSkeletons(banner, `AgentCard · ${seeded.slug}`)
       await expect(banner).toHaveScreenshot(

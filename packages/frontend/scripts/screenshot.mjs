@@ -147,6 +147,7 @@ import {
   MIN_CONTENT_ELEMENTS,
   SCROLL_SHELL_ROOT,
   SHELL_MODE,
+  busyToleranceFor,
   captureFullPage,
 } from './full-page-capture.mjs'
 import { CLIP_TOLERANCE_PX, measureHiddenBelowFold } from './clip-guard.mjs'
@@ -223,6 +224,9 @@ const KEEP_RUNS = resolveKeepRuns(ARGS, process.env)
  *   'blank-below-fold'     the PNG came back empty below the first viewport
  *   'still-loading'        the shell mounted, the ROUTE never did (#2036) — the
  *                          one cause whose PNG looks entirely healthy
+ *   'partially-loading'    the route rendered but part of it is still loading
+ *                          (#2204) — the PNG looks healthy AND clears the #2036
+ *                          floor; the only tell is that it is short
  *   'unknown'              anything else, never silently folded into the above
  */
 export function describeDeletedCapture(err, { route, viewport, file, written = true }) {
@@ -317,6 +321,45 @@ export const APPROVER_PASSKEY = '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2'
 export const APPROVER_WALLET = '0x5B1869D9A4C187F2Eaa108F3062412ECf0526B24'
 export const APPROVER_UNKNOWN = '0x9A7f6E2b1c4D8e05F3a2B9c6D1e8F40b3C5a7D91'
 
+/**
+ * `agent-ops`'s OWN account — a genuinely legacy-rail Safe (#2202).
+ *
+ * Why this exists rather than a second `account_type` on the shared safe:
+ * `account_type` is not an agent column. Every agent-row read selects it as
+ * `us.account_type` off the joined `user_safes` row
+ * (`LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL` and
+ * `FIND_AGENT_FOR_USER_ALL_STATUSES_SQL`,
+ * `infra/repositories/agents.ts:183`/`:203` with `LEFT JOIN user_safes us ON
+ * a.safe_id = us.id` at `:194`/`:214`; likewise
+ * `FIND_DELEGATE_AGENT_FOR_USER_SQL` at `:226-228`). ONE safe answers ONE
+ * `account_type`, so three agents sharing `FIXTURE_SAFE.id` cannot report two
+ * different values — which is what they did until #2202.
+ *
+ * And the value is `'safe'`, not `null`. Migration
+ * `041_hybrid_accounts.ts:29` adds the column `VARCHAR(32) NOT NULL DEFAULT
+ * 'safe'` with `CHECK (account_type IN ('safe','delegator_hybrid'))` at `:38`,
+ * so `null` is not in the column's domain at all. The only way `us.account_type`
+ * comes back null is the LEFT JOIN finding no row — `agents.safe_id` is
+ * nullable (`000_initial.ts:209`) — and then `us.safe_address`, `us.name` and
+ * `us.chain_id` are null in the SAME row. `agent-ops` populated all three while
+ * claiming a null `account_type`, so its old value was impossible independently
+ * of the shared-safe contradiction. `railOf` reads anything-but-`delegator_hybrid`
+ * as the legacy rail (`lib/custody-rail.ts:37-38`), which is why the lie was
+ * invisible: `null` and `'safe'` render identically.
+ *
+ * A second account is a REACHABLE state, not a workaround: `user_safes` is
+ * per-user with an `is_default` flag, and the active-account switcher (#625)
+ * is how a user moves between them.
+ */
+export const FIXTURE_LEGACY_SAFE = {
+  id: 'safe-legacy-fixture',
+  name: 'Imported Safe',
+  safe_address: '0x3333333333333333333333333333333333333333',
+  chain_id: FIXTURE_SAFE.chain_id,
+  is_default: false,
+  created_at: '2026-04-20T10:00:00.000Z',
+}
+
 export const FIXTURE_USER = {
   id: 'user-fixture',
   name: 'Screenshot Fixture',
@@ -327,7 +370,14 @@ export const FIXTURE_USER = {
   // page's Backup & recovery card (#1089) has something real to render,
   // without perturbing FIXTURE_SAFE's identity shape (pinned against the e2e
   // fixture by fixture-shape-parity.test.ts).
-  safes: [{ ...FIXTURE_SAFE, account_type: 'delegator_hybrid' }],
+  //
+  // #2202: the legacy account is listed BESIDE it rather than replacing it.
+  // `agent-ops` lives on that one, so the user really does hold the safe its
+  // agent row names — the join above has a row to find, and it answers 'safe'.
+  safes: [
+    { ...FIXTURE_SAFE, account_type: 'delegator_hybrid' },
+    { ...FIXTURE_LEGACY_SAFE, account_type: 'safe' },
+  ],
   currency_preference: 'USD',
   created_at: '2026-05-01T10:00:00.000Z',
 }
@@ -339,6 +389,13 @@ export const FIXTURE_USER = {
 const ADDR = {
   recipient: '0x9f8f72aA9304c8B593d555F12eF6589cC3A579A2',
   delegate: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
+  // #2194: agent-research's OWN delegate EOA. A SECOND address rather than a
+  // reuse of `delegate` above, because the DB refuses the reuse:
+  // `017_agent_connection_setups.ts:55-56` puts a partial UNIQUE index on
+  // `(user_id, lower(delegate_address)) WHERE delegate_address IS NOT NULL AND
+  // status != 'revoked'`, and both fixture agents are active under the one
+  // FIXTURE_USER.
+  researchDelegate: '0x7A3f5c1E9b2D4A86F0c7e5138D9A4b62c0e1F37d',
   merchant: '0x6B175474E89094C44Da98b954EedeAC495271d0F',
   contact: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
 }
@@ -378,7 +435,40 @@ export const FIXTURE_AGENTS = [
   {
     id: 'agent-research', name: 'Research agent',
     description: 'Pays for x402 research APIs within a weekly budget',
-    delegate_address: null, safe_id: FIXTURE_SAFE.id,
+    // #2194: a REAL delegate address, and the null it replaces was not a
+    // neutral placeholder — it was a state no write path can produce, which
+    // silently made this agent's recovery banner unreachable in production
+    // while the capture showed one.
+    //
+    //   Nothing can create it. Every writer of `agents.delegate_address`
+    //   requires a non-null one: `POST /agents` 400s on a missing or invalid
+    //   address (`routes/agents.ts:180-182`) before `INSERT_AGENT_WITH_KEY_SQL`
+    //   (`infra/repositories/agents.ts:384`), and the connector path types
+    //   `delegateAddress: string` on `insertPendingAgent`
+    //   (`infra/repositories/agent-connection-setups.ts:378-390`). No UPDATE
+    //   anywhere sets the column back to NULL — not revoke, not pause, not
+    //   archive; the re-key path swaps one address for another
+    //   (`infra/repositories/agent-rekeys.ts:517`). The column is nullable only
+    //   because migration `000_initial.ts:40` added it to a table that already
+    //   had rows, so NULL is a pre-column legacy artefact — which is what the
+    //   route's 422 exists for, and what `agent-retired` below keeps carrying.
+    //
+    //   This agent in particular cannot be one. It is seeded with CONFIRMED
+    //   x402 payment intents (`pay-1`, `pay-4`), and `payment_intents`
+    //   declares `delegate_address VARCHAR(42) NOT NULL`
+    //   (`000_initial.ts:82` — NOT the same-named column on the legacy
+    //   `self_sign_payment_intents` table) — an intent records the delegate it
+    //   was signed for. An agent that has paid provably had one.
+    //
+    //   What the null actually did: `routes/agents.ts:140-142` answers 422
+    //   "Agent has no delegate address" for it, `useDelegateBalance`'s catch
+    //   turns that into `balance = null`, and `hasRecoverableUsdc` is false —
+    //   so PRODUCTION renders no "Recoverable funds" banner on this agent at
+    //   all. The capture rendered one only because
+    //   `/agents/:id/delegate-balance` was unkeyed in `fixtureFor` and
+    //   `FIXTURE_EMPTY_FALLBACK` has no `usdc_atomic`, making `undefined !== '0'`
+    //   true. Both halves are fixed together, below and in `fixtureFor`.
+    delegate_address: ADDR.researchDelegate, safe_id: FIXTURE_SAFE.id,
     safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     safe_chain_id: FIXTURE_SAFE.chain_id, account_type: 'delegator_hybrid',
     api_key_prefix: 'hvn_a1b2c3', status: 'active',
@@ -386,6 +476,20 @@ export const FIXTURE_AGENTS = [
     // #1878: a NAMED pair — the case multi-agent wiring exists for.
     mcp_server_name: 'haven-research',
     mcp_last_seen_at: '2026-07-10T08:12:00.000Z',
+    // #2147: NOT decoration and not a second switch — the SAME open
+    // `merchant_retry_rejected_after_payment` reconciliation event that gives
+    // `pay-4` its `payment_attention_reason` below. Both routes that serve an
+    // agent row compute this as `EXISTS(… mpre.event_type = '…' AND
+    // mpre.status = 'open')` over that agent's payment intents
+    // (`infra/repositories/agents.ts:186-192` list, `:206-212` single), so a
+    // fixture seeding the activity row and leaving this false would claim the
+    // event both exists and does not — a contradiction no backend can serve.
+    // It renders `AgentCard`'s "Recoverable funds in agent wallet" notice
+    // (`components/agent-panel/AgentCard.tsx`) on /agents. #2195 renamed that
+    // notice from "Stranded funds on delegate" and moved its title and cause
+    // clause into `lib/stranded-funds-copy.ts`, shared with the agent-detail
+    // banner this same event drives.
+    has_stranded_funds: true,
     // #2106: the DERIVED projection of this agent's active delegation, exactly
     // as `rails/delegation-budget-view.ts` builds it on the delegation rail
     // (250 USDC / 604800s → `allowance_amount` + `reset_period_min` in
@@ -403,24 +507,56 @@ export const FIXTURE_AGENTS = [
   {
     id: 'agent-ops', name: 'Ops agent',
     description: 'Recurring vendor payments',
-    delegate_address: ADDR.delegate, safe_id: FIXTURE_SAFE.id,
-    safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
-    safe_chain_id: FIXTURE_SAFE.chain_id, account_type: null,
+    // #2202: the LEGACY-rail agent, now on a legacy-rail ACCOUNT. It used to
+    // carry `account_type: null` while pointing at `FIXTURE_SAFE` — the safe
+    // the two `delegator_hybrid` agents share and that `FIXTURE_USER.safes`
+    // independently calls `delegator_hybrid`. All four `us.*` fields below come
+    // from ONE joined row, so they must describe one account; see
+    // `FIXTURE_LEGACY_SAFE` for why the value is `'safe'` and why `null` was
+    // impossible rather than merely inconsistent.
+    delegate_address: ADDR.delegate, safe_id: FIXTURE_LEGACY_SAFE.id,
+    safe_address: FIXTURE_LEGACY_SAFE.safe_address, safe_name: FIXTURE_LEGACY_SAFE.name,
+    safe_chain_id: FIXTURE_LEGACY_SAFE.chain_id, account_type: 'safe',
     api_key_prefix: 'hvn_d4e5f6', status: 'active',
     created_at: '2026-05-18T10:00:00.000Z',
     // #1878: the BARE pair, reported — must not read like the agent below,
     // which reported nothing at all.
     mcp_server_name: 'haven',
     mcp_last_seen_at: '2026-07-09T16:40:00.000Z',
-    allowances: [{
-      id: 'alw-1', agent_id: 'agent-ops',
-      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-      token_symbol: 'USDC', allowance_amount: '500.000000', reset_period_min: 1440,
-    }],
+    // #2224: EMPTY, and this is derived rather than chosen. A legacy-rail
+    // agent's `allowances` array is filled by nothing: `GET /agents` returns
+    // `agent.account_type === 'delegator_hybrid' ? derived : []`
+    // (`backend/src/routes/agents.ts:92-98`), `GET /agents/:id` does the same
+    // (`:113-121`), and the `agent_allowances` read surface it used to mirror
+    // is RETIRED — the four LIST_* projections are deleted
+    // (`infra/repositories/agents.ts:232-237`, #1440/#2020) and the write
+    // routes answer 410. So the 500 USDC / daily row this used to carry was
+    // path-impossible for the same reason `account_type: null` was (#2202):
+    // union-legal on the wire type, emitted by nothing.
+    //
+    // It was also RENDERED — that is what makes it the #2205 shape rather than
+    // dead data. `AgentCard.showConfiguredFallback` turned it into a budget row
+    // on `/agents`, and #2224's own evidence table was built on that row. The
+    // card now shows "No agent budget configured" for this agent, which is what
+    // the retired rail actually looks like.
+    //
+    // The delegation-rail agents keep their arrays: theirs are the derived
+    // projection of an active delegation, which is the one thing that fills
+    // this field (see the note on `agent-research`).
+    allowances: [],
   },
   {
     id: 'agent-retired', name: 'Data-feed agent',
     description: 'Paused while the vendor contract renews',
+    // #2194: the null STAYS here, deliberately, and it is the only one left.
+    // `routes/agents.ts:140-142` answers 422 "Agent has no delegate address"
+    // for exactly this row, and `fixtureFor` now serves that 422 rather than
+    // letting the generic fallback answer 200 — so both branches of
+    // `useDelegateBalance` are seeded by the fixture instead of one being
+    // reached by accident. See the note on `agent-research` above for why the
+    // state is a pre-column legacy artefact (`000_initial.ts:40`) rather than
+    // something a current write path can produce: this agent is seeded with no
+    // payment intents, so nothing else contradicts it.
     delegate_address: null, safe_id: FIXTURE_SAFE.id,
     safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
     safe_chain_id: FIXTURE_SAFE.chain_id, account_type: 'delegator_hybrid',
@@ -565,7 +701,176 @@ export const FIXTURE_AGENT_ACTIVITY = [
     next_action: null, error_code: null, status_code: 200,
     created_at: '2026-07-09T11:30:00.000Z',
   },
+  // #2147: the `needs_attention` state, which NO row seeded — leaving both its
+  // badge AND a second rendered surface (the "Recoverable funds" banner's
+  // specific copy branch, `AgentDetailClient.tsx:634-636`) unphotographed
+  // anywhere in the capture suite. The mirror of #2120/#2126: those two seeded
+  // states the product cannot reach; this one is a state the product CAN reach
+  // that the evidence rig never rendered, so the reviewer judging that banner
+  // had only ever seen half of it.
+  //
+  // Every field is derived from the code that produces it, not chosen to make
+  // the badge appear. The state is ONE open `merchant_retry_rejected_after_payment`
+  // reconciliation event — an x402 payment that settled on-chain while the
+  // merchant refused the retry (`packages/sdk/src/merchant-completion.ts:127-136`
+  // posts it with a literal `rail: 'x402'`) — and the reconciliation endpoint
+  // that records it refuses everything else:
+  //
+  //   status  'confirmed' — `modules/mpp/reconciliation.ts:40-48` answers 409
+  //                         ("Reconciliation events require a confirmed payment")
+  //                         for any other status. Also what `machinePaymentLifecycle`
+  //                         needs to get past `machine-payment-lifecycle.ts:33-35`.
+  //   tx_hash  non-null   — same guard, same 409; the event stores
+  //                         `payment.tx_hash.toLowerCase()` (`reconciliation.ts:73`),
+  //                         so an attention row without a hash cannot exist.
+  //   source  'x402'      — `COALESCE(pi.payment_rail, pi.source, 'direct')`
+  //                         (`infra/repositories/agent-activity.ts:96`), and a
+  //                         machine rail per `machine-payment-lifecycle.ts:9`.
+  //                         The event's `rail` must equal the intent's
+  //                         (`reconciliation.ts:54-58`, else 409).
+  //   payment_proof_status
+  //           'payment_confirmed' — the settlement-time base row writes that
+  //                         literal (`infra/repositories/machine-payments.ts:49`;
+  //                         column default, migration `014:13`). The only writer
+  //                         that raises it is the agent-reported attach
+  //                         (`modules/mpp/evidence.ts:196-200`), and on this path
+  //                         the SDK throws instead of attaching
+  //                         (`merchant-completion.ts:137-145`). It is also inert
+  //                         for the derivation: `:37-42` returns before the
+  //                         proof-status branch at `:44-49`.
+  //   payment_flow_status / payment_attention_reason — NOT restated: they are
+  //                         what `machinePaymentLifecycle` returns at
+  //                         `machine-payment-lifecycle.ts:37-41` for the inputs
+  //                         above, and `screenshot-fixture.test.ts` re-derives
+  //                         them with that same shared function.
+  //   explorer_url        — `routes/agent-activity.ts:78` builds it from
+  //                         `tx_hash`, so a hash without a link is impossible.
+  //
+  // The same open event is what `LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL` /
+  // `FIND_AGENT_FOR_USER_ALL_STATUSES_SQL` compute `has_stranded_funds` from
+  // (`infra/repositories/agents.ts:186-192`, `:206-212`), which is why
+  // `agent-research` carries that flag above — one event, both consequences.
+  {
+    type: 'payment', id: 'pay-4', agent_id: 'agent-research', agent_name: 'Research agent',
+    token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    amount_raw: '8000000', amount: '8.00', to: ADDR.merchant,
+    reason: null, status: 'confirmed', tx_hash: `0x${'c3'.repeat(32)}`,
+    source: 'x402', x402_resource_url: 'https://api.example.dev/datasets',
+    x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_SAFE.chain_id,
+    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    explorer_url: `https://sepolia.basescan.org/tx/0x${'c3'.repeat(32)}`,
+    confirmed_at: '2026-07-09T09:16:00.000Z', payment_proof_status: 'payment_confirmed',
+    payment_flow_status: 'needs_attention',
+    payment_attention_reason: 'merchant_retry_rejected_after_payment',
+    created_at: '2026-07-09T09:15:00.000Z',
+  },
 ]
+
+// ── The delegate EOA's on-chain balance (#2194) ──────────────────────────────
+//
+// `GET /agents/:id/delegate-balance` (`routes/agents.ts:127-168`) is what
+// `useDelegateBalance` reads and what the "Recoverable funds in agent wallet"
+// banner is gated on (`AgentDetailClient.tsx:630`, via
+// `hasRecoverableUsdc = Boolean(balance && balance.usdc_atomic !== '0')`,
+// `hooks/useDelegateBalance.ts:88`). It was NOT keyed in `fixtureFor`, so it
+// fell through to `FIXTURE_EMPTY_FALLBACK` — which carries neither
+// `usdc_atomic` nor `usdc` — and `undefined !== '0'` is true. The banner
+// rendered from a body with no balance in it, on an agent the real route
+// would have answered 422 for. The screenshot looked exactly right; that is
+// the whole difficulty of this defect class, and why the guard below asserts
+// the response SHAPE rather than the rendered outcome.
+//
+// The amount is DERIVED, not chosen. Both fields come off the same seeded
+// event that gives `agent-research` its attention row and its
+// `has_stranded_funds` flag:
+//
+//   usdc_atomic  = the intent's `amount_raw`. On the EIP-3009 two-leg x402
+//                  shape, `payTo` IS the agent's own delegate EOA — that is
+//                  what selects the funding leg (`deriveFundingShape`,
+//                  `modules/x402/scheme-selection.ts:56-58`) — so the Safe
+//                  transfers the intent amount TO the delegate and the
+//                  merchant then pulls it. On
+//                  `merchant_retry_rejected_after_payment` the merchant never
+//                  pulls: the SDK throws "x402 retry failed after Haven funded
+//                  the delegate wallet" (`packages/sdk/src/merchant-completion.ts:137-145`)
+//                  after recording the event. The funded amount stays put.
+//   usdc         = the intent's `amount` (`amount_human`), and they are equal
+//                  by CONSTRUCTION rather than by coincidence: the route
+//                  formats with `formatTokenValue(usdcAtomic, 6)`
+//                  (`routes/agents.ts:165`) and the intent's human string is
+//                  `formatTokenValue(amountRaw, tokenConfig.decimals)`
+//                  (`modules/x402/authorize.ts:66`) on the same atomic value
+//                  and the same 6 decimals. One function, one input.
+//
+// `eth` / `eth_atomic` are zero. The recovery path this banner points at is
+// the gasless `haven_sweep_delegate` (see `useDelegateBalance`'s own note),
+// and nothing on the x402 funding leg sends native value to the delegate —
+// so a delegate that has ONLY ever been funded by a rejected x402 retry holds
+// USDC and nothing else. Note the human string is `'0'`, not `'0.00'`:
+// `formatTokenValue` returns early on a zero raw value
+// (`domain/tokens.ts:37`), and the two-decimal padding at `:44` is never
+// reached.
+const STRANDED_INTENT = FIXTURE_AGENT_ACTIVITY.find(
+  (row) => row.payment_attention_reason === 'merchant_retry_rejected_after_payment',
+)
+if (!STRANDED_INTENT) {
+  // A fixture that lost the attention row would otherwise seed `undefined`
+  // amounts here and re-create the exact defect #2194 is about, one layer in.
+  throw new Error(
+    'screenshot fixture: no open merchant_retry_rejected_after_payment row in ' +
+      'FIXTURE_AGENT_ACTIVITY — the delegate balance below is derived from it (#2194)',
+  )
+}
+
+/** The route's 422, verbatim (`routes/agents.ts:140-142`). */
+export const DELEGATE_BALANCE_NO_DELEGATE = { error: 'Agent has no delegate address' }
+
+/**
+ * Keyed by agent id. Every agent in `FIXTURE_AGENTS` has an entry, so the
+ * generic fallback can never answer this endpoint again — which is the
+ * mechanism that produced the bug, not just this instance of it.
+ */
+export const FIXTURE_DELEGATE_BALANCES = {
+  // The recoverable-funds incident, and the ONLY agent that renders the banner.
+  'agent-research': {
+    delegate_address: ADDR.researchDelegate,
+    safe_address: FIXTURE_SAFE.safe_address,
+    chain_id: FIXTURE_SAFE.chain_id,
+    eth: '0',
+    eth_atomic: '0',
+    usdc: STRANDED_INTENT.amount,
+    usdc_atomic: STRANDED_INTENT.amount_raw,
+    usdc_address: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,
+  },
+  // A delegate that holds nothing — the ordinary steady state, and the
+  // CONTROL for the row above: `hasRecoverableUsdc` is false here for the
+  // reason the product says it is ('0' === '0'), not because a key is missing.
+  // #2202: `safe_address` and `chain_id` follow the agent to its OWN account.
+  // The route echoes `agent.safe_address` off the joined `user_safes` row
+  // (`routes/agents.ts:160`) and answers `chain_id` as
+  // `agent.safe_chain_id ?? DEFAULT_CHAIN_ID` (`:143`, echoed at `:161`) — the
+  // coalesce never fires for a real account, which always has a chain, but the
+  // read is not a bare echo and the citation should not say it is
+  // (`haven-reviewer`). So this body must
+  // name the safe THIS agent is on — the shared one would claim the delegate
+  // belongs to an account it has nothing to do with. Caught by #2205's own
+  // echoed-field guard when `agent-ops` moved, which is what that guard is for.
+  'agent-ops': {
+    delegate_address: ADDR.delegate,
+    safe_address: FIXTURE_LEGACY_SAFE.safe_address,
+    chain_id: FIXTURE_LEGACY_SAFE.chain_id,
+    eth: '0',
+    eth_atomic: '0',
+    usdc: '0',
+    usdc_atomic: '0',
+    usdc_address: resolveToken(FIXTURE_LEGACY_SAFE.chain_id, 'USDC').address,
+  },
+  // `agent-retired` has no delegate address, so the route never reaches the
+  // balance reads — it answers 422 at `routes/agents.ts:140-142`. Served as a
+  // real 422 by `fixtureFor` below.
+  'agent-retired': null,
+}
+
 export const FIXTURE_AGENT_STATS = {
   all_time: [{ token: 'USDC', total_spent: '482.50', tx_count: 37 }],
   today: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
@@ -633,6 +938,40 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
       owner_address: null,
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
     }
+  }
+  if (pathname === `/safe/${FIXTURE_LEGACY_SAFE.safe_address}/details`) {
+    // #2202. `/custody` renders `SafeControlCard` for the legacy account, and
+    // that card reads its owners and threshold from here (`useSafeDetails`).
+    // Unkeyed, it fell to `FIXTURE_EMPTY_FALLBACK` and the card photographed
+    // "Threshold: of 0" — an owner-less Safe, which is not a state a Safe can
+    // be in: `000_initial.ts` never creates one, and a deployed Safe with a
+    // zero threshold could not have been deployed. Same mechanism #2194/#2205
+    // fixed for `/agents/:id/delegate-balance`, on the endpoint this issue's
+    // own second account newly reaches — the fallback cannot say "not seeded",
+    // it says 200 with the fields missing and the UI renders the gap as data.
+    //
+    // Two owners at threshold 2, matching what `custody-legacy-rail` seeds for
+    // the same card, so the two captures of one card agree.
+    return {
+      address: FIXTURE_LEGACY_SAFE.safe_address,
+      owners: [APPROVER_WALLET, APPROVER_UNKNOWN],
+      threshold: 2,
+      nonce: 12,
+    }
+  }
+  if (pathname.startsWith('/agents/') && pathname.endsWith('/delegate-balance')) {
+    // #2194. Keyed for EVERY fixture agent — the point is not that this one
+    // path now answers correctly, it is that the generic fallback can no
+    // longer answer it at all. `FIXTURE_EMPTY_FALLBACK` cannot say "this
+    // endpoint is not seeded": it says 200 with a body that has no
+    // `usdc_atomic`, and `undefined !== '0'` reads as YES.
+    const agentId = pathname.slice('/agents/'.length, -'/delegate-balance'.length)
+    if (!(agentId in FIXTURE_DELEGATE_BALANCES)) return null
+    const balance = FIXTURE_DELEGATE_BALANCES[agentId]
+    // A seeded null is the route's OWN 422, not an absent fixture. Served as a
+    // real failure so the app's real error path runs — `useDelegateBalance`'s
+    // catch, which turns it into "nothing to recover" (`:52-54`).
+    return balance ?? httpError(422, DELEGATE_BALANCE_NO_DELEGATE)
   }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/delegations')) {
     // #2106: the delegation rail's actual spend authority, as
@@ -1209,6 +1548,20 @@ const CHAIN_READ_GAPS = []
  * adds the sixteenth; routes change rarely, and the property being asserted is
  * a property of the screen, not of the story told about it.
  */
+/**
+ * Declared-tolerant captures that held no busy element — the declaration is
+ * stale, and that FAILS THE RUN (#2204).
+ *
+ * The registry itself lives in `full-page-capture.mjs` beside the guard, not
+ * here: `captureFullPage` has TWO consumers (this CLI and
+ * `e2e/capture-integrity.spec.ts`), and the first draft kept the exemption in
+ * the CLI only — so the spec captured `/design-system` with no tolerance at
+ * all and CI refused it. An exemption that one caller knows about is not an
+ * exemption, it is a divergence. `busyToleranceFor` is now derived from the
+ * page's own URL inside `captureFullPage`, so a third consumer cannot forget it.
+ */
+export const STALE_BUSY_DECLARATIONS = []
+
 export const CHAIN_FED_ROUTES = [
   {
     pattern: /^\/agents(\/|$)/,
@@ -1489,6 +1842,42 @@ async function newFixtureContext(browser, vp, scenario) {
   // the app's own read path, gate branch and rendering are all real. It is not
   // a hook for stubbing component state, and a scenario that needs one should
   // be re-examined rather than served here.
+  // ── The lever that makes the #2204 race happen on demand ──────────────────
+  //
+  // A guard that has only ever been seen to pass is not evidence. This
+  // reproduces the genuinely-unpainted page the busy check exists to refuse:
+  // it stalls each JSON-RPC read CLIENT-SIDE, before the request is issued.
+  //
+  // The stall has to be on THIS side of the wire, and finding that out cost a
+  // diagnosis worth recording. Delaying the ANSWER (inside the route handler)
+  // reproduces nothing at all: the request is in flight the whole time, so
+  // `waitUntil: 'networkidle'` simply waits it out and the capture is correct
+  // — measured at 500 / 2000 / 6000ms, all three came back at the healthy
+  // 1936px. Stalling BEFORE the fetch leaves the page creates a window with no
+  // in-flight request, `networkidle` fires into it, and the shutter lands on
+  // `useOnChainAllowances` still loading. That is also the real mechanism: the
+  // hook issues four SEQUENTIAL reads, and under load the client-side gap
+  // between two of them can exceed networkidle's 500ms threshold on its own —
+  // which is why the bad run is 1 in 4 on a busy machine and 0 in 10 on an
+  // idle one.
+  //
+  // Diagnostic only, and it says so: it is off unless asked for, and it is
+  // deliberately not a `scenario` field, because nothing committed should ever
+  // capture through it.
+  const chainStallMs = Number(process.env.SCREENSHOT_CHAIN_STALL_MS ?? 0)
+  if (chainStallMs > 0) {
+    await context.addInitScript((ms) => {
+      const original = window.fetch
+      window.fetch = async (input, init) => {
+        const body = typeof init?.body === 'string' ? init.body : ''
+        if (body.includes('"jsonrpc"')) {
+          await new Promise((resolve) => setTimeout(resolve, ms))
+        }
+        return original(input, init)
+      }
+    }, chainStallMs)
+  }
+
   const seeded = scenario?.seed?.()
   if (seeded) {
     await context.addInitScript((entries) => {
@@ -1582,6 +1971,18 @@ async function newFixtureContext(browser, vp, scenario) {
     if (api === '/auth/me') return json(FIXTURE_USER)
     if (api === '/user/safes') return json({ safes: FIXTURE_USER.safes })
     const populated = fixtureFor(api + search)
+    // #2194: the SAME `instanceof` check the scenario branch above makes, for
+    // the same reason and one layer down. `fixtureFor` can now seed a route's
+    // own failure (the delegate-balance 422), and `json()` would serve that
+    // marker object as a 200 whose body happens to have an `error` key — a
+    // fixture that looks like it is seeding an error state and is not.
+    if (populated instanceof ScenarioHttpError) {
+      return route.fulfill({
+        status: populated.status,
+        contentType: 'application/json',
+        body: JSON.stringify(populated.body),
+      })
+    }
     if (populated !== null) return json(populated)
     // Anything unkeyed → a benign empty shape carrying every collection
     // key the hooks read, so a missing key never throws (e.g. a hook that
@@ -1783,19 +2184,61 @@ export { makeAllowanceChainFixture }
 
 // ── The SHARED fixture's chain answers (#1971) ───────────────────────────────
 //
-// On the shared fixture's own chain (84532), for the shared fixture's own Safe,
-// seeded from the shared fixture's own agent. `agent-ops` is the one fixture
-// agent on the LEGACY rail (`account_type: null`) with a `delegate_address`, and
-// both are required: `EditAgentModal` hides the whole budget half on
-// `delegator_hybrid` (#1079, `showBudgetFields`) and `useOnChainAllowances` keys
-// its map by delegate.
+// On the shared fixture's own chain (84532), seeded from the shared fixture's
+// own agent. `agent-ops` is the one fixture agent on the LEGACY rail with a
+// `delegate_address`, and both are required: `EditAgentModal` hides the whole
+// budget half on `delegator_hybrid` (#1079, `showBudgetFields`) and
+// `useOnChainAllowances` keys its map by delegate.
 //
-// The USDC row deliberately MATCHES `agent-ops`'s API allowance (500.000000 /
-// 1440min, `FIXTURE_AGENTS`) rather than inventing a second number. The two
-// sources render side by side on AgentPanel, and a fixture whose chain and API
-// disagree would photograph a contradiction the product cannot actually produce.
-// The delegate set is exactly the managed one for the same reason — seeding a
-// stranger here would render an "unmanaged delegate" warning in every capture.
+// #2202: the rail marker is `account_type: 'safe'`, not `null` — migration
+// `041_hybrid_accounts.ts:29` makes the column `NOT NULL DEFAULT 'safe'` under
+// `CHECK (account_type IN ('safe','delegator_hybrid'))`, so `null` was never a
+// value a `user_safes` row could hold. These rows now hang off `agent-ops`'s
+// OWN account (`FIXTURE_LEGACY_SAFE`) rather than off the shared
+// `delegator_hybrid` one, which is the account that actually has an
+// AllowanceModule.
+//
+// #2224: the USDC row used to be justified as MATCHING `agent-ops`'s API
+// allowance (500.000000 / 1440min) so the two would not photograph a
+// contradiction where they render side by side. That reason is retired with
+// the row: a legacy-rail agent's `allowances` array is `[]` on every read
+// (`backend/src/routes/agents.ts:92-98`, `:113-121`), so there is no API figure
+// left to agree or disagree with, and this is now the SOLE source for the
+// legacy account's budget — it is what `/custody`'s AllowanceModule table
+// renders. The numbers are kept rather than re-picked so the committed
+// captures do not move for a reason unrelated to what changed; the guard that
+// used to cross-check them against the API now pins them against this
+// declaration, which is what it was always really proving.
+//
+// The delegate set is exactly the managed one — seeding a stranger here would
+// render an "unmanaged delegate" warning in every capture.
+//
+// ── Why `agent-research`'s delegate is NOT here (#2194) ──────────────────────
+//
+// It has one now, and it still does not belong in this list. `getDelegates` is
+// the AllowanceModule's own registry — written by `addDelegate` on the LEGACY
+// Safe rail, which #1440/#2020 retired. A `delegator_hybrid` agent's spend
+// authority is a delegation grant (`GET /agents/:id/delegations`), and nothing
+// ever registers its delegate with the module. `agent-ops` is the one fixture
+// agent on that legacy rail (`account_type: 'safe'`, #2202), so it is the one
+// entry — and since #2202 the list hangs off ITS account, not the shared one.
+//
+// This is not a technicality about a registry nobody reads. `useOnChainAllowances`
+// keys its map off THIS list, not off the `managedDelegates` argument
+// (`hooks/useOnChainAllowances.ts:110-127`), and `AgentPanel.tsx:174-176` hands
+// each card `onChainData.get(delegateKey)?.allowances`. Adding `agent-research`
+// here would therefore render an AllowanceModule budget on its card — and
+// `makeAllowanceChainFixture` answers `getTokenAllowance` from `rows` WITHOUT
+// consulting the delegate argument, so the budget it rendered would be
+// `agent-ops`'s 500 USDC / daily, next to its own 250 USDC / weekly delegation.
+// Two spend limits for one agent, from two retired-and-live rails at once.
+//
+// Absent, `onChainData.get()` returns undefined and the card renders no
+// AllowanceModule row, which is what the delegation rail actually looks like.
+// No unmanaged-delegate warning either: `useAgentPanelState.ts:261-271`
+// subtracts the MANAGED set from the on-chain one, and a delegate that is not
+// on-chain cannot be in that difference. `chain-fed-capture-guard.test.ts`
+// pins both halves.
 export const SHARED_CHAIN_ROWS = [
   {
     token: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,
@@ -1804,12 +2247,71 @@ export const SHARED_CHAIN_ROWS = [
     resetTimeMin: 1440,
   },
 ]
+/**
+ * The SHARED account's chain answers — a delegation-rail account, answered as one.
+ *
+ * #2202 moved `agent-ops` and its AllowanceModule off this account, and that
+ * settled a question #2106 had already raised and worked around. `FIXTURE_SAFE`
+ * is `delegator_hybrid`; a Hybrid DeleGator is not a Safe and has no
+ * AllowanceModule, so `isModuleEnabled → true` is a state this account cannot
+ * reach. `custody-delegation-rail` said exactly that ("The shared chain fixture
+ * answers true — correct for the legacy Safe every other capture seeds, and
+ * impossible here") and overrode it scenario-locally, because while `agent-ops`
+ * claimed `account_type: null` there appeared to be a legacy account behind the
+ * shared safe. There is not, and now it says so.
+ *
+ * `useOnChainAllowances` still ISSUES the `isModuleEnabled` read and then
+ * returns early, so `/agents` remains a genuinely chain-fed capture rather than
+ * a silent one — the read happens and is answered, it just answers "no module".
+ */
+// BOTH accounts, because a capture reads both. `/custody` renders one card per
+// account (#2106) and only the legacy card mounts `useOnChainAllowances`, so a
+// single-account answer throws on the other address and fails the run — which
+// is how this was found rather than reasoned about.
 export const answerSharedChainRead = makeAllowanceChainFixture({
   chainId: FIXTURE_SAFE.chain_id,
-  safeAddress: FIXTURE_SAFE.safe_address,
-  delegates: [ADDR.delegate],
-  rows: SHARED_CHAIN_ROWS,
+  accounts: [
+    // The delegation-rail account: no module, and therefore no delegates or
+    // rows to reach — `useOnChainAllowances` returns after the first read.
+    { safeAddress: FIXTURE_SAFE.safe_address, delegates: [], rows: [], moduleEnabled: false },
+    // `agent-ops`'s legacy Safe: the one that really has an AllowanceModule.
+    {
+      safeAddress: FIXTURE_LEGACY_SAFE.safe_address,
+      delegates: [ADDR.delegate],
+      rows: SHARED_CHAIN_ROWS,
+    },
+  ],
 })
+
+/**
+ * The LEGACY account's chain answers, for whichever Safe address is on the
+ * legacy rail in a given scenario (#2202).
+ *
+ * One factory call parameterised by the safe, because two scenarios need the
+ * same legacy answers at two different addresses: `agents-legacy-rail` seeds
+ * `agent-ops`'s own `FIXTURE_LEGACY_SAFE`, and `custody-legacy-rail` re-rails
+ * the SHARED account and so needs them at `FIXTURE_SAFE`'s address.
+ * `makeAllowanceChainFixture` checks the call's `to` against the address it was
+ * built for, so a single shared instance would throw for one of them rather
+ * than quietly answer the wrong account.
+ */
+export const legacyRailChainFor = (safe) =>
+  makeAllowanceChainFixture({
+    chainId: safe.chain_id,
+    safeAddress: safe.safe_address,
+    delegates: [ADDR.delegate],
+    rows: SHARED_CHAIN_ROWS,
+  })
+
+/**
+ * `agent-ops`'s own account alone.
+ *
+ * Exported for `chain-fed-capture-guard.test.ts`, which asserts the legacy
+ * answers in isolation. Scenarios do NOT need it: `answerSharedChainRead`
+ * above already answers for both of the fixture's accounts, so a scenario that
+ * only changes which one is ACTIVE inherits the right answers.
+ */
+export const answerLegacyRailChainRead = legacyRailChainFor(FIXTURE_LEGACY_SAFE)
 
 // ── EditAgentModal's on-chain budget list (#1935) ────────────────────────────
 //
@@ -1826,7 +2328,19 @@ const BUDGET_CHAIN_ID = 8453
 const BUDGET_USDC = resolveToken(BUDGET_CHAIN_ID, 'USDC').address
 const BUDGET_NATIVE = '0x0000000000000000000000000000000000000000'
 
-const BUDGET_FIXTURE_SAFE = { ...FIXTURE_SAFE, chain_id: BUDGET_CHAIN_ID }
+// #2202: derived from the LEGACY account, not from the shared `delegator_hybrid`
+// one. This scenario photographs `EditAgentModal`'s AllowanceModule budget list,
+// which `showBudgetFields` renders only for a NON-`delegator_hybrid` agent
+// (#1079) — so the account behind it has to be the legacy one or the capture is
+// of an empty modal. It used to inherit `FIXTURE_SAFE`, which carries no
+// `account_type` at all and therefore read as legacy only by `railOf`'s
+// "anything else" fallback (`lib/custody-rail.ts:37-38`). The rail is now
+// stated rather than fallen into.
+const BUDGET_FIXTURE_SAFE = {
+  ...FIXTURE_LEGACY_SAFE,
+  chain_id: BUDGET_CHAIN_ID,
+  account_type: 'safe',
+}
 
 /** The shared fixture's LEGACY-rail agent, moved onto the same chain as its account. */
 const BUDGET_FIXTURE_AGENT = {
@@ -1849,6 +2363,66 @@ const answerBudgetChainRead = makeAllowanceChainFixture({
 })
 
 export const SCENARIOS = {
+  /**
+   * #2043: the agent list with NOTHING unrecorded — the note's absent half.
+   *
+   * The present half needs no scenario: the shared fixture's `agent-retired`
+   * carries no `mcp_server_name` at all, so the plain `/agents` route capture
+   * already shows the hoisted explanation. The conditional IS the design, and
+   * a capture that only ever shows the note present proves half of it — a
+   * note that rendered unconditionally would look identical.
+   *
+   * ── Why this override is reachable, per field (#2205/#2227/#2233) ────────
+   *
+   * Only ONE field changes, and only on `agent-retired`:
+   *
+   * | field | value | why the product can produce it |
+   * |---|---|---|
+   * | `mcp_server_name` | `'haven-data-feed'` | `normalizeMcpServerName` accepts it: 15 chars (≤64) and matching `/^haven(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/` (`backend/src/routes/agent-connection-setups.ts:143-149`). Written once at `POST /agent-connection-setups/register`. |
+   *
+   * The combination with this agent's OTHER fields is reachable too, which is
+   * the check #2233 was filed over:
+   *
+   * | co-field | value | compatible because |
+   * |---|---|---|
+   * | `mcp_last_seen_at` | `null` | the name is written at REGISTRATION; `mcp_last_seen_at` is written by MCP tool calls. An agent wired with a current connector that has not yet called a tool has exactly this pair. |
+   * | `status` | `'paused'` | pausing is a Haven-side status flip; it neither writes nor clears `mcp_server_name` (`infra/repositories/agents.ts:472-481` — "This UPDATE never touches mcp_server_name"). |
+   * | `delegate_address` | `null` | orthogonal: a pre-column legacy artefact on this agent, unrelated to the wiring label. Unchanged from the shared fixture. |
+   *
+   * Nothing else in `FIXTURE_AGENTS` is touched: `agent-research` and
+   * `agent-ops` already carry recorded names, which is why they are not
+   * overridden here.
+   */
+  'mcp-name-all-recorded': {
+    description:
+      'The /agents list with every agent reporting an MCP server name — the hoisted "not recorded" explanation must be ABSENT (#2043)',
+    api(apiPath) {
+      if (apiPath === '/agents') {
+        return {
+          agents: FIXTURE_AGENTS.map((a) =>
+            a.mcp_server_name ? a : { ...a, mcp_server_name: 'haven-data-feed' },
+          ),
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      // Wait for EVERY card, not the first: the claim is about the whole list,
+      // so a capture that raced the third card would be evidence of nothing —
+      // and "no note" is exactly what a half-rendered list also looks like.
+      for (const name of ['Research agent', 'Ops agent', 'Data-feed agent']) {
+        await page.getByText(name, { exact: true }).first().waitFor({ timeout: 20_000 })
+      }
+      // Positive control for the absence: the three recorded names are on
+      // screen, so the list really did render its MCP row.
+      await page.getByText('haven-data-feed', { exact: true }).first().waitFor({ timeout: 20_000 })
+
+      await shoot(page.locator('main').first(), 'list')
+    },
+  },
   'design-system-buttons': {
     description:
       'The Buttons and badges card on /design-system — variants, the size scale, and the tap-target note',
@@ -3026,9 +3600,17 @@ export const SCENARIOS = {
     // other rail and shoots the same page.
     //
     // Only `/auth/me`, `/user/safes` and the Safe details read are overridden.
-    // The chain fixture is inherited: `answerSharedChainRead` already answers
-    // `isModuleEnabled` → true with one 500-USDC daily row, which is what the
-    // legacy card is supposed to render.
+    //
+    // #2202: the chain answer is no longer INHERITED. It used to be, because
+    // `answerSharedChainRead` answered `isModuleEnabled` → true — but it
+    // answered that for the shared `delegator_hybrid` account, which cannot
+    // have an AllowanceModule at all. That was the chain-side half of the same
+    // contradiction, and #2106 had already recorded it as impossible while
+    // working around it in `custody-delegation-rail`. The shared answer now
+    // says "no module", so this scenario states its own legacy answers
+    // explicitly — at `FIXTURE_SAFE`'s address, because it re-rails the SHARED
+    // account rather than switching to `agent-ops`'s.
+    chain: legacyRailChainFor(FIXTURE_SAFE),
     api(apiPath) {
       const legacySafe = { ...FIXTURE_SAFE, account_type: 'safe' }
       if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [legacySafe] }
@@ -3055,6 +3637,96 @@ export const SCENARIOS = {
       await page
         .getByText('Owners (control this Safe — Haven is not one)', { exact: false })
         .waitFor({ timeout: 30_000 })
+      await shoot(page.locator('#main-content'), 'page')
+    },
+  },
+  'agents-legacy-rail': {
+    description:
+      '/agents with the LEGACY account active — AgentCard\'s Revoke affordance and the on-chain AllowanceModule row (#2202)',
+    // ── Why this scenario had to exist before #2202 could be fixed ───────────
+    //
+    // `agent-ops` used to claim `account_type: null` while pointing at the
+    // shared `delegator_hybrid` safe. That impossible value was doing real
+    // work: `AgentCard.tsx:63` derives `isDelegationAgent` from it, and the
+    // rail decides which shutdown control the card offers — `Revoke` (the
+    // AllowanceModule teardown, `:349`) on the legacy rail, `Remove` (#1402,
+    // `:366`) on the delegation rail. A plain `/agents` capture photographed
+    // BOTH, from one account, because one of the three agents was lying.
+    //
+    // Giving `agent-ops` its own legacy account fixes the contradiction, but
+    // it does not by itself keep that evidence: `Revoke` also needs
+    // `canUseWalletActions`, which `AgentPanel.tsx:196` binds to
+    // `agentUsesActiveSafe` — an agent's wallet controls are gated to the
+    // ACTIVE account (`useAgentPanelState.ts:220-235`). So on a default
+    // capture, where the delegation account is active, `agent-ops` correctly
+    // renders as an off-active-account agent and the legacy control is absent.
+    //
+    // The honest way to keep the branch photographed is therefore to reach it
+    // the way a user does: SWITCH ACCOUNTS. That is what this scenario is —
+    // the same coherent fixture, seen from the other account, which is exactly
+    // what the account switcher (#625) exists for.
+    //
+    // Note what it does NOT override: no `api` hook at all. The fixture
+    // already serves both accounts on `/auth/me` and all three agents on
+    // `/agents`, so switching the active-account key is sufficient. A scenario
+    // that had to restate the agent list to make this render would be evidence
+    // that the fixture still disagreed with itself.
+    seed: () => ({ [SEED_STORAGE_KEYS.activeSafe]: FIXTURE_LEGACY_SAFE.id }),
+    // No `chain` override either: `answerSharedChainRead` answers for BOTH of
+    // the fixture's accounts (#2202), so the AllowanceModule reads that follow
+    // the active-account switch are already seeded. This scenario states one
+    // thing — which account is active — and everything else is the shared
+    // fixture, which is what makes it evidence about the fixture rather than
+    // about itself.
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      // Wait on the LEGACY control by name, not on a generic heading. If the
+      // active-account switch ever stops taking, or the rail branch flips,
+      // this run fails here instead of shooting the delegation rendering under
+      // this scenario's name — the same reasoning `custody-legacy-rail` states.
+      await page
+        .getByRole('button', { name: 'Revoke Ops agent' })
+        .waitFor({ timeout: 30_000 })
+      // …and on the ON-CHAIN row, which is the other half of what the old
+      // impossible value was buying.
+      //
+      // Waiting on the AMOUNT would prove nothing: the AllowanceModule row is
+      // 500 USDC, so "500" renders identically whether the module answered or
+      // the card took some other branch. The branches are told apart by their
+      // own copy — `AllowanceBar` ends "… remaining"
+      // (`AllowanceBar.tsx:86-89`) — so this waits on that and asserts the
+      // not-answered branch is absent. A capture that quietly took the other
+      // branch would otherwise be indistinguishable from the on-chain one,
+      // which is this whole issue's defect class wearing a different hat.
+      //
+      // #2224 changed WHICH branch the failure would be. This used to check
+      // for "Configured in Haven", the `ConfiguredAllowanceRow` caption, on
+      // the reasoning that a failed module read falls back to the agent's DB
+      // allowances. It cannot: `agent-ops` is on the legacy rail, so
+      // `routes/agents.ts:92-98` serves it `allowances: []` and
+      // `showConfiguredFallback` is unreachable for this card. With no
+      // fallback to take, a module read that does not answer renders
+      // "No agent budget configured" (`AgentCard.tsx`), and that is what is
+      // asserted absent now — the honest discriminator for the branch the
+      // product can actually reach.
+      //
+      // SCOPED to the Ops card, and that scoping is the guard working rather
+      // than a convenience: the first version made its absence check
+      // page-wide and failed, because the two DELEGATION-rail agents legitimately
+      // render the granted-budget row — their authority is a grant, not an
+      // AllowanceModule row. A page-wide absence check was asking the wrong
+      // question, and it is the on-chain half of THIS card that the old
+      // impossible value was buying. `AgentCard`'s root carries
+      // `role="link"` + `aria-label="View <name>"` (`AgentCard.tsx:123-127`).
+      const opsCard = page.getByRole('link', { name: 'View Ops agent' })
+      await opsCard.getByText(/remaining/i).first().waitFor({ timeout: 30_000 })
+      if (await opsCard.getByText('No agent budget configured').count()) {
+        throw new Error(
+          'agents-legacy-rail: the Ops card rendered no budget at all — the ' +
+            'AllowanceModule read did not answer for the active account',
+        )
+      }
       await shoot(page.locator('#main-content'), 'page')
     },
   },
@@ -3095,13 +3767,21 @@ export const SCENARIOS = {
     // and "Add funds" is unclickable. Measured, not assumed — the first run of
     // this scenario timed out waiting for the button while the unresolved
     // counterpart found it, because a missing chain_id happens to route the
-    // gate down a different branch. Dropping `account_type` puts the account on
-    // the Safe rail with no stored passkey, i.e. `no_signer`, which is a hero
-    // that offers its actions. Nothing about the modal under capture changes.
+    // gate down a different branch. Putting the account on the Safe rail
+    // (`account_type: 'safe'`) leaves it with no stored passkey, i.e.
+    // `no_signer`, which is a hero that offers its actions. Nothing about the
+    // modal under capture changes.
+    //
+    // #2202: this used to DROP `account_type` rather than set it. `railOf`
+    // reads the two identically (`lib/custody-rail.ts:37-38`), so nothing
+    // rendered differently — but an ABSENT `account_type` is not a state the
+    // API can serve: the column is `NOT NULL DEFAULT 'safe'`
+    // (`041_hybrid_accounts.ts:29`) and the wire type requires the field
+    // (`core/src/api-types.ts:10025`). The legacy rail has a name; this uses it.
     api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE }] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
       // Same both-endpoints reasoning as the unresolved twin below.
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -3147,7 +3827,10 @@ export const SCENARIOS = {
     // whether an account HAS a chain is a trap for the next scenario that
     // reaches for the other one, and the disagreement would be invisible.
     api(apiPath) {
-      const safeWithoutChain = { ...FIXTURE_SAFE }
+      // #2202: the rail is NAMED here too, exactly as its resolved twin names
+      // it — the pair is only evidence about `chain_id` if `chain_id` is the
+      // one thing that differs, and `screenshot-fixture.test.ts` pins that.
+      const safeWithoutChain = { ...FIXTURE_SAFE, account_type: 'safe' }
       delete safeWithoutChain.chain_id
       if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [safeWithoutChain] }
       if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
@@ -3169,11 +3852,12 @@ export const SCENARIOS = {
     description: 'Receive funds modal with a RESOLVED chain — the normal path (#1852)',
     // The resolved half of the #1852 pair. Same construction as `add-funds`
     // above and for the same reasons: the chain data is the shared fixture's
-    // (84532), and the ONE override is dropping `account_type` so the hero
-    // renders its action buttons instead of `PasskeyOtherDeviceNotice`.
+    // (84532), and the ONE override is the rail marker (`account_type: 'safe'`,
+    // #2202 — see `add-funds` for why it is SET rather than dropped) so the
+    // hero renders its action buttons instead of `PasskeyOtherDeviceNotice`.
     api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE }] }
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE }] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -3215,7 +3899,10 @@ export const SCENARIOS = {
     //
     // Same rail override as its twin, so the two differ by EXACTLY one field.
     api(apiPath) {
-      const safeWithoutChain = { ...FIXTURE_SAFE }
+      // #2202: the rail is NAMED here too, exactly as its resolved twin names
+      // it — the pair is only evidence about `chain_id` if `chain_id` is the
+      // one thing that differs, and `screenshot-fixture.test.ts` pins that.
+      const safeWithoutChain = { ...FIXTURE_SAFE, account_type: 'safe' }
       delete safeWithoutChain.chain_id
       if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [safeWithoutChain] }
       if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
@@ -3481,6 +4168,10 @@ async function main() {
         // Un-clips the h-screen/overflow-hidden shell so `fullPage` paints the
         // whole route, then reads the PNG back and refuses a blank one (#1738).
         try {
+          // No `allowBusy` here on purpose: `captureFullPage` derives the
+          // tolerance from the page's own URL, so every consumer gets the same
+          // answer (#2204 CI catch).
+          const busyTolerance = busyToleranceFor(routePath)
           const { shell, content } = await captureFullPage(page, {
             path: file,
             label: `${routePath} · ${vp.name}`,
@@ -3493,8 +4184,19 @@ async function main() {
               viewport: vp.name,
               chars: content.chars,
               elements: content.elements,
+              busy: content.busy ?? 0,
               waited_ms: content.waitedMs,
             })
+            // The exemption's expiry date (#2204). A route declared
+            // busy-tolerant that held nothing busy is a declaration nobody has
+            // re-read; say so rather than carry it forever.
+            if (busyTolerance && !(content.busy > 0)) {
+              STALE_BUSY_DECLARATIONS.push({
+                route: routePath,
+                viewport: vp.name,
+                reason: busyTolerance.reason,
+              })
+            }
             if (content.raced) {
               contentRaced.push({ route: routePath, viewport: vp.name, waitedMs: content.waitedMs })
             }
@@ -3679,6 +4381,9 @@ async function main() {
         // failing runs.
         content_settle: contentSettles,
         content_waits: contentRaced,
+        // Busy-tolerance declarations (#2204) that turned out not to be needed
+        // — the exemption's own expiry notice.
+        stale_busy_declarations: STALE_BUSY_DECLARATIONS,
         // Retention, recorded so the live manifest can be read as "this is the
         // current run, and here is where the one before it went" (#1888). A
         // reader who finds PNGs under `previous/` can tell from HERE that they
@@ -3735,12 +4440,30 @@ async function main() {
   }
   if (contentSettles.length > 0) {
     console.log(
-      `\nℹ route content confirmed present at capture time (#2036) — floor is ` +
-        `${MIN_CONTENT_CHARS} chars / ${MIN_CONTENT_ELEMENTS} elements in "${SCROLL_SHELL_ROOT}":`,
+      `\nℹ route content confirmed present AND FINISHED at capture time (#2036/#2204) — floor is ` +
+        `${MIN_CONTENT_CHARS} chars / ${MIN_CONTENT_ELEMENTS} elements in "${SCROLL_SHELL_ROOT}", ` +
+        `and nothing in it may still be aria-busy:`,
     )
     for (const e of contentSettles) {
-      console.log(`  [${e.route} · ${e.viewport}] ${e.chars} chars, ${e.elements} elements`)
+      console.log(
+        `  [${e.route} · ${e.viewport}] ${e.chars} chars, ${e.elements} elements` +
+          (e.busy > 0 ? `, ${e.busy} still-busy element(s) — tolerated by declaration` : ''),
+      )
     }
+  }
+  if (STALE_BUSY_DECLARATIONS.length > 0) {
+    console.error(
+      `\n✗ ${STALE_BUSY_DECLARATIONS.length} busy-tolerance declaration(s) were not needed — ` +
+        `BUSY_TOLERANT_CAPTURES in scripts/full-page-capture.mjs is stale (#2204):`,
+    )
+    for (const e of STALE_BUSY_DECLARATIONS) {
+      console.error(`  [${e.route} · ${e.viewport}] held no aria-busy element — declared because: ${e.reason}`)
+    }
+    console.error(
+      '  (remove the entry from BUSY_TOLERANT_CAPTURES — the exemption is only sound while the reason\n' +
+        '   it names is still true, and a route that no longer needs it is a route the guard should be\n' +
+        '   protecting)',
+    )
   }
   for (const line of formatDeletionReport(deletedCaptures)) console.error(line)
   if (clipped.length > 0) {
@@ -3876,6 +4599,15 @@ async function main() {
     deletedCaptures.length > 0 && `${deletedCaptures.length} capture(s) deleted as unusable`,
     CHAIN_READ_GAPS.length > 0 && `${CHAIN_READ_GAPS.length} chain-fed route(s) issued no on-chain reads`,
     CHAIN_SILENT_CAPTURES.length > 0 && `${CHAIN_SILENT_CAPTURES.length} silent chain-fed capture(s)`,
+    // GATING, not advisory — review of #2204 caught this as a should-fix and it
+    // was the right call. The whole claim made for `BUSY_TOLERANT_CAPTURES` is
+    // that it SELF-EXPIRES; a stale declaration that only prints to stdout and
+    // the manifest expires nothing, in a repo whose own playbook says the exit
+    // code does not survive a pipe. Its sibling `CHAIN_SILENT_CAPTURES` fails
+    // the run on exactly the mirror-image staleness, so the two mechanisms now
+    // cost the same to leave rotting.
+    STALE_BUSY_DECLARATIONS.length > 0 &&
+      `${STALE_BUSY_DECLARATIONS.length} stale busy-tolerance declaration(s)`,
   ].filter(Boolean)
   if (failures.length > 0) {
     printRunResult(false, failures.join('; '))

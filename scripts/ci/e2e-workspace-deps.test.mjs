@@ -16,8 +16,11 @@
 // pixels compared, and no `visual-regression-diffs` artifact at all — which
 // surfaces as "the blocking pixel gate is red" and reads like a baseline
 // problem. The obvious repair (re-dispatch the regeneration workflow) is the
-// harmful one: `--update-snapshots=all` blesses whatever renders and returns a
-// green gate carrying no information.
+// harmful one: regeneration blesses whatever renders and returns a green gate
+// carrying no information. #2218 narrowed the default to
+// `--update-snapshots=changed`, which does NOT retire this warning — a
+// collection failure means nothing was compared at all, so "only rewrite what
+// fails comparison" has nothing to protect.
 //
 // So the invariant is asserted rather than remembered. A THIRD job of this
 // shape — and the shape is attractive, because downloading the build is what

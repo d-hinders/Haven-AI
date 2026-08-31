@@ -1,0 +1,201 @@
+name: DB concurrency proof (nightly)
+
+# Re-proves, end to end and on the Postgres version CI runs, the deadlock #2198
+# fixed: a BLOCKING `pg_advisory_lock()` waiter pins a live snapshot for the
+# whole wait, `CREATE INDEX CONCURRENTLY` cannot mark an index valid until every
+# older snapshot in the DATABASE has drained, so each waits for the other and
+# Postgres kills one with SQLSTATE `40P01`. The polled waiter in
+# `packages/backend/src/db/advisory-lock.ts` holds nothing between attempts and
+# the cycle cannot form.
+#
+# ## Why this is a separate workflow and not a step in ci.yml (#2208)
+#
+# The two cases are gated behind HAVEN_DB_CONCURRENCY_PROOF=1 and MUST STAY
+# gated. A `CONCURRENTLY` build waits out every older snapshot database-wide, so
+# inside the backend's ~2 750-test parallel suite its duration is unbounded —
+# measured while shipping #2198, they passed alone and hung past 120 s under the
+# full suite, reproducibly. Un-gating them would make the ordinary suite flaky
+# *about concurrency*, which is the failure mode most likely to be misdiagnosed
+# as contention and deleted.
+#
+# ## The isolation this job needs, and what actually provides it
+#
+# Not a separate DATABASE — a QUIET one. A GitHub Actions service container is
+# created for this job and destroyed with it, and this job runs nothing else:
+# one vitest worker, one file, no parallel suite, no other client. That is
+# stricter isolation than `CREATE DATABASE` inside a shared server would give,
+# and it needs no privilege (the postgres image's POSTGRES_USER is a superuser
+# in any case — verified against postgres:16-alpine, `usesuper = t`, which is
+# also what `docker compose up -d postgres` gives locally).
+#
+# ## Non-gating, deliberately
+#
+# It is not in any ruleset's required checks. A required check must not depend
+# on the duration of a `CONCURRENTLY` build. The signal instead escalates into a
+# `ci-health` + `code-quality` issue, which puts it in the ship-next queue —
+# see the "File (or update) a failure issue" step.
+#
+# The `pull_request` trigger is narrow on purpose: only paths that ARE the proof
+# (the test, the lock helper, this workflow, its verdict script). Without it the
+# only way to learn that an edit here broke the job is to wait for 3am.
+
+on:
+  schedule:
+    # 02:41 UTC nightly. Odd minute to dodge the top-of-hour Actions surge, and
+    # well clear of qa-dev.yml's 03:17 so the two never contend for runners.
+    - cron: '41 2 * * *'
+  workflow_dispatch:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'packages/backend/src/infra/__tests__/db-harness-lock-concurrency.test.ts'
+      - 'packages/backend/src/infra/__tests__/helpers/db-harness.ts'
+      - 'packages/backend/src/db/advisory-lock.ts'
+      - 'packages/backend/src/db/migrate.ts'
+      - '.github/workflows/db-concurrency-proof.yml'
+      - 'scripts/ci/db-concurrency-proof.mjs'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  # Never two at once — a second run would put a competing `CONCURRENTLY` build
+  # and a competing deadlock next to the one being measured. Not cancel-in-
+  # progress: a measurement that is running is worth more than a fresher start.
+  group: db-concurrency-proof-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: Advisory-lock deadlock proof (40P01)
+    # Forks get no issues:write, and the escalation step is the whole point.
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: haven
+          POSTGRES_PASSWORD: haven
+          POSTGRES_DB: haven
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U haven"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://haven:haven@localhost:5432/haven
+      JWT_SECRET: ci-test-secret-not-for-production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Record the Postgres version under test
+        # The whole point of a periodic re-proof is that the CAUSE may still
+        # hold while the CONSEQUENCE changes with the server. When this job
+        # eventually goes red, the first question is "what moved" — so the
+        # answer is in the log rather than inferred from the image tag.
+        run: |
+          node -e "
+            const pg = require('pg');
+            const c = new pg.Client({ connectionString: process.env.DATABASE_URL });
+            c.connect().then(() => c.query('SHOW server_version')).then(r => {
+              console.log('::notice::proving against Postgres ' + r.rows[0].server_version);
+              return c.end();
+            }).catch(e => { console.error(e); process.exit(1); });
+          "
+
+      - name: Run the opt-in end-to-end proof cases
+        id: proof
+        # Never `continue-on-error` and never swallowed: a red vitest run is a
+        # red job. The verdict step below runs `if: always()` because a
+        # *green* vitest run is not by itself evidence — see the script header.
+        continue-on-error: true
+        env:
+          HAVEN_DB_CONCURRENCY_PROOF: '1'
+        run: |
+          npm run test -w packages/backend -- \
+            src/infra/__tests__/db-harness-lock-concurrency.test.ts \
+            --reporter=default --reporter=json \
+            --outputFile.json="$GITHUB_WORKSPACE/proof-report.json"
+
+      - name: Verify the proof cases actually RAN (not skipped)
+        # #2208's real trap. With the flag unset vitest prints `Tests 6 passed
+        # (6)` and exits 0 while both proof cases sit at "skipped" in the JSON.
+        # A job that checked the exit code would be green forever with the gate
+        # broken. This step reads the report and demands both named cases with
+        # status "passed".
+        if: always()
+        run: node scripts/ci/db-concurrency-proof.mjs "$GITHUB_WORKSPACE/proof-report.json"
+
+      - name: Fail the job if vitest itself failed
+        # Kept separate from the verdict so the log says which of the two it was.
+        if: always() && steps.proof.outcome == 'failure'
+        run: |
+          echo "::error::the proof run exited non-zero — see the vitest output above"
+          exit 1
+
+      - name: File (or update) a failure issue
+        # The notification decision (#2208). Not email, not a Slack ping nobody
+        # owns at 3am: an ISSUE, labelled `ci-health` (what it is) and
+        # `code-quality` (which is what puts it in the ship-next queue, so it
+        # becomes work somebody picks up rather than a red square somebody
+        # learns to ignore). One issue, upserted — repeat failures comment.
+        if: failure() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          TITLE='🚨 The advisory-lock deadlock proof (#2208) is failing'
+          gh label create ci-health --color b60205 \
+            --description "Automated: a scheduled CI guard is failing or has stopped running" --force >/dev/null 2>&1 || true
+          BODY=$(printf '%s\n' \
+            "\`db-concurrency-proof.yml\` failed. It is the only job that re-proves end to end that" \
+            "a BLOCKING \`pg_advisory_lock()\` waiter still deadlocks a concurrent" \
+            "\`CREATE INDEX CONCURRENTLY\` (SQLSTATE \`40P01\`), and that the polled waiter in" \
+            "\`packages/backend/src/db/advisory-lock.ts\` still does not." \
+            "" \
+            "- **Trigger:** \`${GITHUB_EVENT_NAME}\`" \
+            "- **Run:** ${RUN_URL}" \
+            "- **When:** $(date -u '+%Y-%m-%d %H:%M UTC')" \
+            "" \
+            "Read the run before assuming a flake. There are three different failures here:" \
+            "" \
+            "1. **The POLLED case failed** — the fix regressed, or something reintroduced a" \
+            "   blocking waiter. This is a real defect; treat it as one." \
+            "2. **The BLOCKING control failed** (no \`40P01\`) — the cause no longer produces the" \
+            "   consequence on this Postgres version. The guard is not wrong, it has stopped" \
+            "   being able to fail, which makes the green half unfalsifiable. Investigate the" \
+            "   server version recorded in the run log before touching the test." \
+            "3. **A proof case did not RUN** — the gate broke (see \`scripts/ci/db-concurrency-proof.mjs\`)." \
+            "" \
+            "Reproduce locally (\`docker compose up -d postgres\` first):" \
+            "" \
+            '```' \
+            "HAVEN_DB_CONCURRENCY_PROOF=1 npm run test -w packages/backend -- \\\\" \
+            "  src/infra/__tests__/db-harness-lock-concurrency.test.ts" \
+            '```' \
+            "" \
+            "_Filed by db-concurrency-proof.yml. Background: #2198, #2208._")
+          NUMBER=$(gh issue list --label ci-health --state open --limit 20 \
+            --json number,title --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")
+          if [ -n "$NUMBER" ]; then
+            gh issue comment "$NUMBER" --body "Another failure (trigger: \`${GITHUB_EVENT_NAME}\`) — ${RUN_URL}"
+          else
+            gh issue create --title "$TITLE" --label ci-health --label code-quality --body "$BODY"
+          fi

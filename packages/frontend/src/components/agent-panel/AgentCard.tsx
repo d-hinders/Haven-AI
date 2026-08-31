@@ -1,13 +1,14 @@
 'use client'
 
-import { CirclePause, TriangleAlert } from 'lucide-react'
 import { McpServerName } from './McpServerName'
-import { Icon } from '@/components/ui/Icon'
+import { ApprovalRequiredBanner } from '@/components/haven/ApprovalRequiredBanner'
 import { useState, useMemo, type KeyboardEvent, type MouseEvent } from 'react'
 import { type Agent } from '@/hooks/useAgents'
 import { type AllowanceInfo } from '@/lib/allowance-module'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
+import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
+import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
 import ConfirmDialog from '../ConfirmDialog'
 import { RemoveAgentDialog } from './RemoveAgentDialog'
 import { entityCardClassName } from '../ui/entityCardStyles'
@@ -140,8 +141,40 @@ export function AgentCard({
             <BotIcon size={16} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-[var(--v2-ink)] truncate">
+            {/* #2237: the title row WRAPS, so the name stops paying for the
+                status pill. Same idiom as `components/haven/
+                TransactionActivityRow.tsx` (#1833), `WalletIdentityBlock.tsx`
+                and, since #2223, the `/accounts` card — `flex flex-wrap
+                items-center gap-2` around a `min-w-0 truncate` name.
+
+                This is a REAL defect here, not only an inconsistency, and it
+                was measured before it was fixed. At 1280 this row's content is
+                259px and the `paused` pill is 54.5px + an 8px gap. Without
+                `flex-wrap` the pill is the row's incompressible item, so the
+                name is capped at 196.7px whatever it says — "Nightly data-feed
+                reconciliation agent" measures 256.2px, FITS the row, and was
+                still rendered ellipsised at 75.9% of it. Every name past
+                196.5px truncated 62.5px earlier than the card required.
+
+                WHAT WRAPPING COSTS, stated rather than buried. When the pill
+                does move down, the title row grows one line: 20px -> 48px, and
+                the card 332px -> 360px. That cost is confined to the card that
+                wraps, because `AgentPanel`'s grid is `items-start` — unlike
+                `/accounts`, whose `align-items: stretch` propagated #2223's
+                wrap to the whole grid row as 28px of dead whitespace. Nothing
+                else on this row can pay: at most ONE pill renders (`!isActive`),
+                so there is no badge pair to orphan (#2235) and no hover-action
+                reservation to derive (#2236) — both of #2240's fixes are
+                inapplicable here, which is why this stayed a separate issue.
+
+                `min-w-0` on the `h3` is redundant given `truncate`
+                (`overflow: hidden` already resolves `min-width: auto` to 0, and
+                removing it alone leaves the geometry suite green — mutated and
+                measured). It is written anyway because all three sibling
+                surfaces write it, and an idiom that is only sometimes complete
+                is the thing this issue is about. */}
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="min-w-0 truncate text-sm font-semibold text-[var(--v2-ink)]">
                 {agent.name}
               </h3>
               {!isActive ? (
@@ -187,30 +220,72 @@ export function AgentCard({
           </p>
       </div>
 
+      {/* ── Both notices go through `ApprovalRequiredBanner` (#2216) ───────────
+          These were two hand-rolled copies of the primitive's shape, a few
+          lines apart in this file, painting TITLE AND BODY in
+          `--v2-warning` while the primitive reserves the tint for the icon
+          badge and keeps prose in `--v2-ink` / `--v2-ink-2`. Same words as the
+          agent-detail banners one click away, two colour voices.
+
+          Restyling the two to imitate the primitive was rejected: it leaves
+          three implementations of one visual idea, which is how these diverged
+          in the first place, and the pattern-absorption preflight (#901) says
+          extract on the SECOND occurrence — this file was already at two, and
+          the primitive existed. Adopting it inherits the ink rule, the icon
+          badge, the tone ladder and the 10px frame instead of re-typing any of
+          them.
+
+          `--v2-warning` is scoped to "402 Payment Required, pending review"
+          (`docs/product/design-system.md` § 1, restated in § Local hint
+          marker), which is a reason the tint belongs on a severity MARKER and
+          not on a paragraph.
+
+          The tones are the ones `AgentDetailClient` already passes for the
+          same two facts (`:666`, `:674`) — `neutral` for paused, `warning` for
+          stranded. Paused is not 402/pending-review, and the card has not lost
+          its amber: the header's status pill and the bot tile both still paint
+          it. Choosing anything else here would leave one fact rendered two
+          ways on two screens the card's own link navigates between, which is
+          exactly the #2195 defect this is the styling half of. */}
+      {/* #2230 (the BODY half #2216 deferred): title and body now come from
+          `lib/agent-pause-copy.ts`, shared with the detail page's banner one
+          click away. The card used to say "Existing network permissions stay
+          in place" where the detail page said "Existing wallet rules" — the
+          detail page's wording was TAKEN rather than a third one written, for
+          the usage / register / accuracy reasons recorded in that module. */}
       {isPaused && (
-        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-warning/20 rounded-lg">
-          <Icon icon={CirclePause} className="h-3.5 w-3.5 text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-xs font-medium text-[var(--v2-warning)]">Paused in Haven</p>
-            <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
-              New agent payments are blocked until you resume this agent. Existing network permissions stay in place.
-            </p>
-          </div>
+        <div className="mb-3">
+          <ApprovalRequiredBanner title={AGENT_PAUSED_TITLE} tone="neutral" density="compact">
+            {AGENT_PAUSED_BODY}
+          </ApprovalRequiredBanner>
         </div>
       )}
 
       {agent.has_stranded_funds && (
-        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-warning/20 rounded-lg">
-          <Icon icon={TriangleAlert} className="h-3.5 w-3.5 text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-[var(--v2-warning)]">Stranded funds on delegate</p>
-            <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
-              A payment was funded on-chain but not settled.{' '}
+        <div className="mb-3">
+          <ApprovalRequiredBanner title={STRANDED_FUNDS_TITLE} tone="warning" density="compact">
+            {/* #2195: title and cause clause are the SHARED ones — this card and
+                the agent-detail banner are one click apart and used to name the
+                same reconciliation event two different ways. The count is `null`
+                because `has_stranded_funds` is a SQL `EXISTS`, so this surface
+                knows the state exists and cannot know how many events or how
+                much money; the detail banner holds the list and the balance, and
+                says so. That is the difference in detail level, made deliberate.
+
+                `strandedFundsCause`, not the `WithLocation` variant the detail
+                banner uses: the shared title already says "in agent wallet" and
+                the link below says "these funds", so repeating the location
+                here bought nothing and cost a fourth wrapped line at 390px
+                (`haven-design-reviewer` on this change, measured off the 390
+                capture — it also corrected my desktop-only "2 to 3 lines"
+                reading; the real growth at 390 was 3 to 4). */}
+            <span>
+              {strandedFundsCause(null)}{' '}
               <a href={`/agents/${agent.id}`} className="underline underline-offset-2">
-                View agent to sweep funds back to your account.
+                View agent to recover these funds.
               </a>
-            </p>
-          </div>
+            </span>
+          </ApprovalRequiredBanner>
         </div>
       )}
 
@@ -235,9 +310,29 @@ export function AgentCard({
               <p className="text-xs text-[var(--v2-ink-3)]">No agent budget configured</p>
             ) : null}
 
-            {pendingDbTokens.map((symbol) => (
-              <AllowanceBarSkeleton key={symbol} symbol={symbol} />
-            ))}
+            {/* ONE status region for the whole pending list, not one per row
+                (#2204 design review). The app's convention is a status region
+                per loading SURFACE — `DashboardClient.tsx:134`,
+                `AgentDetailClient.tsx:373`, `TransactionsTable.tsx:150` — and
+                the per-row version announced the same string once per card,
+                three times over on `/agents`. The rows keep `aria-busy`, which
+                is what the capture harness reads. */}
+            {pendingDbTokens.length > 0 && (
+              <div
+                /* `space-y-2` is carried, not added: these rows used to be
+                   direct children of the `space-y-2` list above, so wrapping
+                   them without it would silently close the gap between two
+                   pending tokens. */
+                className="space-y-2"
+                role="status"
+                aria-live="polite"
+                aria-label={`Loading ${agent.name}'s budget`}
+              >
+                {pendingDbTokens.map((symbol) => (
+                  <AllowanceBarSkeleton key={symbol} symbol={symbol} />
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -413,12 +508,16 @@ export function AgentCard({
       body={
         <div className="space-y-3">
           <p>
-            Pausing stops this agent from creating new payments through Haven right away, without changing its network permissions.
+            {/* #2230: the same noun as the banner above and the detail page.
+                Leaving "network permissions" here would have replaced a
+                divergence BETWEEN two screens with one INSIDE a single file,
+                for the same fact — a strictly worse version of the defect. */}
+            Pausing stops this agent from creating new payments through Haven right away, without changing its wallet rules.
           </p>
           <div className="rounded-lg border border-brand/15 bg-[var(--v2-brand-soft)] px-3 py-3 text-[var(--v2-ink-2)]">
             <p className="text-xs font-medium text-[var(--v2-brand)] mb-1">What stays the same</p>
             <p className="text-xs leading-relaxed">
-              The agent&apos;s network permissions remain in place. You can resume this agent later without reconnecting or reconfiguring it.
+              The agent&apos;s wallet rules remain in place. You can resume this agent later without reconnecting or reconfiguring it.
             </p>
           </div>
           <p className="text-xs text-[var(--v2-ink-2)]">

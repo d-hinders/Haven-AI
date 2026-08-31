@@ -4,12 +4,16 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   fixtureFor,
   FIXTURE_AGENTS,
+  FIXTURE_USER,
   SEED_STORAGE_KEYS,
   FIXTURE_EMPTY_FALLBACK,
   SCENARIOS,
   ScenarioHttpError,
 } from '../../scripts/screenshot.mjs'
 import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
+
+/** The account the harness makes active by default (`screenshot.mjs:1785`). */
+const DEFAULT_ACTIVE_SAFE_ID = 'safe-fixture'
 import {
   isMcpToolCallActivityItem,
   isPaymentActivityItem,
@@ -20,8 +24,28 @@ import { machinePaymentLifecycle } from '@haven_ai/core'
 
 const fx = fixtureFor as (apiPath: string, mode?: string) => Record<string, unknown> | null
 
+/** A scenario that HAS an `api` hook — the shape these assertions exercise. */
 type ScenarioShape = {
   api: (apiPath: string, method: string) => Record<string, unknown> | undefined
+}
+
+/**
+ * Look a scenario up and assert it actually has an `api` hook.
+ *
+ * The harness treats `api` as OPTIONAL — `scenario?.api?.(api, req.method())`
+ * (`screenshot.mjs:1917`) — and since #2202 one scenario genuinely has none:
+ * `agents-legacy-rail` changes which ACCOUNT is active (`seed`) rather than
+ * what the API answers. A blanket `SCENARIOS as Record<string, ScenarioShape>`
+ * therefore states something false about the registry. This says what each
+ * lookup actually needs, and fails by name if a scenario ever loses its hook
+ * instead of throwing `undefined is not a function` several lines later.
+ */
+const scenarioWithApi = (name: string): ScenarioShape => {
+  const scenario = (SCENARIOS as Record<string, Partial<ScenarioShape>>)[name]
+  if (typeof scenario?.api !== 'function') {
+    throw new Error(`scenario '${name}' has no api hook`)
+  }
+  return scenario as ScenarioShape
 }
 /** A scenario that shoots one surface at several states (#1725). */
 type StagedScenarioShape = ScenarioShape & {
@@ -98,18 +122,69 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(pinned.delegations[0].recipient_address).toMatch(/^0x/)
 
       // The open-recipient budget sits on `agent-retired`, not `agent-ops`:
-      // `agent-ops` is `account_type: null` (legacy Safe rail) and a legacy
-      // agent cannot hold a delegation at all. A fixture that gave it one
-      // would photograph a combination the product cannot produce.
+      // `agent-ops` is `account_type: 'safe'` (the legacy Safe rail, #2202)
+      // and a legacy agent cannot hold a delegation at all. A fixture that
+      // gave it one would photograph a combination the product cannot produce.
       const open = fx('/agents/agent-retired/delegations') as {
         delegations: { recipient_address: string | null }[]
       }
       expect(open.delegations[0].recipient_address).toBeNull()
     })
 
+    it('seeds an ACTIVE account that exists, and the scenario switches to the legacy one (#2202)', () => {
+      // `haven-reviewer`'s finding, and it was right: `agents-legacy-rail` is
+      // the first scenario in the harness to use `seed`, and nothing checked
+      // the value. Mutating the seeded id to `FIXTURE_SAFE.id` — the wrong,
+      // DELEGATION-rail account — left the whole suite green. The scenario's
+      // own `run()` would have caught it, but no CI workflow executes the
+      // general screenshot harness, so it would merge and only surface when a
+      // human next took a capture: the "invisible until someone looks at the
+      // PNG" class this whole issue is about.
+      const safeIds = (FIXTURE_USER as unknown as { safes: { id: string }[] }).safes.map(
+        (s) => s.id,
+      )
+
+      // The harness's own default, seeded before any app code runs.
+      expect(safeIds).toContain(DEFAULT_ACTIVE_SAFE_ID)
+
+      const seeded = (
+        SCENARIOS as Record<string, { seed?: () => Record<string, string> }>
+      )['agents-legacy-rail'].seed!()
+      const activeId = seeded[ACTIVE_SAFE_STORAGE_KEY]
+
+      // It must name a REAL account…
+      expect(safeIds).toContain(activeId)
+      // …and specifically the LEGACY one, or the scenario photographs the
+      // delegation rendering under a name that promises the legacy rail.
+      const active = (
+        FIXTURE_USER as unknown as { safes: { id: string; account_type: string }[] }
+      ).safes.find((s) => s.id === activeId)
+      expect(active!.account_type).toBe('safe')
+      expect(activeId).not.toBe(DEFAULT_ACTIVE_SAFE_ID)
+    })
+
+    it('gives the user exactly ONE default account (#2202)', () => {
+      // Also `haven-reviewer`'s: two-default is union-legal, path-impossible
+      // and RENDERED (`AccountsOverviewClient.tsx` badges the default), and it
+      // survived the suite green under mutation. The app layer enforces a
+      // single default — `CLEAR_DEFAULT_SAFES_FOR_USER_SQL` runs before
+      // `SET_SAFE_DEFAULT_SQL` (`infra/repositories/user-safes.ts:160-163`) —
+      // so a second `is_default: true` is a state no write path leaves behind.
+      const safes = (FIXTURE_USER as unknown as { safes: { is_default: boolean }[] }).safes
+      expect(safes.length).toBeGreaterThan(1) // non-vacuity: one safe cannot disagree
+      expect(safes.filter((s) => s.is_default)).toHaveLength(1)
+    })
+
     it('never gives a legacy-rail agent a delegation', () => {
       const legacy = FIXTURE_AGENTS.find((a) => a.id === 'agent-ops')
-      expect(legacy?.account_type).toBeNull()
+      // #2202: `'safe'`, not `null`. `user_safes.account_type` is
+      // `NOT NULL DEFAULT 'safe'` under
+      // `CHECK (account_type IN ('safe','delegator_hybrid'))`
+      // (`041_hybrid_accounts.ts:29`, `:38`), so the legacy rail IS `'safe'` —
+      // `null` was a value the column could never hold, and it only looked
+      // right because `railOf` reads anything-but-`delegator_hybrid` as legacy
+      // (`lib/custody-rail.ts:37-38`).
+      expect(legacy?.account_type).toBe('safe')
       expect(fx('/agents/agent-ops/delegations')).toEqual({ delegations: [] })
     })
 
@@ -308,6 +383,337 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           ])
         }
       })
+
+      /**
+       * #2147 — the attention half of the same describe block, extending it
+       * rather than standing a parallel one beside it.
+       *
+       * The `derives, rather than restates` test above round-trips
+       * `payment_attention_reason` back in as `reconciliationEventType`, so it
+       * proves the seeded PAIR is self-consistent. What it structurally cannot
+       * see is whether the reconciliation event could have been recorded at
+       * all: `machinePaymentLifecycle` never learns the tx hash, and the
+       * endpoint that writes the event refuses on exactly that. So the
+       * preconditions are asserted here, against
+       * `modules/mpp/reconciliation.ts`.
+       */
+      const attentionRows = () =>
+        seededPaymentRows().filter(
+          (r) => r.payment_attention_reason === 'merchant_retry_rejected_after_payment',
+        )
+
+      it('seeds the needs_attention state at all — the #2147 gap', () => {
+        // Non-vacuity for the two assertions below, and the guard against
+        // silently regressing to the state this issue was filed about: with no
+        // attention row, `needs_attention`'s badge and the "Recoverable funds"
+        // banner's specific copy branch (`AgentDetailClient.tsx:634-636`) have
+        // no rendered evidence anywhere in the capture suite.
+        const rows = attentionRows()
+        expect(rows.length).toBeGreaterThan(0)
+        expect(rows.map((r) => r.payment_flow_status)).toEqual(rows.map(() => 'needs_attention'))
+      })
+
+      it('seeds an attention row the reconciliation endpoint would have accepted', () => {
+        // `handleReconciliationEvent` (`modules/mpp/reconciliation.ts:40-48`)
+        // answers 409 "Reconciliation events require a confirmed payment"
+        // unless BOTH hold, and stores `payment.tx_hash.toLowerCase()` (`:73`).
+        // An attention row missing either describes an event that could never
+        // have been written, however consistent its derived pair looks.
+        for (const row of attentionRows()) {
+          expect([row.id, row.status, row.tx_hash != null]).toEqual([row.id, 'confirmed', true])
+        }
+      })
+
+      it('leaves an attention row at the proof status its own path can reach', () => {
+        // `haven-reviewer`'s should-fix: the #2126 proof-status test above
+        // checks UNION MEMBERSHIP, so `merchant_response_observed` on this row
+        // passes it while being unreachable — and the value RENDERS, verbatim,
+        // as `TransactionDetailPanel.tsx:170`'s "Proof" row. Union membership
+        // is the wrong bar for a row whose path is known.
+        //
+        // On the retry-rejected path the proof status is still the
+        // settlement-time base-row literal `'payment_confirmed'`
+        // (`infra/repositories/machine-payments.ts:49`; column default,
+        // migration `014:13`). The only writer that raises it is
+        // `proofStatusForAttach` (`modules/mpp/evidence.ts:196-200`), reached
+        // from the agent-reported attach — and the SDK throws at
+        // `merchant-completion.ts:137-149` before it can report any evidence.
+        // A merchant that answered well enough to attach a response would not
+        // have produced the rejection this row is about.
+        for (const row of attentionRows()) {
+          expect([row.id, row.payment_proof_status]).toEqual([row.id, 'payment_confirmed'])
+        }
+      })
+
+      it('agrees with the agent row that the reconciliation event is open', () => {
+        // One event, two reads. `has_stranded_funds` is
+        // `EXISTS(… event_type = 'merchant_retry_rejected_after_payment' AND
+        // status = 'open')` over the agent's intents
+        // (`infra/repositories/agents.ts:186-192`, `:206-212`) — the same row
+        // the activity feed derives `payment_attention_reason` from. A fixture
+        // where the two disagree serves a contradiction no backend can.
+        const flagged = new Set(
+          (FIXTURE_AGENTS as { id: string; has_stranded_funds?: boolean }[])
+            .filter((a) => a.has_stranded_funds)
+            .map((a) => a.id),
+        )
+        const withAttention = new Set(attentionRows().map((r) => r.agent_id))
+        expect([...withAttention].sort()).toEqual([...flagged].sort())
+      })
+
+      // ── The banner's GATE, not just its copy (#2194) ─────────────────────
+      //
+      // #2147 photographed the "Recoverable funds in agent wallet" banner's
+      // unsettled-payment copy branch and reported, in the same PR, that the
+      // capture did not prove what it looked like it proved: the banner is
+      // gated on `hasRecoverableUsdc` = `Boolean(balance && balance.usdc_atomic
+      // !== '0')` (`hooks/useDelegateBalance.ts:88`), and
+      // `/agents/:id/delegate-balance` was UNKEYED — so it fell through to
+      // `FIXTURE_EMPTY_FALLBACK`, which has no `usdc_atomic`, and `undefined
+      // !== '0'` rendered the banner from a body with no balance in it.
+      //
+      // This is the subtlest member of the #2120/#2126/#2147 family. Those
+      // seeded states the product cannot reach. Here the state IS reachable —
+      // the fixture reached it by a route the API cannot take, and the PNG is
+      // indistinguishable either way. So these guards assert the RESPONSE, not
+      // the rendered outcome.
+      const agentIds = () => (FIXTURE_AGENTS as { id: string }[]).map((a) => a.id)
+      const balanceFor = (id: string) =>
+        fixtureFor(`/agents/${id}/delegate-balance`) as
+          | (Record<string, unknown> & { usdc_atomic?: string })
+          | ScenarioHttpError
+          | null
+
+      it('keys /agents/:id/delegate-balance for EVERY fixture agent — the #2194 gap', () => {
+        // Non-vacuity for the rest, and the guard against regressing to the
+        // mechanism itself rather than to this one instance of it: a `null`
+        // here is the fallback answering, and the fallback cannot say "not
+        // seeded" — it says 200 with a body that has no `usdc_atomic`.
+        expect(agentIds().length).toBeGreaterThan(0)
+        for (const id of agentIds()) {
+          expect([id, balanceFor(id)]).not.toEqual([id, null])
+        }
+        expect(FIXTURE_EMPTY_FALLBACK).not.toHaveProperty('usdc_atomic')
+      })
+
+      it('keys /safe/:address/details for every LEGACY-rail account it serves (#2202)', () => {
+        // The same fallback mechanism as the #2194 gap above, on the endpoint
+        // this issue's second account newly reaches. `SafeControlCard` reads
+        // its owners and threshold from here, and `/custody` renders that card
+        // for every non-`delegator_hybrid` account — so an unkeyed answer is
+        // not "no data", it is 200 with `owners`/`threshold` missing, which the
+        // card renders as **"Threshold: of 0"**: an owner-less Safe, which no
+        // deployed Safe can be.
+        //
+        // Keyed off the rail rather than off a hardcoded address, so a THIRD
+        // legacy account added later fails here instead of photographing the
+        // empty fallback the way this one did before it was caught.
+        const legacySafes = (
+          FIXTURE_USER as unknown as { safes: { safe_address: string; account_type: string }[] }
+        ).safes.filter((s) => s.account_type !== 'delegator_hybrid')
+        expect(legacySafes.length).toBeGreaterThan(0) // non-vacuity
+        for (const safe of legacySafes) {
+          const details = fixtureFor(`/safe/${safe.safe_address}/details`) as {
+            owners?: string[]
+            threshold?: number
+          } | null
+          expect([safe.safe_address, details]).not.toEqual([safe.safe_address, null])
+          expect(details!.owners!.length).toBeGreaterThan(0)
+          // A Safe cannot require more approvals than it has owners, and a
+          // zero threshold is the shape the fallback produced.
+          expect(details!.threshold).toBeGreaterThan(0)
+          expect(details!.threshold).toBeLessThanOrEqual(details!.owners!.length)
+        }
+        // WHY the gap was silent rather than loud, stated exactly — and it is
+        // worse than "the fields are missing", which is what this assertion
+        // first claimed before it was run. The fallback carries `owners: []`,
+        // a real array of the right type, so `owners.length` is 0 instead of
+        // throwing; and `threshold` is absent, so it renders as a blank. That
+        // is the combination that produced "Threshold: of 0" — a well-formed
+        // answer describing a Safe nobody controls.
+        expect(FIXTURE_EMPTY_FALLBACK).toHaveProperty('owners', [])
+        expect(FIXTURE_EMPTY_FALLBACK).not.toHaveProperty('threshold')
+      })
+
+      it('answers 422 for exactly the agents the route would refuse', () => {
+        // `routes/agents.ts:140-142` — `if (!agent.delegate_address) return
+        // reply.code(422).send({ error: 'Agent has no delegate address' })`.
+        // Both directions: a null delegate MUST 422, and an agent that has one
+        // must NOT, or the fixture is answering for a different agent than the
+        // one it names.
+        const agents = FIXTURE_AGENTS as { id: string; delegate_address: string | null }[]
+        for (const agent of agents) {
+          const answer = balanceFor(agent.id)
+          if (agent.delegate_address === null) {
+            expect(answer).toBeInstanceOf(ScenarioHttpError)
+            expect(answer as ScenarioHttpError).toMatchObject({
+              status: 422,
+              body: { error: 'Agent has no delegate address' },
+            })
+          } else {
+            expect([agent.id, answer instanceof ScenarioHttpError]).toEqual([agent.id, false])
+          }
+        }
+      })
+
+      it('serves the exact field set the route builds, and nothing else', () => {
+        // `routes/agents.ts:159-167` returns these eight keys; the named
+        // `DelegateBalance` schema (`openapi/spec.ts:6516-6528`) requires all
+        // eight. A missing one is how this bug worked — `usdc_atomic` absent
+        // reads as "not zero" — and an EXTRA one is a field the generated type
+        // does not have, i.e. a shape the frontend could not have been written
+        // against.
+        const expected = [
+          'chain_id', 'delegate_address', 'eth', 'eth_atomic',
+          'safe_address', 'usdc', 'usdc_address', 'usdc_atomic',
+        ]
+        const served = agentIds()
+          .map((id) => [id, balanceFor(id)] as const)
+          .filter(([, b]) => b !== null && !(b instanceof ScenarioHttpError))
+        expect(served.length).toBeGreaterThan(0)
+        for (const [id, body] of served) {
+          expect([id, Object.keys(body as object).sort()]).toEqual([id, expected])
+        }
+      })
+
+      it('derives the stranded amount from the open reconciliation event, rather than restating it', () => {
+        // The delegate holds what the funding leg put there and the merchant
+        // never pulled. On the EIP-3009 two-leg x402 shape `payTo` IS the
+        // agent's own delegate EOA — that is what selects the funding leg
+        // (`modules/x402/scheme-selection.ts:56-58`) — and on
+        // `merchant_retry_rejected_after_payment` the SDK throws "x402 retry
+        // failed after Haven funded the delegate wallet"
+        // (`packages/sdk/src/merchant-completion.ts:137-145`) after recording
+        // the event. So the balance is the intent's own amount, and an amount
+        // chosen freely here would photograph a number no incident produced.
+        const rows = attentionRows()
+        expect(rows.length).toBeGreaterThan(0)
+        for (const row of rows) {
+          // `agent_id` is optional on the wire type; an attention row without
+          // one could not have been joined to an agent at all.
+          expect([row.id, typeof row.agent_id]).toEqual([row.id, 'string'])
+          const body = balanceFor(row.agent_id as string) as Record<string, unknown>
+          expect(body).not.toBeInstanceOf(ScenarioHttpError)
+          expect([row.id, body.usdc_atomic]).toEqual([row.id, row.amount_raw])
+          // `usdc` and `amount_human` are equal by CONSTRUCTION, not
+          // coincidence: `routes/agents.ts:165` formats with
+          // `formatTokenValue(usdcAtomic, 6)` and the intent's human string is
+          // `formatTokenValue(amountRaw, tokenConfig.decimals)`
+          // (`modules/x402/authorize.ts:66`) — one function, one atomic input,
+          // the same six decimals.
+          expect([row.id, body.usdc]).toEqual([row.id, row.amount])
+        }
+      })
+
+      it('renders the AMOUNT-bearing sentence, not the degraded fallback', () => {
+        // `strandedSummary` (`AgentDetailClient.tsx:296-300`) needs
+        // `usdc_atomic !== '0'` AND a truthy `usdc`, or the banner degrades to
+        // "Recover **it** to your Haven wallet" (#1098 made that deliberate:
+        // "Recover undefined USDC" is worse). The real route always returns
+        // both as strings, so the degraded branch is what a PARTIAL response
+        // looks like — and it is the branch #2147's capture actually showed,
+        // because the fallback supplied neither field. This guard is why the
+        // amount-bearing sentence now has rendered evidence.
+        const rows = attentionRows()
+        expect(rows.length).toBeGreaterThan(0)
+        for (const row of rows) {
+          expect([row.id, typeof row.agent_id]).toEqual([row.id, 'string'])
+          const body = balanceFor(row.agent_id as string) as { usdc_atomic: string; usdc: string }
+          expect([row.id, body.usdc_atomic !== '0']).toEqual([row.id, true]) // hasRecoverableUsdc
+          expect([row.id, Boolean(body.usdc)]).toEqual([row.id, true]) // strandedSummary
+        }
+      })
+
+      it('describes the agent it is keyed by — every echoed field, not just the amounts', () => {
+        // `haven-reviewer`'s should-fix, applied, and it is the shape #2194 is
+        // about one field further out: `chain_id: 1` or another agent's
+        // `delegate_address` here is union-legal, path-impossible (the route
+        // echoes `agent.delegate_address`, `agent.safe_address` and
+        // `agent.safe_chain_id ?? DEFAULT_CHAIN_ID` — `routes/agents.ts:143,159-162`
+        // — it cannot answer for a different agent or a different chain), and
+        // the reviewer's own mutations of both left all 77 tests green.
+        //
+        // Latent rather than live TODAY: `AgentDetailClient` reads the delegate
+        // and chain off the AGENT record, not off this body
+        // (`AgentDetailClient.tsx:302,310`), so nothing currently renders these
+        // three. `SweepClient.tsx:13` already types `delegate_address` off this
+        // response though, so "no consumer" is a fact about today's callers,
+        // not a property of the shape. Pinned now rather than after the first
+        // caller reads it.
+        const agents = FIXTURE_AGENTS as {
+          id: string
+          delegate_address: string | null
+          safe_address: string
+          safe_chain_id: number
+        }[]
+        const usdcAddress = (fixtureFor('/agents/agent-research/delegate-balance') as {
+          usdc_address: string
+        }).usdc_address
+        // One token per chain: the SAME address the API fixture's allowance
+        // rows carry, which `chain-fed-capture-guard` pins to the shared
+        // registry. Two USDC addresses in one fixture is a contradiction the
+        // deployment cannot serve.
+        expect(typeof usdcAddress).toBe('string')
+        let checked = 0
+        for (const agent of agents) {
+          const body = balanceFor(agent.id)
+          if (body === null || body instanceof ScenarioHttpError) continue
+          checked += 1
+          expect([agent.id, body.delegate_address]).toEqual([agent.id, agent.delegate_address])
+          expect([agent.id, body.safe_address]).toEqual([agent.id, agent.safe_address])
+          expect([agent.id, body.chain_id]).toEqual([agent.id, agent.safe_chain_id])
+          expect([agent.id, body.usdc_address]).toEqual([agent.id, usdcAddress])
+        }
+        expect(checked).toBeGreaterThan(0)
+      })
+
+      it('formats every human amount the way formatTokenValue actually would', () => {
+        // The #2197 reviewer's finding, applied to a numeric field: a value can
+        // be union-legal — any string satisfies `type: 'string'` — path-
+        // impossible, and RENDER. `'0.00'` for an empty delegate is exactly
+        // that: `formatTokenValue` returns early on a zero raw value
+        // (`domain/tokens.ts:37`) and never reaches the two-decimal padding at
+        // `:44`, so the route emits `'0'`. Asserted as the emitter's two
+        // properties rather than a copy of it: a port of the function here
+        // would be a second implementation free to drift.
+        const bodies = agentIds()
+          .map((id) => [id, balanceFor(id)] as const)
+          .filter(([, b]) => b !== null && !(b instanceof ScenarioHttpError)) as [
+          string,
+          Record<string, string>,
+        ][]
+        expect(bodies.length).toBeGreaterThan(0)
+        for (const [id, body] of bodies) {
+          for (const [human, atomic, decimals] of [
+            [body.eth, body.eth_atomic, 18],
+            [body.usdc, body.usdc_atomic, 6],
+          ] as [string, string, number][]) {
+            if (atomic === '0') {
+              expect([id, human]).toEqual([id, '0'])
+              continue
+            }
+            // Non-zero: at least two decimal places (`:44`), at most six
+            // (`:46`), and the string must re-parse to the atomic value it
+            // claims to format.
+            //
+            // `haven-reviewer`'s nit, applied: reconstruct via the INTEGER and
+            // FRACTIONAL halves separately. Concatenating the whole string and
+            // padding by `decimals - frac.length` is only correct while the
+            // integer part is a single non-zero digit — for `'0.005'` it keeps
+            // the leading `'0'` and produces one digit too many, a FALSE
+            // failure on a correctly formatted value. Nothing seeded here is
+            // sub-unit today, which is exactly why it would have been found by
+            // a future amount rather than by this run.
+            const [int = '', frac = ''] = human.split('.')
+            expect([id, frac.length >= 2 && frac.length <= 6]).toEqual([id, true])
+            const reconstructed = (
+              BigInt(int) * 10n ** BigInt(decimals) +
+              BigInt(frac.padEnd(decimals, '0'))
+            ).toString()
+            expect([id, reconstructed]).toEqual([id, atomic])
+          }
+        }
+      })
     })
 
     it('carries `activity` in the generic empty fallback', () => {
@@ -328,15 +734,13 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
   })
 
   describe('scenarios (#1409)', () => {
-    const connect = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent']
-    const approve = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent-approve']
-    const approveLegacy = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent-approve-legacy']
-    const signerRemoval = (SCENARIOS as Record<string, ScenarioShape>)['account-signer-removal']
+    const connect = scenarioWithApi('connect-agent')
+    const approve = scenarioWithApi('connect-agent-approve')
+    const approveLegacy = scenarioWithApi('connect-agent-approve-legacy')
+    const signerRemoval = scenarioWithApi('account-signer-removal')
     // Cast the ENTRY, not the registry: `Record<string, StagedScenarioShape>`
     // would claim every scenario is staged, and only this one is.
-    const backupRecovery = (SCENARIOS as Record<string, ScenarioShape>)[
-      'account-backup-recovery'
-    ] as StagedScenarioShape
+    const backupRecovery = scenarioWithApi('account-backup-recovery') as StagedScenarioShape
 
     // The stage is module state in screenshot.mjs (the scenario's `run` resets
     // it per viewport for the same reason). Leaving it moved would make every
@@ -466,7 +870,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // kept the field would shoot the resolved screen under the unresolved
       // filename, which is exactly the confidently-wrong-evidence shape #1800
       // exists to prevent.
-      const unresolved = (SCENARIOS as Record<string, ScenarioShape>)['add-funds-unresolved-chain']
+      const unresolved = scenarioWithApi('add-funds-unresolved-chain')
       const me = unresolved.api('/auth/me', 'GET') as { safes: Record<string, unknown>[] }
       const list = unresolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
       for (const { safes } of [me, list]) {
@@ -476,7 +880,10 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         // a PRESENT address, so an empty safe would prove something else.
         expect(safes[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
         expect(safes[0].id).toBe(FIXTURE_SAFE_ID)
-        expect(safes[0]).not.toHaveProperty('account_type')
+        // #2202: the rail is named, and it matches the resolved twin's — the
+        // pair is evidence about `chain_id` only while `chain_id` is the one
+        // field that differs between them.
+        expect(safes[0].account_type).toBe('safe')
       }
       expect(unresolved.api('/agents', 'GET')).toBeUndefined()
     })
@@ -488,11 +895,18 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // rail override (dropping `account_type`, which exists purely so the hero
       // renders its action buttons instead of the passkey-on-another-device
       // notice).
-      const resolved = (SCENARIOS as Record<string, ScenarioShape>)['add-funds']
+      const resolved = scenarioWithApi('add-funds')
       const me = resolved.api('/auth/me', 'GET') as { safes: Record<string, unknown>[] }
       expect(me.safes).toHaveLength(1)
       expect(me.safes[0].chain_id).toBe(84532)
-      expect(me.safes[0]).not.toHaveProperty('account_type')
+      // #2202: the rail is now NAMED rather than expressed by absence. An
+      // absent `account_type` is not a state the API can serve — the column is
+      // `NOT NULL DEFAULT 'safe'` (`041_hybrid_accounts.ts:29`) — and `railOf`
+      // reads `'safe'` and `undefined` identically, so nothing rendered
+      // differently. What this still pins is that the override is the SAME on
+      // both halves of the pair, which is what makes `chain_id` the sole
+      // variable.
+      expect(me.safes[0].account_type).toBe('safe')
       // Both safe endpoints must agree — a fixture where one says 84532 and the
       // other says nothing is a trap for the next scenario that reads the other.
       const list = resolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
@@ -505,8 +919,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // surface. The pair is only evidence about the CHAIN if the chain is the
       // only thing that differs — and the unresolved capture only proves
       // suppression if its safe genuinely lacks `chain_id` on BOTH endpoints.
-      const resolved = (SCENARIOS as Record<string, ScenarioShape>)['receive-funds']
-      const unresolved = (SCENARIOS as Record<string, ScenarioShape>)['receive-funds-unresolved-chain']
+      const resolved = scenarioWithApi('receive-funds')
+      const unresolved = scenarioWithApi('receive-funds-unresolved-chain')
 
       for (const endpoint of ['/auth/me', '/user/safes']) {
         const r = resolved.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
@@ -521,8 +935,10 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect(u.safes[0].id).toBe(FIXTURE_SAFE_ID)
         // The rail override is the ONLY other difference from the shared
         // fixture, and both halves carry it, so `chain_id` is the sole variable.
-        expect(r.safes[0]).not.toHaveProperty('account_type')
-        expect(u.safes[0]).not.toHaveProperty('account_type')
+        // #2202: named rather than absent — see the #1844 pair above. Both
+        // halves carry it, which is the invariant this line is really for.
+        expect(r.safes[0].account_type).toBe('safe')
+        expect(u.safes[0].account_type).toBe('safe')
       }
       expect(resolved.api('/agents', 'GET')).toBeUndefined()
       expect(unresolved.api('/agents', 'GET')).toBeUndefined()
@@ -621,7 +1037,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
      * right.
      */
     describe('retired-rail-account (#1989)', () => {
-      const legacy = (SCENARIOS as Record<string, ScenarioShape>)['retired-rail-account']
+      const legacy = scenarioWithApi('retired-rail-account')
 
       it('puts the SHARED fixture account on the legacy rail, changing only account_type', () => {
         const me = legacy.api('/auth/me', 'GET') as {

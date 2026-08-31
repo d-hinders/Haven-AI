@@ -164,6 +164,56 @@ Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../
 
    Do not open the pull request while a `covers:`-mapped doc is left unreviewed. Report what the gate actually printed — "no covered docs implicated" is only evidence when the gate saw the candidate diff, which is why it now refuses to call an empty file set a pass.
 
+### Rework caps (#2163)
+
+Unconditional — every pull request, every surface. These reduce **rework**, never
+review: round-one review earns its place on every pass, and nothing here touches
+the owner decision (`CLAUDE.md` § *How shipping is governed*) that the reviewer
+pass runs on every PR, full stop. They come from #2131 / PR #2154 (branch commits
+`db5af4da` → `0083d94d` and after), where most of the eleven branch commits
+existed to repair the commit before them, and every substantive finding after
+round one traced to a fix rather than to the original work. Deliberately **not** a rigour dial the author selects — a self-chosen
+"light mode" is the re-derived conditional that same `CLAUDE.md` section records
+as the licence to skip. What legitimately varies (mutation-proving guards, CASP
+shard depth, characterization-tests-first, the rendered design pass) keys off the
+labels CI applies — `area:*` / `money-path`, the same routing *Prepare* already
+uses — never off self-assessment: on PR #2154 the self-assessment was
+`n/a (not area:frontend)`, the labeler was right, and the pass it forced found a
+real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
+
+1. **Do not write test assertions over freeform prose.** Guard the code that
+   *generates* agent-facing text. Where the text is hand-maintained and the
+   content matters, a blanket `not.toContain(<literal>)` is acceptable when the
+   file has no legitimate use of the literal; anything that requires the
+   assertion to *interpret a sentence* is out of scope, and human review is the
+   control there. The line is prose-interpretation, not string-matching — this
+   rule is never a licence to drop cheap literal guards, which were the *good*
+   outcome on #2131 (sound on the first attempt, while four successive
+   prose-interpreting guards each failed against realistic edits in the file's
+   own house style).
+2. **Stopping rule for the fix→review loop.** When a review round's findings are
+   all traceable to your own previous fix commit rather than to the original
+   work — checkable against `git show`, not a vibe — stop **patching**: choose
+   between reverting to the simpler construct or accepting and documenting the
+   residue — and that choice, including whether the round really was all
+   fix-traceable, still clears through the same reviewer. This ends the fix
+   loop, never the review: it is not a licence to merge over an uncleared
+   finding, and the reviewer accepting the documented residue is the exit,
+   exactly as *Independent Review* step 2 above requires.
+3. **A check must cover the scope of the claim written from it.** Before writing
+   "appears nowhere in backend production code" into a doc, run the check over
+   the scope the sentence names — `packages/`, not `packages/backend/src`, since
+   `packages/core` is consumed by the backend without living in it. A true
+   conclusion resting on a false evidence sentence still has to be corrected in
+   every copy.
+4. **Process reflection stays out of compliance artifacts.** A CASP shard is a
+   regulatory record, not a retrospective; an account of the author's own fix
+   churn belongs in the PR body at most.
+5. **Reviewer verdicts in the PR body are the named verdict line plus its scope
+   caveats — not a multi-paragraph transcript.** A bound, not a ban: quote what
+   a later reader needs in order to know what was cleared and what was not,
+   including any limit the reviewer put on their own clearance.
+
 ## Commit And Pull Request
 
 1. Review the final diff and run `git diff --check`.
@@ -261,7 +311,9 @@ you need the reasoning. Never edit one without the other — CI will not let you
   `scripts/ci/money-path-restatement-scan.mjs`, `.github/CODEOWNERS`,
   `.github/money-path-globs.json`, `.github/workflows/publish.yml`,
   `.github/workflows/dev-gate.yml`, `.github/workflows/qa-dev.yml`,
-  `packages/frontend/src/lib/signer.ts`, `packages/frontend/src/hooks/useAgentRekey.ts`. These are
+  `packages/frontend/src/lib/signer.ts`, `packages/frontend/src/hooks/useAgentRekey.ts`,
+  `scripts/docs/coupling-gate.mjs`, `scripts/docs/validate-frontmatter.mjs` and
+  `.github/workflows/docs-coupling.yml`. These are
   `controlGlobs` in the JSON: labelled money-path so a PR weakening the gate gets
   this playbook and a human, but excluded from the freshness re-run, because
   re-running the money-flow harness proves nothing about a CI config change —

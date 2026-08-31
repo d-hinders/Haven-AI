@@ -1,5 +1,6 @@
 import { CONNECTOR_VERSION, type ConnectOptions } from './runtime.js'
 import { assertValidServerSlug } from './server-names.js'
+import { REKEY_FINISH_NEEDS_API_KEY } from './rekey-messages.js'
 
 export interface ParsedCli {
   options: ConnectOptions
@@ -10,6 +11,14 @@ export interface ParsedCli {
   repair: boolean
   /** #1681: retire an agent credential directory in place — no token required. */
   tombstone?: { directory: string; reason?: string; replacedBy?: string }
+  /**
+   * #2169: unwire one agent — tombstone it, then remove its MCP pair and
+   * Hermes dotenv key from every runtime config. No token required; refuses
+   * rather than guess when a bare pair is owned by a different agent.
+   */
+  unwire?: { reason?: string; replacedBy?: string }
+  /** Optional positional value of --unwire <dir> (else --name / --credentials-dir resolve it). */
+  unwireDir?: string
   /**
    * #1700: replace an agent's signing key on this machine. Two phases, because
    * the dashboard sits between them — `start` generates the key and prints its
@@ -33,6 +42,8 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   let tombstoneDir: string | undefined
   let tombstoneReason: string | undefined
   let tombstoneReplacedBy: string | undefined
+  let unwire: { reason?: string; replacedBy?: string } | undefined
+  let unwireDir: string | undefined
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -52,6 +63,15 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       newApiKey = requireValue(argv, ++i, arg)
     } else if (arg === '--tombstone') {
       tombstoneDir = requireValue(argv, ++i, arg)
+    } else if (arg === '--unwire') {
+      unwire = unwire ?? {}
+      const next = argv[i + 1]
+      // Optional positional form --unwire <dir>; a following flag (usually
+      // --name or --credentials-dir) means the directory is resolved later.
+      if (next !== undefined && !next.startsWith('--')) {
+        unwireDir = next
+        i += 1
+      }
     } else if (arg === '--reason') {
       tombstoneReason = requireValue(argv, ++i, arg)
     } else if (arg === '--replaced-by') {
@@ -113,7 +133,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       )
     }
     if (rekey.phase === 'finish' && !newApiKey) {
-      throw new Error('--rekey-finish needs --api-key <key> — the one the Haven agent page showed once.')
+      throw new Error(REKEY_FINISH_NEEDS_API_KEY)
     }
     return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey }
   }
@@ -124,15 +144,38 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     throw new Error('--api-key requires --rekey-finish.')
   }
 
-  if (!tombstoneDir && (tombstoneReason !== undefined || tombstoneReplacedBy !== undefined)) {
+  if (!tombstoneDir && !unwire && (tombstoneReason !== undefined || tombstoneReplacedBy !== undefined)) {
     // Refuse rather than silently discard — the caller believed these did
     // something. (#1681 review, finding 2)
-    throw new Error('--reason and --replaced-by require --tombstone <dir>.')
+    throw new Error('--reason and --replaced-by require --tombstone <dir> or --unwire.')
+  }
+
+  // --reason / --replaced-by ride whichever teardown mode is active.
+  if (unwire && (tombstoneReason !== undefined || tombstoneReplacedBy !== undefined)) {
+    unwire = {
+      ...(tombstoneReason !== undefined ? { reason: tombstoneReason } : {}),
+      ...(tombstoneReplacedBy !== undefined ? { replacedBy: tombstoneReplacedBy } : {}),
+      ...unwire,
+    }
   }
 
   if (tombstone) {
+    if (unwire) {
+      throw new Error('--unwire and --tombstone are separate operations; run one per invocation.')
+    }
     // Retirement reuses STORED state, like --doctor — no token, no runtime.
-    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey }
+    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey, unwire, unwireDir }
+  }
+
+  if (unwire) {
+    // Unwire reuses STORED state, like --doctor — no token, no runtime.
+    if (options.setupToken) {
+      throw new Error('--unwire removes existing wiring; it does not take --setup. Drop --setup.')
+    }
+    if (!unwireDir && !options.serverName && !options.credentialsDir) {
+      throw new Error('--unwire needs a target: --unwire <dir>, --unwire --name <slug>, or --unwire --credentials-dir <path>.')
+    }
+    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey, unwire, unwireDir }
   }
 
   if (doctor || repair) {
@@ -201,8 +244,20 @@ export function helpText(): string {
     '  --tombstone <dir>          Retire an agent credential directory in place (no token): replaces its signer',
     '                             wrapper with a diagnostic that names the retirement in MCP stderr logs, and',
     '                             writes TOMBSTONE.json. Touches NO key material and revokes nothing.',
-    '  --reason <text>            Reason recorded in the tombstone (with --tombstone).',
-    '  --replaced-by <agent-id>   Successor agent recorded in the tombstone (with --tombstone).',
+    '  --unwire [<dir>]           Remove one agent\u2019s wiring from every runtime config it appears in (no token):',
+    '                             tombstone-first, then drops the hosted + signer MCP pair from Hermes YAML, Codex',
+    '                             TOML and the JSON configs (Cursor, VS Code, Insiders, Claude Desktop), plus the',
+    '                             Hermes dotenv API-key line (MCP_HAVEN_API_KEY / MCP_HAVEN_<SLUG>_API_KEY).',
+    '                             Target the directory directly, or add --name <slug> or --credentials-dir.',
+    '                             An UNNAMED pair is only removed when this directory\u2019s wrapper is the one the',
+    '                             config launches (or its key is the one the Hermes env holds); otherwise the',
+    '                             command refuses rather than unwire a different agent — it never touches a',
+    '                             pair another agent owns. Tears down the target directory: its signer key and',
+    '                             API key are removed locally (record kept via the #2155 tombstone mirror) and',
+    '                             nothing is ever revoked on the backend — that stays an owner action on the',
+    '                             Haven agent page.',
+    '  --reason <text>            Reason recorded in the tombstone (with --tombstone or --unwire).',
+    '  --replaced-by <agent-id>   Successor agent recorded in the tombstone (with --tombstone or --unwire).',
     '  --help                     Show this help.',
     '',
     'The connector never prints the private key and never sends it to Haven. JSON output never includes credential contents or full credential paths.',

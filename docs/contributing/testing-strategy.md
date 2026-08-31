@@ -8,7 +8,7 @@ covers:
   - packages/backend/vitest.global-setup.ts
   - scripts/db-mock-ratchet.mjs
   - packages/backend/db-mock-baseline.json
-last-verified: "2026-08-22" # #1763: the no-database section is rewritten — the local default inverts to failing, HAVEN_SKIP_DB_TESTS=1 acknowledges a narrowed run, and the verdict prints after vitest's summary; harness section re-read against db-harness.ts, the beforeAll example unchanged and still preferred. Prior: resetDb now awaits initDbHarness (the un-awaited-init 42P01/40P01 CI flake); harness section re-read against db-harness.ts, example unchanged and still the preferred shape
+last-verified: "2026-08-30" # #2211: resetDb() now empties the worker schema with foreign-key-ordered DELETEs instead of one TRUNCATE ... RESTART IDENTITY CASCADE — same coverage (every table, every time), cost now set by rows written rather than by relation count: ~371 ms -> ~48 ms quiet, ~414-448 ms -> ~52-61 ms loaded, 861 s -> 345 s of backend test time; harness section re-read against db-harness.ts and the resetDb()-in-a-loop convention rewritten around the new mechanics (the convention itself stands). Prior: #2209: harness section re-read against db-harness.ts; adds the resetDb()-in-a-loop convention with measured per-call cost (~250 ms quiet / ~800 ms-1.2 s loaded at 38 tables) — no harness behaviour changed, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #2198: harness section re-read against db-harness.ts — the cross-worker migration lock now WAITS by polling pg_try_advisory_lock (shared helper db/advisory-lock.ts) instead of blocking in pg_advisory_lock, because a blocking waiter pins a snapshot that deadlocks CREATE INDEX CONCURRENTLY; no doc-visible change, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #1763: the no-database section is rewritten — the local default inverts to failing, HAVEN_SKIP_DB_TESTS=1 acknowledges a narrowed run, and the verdict prints after vitest's summary; harness section re-read against db-harness.ts, the beforeAll example unchanged and still preferred. Prior: resetDb now awaits initDbHarness (the un-awaited-init 42P01/40P01 CI flake); harness section re-read against db-harness.ts, example unchanged and still the preferred shape
 ---
 
 # Backend testing strategy: the real-database rule
@@ -53,7 +53,7 @@ encode query order — not against mocking as such.
 schema per vitest worker (`test_w<id>`), bound through the connection string
 before `config.ts` reads it, so even module-level `pool` imports resolve into
 the worker schema. Migrations apply once per worker (idempotently — cheap on
-re-entry); `resetDb()` truncates between tests — and **awaits harness init
+re-entry); `resetDb()` empties every table between tests — and **awaits harness init
 itself** first, so a file that calls `initDbHarness()` without awaiting it (or
 skips it entirely) still cannot race its own worker's migration DDL. That
 guarantee exists because the #1555/#1559 outbound files DID call it bare at
@@ -126,6 +126,48 @@ transition and the row that must not. The reference conversion is
 `delegation-budgets.test.ts` (#1221); the concurrency patterns (claim CAS,
 `FOR UPDATE` serialisation with two live transactions) are in
 `payment-intents.test.ts` and `agent-connection-setups.test.ts`.
+
+### `resetDb()` belongs in `beforeEach`, not in a loop (#2209, #2211)
+
+One more convention, learned from a flake rather than a conversion. `resetDb()`
+covers **every** table in the worker schema, so its cost is set by the schema
+and not by what your test wrote. It is not a per-case primitive you can sprinkle
+inside a table-driven loop.
+
+Seed the whole case table into one database state and assert on the IDs you
+seeded instead of on the batch size. That is usually the stronger assertion
+anyway: the query has to pick the right rows out of a table that also holds the
+wrong ones, which per-case isolation cannot see. Keep the "nothing extra came
+back" half with a closing set-equality check.
+`passport-rail-eligibility.test.ts` is the worked example.
+
+**What #2211 changed, and what it did not.** The convention above was written
+when the reset was one `TRUNCATE … RESTART IDENTITY CASCADE` over the whole
+table list. `TRUNCATE` costs a roughly fixed amount **per relation** — every
+truncated table and every one of its indexes gets a fresh relfilenode — so the
+reset got slower with every migration that added a table, regardless of what any
+test did. At 38 tables / 136 indexes that measured ~371 ms quiet and ~414–448 ms
+under the parallel load of a concurrent backend run; a six-case loop paid seven
+resets and blew vitest's 5 s default `testTimeout` (#2209), and a bumped timeout
+would only have moved the date.
+
+`resetDb()` now empties the same tables with foreign-key-ordered `DELETE`s, whose
+cost is set by the ROWS a test actually wrote rather than by the relation count.
+Same measurement, interleaved so catalog bloat and machine drift hit both arms
+equally: **~48 ms quiet, ~52–61 ms loaded** — 7–8× cheaper on both. Across the
+whole backend suite that is 861 s → 345 s of test time (221 files, 2 778 tests).
+
+Coverage is unchanged — every table, every time — and that is the part worth
+being careful about: a faster reset that quietly stopped cleaning something
+would be a correctness regression disguised as a speedup.
+`db-harness-reset-cleans-everything.test.ts` proves it rather than asserting it,
+by taking a post-reset row census over `pg_tables` (the catalog, not a list the
+harness maintains) with a named seed as the positive control.
+
+So the convention **stands** — a loop that resets per case is still the wrong
+shape, and the reset is still the most expensive thing in a real-DB test — but
+it is no longer the only thing standing between the suite and the next
+migration.
 
 ## The ratchet
 

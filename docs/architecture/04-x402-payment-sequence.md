@@ -31,7 +31,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-28" # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-30" # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -748,6 +748,10 @@ otherwise. That value now has exactly one producer, and it is server-side:
    leg confirming and its own merchant retry, value sits on the delegate EOA,
    and the merchant was never paid. Before #2145 this exact state answered
    `next_action: none` — *"The payment is confirmed."*
+   The #2159 QA deployment may set `MERCHANT_REPORT_GRACE_MIN_OVERRIDE=0` only
+   when it serves **only Base Sepolia** (`HAVEN_DEPLOY_CHAIN_IDS=84532`); startup
+   refuses that override on mainnet, mixed, or unbounded deployments, so the
+   production 15-minute protection cannot be shortened accidentally.
 2. The derivation is entirely from evidence Haven holds server-side
    (`merchant_leg_reported` in the status projection SQL,
    [`infra/repositories/payment-intents.ts`](../../packages/backend/src/infra/repositories/payment-intents.ts))
@@ -1093,7 +1097,9 @@ index is never used, because "hash absent from a truncated range" is
 indistinguishable from "not settled".
 
 **Accepted residual gaps.** Three, and all three stay `submitted` with no
-evidence row rather than being guessed at. Each is logged as an operational
+evidence row rather than being guessed at. (A *fourth* state — `confirmed` with
+no evidence row — is not in this list because it is not accepted: see the
+recovery pass below.) Each is logged as an operational
 warning once its settlement window has closed, so the residue is visible rather
 than silent:
 
@@ -1113,6 +1119,84 @@ by posting the settlement hash to `POST /machine-payments/evidence`; and since
 (`settlement_unobservable`) — it retries with bounded backoff, so a settlement
 that simply had not been mined yet at report time no longer costs the payment
 its place in the books.
+
+**That remedy now travels with the alert (#2214).** The residual warning used to
+end at "it will not reach the accounting feed", which overstated the situation
+in the same way #2213's PR found one level down: it is the *sweep* that is
+stuck, not the payment. The agent-reported path runs the same verifier with
+`requireDelegationBound` **off**, so it does not need the manager log the scan
+could not find (gap 1) and is not bounded by the recovery horizon (gap 3). The
+log therefore carries a `remedy` field naming that route, because an alert about
+a dead end is an alert operators learn to scroll past.
+
+**The one exclusion that happens in SQL, and why it is not a fourth residual.**
+`FIND_SWEEPABLE_ERC7710_INTENTS_SQL` requires `delegation_hash IS NOT NULL`,
+upstream of the tick — so a row it dropped would be neither completed nor
+counted in `unresolved` nor logged, missing both halves of "complete what can be
+attributed, and log the rest loudly". @PhilipEriksson raised exactly that on PR
+#2134 and #2136 pinned the behaviour. It is not a live gap, because the
+population is unconstructible rather than merely empty: the sole production
+writer of `settlement_scheme = 'erc7710'` sets `delegation_hash` in the *same*
+`insertMachineIntent` call — one INSERT, both columns — and has done so since
+#830 introduced the erc7710 path (2026-07-10), not since #2094 (2026-08-27).
+What #2094 changed is the child's **salt**, so a pre-#2094 intent carries the
+old constant-salt hash, is a candidate, is scanned, and is counted and logged
+like any other; when a look-alike twin makes it unattributable it appears above
+as residual gap 2. So `delegation_hash IS NOT NULL` is defence in depth over an
+empty set. A counter or census for it would report zero forever; what is pinned
+instead — from both directions, in
+[`erc7710-sweep-eligibility.test.ts`](../../packages/backend/src/infra/repositories/__tests__/erc7710-sweep-eligibility.test.ts)
+— is the invariant that keeps the set empty, so a second writer added without a
+`delegationHash` fails a test rather than silently losing payments.
+
+**The confirm and the evidence row are two writes, and the second one can fail
+(#2213).** Completing a payment means flipping the intent `submitted →
+confirmed` and then writing the `machine_payment_evidence` row that the
+accounting feed enumerates. These cannot be one transaction and cannot be
+reordered: `recordMachinePaymentEvidenceBase` refuses any intent that is not
+already `confirmed` with a `tx_hash`, so evidence is settlement-time proof by
+construction, and the write ends in a fire-and-forget call to the reporting feed
+that no rollback could take back. Nor should the confirm be undone — it records
+a true fact about the chain, and reverting it would re-open the replay/ambiguity
+surface that the CAS exists to close.
+
+The consequence is a fourth state, distinct from the three residuals above: a
+payment that is `confirmed` with a hash and has **no evidence row**. It has left
+the candidate query (`status = 'submitted'`) for good, and the feed's backfill
+selects from evidence ROWS, so "Sync now" cannot see it either. Before #2213
+nothing automated could reach it again, while the tick logged it as a
+completion.
+
+Be precise about the one path that was not closed: an agent re-posting the same
+hash to `POST /machine-payments/evidence` WOULD still complete it —
+`observeErc7710Settlement` answers `not_applicable` on an already-confirmed
+intent, and `attachMachinePaymentEvidence` falls through to
+`recordMachinePaymentEvidenceBase` and writes the row. The gap was never that a
+retry would be refused; it was that nothing prompts one. The sweep reported
+success, so no operator had a reason to look, and on the plain-HTTP flow (#2041)
+the agent never had the hash to re-post in the first place.
+
+Two things changed. The evidence seam now **reports** whether a row landed
+(`recorded` / `not_applicable` / `failed`), so the tick counts `evidencePushed`
+and `evidenceFailed` apart from the state transition `confirmed`, and a failure
+is a `warn`, never the completion log. And a **recovery pass** runs each tick
+over `FIND_EVIDENCE_ORPHANED_ERC7710_INTENTS_SQL` — confirmed erc7710 intents
+with no evidence row, inside the same 24-hour horizon — and writes the missing
+row. It touches no chain: those payments are already attributed. It re-derives
+the hole from state rather than from a remembered failure, so it also recovers a
+hole dug by the agent-reported path, and it is not scoped to `delegation_hash IS
+NOT NULL` because recovery needs no lookup key. The one thing it cannot fix is a
+settled payment with no `resource_url`, which `machine_payment_evidence`
+requires NOT NULL: that is retried until the horizon and warned on every
+attempt, so it announces itself rather than reporting success.
+
+The distinction the seam draws is the crux. "Nothing to record" (wrong rail, not
+settled yet) is a correct answer to a speculative caller and must not read as a
+failure; "failed to record" (no resource URL, intent unreadable, write threw)
+means a payment that should be in the books is not. Collapsing the two is how
+the silence got there. At the sweep's own call site there is no legitimate
+"nothing to record" left — it has just established every precondition itself —
+so it treats every non-`recorded` outcome as a failure.
 
 ### What the settlement child delegation actually constrains
 

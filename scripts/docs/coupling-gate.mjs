@@ -33,6 +33,7 @@ import {
   parseFrontMatter,
   globToRegExp,
 } from './validate-frontmatter.mjs'
+import { packageDocRecords } from './package-docs.mjs'
 
 function arg(name) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
@@ -54,10 +55,83 @@ function gitLines(args) {
  * sync PR (e.g. #1336, zero content delta) has nothing to couple, while a
  * failed computation must stay fail-closed (the #1076 lesson).
  */
+/**
+ * Parse `git diff --name-status` output into paths plus the set of ADDED ones.
+ *
+ * The path is the LAST tab-separated field, which keeps renames (`R100\told\tnew`)
+ * pointing at the new path exactly as `--name-only` reports them. Only `A`
+ * counts as added: a rename is an old record under a new name, not a new one —
+ * see `implicatedDocs` for why that distinction is the whole point (#2192).
+ *
+ * DO NOT "fix" this with `--no-renames`, which review proposed and measurement
+ * rejected. The concern is real: git pairs a deleted file with a similar added
+ * one, so a PR that deletes an old shard while adding its own could see its new
+ * shard reported `R` and be wrongly blocked. But `--no-renames` reports every
+ * rename as `D` + `A`, which makes RENAMING a merged shard satisfy the gate —
+ * trading a loud false block for exactly the silent bypass this change exists
+ * to close, and the silent direction is the one that ships.
+ *
+ * Measured 2026-08-29 on git 2.43, both shapes:
+ *   - delete a byte-identical duplicate + add an UNRELATED new shard (the case-3
+ *     fold-in this repo endorses) -> `D` + `A`. Counted. No false block.
+ *   - delete a shard + add one ~97% identical to it -> `R097`. Blocked.
+ * The second is the only case that fires, and blocking it is right: a shard 97%
+ * identical to another shard is a copy-paste, not a verification record for a
+ * different change. `C` (copy) cannot occur — git emits it only under an
+ * explicit `-C`/`--find-copies`, which this file never passes.
+ *
+ * The worry this leaves is a MIDDLE band — two genuinely distinct shards paired
+ * on shared boilerplate. Review measured the real corpus for it and found none:
+ *   - 6 pairs of same-day, same-domain shards (the erc7710/x402 cluster, chosen
+ *     to maximise shared vocabulary): 0% similarity, even at `-M1%`.
+ *   - the two most boilerplate-heavy files in the directory — consecutive
+ *     RELEASE shards sharing a verbatim ~100-word opening: `R003`, 3%.
+ *   - an old shard copied and edited only in its issue number: `R095`.
+ * So the gap is 3% against a 50% default threshold, with copy-paste at 95%+.
+ * There is no band in between, because shards are issue-specific narrative
+ * prose rather than a filled-in template. That is a property of how shards are
+ * WRITTEN, not a proof — if the convention ever becomes templated, re-measure
+ * this rather than reaching for `--no-renames`.
+ */
+export function parseNameStatus(out) {
+  const files = []
+  const added = new Set()
+  for (const line of out.split('\n')) {
+    const parts = line.split('\t').map((s) => s.trim()).filter(Boolean)
+    if (parts.length < 2) continue
+    const path = parts[parts.length - 1]
+    files.push(path)
+    if (parts[0][0] === 'A') added.add(path)
+  }
+  return { files, added }
+}
+
+function gitNameStatus(args) {
+  try {
+    return parseNameStatus(execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' }))
+  } catch {
+    return null
+  }
+}
+
 export function changedFilesWithProvenance() {
   const explicit = arg('changed')
   if (explicit !== undefined) {
-    return { files: explicit.split(',').map((s) => s.trim()).filter(Boolean), computed: true }
+    const explicitAdded = arg('added')
+    return {
+      files: explicit.split(',').map((s) => s.trim()).filter(Boolean),
+      computed: true,
+      // #2192: a bare `--changed=` list carries no add/modify status, so the
+      // added-shard rule cannot be applied to it. `added: null` means "status
+      // unknown" and restores the pre-#2192 behaviour for this path ONLY.
+      // Deliberately permissive rather than fail-closed: `--changed` is a
+      // local/debugging affordance, while the job that actually gates a PR
+      // (docs-coupling.yml `contract`) sets BASE_SHA and gets real status.
+      // Pass `--added=` alongside `--changed=` to exercise the rule by hand.
+      added: explicitAdded === undefined
+        ? null
+        : new Set(explicitAdded.split(',').map((s) => s.trim()).filter(Boolean)),
+    }
   }
   const base = process.env.BASE_SHA
   if (base) {
@@ -65,16 +139,10 @@ export function changedFilesWithProvenance() {
     // THREE-DOT (merge-base): a two-dot diff against a moving base branch lists
     // files the PR never touched as "changed" (same flaw fixed in the
     // design-system coupling gate, code review 2026-07-13).
-    try {
-      const out = execFileSync('git', ['diff', '--name-only', `${base}...${head}`], {
-        cwd: REPO_ROOT,
-        encoding: 'utf8',
-      })
-      return { files: out.split('\n').map((s) => s.trim()).filter(Boolean), computed: true }
-    } catch {
-      // The range itself failed (missing SHA, shallow clone) — NOT a clean bill.
-      return { files: [], computed: false }
-    }
+    const range = gitNameStatus(['diff', '--name-status', `${base}...${head}`])
+    if (range) return { files: range.files, computed: true, added: range.added }
+    // The range itself failed (missing SHA, shallow clone) — NOT a clean bill.
+    return { files: [], computed: false, added: null }
   }
   // Local run (no BASE_SHA): the candidate change is whatever a reviewer would
   // look at, which includes work not committed yet. A committed-only range
@@ -83,13 +151,22 @@ export function changedFilesWithProvenance() {
   // during review, before the commit. CI is unaffected: it always sets BASE_SHA.
   // Local: an empty union here is ambiguous (pre-commit run, #1076) — never
   // provably computed-and-empty.
+  const branch = gitNameStatus(['diff', '--name-status', 'origin/dev...HEAD'])
+  const worktree = gitNameStatus(['diff', '--name-status', 'HEAD']) // staged + unstaged tracked
+  const untracked = gitLines(['ls-files', '--others', '--exclude-standard'])
+  const added = new Set([
+    ...(branch?.added ?? []),
+    ...(worktree?.added ?? []),
+    ...untracked, // an untracked file is added by definition
+  ])
   return {
     files: [...new Set([
-      ...gitLines(['diff', '--name-only', 'origin/dev...HEAD']),
-      ...gitLines(['diff', '--name-only', 'HEAD']), // staged + unstaged tracked
-      ...gitLines(['ls-files', '--others', '--exclude-standard']), // untracked
+      ...(branch?.files ?? []),
+      ...(worktree?.files ?? []),
+      ...untracked,
     ])].sort(),
     computed: false,
+    added,
   }
 }
 
@@ -234,25 +311,49 @@ export function isIncidentalPath(file) {
  * suppression decision, because there is none. It still applies to `ageDays`
  * staleness reporting, where being a day out never changes an outcome.
  */
-export function implicatedDocs(changed, docs, { strict = false } = {}) {
+export function implicatedDocs(changed, docs, { strict = false, added = null } = {}) {
   const changedSet = new Set(changed)
   const findings = []
   for (const { doc, covers, lastVerified, contract, satisfiedBy } of docs) {
     if (changedSet.has(doc)) continue
+    // Per-iteration: a `var` here would leak the previous doc's near-miss into
+    // this one's finding.
+    let editedOnlySatisfyMatches = []
     // #1366: a doc may declare `satisfied-by:` globs — touching a matching
     // file counts as touching the doc itself. Built for the CASP changelog
     // shards: every money-path PR must still write its verification entry,
     // but as `docs/regulatory/casp-changelog/<date>-<issue>.md` (a file no
     // parallel PR also edits) instead of appending to one monolithic EOF —
     // the line-collision class that made four PRs conflict in one day.
-    if (
-      satisfiedBy &&
-      satisfiedBy.some((glob) => {
-        const re = globToRegExp(glob)
-        return changed.some((f) => re.test(f))
-      })
-    ) {
-      continue
+    //
+    // #2192: the match must be an ADDED file. This asked only whether SOME
+    // changed file matched the glob, so a one-character edit to a shard that
+    // merged months ago cleared the blocking gate for an unrelated money-path
+    // PR — silently, on green CI, with the verification record it exists to
+    // force never written. Measured: money-path edit alone → exit 1; the same
+    // edit plus a one-character append to an already-merged shard → exit 0.
+    //
+    // The rule is "at least one ADDED match", never "no modified matches": a
+    // PR that writes its own shard AND tidies an old one still passes, which
+    // is what keeps ordinary release flows and duplicate cleanups working.
+    // Renames do not count (see `parseNameStatus`) — an old record under a new
+    // name is not a new record.
+    //
+    // `added === null` means the caller could not determine add/modify status
+    // (a bare `--changed=` list), and restores the pre-#2192 behaviour. The
+    // gating CI job always supplies it.
+    const satisfiedMatches = satisfiedBy
+      ? changed.filter((f) => satisfiedBy.some((glob) => globToRegExp(glob).test(f)))
+      : []
+    if (satisfiedMatches.length > 0) {
+      const qualifying = added === null
+        ? satisfiedMatches
+        : satisfiedMatches.filter((f) => added.has(f))
+      if (qualifying.length > 0) continue
+      // Matched the glob, but every match was an EDIT to a pre-existing file.
+      // Fall through and report the doc, carrying the near-miss so the error
+      // message can say WHY an apparently-satisfying edit did not satisfy.
+      editedOnlySatisfyMatches = satisfiedMatches
     }
     if (!covers || covers.length === 0) continue
     // (#1824) No same-day suppression. See the header: a doc this change
@@ -277,7 +378,13 @@ export function implicatedDocs(changed, docs, { strict = false } = {}) {
       }
     }
     if (matched.size > 0) {
-      findings.push({ doc, lastVerified, contract: Boolean(contract), matched: [...matched].sort() })
+      findings.push({
+        doc,
+        lastVerified,
+        contract: Boolean(contract),
+        matched: [...matched].sort(),
+        editedOnlySatisfyMatches: [...editedOnlySatisfyMatches].sort(),
+      })
     }
   }
   return findings
@@ -286,7 +393,7 @@ export function implicatedDocs(changed, docs, { strict = false } = {}) {
 async function main() {
   const outPath = arg('out') || 'coupling-comment.md'
   const strict = process.argv.includes('--strict')
-  const { files: changed, computed } = changedFilesWithProvenance()
+  const { files: changed, computed, added } = changedFilesWithProvenance()
 
   // An empty candidate set means the diff could not be computed — not that the
   // docs are fine. Reporting it as a pass is indistinguishable from a real
@@ -337,8 +444,15 @@ async function main() {
     })
   }
 
+  // #2088: governed `packages/**` READMEs. They carry no front-matter — five of
+  // them are published npm landing pages — so their records come from the
+  // manifest in `package-docs.mjs`. All are advisory (`contract: false`): the
+  // point is to put a drifting package README in front of a reviewer, not to
+  // fail every PR that touches `packages/sdk/src/**`.
+  docs.push(...packageDocRecords())
+
   const docsByPath = new Map(docs.map((d) => [d.doc, d]))
-  const findings = implicatedDocs(changed, docs, { strict })
+  const findings = implicatedDocs(changed, docs, { strict, added })
   const hasFindings = findings.length > 0
   const contractFindings = findings.filter((f) => f.contract)
 
@@ -388,6 +502,17 @@ async function main() {
         ? ` — or add a verification shard matching \`satisfied-by\` (${docsByPath.get(f.doc).satisfiedBy.join(', ')}); the doc itself then needs NO edit`
         : ''
       console.error(`  - ${f.doc}${viaShard}`)
+      // #2192: the near-miss deserves its own sentence. Without it this reads
+      // as "add a shard" to someone who is looking straight at a shard they
+      // just edited, and the remedy looks already done.
+      if (f.editedOnlySatisfyMatches?.length) {
+        console.error(
+          `      NOTE: ${f.editedOnlySatisfyMatches.map((m) => `\`${m}\``).join(', ')} ` +
+          'matched that glob but was EDITED, not added. Editing an existing ' +
+          'entry does not satisfy the gate — the point is a NEW record for ' +
+          'this change. Add your own dated shard; you may keep the edit.',
+        )
+      }
     }
     console.error('Update each doc (or re-verify it and bump `last-verified`) and push again.')
     process.exit(1)

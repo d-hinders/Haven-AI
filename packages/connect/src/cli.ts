@@ -3,12 +3,60 @@
 import { realpathSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { helpText, parseArgs } from './args.js'
-import { failedConnectOutcome, runConnect } from './runtime.js'
+import { failedConnectOutcome, failureOutcomeFor, runConnect } from './runtime.js'
 import { redactForAutomation, redactSecrets } from './redact.js'
+import { isConnectError } from './connect-error.js'
 
 export interface CliIo {
   stdout: (message: string) => void
   stderr: (message: string) => void
+}
+
+/**
+ * Report a subcommand failure on BOTH channels (#2184).
+ *
+ * Every subcommand but the main connect run used to write its failure to
+ * stderr alone and leave stdout empty. To a `--json` caller parsing stdout
+ * that is indistinguishable from a stream it stopped reading — which is
+ * exactly how a field `haven-reset` reported "the tombstone command did not
+ * create TOMBSTONE.json" with no error to show for it (#2175). One helper, so
+ * the next subcommand inherits the behaviour instead of re-deciding it.
+ *
+ * `envelope` carries the branch's own success discriminant inverted
+ * (`{ unwired: false }`, `{ rekey: 'failed' }`), so a failure record can never
+ * be mistaken for a success payload — this matters most for `--doctor`, whose
+ * success output IS a JSON report.
+ *
+ * `message` rides along ONLY for a connector-authored `ConnectError`, the same
+ * gate `failedConnectOutcome` applies. A bare `Error` here is an unguarded
+ * failure whose raw text can carry agent ids, local paths, or arbitrary OS
+ * detail (`rekey.ts` throws several such); that text reaches stderr, where it
+ * always did, and never the machine channel.
+ */
+function failSubcommand(
+  io: CliIo,
+  json: boolean,
+  err: unknown,
+  envelope: Record<string, unknown>,
+  fallback: { code: string; nextAction: string },
+): number {
+  const message = err instanceof Error ? err.message : String(err)
+  io.stderr(`${redactSecrets(message)}\n`)
+  if (json) {
+    io.stdout(
+      `${redactSecrets(
+        JSON.stringify({
+          ...envelope,
+          error: {
+            code: isConnectError(err) ? err.code : fallback.code,
+            next_action: isConnectError(err) ? err.nextAction : fallback.nextAction,
+            ...(isConnectError(err) && message ? { message } : {}),
+          },
+        }),
+      )}\n`,
+    )
+  }
+  return 1
 }
 
 export async function runCli(
@@ -70,15 +118,94 @@ export async function runCli(
             'agent page if you have not already.\n',
         )
         io.stdout(
+          `A surviving tombstone record was mirrored to ${redactSecrets(info.recordPath)}\n`,
+        )
+        io.stdout(
           'Restart EVERY long-lived MCP host (gateway, TUI workers, editors): each holds the ' +
             'wiring snapshot from its own start time, and the tombstone only speaks when a stale ' +
-            'host next probes the old path.\n',
+            'host next probes the old path. The mirrored record keeps this retirement observable ' +
+            'even after the agent directory itself is deleted.\n',
         )
       }
       return 0
     } catch (err) {
-      io.stderr(`${redactSecrets(err instanceof Error ? err.message : String(err))}\n`)
-      return 1
+      // #2175 introduced this record; #2184 moved it into `failSubcommand` so
+      // the three sibling subcommands share it rather than each re-deciding.
+      return failSubcommand(io, parsed.json, err, { tombstoned: false }, {
+        code: 'tombstone_failed',
+        nextAction: 'review_the_error_and_retry_with_a_valid_agent_directory',
+      })
+    }
+  }
+  if (parsed.unwire) {
+    // #2169: tombstone-first removal of ONE agent's wiring from every runtime
+    // config it appears in + the Hermes dotenv key. Refuses — never guesses —
+    // when the bare pair is provably another agent's.
+    const { unwireAgent } = await import('./unwire.js')
+    const { homedir } = await import('node:os')
+    const { join } = await import('node:path')
+    const homeDir = homedir()
+    const root = parsed.options.credentialsDir ?? join(homeDir, '.haven', 'agents')
+    const directory =
+      parsed.unwireDir ?? (parsed.options.serverName ? join(root, parsed.options.serverName) : root)
+    try {
+      const result = await unwireAgent({
+        directory,
+        slug: parsed.options.serverName,
+        reason: parsed.unwire.reason,
+        replacedBy: parsed.unwire.replacedBy,
+        homeDir,
+      })
+      const failures = result.runtimes.filter((r) => r.status === 'refused' || r.status === 'unreadable')
+      if (parsed.json) {
+        io.stdout(
+          `${redactSecrets(
+            JSON.stringify({
+              unwired: true,
+              agent_id: result.agentId,
+              slug: result.slug ?? null,
+              directory: result.directory,
+              tombstoned: result.tombstoned,
+              runtimes: result.runtimes.map((r) => ({
+                runtime: r.runtime,
+                label: r.label,
+                status: r.status,
+                ...(r.detail ? { detail: r.detail } : {}),
+              })),
+            }),
+          )}\n`,
+        )
+      } else {
+        io.stdout(redactSecrets(`Unwired agent ${result.agentId} at ${result.directory}.\n`))
+        io.stdout(
+          result.tombstoned
+            ? '  · Tombstoned first: any long-lived host still resolving the old wrapper gets the HAVEN-TOMBSTONE diagnosis.\n'
+            : '  · Directory was already tombstoned.\n',
+        )
+        for (const r of result.runtimes) {
+          const mark = r.status === 'removed' ? '✓' : r.status === 'clean' ? '–' : '✗'
+          io.stdout(redactSecrets(`  ${mark} ${r.label}: ${r.status}${r.detail ? ` — ${r.detail}` : ''}\n`))
+        }
+        io.stdout(
+          failures.length > 0
+            ? '  Some entries were NOT removed (✗ above). Re-run `--unwire` after resolving each refusal —\n' +
+              '  it is idempotent.\n'
+            : '  Verify: `--doctor --runtime <runtime>` per host should report this agent as `retired` with a\n' +
+              '  clean runtime-config check.\n',
+        )
+        io.stdout(
+          'Restart EVERY long-lived MCP host (gateway, TUI workers, editors): each holds the wiring snapshot\n' +
+            'from its own start time. This directory\u2019s local key material was removed and the tombstone\n' +
+            'record + #2155 mirror survive — but nothing was REVOKED on the backend. If you have not\n' +
+            'already, revoke the agent on the Haven agent page to stop it spending entirely.\n',
+        )
+      }
+      return failures.length > 0 ? 1 : 0
+    } catch (err) {
+      return failSubcommand(io, parsed.json, err, { unwired: false }, {
+        code: 'unwire_failed',
+        nextAction: 'review_the_error_and_rerun_unwire_which_is_idempotent',
+      })
     }
   }
   if (parsed.rekey) {
@@ -135,8 +262,10 @@ export async function runCli(
       }
       return 0
     } catch (err) {
-      io.stderr(`${redactSecrets(err instanceof Error ? err.message : String(err))}\n`)
-      return 1
+      return failSubcommand(io, parsed.json, err, { rekey: 'failed' }, {
+        code: 'rekey_failed',
+        nextAction: 'review_the_error_and_rerun_the_rekey_phase',
+      })
     }
   }
   if (parsed.doctor || parsed.repair) {
@@ -190,8 +319,10 @@ export async function runCli(
       }
       return report.ok ? 0 : 1
     } catch (err) {
-      io.stderr(`${redactSecrets(err instanceof Error ? err.message : String(err))}\n`)
-      return 1
+      return failSubcommand(io, parsed.json, err, { doctor: 'failed' }, {
+        code: 'doctor_failed',
+        nextAction: 'review_the_error_and_rerun_doctor',
+      })
     }
   }
   try {
@@ -223,7 +354,11 @@ export async function runCli(
       // redaction bar as those progress lines and the JSON message field:
       // redactForAutomation, which also masks credential-file paths.
       io.stderr(`${redactForAutomation(err instanceof Error ? err.message : String(err))}\n`)
-      io.stdout(`${JSON.stringify(failedConnectOutcome(parsed.options.runtime, err))}\n`)
+      // #2173: the run's OWN record when it built one, so the object printed
+      // here is byte-identical to the one persisted to `last-connect-outcome.json`.
+      // Re-deriving it from the raw `--runtime` hint would report the hint,
+      // not the runtime detection actually resolved (#1672).
+      io.stdout(`${JSON.stringify(failureOutcomeFor(parsed.options.runtime, err))}\n`)
     } else {
       io.stderr(`${redactSecrets(err instanceof Error ? err.message : String(err))}\n`)
     }

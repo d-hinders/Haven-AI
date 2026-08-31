@@ -32,6 +32,24 @@ import pool from '../db.js'
  * One stable key per monitor. Advisory locks share a global 64-bit keyspace
  * with anything else in the database, so keep these grouped under an
  * arbitrary but distinctive prefix (81100x) and never reuse a value.
+ *
+ * **The keyspace is shared with keys that are not in this object**, and "never
+ * reuse a value" is only checkable if they are findable. The others in use
+ * (#2150):
+ *
+ * - `811000061` — the real-DB test harness's migration lock
+ *   (`infra/__tests__/helpers/db-harness.ts`), which serialises whole
+ *   `runMigrations()` calls across vitest workers;
+ * - `21500001` — `NON_TRANSACTIONAL_LOCK_KEY` (`db/migrate.ts`), which
+ *   serialises the migration runner's non-transactional lane across replicas;
+ * - `811000062` — a test-only scratch key
+ *   (`infra/__tests__/db-harness-lock-concurrency.test.ts`, #2198), which parks
+ *   a waiter on a held lock and deliberately provokes a `40P01` without
+ *   touching the real harness key.
+ *
+ * Neither belongs in this object — this one is the *monitor* lease registry and
+ * both of those are boot/test-time — but a new key anywhere should be checked
+ * against this list, not only against grep.
  */
 export const LEADER_LOCK_KEYS = {
   catalogRefresh: 811001,

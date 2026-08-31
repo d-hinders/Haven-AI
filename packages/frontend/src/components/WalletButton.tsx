@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -11,6 +12,8 @@ import {
 import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit'
 import { Info, TriangleAlert, Wallet } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { VIEWPORT_MARGIN } from '@/components/ui/Tooltip'
+import { useScrollEdgeCue } from '@/hooks/useScrollEdgeCue'
 import { useAccount, useDisconnect } from 'wagmi'
 import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
@@ -291,6 +294,14 @@ interface PopoverProps {
  * the component with the props forced, the way the primitive gallery already
  * photographs states no user flow reaches.
  */
+/**
+ * The `mt-2` offset between the trigger's bottom edge and the popover's top,
+ * in px. Read here rather than measured because the popover's own rect is what
+ * the bound is being computed FOR — measuring it would feed the clamp its own
+ * clamped output.
+ */
+const POPOVER_ANCHOR_GAP = 8
+
 export function WalletPopover({
   primary,
   secondary,
@@ -309,6 +320,9 @@ export function WalletPopover({
   const popoverRef = useRef<HTMLDivElement>(null)
   const { disconnectAsync } = useDisconnect()
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null)
+  const [maxHeight, setMaxHeight] = useState<number | null>(null)
+  const scrollBoxRef = useRef<HTMLDivElement>(null)
+  const hasContentBelow = useScrollEdgeCue(scrollBoxRef, open)
   const copyTimerRef = useRef<number | null>(null)
 
   // Cancel the copy-reset timer on unmount so it never fires into a dead component.
@@ -338,6 +352,59 @@ export function WalletPopover({
       window.removeEventListener('mousedown', handler)
     }
   }, [open, onClose, anchorRef])
+
+  /**
+   * Bound the menu against the VIEWPORT, not a pixel count (#2067).
+   *
+   * `absolute top-full` gives the popover no height limit at all, so its box is
+   * whatever its content happens to be — and the #1952 disclosure's content has
+   * changed twice in a week (#2069, #2072). Measured on `origin/dev` at the
+   * tallest app-reachable state (marker-less disclosure + a connected wallet's
+   * secondary section) the box is 430px: comfortably inside 1280x800 and
+   * 390x844, and 93px PAST the bottom of an 844x390 landscape phone. The app
+   * shell scrolls `main`, not the document (`(authenticated)/layout.tsx`), and
+   * this header is `position: relative` inside it — so nothing the user can do
+   * brings that overhang back. The Disconnect button was measured below the
+   * fold with `document.documentElement.scrollHeight === window.innerHeight`.
+   *
+   * The clamp follows the two idioms already in the repo rather than adding a
+   * third: `VIEWPORT_MARGIN` is Tooltip's own gutter, imported (#2038), and the
+   * flex + `min-h-0 flex-1 overflow-y-auto` body below is Modal's scroll
+   * structure (#1893).
+   *
+   * `null` — no bound — when there is no live anchor to measure from. That is
+   * the `/design-system` illustration, which passes `anchorRef={{ current: null }}`:
+   * a static showcase inside a scrolling page needs no viewport clamp, and
+   * leaving it unbounded is also what keeps the committed pixel baselines still.
+   *
+   * `useLayoutEffect`, not `useEffect` (haven-reviewer on this PR). A passive
+   * effect runs AFTER paint, so at a viewport where the clamp actually bites
+   * the browser could paint one unbounded 430px frame and then snap to the
+   * clamped height — a visible pop-in, on exactly the geometry this change
+   * exists to fix. The anchor is already mounted when this runs, so its rect
+   * is available synchronously and there is no cost to measuring before paint.
+   */
+  useLayoutEffect(() => {
+    if (!open) return
+    const measure = () => {
+      const anchor = anchorRef.current
+      if (!anchor) {
+        setMaxHeight(null)
+        return
+      }
+      const top = anchor.getBoundingClientRect().bottom + POPOVER_ANCHOR_GAP
+      setMaxHeight(Math.max(0, window.innerHeight - top - VIEWPORT_MARGIN))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    // Capture phase: the app shell scrolls an inner element, not the document,
+    // so a bubbling listener on `window` would never hear it.
+    window.addEventListener('scroll', measure, true)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('scroll', measure, true)
+    }
+  }, [open, anchorRef])
 
   if (!open) return null
 
@@ -391,67 +458,109 @@ export function WalletPopover({
       ref={popoverRef}
       role={presentational ? 'group' : 'dialog'}
       aria-label="Wallet menu"
-      className="absolute right-0 top-full mt-2 w-72 z-50 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-xl shadow-modal overflow-hidden"
+      className="absolute right-0 top-full mt-2 flex w-72 flex-col z-50 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-xl shadow-modal overflow-hidden"
+      style={maxHeight === null ? undefined : { maxHeight }}
     >
-      <div className="p-4 border-b border-[var(--v2-border)]">
-        {unavailablePasskey && (
-          <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
-            This account uses a passkey that is not available here.
-          </p>
-        )}
-        {wrongWalletOwner && (
-          // #2073: same quiet slot as the passkey note above. The mismatch is
-          // named HERE because this popover is where the "Wrong wallet" pill
-          // lands — the action-area caption is scoped to a gated action, and
-          // a page without one would otherwise offer a red pill whose menu
-          // looks exactly like the healthy state.
-          <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
-            This is not the wallet that controls this account. Switch to the
-            account&apos;s wallet {wrongWalletOwner} to approve actions.
-          </p>
-        )}
-        {renderAddressSection(primary)}
-        {signingWith ? (
-          // #1952: the fallback carries a DESIGNED marker — a left rule and an
-          // icon-led label — not a longer sentence. An earlier revision changed
-          // only the eyebrow string, and the design pass measured that the
-          // distinction then rested on incidental text wrap: at `w-72` minus
-          // `p-4` the content box is 256px, so a 54-character `text-xs` eyebrow
-          // happened to run to two lines while "Signing with" did not. That is
-          // a coincidence of string length, and it also pushed the bold
-          // credential name — the fact that matters most — into the middle of
-          // two muted paragraphs. The rule and the icon are independent of copy
-          // length, and keeping the "Signing with" eyebrow identical in both
-          // states preserves the hierarchy the name sits in.
-          <div
-            className={
-              signingWith.onThisDevice
-                ? 'py-2'
-                : 'my-1 border-l-2 border-[var(--v2-border-strong)] py-2 pl-3'
-            }
-          >
-            {signingWith.onThisDevice ? null : (
-              <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--v2-ink-2)]">
-                <Icon icon={Info} className="h-3.5 w-3.5 flex-shrink-0" />
-                No passkey enrolled on this device
-              </p>
-            )}
-            <p className="text-xs text-[var(--v2-ink-muted)]">Signing with</p>
-            <p className="text-sm font-medium text-[var(--v2-ink)]">{signingWith.label}</p>
-            <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">
-              {truncateAddress(signingWith.keyId)}
+      {/*
+        The scroll box, per Modal's structure (#1893): `min-h-0` so the flex
+        item may shrink below its content, `flex-1` so it absorbs whatever the
+        clamp leaves, `overflow-y-auto` so the remainder stays REACHABLE rather
+        than clipped. The action buttons below are deliberately OUTSIDE it —
+        Switch/Disconnect are the reason the menu is open, and they stay put.
+
+        The `relative` wrapper exists for the same reason Modal's does: the cue
+        must be positioned against a box containing ONLY the scroll region, or
+        it sits over the action block and says something about a region it does
+        not describe. `data-wallet-menu-scroll` gives tests an honest handle on
+        the scroller rather than a positional `firstElementChild` guess.
+
+        Focus survives this: the Copy buttons inside remain in the tab order,
+        and the browser scrolls a focused element into view on its own, so
+        keyboard reachability is unchanged. Their `focus-visible:ring-2` paints
+        OUTSIDE the border box (#1873) and is not clipped, because this box
+        clips at its PADDING edge and `p-4` leaves 16px of gutter for a 2px
+        ring — measured in `wallet-popover-height-bound.spec.ts`, not assumed.
+      */}
+      <div className="relative flex min-h-0 flex-1 flex-col border-b border-[var(--v2-border)]">
+        <div
+          ref={scrollBoxRef}
+          data-wallet-menu-scroll=""
+          className="min-h-0 flex-1 overflow-y-auto p-4"
+        >
+          {unavailablePasskey && (
+            <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
+              This account uses a passkey that is not available here.
             </p>
-            {signingWith.onThisDevice ? null : (
-              <p className="mt-1.5 text-xs text-[var(--v2-ink-3)]">
-                Your browser may ask you to choose a different one.
+          )}
+          {wrongWalletOwner && (
+            // #2073: same quiet slot as the passkey note above. The mismatch is
+            // named HERE because this popover is where the "Wrong wallet" pill
+            // lands — the action-area caption is scoped to a gated action, and
+            // a page without one would otherwise offer a red pill whose menu
+            // looks exactly like the healthy state.
+            <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
+              This is not the wallet that controls this account. Switch to the
+              account&apos;s wallet {wrongWalletOwner} to approve actions.
+            </p>
+          )}
+          {renderAddressSection(primary)}
+          {signingWith ? (
+            // #1952: the fallback carries a DESIGNED marker — a left rule and an
+            // icon-led label — not a longer sentence. An earlier revision changed
+            // only the eyebrow string, and the design pass measured that the
+            // distinction then rested on incidental text wrap: at `w-72` minus
+            // `p-4` the content box is 256px, so a 54-character `text-xs` eyebrow
+            // happened to run to two lines while "Signing with" did not. That is
+            // a coincidence of string length, and it also pushed the bold
+            // credential name — the fact that matters most — into the middle of
+            // two muted paragraphs. The rule and the icon are independent of copy
+            // length, and keeping the "Signing with" eyebrow identical in both
+            // states preserves the hierarchy the name sits in.
+            <div
+              className={
+                signingWith.onThisDevice
+                  ? 'py-2'
+                  : 'my-1 border-l-2 border-[var(--v2-border-strong)] py-2 pl-3'
+              }
+            >
+              {signingWith.onThisDevice ? null : (
+                <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--v2-ink-2)]">
+                  <Icon icon={Info} className="h-3.5 w-3.5 flex-shrink-0" />
+                  No passkey enrolled on this device
+                </p>
+              )}
+              <p className="text-xs text-[var(--v2-ink-muted)]">Signing with</p>
+              <p className="text-sm font-medium text-[var(--v2-ink)]">{signingWith.label}</p>
+              <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">
+                {truncateAddress(signingWith.keyId)}
               </p>
-            )}
-          </div>
-        ) : null}
-        {secondary && renderAddressSection(secondary, true)}
+              {signingWith.onThisDevice ? null : (
+                <p className="mt-1.5 text-xs text-[var(--v2-ink-3)]">
+                  Your browser may ask you to choose a different one.
+                </p>
+              )}
+            </div>
+          ) : null}
+          {secondary && renderAddressSection(secondary, true)}
+        </div>
+
+        {/*
+          Modal's own cue (#1893), reused rather than reinvented — the
+          design-review finding on this PR was that the clamped box ended mid
+          line with nothing saying more existed above the action row. A 6px
+          translucent inset shadow that DARKENS the last sliver rather than
+          painting over it; the token carries the reasoning.
+        */}
+        {hasContentBelow && (
+          <div
+            data-wallet-menu-scroll-cue=""
+            aria-hidden="true"
+            className="v2-scroll-edge-cue pointer-events-none absolute inset-x-0 bottom-0 h-1.5"
+          />
+        )}
       </div>
 
-      <div className="p-2">
+      <div className="shrink-0 p-2">
         <button
           type="button"
           disabled={switching}

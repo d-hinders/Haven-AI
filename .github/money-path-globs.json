@@ -105,7 +105,9 @@
     "and open at the side. Listed for the same reason #1892 listed",
     "infra/delegate-*.ts: which file the enforcement happens to live in is an",
     "accident, and the perimeter should not depend on it.",
-    "2026-08-25 (#1905/#1896/#1903): packages/signer/** and packages/core/src/machine-payment-lifecycle.ts joined `globs` \u2014 the edge-signer package that actually holds the delegate key (the SDK-side signer was already listed on 'signing schemes are spend authority', the package was not \u2014 #1896), and the machine-payment domain logic relocated verbatim to @haven_ai/core by #987 (the backend listing guarded a 12-line re-export shim, not the code \u2014 #1905). packages/frontend/src/lib/signer.ts and packages/frontend/src/hooks/useAgentRekey.ts joined `controlGlobs`: the client that picks which signer signs a spend-authority action is invisible to this list today (#1903), but the money-flow harness exercises the deployed backend, not the client \u2014 so it gets the label and a human, without a QA re-run that proves nothing. A frontend file that MOVES money has not been found; these are decision surfaces, and if one appears it belongs in `globs`."
+    "2026-08-25 (#1905/#1896/#1903): packages/signer/** and packages/core/src/machine-payment-lifecycle.ts joined `globs` \u2014 the edge-signer package that actually holds the delegate key (the SDK-side signer was already listed on 'signing schemes are spend authority', the package was not \u2014 #1896), and the machine-payment domain logic relocated verbatim to @haven_ai/core by #987 (the backend listing guarded a 12-line re-export shim, not the code \u2014 #1905). packages/frontend/src/lib/signer.ts and packages/frontend/src/hooks/useAgentRekey.ts joined `controlGlobs`: the client that picks which signer signs a spend-authority action is invisible to this list today (#1903), but the money-flow harness exercises the deployed backend, not the client \u2014 so it gets the label and a human, without a QA re-run that proves nothing. A frontend file that MOVES money has not been found; these are decision surfaces, and if one appears it belongs in `globs`.",
+    "",
+    "2026-08-29 (#2200): the docs coupling gate's control surface added to controlGlobs -- scripts/docs/coupling-gate.mjs, scripts/docs/validate-frontmatter.mjs and .github/workflows/docs-coupling.yml. That gate is the ENFORCEMENT POINT for the CASP shard requirement -- what decides whether a money-path PR may merge without writing its perimeter analysis -- which is the job qa-freshness.mjs does for the QA harness, and that was already listed. None of the three was on either list, so PR #2201 changed that gate carrying area:docs and NO money-path label and got no mandatory human read, while fixing a silent bypass in it (an edit to an already-merged shard satisfied the blocking gate: exit 1 -> exit 0). Same shape as #1892. Each entry decided on its own evidence: coupling-gate.mjs IS the gate; validate-frontmatter.mjs because the gate imports its globToRegExp/parseFrontMatter and mutating that matcher flips the blocking gate exit 1 -> exit 0 from OUTSIDE the gate (its own test suite reddens, but docs:coupling is also run standalone with no sibling suite -- release-bump.mjs's release preflight, ai-agent-workflow.md's Green-Gate Evidence step, pr-workflow-checklist.md -- and there the regression is genuinely silent); docs-coupling.yml because its `contract` job is what makes the script a REQUIRED check, so dropping --strict or narrowing the job's `if:` weakens CASP enforcement without touching any listed file, exactly as dev-gate.yml/qa-dev.yml/publish.yml are listed for wiring their scripts into real gates. CONSIDERED AND EXCLUDED, recorded so nobody re-derives it: chain-integrity.mjs -- neither the gate nor the parser imports it (checked), it runs in a different required job, and it guards last-verified history rather than the shard requirement; coupling-gate.test.mjs -- the gate runs for real on every PR so a broken test disables nothing silently, and any edit reintroducing a #2192-shaped bug must touch coupling-gate.mjs itself, which is now listed. (money-path.test.mjs IS listed because it is the drift guard with no separate runtime -- a different case.) Sweeping scripts/docs/ in wholesale was rejected: over-labelling costs a human read on every docs-tooling PR. Label cost measured first -- 90-day commit counts: coupling-gate.mjs 2, validate-frontmatter.mjs 3, docs-coupling.yml 1, against the already-listed qa-freshness.mjs at 2. controlGlobs and not globs: re-running the money-flow harness proves nothing about a docs gate."
   ],
   "globs": [
     "packages/backend/src/db/migrations/**",
@@ -145,6 +147,7 @@
     ".github/CODEOWNERS",
     ".github/money-path-globs.json",
     ".github/workflows/dev-gate.yml",
+    ".github/workflows/docs-coupling.yml",
     ".github/workflows/publish.yml",
     ".github/workflows/qa-dev.yml",
     "packages/frontend/src/hooks/useAgentRekey.ts",
@@ -152,6 +155,8 @@
     "scripts/ci/money-path-restatement-scan.mjs",
     "scripts/ci/money-path.test.mjs",
     "scripts/ci/qa-freshness.mjs",
+    "scripts/docs/coupling-gate.mjs",
+    "scripts/docs/validate-frontmatter.mjs",
     "scripts/release-bump.mjs"
   ]
 }

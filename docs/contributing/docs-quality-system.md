@@ -15,7 +15,7 @@ covers:
   - packages/backend/src/docs-drift/docs-drift.test.ts
   - packages/backend/src/docs-drift/env-example-drift.test.ts
   - .env.example
-last-verified: "2026-08-28" # #2124: Phase 2's queue-framing-census subsection re-read against `scripts/ci/queue-framing-census.test.mjs` and `.github/workflows/ci.yml`; records the census's guarded-files boundary, its every-PR CI home, and why it is neither the coupling gate nor claim-truth verification. Prior: #1993: added the empty-`covers` reason rule to the front-matter schema section, describing the new BLOCKING check in `scripts/docs/validate-frontmatter.mjs` (a `covers: []` must carry an inline `# reason`), why it is enforced rather than encouraged (a doc with `covers: []` looks governed while no coupling gate can implicate it — strictly worse than no front-matter, which is at least visibly outside the system), and its SCOPE (`docs/**` plus the four root gravity files; Markdown under `packages/**` has no front-matter and is outside the system entirely). That section re-read against the validator on this branch. Nothing else in Phases 1-4 re-verified in this pass. Prior: #1885: Phase 1 §"Finding a break that is already on `dev`" re-read against `scripts/docs/chain-sweep.mjs` and `chain-integrity.mjs` on `origin/dev` — records that the sweep now classifies a DECLARED RESET separately from an unrestored break (`N unrestored, M declared reset`), why the blanket `nowLine` check was rejected (one declared compaction would excuse every break in the doc, a false negative in the tool built to find silent losses), and the binding actually used (the commit that INTRODUCED the declaration). Also records `--ref=` and the `--follow` rename residual with the measurement that shows it currently empty. Nothing in Phases 2-4 re-verified in this pass. Prior: #1869: Phase 2 §"Coupling gate" re-read against `scripts/docs/coupling-gate.mjs` on `origin/dev` (not against #1824's description of itself) — the same-day-suppression paragraph #1854 flagged and left is REPLACED, because `implicatedDocs` no longer compares `last-verified` to today and the `today` parameter is gone from its signature rather than accepted-and-ignored. The replacement states the behaviour and carries only the reasoning a reader needs (the heuristic's entire live domain was somebody else's stamp, since `changedSet.has(doc)` already covers a doc this change verified), and quotes the 22-advisories/15-of-40-merges/0-blocking measurement WITH its window (`0d299034`) because the docstring records the counts as traffic-dependent. The `--strict` carve-out the old paragraph described is genuinely gone; the one that REMAINS is different and now documented where it lives — a `contract: true` doc under `--strict` skips the incidental-path filter (`filterIncidental = !(strict && contract)`). Phase 1 also gains `scripts/docs/chain-sweep.mjs` (#1876) and the reason it is needed: a chain break already on `dev` is invisible to the diff-scoped check permanently, not merely deferred to the next editor. Nothing else in Phases 2-4 re-verified in this pass. Prior: #1854: Phase 2 §"Scoping covers" re-read against `scripts/docs/coupling-gate.mjs` — documents the test-content carve-out (`packages/qa-agent/**`, `packages/frontend/e2e/**`) and the `__screenshots__/` carve-out from it, which is checked first; the same-day-suppression paragraph in this section is STALE since #1824 and is NOT fixed here (#1869) — nothing else re-verified in this pass. Prior: #1843: Phase 1 re-read against `scripts/docs/*` and `docs.yml` — gains the `last-verified` chain-integrity check (third `docs:check` step, inside the existing required job, needs `fetch-depth: 0`), the `chain-reset` escape hatch, and why the rule is containment rather than #1843's proposed subsequence; nothing in Phases 2–4 re-verified in this pass. Prior: #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
+last-verified: "2026-08-30" # #2088: Phase 1 gains the `packages/**` Markdown boundary — the population census (322 Markdown files, 89 enumerated), why the fix is a declared boundary rather than a bigger scan, the two sets in `scripts/docs/package-docs.mjs` and the line between them, the two design choices (manifest instead of front-matter, because five of these files are published npm landing pages; advisory rather than `contract: true`), why `last-verified` is seeded from each file's last commit rather than stamped today, and what the boundary deliberately does not reach. That section written against the new module on this branch; Phase 1's existing subsections re-read only far enough to place it. Nothing in Phases 2-4 re-verified in this pass. Prior: #2200: Phase 2's "Coupling gate" subsection gains the fact that the gate, its front-matter parser and the workflow that runs it are now money-path `controlGlobs` — editing either draws the label and the money.md playbook, and this doc describes that code, so a contributor reading it here should not first learn it from a surprise label. States why `chain-integrity.mjs` is excluded, so the omission reads as decided rather than forgotten. Scope: that subsection only; nothing else in Phases 1-4 re-verified in this pass. Prior: #2192: Phase 2's `satisfied-by` documentation re-read against `scripts/docs/coupling-gate.mjs` and updated for the added-file rule — a satisfying file must now be ADDED, not merely changed, because the old any-match test let an edit to an already-merged shard clear the blocking gate for an unrelated money-path PR (measured: exit 1 -> exit 0 on a one-character append). Records the two consequences a reader needs: the parent-doc edit remains the escape hatch, and a bare `--changed=` list keeps the pre-#2192 behaviour because it carries no add/modify status. The front-matter schema example's `satisfied-by` comment corrected in the same pass. Nothing else in Phases 1-4 re-verified. Prior: #2124: Phase 2's queue-framing-census subsection re-read against `scripts/ci/queue-framing-census.test.mjs` and `.github/workflows/ci.yml`; records the census's guarded-files boundary, its every-PR CI home, and why it is neither the coupling gate nor claim-truth verification. Prior: #1993: added the empty-`covers` reason rule to the front-matter schema section, describing the new BLOCKING check in `scripts/docs/validate-frontmatter.mjs` (a `covers: []` must carry an inline `# reason`), why it is enforced rather than encouraged (a doc with `covers: []` looks governed while no coupling gate can implicate it — strictly worse than no front-matter, which is at least visibly outside the system), and its SCOPE (`docs/**` plus the four root gravity files; Markdown under `packages/**` has no front-matter and is outside the system entirely). That section re-read against the validator on this branch. Nothing else in Phases 1-4 re-verified in this pass. Prior: #1885: Phase 1 §"Finding a break that is already on `dev`" re-read against `scripts/docs/chain-sweep.mjs` and `chain-integrity.mjs` on `origin/dev` — records that the sweep now classifies a DECLARED RESET separately from an unrestored break (`N unrestored, M declared reset`), why the blanket `nowLine` check was rejected (one declared compaction would excuse every break in the doc, a false negative in the tool built to find silent losses), and the binding actually used (the commit that INTRODUCED the declaration). Also records `--ref=` and the `--follow` rename residual with the measurement that shows it currently empty. Nothing in Phases 2-4 re-verified in this pass. Prior: #1869: Phase 2 §"Coupling gate" re-read against `scripts/docs/coupling-gate.mjs` on `origin/dev` (not against #1824's description of itself) — the same-day-suppression paragraph #1854 flagged and left is REPLACED, because `implicatedDocs` no longer compares `last-verified` to today and the `today` parameter is gone from its signature rather than accepted-and-ignored. The replacement states the behaviour and carries only the reasoning a reader needs (the heuristic's entire live domain was somebody else's stamp, since `changedSet.has(doc)` already covers a doc this change verified), and quotes the 22-advisories/15-of-40-merges/0-blocking measurement WITH its window (`0d299034`) because the docstring records the counts as traffic-dependent. The `--strict` carve-out the old paragraph described is genuinely gone; the one that REMAINS is different and now documented where it lives — a `contract: true` doc under `--strict` skips the incidental-path filter (`filterIncidental = !(strict && contract)`). Phase 1 also gains `scripts/docs/chain-sweep.mjs` (#1876) and the reason it is needed: a chain break already on `dev` is invisible to the diff-scoped check permanently, not merely deferred to the next editor. Nothing else in Phases 2-4 re-verified in this pass. Prior: #1854: Phase 2 §"Scoping covers" re-read against `scripts/docs/coupling-gate.mjs` — documents the test-content carve-out (`packages/qa-agent/**`, `packages/frontend/e2e/**`) and the `__screenshots__/` carve-out from it, which is checked first; the same-day-suppression paragraph in this section is STALE since #1824 and is NOT fixed here (#1869) — nothing else re-verified in this pass. Prior: #1843: Phase 1 re-read against `scripts/docs/*` and `docs.yml` — gains the `last-verified` chain-integrity check (third `docs:check` step, inside the existing required job, needs `fetch-depth: 0`), the `chain-reset` escape hatch, and why the rule is containment rather than #1843's proposed subsequence; nothing in Phases 2–4 re-verified in this pass. Prior: #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
 ---
 
 # Documentation-quality system
@@ -55,7 +55,7 @@ contract: true             # OPTIONAL (Phase 4): promotes the coupling gate
                            # from advisory to BLOCKING for this doc
 covers:                    # repo globs of the code this doc describes
   - packages/backend/src/routes/payments.ts
-satisfied-by:              # OPTIONAL (#1366): globs whose touch counts as
+satisfied-by:              # OPTIONAL (#1366): globs whose NEW files count as
   - docs/some-dir/**       # touching THIS doc in the coupling gate — built
                            # for per-PR changelog shards, so concurrent PRs
                            # write separate files instead of colliding on one
@@ -75,6 +75,28 @@ the mandatory line-prepend also eventually corrupted the note line itself. The
 strict error now names the shard path for docs that declare one. Bump
 `last-verified` only when you genuinely re-read the doc body against the code —
 the per-change history lives in the shards and git log, not on that line.
+
+**The satisfying file must be ADDED, not merely changed (#2192).** The gate
+originally asked only whether *some* changed file matched a `satisfied-by`
+glob. It never asked whether the file was new — so a one-character edit to a
+shard that merged months ago cleared the blocking gate for an unrelated
+money-path PR, silently and on green CI, with the record the gate exists to
+force never written. Measured before the fix: money-path edit alone → exit 1;
+the same edit plus a one-character append to an already-merged shard → exit 0.
+
+The rule is "at least one **added** match", never "no modified matches" — a PR
+that writes its own shard *and* tidies an old one still passes. Renames do not
+count: an old record under a new name is not a new record. Two consequences
+worth knowing:
+
+- **Editing the parent contract doc is still the escape hatch**, and it is the
+  right one when a money-path change genuinely warrants no new shard: touching
+  the doc itself clears the gate and leaves a reviewable statement of why.
+- **A bare `--changed=` list carries no add/modify status**, so the rule is not
+  applied to it and the pre-#2192 behaviour stands for that path alone. This is
+  deliberate and narrow: `--changed=` is a local/debugging affordance, while the
+  job that actually gates a PR sets `BASE_SHA` and gets real status from git.
+  Pass `--added=` alongside it to exercise the rule by hand.
 
 - `covers` is **required** but may be empty (`covers: []`) for narrative docs
   with no direct code mirror (indexes, research, archives, process prose). Keep
@@ -159,6 +181,7 @@ Run by `.github/workflows/docs.yml` on **every** pull request:
 | Check | Tool | Blocking? |
 | --- | --- | --- |
 | Front-matter + `covers` resolution | `scripts/docs/validate-frontmatter.mjs` | **Blocking** |
+| `packages/**` Markdown boundary ([#2088](https://github.com/d-hinders/Haven-AI/issues/2088)) | `scripts/docs/package-docs.mjs`, run from `validate-frontmatter.mjs` | **Blocking** |
 | Agent-skill structure + adapter alignment | `scripts/docs/validate-agent-skills.mjs` | **Blocking** |
 | `last-verified` chain integrity ([#1843](https://github.com/d-hinders/Haven-AI/issues/1843)) | `scripts/docs/chain-integrity.mjs` | **Blocking** |
 | Link health | lychee (`.lychee.toml`) | Advisory (`continue-on-error`) |
@@ -188,6 +211,72 @@ on which tool opened the PR.
 Vale is scoped to `docs/product/**` on purpose: engineering docs legitimately use
 "Safe", "AllowanceModule", and "signer", so the terminology rule must not flood
 them.
+
+#### The `packages/**` Markdown boundary ([#2088](https://github.com/d-hinders/Haven-AI/issues/2088))
+
+Everything above enumerates `docs/**` plus the four root gravity files — 89 files.
+The repo holds **322** Markdown files. The other 233 were not merely unchecked;
+they were outside the system entirely: no `owner`, no `covers`, no
+`last-verified`, never implicable by the coupling gate, skipped by the staleness
+audit (which `continue`s on an empty `covers`), and pointed at by no gate.
+
+That is the same shape [#1993](https://github.com/d-hinders/Haven-AI/issues/1993)
+closed one bucket in — *a system reporting success about the part it can see* —
+and it had already bitten: `packages/qa-agent/README.md` described three
+legacy-rail QA legs as live long after
+[#1986](https://github.com/d-hinders/Haven-AI/issues/1986) made all three
+impossible, and a human found it
+([#1992](https://github.com/d-hinders/Haven-AI/issues/1992)).
+
+**The fix is not a bigger scan.** Sweeping every Markdown file into front-matter
+would manufacture ceremony on files that have no code mirror, and a requirement
+nobody can satisfy gets bypassed — the next contributor adds a blanket ignore
+and the system ends up weaker than before. What is enforced instead is that the
+**boundary** is declared. `scripts/docs/package-docs.mjs` holds two sets, and
+every `packages/**/*.md` must be in exactly one:
+
+- **`GOVERNED_PACKAGE_DOCS`** — the eight package-root READMEs, each with real
+  `owner` / `status` / `covers` / `last-verified`. Five are the npm landing pages
+  for `@haven_ai/sdk`, `signer`, `mcp`, `connect` and `cli` — user-facing
+  contracts that can go stale and mislead; three are the hosted MCP server, the
+  demo merchant and the QA harness. All eight become implicable by the coupling
+  gate and rankable by the staleness audit.
+- **`EXEMPT_PACKAGE_DOCS`** — the five nested directory notes, each with a
+  written reason. A note to the next maintainer of one directory has no code
+  mirror worth coupling; a `covers:` there would fire on every edit and be
+  dismissed every time, which is how a gate teaches people to ignore it.
+
+A file in neither set is a **named blocking error**, so a new `packages/**/*.md`
+cannot land silently outside both — that, not the size of the enforced set, is
+what closes the gap.
+
+Two deliberate choices, stated so the design is not re-litigated by guess:
+
+1. **Metadata lives in a manifest, not in front-matter.** A `---` YAML block at
+   the top of a published README renders — as a metadata table on GitHub, and as
+   loose text under a horizontal rule wherever the renderer has no front-matter
+   plugin. Defacing a user-facing artifact to satisfy an internal hygiene gate is
+   the wrong trade. The manifest uses the *same four keys*, so a reader who knows
+   one knows the other, and it is the "one reviewable place" #2088 asked for.
+2. **No package doc is a `contract: true` blocking doc.** They are advisory
+   implications: the aim is to put a drifting README in front of a reviewer, not
+   to fail every PR touching `packages/sdk/src/**` until someone edits prose.
+
+`last-verified` for these eight is **seeded from each file's last commit date**,
+not from a verification pass in #2088 — registering a doc is not verifying it,
+and the staleness audit ranks on that date, so a rubber stamp would be worse than
+a stale one. The first PR the coupling gate implicates re-reads the body and
+bumps it.
+
+**What the boundary does not reach**, enumerated in
+`boundaryScopeNotes()` in the manifest itself rather than only here, so a green
+run cannot be over-read: `.agents/**` and `.claude/**` (32 files, already
+enumerated by `validate-agent-skills.mjs`, which checks the structure those files
+actually have); `.github/**` and `scripts/README.md` (4 files, the same class as
+the exempt entries, left out to keep this one population wide); and *behaviour* —
+registration makes a doc implicable, it does not read the prose. Nothing here
+would have caught #1992 on its own; it would have put the file in front of a
+reviewer, which is the whole claim.
 
 #### `last-verified` chain integrity ([#1843](https://github.com/d-hinders/Haven-AI/issues/1843))
 
@@ -318,6 +407,22 @@ Currently the gap is empty rather than tolerated: `git log --diff-filter=R -M
 `scripts/docs/coupling-gate.mjs`): on every PR, finds docs whose `covers` globs
 match a changed file the PR did **not** also touch, and posts a single advisory
 sticky comment naming each doc and its `last-verified` age.
+
+**Editing the gate itself is a money-path change (#2200).**
+`scripts/docs/coupling-gate.mjs`, `scripts/docs/validate-frontmatter.mjs` and
+`.github/workflows/docs-coupling.yml` are `controlGlobs` in
+[`.github/money-path-globs.json`](../../.github/money-path-globs.json),
+so a PR touching any of them gets the `money-path` label and the
+[`money.md`](ship-playbooks/money.md) playbook — a human read, but no
+`qa-freshness` QA re-run, since re-running the money-flow harness proves nothing
+about a docs gate. The reason is that this gate is what forces a money-path PR to
+write its CASP perimeter analysis, so weakening it weakens that discipline;
+`validate-frontmatter.mjs` is listed because the gate imports its
+`globToRegExp`/`parseFrontMatter` and can therefore be disabled from outside
+itself, and the workflow because its `contract` job is what makes the script a
+**required** check. `chain-integrity.mjs` is deliberately **not** listed — the
+gate does not import it, and it guards `last-verified` history rather than the
+shard requirement.
 
 **Run `npm run docs:coupling` locally — it is the strict, CI-equivalent form.**
 The bare `node scripts/docs/coupling-gate.mjs` is the *advisory* posture: it always

@@ -3384,6 +3384,38 @@ describe('mcp_transport shape is refused loudly (#2282)', () => {
     expect(merchant).not.toHaveBeenCalled()
   })
 
+  it('refuses a STORED context whose transport `source` is not a value Haven knows', async () => {
+    // haven-reviewer (#2282, should-fix): the shape guard above proves the
+    // missing-key branch; this one proves the bad-`source` branch, which the
+    // tool schema's enum cannot reach because only a REHYDRATED context gets
+    // here unvalidated. Same class as the rest of hazard 2 — an unrecognised
+    // value must not collapse into the "no transport supplied" answer.
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockResolvedValue({
+      paymentId: 'pay_x402',
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'buy_vpn',
+      arguments: {},
+      mcpTransport: { handshakeRequired: true, source: 'bogus' } as never,
+    })
+    const merchant = vi.spyOn(haven, 'completeX402MerchantCall')
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402',
+      signature: SIG,
+      payment_header: VALID_PAYMENT_HEADER,
+    })
+
+    if (payload.success) throw new Error('expected the unknown transport source to be refused')
+    expect(payload.code).toBe('INVALID_INPUT')
+    expect(payload.message).toContain('mcp_transport')
+    expect(calls.some((c) => c.url.endsWith('/payments/pay_x402/sign'))).toBe(false)
+    expect(merchant).not.toHaveBeenCalled()
+  })
+
   it('a legitimate snake_case transport still settles (positive control)', async () => {
     stubFetch({
       'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },

@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: research
 covers:
   - packages/cli/**
-last-verified: "2026-08-24" # #1988: the Tier-C deep-link sketch cited `/user/safes/:id/approvers/tx` as a live example of a backend that already returns unsigned tx data. #1988 deleted it, so the example is marked historical and the agent-connection-setup flow carries the point. Tier C is still NOT built and nothing else here was re-verified. Prior: weekly #1248 audit: package SHIPPED — status header rewritten to record what was built vs the sketch (Tier A/B live as @haven_ai/cli; Tier C/D unbuilt; no connect code reuse; unplanned SIE export shipped); covers: corrected to the package this doc is actually about
+last-verified: "2026-08-31" # #2313: the tier table — which sits BELOW this doc's "read the sections below as proposed" banner but states live-facing FACTS, and which this doc's own #1988 entry set the precedent of correcting — carried three retired items: Tier A `approvals` (route deregistered, `approval_requests` dropped, #2055), Tier B approver *metadata* (five routes deleted by #1988, `safe_approver_metadata` dropped by migration 069/#1990), and Tier C `deploy Safe, create/modify agent allowance, approve over-budget payment, add/remove approver` (closed by #1984 or deleted by #1988/#2055). Rows re-based on the live owner-signed actions and the removals recorded in a note below the table, following #1988's keep-the-record style rather than deleting silently. The tiering ARGUMENT is untouched. Scope: the tier table and its new note. NOT re-verified and deliberately LEFT: the command sketch, the signing-handoff options and the P0-P3 roadmap, which are inside the banner's design-record scope and read as proposed. Prior: #1988: the Tier-C deep-link sketch cited `/user/safes/:id/approvers/tx` as a live example of a backend that already returns unsigned tx data. #1988 deleted it, so the example is marked historical and the agent-connection-setup flow carries the point. Tier C is still NOT built and nothing else here was re-verified. Prior: weekly #1248 audit: package SHIPPED — status header rewritten to record what was built vs the sketch (Tier A/B live as @haven_ai/cli; Tier C/D unbuilt; no connect code reuse; unplanned SIE export shipped); covers: corrected to the package this doc is actually about
 ---
 
 # Sketch — `haven` CLI (terminal-native parallel to the dashboard)
@@ -43,10 +43,22 @@ splits every command into three tiers, and the tiers are the design:
 
 | Tier | What | Auth needed | CLI can do it? |
 |---|---|---|---|
-| **A. Read** | wallets, balances, agents, allowances (live remaining), transactions, approvals, catalog, analytics | user JWT | ✅ fully |
-| **B. Backend-only management** | pause/resume/revoke agent, rotate agent key, rename wallet/agent, contacts, approver *metadata*, create connect-setup tokens, CSV export | user JWT | ✅ fully |
-| **C. On-chain, owner-signed** | deploy Safe, create/modify agent allowance, approve over-budget payment, add/remove approver, manual send | owner key (wallet/passkey) | ⛔ not directly — **hand off** |
+| **A. Read** | wallets, balances, agents, allowances (live remaining), transactions, catalog, analytics | user JWT | ✅ fully |
+| **B. Backend-only management** | pause/resume/revoke agent, rotate agent key, rename wallet/agent, contacts, create connect-setup tokens, CSV export | user JWT | ✅ fully |
+| **C. On-chain, owner-signed** | grant/revoke an agent budget delegation, re-key an agent, manual send | owner key (wallet/passkey) | ⛔ not directly — **hand off** |
 | **D. Agent payments** | direct pay / x402 / MPP within budget | agent API key + delegate key (already local) | ✅ via `@haven_ai/sdk` |
+
+> **Three of these rows were re-based by #2313 (epic #1440); the tiering ARGUMENT is
+> unchanged.** Tier A listed `approvals` — `/approvals` was deregistered and
+> `approval_requests` dropped by #2055, so there is nothing to read. Tier B listed
+> approver *metadata* — #1988 deleted the five approver routes and migration 069
+> (#1990) dropped `safe_approver_metadata`. Tier C read "deploy Safe, create/modify
+> agent allowance, approve over-budget payment, add/remove approver, manual send";
+> every one of those but `manual send` is a Safe-rail action closed by #1984 or
+> deleted by #1988/#2055, and the live owner-signed actions are the delegation
+> rail's budget grant/revoke and re-key. What the tier says about *custody* — an
+> owner-signed on-chain action cannot happen in a terminal — is why the row exists
+> and did not change.
 
 Tier C is the crux. A terminal has no browser wallet, so the CLI **constructs**
 the action and hands signing off (see [Signing handoff](#signing-handoff)). Tiers

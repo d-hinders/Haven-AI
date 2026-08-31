@@ -258,8 +258,8 @@ path here that the JSON lacks fails CI, and a path in the JSON that is missing h
 fails CI too. Read the JSON when you need the authoritative answer; read this when
 you need the reasoning. Never edit one without the other — CI will not let you.
 
-- `routes/payments.ts`, `routes/x402-resources.ts`, `routes/x402.ts`, and
-  `routes/machine-payments.ts` — all four are live route files. (#996/#997 moved
+- `routes/payments.ts`, `routes/x402.ts`, and
+  `routes/machine-payments.ts` — all three are live route files. (#996/#997 moved
   their *logic* into the modules below and left thin validation/auth shells, which
   this line described for a year as the files having "dissolved". They had not;
   both are registered in `index.ts` today. A parenthetical that reads as an

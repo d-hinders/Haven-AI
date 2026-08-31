@@ -30,7 +30,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-31" # #2291: corrected the #2290 paragraph in "Resuming An Authorized Payment", which named haven_sign_x402 -> haven_x402_sign_header as the working remedy — a sequence the one-shot's spent binding cannot serve. Scope: that paragraph. The rest of the section, and the decomposed/recommended flows elsewhere in this doc, were re-read against the corrected contract and are accurate as written. Prior: chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-31" # #2274: the retired-rail gate paragraph in "Scheme selection" corrected — it named token resolution as still preceding the rail 410, which #2274 moved below the gate on this route and on POST /payments together. Scope: that paragraph only; the surrounding scheme-selection and 3009-mode prose was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: #2291: corrected the #2290 paragraph in "Resuming An Authorized Payment", which named haven_sign_x402 -> haven_x402_sign_header as the working remedy — a sequence the one-shot's spent binding cannot serve. Scope: that paragraph. The rest of the section, and the decomposed/recommended flows elsewhere in this doc, were re-read against the corrected contract and are accurate as written. Prior: chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -1518,10 +1518,18 @@ either scheme branch — it can no longer slip into the legacy AllowanceModule
 flow below — and since #1986 an `allowance_module` account (or the LEFT-JOIN
 `null` most of that population carries) gets the Safe-rail 410 the same way.
 Since #2245 **nothing rail-dependent runs above that gate**, so neither
-tombstone can be diverted by a request field. What still precedes it is
-rail-INDEPENDENT and claims nothing about any rail: the route's structural
-`settlementScheme` enum check and token resolution — the same position `POST
-/payments` puts its own gate in, and the same class as the 401 auth hook.
+tombstone can be diverted by a request field. Since **#2274** token and amount
+resolution do not run above it either: they answer "which assets can you pay
+with", and for a retired-rail account the answer is none on every asset, so a
+400 carrying `supported: [...]` was a premature answer to a question the 410
+settles. Rail-INDEPENDENT residue — it asserted nothing false about a rail,
+which is why #2245 filed it rather than folding it in, and why it was fixed on
+`POST /x402/authorize` and `POST /payments` **together**: one route alone
+recreates the asymmetry #2245 removed. What still precedes the gate is the
+route's structural validation (`settlementScheme` enum shape, required fields,
+address and network checks) — the same position `POST /payments` puts its own
+gate in, and the same class as the 401 auth hook. A malformed request is still
+a 400 on both routes: the tombstone is not the route's error handler.
 
 **How 3009-mode works.** EIP-3009 (`transferWithAuthorization`) is ECDSA-based —
 the fund-holder must be an **EOA** that signs (USDC rejects EIP-1271 for it),

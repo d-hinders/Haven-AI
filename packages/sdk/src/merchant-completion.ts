@@ -14,6 +14,7 @@ import {
   McpMerchantTransport,
 } from './mcp-merchant-transport.js'
 import type { CapturedMerchantResponse } from './mcp-merchant-transport.js'
+import { X402_PAYMENT_HEADER_NAMES_SENT } from './x402.js'
 import { buildExplorerUrl, x402PayerAddress } from './x402-protocol.js'
 import { paymentStateStatusCode } from './payment-state.js'
 import { decodeBase64Json } from './base64.js'
@@ -168,7 +169,7 @@ export class MerchantCompletion {
       merchantStatus: retryResponse.status,
       challengePayload: paymentRequired as unknown as Record<string, unknown>,
       selectedPayment: receipt.accepted as unknown as Record<string, unknown>,
-      paymentProofHeaderName: 'X-PAYMENT',
+      paymentProofHeaderName: X402_PAYMENT_HEADER_NAMES_SENT,
       paymentProofHeader: receipt.paymentHeader,
       protocolReceiptHeaderName: 'PAYMENT-RESPONSE',
       protocolReceiptHeader: retryResponse.headers.get('PAYMENT-RESPONSE') ?? undefined,

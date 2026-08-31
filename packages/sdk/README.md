@@ -365,7 +365,7 @@ x402 tool-window failures:
 | `expired` | Payment expired before completion. | yes |
 | `failed` | Haven could not complete the payment. | yes |
 
-The merchant settlement leg of x402 (and the MPP retry) is the agent's own request to the merchant — it does not have a Haven `phase`. The payment is `funding_sent` until the agent retries with `X-PAYMENT` (x402) or the MPP proof header; from Haven's perspective the payment becomes `executed` only after the agent successfully resumes.
+The merchant settlement leg of x402 (and the MPP retry) is the agent's own request to the merchant — it does not have a Haven `phase`. The payment is `funding_sent` until the agent retries with the payment header (`PAYMENT-SIGNATURE` + `X-PAYMENT`) (x402) or the MPP proof header; from Haven's perspective the payment becomes `executed` only after the agent successfully resumes.
 
 ### `nextAction` reference
 
@@ -534,7 +534,7 @@ For MCP/SSE x402 tools, keep the same MCP session and JSON-RPC payload where the
 merchant requires it: initialize, retain `mcp-session-id`, send the original
 `tools/call`, parse the 402 challenge, wait for the funding leg to confirm if
 the payment is bridged, then resume with the same `payment_id` and retry the
-original `tools/call` with `X-PAYMENT`. Use a stable `idempotencyKey` for the
+original `tools/call`, setting BOTH `PAYMENT-SIGNATURE` (x402 v2) and `X-PAYMENT` (v1) to the header. Use a stable `idempotencyKey` for the
 user intent so fresh merchant quotes or sessions do not become duplicate Haven
 payments.
 

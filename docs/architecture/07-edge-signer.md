@@ -62,7 +62,7 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      `x402_binding` that records the authenticated funding-intent and
      merchant-header context returned by hosted MCP.
    - `buildX402PaymentHeader(paymentRequired, x402Binding)` → the EIP-3009
-     `X-PAYMENT` header for the merchant leg of an x402 payment, after
+     merchant payment header for the merchant leg of an x402 payment, after
      consuming the recorded binding and checking the merchant challenge against
      it. Reuses the SDK's `selectStandardPaymentOption` +
      `toStandardPaymentRequirements` + the `x402` library.
@@ -247,7 +247,7 @@ call:
 
 ```
 hosted:  haven_pay_mcp_tool     -> unsigned funding + merchant/tool context
-local:   haven_sign_x402        -> funding signature + merchant-bound X-PAYMENT
+local:   haven_sign_x402        -> funding signature + merchant-bound payment header
 hosted:  haven_settle_mcp_tool  -> relay funding, confirm, call merchant tool
 ```
 
@@ -257,8 +257,8 @@ hosted:  haven_settle_mcp_tool  -> relay funding, confirm, call merchant tool
 hosted:  haven_pay_x402_quote     -> { payment_id, payload_hash, x402.expected }
 local:   haven_sign + expected    -> funding signature + x402_binding
 hosted:  haven_submit             -> fund Safe -> delegate EOA
-local:   haven_x402_sign_header   -> EIP-3009 X-PAYMENT if binding matches
-agent:   retry merchant with X-PAYMENT
+local:   haven_x402_sign_header   -> EIP-3009 payment header if binding matches
+agent:   retry merchant, setting BOTH PAYMENT-SIGNATURE + X-PAYMENT
 ```
 
 **Decomposed x402 flow — erc7710 direct settlement**
@@ -270,7 +270,7 @@ account is on the delegation rail and the merchant advertises
 hosted:  haven_pay_x402_quote     -> settlement child + settlement_scheme: erc7710
 local:   haven_sign { payment_id } -> child signature (caveats verified locally)
 hosted:  haven_submit { settlement_scheme: "erc7710" } -> payment_header
-agent:   retry merchant with X-PAYMENT
+agent:   retry merchant, setting BOTH PAYMENT-SIGNATURE + X-PAYMENT
 ```
 
 The signer's step is the same tool, but what it signs is not: on the bridge the
@@ -316,7 +316,7 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
   required session/handshake traffic. Haven never builds the payment header on
   the hosted server **on the EIP-3009 bridge** — that blanket claim does not
   hold for erc7710, where the signed artifact is the settlement child and Haven
-  assembles the MetaMask `X-PAYMENT` payload server-side from it
+  assembles the MetaMask payment payload server-side from it
   (`assembleSettlementPayload`, reached by `haven_settle_mcp_tool` since #1456
   and by `haven_submit` on the generic path since
   [#2041](https://github.com/d-hinders/Haven-AI/issues/2041)). The custody

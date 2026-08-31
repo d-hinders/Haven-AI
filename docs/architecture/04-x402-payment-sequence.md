@@ -46,7 +46,7 @@ The live delegation-rail merchant x402 flow is scheme-specific:
    redeems the payment directly from the delegated account; there is no funding
    leg or delegate hot balance.
 2. On EIP-3009, Haven may first relay a signed funding leg to the delegated
-   account, then the agent signs the merchant `X-PAYMENT` header locally and
+   account, then the agent signs the merchant payment header locally and
    retries the merchant/resource request.
 
 > ⚠️ **The legacy AllowanceModule two-leg described below NO LONGER RUNS.**

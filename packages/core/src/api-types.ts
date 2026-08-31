@@ -3305,6 +3305,7 @@ export type components = {
             /** Format: uuid */
             payment_id: string;
             payment_intent_id?: string | null;
+            /** @description Retained for wire compatibility; ALWAYS null. #2055 dropped `approval_requests`, so no receipt can be anchored to an approval any more. */
             approval_request_id?: string | null;
             rail: string;
             /** @description Which settlement branch ran (eip3009 | erc7710), from the intent (#946). Null on legacy-rail receipts. */
@@ -10259,33 +10260,6 @@ export interface operations {
                             agent_name?: string;
                         } | {
                             /** @enum {string} */
-                            type: "approval";
-                            id: string;
-                            token: string | null;
-                            amount: string | null;
-                            to: string | null;
-                            reason?: string | null;
-                            status: string | null;
-                            tx_hash?: string | null;
-                            /** @description Synthesised when absent: an executed approval reports 'payment_confirmed'. */
-                            payment_proof_status?: string | null;
-                            payment_flow_status?: string | null;
-                            payment_attention_reason?: string | null;
-                            source?: string;
-                            x402_resource_url?: string | null;
-                            chain_id?: number | null;
-                            token_address?: string | null;
-                            safe_id?: string | null;
-                            safe_address?: string | null;
-                            safe_name?: string | null;
-                            explorer_url?: string | null;
-                            created_at: string;
-                            /** @description Feed only. */
-                            agent_id?: string;
-                            /** @description Feed only. */
-                            agent_name?: string;
-                        } | {
-                            /** @enum {string} */
                             type: "mcp_tool_call";
                             id: string;
                             tool_name: string;
@@ -10467,33 +10441,6 @@ export interface operations {
                             agent_name?: string;
                         } | {
                             /** @enum {string} */
-                            type: "approval";
-                            id: string;
-                            token: string | null;
-                            amount: string | null;
-                            to: string | null;
-                            reason?: string | null;
-                            status: string | null;
-                            tx_hash?: string | null;
-                            /** @description Synthesised when absent: an executed approval reports 'payment_confirmed'. */
-                            payment_proof_status?: string | null;
-                            payment_flow_status?: string | null;
-                            payment_attention_reason?: string | null;
-                            source?: string;
-                            x402_resource_url?: string | null;
-                            chain_id?: number | null;
-                            token_address?: string | null;
-                            safe_id?: string | null;
-                            safe_address?: string | null;
-                            safe_name?: string | null;
-                            explorer_url?: string | null;
-                            created_at: string;
-                            /** @description Feed only. */
-                            agent_id?: string;
-                            /** @description Feed only. */
-                            agent_name?: string;
-                        } | {
-                            /** @enum {string} */
                             type: "mcp_tool_call";
                             id: string;
                             tool_name: string;
@@ -10553,7 +10500,10 @@ export interface operations {
                 content: {
                     "application/json": {
                         steps: {
-                            /** @enum {string} */
+                            /**
+                             * @description Retained for wire compatibility with historical windows. THREE of these steps are permanently zero for any window after their retirement and a funnel built from them will show three dead stages: 'safe_deployed' and 'safe_imported' (410 since #1984 — Safe inflow is retired) and 'allowance_granted' (#2020 — the AllowanceModule rail no longer grants). Historical rows before those dates still count.
+                             * @enum {string}
+                             */
                             event: "signed_up" | "safe_deployed" | "safe_imported" | "agent_created" | "allowance_granted" | "safe_funded" | "first_payment_settled";
                             /** @description DISTINCT users who reached this step. */
                             users: number;

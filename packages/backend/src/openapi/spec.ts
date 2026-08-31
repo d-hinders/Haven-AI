@@ -1,6 +1,8 @@
 import {
   AgentPaymentNextAction,
+  AgentPaymentNextActionDescriptions,
   AgentPaymentPhase,
+  AgentPaymentPhaseDescriptions,
   AgentPaymentRail,
 } from '../domain/agent-payment-taxonomy.js'
 
@@ -549,39 +551,6 @@ const activityPayment = {
   },
 } as const
 
-/** One approval in an activity list. Narrower than a payment. */
-const activityApproval = {
-  type: 'object',
-  required: ['type', 'id', 'token', 'amount', 'to', 'status', 'created_at'],
-  properties: {
-    type: { type: 'string', enum: ['approval'] },
-    id: { type: 'string' },
-    token: { type: ['string', 'null'] },
-    amount: { type: ['string', 'null'] },
-    to: { type: ['string', 'null'] },
-    reason: { type: ['string', 'null'] },
-    status: { type: ['string', 'null'] },
-    tx_hash: { type: ['string', 'null'] },
-    payment_proof_status: {
-      type: ['string', 'null'],
-      description: "Synthesised when absent: an executed approval reports 'payment_confirmed'.",
-    },
-    payment_flow_status: { type: ['string', 'null'] },
-    payment_attention_reason: { type: ['string', 'null'] },
-    source: { type: 'string' },
-    x402_resource_url: { type: ['string', 'null'] },
-    chain_id: { type: ['integer', 'null'] },
-    token_address: { type: ['string', 'null'] },
-    safe_id: { type: ['string', 'null'] },
-    safe_address: { type: ['string', 'null'] },
-    safe_name: { type: ['string', 'null'] },
-    explorer_url: { type: ['string', 'null'] },
-    created_at: { type: 'string' },
-    agent_id: { type: 'string', description: 'Feed only.' },
-    agent_name: { type: 'string', description: 'Feed only.' },
-  },
-} as const
-
 /** One MCP tool call — the agent-facing audit log entry. */
 const activityToolCall = {
   type: 'object',
@@ -602,7 +571,17 @@ const activityToolCall = {
 } as const
 
 /** The heterogeneous activity entry, discriminated by `type`. */
-const activityEntry = { oneOf: [activityPayment, activityApproval, activityToolCall] } as const
+// #2055: `activityApproval` is REMOVED from this union, not deprecated in it.
+// The approval-request feed entries died with the `approval_requests` table —
+// `routes/agent-activity.ts` merges payments and MCP tool invocations and has
+// no third source, so a documented `type: 'approval'` branch described a
+// response shape the route cannot emit. #2120 already deleted the fabricated
+// `type: 'approval'` FIXTURE for this reason; the schema it was fixed against
+// was not touched then (#2262). Kept out of the union rather than tombstoned
+// inside it: a `oneOf` member is a promise to a code generator, and
+// `packages/core/src/api-types.ts` mirrors it into the frontend's
+// `ApiSchema<>` imports.
+const activityEntry = { oneOf: [activityPayment, activityToolCall] } as const
 
 /** Per-token spend totals, as the stats route shapes them. */
 const spendTotals = {
@@ -3790,9 +3769,9 @@ export const openapiSpec = {
       get: {
         tags: ['Dashboard'],
         operationId: 'getAgentActivity',
-        summary: "One agent's payments, approvals and tool calls, newest first.",
+        summary: "One agent's payments and tool calls, newest first.",
         description:
-          "A heterogeneous list discriminated by `type`: payment, approval, or mcp_tool_call. **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the three sources separately and the results are then merged and sorted, so this route can return up to three times `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.",
+          "A heterogeneous list discriminated by `type`: payment or mcp_tool_call. (#2262: the third branch, `approval`, is gone — #2055 dropped `approval_requests` and this handler merges `payment_intents` and the MCP tool-call audit log, with no third source.) **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the two sources separately and the results are then merged and sorted, so this route can return up to twice `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.",
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Agent id.' },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
@@ -3854,7 +3833,7 @@ export const openapiSpec = {
         operationId: 'getActivityFeed',
         summary: 'Combined activity across every agent the caller owns.',
         description:
-          "The same three entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` is always 0 since #2055 (the approval queue died with the Safe rail); the field survives for wire compatibility.",
+          "The same two entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` is always 0 since #2055 (the approval queue died with the Safe rail); the field survives for wire compatibility.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
@@ -3910,6 +3889,8 @@ export const openapiSpec = {
                           event: {
                             type: 'string',
                             enum: ['signed_up', 'safe_deployed', 'safe_imported', 'agent_created', 'allowance_granted', 'safe_funded', 'first_payment_settled'],
+                            description:
+                              "Retained for wire compatibility with historical windows. THREE of these steps are permanently zero for any window after their retirement and a funnel built from them will show three dead stages: 'safe_deployed' and 'safe_imported' (410 since #1984 — Safe inflow is retired) and 'allowance_granted' (#2020 — the AllowanceModule rail no longer grants). Historical rows before those dates still count.",
                           },
                           users: { type: 'integer', description: 'DISTINCT users who reached this step.' },
                           conversionFromPrev: { type: ['number', 'null'], description: 'Null when there is nothing to convert from: the first step, or any step whose predecessor counted zero users.' },
@@ -5971,15 +5952,28 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      // #2262: these two enums publish five values no live rail can produce —
+      // `user_approval_required`, `user_execution_required`,
+      // `waiting_for_additional_approvals`, `wait_for_user_approval`,
+      // `wait_for_user_to_complete_payment`. They stay in the enum for wire
+      // compatibility, but under a bare `description:` the spec told a raw-API
+      // integrator only that the phase is "stable", while an SDK user reading
+      // the same taxonomy has been warned since #2101 that these are retired.
+      // `x-enumDescriptions` appeared ZERO times in the served spec before
+      // this. The prose is the SDK's own, mirrored through
+      // `domain/agent-payment-taxonomy.ts` and pinned verbatim by
+      // `agent-payment-taxonomy.parity.test.ts` — not a second copy.
       AgentPaymentPhase: {
         type: 'string',
         enum: Object.values(AgentPaymentPhase),
         description: 'Stable Haven agent payment state phase.',
+        'x-enumDescriptions': AgentPaymentPhaseDescriptions,
       },
       AgentPaymentNextAction: {
         type: 'string',
         enum: Object.values(AgentPaymentNextAction),
         description: 'Stable next action an agent should take for a Haven payment state.',
+        'x-enumDescriptions': AgentPaymentNextActionDescriptions,
       },
       AgentPaymentRail: {
         type: 'string',
@@ -7074,7 +7068,11 @@ export const openapiSpec = {
           id: uuid,
           payment_id: uuid,
           payment_intent_id: { anyOf: [uuid, { type: 'null' }] },
-          approval_request_id: { anyOf: [uuid, { type: 'null' }] },
+          approval_request_id: {
+            anyOf: [uuid, { type: 'null' }],
+            description:
+              'Retained for wire compatibility; ALWAYS null. #2055 dropped `approval_requests`, so no receipt can be anchored to an approval any more.',
+          },
           rail: { type: 'string' },
           settlement_scheme: {
             type: ['string', 'null'],

@@ -1366,9 +1366,18 @@ echo the 300 default their child expiry was built with). The v1 payload-only
 shape made every v2 merchant reject with a generic failure — caught by the
 #1064 QA leg's first live run.
 
-An explicit `settlementScheme` field is validated against that shape on every
-rail, so a confused client fails loudly instead of silently getting the wrong
-flow. Since #1360 the SDK's two 3009-shape writers (`createX402Intent`, the
+An explicit `settlementScheme` field is validated against that shape, so a
+confused client fails loudly instead of silently getting the wrong flow. **On
+the delegation rail only, and that is the whole of it since #2245**: the
+validation is a delegation-rail-INTERNAL shape check
+(`validateDelegationSchemeShape`), reached only after the rail seam has
+answered `delegation`. It used to read "on every rail", and a rail-generic
+guard above the seam made that literally true — which is exactly what #2245
+removed, because on a RETIRED rail "fails loudly" was a 400 asserting that the
+legacy AllowanceModule rail "settles via EIP-3009 only", diverting the account
+off the #1986 410 tombstone and inviting it to retry with another scheme
+against a rail that answers 410 to everything. A retired-rail account now gets
+the 410 whatever it declares; the loud failure it needs is the tombstone. Since #1360 the SDK's two 3009-shape writers (`createX402Intent`, the
 local-key `authorizeX402`) ALWAYS declare `settlementScheme: 'eip3009'` —
 closing the #1358-review gap where a delegate address made stale by a rotation
 mid-flow was indistinguishable from a merchant `payTo` and silently routed an
@@ -1406,9 +1415,15 @@ Since #1130 agent authentication ahead of every x402 call distinguishes a
 pending agent (`403 agent_pending_approval`, actionable) from a bad key
 (`401`) — the compound misdiagnosis from #1129's URL confusion is now
 separable. Since #993 the x402 authorize entry point also runs the
-retired-session gate: a session-marked account gets the seam's 410 (nothing written) before
+retired-rail gate: a session-marked account gets the seam's 410 (nothing written) before
 either scheme branch — it can no longer slip into the legacy AllowanceModule
-flow below.
+flow below — and since #1986 an `allowance_module` account (or the LEFT-JOIN
+`null` most of that population carries) gets the Safe-rail 410 the same way.
+Since #2245 **nothing rail-dependent runs above that gate**, so neither
+tombstone can be diverted by a request field. What still precedes it is
+rail-INDEPENDENT and claims nothing about any rail: the route's structural
+`settlementScheme` enum check and token resolution — the same position `POST
+/payments` puts its own gate in, and the same class as the 401 auth hook.
 
 **How 3009-mode works.** EIP-3009 (`transferWithAuthorization`) is ECDSA-based —
 the fund-holder must be an **EOA** that signs (USDC rejects EIP-1271 for it),

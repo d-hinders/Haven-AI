@@ -2,7 +2,7 @@
 
 import { ArrowRight, Check, Clipboard, EllipsisVertical, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
@@ -10,7 +10,7 @@ import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { useBalances } from '@/hooks/useBalances'
 import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
 import { usePortfolio } from '@/hooks/usePortfolio'
-import { useSafeDetails } from '@/hooks/useSafeDetails'
+import { useRetiredRailOwnerAccess } from '@/hooks/useRetiredRailOwnerAccess'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
 import { useAgents, type Agent } from '@/hooks/useAgents'
@@ -19,7 +19,7 @@ import TransactionsTable from '@/components/transactions/TransactionsTable'
 import DelegationSendModal from '@/components/DelegationSendModal'
 import AccountSignersCard from '@/components/AccountSignersCard'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
-import RetiredRailNotice, { type RetiredRailOwnerAccess } from '@/components/RetiredRailNotice'
+import RetiredRailNotice from '@/components/RetiredRailNotice'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -44,6 +44,7 @@ import { agentStatusPresentation } from '@/lib/payment-status'
 import { formatAgentLastActivity } from '@/lib/agent-last-seen'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -57,7 +58,7 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={copy}
-      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
       title="Copy"
       aria-label="Copy address"
     >
@@ -107,6 +108,9 @@ function agentBudgetSummary(agent: Agent, chainId: number | null): string {
 }
 
 function agentAccessSummary(agent: Agent, chainId: number | null): string {
+  if (agent.account_type !== 'delegator_hybrid') {
+    return `Legacy Safe agent · ${formatAgentLastActivity(agent.mcp_last_seen_at)}`
+  }
   return `${agentBudgetSummary(agent, chainId)} · ${formatAgentLastActivity(agent.mcp_last_seen_at)}`
 }
 
@@ -210,6 +214,7 @@ export default function AccountDetailClient() {
       )
       .map((passkey) => passkey.signer_address.toLowerCase()),
   )
+  const knownWalletOwner = user?.wallet_address?.toLowerCase()
 
   // Build linked-agent list
   const safeAgents = agents.filter((a) => a.safe_id === safeId)
@@ -219,36 +224,8 @@ export default function AccountDetailClient() {
     loading: detailsLoading,
     error: detailsError,
     refetch: refetchDetails,
-    // #1107: a delegator_hybrid account has no Safe contract — fetching Safe
-    // details 500s and pollutes every console session on the default rail.
-    // The signer set (Backup & recovery card) is that rail's approval story.
-  } = useSafeDetails(safe?.account_type === 'delegator_hybrid' ? null : safeAddress, { chainId })
-
-  // #1989: what a legacy account's owner can still DO about their funds
-  // depends on whether any owner is a WALLET, and BOTH branches require
-  // POSITIVE evidence. The obvious predicate — "some owner is not a passkey we
-  // know about, therefore a wallet" — reasons from ABSENCE, and its failure
-  // mode is the one that hurts: `POST /safe/exec` deliberately authorises a
-  // backup passkey that Haven holds no binding row for (that is the #1229 fast
-  // path being absent, not the passkey being absent), so an owner Haven cannot
-  // identify is NOT evidence of a wallet. Reading it as one would tell a
-  // passkey-only owner to go and sign at Safe's interface, which cannot help
-  // them, about funds they may not otherwise be able to reach.
-  //
-  // So: a known wallet owner proves 'wallet'. Every owner being a known passkey
-  // proves 'passkey-only'. Anything else — an owner we cannot classify, or a
-  // still-loading/failed owner read — is 'unknown', and the notice then claims
-  // nothing about how to reach the funds. The asymmetry is deliberate: being
-  // wrongly told to contact Haven costs a message, being wrongly told to use
-  // Safe's interface costs trust at the worst possible moment.
-  const knownWalletOwner = user?.wallet_address?.toLowerCase()
-  const retiredRailOwnerAccess: RetiredRailOwnerAccess = !details
-    ? 'unknown'
-    : details.owners.some((owner) => owner.toLowerCase() === knownWalletOwner)
-      ? 'wallet'
-      : details.owners.every((owner) => passkeyAddresses.has(owner.toLowerCase()))
-        ? 'passkey-only'
-        : 'unknown'
+    ownerAccess: retiredRailOwnerAccess,
+  } = useRetiredRailOwnerAccess(safe)
 
   const {
     totalUsd,
@@ -322,7 +299,7 @@ export default function AccountDetailClient() {
   // "Account not found" — the safe lookup will resolve once safes load.
   if (authLoading || !user) {
     return (
-      <div className="max-w-5xl py-16 flex items-center justify-center gap-2">
+      <div role="status" aria-busy="true" aria-label="Loading account" className="max-w-5xl py-16 flex items-center justify-center gap-2">
         <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
         <span className="text-xs text-[var(--v2-ink-3)]">Loading account...</span>
       </div>
@@ -375,7 +352,7 @@ export default function AccountDetailClient() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="Account options"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
               >
                 <Icon icon={EllipsisVertical} className="h-4 w-4" />
               </DropdownMenuTrigger>
@@ -441,12 +418,12 @@ export default function AccountDetailClient() {
             </button>
           </div>
           {portfolioLoading ? (
-            <div className="space-y-2">
+            <div role="status" aria-busy="true" aria-label="Loading token balances" className="space-y-2">
               {[0, 1, 2].map((item) => (
                 <div key={item} className="grid grid-cols-3 gap-4 px-2 py-2">
-                  <div className="h-4 w-16 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                  <div className="h-4 w-20 justify-self-end rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                  <div className="h-4 w-24 justify-self-end rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                  <Skeleton className="h-4 w-16" />
+                  <Skeleton className="h-4 w-20 justify-self-end" />
+                  <Skeleton className="h-4 w-24 justify-self-end" />
                 </div>
               ))}
             </div>
@@ -508,24 +485,32 @@ export default function AccountDetailClient() {
             </Link>
           </div>
           <p className="mt-1 max-w-2xl pb-5 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Agents can request payments from this Haven wallet when their status and agent budget allow it.
+            {safe.account_type === 'delegator_hybrid'
+              ? 'Agents can request payments from this Haven wallet when their status and agent budget allow it.'
+              : 'Existing legacy Safe agents remain readable here; new agent connections and authority controls are retired.'}
           </p>
         </div>
 
         {agentsLoading ? (
-          <Card.Section divided>
-            {[0, 1, 2].map((item) => (
-              <div key={item} className="px-4 py-3.5">
-                <div className="h-4 w-32 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                <div className="mt-2 h-3 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-              </div>
-            ))}
-          </Card.Section>
+          <div role="status" aria-busy="true" aria-label="Loading agent access">
+            <Card.Section divided>
+              {[0, 1, 2].map((item) => (
+                <div key={item} className="px-4 py-3.5">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="mt-2 h-3 w-24" />
+                </div>
+              ))}
+            </Card.Section>
+          </div>
         ) : agentsError ? (
           <div className="border-t border-[var(--v2-border)]">
             <EmptyState
               title="Agent access could not load"
-              body="Haven could not verify which agents can request payments from this wallet."
+              body={
+                safe.account_type === 'delegator_hybrid'
+                  ? 'Haven could not verify which agents can request payments from this wallet.'
+                  : 'Haven could not load the readable agent records for this account.'
+              }
               className="py-8"
               action={<Button variant="ghost" size="sm" onClick={() => refetchAgents()}>Try again</Button>}
             />
@@ -553,9 +538,19 @@ export default function AccountDetailClient() {
           <div className="border-t border-[var(--v2-border)]">
             <EmptyState
               title="No agents connected"
-              body="Connect an agent when you want it to request payments from this Haven wallet."
+              body={
+                safe.account_type === 'delegator_hybrid'
+                  ? 'Connect an agent when you want it to request payments from this Haven wallet.'
+                  : 'Agent connections are retired for this older Safe account. Existing agents remain readable here.'
+              }
               className="py-8"
-              action={<Button href="/agents" size="sm">Connect agent</Button>}
+              action={
+                safe.account_type === 'delegator_hybrid' ? (
+                  <Button href="/agents" size="sm">Connect agent</Button>
+                ) : (
+                  <Button href="/agents" variant="ghost" size="sm">View agents</Button>
+                )
+              }
             />
           </div>
         )}
@@ -602,7 +597,9 @@ export default function AccountDetailClient() {
           <div>
             <p className="text-xs text-[var(--v2-ink-3)] mb-1">Required approvals</p>
             {detailsLoading ? (
-              <div className="h-5 w-24 bg-[var(--v2-surface-2)] rounded animate-pulse" />
+              <div role="status" aria-busy="true" aria-label="Loading approval details">
+                <Skeleton className="h-5 w-24" />
+              </div>
             ) : details ? (
               <span className="text-sm text-[var(--v2-ink)]">
                 {approvalCopy}
@@ -771,7 +768,7 @@ export default function AccountDetailClient() {
         onCancel={() => setRemoveOpen(false)}
         onConfirm={handleRemoveConfirmed}
         title={`Delete ${safe.name}?`}
-        body="This only removes the account from Haven. Funds on-chain are unaffected and you can re-import it later."
+        body="This only removes the account from Haven. Funds on-chain are unaffected. Removing it may permanently remove this read-only record from Haven."
         confirmLabel="Delete account"
         loading={removing}
       />
@@ -790,8 +787,10 @@ function RenameModal({
   onRename: (name: string) => Promise<void>
   loading: boolean
 }) {
+  const panelRef = useRef<HTMLDivElement>(null)
   const [name, setName] = useState(safe.name)
   const [error, setError] = useState('')
+  useFocusTrap(panelRef, true)
   useEscapeToClose(true, onClose, { enabled: !loading })
 
   const handleSubmit = async (e: FormEvent) => {
@@ -813,25 +812,33 @@ function RenameModal({
   return (
     <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={loading ? undefined : onClose} />
-      <div className="relative mx-4 w-full max-w-sm rounded-xl border border-[var(--v2-border)] bg-white shadow-modal">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rename-account-title"
+        className="relative mx-4 w-full max-w-sm rounded-xl border border-[var(--v2-border)] bg-white shadow-modal"
+      >
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-5 py-4">
           <div>
-            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Rename account</h2>
+            <h2 id="rename-account-title" className="text-base font-semibold text-[var(--v2-ink)]">Rename account</h2>
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Give this Haven account a name only you see.</p>
           </div>
           <button
+            type="button"
             onClick={onClose}
             disabled={loading}
             aria-label="Close"
-            className="rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Icon icon={X} className="h-5 w-5" />
           </button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4 p-5">
           <div>
-            <label className="mb-1.5 block text-xs text-[var(--v2-ink-2)]">Account name</label>
+            <label htmlFor="rename-account-name" className="mb-1.5 block text-xs text-[var(--v2-ink-2)]">Account name</label>
             <input
+              id="rename-account-name"
               type="text"
               value={name}
               onChange={(e) => {

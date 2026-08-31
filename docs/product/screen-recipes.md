@@ -22,7 +22,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-08-27" # #2097: the transaction-copy bullet in the Transaction History / terminology section — `Payment sent by you` is now human-initiated-only per the initiator-semantics invariant; the neutral `Payment sent` covers unattributed rows. Scope: that one line; no other recipe re-read. Prior: #1947: Agent Activity and Policy Violation recipes de-queued — "queued requests"/"required approval"/"blocked or queued" restated as declined-by-the-rules, the `Approval request` row-copy example replaced with `x402 payment`, and Policy Violation now states there is no queued state to present (rails/execution-rail.ts: the delegation rail is the only live rail; routes/payments.ts declines out-of-policy requests during prepare). Scope: those two recipes only; the Approve-Payment RETIRED block untouched. Prior: #1992: the money-and-risk bullet told designers to state a per-rail over-budget behaviour — "queued for approval on legacy Safe accounts". That branch does not exist: the approval queue died with the Safe rail (#1986/#1987), and a legacy account cannot mint a payment intent at all (HTTP 410), so there is no over-budget state for it to reach. Scope: that bullet; the rest of the agent-budget recipe was re-read and unchanged, and #1989's own corrections to the Approve-Payment recipe stand. Prior: #1989: the "Approve Payment" recipe documented `ApprovalQueue` / the `/approvals` route, both deleted here (and 410 server-side since #1986). No screen matches it on either rail. Marked RETIRED with the recipe kept verbatim in a details block, because its two-leg x402 money-and-risk guidance is the only written record of that presentation and the #946 bridge reintroduces a funding leg. Also dropped "and approvers" from the Account Detail advanced-details bullet, noting that `AccountSignersCard` is a different concept and not a substitute. Scope: those two places. Prior: #1701: adds the Replace An Agent Signing Key recipe — the point-of-no-return gate (name the irreversible step before it is taken, require an acknowledgement that names the consequence, say stopping is free up to the line, remove backdrop/Escape/close past it), tone escalation reserved for that step, and refuse-before-the-gate. Only the new recipe written; the existing recipes on this page were not re-read. Prior: #1852: the Receive Funds recipe's unresolved-network rule now names the QR code and the explorer link explicitly (a receive surface withholds them together with the address, or it is still instructing), adds the required-but-non-promising next action, and pins the account name as the one thing that stays. The unconditional "keep raw address visible" bullet is now conditioned on a confirmed network — it contradicted the #1844 bullet directly above it. Only the Receive Funds recipe re-read. Prior: #1844: the Receive Funds recipe gains the unresolved-network rule — a funding surface that cannot confirm the account's network names none, withholds the address and the on-ramp, and says so, rather than defaulting to Base mainnet. Only that recipe re-read. Prior: #1720: the Connect And Approve recipe no longer pairs a SELECTED runtime — the picker is gone and one setup prompt serves every environment; the bounded-wait step now points at the connector's output, which can refuse locally without Haven ever hearing about it. Other recipes on this page not re-read. Prior: #1684: the approval screen names the gate ONCE — the `Approve agent budget` card heading is gone on both rails, leaving the modal subtitle `Approve the agent budget`; the one-gate-one-name sequence and its per-viewport rule updated to match. Body re-read against the connect-agent components. Prior: #1572 named the gate `agent budget` end to end (recipe titles, primary actions, the one-gate-one-name rule); #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
+last-verified: "2026-08-31" # #2258: Re-read the legacy Safe retirement, live delegation boundary, and covered claims for this implementation. Prior: #2097: the transaction-copy bullet in the Transaction History / terminology section — `Payment sent by you` is now human-initiated-only per the initiator-semantics invariant; the neutral `Payment sent` covers unattributed rows. Scope: that one line; no other recipe re-read. Prior: #1947: Agent Activity and Policy Violation recipes de-queued — "queued requests"/"required approval"/"blocked or queued" restated as declined-by-the-rules, the `Approval request` row-copy example replaced with `x402 payment`, and Policy Violation now states there is no queued state to present (rails/execution-rail.ts: the delegation rail is the only live rail; routes/payments.ts declines out-of-policy requests during prepare). Scope: those two recipes only; the Approve-Payment RETIRED block untouched. Prior: #1992: the money-and-risk bullet told designers to state a per-rail over-budget behaviour — "queued for approval on legacy Safe accounts". That branch does not exist: the approval queue died with the Safe rail (#1986/#1987), and a legacy account cannot mint a payment intent at all (HTTP 410), so there is no over-budget state for it to reach. Scope: that bullet; the rest of the agent-budget recipe was re-read and unchanged, and #1989's own corrections to the Approve-Payment recipe stand. Prior: #1989: the "Approve Payment" recipe documented `ApprovalQueue` / the `/approvals` route, both deleted here (and 410 server-side since #1986). No screen matches it on either rail. Marked RETIRED with the recipe kept verbatim in a details block, because its two-leg x402 money-and-risk guidance is the only written record of that presentation and the #946 bridge reintroduces a funding leg. Also dropped "and approvers" from the Account Detail advanced-details bullet, noting that `AccountSignersCard` is a different concept and not a substitute. Scope: those two places. Prior: #1701: adds the Replace An Agent Signing Key recipe — the point-of-no-return gate (name the irreversible step before it is taken, require an acknowledgement that names the consequence, say stopping is free up to the line, remove backdrop/Escape/close past it), tone escalation reserved for that step, and refuse-before-the-gate. Only the new recipe written; the existing recipes on this page were not re-read. Prior: #1852: the Receive Funds recipe's unresolved-network rule now names the QR code and the explorer link explicitly (a receive surface withholds them together with the address, or it is still instructing), adds the required-but-non-promising next action, and pins the account name as the one thing that stays. The unconditional "keep raw address visible" bullet is now conditioned on a confirmed network — it contradicted the #1844 bullet directly above it. Only the Receive Funds recipe re-read. Prior: #1844: the Receive Funds recipe gains the unresolved-network rule — a funding surface that cannot confirm the account's network names none, withholds the address and the on-ramp, and says so, rather than defaulting to Base mainnet. Only that recipe re-read. Prior: #1720: the Connect And Approve recipe no longer pairs a SELECTED runtime — the picker is gone and one setup prompt serves every environment; the bounded-wait step now points at the connector's output, which can refuse locally without Haven ever hearing about it. Other recipes on this page not re-read. Prior: #1684: the approval screen names the gate ONCE — the `Approve agent budget` card heading is gone on both rails, leaving the modal subtitle `Approve the agent budget`; the one-gate-one-name sequence and its per-viewport rule updated to match. Body re-read against the connect-agent components. Prior: #1572 named the gate `agent budget` end to end (recipe titles, primary actions, the one-gate-one-name rule); #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
 ---
 
 # Haven Screen Recipes
@@ -120,21 +120,24 @@ Structure:
 4. Secondary technical disclosure only if needed, collapsed or visually subordinate.
 5. Primary action: `Create setup prompt` for creation; for edits, `Update
    budget`/`Add budget` when the budget changed or `Save details` otherwise.
-   Budget editing here is legacy-Safe-only — delegation-rail agents manage
-   budgets per-budget on the agent detail page, so their edit modal offers
+   Budget editing here is for delegation-rail agents — they manage budgets
+   per-budget on the agent detail page, while legacy Safe accounts have no
+   Haven budget-management surface. The identity edit modal therefore offers
    `Save details` only.
 
 Money and risk clarity:
 - Show whether the agent can make payments automatically within the budget.
-- Show how the user can revoke or pause later.
+- Show how the user can pause or disable the delegation later.
 - Keep raw addresses out of the primary summary unless there is no human-readable label.
 
 ## Connect And Approve Agent
 
-Use after the user reviews the agent budget and needs to connect the agent to
-its runtime and approve the agent's on-chain authority. The connector works out
-which runtime that is (#1720) — the user is never asked — so this flow has one
-setup prompt for every environment.
+Use after the user reviews the agent budget and needs to connect a delegation
+agent to its runtime and approve its on-chain authority. The connector works
+out which runtime that is (#1720) — the user is never asked — so this flow has
+one setup prompt for every environment. Legacy Safe accounts remain readable,
+but the dashboard refuses this flow with a retired-rail notice before creating
+a signable setup.
 
 Structure:
 1. Create and copy a single setup prompt — identical for every environment.
@@ -145,19 +148,20 @@ Structure:
    at the connector's own output first (it can refuse locally without ever
    contacting Haven, and then it is the only place naming why), offer the same
    local command, and let them cancel before creating a fresh one-time prompt.
-3. Show the registered public address and reviewed agent budget before wallet
-   approval.
-4. Ask the user to approve the agent's authority: a wallet approval from the selected Haven wallet on legacy Safe accounts, or a single in-modal budget signature on delegation accounts — which activates the agent.
-5. On legacy multisig accounts, if more approvals are required, show a
-   submitted/waiting state rather than implying the agent is active.
-6. Finish with `Done` plus a compact runtime-specific activation step and a
+3. Show the registered public address and reviewed agent budget before the
+   delegation signature.
+4. Ask the user to grant the agent budget in the modal; that signature activates
+   the delegation agent.
+5. Finish with `Done` plus a compact runtime-specific activation step and a
    read-only `haven_get_agent` / `haven_get_allowances` confirmation. Make clear
    that approval, not restarting, unlocks Haven tools; never require a payment
    to confirm setup.
 
 Money and risk clarity:
 - Repeat the budget and approval boundary.
-- Include a clear revoke path.
+- Include a clear pause or delegation-disable path. Legacy Safe permissions are
+  outside Haven; only tell a known wallet owner to use Safe's own interface.
+  Passkey-only and unknown-owner cases need a truthful no-self-serve-exit state.
 - Say the API key identifies the agent but cannot spend by itself.
 - Say the private signing key is created and held locally; Haven receives the
   public signing address and proof, not the key.

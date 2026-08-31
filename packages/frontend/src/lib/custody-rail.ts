@@ -58,7 +58,7 @@ const RAIL_CANNOT: Record<CustodyRail, string[]> = {
   ],
   safe: [
     'Expand an agent’s allowance without a Safe transaction you sign.',
-    'Block you — you can manage this Safe from any Safe-compatible app and revoke agents on-chain.',
+    'Block you — a supported Safe owner can manage the account externally; Haven does not revoke legacy agent permissions.',
   ],
 }
 

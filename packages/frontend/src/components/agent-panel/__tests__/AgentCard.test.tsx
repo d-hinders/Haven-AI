@@ -44,14 +44,10 @@ function renderCard(agent: Agent, { canUseWalletActions = true } = {}) {
   const { container } = render(
     <AgentCard
       agent={agent}
-      onChainAllowances={null}
-      onChainLoading={false}
-      chainTimeSec={null}
       onViewDetails={vi.fn()}
       onEdit={vi.fn()}
       onPause={vi.fn()}
       onResume={vi.fn()}
-      onRevoke={vi.fn()}
       onRevokeCredential={vi.fn().mockResolvedValue(undefined)}
       onArchive={vi.fn().mockResolvedValue(undefined)}
       onRestore={onRestore}
@@ -102,6 +98,12 @@ describe('AgentCard stranded-funds notice (#2195)', () => {
   it('shows nothing when the agent has no open reconciliation event', () => {
     renderCard(agentFixture())
     expect(screen.queryByText(STRANDED_FUNDS_TITLE)).toBeNull()
+  })
+
+  it('does not advertise recovery for a legacy Safe agent', () => {
+    renderCard(agentFixture({ account_type: 'safe', has_stranded_funds: true } as Partial<Agent>))
+    expect(screen.queryByText(STRANDED_FUNDS_TITLE)).toBeNull()
+    expect(screen.queryByText(/View agent to recover these funds/)).toBeNull()
   })
 })
 
@@ -239,14 +241,49 @@ describe('AgentCard paused notice copy (#2230)', () => {
 describe('AgentCard action-row matrix (#1402)', () => {
   it('active delegation agent: Remove shown, Safe Revoke hidden', () => {
     renderCard(agentFixture())
-    expect(screen.getByRole('button', { name: 'Remove Research agent' })).toBeTruthy()
+    const actions = [
+      screen.getByRole('button', { name: 'Edit Research agent' }),
+      screen.getByRole('button', { name: 'Pause Research agent' }),
+      screen.getByRole('button', { name: 'Remove Research agent' }),
+    ]
+    for (const action of actions) {
+      // Hand-rolled text actions have their own non-overlapping 44px target.
+      expect(action.className).toContain('min-h-11')
+      expect(action.className).toContain('min-w-11')
+    }
     expect(screen.queryByRole('button', { name: 'Revoke Research agent' })).toBeNull()
   })
 
-  it('active legacy agent: Safe Revoke shown, Remove hidden while operational', () => {
+  it('keeps the live delegation budget row and does not render the historical meter', () => {
+    const { container } = renderCard(
+      agentFixture({
+        allowances: [{
+          id: 'allowance-1',
+          agent_id: 'agent-1',
+          token_address: '0x' + '33'.repeat(20),
+          token_symbol: 'USDC',
+          allowance_amount: '1000000',
+          reset_period_min: 1440,
+        }],
+      } as Partial<Agent>),
+    )
+
+    expect(screen.getByText('Enforced on-chain')).toBeInTheDocument()
+    expect(container.querySelector('.allowance-fill')).toBeNull()
+  })
+
+  it('active legacy agent: no authority actions are shown while operational', () => {
     renderCard(agentFixture({ account_type: 'safe' as Agent['account_type'] }))
-    expect(screen.getByRole('button', { name: 'Revoke Research agent' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Rename Research agent' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Revoke Research agent' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Remove Research agent' })).toBeNull()
+  })
+
+  it('paused legacy agent stays readable without live pause messaging or resume', () => {
+    renderCard(agentFixture({ account_type: 'safe' as Agent['account_type'], status: 'paused' }))
+    expect(screen.getByText('paused')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Paused in Haven' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /resume/i })).toBeNull()
   })
 
   it('revoked-not-archived agent (any rail): status note + Remove, no Restore', () => {

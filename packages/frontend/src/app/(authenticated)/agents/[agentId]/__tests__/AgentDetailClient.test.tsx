@@ -6,28 +6,14 @@ const {
   mockUseAuth,
   mockUseAgents,
   mockUseAgentActivity,
-  mockUseOnChainAllowances,
-  mockUsePublicClient,
-  mockUseSafeDetails,
-  mockUseSafeOperationGate,
-  mockUseActiveSigner,
   mockUseDelegateBalance,
   mockUseAgentPassport,
 } = vi.hoisted(() => ({
   mockUseAuth: vi.fn(),
   mockUseAgents: vi.fn(),
   mockUseAgentActivity: vi.fn(),
-  mockUseOnChainAllowances: vi.fn(),
-  mockUsePublicClient: vi.fn(),
-  mockUseSafeDetails: vi.fn(),
-  mockUseSafeOperationGate: vi.fn(),
-  mockUseActiveSigner: vi.fn(),
   mockUseDelegateBalance: vi.fn(),
   mockUseAgentPassport: vi.fn(),
-}))
-
-vi.mock('wagmi', () => ({
-  usePublicClient: (...args: unknown[]) => mockUsePublicClient(...args),
 }))
 
 // #1402: the component navigates to /agents after a completed remove.
@@ -51,30 +37,12 @@ vi.mock('@/hooks/useAgentActivity', async () => {
   }
 })
 
-vi.mock('@/hooks/useOnChainAllowances', () => ({
-  useOnChainAllowances: (...args: unknown[]) => mockUseOnChainAllowances(...args),
-}))
-
 vi.mock('@/hooks/useDelegateBalance', () => ({
   useDelegateBalance: (...args: unknown[]) => mockUseDelegateBalance(...args),
 }))
 
 vi.mock('@/hooks/useAgentPassport', () => ({
   useAgentPassport: (...args: unknown[]) => mockUseAgentPassport(...args),
-}))
-
-vi.mock('@/hooks/useSafeDetails', () => ({
-  useSafeDetails: (...args: unknown[]) => mockUseSafeDetails(...args),
-}))
-
-vi.mock('@/hooks/useSafeOperationGate', () => ({
-  useSafeOperationGate: (...args: unknown[]) => mockUseSafeOperationGate(...args),
-}))
-
-vi.mock('@/lib/signer', () => ({
-  useActiveSigner: (...args: unknown[]) => mockUseActiveSigner(...args),
-  // Real predicate shape (#1079): narrows away the delegator_passkey variant.
-  isSafeCapableSigner: (s: { type?: string } | null) => s !== null && s.type !== 'delegator_passkey',
 }))
 
 vi.mock('@/components/OnchainActionGate', () => ({
@@ -92,8 +60,8 @@ vi.mock('@/components/PasskeyOtherDeviceNotice', () => ({
 vi.mock('@/components/EditAgentModal', () => ({
   // Renders a marker when open so routing tests can assert the modal did /
   // did not open (#1079).
-  default: ({ open, mode }: { open: boolean; mode?: string }) =>
-    open ? <div data-testid="edit-agent-modal">{mode}</div> : null,
+  default: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="edit-agent-modal">Edit agent</div> : null,
 }))
 
 vi.mock('@/components/DelegationBudgetCard', () => ({
@@ -103,6 +71,10 @@ vi.mock('@/components/DelegationBudgetCard', () => ({
 
 vi.mock('@/components/PaymentCredentialsModal', () => ({
   default: () => null,
+}))
+
+vi.mock('@/components/agent-panel/ReplaceSigningKeyModal', () => ({
+  ReplaceSigningKeyModal: () => null,
 }))
 
 vi.mock('@/components/ConfirmDialog', () => ({
@@ -164,6 +136,7 @@ describe('AgentDetailClient last-activity metadata', () => {
           created_at: '2026-05-01T00:00:00Z',
           mcp_last_seen_at: '2026-06-01T10:00:00Z',
           allowances: [],
+          account_type: 'delegator_hybrid',
         },
       ],
       loading: false,
@@ -177,21 +150,6 @@ describe('AgentDetailClient last-activity metadata', () => {
       stats: null,
       loading: false,
     })
-    mockUseOnChainAllowances.mockReturnValue({
-      data: new Map(),
-      refetch: vi.fn(),
-    })
-    mockUsePublicClient.mockReturnValue({})
-    mockUseSafeDetails.mockReturnValue({
-      details: {
-        address: SAFE.safe_address,
-        owners: ['0x5555555555555555555555555555555555555555'],
-        threshold: 1,
-        nonce: 1,
-      },
-    })
-    mockUseSafeOperationGate.mockReturnValue({ kind: 'ready' })
-    mockUseActiveSigner.mockReturnValue(null)
     // Default: delegate wallet is empty, so recovery UI stays hidden.
     mockUseDelegateBalance.mockReturnValue({
       balance: null,
@@ -588,62 +546,6 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.getAllByText('Haven wallet 0x4444…4444').length).toBeGreaterThan(0)
   })
 
-  it('uses stored agent wallet chain when the wallet is missing from auth state', () => {
-    const baseSafeAddress = '0x3333333333333333333333333333333333333333'
-    const delegateAddress = '0x4444444444444444444444444444444444444444'
-    mockUseAuth.mockReturnValue({
-      user: {
-        safes: [],
-      },
-    })
-    mockUseAgents.mockReturnValue({
-      agents: [
-        {
-          id: 'agent-1',
-          name: 'Base agent',
-          description: null,
-          delegate_address: delegateAddress,
-          safe_id: 'safe-base',
-          safe_address: baseSafeAddress,
-          safe_name: 'Base account',
-          safe_chain_id: 8453,
-          status: 'active',
-          created_at: '2026-05-01T00:00:00Z',
-          mcp_last_seen_at: null,
-          allowances: [{
-            id: 'allowance-base-usdc',
-            agent_id: 'agent-1',
-            token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-            token_symbol: 'USDC',
-            allowance_amount: '1000000',
-            reset_period_min: 1440,
-          }],
-        },
-      ],
-      loading: false,
-      pauseAgent: vi.fn(),
-      resumeAgent: vi.fn(),
-      revokeAgent: vi.fn(),
-      refetch: vi.fn(),
-    })
-
-    render(<AgentDetailClient agentId="agent-1" />)
-
-    expect(mockUseSafeDetails).toHaveBeenCalledWith(baseSafeAddress, { chainId: 8453 })
-    expect(mockUseOnChainAllowances).toHaveBeenCalledWith(baseSafeAddress, [delegateAddress], 8453)
-    expect(mockUsePublicClient).toHaveBeenCalledWith({ chainId: 8453 })
-    expect(mockUseActiveSigner).toHaveBeenCalledWith({
-      safeAddress: baseSafeAddress,
-      chainId: 8453,
-    })
-    expect(mockUseSafeOperationGate).toHaveBeenCalledWith({
-      safeAddress: baseSafeAddress,
-      chainId: 8453,
-    })
-    expect(screen.getByText('Base')).toBeInTheDocument()
-    expect(screen.getByText('1.00 USDC per day')).toBeInTheDocument()
-  })
-
   // ── Budget-affordance routing (#1079) ──────────────────────────────────
 
   function mockDelegationAgent() {
@@ -702,16 +604,9 @@ describe('AgentDetailClient last-activity metadata', () => {
   })
 
   it('hides the backup & recovery pointer on a legacy agent', () => {
+    mockAgentWith({ account_type: 'safe' })
     render(<AgentDetailClient agentId="agent-1" />)
     expect(screen.queryByRole('link', { name: /Backup & recovery/ })).not.toBeInTheDocument()
-  })
-
-  it('still opens EditAgentModal in budget mode on a legacy agent', () => {
-    render(<AgentDetailClient agentId="agent-1" />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Update budget' }))
-
-    expect(screen.getByTestId('edit-agent-modal')).toHaveTextContent('budget')
   })
 
   it('reads the delegate balance for REVOKED agents too — the recovery banner must reach them (#1403)', () => {
@@ -732,37 +627,21 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(calls[calls.length - 1][0]).toBe('agent-1')
   })
 
-  it('hides the Safe revoke control on a delegation agent, keeps it on a legacy agent', () => {
-    mockDelegationAgent()
-    const { unmount } = render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.queryByRole('button', { name: 'Revoke agent budget' })).not.toBeInTheDocument()
-    unmount()
-
-    // Legacy fixture from beforeEach.
+  it('does not read delegate balance for a legacy agent (#2258)', () => {
+    const base = mockUseAgents()
     mockUseAgents.mockReturnValue({
-      agents: [
-        {
-          id: 'agent-1',
-          name: 'Research agent',
-          description: null,
-          delegate_address: '0x2222222222222222222222222222222222222222',
-          safe_id: 'safe-1',
-          safe_address: SAFE.safe_address,
-          safe_name: 'Main account',
-          status: 'active',
-          created_at: '2026-05-01T00:00:00Z',
-          mcp_last_seen_at: null,
-          allowances: [],
-        },
-      ],
-      loading: false,
-      pauseAgent: vi.fn(),
-      resumeAgent: vi.fn(),
-      revokeAgent: vi.fn(),
-      refetch: vi.fn(),
+      ...base,
+      agents: base.agents.map((agent: { id: string }) => ({
+        ...agent,
+        account_type: 'safe',
+      })),
     })
+
     render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.getByRole('button', { name: 'Revoke agent budget' })).toBeInTheDocument()
+
+    const calls = mockUseDelegateBalance.mock.calls
+    expect(calls.length).toBeGreaterThan(0)
+    expect(calls[calls.length - 1][0]).toBeNull()
   })
 
   // #1402: the Remove/Restore visibility gates on the detail footer.
@@ -802,11 +681,15 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.queryByRole('button', { name: 'Restore to list' })).not.toBeInTheDocument()
   })
 
-  it('hides Remove on an operational LEGACY agent — Revoke stays its shutdown (#1402)', () => {
+  it('hides all authority controls on an operational LEGACY agent (#2258)', () => {
     mockAgentWith({ account_type: undefined })
     render(<AgentDetailClient agentId="agent-1" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Agent options' }))
     expect(screen.queryByRole('button', { name: 'Remove agent' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Revoke agent budget' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Update budget' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Payment credentials' })).not.toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Rename agent' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Update budget' })).not.toBeInTheDocument()
   })
 
   /**
@@ -828,10 +711,17 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.getByText(AGENT_PAUSED_BODY)).toBeInTheDocument()
   })
 
-  it('offers Remove (archive leg) on a revoked legacy agent (#1402)', () => {
+  it('does not present a live pause or resume message for a paused legacy record (#2258)', () => {
+    mockAgentWith({ account_type: undefined, status: 'paused' })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.queryByRole('heading', { name: AGENT_PAUSED_TITLE })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument()
+  })
+
+  it('offers Unlink on a revoked legacy agent after authority is already gone (#2258)', () => {
     mockAgentWith({ account_type: undefined, status: 'revoked' })
     render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.getByRole('button', { name: 'Remove agent' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Unlink agent' })).toBeInTheDocument()
   })
 
   it('an archived agent gets Restore to list and no Remove (#1402)', () => {

@@ -345,8 +345,10 @@ Preserve these facts as non-negotiable implementation invariants:
 - Budget, recipient and expiry limits are enforced on-chain by the caveat enforcers, not only by Haven.
 - Agent-initiated transactions, including the EIP-3009 x402 merchant leg, are signed by an agent private key held by the agent or user, not by Haven.
 - Haven may relay execution, but authority comes from the user or agent signature and the controls applicable to that leg, never from Haven authentication or database policy alone.
-- Users can enumerate and revoke every authority on their account, and recover control of the account itself, without Haven — the demonstrated exit story ([`docs/exit/README.md`](../exit/README.md)).
-- Users can revoke or modify agent authority independently of Haven.
+- On the live delegation rail, users can enumerate and revoke every delegation
+  on their account, and recover control of the account itself, without Haven —
+  the demonstrated exit story ([`docs/exit/README.md`](../exit/README.md)).
+- Users can revoke or modify live delegation authority independently of Haven.
 - Haven cannot block users from transacting with their account outside Haven.
 
 **Delegation-rail x402 signing is local-signer-only (owner decision, 2026-08-06, #1138).** The hosted/edge keyless path never signs an account UserOp: on this rail the agent's signature is produced by the local signer holding the delegate key, exactly as invariant "signed by an agent private key held by the agent or user, not by Haven" requires. Haven's role is limited to *declaring* what is to be signed — an expected context it signs with a dedicated binding key — which the signer verifies before signing and can refuse. Because the account validates EIP-712 typed data rather than the bare ERC-4337 hash, that declaration commits to the typed data's digest (expected context v2); the signer re-derives the digest from the payload it actually signs and refuses any mismatch, so Haven cannot substitute a different operation behind a correctly-signed declaration. The refusal extends to declarations the signer does not *understand*: an expected-context version outside the set that signer supports is rejected before any content check (#1143, `SUPPORTED_X402_EXPECTED_VERSIONS`), so a newer backend cannot obtain a signature by declaring a context whose rules the signer cannot evaluate — the same property, applied to the version field itself. Since #1155 the signer also *advertises* that supported set at its MCP `initialize` handshake, so an agent can spot the skew before it quotes. That advertisement is metadata — version numbers, no key material and no authority — and it is advisory by decision: it adds no refusal to the payment path, and the signing-time refusal above remains the control. This is a boundary, not a staging decision: teaching the hosted signer to sign account UserOps would put Haven in the signing path and is out of scope by construction.
@@ -826,7 +828,7 @@ Before merging any payment-related, agent-authority, account, SDK, x402/MPP, or 
 - [ ] Haven database policy is not the only spend control.
 - [ ] A user signature establishes or modifies agent authority — an owner-signed delegation.
 - [ ] Users can revoke agent authority on-chain.
-- [ ] Users can enumerate and revoke authority on their account without Haven (the exit story).
+- [ ] On the live delegation rail, users can enumerate and revoke every delegation on their account without Haven (the exit story).
 - [ ] Haven cannot block or freeze user funds.
 - [ ] Haven cannot expand an agent's budget without an owner signature.
 - [ ] Haven cannot change recipient, amount, token, route, or timing after signature.

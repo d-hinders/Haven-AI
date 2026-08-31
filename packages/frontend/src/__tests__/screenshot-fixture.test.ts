@@ -12,8 +12,6 @@ import {
 } from '../../scripts/screenshot.mjs'
 import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
 
-/** The account the harness makes active by default (`screenshot.mjs:1785`). */
-const DEFAULT_ACTIVE_SAFE_ID = 'safe-fixture'
 import {
   isMcpToolCallActivityItem,
   isPaymentActivityItem,
@@ -32,13 +30,10 @@ type ScenarioShape = {
 /**
  * Look a scenario up and assert it actually has an `api` hook.
  *
- * The harness treats `api` as OPTIONAL — `scenario?.api?.(api, req.method())`
- * (`screenshot.mjs:1917`) — and since #2202 one scenario genuinely has none:
- * `agents-legacy-rail` changes which ACCOUNT is active (`seed`) rather than
- * what the API answers. A blanket `SCENARIOS as Record<string, ScenarioShape>`
- * therefore states something false about the registry. This says what each
- * lookup actually needs, and fails by name if a scenario ever loses its hook
- * instead of throwing `undefined is not a function` several lines later.
+ * The harness treats `api` as optional — `scenario?.api?.(api, req.method())`
+ * — and some scenarios are seed-only or staged. A blanket registry cast would
+ * therefore state something false about the registry. This says what each
+ * lookup actually needs and fails by name if a scenario loses its hook.
  */
 const scenarioWithApi = (name: string): ScenarioShape => {
   const scenario = (SCENARIOS as Record<string, Partial<ScenarioShape>>)[name]
@@ -129,38 +124,6 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         delegations: { recipient_address: string | null }[]
       }
       expect(open.delegations[0].recipient_address).toBeNull()
-    })
-
-    it('seeds an ACTIVE account that exists, and the scenario switches to the legacy one (#2202)', () => {
-      // `haven-reviewer`'s finding, and it was right: `agents-legacy-rail` is
-      // the first scenario in the harness to use `seed`, and nothing checked
-      // the value. Mutating the seeded id to `FIXTURE_SAFE.id` — the wrong,
-      // DELEGATION-rail account — left the whole suite green. The scenario's
-      // own `run()` would have caught it, but no CI workflow executes the
-      // general screenshot harness, so it would merge and only surface when a
-      // human next took a capture: the "invisible until someone looks at the
-      // PNG" class this whole issue is about.
-      const safeIds = (FIXTURE_USER as unknown as { safes: { id: string }[] }).safes.map(
-        (s) => s.id,
-      )
-
-      // The harness's own default, seeded before any app code runs.
-      expect(safeIds).toContain(DEFAULT_ACTIVE_SAFE_ID)
-
-      const seeded = (
-        SCENARIOS as Record<string, { seed?: () => Record<string, string> }>
-      )['agents-legacy-rail'].seed!()
-      const activeId = seeded[ACTIVE_SAFE_STORAGE_KEY]
-
-      // It must name a REAL account…
-      expect(safeIds).toContain(activeId)
-      // …and specifically the LEGACY one, or the scenario photographs the
-      // delegation rendering under a name that promises the legacy rail.
-      const active = (
-        FIXTURE_USER as unknown as { safes: { id: string; account_type: string }[] }
-      ).safes.find((s) => s.id === activeId)
-      expect(active!.account_type).toBe('safe')
-      expect(activeId).not.toBe(DEFAULT_ACTIVE_SAFE_ID)
     })
 
     it('gives the user exactly ONE default account (#2202)', () => {
@@ -736,7 +699,6 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
   describe('scenarios (#1409)', () => {
     const connect = scenarioWithApi('connect-agent')
     const approve = scenarioWithApi('connect-agent-approve')
-    const approveLegacy = scenarioWithApi('connect-agent-approve-legacy')
     const signerRemoval = scenarioWithApi('account-signer-removal')
     // Cast the ENTRY, not the registry: `Record<string, StagedScenarioShape>`
     // would claim every scenario is staged, and only this one is.
@@ -996,28 +958,6 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect(status.delegate_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
       })
 
-      it('puts the LEGACY twin on the other rail, and ONLY by account_type', () => {
-        // The rail branch reads `account_type` off /auth/me. Without this
-        // override the legacy scenario would silently capture the DELEGATION
-        // screen under the legacy filename — the exact wrong-screen failure
-        // the scenario's own copy-based wait exists to catch.
-        const me = approveLegacy.api('/auth/me', 'GET') as {
-          safes: Array<{ account_type: string; id: string }>
-          email: string
-        }
-        expect(me.safes[0].account_type).toBe('safe')
-        // Same account otherwise — a scenario states only what is special.
-        expect(me.email).toBe('fixture@haven.test')
-        expect(me.safes[0].id).toBe(FIXTURE_SAFE_ID)
-        const safes = approveLegacy.api('/user/safes', 'GET') as {
-          safes: Array<{ account_type: string }>
-        }
-        // Both readers must agree: `useAgentConnectionSetup` resolves the rail
-        // from /auth/me, but a disagreeing /user/safes would make the capture
-        // depend on which hook won.
-        expect(safes.safes[0].account_type).toBe('safe')
-      })
-
       it('serves a reachable signer so the Approve button renders, not the connect fallback', () => {
         // `pickSigningPath` returns null on an empty signer set, which flips
         // BudgetGrantAction to its not-ready branch — a capture of the wrong
@@ -1066,8 +1006,14 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect(me.safes[0].is_default).toBe(true)
       })
 
-      it('leaves every other endpoint to the shared fixture', () => {
-        expect(legacy.api('/agents', 'GET')).toBeUndefined()
+      it('keeps legacy agent records readable without delegation budgets', () => {
+        const agents = legacy.api('/agents', 'GET') as {
+          agents: Array<{ safe_id: string; account_type: string; allowances: unknown[] }>
+        }
+        const sharedAgents = agents.agents.filter((agent) => agent.safe_id === FIXTURE_SAFE_ID)
+        expect(sharedAgents.length).toBeGreaterThan(0)
+        expect(sharedAgents.every((agent) => agent.account_type === 'safe')).toBe(true)
+        expect(sharedAgents.every((agent) => agent.allowances.length === 0)).toBe(true)
         expect(legacy.api(`/balances/${FIXTURE_SAFE_ADDRESS}`, 'GET')).toBeUndefined()
       })
     })

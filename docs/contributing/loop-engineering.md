@@ -69,7 +69,7 @@ Same discipline, different oracle:
 
 | Shape | Oracle | Example in Haven |
 | --- | --- | --- |
-| **Differential** | a reference model / the real artifact | `computeEffectiveAllowance` vs the AllowanceModule reset model (backend + frontend) |
+| **Differential** | a reference model / the real artifact | `computeEffectiveAllowance` vs the historical AllowanceModule reset model (frontend test-only) |
 | **Property / invariant** | an asserted rule over fuzzed inputs | "over-budget intent ⇒ declined before it becomes signable, never `executed`" |
 | **Eval** (future) | a grading rubric | an LLM-assisted feature graded against expected outputs |
 
@@ -151,9 +151,10 @@ A loop has a terminal state, and the harness encodes it:
   does not pause for human approval on merge, so the restraint has to live here.
 - **Bound the campaign:** cap iterations and diff size so a stuck loop surfaces a
   "stuck, here's my diagnosis" report instead of a sprawling refactor.
-- **Classify the value honestly.** These allowance loops are *reliability /
-  state-correctness* loops, not fund-safety loops — the on-chain module enforces
-  the hard limit. Know which kind you are running.
+- **Classify the value honestly.** The remaining allowance loop is a frontend
+  display-math regression loop against a historical AllowanceModule model, not
+  a live authority or fund-safety loop. Live delegation budgets are enforced by
+  the delegation caveat enforcers; the retired module is not a current control.
 
 ## 8. Running and scheduling
 

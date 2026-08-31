@@ -152,10 +152,9 @@ export function ExternalDetailsLink({ href, label = 'Open externally' }: { href:
       rel="noopener noreferrer"
       aria-label={label}
       title={label}
-      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
     >
       <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
     </a>
   )
 }
-

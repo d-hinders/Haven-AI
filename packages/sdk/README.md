@@ -487,9 +487,48 @@ const receipt = await haven.resumeAuthorizedX402({
 })
 
 await fetch('https://paid-api.example.com/data', {
-  headers: { 'X-PAYMENT': receipt.paymentHeader! },
+  headers: {
+    'PAYMENT-SIGNATURE': receipt.paymentHeader!,
+    'X-PAYMENT': receipt.paymentHeader!,
+  },
 })
 ```
+
+**When YOU make the retry, report the outcome (#2292).** `haven.fetch()` and
+the `payX402*` helpers call the merchant themselves and write the evidence or
+reconciliation record from what they observed. `resumeAuthorizedX402()` and the
+raw MCP/SSE flow below deliberately do not — you hold the header and make the
+call — so Haven cannot learn what happened unless you tell it:
+
+```typescript
+const response = await fetch('https://paid-api.example.com/data', {
+  headers: {
+    'PAYMENT-SIGNATURE': receipt.paymentHeader!,
+    'X-PAYMENT': receipt.paymentHeader!,
+  },
+})
+
+await haven.reportX402MerchantOutcome({
+  paymentId: status.paymentId,
+  outcome: response.ok ? 'accepted' : 'rejected',
+  merchantStatus: response.status,
+})
+```
+
+A `rejected` report writes the same open `merchant_retry_rejected_after_payment`
+reconciliation event the built-in retry writes, so the next
+`getPaymentStatus()` answers `phase: funded_but_unsettled` /
+`nextAction: sweep_stranded_funds` instead of reading as complete for the
+fifteen-minute merchant-report grace window. An `accepted` report records the
+merchant response so a delivered payment never enters that window at all.
+
+It is evidence, not authority. The funding transaction hash and resource URL are
+read from the payment's own record rather than taken from you — they are not
+parameters — the call is scoped to your own agent's payments, and it changes no
+amount, recipient or status. `outcome` must agree with `merchantStatus`
+(`accepted` only for a 2xx), and an acceptance is terminal: a rejection reported
+after a recorded merchant response is refused rather than re-flagging a
+delivered payment as stranded.
 
 For MCP/SSE x402 tools, keep the same MCP session and JSON-RPC payload where the
 merchant requires it: initialize, retain `mcp-session-id`, send the original

@@ -158,7 +158,12 @@ the merchant: \`mcp__haven-signer__haven_sign_x402\` returns both
 \`mcp__haven__haven_submit\`, then retry the paywalled URL yourself with
 \`payment_header\`. Do not pass that call's \`x402_binding\` to
 \`mcp__haven-signer__haven_x402_sign_header\` — the one-shot already spent it
-building the header, so the call can only refuse. (The SDK's own
+building the header, so the call can only refuse. Then tell Haven what the
+merchant answered: \`mcp__haven__haven_report_x402_outcome\` with the
+\`payment_id\`, \`outcome\` (\`"accepted"\` for a 2xx, else \`"rejected"\`)
+and the \`merchant_status\` you got. Because Haven never contacted that
+merchant, this is the only way it can learn the purchase failed — without it a
+failed purchase reads as complete for fifteen minutes. (The SDK's own
 \`haven_pay_x402\` tool does perform the merchant retry itself; that tool is
 not part of the hosted MCP surface.) If the process
 crashes after payment, a later \`mcp__haven__haven_get_payment_status\` call

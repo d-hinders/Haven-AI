@@ -116,6 +116,7 @@ Source of truth:
   route orchestration.
 - [`packages/mcp/src/tools.ts`](../../packages/mcp/src/tools.ts)
 - [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts)
+- [`packages/backend/src/modules/mpp/reconciliation.ts`](../../packages/backend/src/modules/mpp/reconciliation.ts) — `POST /machine-payments/reconciliation-events`, and the #2292 acceptance-is-terminal precedence rule.
 - [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
 
 ## Challenge And Header Semantics
@@ -815,6 +816,59 @@ best-effort evidence upgrade never reached Haven: it reads as undelivered and
 is told to retry a merchant that was already paid, which is the safe side —
 x402 merchants answer a re-request of a settled purchase idempotently
 (#1519).
+
+**What is live since #2292: a way for the agent to say what happened.** The
+derivation above is deliberately server-side, and stays so — case 2 has to
+fire for an agent that never came back, which no client-written signal can
+provide. What #2292 changes is how long the *surviving* agent has to wait. On
+the plain-HTTP path Haven never contacts the merchant, so before #2292 both
+routes into `funded_but_unsettled` were out of reach there: the
+`merchant_retry_rejected_after_payment` event had exactly one producer, the
+SDK's own retry path, and a manually retried merchant could not write it; and
+the grace window is fifteen minutes. A demonstrably failed purchase therefore
+read `confirmed` / `payment_confirmed` / `none` for that whole window. Not a
+wrong status — an unobservable one.
+
+`haven_report_x402_outcome` (hosted MCP) and
+`HavenClient.reportX402MerchantOutcome` (SDK) close that. `rejected` posts the
+same `POST /machine-payments/reconciliation-events` the SDK path posts, so
+case 1 fires on the next status call; `accepted` posts `POST
+/machine-payments/evidence`, which upgrades `proof_status` to
+`merchant_response_observed` and therefore removes the payment from case 2's
+predicate permanently rather than until the window elapses.
+
+The report is caller-**asserted**, and the boundary is drawn the way #2092/#2096
+drew it for a caller-asserted settlement hash:
+
+- **Verified:** the payment resolves scoped to the calling agent (both routes
+  are `WHERE agent_id = $`, so a foreign payment is a 404); it is an x402
+  intent, `confirmed`, with a Haven funding transaction; the anchor tx hash and
+  resource URL are read from that record and are **not** arguments — the tool
+  refuses `tx_hash` / `resource_url` outright rather than stripping them; and
+  `merchant_status` must be a 100–599 integer that agrees with the asserted
+  outcome.
+- **Deliberately not verified:** that the merchant actually returned that
+  status, or that the resource was delivered. Checking would mean calling the
+  merchant, which is the property this path exists to preserve. Haven must not
+  start talking to this merchant, not even to be helpful.
+- **What a false report can therefore achieve:** on the reporter's own payment
+  only, either hiding its stranded-funds prompt or raising a spurious one. It
+  cannot move funds, cannot change the intent's status, amount or recipient,
+  cannot confirm a `submitted` erc7710 intent (that has no Haven tx hash and is
+  refused here — the on-chain-verified seam in `attachMachinePaymentEvidence`
+  stays the only door), and cannot block or unblock a sweep, which is driven by
+  the delegate's on-chain balance. A false `accepted` additionally triggers the
+  server's own post-settlement residue read, which re-flags stranded funds
+  independently.
+
+**Precedence between contradictory reports, decided once:** an acceptance is
+terminal. An acceptance after a rejection resolves the open event (the attach
+path already did this); a rejection after an acceptance is now refused with
+409 rather than opening a stranding on a delivered payment. Before #2292 the
+three orderings gave three different answers, none of them chosen. Delivery is
+the stronger fact, and an x402 merchant answers a re-request of a settled
+purchase idempotently (#1519), so a later 402 says something about the retry
+and not about whether the user got what they paid for.
 
 **What is live since #2290: the signing leg the remedy depends on.** Until
 #2290 the trigger above was reachable and its cure was not. `haven_sign_x402`

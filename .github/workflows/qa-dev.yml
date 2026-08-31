@@ -6,9 +6,25 @@ name: QA — money-flow (dev)
 # Triggers (#578):
 #   - workflow_dispatch: manual run / local-debug parity.
 #   - schedule: nightly, so a fresh green signal exists without anyone triggering it.
-#   - repository_dispatch (dev-deployed): fired by the Railway/Vercel dev deploy so QA
-#     runs against exactly what just shipped. Webhook setup is in
+#   - repository_dispatch (dev-deployed): MEANT to be fired by the Railway/Vercel dev
+#     deploy so QA runs against exactly what just shipped. Webhook setup is in
 #     docs/operations/agent-qa.md → "Automation & gating".
+#
+#     NOT CURRENTLY WIRED (#2268). This trigger had fired ZERO times across the
+#     repository's entire history — 156 qa-dev.yml runs, 2026-06-30 → 2026-08-31,
+#     and zero repository_dispatch runs on any workflow. The declaration below is
+#     correct and the receiving half works (a manual
+#     `gh api repos/:owner/:repo/dispatches -f event_type=dev-deployed` started run
+#     33370275124 three seconds later); nothing SENDS the dispatch. That is an
+#     operator action in the Railway/Vercel dashboard, not a change to this file —
+#     so the trigger stays declared, and its SILENCE is now watched by
+#     scripts/ci/guard-freshness.mjs, which files a `ci-health` issue when no
+#     dev-deployed dispatch has arrived in four days.
+#
+#     Do NOT "fix" this by adding a push trigger: this is a black-box harness
+#     against the DEPLOYED backend, so firing on push races the deploy and
+#     produces a green run whose headSha claims coverage the deployed code never
+#     had — a visible block converted into a false pass.
 #
 # This run is the promotion signal that dev-gate.yml's freshness gate reads before
 # allowing dev → main. On failure it files (or comments on) a `qa-failure` issue.

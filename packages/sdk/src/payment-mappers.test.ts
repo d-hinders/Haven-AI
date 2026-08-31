@@ -173,6 +173,65 @@ describe('payment result mappers', () => {
 })
 
 describe('raw payment state mapping', () => {
+  it('#2262: approved is fail-closed — stop, never a wait instruction', () => {
+    // `approved` sat literally between two branches #2101 had already
+    // converted and was the last arm emitting a wait. It was an
+    // `approval_requests` status (table dropped, #2055) and no repository
+    // write sets `payment_intents.status` to it, so nothing can mint it — the
+    // wait pointed at a user-execution step on a rail that answers 410.
+    const state = paymentStateFromRaw('x402 payment', {
+      payment_id: 'ar_3',
+      status: 'approved',
+    } as RawX402AuthorizeResponse)
+    expect(state?.nextAction).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(state?.nextAction).not.toBe(AgentPaymentNextAction.WaitForUserToCompletePayment)
+    // The phase label is deliberately unchanged — #2101 and #2145 converted
+    // next actions only, and this value already documents itself as retired.
+    expect(state?.phase).toBe(AgentPaymentPhase.UserExecutionRequired)
+    expect(state?.message).toMatch(/no live Haven rail produces/)
+    expect(state?.message).toMatch(/Nothing is waiting to be completed/)
+    // The generic template is what used to render here, and it embedded the
+    // retired next action verbatim into agent-facing text.
+    expect(state?.message).not.toContain('wait_for_user_to_complete_payment')
+    expect(state?.message).not.toContain('is approved; next_action=')
+  })
+
+  it('#2262: no status fallback in this module answers with a wait', () => {
+    // Positive control against the reverse defect: a build that answered
+    // StopAndTellUser for EVERY status would pass the assertion above. These
+    // three statuses must keep their own distinct, non-stop verdicts.
+    const verdicts = (['pending_signature', 'submitted', 'confirmed', 'expired'] as const).map(
+      (status) =>
+        paymentStateFromRaw('x402 payment', {
+          payment_id: 'ar_4',
+          status,
+        } as RawX402AuthorizeResponse)?.nextAction,
+    )
+    expect(verdicts).toEqual([
+      AgentPaymentNextAction.SignAndSubmitPayment,
+      AgentPaymentNextAction.CheckStatusLater,
+      AgentPaymentNextAction.None,
+      AgentPaymentNextAction.RequestAgainIfUserStillWantsIt,
+    ])
+
+    // And no status this module maps may answer with either retired wait.
+    const retiredWaits: string[] = [
+      AgentPaymentNextAction.WaitForUserApproval,
+      AgentPaymentNextAction.WaitForUserToCompletePayment,
+    ]
+    for (const status of [
+      'pending_signature', 'submitted', 'confirmed', 'pending', 'pending_approval',
+      'approved', 'proposed', 'executed', 'rejected', 'expired', 'failed',
+    ]) {
+      const nextAction = paymentStateFromRaw('x402 payment', {
+        payment_id: 'ar_5',
+        status,
+      } as RawX402AuthorizeResponse)?.nextAction
+      expect(nextAction, `status ${status} must not answer with a retired wait`).not.toBeUndefined()
+      expect(retiredWaits, `status ${status} answered with a retired wait`).not.toContain(nextAction)
+    }
+  })
+
   it('#2145: executed is fail-closed — stop, never a retry instruction', () => {
     // `executed` was the last #2101 sibling still mapped to
     // retry_original_x402_request. It was an `approval_requests` status

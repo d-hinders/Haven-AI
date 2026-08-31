@@ -29,6 +29,17 @@ export function paymentStateStatusCode(status: string, fallback = 502): number {
   return PAYMENT_STATE_STATUS_CODES[status] ?? fallback
 }
 
+// The three retired-queue statuses keep their descriptive phase labels on
+// purpose, and #2262 deliberately did not make `approved` the exception.
+// #2101 and #2145 both converted `nextActionForStatus` only and left every
+// arm of this function alone: `phase` is a descriptive label, `nextAction` is
+// the field the agent contract says to follow FIRST, and all three phases
+// these arms return — `user_approval_required`, `user_execution_required`,
+// `waiting_for_additional_approvals` — already carry the "Retired wire value:
+// no live rail produces it. Stop and tell the user." text in
+// `AgentPaymentPhaseDescriptions` (`types.ts`). Re-pointing one of the three
+// at a different phase would make the status→phase correspondence lie in a
+// new way and would be a third handling of one fact.
 function phaseForStatus(status: string): PaymentPhase | null {
   if (status === 'pending_signature') return AgentPaymentPhase.AgentSignatureRequired
   if (status === 'submitted') return AgentPaymentPhase.PaymentSubmitted
@@ -55,7 +66,21 @@ function nextActionForStatus(status: string): PaymentNextAction | null {
   // the message beside it and send a compliant agent into a poll loop that
   // cannot terminate. The fail-closed branch is retained; its verdict is stop.
   if (status === 'pending' || status === 'pending_approval') return AgentPaymentNextAction.StopAndTellUser
-  if (status === 'approved') return AgentPaymentNextAction.WaitForUserToCompletePayment
+  // #2262: `approved` closes the #2101 sweep — it was the one branch left
+  // emitting a wait, sitting literally between two converted siblings. Same
+  // proof as theirs, re-verified rather than inherited: `approved` was an
+  // `approval_requests` status (table dropped by #2055), and no write in the
+  // repository layer sets `payment_intents.status` to it — every INSERT/UPDATE
+  // in `infra/repositories/payment-intents.ts`, `x402-authorizations.ts` and
+  // `agent-rekeys.ts` sets `pending_signature`, `submitted`, `confirmed`,
+  // `expired` or `failed`. So nothing can mint it, and the wait it returned
+  // pointed at a user-execution step on the Safe rail, which has answered 410
+  // to everything since #1986. An agent that followed it would wait forever.
+  // Three places already said so — `AgentPaymentNextActionDescriptions` and
+  // `AgentPaymentPhaseDescriptions` in `types.ts`, and README's next-action
+  // table — so the tree contradicted itself here. Fail-closed branch retained;
+  // its verdict is stop.
+  if (status === 'approved') return AgentPaymentNextAction.StopAndTellUser
   if (status === 'proposed') return AgentPaymentNextAction.StopAndTellUser
   // #2145: `executed` joins its #2101 siblings, fail-closed. It was an
   // `approval_requests` status (table dropped, #2055) and cannot be
@@ -85,6 +110,14 @@ function messageForState(
     // retirement, but the message must not promise an approval that will
     // never arrive — the agent is told to stop, not to poll.
     return `${label} is not payable: it is outside the agent's on-chain budget and no approval is pending (payment_id: ${paymentId}). Ask the user to grant or raise the budget in Haven.`
+  }
+  if (status === 'approved') {
+    // #2262: no live rail mints this status (it belonged to the dropped
+    // approval queue), so the message must not promise a payment the user is
+    // about to complete. Before this branch existed the generic template below
+    // rendered "<label> is approved; next_action=wait_for_user_to_complete_payment",
+    // which is the instruction, not the documentation, an agent acts on.
+    return `This payment carries a retired status ("approved") that no live Haven rail produces (payment_id: ${paymentId}). Nothing is waiting to be completed — tell the user to review this payment in Haven.`
   }
   if (status === 'executed') {
     // #2145: no live rail mints this status (it belonged to the dropped

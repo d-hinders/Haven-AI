@@ -1,7 +1,7 @@
 {
   "name": "@haven_ai/sdk",
   "version": "0.1.32-alpha.0",
-  "description": "TypeScript SDK for Haven — agent wallet infrastructure",
+  "description": "TypeScript SDK for Haven — give AI agents budgeted, non-custodial payment ability. Pay x402 (HTTP 402) APIs in USDC within on-chain-enforced spending limits; the agent never holds funds or keys.",
   "engines": {
     "node": ">=22"
   },
@@ -34,13 +34,18 @@
   },
   "keywords": [
     "haven",
-    "agent",
-    "wallet",
+    "ai-agent",
+    "agent-payments",
+    "x402",
+    "402",
     "payments",
-    "safe",
-    "gnosis",
-    "web3",
-    "ai-agent"
+    "spending-limit",
+    "budget",
+    "usdc",
+    "non-custodial",
+    "mcp",
+    "agentic-commerce",
+    "web3"
   ],
   "license": "MIT",
   "repository": {
@@ -57,5 +62,6 @@
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.2.4"
-  }
+  },
+  "homepage": "https://haven.xyz"
 }

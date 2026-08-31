@@ -125,7 +125,29 @@ export function AgentCard({
       onClick={openDetails}
       onKeyDown={handleCardKeyDown}
       aria-label={`View ${agent.name}`}
-      className={`${entityCardClassName({ muted: isRevoked })} cursor-pointer`}
+      /* #2251: `min-w-0` is the STRUCTURAL half of the fit-the-track fix, and
+         it is on the call site rather than in `entityCardClassName` on
+         purpose — `/accounts` shares that helper and has its own open
+         sizing issue (#2241), so folding this in would ship an unmeasured
+         change to a surface this diff never rendered.
+
+         A grid item's `min-width` defaults to `auto`, which resolves to its
+         min-content. `AgentPanel`'s grid (`grid items-start gap-4
+         lg:grid-cols-2`) therefore sizes its column to the WIDEST card's
+         min-content and lets no card shrink below it. At 390 the track is
+         342px and a card carrying the longest legal `mcp_server_name` floors
+         at 466.6px, so every card in the grid rendered ~146px wider than the
+         track and was CLIPPED — `main` is `overflow-x: auto` inside an
+         `overflow-hidden` parent, so `documentElement.scrollWidth` stays 390
+         and nothing on the page says there is more to the right.
+
+         This class alone is not the fix and was measured not to be: with it
+         the card sits at 342px while the MCP chip still renders 264.9px inside
+         an 86.5px box, i.e. spilling out of the card instead of expanding it.
+         The other half is `McpServerName`'s `[&>span]:min-w-0`, which lets the
+         chip's `truncate` finally engage. Both are asserted, separately, in
+         `e2e/agent-card-fit-measure.spec.ts`. */
+      className={`${entityCardClassName({ muted: isRevoked })} min-w-0 cursor-pointer`}
     >
       {/* Header */}
       <div className="flex items-start gap-3 mb-4">

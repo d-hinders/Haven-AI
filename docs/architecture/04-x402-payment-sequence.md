@@ -123,8 +123,10 @@ Source of truth:
 The SDK normalizes the merchant's 402 response into a `PaymentRequired` object.
 It accepts the v2 `PAYMENT-REQUIRED` header, the v1 `X-PAYMENT` challenge
 header, and a JSON-body fallback. When the delegate address is known, probes
-also send `x402-wallet`. The paid retry uses `X-PAYMENT`; a successful merchant
-response may include `PAYMENT-RESPONSE` evidence.
+also send `x402-wallet`. The paid retry sets **both** payment header names to
+the same value — the v2 `PAYMENT-SIGNATURE` and the v1 `X-PAYMENT` (#2289) — so
+a strict merchant on either version reads it; a successful merchant response may
+include `PAYMENT-RESPONSE` evidence.
 
 `quoteX402()`, `haven_quote_x402`, `haven_quote_mcp_tool`, and
 `haven_quote_catalog_purchase` are read-only. The MCP variants establish the
@@ -223,7 +225,7 @@ sequenceDiagram
     AM->>Safe: Transfer within approved budget
     API-->>SDK: Funding transaction
     SDK->>SDK: Wait for at least one confirmation
-    SDK->>Resource: Retry original request with X-PAYMENT
+    SDK->>Resource: Retry with PAYMENT-SIGNATURE + X-PAYMENT
     alt merchant accepts
       Resource-->>SDK: Success + optional PAYMENT-RESPONSE
       SDK-->>Agent: Merchant response
@@ -279,7 +281,7 @@ sequenceDiagram
     API-->>MCP: funding status
     Agent->>Signer: haven_x402_sign_header { payment_required, x402_binding }
     Signer-->>Agent: { payment_header }
-    Agent->>Resource: Retry with X-PAYMENT
+    Agent->>Resource: Retry with PAYMENT-SIGNATURE + X-PAYMENT
     Resource-->>Agent: 200 OK / merchant response
   else outside the on-chain budget
     API-->>MCP: refusal — no intent row, no payload_hash, nothing queued
@@ -318,7 +320,8 @@ haven_pay_x402_quote  → settlement child + settlement_scheme: "erc7710"
 haven_sign            → { payment_id } only; the signer fetches the child
 haven_submit          → { payment_id, signature, settlement_scheme: "erc7710" }
                         POST /x402/:id/settle → payment_header, tx_hash null
-agent retry           → X-PAYMENT: <payment_header>
+agent retry           → PAYMENT-SIGNATURE: <payment_header>
+                        X-PAYMENT:         <payment_header>   (v1 alias)
 ```
 
 There is no `haven_submit` funding relay to confirm and **no
@@ -856,7 +859,7 @@ print — which is exactly why the API-side mapping exists.
 | Payment target | Recipient address from agent intent | Merchant `payTo` from HTTP 402 challenge |
 | Amount units | Human decimal string | Atomic amount from x402 option |
 | Agent action after funding | None for direct confirmed payment | Retry original merchant/resource request |
-| Header sent to merchant | None | `X-PAYMENT` |
+| Header sent to merchant | None | `PAYMENT-SIGNATURE` **and** `X-PAYMENT`, same value (#2289) |
 | Payment authority | Delegate signature + on-chain allowance | Same for funding leg; EIP-3009 signature for merchant leg |
 | Restart recovery | Fetch payment status | Rehydrate stored x402 context by payment id (`getResumeState`); resume when status answers `retry_original_x402_request` (#2145) — see [Resuming An Authorized Payment](#resuming-an-authorized-payment) |
 

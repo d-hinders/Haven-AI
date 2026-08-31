@@ -1,5 +1,9 @@
 import type { X402McpTransport, X402PaymentRequired } from './types.js'
 import { MerchantTimeoutError } from './types.js'
+import {
+  X402_LEGACY_PAYMENT_HEADER_NAME,
+  X402_PAYMENT_HEADER_NAME,
+} from './x402.js'
 
 export const DEFAULT_MERCHANT_TIMEOUT = 300_000
 export const MCP_NOTIFICATION_TIMEOUT = 10_000
@@ -186,14 +190,27 @@ export class McpMerchantTransport {
     return responseHasBazaarExtension(response)
   }
 
-  /** Deliver an already-signed x402 header without changing the caller body. */
+  /**
+   * Deliver an already-signed x402 header without changing the caller body.
+   *
+   * #2289: sets BOTH wire names to the same value. x402 v2 reads
+   * `PAYMENT-SIGNATURE`; v1 reads `X-PAYMENT`. Sending only the legacy name
+   * meant a strict v2 merchant never saw the header — indistinguishable, from
+   * the merchant's side, from sending no header at all, while on the EIP-3009
+   * bridge the funding leg had already moved the money.
+   *
+   * `set` (not `append`) on both, so a stale header on the caller's `init` is
+   * replaced rather than added to — a merchant that reads the first of two
+   * values would otherwise verify a superseded authorization.
+   */
   async deliverPayment(
     url: string,
     init: RequestInit | undefined,
     paymentHeader: string,
   ): Promise<Response> {
     const headers = new Headers(init?.headers)
-    headers.set('X-PAYMENT', paymentHeader)
+    headers.set(X402_PAYMENT_HEADER_NAME, paymentHeader)
+    headers.set(X402_LEGACY_PAYMENT_HEADER_NAME, paymentHeader)
     return this.fetch(url, { ...init, headers })
   }
 

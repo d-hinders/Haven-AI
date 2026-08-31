@@ -533,7 +533,25 @@ describe('x402 helpers', () => {
     const payment = decodeHeader(x402Header)
 
     expect(retryHeaders.get('x402-wallet')).toBe(delegateAddress)
-    expect(retryHeaders.has('PAYMENT-SIGNATURE')).toBe(false)
+    // #2289: BOTH wire names carry the same payload.
+    //
+    // This line asserted `has('PAYMENT-SIGNATURE') === false` for 3.5 months,
+    // and the history is worth stating exactly, because the obvious reading of
+    // it is wrong. `9d83ded5` (2026-05-10 20:21) sent the real EIP-3009
+    // authorization under BOTH names. `bdee95f0` (21:10 the SAME DAY, "Address
+    // x402 payment review feedback") deliberately removed the PAYMENT-SIGNATURE
+    // send, flipped this assertion, and documented the removal in CLAUDE.md and
+    // packages/sdk/README.md. So this is NOT a stale assertion about Haven's
+    // older tx-hash proof (which did use that name earlier, in 2abdc811, and is
+    // a different payload) — it pinned a deliberate decision whose rationale was
+    // never recorded anywhere in the commit trail.
+    //
+    // #2289 reverts that decision on evidence rather than inference: a strict
+    // x402 v2 merchant reads PAYMENT-SIGNATURE and nothing else, so sending only
+    // the v1 name means the header is never seen at all. If the May 10 reasoning
+    // ever resurfaces, it has to be weighed against that.
+    expect(retryHeaders.get('PAYMENT-SIGNATURE')).toBe(x402Header)
+    expect(x402Header).not.toBe('')
     expect(payment).toMatchObject({
       x402Version: 2,
       accepted,
@@ -582,7 +600,7 @@ describe('x402 helpers', () => {
       resourceUrl,
       merchantStatus: 200,
       selectedPayment: accepted,
-      paymentProofHeaderName: 'X-PAYMENT',
+      paymentProofHeaderName: 'PAYMENT-SIGNATURE, X-PAYMENT',
       protocolReceiptHeaderName: 'PAYMENT-RESPONSE',
       protocolReceiptPayload: {
         success: true,

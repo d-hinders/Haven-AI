@@ -40,45 +40,69 @@ const MAX_DESCRIPTION_CHARS = 100
  * Parse the `- name: / color: / description:` triples.
  *
  * Deliberately not a YAML dependency: `scripts/ci/` runs on bare node with no
- * install step, and this file's shape is fixed by the labeler action.
+ * install step.
+ *
+ * Quote-agnostic on purpose. The first version of this parser matched only
+ * double-quoted scalars, because that is what the file happens to use today —
+ * and `haven-reviewer` broke it by appending a single-quoted label with a
+ * 150-character description, which `readLabels()` skipped entirely and the
+ * suite passed. Single quotes are valid YAML and the labeler action accepts
+ * them, so that was this guard carrying the very defect it exists to catch:
+ * a too-long description reaching *Sync labels* unseen. The convention is a
+ * property of today's content, not of the format, and a guard may not depend
+ * on one silently.
  */
 function readLabels() {
   const lines = readFileSync(LABELS_YML, 'utf8').split('\n')
   const labels = []
   for (const line of lines) {
-    const name = /^- name:\s*"(.*)"\s*$/.exec(line)
+    const name = /^- name:\s*(["'])(.*)\1\s*$/.exec(line)
     if (name) {
-      labels.push({ name: name[1], description: null })
+      labels.push({ name: name[2], description: null })
       continue
     }
-    const description = /^\s+description:\s*"(.*)"\s*$/.exec(line)
+    const description = /^\s+description:\s*(["'])(.*)\1\s*$/.exec(line)
     if (description && labels.length > 0) {
-      labels[labels.length - 1].description = description[1]
+      labels[labels.length - 1].description = description[2]
     }
   }
   return labels
+}
+
+/** Every list entry in the file, however it is quoted — the parser's own control. */
+function countRawEntries() {
+  return readFileSync(LABELS_YML, 'utf8')
+    .split('\n')
+    .filter((line) => /^- name:/.test(line)).length
 }
 
 describe('.github/labels.yml (#2276 follow-up)', () => {
   // Meta-test first. Every assertion below is a filter over `readLabels()`, so
   // a parser that silently returns [] would make all of them pass — the exact
   // shape of unfalsifiable guard #2307 removed 56 of. Pin the parse itself.
-  test('the parser actually reads the file', () => {
+  test('the parser reads EVERY entry in the file', () => {
     const labels = readLabels()
     assert.ok(labels.length >= 5, `expected to parse several labels, got ${labels.length}`)
     assert.ok(
       labels.some((l) => l.name === 'money-path'),
       'money-path not parsed — the regexes no longer match the file shape',
     )
-    assert.ok(
-      labels.every((l) => typeof l.description === 'string' && l.description.length > 0),
-      'a label parsed with no description — the description regex is out of step',
+    // The load-bearing one. `>= 5` would still hold if a NEW entry were
+    // skipped, and every assertion below is a filter over what was parsed —
+    // so an entry the parser cannot see is an entry with no guard at all.
+    // Pin the parsed count to the raw count instead of a floor.
+    assert.equal(
+      labels.length,
+      countRawEntries(),
+      'a label in the file was not parsed — it is silently exempt from every check below',
     )
+    const missing = labels.filter((l) => l.description === null).map((l) => l.name)
+    assert.deepEqual(missing, [], `label(s) parsed with no description: ${missing.join(', ')}`)
   })
 
   test(`no description exceeds GitHub's ${MAX_DESCRIPTION_CHARS}-character limit`, () => {
     const tooLong = readLabels()
-      .filter((l) => l.description.length > MAX_DESCRIPTION_CHARS)
+      .filter((l) => (l.description ?? '').length > MAX_DESCRIPTION_CHARS)
       .map((l) => `${l.name} (${l.description.length} chars)`)
     assert.deepEqual(
       tooLong,

@@ -1,0 +1,47 @@
+# Haven — agent-readable overview
+
+Haven is the buy-side control layer for AI-agent payments. Users and businesses give agents constrained spending authority instead of credentials: the agent gets an identity plus a scoped, revocable spending delegation on the user's own smart account — a period budget, an allowed recipient, an expiry. The agent's API credential alone cannot move money, and no private key ever sits with the agent or with Haven.
+
+One line: give your agent a budget, not your wallet.
+
+## The model
+
+- Agents are never wallets. Funds stay in the user's own smart account (a MetaMask Hybrid DeleGator). The agent holds a signed, revocable delegation — never funds, never keys.
+- Enforcement is on-chain. Budgets are enforced by audited on-chain policy modules (MetaMask Delegation Framework caveat enforcers: period budget, recipient pin, expiry) at execution time. An over-budget or off-policy payment does not get flagged — it reverts. This holds even if Haven itself were compromised or offline.
+- Provably non-custodial. Users can inspect and revoke every agent budget with nothing but a block explorer and their own wallet: https://haven.xyz/exit/
+- Accountability built in. Every payment carries a receipt: which agent, what it bought, which policy allowed it, and the on-chain proof. Receipts export to bookkeeping (Fortnox first).
+
+## How an agent pays (x402)
+
+1. The agent encounters HTTP 402 Payment Required from a merchant.
+2. It asks Haven for a quote/authorization; Haven checks the exact payment terms against the agent's live budget.
+3. Within budget: the agent signs locally (the key never leaves the runtime) and Haven relays. Over budget or wrong recipient: the payment is refused — the agent cannot bypass the limit.
+4. Settlement is per-merchant: ERC-7710 delegated settlement natively (funds move user-account → merchant directly), or the standard EIP-3009 transfer-with-authorization path for merchants on standard x402 today. In practice a Haven agent with an open (unpinned) budget can pay any standard x402 merchant today, through one policy and audit layer; a recipient-pinned budget settles via ERC-7710 only, by design — pinning and the EIP-3009 funding path are mutually exclusive.
+5. Settles in USDC on Base. Stripe MPP support is on the roadmap; the policy layer is rail-neutral by design.
+
+## Integration surface
+
+- Hosted MCP (keyless): the agent authenticates with a credential that cannot move funds; tools include haven_get_agent, haven_pay, haven_quote_x402, haven_get_allowances. Signing happens only in the local signer.
+- Local connector: run the connect command from the dashboard (npx @haven_ai/connect@alpha) — it installs the MCP runtime and generates the agent signing key locally, registering only the public address.
+- TypeScript SDK: @haven_ai/sdk for direct integration (payments, x402 quote/pay/resume, allowances).
+- CLI: @haven_ai/cli for terminal-native management.
+- Runtime-agnostic: works with Claude, GPT-based agents, custom scripts, and orchestration frameworks. No assumptions about where the agent runs.
+
+## Quickstart (owner)
+
+1. Create a Haven account at https://app.haven.xyz — one passkey prompt (Face ID / Touch ID), no seed phrase.
+2. Create an agent and set its budget: how much, per what period, optionally pinned to a recipient.
+3. Connect the agent: copy the connect command from the dashboard into the agent's environment. The agent can now pay — only within the rules you set. Pause, tighten, or revoke at any time.
+
+## What Haven is not
+
+- Not a custodian: Haven never holds funds or unrestricted signing authority.
+- Not a card: no card numbers, no chargebacks, no per-purchase human approval needed within budget.
+- Not a rail: Haven is the policy and audit layer across rails (x402 today; built for Stripe MPP next).
+
+## Links
+
+- Your agent hit a 402: https://haven.xyz/402.md
+- Dashboard: https://app.haven.xyz
+- Independent exit (inspect/revoke without Haven): https://haven.xyz/exit/
+- npm: https://www.npmjs.com/package/@haven_ai/connect (also @haven_ai/sdk, @haven_ai/mcp, @haven_ai/signer, @haven_ai/cli)

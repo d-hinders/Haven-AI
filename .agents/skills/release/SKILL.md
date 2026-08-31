@@ -49,6 +49,54 @@ to carry is noise.
 **3. Write down what it carries.** That commit list becomes the PR body and the
 CASP shard. Name the issues.
 
+**4. Start the money-flow QA run NOW if the freshness signal is stale.** This is
+the step that turns a late blocker into a parallel task, and it belongs in
+preflight for one reason: `qa-freshness` is a required check on the **promotion**
+PR, which you only reach *after* the release PR has already merged to `dev`. The
+run itself takes about three minutes; discovering you need it at the end costs a
+whole cycle.
+
+Do not read the gate as "has QA run recently". It asks a second question, and it
+is the one that fails: **has a green run covered the money-path files now on
+`dev`?** Recency is not coverage — a run that predates those merges never
+exercised them ([#1030](https://github.com/d-hinders/Haven-AI/issues/1030)).
+Check both halves:
+
+```sh
+# newest green qa-dev run on dev, and the commit it ran at
+gh run list --workflow=qa-dev.yml --branch=dev --status=success --limit=1 \
+  --json headSha,createdAt          # or the Actions UI / GitHub MCP
+
+# money-path files changed since that commit — any output means the gate blocks
+git diff --name-only <that-sha>..origin/dev \
+  | grep -f <(jq -r '.globs[]' .github/money-path-globs.json | sed 's#/\*\*#/#')
+```
+
+That one-liner is a **conservative approximation of the gate, not the gate** —
+`scripts/ci/qa-freshness.mjs` is authoritative. It matches glob prefixes rather
+than the real matcher, and it does not implement the #2164 version-bump
+exemption, so it can list files the gate would excuse. It errs toward telling
+you to run QA when you needn't, never toward silence when you must; verified
+against this session's real block, where it reproduced all ten files the gate
+named and over-reported only the two the exemption covers.
+
+If that diff is non-empty, dispatch **Actions → “QA — money-flow (dev)” → Run
+workflow** on `dev` before you run the bump, and let it finish while you write
+the contract docs. Testnet-only (Base Sepolia), never mainnet. Dispatching it at
+the *promotion head* is ideal — then the money-path delta is empty by
+construction — but any run after the last money-path merge satisfies the gate.
+
+**The release bump is never the cause.** [#2164](https://github.com/d-hinders/Haven-AI/issues/2164)
+exempts an in-place version rewrite in `packages/signer/**`, so what blocks you
+is always *other* money-path work sitting on `dev`. Check it against `dev`, not
+against your release branch.
+
+**`qa-override` is not the remedy here**, and reaching for it on a release is the
+specific failure #2164 exists to prevent: an escape hatch used on every promotion
+is the route, not an exception. It exists for a confirmed testnet flake, not for
+"the run is inconvenient". Running the harness costs three minutes; skipping it
+ships money-path code to production on a signal that provably never covered it.
+
 ## Choose The Version
 
 Pass an explicit version string, never a bump type. `scripts/README.md`

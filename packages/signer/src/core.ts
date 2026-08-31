@@ -180,6 +180,29 @@ export function createEdgeSigner(
     )
   }
   const x402Bindings = new Map<string, X402ExpectedPayment>()
+  /**
+   * #2291: ids of bindings this process has already spent. A binding is
+   * single-use by design and `buildX402PaymentHeader` deletes it on every exit
+   * path, so a re-use and a typo previously produced the SAME refusal — and
+   * they need opposite remedies: a spent binding means the header was already
+   * built (use it, or re-quote), while an unknown one means the signer never
+   * held it (sign first, or the signer restarted).
+   *
+   * Ids only. The payment context is still deleted with the map entry, so this
+   * changes nothing about what the signer retains — a spent id is an opaque
+   * UUID, not payment data. Bounded so a long-lived signer cannot grow it
+   * without limit; the oldest ids fall off, which degrades a stale re-use back
+   * to the unknown-binding message rather than to a wrong one.
+   */
+  const spentX402Bindings = new Set<string>()
+  const SPENT_BINDING_MEMORY = 64
+  function markX402BindingSpent(id: string): void {
+    spentX402Bindings.add(id)
+    if (spentX402Bindings.size > SPENT_BINDING_MEMORY) {
+      const oldest = spentX402Bindings.values().next()
+      if (!oldest.done) spentX402Bindings.delete(oldest.value)
+    }
+  }
 
   function signAndVerify(hash: string): string {
     const signature = signHash(delegateKey, hash)
@@ -285,14 +308,29 @@ export function createEdgeSigner(
     ): Promise<X402HeaderResult> {
       const expected = x402Bindings.get(x402Binding)
       if (!expected) {
+        // #2291: two different situations, two different remedies. Conflating
+        // them sent a reporter hunting a binding-lookup bug that did not
+        // exist — the caller HAD signed, seconds earlier, with a one-shot that
+        // spends its own binding building the header inline.
         throw new HavenSigningError(
-          'x402 funding binding is required before signing a merchant header. Sign the hosted funding hash with x402_expected first.',
+          spentX402Bindings.has(x402Binding)
+            ? 'This x402 binding was already used to build a merchant header. Bindings are ' +
+              'single-use. If you called haven_sign_x402, it already returned the ' +
+              'payment_header — retry the merchant with THAT header instead of building ' +
+              'another; haven_x402_sign_header is the follow-up to haven_sign, not to ' +
+              'haven_sign_x402. If you no longer have the header, re-run the quote tool with ' +
+              'the same idempotency_key.'
+            : 'x402 funding binding is required before signing a merchant header. Sign the ' +
+              'hosted funding hash with x402_expected first (haven_sign returns a binding this ' +
+              'tool can use). A binding is also lost when the signer process restarts, since ' +
+              'bindings live in memory only — re-sign to mint a fresh one.',
         )
       }
       try {
         assertX402PaymentWindowOpen(expected)
       } catch (err) {
         x402Bindings.delete(x402Binding)
+        markX402BindingSpent(x402Binding)
         throw err
       }
       const option = selectStandardPaymentOption(paymentRequired.accepts)
@@ -315,6 +353,7 @@ export function createEdgeSigner(
 
       if (paymentRequired.x402Version < 2) {
         x402Bindings.delete(x402Binding)
+        markX402BindingSpent(x402Binding)
         return { paymentHeader: header, accepted: option }
       }
 
@@ -331,6 +370,7 @@ export function createEdgeSigner(
         return { paymentHeader: wrapped, accepted: option }
       } finally {
         x402Bindings.delete(x402Binding)
+        markX402BindingSpent(x402Binding)
       }
     },
 

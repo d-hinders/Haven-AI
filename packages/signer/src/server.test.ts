@@ -160,10 +160,20 @@ describe('buildSignerMcpServer', () => {
     expect(byName.get('haven_x402_sign_header')).toContain(
       'Next for paid MCP tools: call mcp__haven__haven_complete_mcp_tool',
     )
+    // #2291: haven_sign_x402 serves TWO paths and now names both successors —
+    // settle_mcp_tool for a paid MCP tool, and submit-then-retry-yourself for a
+    // direct plain-HTTP merchant. It previously named only the first, which is
+    // how the direct path came to be documented as ending at
+    // haven_x402_sign_header, a call this one-shot's spent binding cannot serve.
     expect(byName.get('haven_sign_x402')).toContain(
-      'Next: call mcp__haven__haven_settle_mcp_tool',
+      'call mcp__haven__haven_settle_mcp_tool',
     )
+    expect(byName.get('haven_sign_x402')).toContain('mcp__haven__haven_submit')
+    expect(byName.get('haven_sign_x402')).toContain('ALREADY SPENT')
     expect(byName.get('haven_sign_x402')).toContain('PAYMENT_WINDOW_EXPIRED')
+    // And the header tool says whose binding it takes, since taking the wrong
+    // one is the whole defect.
+    expect(byName.get('haven_x402_sign_header')).toContain('NOT haven_sign_x402')
     expect(byName.get('haven_sign_sweep_delegate')).toContain('mcp__haven__haven_sweep_delegate')
 
     await client.close()
@@ -372,6 +382,78 @@ describe('haven_x402_sign_header tool', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+
+  it('distinguishes a SPENT binding from an unknown one, and names the right remedy for each (#2291)', async () => {
+    // The defect this pins: haven_sign_x402 is a one-shot that builds the
+    // header itself, spending its own binding on the way. Re-using that
+    // binding used to produce the same refusal as a typo — "sign first" — and
+    // a reporter reasonably concluded haven_x402_sign_header had a lookup bug.
+    // It did not; the caller had signed, seconds earlier, with the tool whose
+    // own guidance named this one as the successor.
+    const handlers = createToolHandlers(
+      createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }),
+    )
+
+    const oneShot = ok<{ x402_binding: string; payment_header: string }>(
+      await handlers.haven_sign_x402({
+        payload_hash: HASH,
+        x402_expected: await expectedX402(),
+        payment_required: PAYMENT_REQUIRED,
+      }),
+    )
+    // The one-shot did produce a usable header — the binding is spent BECAUSE
+    // the work is already done, not because anything failed.
+    expect(oneShot.data.payment_header.length).toBeGreaterThan(0)
+
+    const reused = await handlers.haven_x402_sign_header({
+      payment_required: PAYMENT_REQUIRED,
+      x402_binding: oneShot.data.x402_binding,
+    })
+    expect(reused.success).toBe(false)
+    const reusedText = JSON.stringify(reused)
+    expect(reusedText).toContain('already used')
+    // Names the actual remedy: the header you already hold.
+    expect(reusedText).toContain('payment_header')
+    expect(reusedText).not.toContain('Sign the hosted funding hash')
+
+    // An id the signer never held is the OTHER situation, with the other
+    // remedy — and must not be described as re-use.
+    const unknown = await handlers.haven_x402_sign_header({
+      payment_required: PAYMENT_REQUIRED,
+      x402_binding: '00000000-0000-4000-8000-000000000000',
+    })
+    expect(unknown.success).toBe(false)
+    const unknownText = JSON.stringify(unknown)
+    expect(unknownText).not.toContain('already used')
+    expect(unknownText).toContain('restarts')
+  })
+
+  it('a binding minted by haven_sign is NOT spent, so the decomposed flow still works (#2291)', async () => {
+    // The counterpart the fix must not break: haven_sign only records the
+    // context, so haven_sign -> haven_x402_sign_header remains valid. If this
+    // ever fails, the spent-binding bookkeeping has over-reached.
+    const handlers = createToolHandlers(
+      createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }),
+    )
+    const signed = ok<{ x402_binding: string }>(
+      await handlers.haven_sign({ payload_hash: HASH, x402_expected: await expectedX402() }),
+    )
+    const header = ok<{ payment_header: string }>(
+      await handlers.haven_x402_sign_header({
+        payment_required: PAYMENT_REQUIRED,
+        x402_binding: signed.data.x402_binding,
+      }),
+    )
+    expect(header.data.payment_header.length).toBeGreaterThan(0)
+
+    // ...and it is single-use afterwards, reported as spent.
+    const again = await handlers.haven_x402_sign_header({
+      payment_required: PAYMENT_REQUIRED,
+      x402_binding: signed.data.x402_binding,
+    })
+    expect(again.success).toBe(false)
+    expect(JSON.stringify(again)).toContain('already used')
   })
 
   it('rejects a merchant header when expected context is missing or mismatched', async () => {

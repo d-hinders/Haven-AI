@@ -596,11 +596,24 @@ describe('haven_pay_x402_quote', () => {
       payment_id: string
       idempotency_key: string
       payload_hash: string
+      next_tool: string
+      reason: string
       x402: Record<string, unknown>
     }>(await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }))
 
     expect(result.data.payment_id).toBe('pay_x402')
     expect(result.data.idempotency_key).toMatch(/^x402:/)
+    // #2291: next_tool was already right; the REASON beside it, in the SAME
+    // response object, named a successor the named tool cannot serve —
+    // "finish with haven_x402_sign_header" after a one-shot that spends its
+    // own binding building the header inline. A test asserting only next_tool
+    // stayed green while the pair contradicted itself. Cheap literal guards,
+    // the same shape the erc7710 branch already uses; nothing interprets a
+    // sentence.
+    expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
+    expect(result.data.reason).toContain('Do NOT call')
+    expect(result.data.reason).toContain('haven_x402_sign_header')
+    expect(result.data.reason).toContain('payment_header')
     expect(result.data.payload_hash).toBe('0xfunding')
     expect(result.data.x402.funding_to).toBe('0xDelegate')
     expect(result.data.x402.merchant_to).toBe('0xMerchant')
@@ -3957,6 +3970,7 @@ describe('structured agent guidance (#1308)', () => {
       next_action: string
       next_tool: string
       next_arguments: Record<string, unknown>
+      reason: string
       safe_to_continue: boolean
       agent_summary: Record<string, unknown>
       warnings: Array<{ code: string; message: string }>

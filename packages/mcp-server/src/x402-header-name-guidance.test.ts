@@ -193,6 +193,32 @@ const REPO_ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..',
  * such fixtures plus a doc comment. Over-matching would have been the more
  * expensive mistake: a guard that cries wolf gets an allowlist entry per
  * false positive until the allowlist is the real config.
+ *
+ * Matching is CASE-INSENSITIVE. HTTP header names are case-insensitive on the
+ * wire and the platform `Headers` API lower-cases them, so `h.set('x-payment',
+ * proof.token)` is the same defect written the way the runtime itself writes
+ * it — and it passed every version of this guard until review pointed it out.
+ * The v2-presence check carries the same flag, for symmetry.
+ *
+ * ## Known limits, not promises
+ *
+ * This is a literal shape-and-text scan. It is NOT a proof that no file sets
+ * the v1 header alone, and it should not be read or cited as one. Three
+ * categories are known to defeat it, deliberately left unchased:
+ *
+ *   1. A dynamically built or variable header name — `const h = LEGACY_HEADER;
+ *      headers.set(h, token)`. The literal never appears at the setting site.
+ *   2. String concatenation or interpolation — `'X-' + 'PAYMENT'`,
+ *      `` `X-${kind}` ``.
+ *   3. Unicode or whitespace obfuscation — a non-ASCII hyphen, an inserted
+ *      zero-width character.
+ *
+ * Chasing these means writing a parser, and a parser is a second thing to keep
+ * correct. The guard's job is to stop the ordinary regression — someone writes
+ * the header name the obvious way and forgets the second one — which is every
+ * instance the epic actually found. Deliberate evasion is human review's job,
+ * and the constants (`X402_PAYMENT_HEADER_NAMES_SENT`) are where a real
+ * dynamic implementation belongs anyway.
  */
 const SETS_V1_HEADER = new RegExp(
   [
@@ -214,8 +240,15 @@ const SETS_V1_HEADER = new RegExp(
     // A header line opening a Markdown code fence.
     `(^\\s*X-PAYMENT:\\s*\\S)`,
   ].join('|'),
-  'm',
+  'im',
 )
+
+/**
+ * The v2 name in any casing, for the same reason `SETS_V1_HEADER` carries `i`:
+ * if `h.set('x-payment', …)` counts as setting the header, then naming
+ * `payment-signature` in the same file has to count as naming it.
+ */
+const NAMES_V2 = /PAYMENT-SIGNATURE/i
 
 const SCAN_ROOTS = ['packages', 'docs']
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.next', 'coverage', '.turbo'])
@@ -264,7 +297,7 @@ describe('#2330 — nothing SETS the v1 header alone', () => {
         if (!SETS_V1_HEADER.test(source)) continue
         setters += 1
         if (ALLOWLIST.has(rel)) continue
-        if (!source.includes(V2_NAME)) offenders.push(rel)
+        if (!NAMES_V2.test(source)) offenders.push(rel)
       }
     }
 

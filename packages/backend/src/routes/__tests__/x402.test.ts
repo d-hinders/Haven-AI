@@ -231,7 +231,15 @@ describe('x402 routes', () => {
     expect(response.json()).toEqual({ error: 'Missing or invalid API key' })
   })
 
-  it('rejects settlementScheme erc7710 on the legacy rail — 3009 only there (#946)', async () => {
+  // #2245 (was: "rejects settlementScheme erc7710 on the legacy rail — 3009
+  // only there (#946)"). The #946 guard ran ABOVE the rail resolution, so this
+  // request used to get a 400 saying "the legacy AllowanceModule rail settles
+  // via EIP-3009 only" — a retired rail being told it settles, and one
+  // optional request field deciding WHICH refusal the account saw. #946's
+  // "fail loudly" rationale predates #1986: the loud failure is now the 410,
+  // and it is the accurate one. Same expectation, opposite direction — the
+  // scheme field must make NO difference to a retired-rail account.
+  it('a legacy-rail account asking erc7710 gets the #1986 410, not a scheme 400 (#2245)', async () => {
     primeDb(AUTH)
     const response = await app.inject({
       method: 'POST',
@@ -247,8 +255,12 @@ describe('x402 routes', () => {
         settlementScheme: 'erc7710',
       },
     })
-    expect(response.statusCode).toBe(400)
-    expect(response.json().error).toMatch(/delegation-rail account/)
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    // The specific sentence that used to come back, gone: a payment route must
+    // not tell a retired-rail caller that its rail settles.
+    expect(JSON.stringify(response.json())).not.toContain('EIP-3009')
+    expect(JSON.stringify(response.json())).not.toContain('delegation-rail account')
   })
 
   // #993 (review finding on #1120): the retired-rail 410 must hold on the
@@ -275,7 +287,9 @@ describe('x402 routes', () => {
 
   // #1058: same scheme confusion, same loud failure — a legacy-rail client
   // believing a redeemer pin exists must not silently proceed unpinned.
-  it('rejects facilitatorAddresses on the legacy rail — no settlement child exists there', async () => {
+  // #2245, the #1058 half of the same defect — see the note on the erc7710
+  // case above.
+  it('a legacy-rail account sending facilitatorAddresses gets the #1986 410, not a scheme 400 (#2245)', async () => {
     primeDb(AUTH)
     const response = await app.inject({
       method: 'POST',
@@ -291,8 +305,9 @@ describe('x402 routes', () => {
         facilitatorAddresses: ['0x' + '77'.repeat(20)],
       },
     })
-    expect(response.statusCode).toBe(400)
-    expect(response.json().error).toMatch(/delegation-rail account/)
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    expect(JSON.stringify(response.json())).not.toContain('delegation-rail account')
   })
 
   it('creates a funding intent to the delegate and records merchant metadata', async () => {

@@ -394,6 +394,199 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
     )
   })
 
+  /**
+   * #2245 — a caller-supplied field must not decide WHICH refusal a
+   * retired-rail account gets.
+   *
+   * Before this slice `validateGenericSchemeRail` ran ABOVE the rail
+   * resolution in `modules/x402/authorize.ts`, so a retired-rail account that
+   * sent `settlementScheme: 'erc7710'` (or any `facilitatorAddresses`) never
+   * reached the tombstone above. It got a **400** whose body said *"the legacy
+   * AllowanceModule rail settles via EIP-3009 only"* — telling an agent, in a
+   * response body on a money-path route, that a rail #1986 has fail-closed
+   * would settle its payment, and inviting it to retry forever with a
+   * different scheme against a rail that answers 410 to everything.
+   *
+   * Money was never at risk either way: both branches are refusals, both are
+   * pure (`validateGenericSchemeRail` and `resolveExecutionRail` are both
+   * side-effect-free and read the SAME `agent.execution_rail` field), and
+   * nothing was read on-chain or written on either. `expectNothingHappened()`
+   * is asserted on every case below anyway, because that is the property that
+   * would silently invert if the fix were ever undone by re-raising a guard.
+   *
+   * The mutation that proves these: restore the
+   * `validateGenericSchemeRail(agent, settlementScheme, facilitatorAddresses)`
+   * call above the token resolution in `modules/x402/authorize.ts` and every
+   * `settlementScheme: 'erc7710'` / `facilitatorAddresses` case here goes red
+   * on a 400.
+   */
+  describe('a caller-supplied settlementScheme cannot divert the tombstone (#2245)', () => {
+    const baseX402 = {
+      url: 'https://merchant.example/resource',
+      payTo: RECIPIENT,
+      amount: '10000',
+      asset: USDC,
+      network: 'base-sepolia',
+    }
+
+    // The scheme-bearing shapes, on BOTH authorize aliases and the whole
+    // retired population. `eip3009` and the bare request are included as
+    // controls: they already got the 410 before #2245, so their presence here
+    // is what makes "for EVERY input shape" a claim rather than a slogan —
+    // and their staying green under the mutation is what shows the mutation
+    // is discriminating rather than blanket-red.
+    const SCHEME_SHAPES: Array<[string, Record<string, unknown>]> = [
+      ['settlementScheme: erc7710 (the diverted case)', { settlementScheme: 'erc7710' }],
+      ['settlementScheme: eip3009', { settlementScheme: 'eip3009' }],
+      ['facilitatorAddresses present (the #1058 diverted case)', { facilitatorAddresses: [RECIPIENT] }],
+      ['erc7710 AND facilitatorAddresses together', { settlementScheme: 'erc7710', facilitatorAddresses: [RECIPIENT] }],
+      ['no scheme field at all (the pre-#2245 control)', {}],
+    ]
+
+    for (const [railLabel, rail] of RETIRED_RAILS) {
+      for (const url of ['/x402/authorize', '/x402']) {
+        it.each(SCHEME_SHAPES)(
+          `POST ${url} on ${railLabel} with %s — 410, nothing written`,
+          async (_shapeLabel, extra) => {
+            primeDb(authRoute(rail), railRoute(rail))
+
+            const res = await app.inject({
+              method: 'POST',
+              url,
+              headers,
+              payload: { ...baseX402, ...extra },
+            })
+
+            expect(res.statusCode, `got ${res.body}`).toBe(410)
+            // Named, not merely "some 410" — and explicitly NOT the 400 the
+            // scheme guard used to produce.
+            expect(res.json().error).toBe(RETIRED_ACCOUNT)
+            expect(JSON.stringify(res.json())).not.toContain('EIP-3009')
+            expect(JSON.stringify(res.json())).not.toContain('delegation-rail account')
+            expectNothingHappened()
+          },
+        )
+      }
+    }
+
+    it('no surviving response body on this route describes the retired rail as settling', async () => {
+      // Acceptance criterion 2, asserted as a literal guard on the file that
+      // used to carry the sentence rather than as an interpretation of prose.
+      // `scheme-selection.ts` has no legitimate use of either literal: what
+      // remains in it is delegation-rail-INTERNAL shape checking, which never
+      // names the legacy rail.
+      const src = await import('node:fs/promises').then((fs) =>
+        fs.readFile(new URL('../../modules/x402/scheme-selection.ts', import.meta.url), 'utf8'),
+      )
+      // The refusal STRINGS are gone. The file's own #2245 rationale block
+      // quotes the deleted sentence to explain why it went, so the guard is
+      // scoped to the executable half.
+      const code = src
+        .split('\n')
+        .filter((line) => !/^\s*(\/\*|\*|\/\/)/.test(line))
+        .join('\n')
+      expect(code).not.toContain('AllowanceModule')
+      expect(code).not.toContain('delegation-rail account')
+    })
+
+    /**
+     * The OTHER direction, and the one PR #2052/#2056 says to check
+     * explicitly: the reorder must not make a LIVE-rail caller's answer worse.
+     * A delegation account that asks for a scheme its request SHAPE cannot
+     * settle still gets its own 400 from the delegation-rail-internal check
+     * (`validateDelegationSchemeShape`, where #946's real contract lives) —
+     * not a 410, and not a silent pass into settlement.
+     *
+     * This doubles as the x402 POSITIVE CONTROL for this route: reaching a
+     * delegation-rail-INTERNAL error proves the rail gate answered
+     * `delegation` and control entered the delegation branch. A version of
+     * this fix that 410'd everything would fail here, which the retired-rail
+     * cases above cannot detect on their own.
+     */
+    it('POSITIVE CONTROL — a DELEGATION account asking erc7710 with the funding payTo still gets its own scheme 400, not a 410', async () => {
+      primeDb(authRoute('delegation'), railRoute('delegation'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/x402/authorize',
+        headers,
+        // payTo = the agent's OWN delegate EOA is the 3009 funding shape;
+        // asking for erc7710 with it is the shape contradiction #946 guards.
+        payload: { ...baseX402, payTo: DELEGATE, settlementScheme: 'erc7710' },
+      })
+
+      expect(res.statusCode, `got ${res.body}`).toBe(400)
+      expect(res.json().error).toMatch(/payTo = the merchant/)
+      expect(res.json().error).not.toBe(RETIRED_ACCOUNT)
+      expectNothingHappened()
+    })
+
+    it('POSITIVE CONTROL — a DELEGATION account with a valid erc7710 shape is not refused at the rail seam', async () => {
+      // Weaker on purpose: it asserts only that the request passed BOTH the
+      // rail gate and the scheme shape check, since anything past that point
+      // needs chain estimation this suite deliberately does not mock. Without
+      // it, "410 nothing / 400 nothing" would still be satisfiable by a fix
+      // that refused every erc7710 request outright.
+      primeDb(authRoute('delegation'), railRoute('delegation'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/x402/authorize',
+        headers,
+        payload: { ...baseX402, settlementScheme: 'erc7710', facilitatorAddresses: [RECIPIENT] },
+      })
+
+      expect(res.statusCode).not.toBe(410)
+      expect(JSON.stringify(res.json())).not.toContain('retired')
+      expect(JSON.stringify(res.json())).not.toMatch(/payTo = the merchant/)
+    })
+
+    /**
+     * The residue, stated rather than glossed. Two refusals still precede the
+     * 410 on this route, and BOTH are rail-INDEPENDENT — neither makes a claim
+     * about any rail, which is the property #2245 is actually about:
+     *
+     *   - `routes/x402.ts`'s structural enum check on `settlementScheme`
+     *     (a value that is not a settlement scheme at all), and
+     *   - token resolution in `authorizeX402`, exactly where `POST /payments`
+     *     puts its own gate relative to the seam.
+     *
+     * Same class as the 401-precedes-410 case this file already pins.
+     */
+    it('a STRUCTURALLY invalid settlementScheme is still a 400 — and it makes no rail claim', async () => {
+      primeDb(authRoute('allowance_module'), railRoute('allowance_module'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/x402/authorize',
+        headers,
+        payload: { ...baseX402, settlementScheme: 'not-a-scheme' },
+      })
+
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toMatch(/settlementScheme must be/)
+      // The point of keeping it: it says nothing about what any rail settles.
+      expect(res.json().error).not.toContain('AllowanceModule')
+      expect(res.json().error).not.toContain('EIP-3009')
+      expectNothingHappened()
+    })
+
+    it('the same structural 400 is what a DELEGATION account gets too — the check never branched on rail', async () => {
+      primeDb(authRoute('delegation'), railRoute('delegation'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/x402/authorize',
+        headers,
+        payload: { ...baseX402, settlementScheme: 'not-a-scheme' },
+      })
+
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toMatch(/settlementScheme must be/)
+      expectNothingHappened()
+    })
+  })
+
   describe('POST /machine-payments/send — writes rows even though it does not execute', () => {
     it.each(RETIRED_RAILS)('refuses %s — 410, no intent and no approval row', async (_label, rail) => {
       primeDb(authRoute(rail), railRoute(rail))

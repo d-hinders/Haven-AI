@@ -1013,8 +1013,8 @@ export class HavenClient {
       /**
        * The account's rail, when the caller has ALREADY read it — passing it
        * skips a duplicate fetch (#1456). An optimisation, not a trust
-       * boundary: the backend independently refuses erc7710 from a
-       * non-delegation account (`validateGenericSchemeRail`).
+       * boundary: the backend independently refuses a non-delegation account
+       * at the rail seam (the #1986 retired-rail 410, #2245).
        */
       delegationRail?: boolean
       /**

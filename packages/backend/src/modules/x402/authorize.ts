@@ -15,7 +15,6 @@ import {
 } from '../../rails/execution-rail.js'
 import { resolvePaymentToken } from '../../domain/payment-token.js'
 import { formatTokenValue } from '../../domain/tokens.js'
-import { validateGenericSchemeRail } from './scheme-selection.js'
 import { runDelegationAuthorize } from './delegation-authorize.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
 
@@ -48,8 +47,21 @@ export async function authorizeX402(input: AuthorizeX402Input): Promise<X402Hand
     mcpCallContext, paymentRequired,
   } = input
 
-  const genericSchemeError = validateGenericSchemeRail(agent, settlementScheme, facilitatorAddresses)
-  if (genericSchemeError) return genericSchemeError
+  // #2245: NOTHING rail-dependent runs above the rail gate below. The
+  // `validateGenericSchemeRail` call that stood here refused
+  // `settlementScheme: 'erc7710'` / a present `facilitatorAddresses` from a
+  // non-delegation account with a 400 whose body asserted that "the legacy
+  // AllowanceModule rail settles via EIP-3009 only" — so one optional caller
+  // field decided WHICH refusal a retired-rail account got, and the
+  // alternative told it a rail #1986 fail-closes would settle its payment.
+  // Deleted (`scheme-selection.ts` carries the full rationale); the only
+  // scheme validation left is the delegation-rail-internal shape check inside
+  // `runDelegationAuthorize`, which is where #946's real contract lives.
+  //
+  // Above the gate there is now only rail-INDEPENDENT input validation —
+  // `routes/x402.ts`'s structural checks and the token/amount resolution
+  // below — the same position `POST /payments` puts its gate in. None of it
+  // makes a claim about any rail, which is the property that matters here.
 
   // 2. Resolve token from asset address (shared with the MPP core).
   const tokenResult = resolvePaymentToken(agent.chain_id, asset)

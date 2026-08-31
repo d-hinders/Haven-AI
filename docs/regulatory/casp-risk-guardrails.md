@@ -181,17 +181,30 @@ Haven backend
 > "kept, unreferenced", which was true when written and stopped being true two
 > slices later.
 >
-> One caveat, recorded rather than glossed ([#2245](https://github.com/d-hinders/Haven-AI/issues/2245)):
+> The one caveat this section carried — recorded by the #2244 re-verification
+> and now **closed** ([#2245](https://github.com/d-hinders/Haven-AI/issues/2245)):
 > on `POST /x402/authorize` a caller-supplied `settlementScheme: 'erc7710'` or
-> `facilitatorAddresses` is validated by `modules/x402/scheme-selection.ts`
-> *above* the rail resolution, so a retired-rail account with that field set
-> gets a 400 instead of the 410 tombstone. The seam remains the only thing that
-> decides whether the account may **spend** — both answers are refusals, both
-> fail-closed with nothing read on-chain and nothing written — but it is not,
-> on that one route, the only thing that decides what the account is **told**,
-> and the alternative message asserts that the retired rail settles. Filed as a
-> code fix; the sentence above is written to be true of the spend decision,
-> which is what this document guards.
+> `facilitatorAddresses` used to be validated *above* the rail resolution, so a
+> retired-rail account setting that field got a 400 — whose body asserted that
+> the retired rail "settles via EIP-3009 only" — instead of the 410 tombstone.
+> The spend decision was never affected (both answers were refusals, both
+> fail-closed with nothing read on-chain and nothing written), which is why the
+> sentence above was true throughout; what was affected was what the account
+> was TOLD. #2245 deleted those two rail-dependent guards
+> (`validateGenericSchemeRail`) rather than rewording them: both tested
+> `agent.execution_rail !== 'delegation'`, the same field `resolveExecutionRail`
+> reads, so the seam already refused every input they refused. The seam is once
+> again the only thing that decides whether a retired-rail account may spend AND
+> the only thing that makes a rail-specific claim to it, on this route as on the
+> others. Note the second half is narrower than "the only thing that answers it",
+> deliberately: refusals that are not rail claims still precede the seam, and a
+> sentence that swallowed them would be false. What still precedes the 410 there
+> is rail-INDEPENDENT and makes no claim about any rail:
+> the route's structural `settlementScheme` enum check and token resolution —
+> the same position `POST /payments` puts its own gate in, and the same class as
+> the 401 auth hook. Pinned by
+> `routes/__tests__/allowance-rail-retired.test.ts` → "a caller-supplied
+> settlementScheme cannot divert the tombstone (#2245)".
 >
 > Since #1986 (epic #1440) that covers BOTH retired rails — the session rail
 > (#834) and the legacy Safe AllowanceModule rail — so the delegation rail is

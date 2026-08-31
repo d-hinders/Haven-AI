@@ -3,6 +3,7 @@ import {
   formatAllowanceAmount,
   formatAllowanceForToken,
   getTokenDecimals,
+  humanAmountToAtomic,
 } from '@/lib/allowance-format'
 
 describe('formatAllowanceAmount', () => {
@@ -121,5 +122,53 @@ describe('formatAllowanceForToken', () => {
   it('formats known tokens correctly when chainId is null', () => {
     expect(formatAllowanceForToken('5000', null, 'USDC')).toBe('0.005')
     expect(formatAllowanceForToken('1000000000000000000', null, 'EURe')).toBe('1.00')
+  })
+})
+
+/**
+ * #2295. `allowance_amount` carries two incompatible wire shapes under one
+ * field name, and they are NOT distinguishable at runtime — `'250'` is 250
+ * USDC as a human amount and 0.00025 USDC as an atomic one. So this helper
+ * does not sniff; the caller states the shape, and the OpenAPI schema
+ * (`allowanceHumanAmount` vs `allowanceAtomicAmount`) is what tells it which.
+ */
+describe('humanAmountToAtomic (#2295)', () => {
+  it('scales whole and fractional token units by the decimals', () => {
+    expect(humanAmountToAtomic('5.00', 6)).toBe(5_000_000n)
+    expect(humanAmountToAtomic('250.000000', 6)).toBe(250_000_000n)
+    // A bare integer is a legal human amount — this is the value that no
+    // runtime sniff could ever get right, and the reason for the parameter.
+    expect(humanAmountToAtomic('250', 6)).toBe(250_000_000n)
+    expect(humanAmountToAtomic('0.000001', 6)).toBe(1n)
+    expect(humanAmountToAtomic('1', 18)).toBe(10n ** 18n)
+    expect(humanAmountToAtomic('12', 0)).toBe(12n)
+  })
+
+  it('returns 0n for a zero budget, which is an answer and not a failure', () => {
+    // `formatTokenValue` emits a bare '0' for a revoked/zero budget. A null
+    // here would make callers report "unknown" for a budget that is known.
+    expect(humanAmountToAtomic('0', 6)).toBe(0n)
+    expect(humanAmountToAtomic('0.00', 6)).toBe(0n)
+  })
+
+  it('truncates precision beyond the token decimals rather than rounding up', () => {
+    // Conservative direction for a "does this budget cover the price" test.
+    expect(humanAmountToAtomic('1.9999999', 6)).toBe(1_999_999n)
+  })
+
+  it('returns null instead of throwing on anything that is not a decimal', () => {
+    expect(humanAmountToAtomic('not-a-number', 6)).toBe(null)
+    expect(humanAmountToAtomic('', 6)).toBe(null)
+    // Scientific notation is rejected for the same reason formatAllowanceAmount
+    // refuses it — precision is already lost by the time it is parseable.
+    expect(humanAmountToAtomic('1e6', 6)).toBe(null)
+    expect(humanAmountToAtomic('0x10', 6)).toBe(null)
+    // `BigInt('')` is 0n and `BigInt(' 5 ')` is 5n; neither may leak through.
+    expect(humanAmountToAtomic('5.', 6)).toBe(null)
+  })
+
+  it('handles a negative amount without corrupting the magnitude', () => {
+    // Not a shape the API emits, but sign handling must not silently invert.
+    expect(humanAmountToAtomic('-5.00', 6)).toBe(-5_000_000n)
   })
 })

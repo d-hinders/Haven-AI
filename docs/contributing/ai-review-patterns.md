@@ -12,7 +12,7 @@ covers:
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/components/NetworkGate.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
-last-verified: "2026-08-26" # #2063: the Generated-Artifacts bullet told artifacts to "explain queued approval behavior" — instructing reviewers to preserve the exact framing #2063 removes (the delegation rail declines out-of-policy payments at prepare; nothing queues). Restated as declined-payment behavior. ONLY that bullet re-read. Prior: #1945: § "Shared UI And Cross-Surface Consistency" gains the bare-`var()`-in-an-arbitrary-value entry. Added because #1945 was the THIRD instance of one failure mode (#1708 focus-ring colour, #1818 the generalisation from shape to output, #1945 the four elevation tokens) and this doc — whose whole charter is pattern-based shared memory — catalogued none of them, so each was re-derived from scratch. The entry states the mechanism, all three instances, why `design:lint` is structurally blind to it, and the two things that generalise: promote the token into the Tailwind theme, and guard it with a compiled-CSS test carrying a positive control rather than a regex over class strings. ONLY that § was re-read in this pass; the wallet/signer, recipient-form, generated-artifact, formatter and counter sections were NOT re-verified. Prior: weekly #1248 audit: every covers: claim re-verified (incl. the #1077 Green-Gate Evidence section); in sync with the Captain Preflight and the reviewer role trap list
+last-verified: "2026-08-31" # #2295: § "Numeric Formatters" gains two entries. The existing "one shared formatter owns both input shapes" bullet is correct for DISPLAY and was being read as general, so it licensed shape-sniffing in arithmetic — the exact defect in #2283 and again in #2295, where the catalog budget badge answered `null` for every delegation-rail agent. Added: shape tolerance does not transfer to comparison (the caller states the shape), and `try { BigInt(x) } catch` is a type test rather than an error handler. ONLY § "Numeric Formatters" was re-read; the wallet/signer, shared-UI, recipient-form, generated-artifact and counter sections were NOT re-verified. Prior: #2063: the Generated-Artifacts bullet told artifacts to "explain queued approval behavior" — instructing reviewers to preserve the exact framing #2063 removes (the delegation rail declines out-of-policy payments at prepare; nothing queues). Restated as declined-payment behavior. ONLY that bullet re-read. Prior: #1945: § "Shared UI And Cross-Surface Consistency" gains the bare-`var()`-in-an-arbitrary-value entry. Added because #1945 was the THIRD instance of one failure mode (#1708 focus-ring colour, #1818 the generalisation from shape to output, #1945 the four elevation tokens) and this doc — whose whole charter is pattern-based shared memory — catalogued none of them, so each was re-derived from scratch. The entry states the mechanism, all three instances, why `design:lint` is structurally blind to it, and the two things that generalise: promote the token into the Tailwind theme, and guard it with a compiled-CSS test carrying a positive control rather than a regex over class strings. ONLY that § was re-read in this pass; the wallet/signer, recipient-form, generated-artifact, formatter and counter sections were NOT re-verified. Prior: weekly #1248 audit: every covers: claim re-verified (incl. the #1077 Green-Gate Evidence section); in sync with the Captain Preflight and the reviewer role trap list
 ---
 
 # AI Review Patterns
@@ -86,6 +86,26 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 - A single shared formatter must own both the raw-bigint and already-decimal input paths. Callers should not be able to reintroduce the bug by passing the "other" shape. See `packages/frontend/src/lib/allowance-format.ts` as the canonical example.
 - Formatter tests must cover negative inputs, zero, scientific notation, and
   both raw-bigint and already-decimal input shapes.
+- **Shape tolerance is a DISPLAY property, and it does not transfer to
+  arithmetic (#2295).** The bullet above is right for rendering: both shapes of
+  `allowance_amount` format to the same string, so one shared formatter can own
+  both paths. A *comparison* cannot borrow that. The two shapes are not
+  distinguishable at runtime — `"250"` is 250 USDC as a human amount and
+  0.00025 USDC as an atomic one — so any helper that infers the shape in order
+  to do maths on it is guessing, and guessing silently. Make the caller state
+  the shape it holds (`humanAmountToAtomic(amount, decimals)`), and let the
+  wire contract be what tells the caller which shape that is. Two instances of
+  the same field, three years of one name: #2283 rendered a raw
+  `"250.000000 USDC per week"` on `/agents`, and #2295 found the catalog's
+  "within budget" badge answering `null` on every delegation-rail agent.
+- **`try { BigInt(x) } catch` is a type test wearing an error handler.** Both
+  instances above discriminated between the shapes by catching a throw, and
+  both failed in the direction the live rail actually produces — silently, with
+  the fallback looking like ordinary defensive coding. On sight, ask what the
+  `catch` is *for*: if the answer is "the other shape", it is a missing
+  contract, not a caught error. Reserve `catch` for values you do not control
+  (a merchant's advertised price), and reach for an explicit parse that returns
+  `null` for everything else.
 
 ## Counter And Summary Buckets
 

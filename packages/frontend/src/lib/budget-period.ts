@@ -41,8 +41,31 @@ export function budgetPeriodLabel(mins: number): string {
  * connect is a published package and the only shared home would be the
  * PRIVATE `@haven_ai/core` — the tests are the coupling.
  *
- * `allowance_amount` is the raw on-chain bigint string, so formatting needs the
- * chain to resolve the token's decimals.
+ * ── Which `allowance_amount` shape callers actually pass (#2295) ─────────────
+ *
+ * That field carries two incompatible shapes across the API, and this
+ * docstring used to name only one of them ("the raw on-chain bigint string").
+ * True for every current caller, false for the field in general — which is
+ * exactly the memory-not-contract gap that made #2283 a production bug.
+ *
+ * Both call sites pass the ATOMIC shape, because both describe a connect-setup
+ * budget REQUEST rather than an agent's derived budget view:
+ * `SetupStates.tsx`'s `SetupDoneState` and `LocalConnectionReady.tsx`, each
+ * mapping over `setupStatus.agent_budget` from `GET /agent-connection-setups/*`
+ * — whose schema is `allowanceAtomicAmount`. (The two unmigrated describers
+ * named above, `DelegationApprovalStep` and `useAgentConnectionSetup`'s prompt
+ * builder, read the same atomic `agent_budget` rows.)
+ *
+ * No caller passes the human-decimal `AgentAllowance` projection today. If one
+ * ever does, it renders correctly anyway — see below — but this list is what
+ * makes the claim checkable rather than remembered.
+ *
+ * It is nonetheless safe against the other shape and must stay so:
+ * `formatAllowanceForToken` hands the string to `formatAllowanceAmount`, which
+ * takes an atomic-bigint primary path and a decimal-string secondary path
+ * explicitly, never by catching a `BigInt` throw. Either shape renders. What
+ * this function needs the chain for is the atomic case — resolving the token's
+ * decimals to divide by.
  */
 export function describeBudgetGrant(
   budget: { allowance_amount: string; token_symbol: string; reset_period_min: number },

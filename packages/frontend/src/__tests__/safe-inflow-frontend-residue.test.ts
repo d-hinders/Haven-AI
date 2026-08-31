@@ -86,6 +86,25 @@ function literalPaths(source: string, method: 'post' | 'put'): string[] {
 const files = sourceFiles()
 const sources = new Map(files.map((f) => [f, readFileSync(path.join(ROOT, f), 'utf8')]))
 
+/**
+ * Every offending file mapped to the retired paths it calls, `{}` when clean.
+ *
+ * Aggregate rather than one `it.each` case per file (haven-reviewer, #2261):
+ * a per-file case reports only the FIRST offender and, at ~356 files × 2, added
+ * ~714 near-identical greens — a third of the frontend suite's reported test
+ * count, and enough extra wall-clock to tip four unrelated timing-sensitive
+ * modal suites over their timeouts on a loaded machine. This form names every
+ * offender at once and costs two tests.
+ */
+function offenders(method: 'post' | 'put', retired: Set<string>): Record<string, string[]> {
+  const found: Record<string, string[]> = {}
+  for (const file of files) {
+    const hits = literalPaths(sources.get(file)!, method).filter((p) => retired.has(p))
+    if (hits.length > 0) found[file] = hits
+  }
+  return found
+}
+
 describe('retired Safe inflow routes have no frontend caller (#2261, epic #1440)', () => {
   it('sees the frontend source tree — an empty sweep would pass forever', () => {
     // The guard's own floor. Every zero below is only evidence if this is not.
@@ -105,24 +124,21 @@ describe('retired Safe inflow routes have no frontend caller (#2261, epic #1440)
     expect(all).toContain('/safe/exec')
   })
 
-  it.each(files)('%s posts to no retired inflow route', (file) => {
-    const offending = literalPaths(sources.get(file)!, 'post').filter((p) => RETIRED_POST.has(p))
+  it('no frontend module POSTs to a retired inflow route', () => {
     expect(
-      offending,
-      `${file} POSTs to ${offending.join(', ')} — retired by #1984 (epic #1440); ` +
-        'the route answers 410 and #1988 deleted what was behind it. New accounts ' +
-        'come from POST /accounts/hybrid.',
-    ).toEqual([])
+      offenders('post', RETIRED_POST),
+      'Retired by #1984 (epic #1440): the route answers 410 and #1988 deleted ' +
+        'what was behind it. New accounts come from POST /accounts/hybrid.',
+    ).toEqual({})
   })
 
-  it.each(files)('%s does not PUT the legacy single-Safe link', (file) => {
-    const offending = literalPaths(sources.get(file)!, 'put').filter((p) => RETIRED_PUT.has(p))
+  it('no frontend module PUTs the legacy single-Safe link', () => {
     expect(
-      offending,
-      `${file} PUTs to ${offending.join(', ')} — the legacy single-Safe link, ` +
-        'retired by #1984. Note PUT /user/safes/:id (rename, set default) is a ' +
-        'different, live route and is deliberately not matched here.',
-    ).toEqual([])
+      offenders('put', RETIRED_PUT),
+      'PUT /user/safe is the legacy single-Safe link, retired by #1984. Note ' +
+        'PUT /user/safes/:id (rename, set default) is a different, live route ' +
+        'and is deliberately not matched here.',
+    ).toEqual({})
   })
 
   it('the deployPasskeySafe api helper stays deleted', () => {

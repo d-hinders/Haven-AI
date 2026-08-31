@@ -57,7 +57,6 @@ import userSafesRoutes from './routes/user-safes.js'
 import passkeyRoutes from './routes/passkeys.js'
 import safeDeployRoutes from './routes/safe-deploy.js'
 import safeExecRoutes from './routes/safe-exec.js'
-import x402ResourceRoutes from './routes/x402-resources.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
 import openapiRoutes from './routes/openapi.js'
 import catalogRoutes from './routes/catalog.js'
@@ -276,7 +275,6 @@ await app.register(passkeyRoutes, { prefix: '/passkeys' })
 await app.register(safeDeployRoutes, { prefix: '/safe' })
 await app.register(safeExecRoutes, { prefix: '/safe' })
 await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
-await app.register(x402ResourceRoutes, { prefix: '/x402' })
 await app.register(catalogRoutes, { prefix: '/catalog' })
 await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })

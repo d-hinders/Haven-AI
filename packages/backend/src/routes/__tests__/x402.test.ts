@@ -231,6 +231,23 @@ describe('x402 routes', () => {
     expect(response.json()).toEqual({ error: 'Missing or invalid API key' })
   })
 
+  it('leaves the retired Haven-as-merchant resource surface as ordinary 404s (#2257)', async () => {
+    const retiredRoutes = [
+      { method: 'POST' as const, url: '/x402/resources' },
+      { method: 'GET' as const, url: '/x402/resources' },
+      { method: 'DELETE' as const, url: '/x402/resources/11111111-1111-1111-1111-111111111111' },
+      { method: 'GET' as const, url: '/x402/receipts' },
+      { method: 'GET' as const, url: '/x402/resources/11111111-1111-1111-1111-111111111111/challenge' },
+      { method: 'POST' as const, url: '/x402/resources/11111111-1111-1111-1111-111111111111/verify' },
+    ]
+
+    for (const route of retiredRoutes) {
+      const response = await app.inject(route)
+      expect(response.statusCode, `${route.method} ${route.url}`).toBe(404)
+      expect(response.json()).toMatchObject({ statusCode: 404 })
+    }
+  })
+
   it('rejects settlementScheme erc7710 on the legacy rail — 3009 only there (#946)', async () => {
     primeDb(AUTH)
     const response = await app.inject({

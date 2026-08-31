@@ -5,7 +5,6 @@ contract: true
 covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
-  - packages/backend/src/routes/x402-resources.ts
   - packages/backend/src/modules/payments/agent-payment-status.ts
   - packages/backend/src/modules/x402/x402-delegation.ts
   - packages/backend/src/infra/chain/settlement-transfer-verifier.ts
@@ -31,7 +30,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-30" # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-31" # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -41,13 +40,14 @@ Standard merchant-verifiable x402 support is `exact`-scheme USDC on Base and
 Base Sepolia. Haven can parse some additional network/token forms for legacy
 proofs and display, but they are not part of the standard settlement path.
 
-Standard merchant x402 has two legs:
+The live delegation-rail merchant x402 flow is scheme-specific:
 
-1. Haven funding leg: within budget, an agent-signed Safe AllowanceModule
-   transfer funds the delegate wallet. Over budget, the user must approve and
-   execute a Safe funding transaction.
-2. Merchant leg: the agent signs the standard EIP-3009 `X-PAYMENT` header from
-   the delegate wallet and retries the merchant/resource request.
+1. On `erc7710`, the agent signs the settlement context and the merchant
+   redeems the payment directly from the delegated account; there is no funding
+   leg or delegate hot balance.
+2. On EIP-3009, Haven may first relay a signed funding leg to the delegated
+   account, then the agent signs the merchant `X-PAYMENT` header locally and
+   retries the merchant/resource request.
 
 > ⚠️ **The legacy AllowanceModule two-leg described below NO LONGER RUNS.**
 > Under epic #1440 the Safe rail was closed to new accounts by #1984 and then
@@ -195,7 +195,7 @@ flow has no dedicated probe step (`haven.fetch()` resolves a 402 itself), so
 its equivalent miss is a non-ok `Response` from the untouched first hop.
 Discovery finds endpoints; payment authority is unchanged.
 
-## Standard SDK / Local MCP Flow
+## Historical SDK / Local MCP Flow — retired AllowanceModule rail
 
 ```mermaid
 sequenceDiagram
@@ -928,10 +928,10 @@ The flow is a two-call variant of `/x402/authorize`:
    payment at all — see the delivery matrix in
    [`11-agent-passport-schema.md`](11-agent-passport-schema.md).
 
-The intent moves to `submitted`. `POST /x402/:id/settle` is Base-only and, as of
-this writing, sits on the OpenAPI drift check's `KNOWN_UNDOCUMENTED_ROUTES`
-allowlist pending the epic docs sweep (#834). Operational detail (gas sponsorship, vendor
-dependencies): [`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md);
+The intent moves to `submitted`. `POST /x402/:id/settle` is Base-only and is
+documented in the OpenAPI spec as the live delegation-rail settlement endpoint.
+Operational detail (gas sponsorship, vendor dependencies):
+[`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md);
 security model: [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
 #### Completing an erc7710 settlement (#2092)

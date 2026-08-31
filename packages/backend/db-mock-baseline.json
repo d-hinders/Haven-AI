@@ -228,10 +228,6 @@
     "db-mock": 1,
     "positional": 15
   },
-  "packages/backend/src/routes/__tests__/x402-resources.test.ts": {
-    "db-mock": 1,
-    "positional": 14
-  },
   "packages/backend/src/routes/__tests__/x402.test.ts": {
     "db-mock": 1,
     "positional": 42

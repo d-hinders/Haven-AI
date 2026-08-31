@@ -106,7 +106,7 @@
  *
  * Every outcome other than `verified` leaves the caller unable to confirm. The
  * outcomes are kept DISTINCT rather than collapsed into a boolean (the older
- * `allowance-transfer-verifier.ts` collapses an RPC exception into
+ * The retired AllowanceModule verifier collapsed an RPC exception into
  * `valid: false`, which reads a transport failure as a negative verdict).
  * `rpc_unavailable` in particular must never become either a confirmation or a
  * permanent rejection: an RPC outage is "not known yet", and the caller maps

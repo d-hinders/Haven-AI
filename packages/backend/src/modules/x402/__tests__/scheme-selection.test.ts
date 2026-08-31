@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   deriveFundingShape,
   validateDelegationSchemeShape,
-  validateGenericSchemeRail,
 } from '../scheme-selection.js'
-import type { AgentContext } from '../../../middleware/agentAuth.js'
 
 /**
  * The erc7710-vs-eip3009 settlement-scheme decision (#946, #1058), now
@@ -13,57 +11,20 @@ import type { AgentContext } from '../../../middleware/agentAuth.js'
  * these branches through the route — these tests pin the DECISION FUNCTIONS
  * themselves and the evaluation order between them, which the route tests
  * cannot isolate from token resolution / persistence side effects.
+ *
+ * #2245 deleted `validateGenericSchemeRail` and the six cases that pinned it.
+ * They asserted the rail-GENERIC guards — "erc7710 / facilitatorAddresses
+ * require a delegation-rail account" — which ran above the rail resolution and
+ * so answered a retired-rail account with a 400 instead of the #1986 410. That
+ * behaviour is now the rail seam's, and it is pinned where the rest of the
+ * retirement is pinned, at the route:
+ * `routes/__tests__/allowance-rail-retired.test.ts` → "a caller-supplied
+ * settlementScheme cannot divert the tombstone (#2245)". Everything left in
+ * this file is delegation-rail-INTERNAL and never sees another rail.
  */
-
-function agent(overrides: Partial<AgentContext> = {}): AgentContext {
-  return {
-    id: 'agent-1',
-    user_id: 'user-1',
-    name: 'A',
-    delegate_address: '0x' + '11'.repeat(20),
-    safe_address: '0x' + '22'.repeat(20),
-    chain_id: 8453,
-    status: 'active',
-    execution_rail: 'delegation',
-    ...overrides,
-  }
-}
 
 const MERCHANT = '0x' + '33'.repeat(20)
 const DELEGATE = '0x' + '11'.repeat(20)
-
-describe('validateGenericSchemeRail (#946, #1058) — rail-generic guards', () => {
-  it('allows erc7710 on the delegation rail', () => {
-    expect(validateGenericSchemeRail(agent({ execution_rail: 'delegation' }), 'erc7710', undefined)).toBeNull()
-  })
-
-  it('rejects erc7710 on a legacy-rail agent', () => {
-    const result = validateGenericSchemeRail(agent({ execution_rail: 'legacy' }), 'erc7710', undefined)
-    expect(result?.code).toBe(400)
-    expect((result?.body as { error: string }).error).toMatch(/delegation-rail account/)
-  })
-
-  it('allows eip3009 on a legacy-rail agent (no rail restriction on that scheme)', () => {
-    expect(validateGenericSchemeRail(agent({ execution_rail: 'legacy' }), 'eip3009', undefined)).toBeNull()
-  })
-
-  it('rejects facilitatorAddresses on a legacy-rail agent, regardless of settlementScheme', () => {
-    const result = validateGenericSchemeRail(agent({ execution_rail: 'legacy' }), undefined, [MERCHANT])
-    expect(result?.code).toBe(400)
-    expect((result?.body as { error: string }).error).toMatch(/facilitatorAddresses/)
-  })
-
-  it('allows facilitatorAddresses on a delegation-rail agent', () => {
-    expect(validateGenericSchemeRail(agent({ execution_rail: 'delegation' }), undefined, [MERCHANT])).toBeNull()
-  })
-
-  it('checks settlementScheme BEFORE facilitatorAddresses — evaluation order', () => {
-    // Both would independently fail on a legacy rail; the erc7710 message
-    // must surface first, matching the pre-#996 route's if-chain order.
-    const result = validateGenericSchemeRail(agent({ execution_rail: 'legacy' }), 'erc7710', [MERCHANT])
-    expect((result?.body as { error: string }).error).toMatch(/delegation-rail account/)
-  })
-})
 
 describe('deriveFundingShape (#946) — payTo shape selects the scheme', () => {
   it('is true when payTo IS the agent delegate EOA (case-insensitive)', () => {

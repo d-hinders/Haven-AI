@@ -1,51 +1,39 @@
 /**
  * The erc7710-vs-eip3009 settlement-scheme decision (#946, #1058), extracted
  * verbatim from `routes/x402.ts`'s authorize handler as pure functions so the
- * decision is unit-testable without HTTP. Evaluation ORDER matches the
- * pre-#996 route exactly:
+ * decision is unit-testable without HTTP.
  *
- *   1. `validateGenericSchemeRail` — rail-generic guards (erc7710/
- *      facilitatorAddresses require a delegation-rail account), run BEFORE
- *      token resolution so a confused client fails on the scheme mismatch
- *      rather than an unrelated asset error.
- *   2. `deriveFundingShape` — once inside the delegation-rail branch, the
- *      payTo shape (merchant vs the agent's own delegate EOA) selects erc7710
- *      vs the EIP-3009 funding leg.
- *   3. `validateDelegationSchemeShape` — the delegation-rail-only
- *      cross-checks once the shape is known.
+ * Everything here is **delegation-rail-internal** and runs only after
+ * `authorizeX402` has resolved the rail, so every function below may assume a
+ * `delegation` account:
+ *
+ *   1. `deriveFundingShape` — the payTo shape (merchant vs the agent's own
+ *      delegate EOA) selects erc7710 vs the EIP-3009 funding leg.
+ *   2. `validateDelegationSchemeShape` — the cross-checks once the shape is
+ *      known.
+ *
+ * **What used to sit above them, and why it is gone (#2245).**
+ * `validateGenericSchemeRail` ran BEFORE the rail resolution and refused
+ * `settlementScheme: 'erc7710'` / a present `facilitatorAddresses` from a
+ * non-delegation account with a 400. Its #946 rationale — "a legacy-rail agent
+ * requesting erc7710 must fail loudly, not silently get the 3009 two-leg" —
+ * predates #1986, which fail-closes the whole rail: the loud failure is now the
+ * 410 tombstone, and it is the more accurate one. The old 400 said "the legacy
+ * AllowanceModule rail settles via EIP-3009 only", asserting on a money-path
+ * route that a retired rail settles at all, and it let one optional caller
+ * field decide WHICH refusal a retired-rail account saw — contradicting the
+ * #993 single-seam claim in `docs/regulatory/casp-risk-guardrails.md`.
+ *
+ * Deleted rather than reworded because both guards were exactly redundant with
+ * the seam, not merely adjacent to it: both tested
+ * `agent.execution_rail !== 'delegation'`, and `resolveExecutionRail` is fed
+ * `agent.execution_rail ?? null` from the SAME field and answers `delegation`
+ * for exactly the literal `'delegation'`. So every input the guards refused is
+ * an input the rail gate refuses one step later, and nothing they refused can
+ * now reach the delegation branch. That total overlap is what makes the
+ * deletion a message change rather than a permission change.
  */
-import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { X402HandlerResult } from './types.js'
-
-export function validateGenericSchemeRail(
-  agent: AgentContext,
-  settlementScheme: string | undefined,
-  facilitatorAddresses: string[] | undefined,
-): X402HandlerResult | null {
-  // #946: settlementScheme is validated for EVERY rail — a legacy-rail agent
-  // requesting erc7710 must fail loudly, not silently get the 3009 two-leg.
-  if (settlementScheme === 'erc7710' && agent.execution_rail !== 'delegation') {
-    return {
-      code: 400,
-      body: {
-        error: 'erc7710 settlement requires a delegation-rail account — the legacy AllowanceModule rail settles via EIP-3009 only',
-      },
-    }
-  }
-  // #1058: facilitator addresses pin the settlement child's redeemer caveat.
-  // Garbage here would either brick the child (unredeemable) or silently
-  // skip the pin — both are caller errors that must fail loudly.
-  if (facilitatorAddresses !== undefined && agent.execution_rail !== 'delegation') {
-    // Same scheme confusion the erc7710 settlementScheme rejection above
-    // fails loudly on — a legacy-rail client believing a redeemer pin
-    // exists must not silently proceed unpinned.
-    return {
-      code: 400,
-      body: { error: 'facilitatorAddresses applies to erc7710 direct settlement, which requires a delegation-rail account' },
-    }
-  }
-  return null
-}
 
 /**
  * The payTo shape selects the scheme: the standard-x402 SDK contract sends

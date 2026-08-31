@@ -465,9 +465,10 @@ export interface X402SchemeSelection {
  * caller's to supply — the SDK cannot see which rail an account is on from a
  * 402 response alone. A legacy AllowanceModule account passing
  * `delegationRail: true` would select a scheme its account cannot settle; the
- * backend refuses that at authorize (`validateGenericSchemeRail`), which is
- * where a rail mismatch SHOULD fail, on-chain-adjacent rather than in a client
- * that could be lying to itself.
+ * backend refuses that at authorize with the #1986 retired-rail 410 (#2245 —
+ * previously a scheme-specific 400 that wrongly implied the legacy rail could
+ * still settle via EIP-3009), which is where a rail mismatch SHOULD fail,
+ * on-chain-adjacent rather than in a client that could be lying to itself.
  *
  * Returns `null` when neither scheme has a payable entry — the caller decides
  * whether that is an error or a reason to look elsewhere.

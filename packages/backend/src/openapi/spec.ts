@@ -4856,7 +4856,9 @@ export const openapiSpec = {
         operationId: 'recordMachinePaymentReconciliationEvent',
         summary: 'Record a merchant retry reconciliation event.',
         description:
-          'Records a post-payment reconciliation marker when the merchant/protocol retry rejects or needs follow-up after a confirmed payment. The event is audit context only; it does not move funds.',
+          'Records a post-payment reconciliation marker when the merchant/protocol retry rejects or needs follow-up after a confirmed payment. The event is audit context only; it does not move funds. '
+          + 'The payment is resolved scoped to the calling agent, so another agent\'s payment answers 404 with nothing written. '
+          + '#2292: an acceptance is terminal — a merchant_retry_rejected_after_payment on a payment that already carries a client-reported merchant response (machine_payment_evidence proof_status merchant_response_observed or protocol_receipt_attached) answers 409 rather than re-opening a stranded-funds flag on a delivered payment.',
         security: [{ AgentApiKey: [] }],
         requestBody: {
           required: true,

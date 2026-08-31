@@ -95,8 +95,9 @@
 //
 //   * The **closing-keyword** half asks *what will GitHub do?* It must mirror
 //     GitHub exactly, so it does NOT read negation: `does not close #5` really
-//     does close #5, and a keyword quoted inside a fence or a blockquote closes
-//     the issue just the same — that is precisely what happened in #2320. A test
+//     does close #5, and a keyword quoted inside a fence or a blockquote is
+//     treated as live — measured for a commit message in #2320, assumed on the
+//     safe side for the body (see § *How an author quotes the keyword*). A test
 //     below pins this.
 //   * The **stays-open** half asks *what did the author assert?* That is a claim
 //     about intent with no GitHub behaviour behind it, and negation is the whole
@@ -382,8 +383,9 @@ export function renderReport(violations) {
     '',
     'To write ABOUT the keyword without emitting it, use a form GitHub does not',
     'parse: `Refs #<n>`, a non-numeric placeholder (`Closes #<n>`), or the number',
-    'with no keyword in front of it. A code fence does NOT help — GitHub parses',
-    'fenced text too, which is how #2268 was closed a second time (#2320).',
+    'with no keyword in front of it. A code fence does NOT help: a fenced keyword',
+    'in a commit message is how #2268 was closed a second time, and this check',
+    'reads a fenced keyword in the body the same way (#2320).',
     '',
     'See .agents/skills/ship-next/SKILL.md § Commit And Pull Request, step 7.',
     'If the issue is NOT in operator-verify mode, remove the `operator-verify`',

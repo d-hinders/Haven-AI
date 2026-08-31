@@ -427,10 +427,11 @@ The recommended three-call fast path for an x402-protected MCP tool is:
    the unsigned funding payload plus merchant/tool context.
 2. `haven_sign_x402` — the local signer signs the funding hash and creates the
    merchant-bound payment header.
-3. `haven_settle_mcp_tool` — hosted MCP relays the funding signature, waits for
-   confirmation, performs a fresh merchant MCP handshake, delivers the signed
-   header, and returns `agent_summary.purchase_summary` as the default report;
-   raw `result` remains optional merchant evidence.
+3. `haven_settle_mcp_tool` — hosted MCP resolves the merchant call context
+   (#2282, below), relays the funding signature, waits for confirmation,
+   performs a fresh merchant MCP handshake, delivers the signed header, and
+   returns `agent_summary.purchase_summary` as the default report; raw `result`
+   remains optional merchant evidence.
 
 **Hosted header preflight (#1398).** Before step 3 relays the funding
 signature, hosted MCP validates the bounded, signed `X-PAYMENT` header against
@@ -466,6 +467,40 @@ its window, exactly like #1263 — a row that already moved past
 `pending_signature` stays servable for however long merchant delivery takes,
 so a retry after a `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` timeout is never
 forced into a fresh, re-funding quote).
+
+**The context is resolved BEFORE anything is submitted (#2282).** On
+`haven_settle_mcp_tool` the resolution above runs ahead of the funding relay on
+the EIP-3009 bridge, and ahead of `POST /x402/:id/settle` on erc7710 — not
+inside the merchant-delivery helper, where it used to run. It had been correct
+and late: the `haven_pay_x402_quote` entry point stores no call context (that
+tool receives only the raw 402, and an x402 `PaymentRequired` carries a resource
+URL but no MCP tool name and no arguments), so a quote-first settle relayed and
+confirmed the funding userop and only then answered
+`MERCHANT_CALL_CONTEXT_UNAVAILABLE`, leaving a `funded_but_unsettled` intent
+this tool can no longer finish — a settle retry with explicit context relays
+funding again and is refused with `expected pending_signature`, which reads
+like "your context was fine". Resolved first, the identical refusal lands while
+the intent is still `pending_signature` with nothing spent, and the caller
+retries the SAME tool with explicit `merchant_url` / `tool_name` / `arguments`
+and it settles. Storing a context at `haven_pay_x402_quote` time was considered
+and rejected: the tool has no tool name or arguments to store, so accepting
+them optionally would leave every caller who omitted them in exactly the state
+this removes.
+
+**`mcp_transport` is snake_case at this boundary, and the other spelling is
+refused (#2282).** Hosted MCP tool arguments are snake_case
+(`{ handshake_required, source }`); the SDK type `X402McpTransport` and
+`POST /x402/authorize`'s `mcpCallContext.mcpTransport` are camelCase
+(`{ handshakeRequired, source }`). Both are authoritative at their own
+boundary and the hosted server bridges them. A caller reaching the tool
+boundary with the camelCase shape is REFUSED, with a message naming both
+spellings — the tool schema is strict (matching the `additionalProperties:
+false` it advertises) rather than stripping the unknown key, and the internal
+transport parser throws on a present-but-unrecognised transport instead of
+answering `undefined`, which is the value "no transport supplied" also
+produces. A rejection the caller can act on is worth more than a permissive
+parse: the failure mode being closed here is a caller unable to tell that their
+explicit-context retry was never seen.
 
 The decomposed alternative is:
 

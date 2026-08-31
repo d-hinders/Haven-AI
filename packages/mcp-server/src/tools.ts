@@ -80,6 +80,43 @@ export type HostedToolName =
 /** Legacy aliases kept for one release cycle so existing agents don't break. */
 export type HostedToolNameLegacy = 'haven_x402_authorize' | 'haven_list_transactions'
 
+/**
+ * #2282: the hosted MCP tool boundary spells arguments in **snake_case**
+ * (`payment_id`, `merchant_url`, `tool_name`), and `mcp_transport` is no
+ * exception. The SDK / HTTP API spells the same value in camelCase
+ * (`X402McpTransport.handshakeRequired`, `POST /x402/authorize`'s
+ * `mcpCallContext.mcpTransport`) — both spellings are authoritative, each at
+ * its own boundary, and `serializeMcpTransport` / `parseMcpTransport` bridge
+ * them.
+ *
+ * The failure #2282 reports is a caller reaching this boundary with the SDK's
+ * camelCase shape. Two things make that refusal worth spelling out here rather
+ * than leaving to zod's default:
+ *
+ *   1. `.strict()` — the JSON Schema this shape advertises to agents already
+ *      says `additionalProperties: false`, but a bare `z.object` STRIPS unknown
+ *      keys instead of refusing them. Advertising strict and behaving
+ *      permissive is precisely the "the caller cannot tell their argument was
+ *      dropped" shape; strict makes the behaviour match the advertisement.
+ *   2. `required_error` — the default message is `handshake_required: Required`,
+ *      which is true but does not tell a caller holding `handshakeRequired`
+ *      what is wrong with it. A rejection a caller can act on is worth more
+ *      than a permissive parse, so the message names the mismatch.
+ */
+const MCP_TRANSPORT_CASE_HINT =
+  'mcp_transport uses snake_case at the hosted tool boundary: ' +
+  '{ handshake_required: boolean, source: "path" | "bazaar" }. The SDK and the HTTP API ' +
+  'spell the same value camelCase ({ handshakeRequired, source }) — that shape is REFUSED ' +
+  'here rather than ignored, so rename the key. Echo the mcp_transport a Haven quote tool ' +
+  'returned and it is already correct.'
+
+const mcpTransportArg = z
+  .object({
+    handshake_required: z.boolean({ required_error: MCP_TRANSPORT_CASE_HINT }),
+    source: z.enum(['path', 'bazaar'], { required_error: MCP_TRANSPORT_CASE_HINT }),
+  })
+  .strict(MCP_TRANSPORT_CASE_HINT)
+
 export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   haven_get_agent: {},
   haven_get_allowances: {},
@@ -223,10 +260,7 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     merchant_url: z.string().url().optional(),
     tool_name: z.string().min(1).optional(),
     arguments: z.record(z.string(), z.unknown()).optional(),
-    mcp_transport: z.object({
-      handshake_required: z.boolean(),
-      source: z.enum(['path', 'bazaar']),
-    }).optional(),
+    mcp_transport: mcpTransportArg.optional(),
     // The X-PAYMENT header built by the local signer (haven_x402_sign_header).
     // #1456: OPTIONAL — its absence selects erc7710, where Haven assembles the
     // header at settle instead of the signer building it locally.
@@ -244,10 +278,7 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     merchant_url: z.string().url().optional(),
     tool_name: z.string().min(1).optional(),
     arguments: z.record(z.string(), z.unknown()).optional(),
-    mcp_transport: z.object({
-      handshake_required: z.boolean(),
-      source: z.enum(['path', 'bazaar']),
-    }).optional(),
+    mcp_transport: mcpTransportArg.optional(),
     // The X-PAYMENT header built by the local signer (haven_sign_x402).
     // #1456: OPTIONAL — its absence selects erc7710, where Haven assembles the
     // header at settle instead of the signer building it locally.
@@ -1486,6 +1517,31 @@ export function createToolHandlers(
     haven_settle_mcp_tool: async (input) =>
       runTool(async () => {
         const args = parse('haven_settle_mcp_tool', input)
+        // ── #2282: the merchant-call context is resolved BEFORE anything is
+        // submitted, on BOTH schemes. ──
+        //
+        // This tool's whole purpose is "fund AND deliver in one call", so it
+        // relays the funding signature itself. The context needed for the
+        // delivery half used to be resolved inside `deliverMerchantPayment`,
+        // i.e. after that relay: an intent created by `haven_pay_x402_quote`
+        // has no stored context (that tool receives only the raw 402 — a
+        // PaymentRequired carries a resource URL but no MCP tool name and no
+        // arguments, so there is nothing to store), and the caller learned so
+        // only once the funding was confirmed on-chain. The check was correct
+        // and it ran after the thing it would have prevented, leaving a
+        // `funded_but_unsettled` intent that this tool can no longer finish —
+        // a settle retry with explicit context relays funding again and gets
+        // `expected pending_signature`, which reads like "your context was
+        // fine". Recovery meant switching to `haven_complete_mcp_tool`.
+        //
+        // Resolved here, the same refusal lands while the intent is still
+        // `pending_signature` and nothing has been spent, so the caller retries
+        // THIS tool with explicit merchant_url/tool_name/arguments and it
+        // simply works. The failure stops stranding value instead of being
+        // reported sooner. Same reasoning as the erc7710 branch below: there
+        // the submit burns the settlement child, which is not recoverable by
+        // re-signing either.
+        const merchantContext = await resolveMerchantCallContext(haven, args)
         // Fast path: fund (relay the signature) then deliver the merchant header
         // in one hosted call. The signature and X-PAYMENT header are both signed
         // by the local edge signer — Haven relays them but never holds the key.
@@ -1517,7 +1573,7 @@ export function createToolHandlers(
             // the payment status unconditionally, which is a 409 here because
             // the settle above already moved the intent to 'submitted'. Say
             // "there is no funding leg" explicitly instead of implying it.
-            { noFundingLeg: true },
+            { noFundingLeg: true, context: merchantContext },
           )
           const summary7710 = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
           return {
@@ -1577,7 +1633,9 @@ export function createToolHandlers(
             }),
           }
         }
-        const merchant = await deliverMerchantPayment(haven, args, funding.txHash)
+        const merchant = await deliverMerchantPayment(haven, args, funding.txHash, {
+          context: merchantContext,
+        })
         // #1310: rail-aware remaining-budget summary so the agent can report
         // spend without a separate haven_get_agent/haven_get_allowances round
         // trip. A failed read NEVER converts this settled success into a
@@ -2535,15 +2593,62 @@ function serializeMcpTransport(input: X402McpTransport | undefined):
   }
 }
 
+/**
+ * #2282: defence in depth behind `mcpTransportArg`. This used to answer
+ * `undefined` — "no transport" — for ANY object it did not recognise, which is
+ * the same value a caller who passed nothing gets. So a transport that was
+ * present but wrong-shaped was indistinguishable from one that was absent, at
+ * the last point where anyone could still tell the difference.
+ *
+ * `undefined`/absent still means absent, and `handshake_required: false` still
+ * means the same thing it means to the SDK (`mcpTransport?.handshakeRequired
+ * === true` is the only read) — those are legitimate "no handshake" answers. A
+ * transport that is PRESENT and unrecognised is refused loudly instead, naming
+ * the snake_case/camelCase mismatch that is the common cause.
+ *
+ * The tool schema refuses that shape first on every hosted call, so this is not
+ * the only guard — it is the one that holds if the outer boundary is ever
+ * looser than it is today (an older MCP SDK, or `createToolHandlers` driven
+ * directly by an embedder). A silent drop here strands a payment; a refusal
+ * does not.
+ */
 function parseMcpTransport(input: unknown): X402McpTransport | undefined {
-  if (!input || typeof input !== 'object') return undefined
+  if (input === undefined || input === null) return undefined
+  if (typeof input !== 'object' || Array.isArray(input)) {
+    throw mcpTransportShapeError(input)
+  }
   const transport = input as { handshake_required?: unknown; source?: unknown }
+  if (transport.handshake_required === undefined) throw mcpTransportShapeError(input)
+  if (typeof transport.handshake_required !== 'boolean') throw mcpTransportShapeError(input)
   if (transport.handshake_required !== true) return undefined
-  if (transport.source !== 'path' && transport.source !== 'bazaar') return undefined
+  if (transport.source !== 'path' && transport.source !== 'bazaar') {
+    throw mcpTransportShapeError(input)
+  }
   return {
     handshakeRequired: true,
     source: transport.source,
   }
+}
+
+function mcpTransportShapeError(input: unknown): HostedToolError {
+  const camelCase =
+    typeof input === 'object' &&
+    input !== null &&
+    'handshakeRequired' in (input as Record<string, unknown>)
+  return new HostedToolError({
+    code: 'INVALID_INPUT',
+    message:
+      (camelCase
+        ? 'mcp_transport was supplied in the SDK camelCase shape. '
+        : 'mcp_transport was supplied in a shape Haven does not recognise. ') +
+      MCP_TRANSPORT_CASE_HINT +
+      ' Nothing was relayed and no funds moved.',
+    statusCode: 400,
+    status: 'invalid_input',
+    phase: 'not_started',
+    nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+    rail: 'x402',
+  })
 }
 
 // #1328: the 'mpp' rail branch (and its haven_resume_mpp_payment caller) is
@@ -2980,10 +3085,17 @@ class HostedToolError extends Error {
  * same call. Omitting either one rehydrates the FULL stored context by
  * payment_id (the #1263 sign-context precedent, applied to the settle leg).
  */
+export interface ResolvedMerchantCallContext {
+  merchantUrl: string
+  toolName: string
+  toolArguments: Record<string, unknown>
+  mcpTransport: X402McpTransport | undefined
+}
+
 async function resolveMerchantCallContext(
   haven: HavenClient,
   args: Record<string, any>,
-): Promise<{ merchantUrl: string; toolName: string; toolArguments: Record<string, unknown>; mcpTransportRaw: unknown }> {
+): Promise<ResolvedMerchantCallContext> {
   const hasUrl = typeof args.merchant_url === 'string'
   const hasTool = typeof args.tool_name === 'string'
   if (hasUrl && hasTool) {
@@ -2991,7 +3103,9 @@ async function resolveMerchantCallContext(
       merchantUrl: args.merchant_url,
       toolName: args.tool_name,
       toolArguments: (args.arguments as Record<string, unknown> | undefined) ?? {},
-      mcpTransportRaw: args.mcp_transport,
+      // #2282: parse the transport HERE, where the caller can still act on a
+      // refusal, rather than deep inside the merchant call after funding.
+      mcpTransport: parseMcpTransport(args.mcp_transport),
     }
   }
   // #1307 review: exactly ONE of the pair present is refused, not silently
@@ -3018,7 +3132,9 @@ async function resolveMerchantCallContext(
       merchantUrl: ctx.merchantUrl,
       toolName: ctx.toolName,
       toolArguments: ctx.arguments,
-      mcpTransportRaw: ctx.mcpTransport ? serializeMcpTransport(ctx.mcpTransport) : undefined,
+      mcpTransport: parseMcpTransport(
+        ctx.mcpTransport ? serializeMcpTransport(ctx.mcpTransport) : undefined,
+      ),
     }
   } catch (err) {
     if (err instanceof HavenApiError) {
@@ -3068,12 +3184,18 @@ async function deliverMerchantPayment(
   fundingTxHash?: string,
   // #1508: a scheme with NO funding leg (erc7710) must skip the funding wait
   // ENTIRELY. Omitting fundingTxHash above does NOT achieve that — see below.
-  options?: { noFundingLeg?: boolean },
+  options?: { noFundingLeg?: boolean; context?: ResolvedMerchantCallContext },
 ): Promise<{ status: number; ok: boolean; result: unknown; settlement_tx_hash: string | null }> {
   // #1307: resolve merchant_url/tool_name/arguments/mcp_transport BEFORE
   // waiting on funding confirmation — a version-skew refusal (no stored
   // context) should surface immediately, not after a pointless wait.
-  const context = await resolveMerchantCallContext(haven, args)
+  //
+  // #2282: on the settle fast path that is no longer early enough — funding is
+  // already relayed by the time this runs — so `haven_settle_mcp_tool` resolves
+  // the context itself, pre-funding, and hands the result in. Resolving once
+  // and passing it through also keeps the two calls from diverging (the stored
+  // context could change, and a second GET is a second chance to disagree).
+  const context = options?.context ?? (await resolveMerchantCallContext(haven, args))
 
   // Wait for ≥1 on-chain confirmation of the funding tx BEFORE the merchant
   // verifies the X-PAYMENT header — otherwise its balanceOf(delegate) check
@@ -3110,7 +3232,7 @@ async function deliverMerchantPayment(
       },
       paymentId: args.payment_id,
       paymentHeader: args.payment_header,
-      mcpTransport: parseMcpTransport(context.mcpTransportRaw),
+      mcpTransport: context.mcpTransport,
       // #1508: the same flag that skips the funding wait above also has to
       // reach the SDK's completion gate, which is where the real refusal was.
       noFundingLeg: options?.noFundingLeg === true,

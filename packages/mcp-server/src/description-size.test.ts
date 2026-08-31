@@ -45,6 +45,19 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * both counts; and the two assertions below — no issue archaeology, no
  * repeated flow boilerplate — are untouched, and they are what actually
  * enforces "not repeated text".
+ *
+ * **The tradeoff, stated where the next person adding a tool will read it
+ * (haven-reviewer, #2292).** A mean with no cap on tool COUNT no longer
+ * bounds total `tools/list` context growth. The absolute cap did — that was
+ * the point of it, since what an agent pays for is the total it has to read
+ * — and a mean permits an unbounded total so long as each addition is small.
+ * That is a real loss, accepted knowingly: the absolute form had stopped
+ * discriminating (it would have rejected any 22nd tool, however terse, while
+ * saying nothing about whether descriptions were bloated), and a guard that
+ * fires on the wrong quantity gets its constant bumped until it means
+ * nothing. If total context becomes the live concern again, the answer is a
+ * SECOND assertion bounding the tool count or the total explicitly — argued
+ * on its own evidence — not a silent return to a number nobody re-derived.
  */
 const MAX_MEAN_BYTES = 874
 

@@ -539,13 +539,19 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'Haven never talks to this merchant and never holds the key. The header is built before funding',
   'confirms, so its validity window starts at signing: retry promptly, and on',
   'PAYMENT_WINDOW_EXPIRED re-run this tool with the same idempotency_key.',
-  // #2292 re-attached to #2291's corrected chain: the merchant retry moved from
-  // haven_x402_sign_header to haven_sign_x402's inline header, but it is still the AGENT's
-  // retry — which is exactly why its outcome has nowhere to go without this call.
-  'Then report the outcome with haven_report_x402_outcome.',
   'When the merchant advertises extra.assetTransferMethod "erc7710" and the account is on the',
   'delegation rail, this returns settlement_scheme "erc7710" instead: sign, then haven_submit with',
   'settlement_scheme "erc7710" returns the payment_header directly. No funding leg on that path.',
+  // #2292, placed AFTER the erc7710 sentence and scoped explicitly (haven-reviewer NIT): sitting
+  // between the 3009 retry and the erc7710 branch it read as though it applied to both. It does
+  // not — an erc7710 intent has no Haven funding transaction, so the report is refused there —
+  // and prose that has to be disambiguated by a downstream refusal is prose worth fixing.
+  // Re-attached to #2291's corrected chain: the retry moved from haven_x402_sign_header to
+  // haven_sign_x402's inline header, but it is still the AGENT's retry, which is exactly why its
+  // outcome has nowhere to go without this call.
+  'On the funding-leg (EIP-3009) shape ONLY, report what the merchant answered to your retry with',
+  'haven_report_x402_outcome. Nothing to report on erc7710: there confirmed already means the',
+  'merchant settled.',
 ].join(' ')
 
 // #2145: the backend now emits nextAction=retry_original_x402_request from

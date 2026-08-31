@@ -520,15 +520,24 @@ const PAY_X402_QUOTE_DESCRIPTION = [
 // agent-payment-status.ts). The gate in the handler below requires that exact
 // nextAction, so this tool is reachable again on purpose — the description
 // tells an agent to gate on the structured field, not call this speculatively.
+// #2290: the last two lines used to end at haven_x402_sign_header, with
+// haven_sign as an optional aside "to re-derive a binding lost across a signer
+// restart". A binding is not optional — haven_x402_sign_header requires one —
+// and for a funded payment the fetch behind haven_sign was refused outright
+// (409 already_executed), so the sequence this tool pointed at could not be
+// completed at all. Both halves are fixed: the gate now serves this state, and
+// the description names the full order instead of an aside.
 const RESUME_X402_DESCRIPTION = [
   'Resume an authorized x402 payment: retrieve the signing context so the signer can rebuild the',
-  'X-PAYMENT header and the agent can retry the merchant.',
+  'merchant payment header and the agent can retry the merchant.',
   'Only call this after haven_get_payment_status reports nextAction=retry_original_x402_request —',
   'that means Haven funding confirmed but no merchant response was ever recorded, typically because',
   'the process crashed between funding and the merchant retry. Any other nextAction reports a',
   'conflict instead of returning context; do not call this speculatively and do not pay again.',
-  'Returns { payment_id, payment_required, x402 } in the haven_pay_x402_quote shape — next is',
-  'haven_x402_sign_header (or haven_sign first, to re-derive a binding lost across a signer restart).',
+  'Returns { payment_id, payment_required, x402 } in the haven_pay_x402_quote shape. Then call',
+  'haven_sign_x402 with this payment_id to mint an x402_binding — the funding leg is already spent,',
+  'so this signs nothing new on-chain and must not be re-submitted — and pass that binding to',
+  'haven_x402_sign_header to build the header. Retry the original resource_url with it.',
   'Carries no signer_compatibility of its own; an incompatible signer refuses at signing time.',
 ].join(' ')
 

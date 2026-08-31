@@ -19,8 +19,10 @@
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import {
   findIntentForAgent,
+  findIntentStatusRow,
   expirePendingIntent,
 } from '../../infra/repositories/payment-intents.js'
+import { isFundedX402AwaitingMerchantLeg } from '../payments/agent-payment-status.js'
 import { rebuildDelegationSignContext } from './replay.js'
 import type { X402HandlerResult } from './types.js'
 
@@ -47,7 +49,33 @@ export async function getX402SignContext(
       },
     }
   }
-  if (existing.status === 'confirmed' && existing.tx_hash) {
+  // #2290: the one confirmed state that still has work left to do. #2145
+  // taught `haven_get_payment_status` to answer `retry_original_x402_request`
+  // for a funded eip3009 intent whose merchant leg was never delivered, then
+  // left every route that could rebuild the merchant header shut — the
+  // diagnosis shipped without the cure. The permission is read from the SAME
+  // predicate that emits the remedy, over the SAME derived row, so the two
+  // cannot drift apart into a promise nothing can keep.
+  //
+  // This widens WHO MAY FETCH a context, never what the signer will sign
+  // without one: `assertExpectedBinding` and the digest re-derivation are
+  // untouched. It cannot re-fund — the funding UserOp is spent and Haven
+  // refuses a second submit — and it writes nothing.
+  //
+  // Scoped to `confirmed` so the ordinary pending_signature fetch keeps its
+  // single read: the predicate cannot hold for any other status.
+  const fundedMerchantRetry =
+    existing.status === 'confirmed' && (await isFundedMerchantRetry(paymentId, agent))
+  if (fundedMerchantRetry) {
+    const rebuilt = await rebuildDelegationSignContext(existing, agent, {
+      fundedMerchantRetry: true,
+    })
+    // A null rebuild is the legacy-rail row with no stored signing payload;
+    // it falls through to that refusal below rather than growing a second
+    // wording for the same condition.
+    if (rebuilt) return signContextResponse(rebuilt, existing)
+  }
+  if (existing.status === 'confirmed' && existing.tx_hash && !fundedMerchantRetry) {
     return {
       code: 409,
       body: {
@@ -84,7 +112,7 @@ export async function getX402SignContext(
       },
     }
   }
-  const rebuilt = await rebuildDelegationSignContext(existing, agent)
+  const rebuilt = fundedMerchantRetry ? null : await rebuildDelegationSignContext(existing, agent)
   if (!rebuilt) {
     // Legacy-rail x402 stores no prepared op; its sign_data is the short hash
     // from the original authorize response, which never needed this handoff.
@@ -99,6 +127,25 @@ export async function getX402SignContext(
       },
     }
   }
+  return signContextResponse(rebuilt, existing)
+}
+
+/**
+ * #2290: true when this confirmed intent is the funded-but-undelivered
+ * eip3009 state. Reads the DERIVED row — `merchant_leg_reported` and
+ * `funded_but_unsettled` are joins over evidence and reconciliation events,
+ * not columns on `payment_intents` — so this is the identical input
+ * `haven_get_payment_status` judges, run through the identical predicate.
+ */
+async function isFundedMerchantRetry(paymentId: string, agent: AgentContext): Promise<boolean> {
+  const statusRow = await findIntentStatusRow(paymentId, agent.id)
+  return statusRow !== null && isFundedX402AwaitingMerchantLeg(statusRow)
+}
+
+function signContextResponse(
+  rebuilt: X402HandlerResult,
+  existing: Record<string, unknown>,
+): X402HandlerResult {
   // The rebuild is shared with the idempotent replay, which stamps
   // `idempotent_replay: true`; this surface is a read, not a replay.
   const body = { ...(rebuilt.body as Record<string, unknown>) }
@@ -108,6 +155,11 @@ export async function getX402SignContext(
   // agent relaying the blob. Absent on pre-#1355 rows (the signer then
   // requires the caller-supplied copy). Not authority: whichever copy the
   // signer uses is verified against the Haven-signed expected context.
+  //
+  // #2290: this is also what carries the merchant's `accepts[].extra` (the
+  // USDC EIP-712 domain `{name, version}`) into a funded retry. The stored
+  // blob is re-served verbatim, so the domain the signer builds against is
+  // the merchant's own — never a library default guessed from the network.
   const storedPaymentRequired = storedPaymentRequiredFromMetadata(existing.machine_metadata)
   if (storedPaymentRequired) body.payment_required = storedPaymentRequired
   return { code: 200, body }

@@ -816,6 +816,52 @@ is told to retry a merchant that was already paid, which is the safe side —
 x402 merchants answer a re-request of a settled purchase idempotently
 (#1519).
 
+**What is live since #2290: the signing leg the remedy depends on.** Until
+#2290 the trigger above was reachable and its cure was not. `haven_sign_x402`
+mints the `x402_binding` that `haven_x402_sign_header` requires, and it gets
+the bytes from `GET /x402/:id/sign-context` — which refused **every**
+`confirmed` intent with `409 already_executed`, regardless of what
+`next_action` had just told the agent to do. An agent following the documented
+remedy reached a dead end four calls in, with the funding leg already spent
+(live case: payment `d480c3e4`, 0.01 USDC on the delegate EOA).
+
+The gate now opens for exactly the state described above and no other, because
+it reads the *same* predicate over the *same* derived row:
+`isFundedX402AwaitingMerchantLeg` is exported from `agent-payment-status.ts`
+and called by both `intentStateFor` and `getX402SignContext`
+([`modules/x402/sign-context.ts`](../../packages/backend/src/modules/x402/sign-context.ts)),
+so a published remedy and the permission to act on it cannot drift apart. A
+real-Postgres test asserts that biconditional across nine evidence states.
+Everything else still refuses: erc7710, a reported merchant leg, a
+client-reported rejection (whose remedy stays `sweep_stranded_funds`), an
+intent inside the grace window, absent scheme metadata, and a pending intent
+past its quote window.
+
+Two things about the rebuild are worth stating, because neither is obvious
+from the gate alone:
+
+- **`expires_at` is minted fresh, not re-served.** The stored value is the
+  QUOTE window; it bounded signing the funding leg, which has happened. The
+  signer's own `assertX402PaymentWindowOpen`
+  ([`packages/signer/src/core.ts`](../../packages/signer/src/core.ts)) refuses
+  an expired expected context, so re-serving the stale value would leave the
+  rebuild inert for precisely the payments it exists to rescue. Haven signs the
+  fresh value, so the binding still verifies; the merchant-side EIP-3009
+  validity window is a separate clock the signer derives at signing time. Only
+  this caller gets a fresh window — the #961 idempotent replay and the ordinary
+  pending-signature fetch are unchanged.
+- **The merchant's own `extra` survives.** The rebuilt `payment_required` is
+  the blob persisted at authorize time (`machine_metadata.payment_required`,
+  #1355), re-served verbatim, so `accepts[].extra` — the USDC EIP-712 domain
+  `{name, version}` — is the merchant's, never a default inferred from the
+  network. A wrong domain yields a signature the facilitator rejects. Note this
+  is the *sign-context* path; `getResumeState`'s `payment_required` is
+  reconstructed from columns and does not carry `extra`.
+
+Nothing about what the signer will sign changed: `assertExpectedBinding` and
+the digest re-derivation are untouched, and the funding UserOperation is
+already submitted, so no second funding can be initiated from this route.
+
 **Historical record (#2131/#2145), kept because both states shipped.** From
 the approval queue's removal (#2055) until #2145, this value had **no
 producer at all**: the backend never emitted it, and the SDK's only mapping

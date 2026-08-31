@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// Scheduled-guard freshness reporter (#2208) — `.github/workflows/guard-freshness.yml`.
+// CI guard freshness reporter (#2208, widened by #2268) —
+// `.github/workflows/guard-freshness.yml`.
 //
 // ## The problem this exists for
 //
-// A scheduled job that silently stops running looks exactly like a passing one.
+// A job that silently stops running looks exactly like a passing one.
 // There is no red X for "did not happen". The ways it stops are all mundane:
 // the workflow file is renamed or moved, its cron is edited, GitHub disables
 // schedules on a repo with 60 days of no activity, a token expires, the default
@@ -30,10 +31,27 @@
 // something and a pull request goes red immediately — the fast path — while
 // this reporter covers the slow one (it ran, then it stopped).
 //
+// ## What #2268 widened, and why it belongs in the SAME registry
+//
+// The original registry watched scheduled guards. #2268 was the same defect with
+// the sender moved off the premises: `qa-dev.yml`'s `repository_dispatch`
+// (`dev-deployed`) trigger — the one that runs the money-flow harness against
+// what the dev deploy just shipped — had fired **zero** times in the
+// repository's history, while the workflow's other two triggers fired normally
+// and the operations doc described all three as live. Nobody noticed, because
+// the failure has no red X: a trigger that never fires and a trigger that fires
+// and finds nothing are the same picture.
+//
+// Two arms make that case detectable and they are both in the registry entry
+// rather than in this prose: `countedEvents`, so a healthy sibling trigger on
+// the same workflow file cannot vouch for the dead one, and `requiredTrigger`,
+// so deleting the `on:` block goes red at pull-request time instead of leaving
+// a permanently-fresh run history behind it.
+//
 // `evaluate()` is pure; every `gh` call lives in the CLI wrapper at the bottom.
 
 import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -41,19 +59,40 @@ export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 
 export const DAY_MS = 24 * 60 * 60 * 1000
 
-/** The one issue this reporter owns. Upserted, and CLOSED when everything is healthy. */
-export const ISSUE_TITLE = '🩺 A scheduled CI guard has stopped proving its guarantee'
+/**
+ * The one issue this reporter owns. Upserted, and CLOSED when everything is healthy.
+ *
+ * The word "scheduled" was dropped in #2268: the registry now also covers a
+ * trigger fired from outside the repository, and a title that describes only
+ * half of what the body can report is the same kind of quietly-wrong
+ * documentation this reporter exists to catch. Safe to retitle here because the
+ * upsert only ever looks at OPEN issues and none was open; #2226 (the previous
+ * title) had already been closed healthy.
+ */
+export const ISSUE_TITLE = '🩺 A CI guard has stopped proving its guarantee'
 
 /**
- * The registry. Adding a scheduled guard here is what makes its absence
- * detectable; the self-test asserts every `workflow` below exists on disk, so a
- * rename cannot quietly de-register one.
+ * The registry. Adding a guard here is what makes its absence detectable; the
+ * self-test asserts every `workflow` below exists on disk and still declares the
+ * trigger the entry is watching, so neither a rename nor a deleted `on:` block
+ * can quietly de-register one.
  *
  * `maxAgeDays` is a budget, not the cadence: 3 days on a nightly tolerates two
  * consecutive misses (an Actions incident, a queue backlog) before it speaks. A
  * reporter that cries on the first blip gets muted, and a muted reporter is
  * worse than none — which is the same reasoning that keeps the proof job itself
  * non-gating.
+ *
+ * Fields:
+ * - `countedEvents` / `countedBranches` — which runs count as this guard having
+ *   run. Scoping them is the arm that stops a *different*, healthy trigger on
+ *   the same workflow file from masking the dead one (#2268).
+ * - `requiredTrigger` — a regex the workflow source must still match. The age
+ *   check asks "did it run lately"; this asks "can it still run at all", which
+ *   the run history can never answer, because a deleted trigger leaves its old
+ *   successes in the API forever.
+ * - `restart` — what a human actually does about it. Not every guard is
+ *   restarted with `gh workflow run`.
  */
 export const SCHEDULED_GUARDS = [
   {
@@ -82,6 +121,60 @@ export const SCHEDULED_GUARDS = [
       'still deadlocks a concurrent CREATE INDEX CONCURRENTLY (40P01) and that the polled ' +
       'waiter in packages/backend/src/db/advisory-lock.ts still does not. While it is not ' +
       'running, that guarantee rests on assertions about the cause only.',
+    requiredTrigger: /^\s*schedule:/m,
+    restart:
+      '`gh workflow run db-concurrency-proof.yml`, then check why it stopped — a renamed ' +
+      'file, an edited cron, an expired token, a changed default branch, or GitHub’s ' +
+      '60-day inactivity disablement of scheduled workflows.',
+  },
+  {
+    // #2268. This one is NOT a schedule. It is a trigger whose sender lives
+    // outside the repository, which is a strictly worse version of the same
+    // defect: `qa-dev.yml` declares three triggers, two of them fire, and the
+    // third — `repository_dispatch: [dev-deployed]`, POSTed by the Railway/Vercel
+    // dev deploy — had fired ZERO times in the repository's entire history
+    // (156 qa-dev runs, 2026-06-30 → 2026-08-31; and zero repository_dispatch
+    // runs across every workflow). Nothing looked wrong, because a trigger that
+    // never fires looks exactly like one that fires and finds nothing.
+    //
+    // The receiving half is healthy — a manual
+    // `gh api repos/:owner/:repo/dispatches -f event_type=dev-deployed` started
+    // run 33370275124 three seconds later, on `dev`. So the failure is entirely
+    // at the sender, in a deploy-provider dashboard this repository cannot see.
+    // That is exactly why it needs watching from here: the repo owns the
+    // consequence (a stale `qa-freshness` blocking a dev → main promotion) while
+    // owning none of the machinery.
+    workflow: 'qa-dev.yml',
+    label: 'Post-deploy money-flow QA — the `dev-deployed` trigger (#2268)',
+    // Four days, not three. Dev deploys are bursty and stop entirely over a
+    // quiet weekend, and a reporter that speaks every Monday morning is one
+    // people learn to close unread.
+    maxAgeDays: 4,
+    cadence: 'every dev deploy',
+    // ONLY `repository_dispatch`. This is the load-bearing line in the whole
+    // entry, and it is deliberately narrower than the other guard's: the nightly
+    // `schedule` and the manual `workflow_dispatch` on this same workflow are
+    // both alive and green, so counting them would report the post-deploy
+    // trigger healthy on the strength of the two signals that are not it. That
+    // is precisely how this went unnoticed for two months.
+    countedEvents: ['repository_dispatch'],
+    // A repository_dispatch always runs from the default branch, observed as
+    // `dev` on run 33370275124 — not assumed.
+    countedBranches: ['dev'],
+    requiredTrigger: /^\s*repository_dispatch:\s*\n\s*types:\s*\[\s*dev-deployed\s*\]/m,
+    why:
+      'It is the only trigger that runs the money-flow harness against what the dev deploy ' +
+      'ACTUALLY shipped, at the moment it ships. Without it, freshness rests on the nightly ' +
+      'cron alone, a busy day on dev outruns it, and qa-freshness then blocks the dev → main ' +
+      'promotion — correctly, but at the worst moment, where the pressure is to reach for the ' +
+      'qa-override label instead.',
+    restart:
+      'The sender is OUTSIDE this repository, so `gh workflow run` will not fix it (and a ' +
+      '`workflow_dispatch` run deliberately does not clear this finding). An operator has to ' +
+      'add or repair the post-deploy hook in the Railway dev backend / Vercel dev project — ' +
+      'see docs/operations/agent-qa.md → "Post-deploy trigger (webhook setup)". Confirm the ' +
+      'fix with `gh api repos/d-hinders/Haven-AI/dispatches -f event_type=dev-deployed`, which ' +
+      'must start a `qa-dev.yml` run within seconds.',
   },
 ]
 
@@ -146,6 +239,23 @@ export function evaluate({ guards = SCHEDULED_GUARDS, observations = {}, now = D
       continue
     }
 
+    // "Can it still fire at all", which the run history structurally cannot
+    // answer: deleting a trigger leaves every past success in the Actions API,
+    // so an age-only check reads green on a guard that can never run again —
+    // the same trap `missing-file` closes, one level in. Checked BEFORE the age
+    // check, because a workflow whose trigger was removed an hour ago is still
+    // perfectly fresh by timestamp.
+    if (seen.triggerPresent === false) {
+      findings.push({
+        guard,
+        kind: 'missing-trigger',
+        detail:
+          `.github/workflows/${guard.workflow} no longer declares the trigger this guard ` +
+          `watches (${guard.requiredTrigger}). It cannot fire, however green its history looks.`,
+      })
+      continue
+    }
+
     if (!seen.lastSuccessAt) {
       findings.push({
         guard,
@@ -193,11 +303,12 @@ export function renderIssueBody(findings, { now = new Date().toISOString(), runU
     lines.push(`- **Problem:** ${f.kind} — ${f.detail}`)
     lines.push(`- **Cadence:** ${f.guard.cadence} (budget: ${f.guard.maxAgeDays} days)`)
     lines.push(`- **Why it matters:** ${f.guard.why}`)
-    lines.push(
-      `- **Restart it:** \`gh workflow run ${f.guard.workflow}\`, then check why it stopped — ` +
-        'a renamed file, an edited cron, an expired token, a changed default branch, or ' +
-        "GitHub's 60-day inactivity disablement of scheduled workflows.",
-    )
+    // Per-guard, because "restart it" is not one instruction. #2208's guard is a
+    // cron you re-run with `gh workflow run`; #2268's sender lives in a
+    // third-party deploy dashboard and no command in this repository can fix it.
+    // A generic restart hint on the second one would send the reader to do the
+    // one thing that provably does NOT clear the finding.
+    lines.push(`- **Restart it:** ${f.guard.restart}`)
     lines.push('')
   }
   lines.push('---')
@@ -232,19 +343,35 @@ export function renderSummary({ healthy, findings }, observations = {}, guards =
 const gh = (args) => execFileSync('gh', args, { encoding: 'utf8' })
 
 function observe(guard) {
-  const fileExists = existsSync(path.join(ROOT, '.github', 'workflows', guard.workflow))
-  if (!fileExists) return { fileExists: false, lastSuccessAt: null, lastRunAt: null }
+  const workflowPath = path.join(ROOT, '.github', 'workflows', guard.workflow)
+  const fileExists = existsSync(workflowPath)
+  if (!fileExists) return { fileExists: false, triggerPresent: false, lastSuccessAt: null, lastRunAt: null }
+
+  const triggerPresent = guard.requiredTrigger
+    ? guard.requiredTrigger.test(readFileSync(workflowPath, 'utf8'))
+    : true
+
   try {
-    const raw = gh([
-      'run', 'list',
-      '--workflow', guard.workflow,
-      '--limit', '100',
-      '--json', 'conclusion,status,event,headBranch,createdAt,updatedAt',
-    ])
-    const qualifying = selectQualifyingRuns(JSON.parse(raw), guard)
+    // One query PER counted event, rather than one shared window filtered
+    // afterwards. `qa-dev.yml` is dispatched manually dozens of times a week, so
+    // a single `--limit 100` window can contain zero of the event we care about
+    // while the trigger is perfectly healthy — the busier the workflow, the
+    // blinder the check, which is backwards.
+    const runs = []
+    for (const event of guard.countedEvents) {
+      runs.push(...JSON.parse(gh([
+        'run', 'list',
+        '--workflow', guard.workflow,
+        '--event', event,
+        '--limit', '50',
+        '--json', 'conclusion,status,event,headBranch,createdAt,updatedAt',
+      ])))
+    }
+    const qualifying = selectQualifyingRuns(runs, guard)
     const success = qualifying.filter((r) => r.conclusion === 'success')
     return {
       fileExists: true,
+      triggerPresent,
       lastSuccessAt: newestTimestamp(success),
       lastRunAt: newestTimestamp(qualifying),
     }

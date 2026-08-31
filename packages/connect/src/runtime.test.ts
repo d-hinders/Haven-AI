@@ -1140,7 +1140,11 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     // 180s / 5s = the stated bound of 36 polls, then a clean exit — never a hang.
     expect(getConnectorStatus).toHaveBeenCalledTimes(36)
     const output = logs.join('\n')
-    expect(output).toContain('Still waiting for budget approval in Haven…')
+    // #2279: the reminder distinguishes active polling from a hang (elapsed +
+    // cadence, poll-count arithmetic on the injectable clock) and names the
+    // give-up bound before it fires.
+    expect(output).toContain('Still waiting for budget approval in Haven — 30s elapsed, checking every 5s.')
+    expect(output).toContain("I'll stop waiting after 3 minutes")
     expect(output).toContain('Budget approval is still pending in Haven.')
     expect(output).toContain('haven_get_agent')
   })
@@ -1319,6 +1323,7 @@ describe('waitForBudgetApproval (#1377 D)', () => {
   // and remains authoritative.
   it('runConnect sends an early install-status report when the runtime config write settles', async () => {
     const reports: UpdateInstallStatusInput[] = []
+    const logs: string[] = []
     const updateInstallStatus = vi.fn(async (_setupId: string, _apiKey: string, input: UpdateInstallStatusInput) => {
       reports.push(input)
     })
@@ -1378,7 +1383,7 @@ describe('waitForBudgetApproval (#1377 D)', () => {
         })
         return completedInstall('claude-code')
       }),
-      log: () => undefined,
+      log: (message) => logs.push(message),
     })
 
     expect(updateInstallStatus).toHaveBeenCalledTimes(2)
@@ -1394,6 +1399,10 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     expect(reports[0].skillInstalled).toBeUndefined()
     // The final report follows and is the complete, authoritative one.
     expect(reports[1].probeResult).toBeDefined()
+    // #2279: the successful early report is the moment the dashboard's
+    // approve-budget button unlocks — the imperative CTA prints right there,
+    // not after the install tail finishes.
+    expect(logs.join('\n')).toContain('→ Action needed: approve this agent\'s budget in the Haven dashboard')
   })
 
   it('runConnect survives an early install-status report failure', async () => {
@@ -1463,6 +1472,88 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     expect(result.agentId).toBe('agent-6')
     expect(updateInstallStatus).toHaveBeenCalledTimes(2)
     expect(logs.join('\n')).not.toContain('network down')
+    // #2279: no CTA before a SUCCESSFUL report — a failed early report means
+    // the dashboard button may not be live yet, and a CTA would point at it
+    // anyway. The instruction reaches the user with the post-complete-report
+    // wait flow instead.
+    expect(logs.join('\n')).not.toContain('→ Action needed')
+  })
+
+  // #2279 review, both rounds: a DELIVERED errorCode report still unlocks
+  // the dashboard button (`runtimeConfigured || installErrored`), but the CTA
+  // must also cohere with the run's own ending — manual_runtime_setup_required
+  // ends in a handoff that recommends approving, so the CTA prints;
+  // runtime_config_write_failed ends in "start a fresh connection" (which
+  // mints a NEW agent, #1688), so asking to approve THIS setup first would
+  // contradict it, and the CTA stays silent.
+  it.each([
+    ['manual_runtime_setup_required', true],
+    ['runtime_config_write_failed', false],
+  ] as const)('gates the approval CTA by handoff coherence on an errorCode early report (%s)', async (errorCode, expectCta) => {
+    const logs: string[] = []
+    await runConnect({
+      setupToken: 'hv_setup_test_early_error',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir: '/tmp/haven-connect-test-early-error',
+      waitForApproval: false,
+    }, {
+      api: {
+        resolveSetup: vi.fn(async () => ({
+          setup_id: 'setup-9',
+          status: 'awaiting_connection',
+          agent: { name: 'Early Error Agent' },
+          haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 8453, network: 'Base' },
+          agent_budget: [],
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          challenge: { id: 'challenge-9', message: 'Haven Connect Agent 2\nsetup_id: setup-9\nchallenge: yz1', expires_at: '2099-01-01T00:00:00.000Z' },
+        })),
+        registerSetup: vi.fn(async (input) => ({
+          setup_id: 'setup-9',
+          agent_id: 'agent-9',
+          status: 'connected_local',
+          agent_status: 'pending_approval',
+          api_key_prefix: input.apiKeyPrefix,
+          api_key_scope: 'setup_pending',
+          delegate_address: input.delegateAddress.toLowerCase(),
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          next_action: 'return_to_haven_for_wallet_approval',
+        })),
+        updateInstallStatus: vi.fn(),
+        getConnectorStatus: vi.fn(),
+        getAgentIdentity: vi.fn(),
+      },
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_earlyerror',
+      preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-early-error'),
+      writeCredentials: vi.fn(async () => ({
+        directory: '/tmp/haven-connect-test-early-error/agent-9',
+        identityPath: '/tmp/haven-connect-test-early-error/agent-9/identity.json',
+        signerPath: '/tmp/haven-connect-test-early-error/agent-9/signer.json',
+        agentPath: '/tmp/haven-connect-test-early-error/agent-9/agent.json',
+      })),
+      installRuntime: vi.fn(async (_input, deps) => {
+        await deps?.onRuntimeConfigured?.({
+          runtime: 'claude-code',
+          runtimeMcpMode: 'hosted_plus_signer',
+          hostedMcpConfigured: false,
+          localSignerConfigured: false,
+          localMcpConfigured: false,
+          restartRequired: true,
+          nextUserAction: 'complete_manual_runtime_setup',
+          errorCode,
+        })
+        return completedInstall('claude-code')
+      }),
+      log: (message) => logs.push(message),
+    })
+
+    if (expectCta) {
+      expect(logs.join('\n')).toContain('→ Action needed: approve this agent\'s budget in the Haven dashboard')
+    } else {
+      expect(logs.join('\n')).not.toContain('→ Action needed')
+    }
   })
 
   it('runConnect polls after registering by default and forwards approvalWait overrides', async () => {

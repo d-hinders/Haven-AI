@@ -541,6 +541,27 @@ async function executeConnect(
           errorCode: early.errorCode ?? null,
           environmentLabel: options.environmentLabel ?? 'Local workspace',
         })
+        // #2279: THIS report landing is the exact moment the dashboard's
+        // approve-budget controls unlock — so say so now, imperatively,
+        // instead of running the install tail (probes, consent, skill) in
+        // silence and only asking after it finishes. The field report: the
+        // user watched the live button for minutes while the terminal said
+        // nothing about it.
+        //
+        // Two distinct gates, from review. Liveness: the dashboard unlocks
+        // on any DELIVERED report, clean or errored (`runtimeConfigured ||
+        // installErrored`, useAgentConnectionSetup.ts) — so only a report
+        // that never arrived (the catch below) may leave the button dead.
+        // Coherence: the CTA also stays silent when the errorCode's own
+        // completion handoff will say "start a fresh connection" — a fresh
+        // connection mints a NEW agent (#1688), so "approve now" would spend
+        // the approval on a setup this very run is about to disown. The one
+        // errorCode whose handoff still recommends approving is
+        // manual_runtime_setup_required. One name for the gate: the budget
+        // (#1542).
+        if (!early.errorCode || early.errorCode === 'manual_runtime_setup_required') {
+          log('→ Action needed: approve this agent\'s budget in the Haven dashboard — the approval button is live now. Setup continues here in the meantime.')
+        }
       } catch {
         // ignore — the final report follows either way
       }
@@ -989,6 +1010,15 @@ function describeApprovedBudget(budget: {
   return `${amount} ${describeResetPeriod(budget.reset_period_min)}`
 }
 
+/** "3 minutes" for the default bound; seconds for the sub-2-minute test cadences. */
+function describeWaitBound(timeoutMs: number): string {
+  if (timeoutMs >= 120_000) {
+    const minutes = Math.round(timeoutMs / 60_000)
+    return `${minutes} minutes`
+  }
+  return `${Math.round(timeoutMs / 1_000)}s`
+}
+
 export type BudgetApprovalOutcome = 'approved' | 'pending' | 'ended'
 
 export async function waitForBudgetApproval(
@@ -1006,11 +1036,17 @@ export async function waitForBudgetApproval(
 
   // Announced only once a check has actually observed a pending (or unknown)
   // state — never ahead of a first check that may find the wait already over.
+  //
+  // #2279: phrased as status, not as the first ask — the imperative CTA now
+  // prints when the early install-status report unlocks the dashboard button,
+  // usually minutes before this line. When that CTA did not print (early
+  // report failed or errored), the complete report just before this wait is
+  // what unlocked the button, so this line still carries the instruction.
   let waitingAnnounced = false
   const announceWaiting = () => {
     if (waitingAnnounced) return
     waitingAnnounced = true
-    log('Registered with Haven — waiting for you to approve the budget in the dashboard…')
+    log('Now waiting for you to approve the budget in the Haven dashboard — approval is what unlocks the agent\'s Haven tools…')
   }
 
   for (let i = 0; i < maxPolls; i++) {
@@ -1047,7 +1083,16 @@ export async function waitForBudgetApproval(
     }
     announceWaiting()
     if (i > 0 && i % remindEvery === 0) {
-      log('Still waiting for budget approval in Haven…')
+      // #2279: a watcher could not tell active polling from a hang, and the
+      // give-up bound (#1377 D) was invisible until it fired. Elapsed time is
+      // poll-count arithmetic, not a clock read, so the injectable-clock
+      // tests stay deterministic.
+      const elapsedSeconds = Math.round((i * intervalMs) / 1_000)
+      log(
+        `Still waiting for budget approval in Haven — ${elapsedSeconds}s elapsed, checking every ` +
+          `${Math.round(intervalMs / 1_000)}s. I'll stop waiting after ${describeWaitBound(timeoutMs)}; ` +
+          'you can approve later and the tools unlock then.',
+      )
     }
   }
   log(

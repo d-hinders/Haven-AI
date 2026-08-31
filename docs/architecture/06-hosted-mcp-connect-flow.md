@@ -111,6 +111,7 @@ haven_quote_x402 / haven_pay_x402_quote
   → haven_submit                       (relays the FUNDING signature)
   → haven_x402_sign_header
   → merchant retry or haven_complete_mcp_tool
+  → haven_report_x402_outcome          (only when YOU did the retry)
 
 erc7710 direct settlement (delegation rail + merchant advertises it)
 haven_quote_x402 / haven_pay_x402_quote
@@ -118,6 +119,26 @@ haven_quote_x402 / haven_pay_x402_quote
   → haven_submit { settlement_scheme: "erc7710" }  → payment_header
   → merchant retry
 ```
+
+**Why the last EIP-3009 step exists at all
+([#2292](https://github.com/d-hinders/Haven-AI/issues/2292)).** The two
+branches of "merchant retry **or** `haven_complete_mcp_tool`" are not
+symmetric, and the asymmetry is the point of this whole flow: on the
+`haven_complete_mcp_tool` branch Haven makes the merchant call and therefore
+*observes* the outcome, writing the evidence or reconciliation row itself. On
+the plain-HTTP branch Haven never contacts the merchant — it holds no key and
+speaks to no merchant — so the outcome only exists in the agent. Without a
+report, the funded-but-undelivered detection this doc describes could not fire
+for fifteen minutes on the one flow Haven prescribes.
+
+`haven_report_x402_outcome` is that channel, and it is a separate tool rather
+than a mode on `haven_complete_mcp_tool` for the same reason the branches
+differ: one records an observation, the other records an assertion. It records;
+it never verifies, because verifying would mean Haven calling the merchant. Its
+authority boundary — what is checked, what deliberately is not, and what a
+hostile caller can and cannot achieve — is written up in
+[`04-x402-payment-sequence.md`](04-x402-payment-sequence.md) rather than
+restated here.
 
 The erc7710 shape is shorter by exactly the funding leg: no funding relay to
 confirm, no `haven_x402_sign_header`, no delegate hot balance and nothing to

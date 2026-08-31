@@ -69,6 +69,7 @@ export type HostedToolName =
   | 'haven_quote_x402'
   | 'haven_pay_x402_quote'
   | 'haven_resume_x402_payment'
+  | 'haven_report_x402_outcome'
   | 'haven_get_payment_status'
   | 'haven_get_resume_state'
   | 'haven_list_receipts'
@@ -319,6 +320,30 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     payment_id: z.string().optional(),
     resume_state: z.record(z.string(), z.unknown()).optional(),
   },
+  haven_report_x402_outcome: {
+    // #2292: the plain-HTTP twin of haven_complete_mcp_tool's bookkeeping —
+    // see REPORT_X402_OUTCOME_DESCRIPTION for why it is a separate tool.
+    //
+    // Note what is NOT here: no merchant_url, no tx_hash, no resource_url, no
+    // amount. Everything Haven writes down is read from the payment's own
+    // record, so the report says what the merchant ANSWERED and cannot say
+    // what it was answering about.
+    payment_id: z.string().min(1),
+    outcome: z.enum(['accepted', 'rejected'], {
+      required_error:
+        'outcome is required: "accepted" if the merchant served the resource (2xx), ' +
+        '"rejected" if it refused (non-2xx).',
+    }),
+    merchant_status: z
+      .number()
+      .int()
+      .min(100)
+      .max(599)
+      .describe('The HTTP status the merchant returned to your retry.'),
+    // Truncated server-side; kept short because it is a diagnostic snippet,
+    // not a receipt.
+    merchant_body: z.string().max(4096).optional(),
+  },
   haven_get_payment_status: {
     payment_id: z.string().min(1),
   },
@@ -509,6 +534,9 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'older signer. Over-budget is declined at prepare; nothing is ever held for later approval.',
   'After signing and haven_submit confirms funding, build the header with haven_x402_sign_header and',
   'retry the merchant YOURSELF — Haven never talks to this merchant and never holds the key.',
+  // #2292: appended, not rewritten — the line above is the whole reason a report tool has to
+  // exist, and until now the retry it prescribes had nowhere to put its result.
+  'Then report the outcome with haven_report_x402_outcome.',
   'When the merchant advertises extra.assetTransferMethod "erc7710" and the account is on the',
   'delegation rail, this returns settlement_scheme "erc7710" instead: sign, then haven_submit with',
   'settlement_scheme "erc7710" returns the payment_header directly. No funding leg on that path.',
@@ -538,7 +566,35 @@ const RESUME_X402_DESCRIPTION = [
   'haven_sign_x402 with this payment_id to mint an x402_binding — the funding leg is already spent,',
   'so this signs nothing new on-chain and must not be re-submitted — and pass that binding to',
   'haven_x402_sign_header to build the header. Retry the original resource_url with it.',
+  // #2292: same obligation as the first-attempt path — a resumed retry Haven did not make is
+  // just as unobservable as the original one.
+  'Then report the outcome with haven_report_x402_outcome.',
   'Carries no signer_compatibility of its own; an incompatible signer refuses at signing time.',
+].join(' ')
+
+// #2292: a NEW tool rather than a mode on haven_complete_mcp_tool.
+//
+// The two look adjacent — both end an x402 purchase and both write the same
+// two records — but they differ in the one place that matters: WHO called the
+// merchant. haven_complete_mcp_tool makes the call itself, so what it writes
+// is observed; this tool writes what the caller ASSERTS about a call Haven
+// deliberately did not make, because on the plain-HTTP path Haven never talks
+// to the merchant and never holds the key. Folding them together would put an
+// observed fact and an asserted one behind one name, with a flag deciding
+// which — and their arguments barely intersect (merchant_url / tool_name /
+// payment_header versus outcome / merchant_status). That is the mode flag
+// whose branches a caller has to learn, wearing the hat of deduplication.
+// #1591's description-byte ratchet is nearly spent (this addition leaves ~2
+// bytes of the 40% margin), so this description is deliberately terse: the
+// "why a separate tool" reasoning above is for maintainers and does not
+// belong in the served payload. What an agent needs is what it does, what to
+// pass, what changes, and what it cannot do.
+const REPORT_X402_OUTCOME_DESCRIPTION = [
+  'Report what a plain-HTTP x402 merchant answered to a retry YOU made; Haven never contacts it, so',
+  'nothing else can. Pass payment_id, outcome ("accepted" for a 2xx, else "rejected"),',
+  'merchant_status, optional merchant_body. A rejection surfaces stranded funds on your next',
+  'haven_get_payment_status instead of a 15-minute wait. Evidence only, your own payments only: it',
+  'moves no money.',
 ].join(' ')
 
 const SWEEP_DELEGATE_DESCRIPTION = [
@@ -575,6 +631,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_quote_x402: QUOTE_X402_DESCRIPTION,
   haven_pay_x402_quote: PAY_X402_QUOTE_DESCRIPTION,
   haven_resume_x402_payment: RESUME_X402_DESCRIPTION,
+  haven_report_x402_outcome: REPORT_X402_OUTCOME_DESCRIPTION,
   haven_get_payment_status: composeDescription(sharedDescriptions.getPaymentStatus),
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
@@ -2077,6 +2134,61 @@ export function createToolHandlers(
         return haven.getPaymentStatusWithPostPurchaseAllowance(args.payment_id)
       }),
 
+    haven_report_x402_outcome: async (input) =>
+      runTool(async () => {
+        const args = parseStrict('haven_report_x402_outcome', input)
+        const report = await haven.reportX402MerchantOutcome({
+          paymentId: args.payment_id,
+          outcome: args.outcome,
+          merchantStatus: args.merchant_status,
+          ...(args.merchant_body ? { merchantBody: args.merchant_body } : {}),
+        })
+        // Re-read rather than predict. The status this returns is the one the
+        // agent would get from haven_get_payment_status on its next call, so
+        // "reflected on the NEXT call" is demonstrated in the report's own
+        // response instead of being asserted by the description. A status read
+        // that fails must not turn a RECORDED report into a reported failure —
+        // the write already happened and is not undone by a failed read.
+        let status: Awaited<ReturnType<HavenClient['getPaymentStatus']>> | null = null
+        try {
+          status = await haven.getPaymentStatus(report.paymentId)
+        } catch {
+          status = null
+        }
+        return {
+          payment_id: report.paymentId,
+          outcome: report.outcome,
+          recorded: report.recorded,
+          // Echoed so a reconciling human can see WHICH transaction the report
+          // was anchored to — and see that the agent did not choose it.
+          tx_hash: report.txHash,
+          resource_url: report.resourceUrl,
+          ...buildAgentGuidance({
+            nextAction:
+              status?.nextAction ??
+              (report.outcome === 'rejected'
+                ? AgentPaymentNextAction.SweepStrandedFunds
+                : AgentPaymentNextAction.None),
+            ...(report.outcome === 'rejected'
+              ? { nextTool: 'mcp__haven__haven_sweep_delegate' as const, nextArguments: {} }
+              : {}),
+            safeToContinue: true,
+            reason:
+              report.outcome === 'rejected'
+                ? 'Recorded. The merchant refused the paid retry, so the funding may be stranded on ' +
+                  'the delegate wallet — recover it with haven_sweep_delegate. Do NOT pay again for ' +
+                  'the same purchase.'
+                : 'Recorded. The purchase is complete and no longer reads as undelivered; no further ' +
+                  'Haven tool is needed.',
+            summary: {
+              payment_id: report.paymentId,
+              status: status?.status ?? 'confirmed',
+            },
+          }),
+          phase: status?.phase ?? null,
+        }
+      }),
+
     haven_get_resume_state: async (input) =>
       runTool(async () => {
         const args = parse('haven_get_resume_state', input)
@@ -3043,6 +3155,46 @@ function priceSelectedOption(
 
 function parse<TName extends HostedToolName>(name: TName, input: unknown): Record<string, any> {
   return z.object(toolSchemas[name]).parse(input ?? {})
+}
+
+/**
+ * #2292: `parse` with unknown keys REFUSED instead of stripped.
+ *
+ * `parse` above is a bare `z.object`, which silently drops anything it does
+ * not recognise — the exact shape #2282 found on `mcp_transport`, where a
+ * caller's argument was edited rather than validated and an unrecognised
+ * input parsed to the same value as an absent one. Left alone here for every
+ * existing tool, because widening it is a behaviour change on twenty
+ * already-shipped surfaces and belongs to whoever decides to make it.
+ *
+ * For a REPORT it is not a style question. Every field a reporter might reach
+ * for and that this tool deliberately does not accept — `tx_hash`,
+ * `resource_url`, `amount`, `merchant_url` — is a field whose value Haven
+ * reads from the payment's own record instead. Stripping such a key would let
+ * a caller believe it had pinned the anchor when it had not, which is worse
+ * than either accepting or refusing it. So: refuse, and say which keys are
+ * unrecognised.
+ */
+function parseStrict<TName extends HostedToolName>(name: TName, input: unknown): Record<string, any> {
+  const result = z.object(toolSchemas[name]).strict().safeParse(input ?? {})
+  if (result.success) return result.data
+  const unrecognized = result.error.issues.flatMap((issue) =>
+    issue.code === 'unrecognized_keys' ? issue.keys : [],
+  )
+  if (unrecognized.length > 0) {
+    throw new HostedToolError({
+      code: 'INVALID_INPUT',
+      message:
+        `${name} does not accept ${unrecognized.map((k) => `"${k}"`).join(', ')}. ` +
+        'That is deliberate rather than an omission: the funding transaction, resource URL and ' +
+        'amount are read from the payment record so a report cannot be pointed at a different ' +
+        'payment. Send only the fields this tool declares.',
+      statusCode: 400,
+      status: 'invalid_input',
+      phase: 'not_started',
+    })
+  }
+  throw result.error
 }
 
 class HostedToolError extends Error {

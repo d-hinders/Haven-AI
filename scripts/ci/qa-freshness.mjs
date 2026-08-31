@@ -53,6 +53,13 @@
 // coincide; for the nightly cron a lagging or failed dev deploy makes the run's
 // headSha overstate what was exercised.
 //
+// Read that as one live case and one theoretical one (#2268): `dev-deployed`
+// has never fired — 0 of 156 qa-dev.yml runs, 2026-06-30 to 2026-08-31 — so the
+// cron's overstatement is in practice the only case, and the reassuring half of
+// the contrast buys nothing today. Nothing SENDS the dispatch; the receiver is
+// fine. Evidence, the operator fix and the alarm that now reports the trigger's
+// silence are in docs/operations/agent-qa.md § "Post-deploy trigger".
+//
 // ## What it still does NOT cover — by design, do not "fix" these
 //
 // The `qa-override` label, the QA_FRESHNESS_HOURS repo variable, and admin

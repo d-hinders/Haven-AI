@@ -72,6 +72,7 @@ import * as dropApprovalRequests from './070_drop_approval_requests.js'
 import * as dropAllowanceNonceWatermarks from './071_drop_allowance_nonce_watermarks.js'
 import * as paymentIntentsSettlementIndexes from './072_payment_intents_settlement_indexes.js'
 import * as dropX402ResourceTables from './073_drop_x402_resource_tables.js'
+import * as agentConnectionSetupSource from './074_agent_connection_setup_source.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -203,4 +204,5 @@ export const migrations: Migration[] = [
   dropAllowanceNonceWatermarks,
   paymentIntentsSettlementIndexes,
   dropX402ResourceTables,
+  agentConnectionSetupSource,
 ]

@@ -2540,6 +2540,8 @@ export type components = {
             allowances?: components["schemas"]["AgentConnectionAllowanceInput"][];
             /** @description Opt in to an L0 Agent Passport for the agent this setup creates. Default false. */
             issue_passport?: boolean;
+            /** @description Discovery-source slug for connect attribution (#2302) — e.g. 402-page, registry, template, skill. Sanitized server-side; a malformed value is stored as null rather than refused. */
+            source?: string;
         };
         CreateAgentConnectionSetupResponse: {
             /** Format: uuid */

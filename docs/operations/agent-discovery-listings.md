@@ -6,6 +6,8 @@ covers:
   - packages/frontend/public/llms-full.txt
   - packages/frontend/public/402/index.html
   - packages/frontend/public/402.md
+  - packages/frontend/src/middleware.ts
+  - packages/frontend/src/lib/discovery.ts
 last-verified: "2026-08-31"
 ---
 
@@ -64,7 +66,41 @@ Status legend: `listed` / `submitted` / `todo`. Re-audit **monthly** (rank + fre
 
 Adapt length per registry; never change the one-liner or invent capability claims (no "MPP support" until it ships — the track's credibility rule is that every listing is verifiably true).
 
-## Follow-ups filed
+## Measurement (#2302 — live)
 
-- Agent-crawler analytics (log GPTBot/ClaudeBot/PerplexityBot UAs + llms.txt fetches) and connect-funnel source attribution — backlog issue, Phase 0's measurement half.
-- Share-of-answer weekly probe (20 canonical questions vs major models) — Phase 1, needs the analytics issue first.
+**Agent-crawler trend.** `packages/frontend/src/middleware.ts` logs one structured line per discovery-surface fetch by a known AI-agent UA family (classifier: `src/lib/discovery.ts` — under-counts, never over-counts). Query in Vercel logs:
+
+```
+evt=agent_discovery_fetch
+```
+
+Each line carries `surface` (`/llms.txt`, `/402`, …), `agent` (family: openai, anthropic, perplexity, …) and `ts`. Trend = weekly count per surface × family. Deliberately log-based: an unauthenticated ingest endpoint on the money-path backend would be an abuse surface. Upgrade path if Vercel log retention becomes the bottleneck: a log drain, not a public write endpoint.
+
+**Attributed connects.** Tag any inbound link with `?src=<slug>` (lowercase, ≤32 chars: `402-page`, `registry`, `template`, `skill`, per-registry slugs like `smithery`). The app captures it to localStorage at first touch (root-layout capture — the query string alone does not survive the login hop) and reads it at setup creation, URL param winning over stored; the backend sanitizes and stores it on `agent_connection_setups.source` (migration 074) and echoes it into the `agent_created` funnel event's metadata. KPI queries:
+
+```sql
+-- Attributed connects (share of setups that reached connected, by source)
+SELECT COALESCE(source, 'organic') AS source, COUNT(*) AS connects
+FROM agent_connection_setups
+WHERE status <> 'awaiting_connection'
+GROUP BY 1 ORDER BY connects DESC;
+
+-- Time-to-first-payment segmented by source (via onboarding_events metadata)
+-- DISTINCT user_id: agent_created is repeatable (one row per agent), while
+-- first_payment_settled is one-time — plain COUNT(*) would double-count
+-- multi-agent users (same reason queryFunnel counts DISTINCT).
+SELECT COALESCE(ac.metadata->>'source', 'organic') AS source,
+       COUNT(DISTINCT fp.user_id) AS users_reached_first_payment,
+       COUNT(DISTINCT ac.user_id) AS users_with_agents
+FROM onboarding_events ac
+LEFT JOIN onboarding_events fp
+  ON fp.user_id = ac.user_id AND fp.event = 'first_payment_settled'
+WHERE ac.event = 'agent_created'
+GROUP BY 1;
+```
+
+The sanitization rule lives in TWO places by design — `normalizeDiscoverySource` (backend route) and `parseDiscoverySource` (frontend `lib/discovery.ts`) — keep them identical.
+
+## Follow-ups
+
+- Share-of-answer weekly probe (20 canonical questions vs major models) — Phase 1.

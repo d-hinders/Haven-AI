@@ -306,7 +306,46 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       return reply.code(400).send({ error: 'idempotency_key must be a non-empty string of at most 128 characters' })
     }
 
-    // 2. Resolve token for agent's chain
+    // 2. Resolve the execution rail — ABOVE token resolution (#2274).
+    //
+    // The gate used to sit below token/amount resolution, so a retired-rail
+    // account naming an unsupported token was handed a 400 carrying
+    // `supported: [...]` — the assets it can pay with — before anything told
+    // it the rail is gone and it can pay with none of them. Rail-INDEPENDENT
+    // residue (it asserts nothing false about any rail, which is why #2245
+    // left it and filed #2274), but it is still an answer to a question a
+    // doomed request should not get answered.
+    //
+    // What stays ABOVE this gate is the structural validation in step 1: a
+    // malformed request is not a request about a rail, and answering 410 to
+    // one would make the tombstone the route's error handler. That bound is
+    // the same one `agentAuthMiddleware`'s 401 already holds, and both are
+    // pinned in `routes/__tests__/allowance-rail-retired.test.ts`.
+    //
+    // ── Retired-session gate (#993) — the marking alone decides; see
+    // rails/execution-rail.ts for the seam and the retirement record.
+    const railState = await loadExecutionRailState(agent)
+
+    // ── Retired-session gate (#993), BEFORE the replay lookup: a replayed key
+    // must not resurrect actionable sign_data for an account the rail
+    // retirement fail-closes (review finding on #1207 — /:id/sign re-checks
+    // independently, but the create surface should never hand it out either).
+    //
+    // ── Retired-ALLOWANCE gate (#1986, epic #1440 slice 3) — same seam, same
+    // fail-closed contract, same position: BEFORE the replay lookup and
+    // before any chain read, so nothing is written and no allowance is read
+    // for an account that can no longer spend.
+    const earlyDecision = resolveExecutionRail({ ...railState, chainId: agent.chain_id })
+    if (earlyDecision.rail === 'retired_session') {
+      const retired = sessionRailRetired('account')
+      return reply.code(retired.statusCode).send(retired.body)
+    }
+    if (earlyDecision.rail === 'retired_allowance') {
+      const retired = allowanceModuleRailRetired('account')
+      return reply.code(retired.statusCode).send(retired.body)
+    }
+
+    // 3. Resolve token for agent's chain
     const chain = getChain(agent.chain_id)
     const tokenConfig = resolveToken(agent.chain_id, token)
     if (!tokenConfig) {
@@ -319,7 +358,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // Token address for AllowanceModule (native = zero address)
     const tokenAddress = tokenConfig.address ?? ZERO_ADDRESS
 
-    // 3. Convert human amount to raw units
+    // 4. Convert human amount to raw units
     let amountRaw: bigint
     try {
       amountRaw = parseTokenAmount(amount, tokenConfig.decimals)
@@ -329,34 +368,6 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
     if (amountRaw <= 0n) {
       return reply.code(400).send({ error: 'Amount must be greater than zero' })
-    }
-
-    // 4. Resolve the execution rail first — the token-configuration gate is
-    // rail-specific.
-    //
-    // ── Retired-session gate (#993) — the marking alone decides; see
-    // lib/execution-rail.ts for the seam and the retirement record.
-    const railState = await loadExecutionRailState(agent)
-
-    // ── Retired-session gate (#993), BEFORE the replay lookup: a replayed key
-    // must not resurrect actionable sign_data for an account the rail
-    // retirement fail-closes (review finding on #1207 — /:id/sign re-checks
-    // independently, but the create surface should never hand it out either).
-    //
-    // ── Retired-ALLOWANCE gate (#1986, epic #1440 slice 3) — same seam, same
-    // fail-closed contract, same position: BEFORE the replay lookup and
-    // before any chain read, so nothing is written and no allowance is read
-    // for an account that can no longer spend. The legacy execution body
-    // below is left VERBATIM for the deletion slices (#1987/#1988) to
-    // remove; this is a runtime refusal, not a deletion.
-    const earlyDecision = resolveExecutionRail({ ...railState, chainId: agent.chain_id })
-    if (earlyDecision.rail === 'retired_session') {
-      const retired = sessionRailRetired('account')
-      return reply.code(retired.statusCode).send(retired.body)
-    }
-    if (earlyDecision.rail === 'retired_allowance') {
-      const retired = allowanceModuleRailRetired('account')
-      return reply.code(retired.statusCode).send(retired.body)
     }
 
     // 4a. Idempotent replay (#1207): a retried request must return the FIRST

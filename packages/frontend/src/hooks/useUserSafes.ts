@@ -13,11 +13,12 @@ export function useUserSafes() {
   // `addSafe` lived here — a POST to /user/safes, the Safe IMPORT route. It is
   // removed rather than left dead: since #1984 (epic #1440) that route answers
   // 410, so the only thing this could still do is throw. Its one call site,
-  // the Accounts page's AddSafeModal, went with it. Unlike PasskeyEnrollFlow —
-  // a whole surface whose deletion is slice #1989 — this is a no-caller
-  // function in a file already being edited, so leaving it would be dead code
-  // the PR narrative does not account for. Rename, remove and set-default all
-  // stay: they operate on EXISTING accounts, which must keep working.
+  // the Accounts page's AddSafeModal, went with it. The onboarding surface that
+  // called the same route, `PasskeyEnrollFlow`, was deleted by #2261 — nothing
+  // in the frontend posts to a retired Safe inflow any more, and
+  // `src/__tests__/safe-inflow-frontend-residue.test.ts` now holds that line.
+  // Rename, remove and set-default all stay: they operate on EXISTING
+  // accounts, which must keep working.
 
   const renameSafe = useCallback(
     async (safeId: string, name: string): Promise<UserSafe> => {

@@ -43,6 +43,20 @@ import { decodeBase64Json } from './base64.js'
  * Internal to `HavenClient`. Exported for direct tests and composition only.
  */
 
+/** #2292: what an agent says a merchant answered to a retry Haven did not make. */
+export type X402MerchantOutcome = 'accepted' | 'rejected'
+
+/** #2292: what Haven wrote down for such a report. */
+export interface X402MerchantOutcomeReport {
+  paymentId: string
+  outcome: X402MerchantOutcome
+  /** Haven's own funding tx for this payment — the anchor, never caller-supplied. */
+  txHash: string
+  /** Haven's own recorded resource URL — likewise never caller-supplied. */
+  resourceUrl: string
+  recorded: 'reconciliation_event' | 'evidence'
+}
+
 const MERCHANT_BODY_SNIPPET_LIMIT = 1000
 
 /**
@@ -342,6 +356,123 @@ export class MerchantCompletion {
     } catch {
       // Best-effort durability: preserve the original retry failure for callers.
     }
+  }
+
+  /**
+   * #2292: record what a merchant said to a retry **Haven did not make**.
+   *
+   * On the plain-HTTP x402 path Haven tells the agent to call the merchant
+   * itself — that is the keyless design, not an oversight — so the two writes
+   * above were reachable only from `completeX402MerchantCall`, where Haven IS
+   * the caller. A manual retry had nowhere to put its outcome, which left
+   * `intentStateFor`'s merchant-rejected branch dead on the one flow Haven
+   * prescribes and made the 15-minute grace window the only route to
+   * `funded_but_unsettled`.
+   *
+   * Three properties distinguish this from `recordRetryRejected` /
+   * `reportEvidence`, and each is deliberate:
+   *
+   * 1. **It does not swallow.** Those two are bookkeeping hung off a call
+   *    whose outcome is already decided, so an exception there would turn a
+   *    completed payment into a reported failure. Here the report IS the
+   *    caller's request; silently dropping it would recreate the exact
+   *    unobservability #2292 exists to remove.
+   * 2. **The anchor is server-side.** `txHash` and `resourceUrl` come from
+   *    the payment's own Haven record, never from the reporter — so a report
+   *    cannot be pointed at a different transaction or a different resource,
+   *    and it can never CONFIRM an intent (an erc7710 intent has no Haven
+   *    tx hash and is refused here rather than completed from a supplied one,
+   *    which is #2092's verified seam and stays its own path).
+   * 3. **It is evidence, never authority.** Haven does not and must not check
+   *    the claim: verifying it would mean calling the merchant, which is the
+   *    property this whole path exists to preserve. What bounds a false
+   *    report is scope — the backend routes resolve the payment
+   *    `WHERE agent_id = $`, so a caller can only ever describe its own
+   *    payment — plus the fact that nothing financial keys off the claim:
+   *    the sweep is balance-driven, the intent's status/amount/recipient are
+   *    untouched, and a false `accepted` runs the server's own on-chain
+   *    residue check, which re-flags stranded funds independently.
+   */
+  async reportMerchantOutcome(input: {
+    paymentId: string
+    outcome: X402MerchantOutcome
+    merchantStatus: number
+    merchantBody?: string
+  }): Promise<X402MerchantOutcomeReport> {
+    if (!Number.isInteger(input.merchantStatus) || input.merchantStatus < 100 || input.merchantStatus > 599) {
+      throw new HavenApiError(
+        `merchant_status must be an integer HTTP status from 100 to 599 (received ${input.merchantStatus}).`,
+        400,
+        undefined,
+        input.paymentId,
+      )
+    }
+    // A self-contradictory report is refused rather than recorded: this is
+    // the one thing about the claim Haven CAN check without contacting the
+    // merchant, so it checks it.
+    const looksAccepted = input.merchantStatus >= 200 && input.merchantStatus < 300
+    if (looksAccepted !== (input.outcome === 'accepted')) {
+      throw new HavenApiError(
+        `outcome "${input.outcome}" contradicts merchant_status ${input.merchantStatus}: ` +
+          'report "accepted" only for a 2xx and "rejected" only for a non-2xx.',
+        400,
+        undefined,
+        input.paymentId,
+      )
+    }
+
+    const status = await this.getPaymentStatus(input.paymentId)
+    if (status.rail !== 'x402') {
+      throw new HavenPaymentStateError(
+        `Payment ${status.paymentId} is ${status.rail}, not x402 — there is no merchant retry to report.`,
+        409,
+        status,
+      )
+    }
+    if (status.status !== 'confirmed' || !status.txHash) {
+      throw new HavenPaymentStateError(
+        `Payment ${status.paymentId} has no confirmed Haven funding transaction to anchor a ` +
+          `merchant report to (status ${status.status}). ${status.message}`,
+        paymentStateStatusCode(status.status, 409),
+        status,
+      )
+    }
+    const resourceUrl = status.resourceUrl ?? status.x402?.resourceUrl ?? null
+    if (!resourceUrl) {
+      throw new HavenApiError(
+        `Payment ${status.paymentId} has no recorded resource URL, so a merchant report cannot be stored.`,
+        409,
+        status,
+        status.paymentId,
+      )
+    }
+
+    const txHash = status.txHash
+    if (input.outcome === 'rejected') {
+      await this.post('/machine-payments/reconciliation-events', {
+        paymentId: status.paymentId,
+        rail: 'x402',
+        eventType: 'merchant_retry_rejected_after_payment',
+        txHash,
+        reason: `Agent-reported: merchant returned HTTP ${input.merchantStatus} to a manual retry after Haven payment confirmation`,
+        details: {
+          resource_url: resourceUrl,
+          retry_status: input.merchantStatus,
+          retry_body: input.merchantBody?.slice(0, MERCHANT_BODY_SNIPPET_LIMIT) || null,
+          reported_by: 'agent_manual_retry',
+        },
+      })
+      return { paymentId: status.paymentId, outcome: 'rejected', txHash, resourceUrl, recorded: 'reconciliation_event' }
+    }
+
+    await this.post('/machine-payments/evidence', {
+      paymentId: status.paymentId,
+      rail: 'x402',
+      txHash,
+      resourceUrl,
+      merchantStatus: input.merchantStatus,
+    })
+    return { paymentId: status.paymentId, outcome: 'accepted', txHash, resourceUrl, recorded: 'evidence' }
   }
 
   async reportEvidence(input: {

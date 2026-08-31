@@ -518,6 +518,31 @@ export async function findReconciliationEvent(
   return result.rows[0] ?? null
 }
 
+/**
+ * #2292: does this payment already carry a CLIENT-UPGRADED evidence row —
+ * i.e. has a merchant response been recorded for it?
+ *
+ * The same predicate `FIND_INTENT_STATUS_ROW_SQL` derives as
+ * `merchant_leg_reported`, asked directly. `payment_confirmed` is the base
+ * row the backend writes at funding-confirm and is deliberately NOT a
+ * merchant response; only the two upgraded statuses count.
+ */
+export const HAS_MERCHANT_RESPONSE_EVIDENCE_SQL = `SELECT 1
+     FROM machine_payment_evidence
+     WHERE payment_intent_id = $1
+       AND agent_id = $2
+       AND proof_status IN ('merchant_response_observed', 'protocol_receipt_attached')
+     LIMIT 1`
+
+export async function hasMerchantResponseEvidence(
+  paymentId: string,
+  agentId: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(HAS_MERCHANT_RESPONSE_EVIDENCE_SQL, [paymentId, agentId])
+  return result.rows.length > 0
+}
+
 function resolveReconciliationForPaymentSql(referenceColumn: 'payment_intent_id'): string {
   return `UPDATE machine_payment_reconciliation_events
        SET status = 'resolved',

@@ -1,10 +1,12 @@
 /**
  * Top-level x402 authorize orchestration (#996, epic #980 M4). Extracted
- * verbatim from `routes/x402.ts`'s authorize handler: token resolution,
- * amount parsing, the #993 retired-rail refusal, and the delegation-vs-legacy
- * rail dispatch. `routes/x402.ts` keeps request validation, auth wiring, rate
- * limiting, and serialization; this is everything after structural
- * validation. Step numbering in comments matches the pre-#996 route.
+ * verbatim from `routes/x402.ts`'s authorize handler: the #993/#1986
+ * retired-rail refusal, token resolution, amount parsing, and the
+ * delegation-rail dispatch (#2274 put the rail refusal FIRST — see the
+ * comment on the gate). `routes/x402.ts` keeps request validation, auth
+ * wiring, rate limiting, and serialization; this is everything after
+ * structural validation. Step numbering in comments matches the pre-#996
+ * route, renumbered by #2274 to match the order the code now runs in.
  */
 import type { FastifyBaseLogger } from 'fastify'
 import type { AgentContext } from '../../middleware/agentAuth.js'
@@ -59,27 +61,29 @@ export async function authorizeX402(input: AuthorizeX402Input): Promise<X402Hand
   // `runDelegationAuthorize`, which is where #946's real contract lives.
   //
   // Above the gate there is now only rail-INDEPENDENT input validation —
-  // `routes/x402.ts`'s structural checks and the token/amount resolution
-  // below — the same position `POST /payments` puts its gate in. None of it
-  // makes a claim about any rail, which is the property that matters here.
+  // `routes/x402.ts`'s structural checks — the same position `POST /payments`
+  // puts its gate in. None of it makes a claim about any rail, which is the
+  // property that matters here. (#2245 wrote this as "the structural checks
+  // AND the token/amount resolution below"; #2274 moved that resolution below
+  // the gate on both routes, so the structural checks are all that is left.)
 
-  // 2. Resolve token from asset address (shared with the MPP core).
-  const tokenResult = resolvePaymentToken(agent.chain_id, asset)
-  if (!tokenResult.ok) {
-    return { code: 400, body: { error: tokenResult.error, supported: tokenResult.supported } }
-  }
-  // tokenAddress is the AllowanceModule token address (ZERO_ADDRESS for native).
-  const { tokenConfig, tokenAddress } = tokenResult
-
-  // 3. Parse amount (already in atomic units from x402)
-  const amountRaw = BigInt(amount)
-
-  // Human-readable amount for storage
-  const amountHuman = formatTokenValue(amountRaw.toString(), tokenConfig.decimals)
-
+  // 2. Resolve the execution rail — ABOVE token resolution (#2274).
+  //
   // #993 (review finding on #1120): the retired-rail refusal must hold on
   // EVERY money entry point, not just /payments — a session-marked account
   // previously slipped into the legacy AllowanceModule x402 flow below.
+  //
+  // #2274 moved it above token/amount resolution, on this route and on
+  // `POST /payments` together. The resolution below answers "which assets can
+  // you pay with"; for a retired-rail account the answer is none, on any
+  // asset, so handing it a `supported: [...]` list first was a premature
+  // answer to a question the 410 settles. Rail-INDEPENDENT residue left
+  // deliberately by #2245 and filed as its own issue, because fixing one
+  // route alone would have recreated exactly the asymmetry #2245 removed.
+  //
+  // What stays ABOVE the gate is `routes/x402.ts`'s structural validation —
+  // the same bound `POST /payments` keeps, and the same one
+  // `agentAuthMiddleware`'s 401 already holds.
   const railDecision = resolveExecutionRail({
     safeExecutionRail: agent.execution_rail ?? null,
     chainId: agent.chain_id,
@@ -98,6 +102,20 @@ export async function authorizeX402(input: AuthorizeX402Input): Promise<X402Hand
     const retired = allowanceModuleRailRetired('account')
     return { code: retired.statusCode, body: retired.body }
   }
+
+  // 3. Resolve token from asset address (shared with the MPP core).
+  const tokenResult = resolvePaymentToken(agent.chain_id, asset)
+  if (!tokenResult.ok) {
+    return { code: 400, body: { error: tokenResult.error, supported: tokenResult.supported } }
+  }
+  // tokenAddress is the AllowanceModule token address (ZERO_ADDRESS for native).
+  const { tokenConfig, tokenAddress } = tokenResult
+
+  // 4. Parse amount (already in atomic units from x402)
+  const amountRaw = BigInt(amount)
+
+  // Human-readable amount for storage
+  const amountHuman = formatTokenValue(amountRaw.toString(), tokenConfig.decimals)
 
   // ── Delegation rail (#830, epic #821) — DIRECT settlement ──────────────
   // The agent's budget delegation IS the settlement instrument: the delegate

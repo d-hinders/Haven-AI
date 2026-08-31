@@ -28,8 +28,20 @@
 
 - name: "money-path"
   color: "b60205"
-  description: "Payments, agent authority, allowances, or migrations — loads money.md (characterization tests + CASP)"
+  description: "Payments, agent authority, allowances, migrations — loads money.md (characterization + CASP)"
 
 - name: "promotion"
   color: "1d76db"
   description: "Tracks dev → prod promotion (used by the pending-promotion digest)"
+
+# Not a surface label: a MERGE-TIME control. `Closes #<n>` is a GitHub keyword
+# that closes the issue on merge whatever the pull-request body says elsewhere,
+# so ship-next's operator-verify mode — "the code lands, the issue stays open
+# until a human runs the live step" — was unenforceable in prose and lost the
+# first time it was used (#2268, closed by the merge of PR #2272). This label is
+# the machine-readable form of that declaration:
+# `scripts/ci/operator-verify-close-guard.mjs` fails a pull request whose closing
+# keyword targets an issue carrying it. Remove it when the operator step is done.
+- name: "operator-verify"
+  color: "d93f0b"
+  description: "Issue outlives the merge: an operator step is outstanding — use `Refs #<n>`, not `Closes`"

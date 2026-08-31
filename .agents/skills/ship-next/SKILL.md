@@ -275,13 +275,19 @@ you need the reasoning. Never edit one without the other — CI will not let you
 - `rails/execution-rail.ts` (the rail seam);
 - `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`,
   `rails/hybrid-account-config.ts`, `rails/hybrid-signer-actions.ts`,
-  `rails/hybrid-transfers.ts`, `routes/agent-delegations.ts`, or
+  `rails/hybrid-transfers.ts`, `routes/agent-delegations.ts`,
+  `routes/agent-connection-setups.ts`, or
   `routes/agent-rekey.ts` and `modules/agents/rekey-*.ts`
   (the delegation rail — including re-key, which revokes and re-issues an agent's
   on-chain spend authority. It was missing here, in the JSON and in the labeler
   from #1698 until #1892, while `infra/repositories/` already covered its storage
   layer: a PR touching the re-key repository was labelled and one touching only the
-  route was not, so the list read as though it knew about re-key);
+  route was not, so the list read as though it knew about re-key. `routes/agent-connection-setups.ts`
+  is the third member of that family, added by #2264 on the identical rationale:
+  its budget-approval route verifies the signed delegation against the setup and
+  flips setup and agent to `active`, so it is where an owner's approval becomes an
+  agent's on-chain spend authority — and since #1984 made connect the only
+  onboarding path, the retirement moved that job INTO this list's blind spot);
 - `rails/sweep.ts`, `infra/relayer*.ts`, `infra/delegate-*.ts`, `infra/outbound-*.ts`,
   `infra/chain/`, `infra/repositories/`, or `modules/accounts/mainnet-gate.ts` (funds
   recovery, gas payment, the durable outbound-tx queue and its bump worker, the relayer

@@ -312,6 +312,14 @@ export const FIXTURE_SAFE = {
   safe_address: '0x1111111111111111111111111111111111111111',
   chain_id: 84532,
   is_default: true,
+  // #2264: the rail marker belongs on the object itself. Every consumer below
+  // already spreads an explicit `account_type` over it, so this changes no
+  // capture — what it removes is the raw object being a shape the backend
+  // cannot serve: migration `041_hybrid_accounts.ts` declares the column NOT
+  // NULL, so a `user_safes` row without one does not exist (#2202). It also
+  // keeps `fixture-shape-parity.test.ts`'s strict key comparison honest now
+  // that the e2e `testSafe` carries the field.
+  account_type: 'delegator_hybrid',
   created_at: '2026-05-01T10:00:00.000Z',
 }
 // #2017 approver-badge fixture addresses. Three owners, one per branch of
@@ -1045,7 +1053,12 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
  */
 export const FIXTURE_EMPTY_FALLBACK = {
   data: [], items: [], overview: {},
-  safes: [], agents: [], transactions: [], approvals: [], contacts: [],
+  // No `approvals` key (#2264). It was the last trace of `/approvals` in this
+  // file: #1989 deleted the screen, #2055 deregistered the endpoint, and the
+  // route is deliberately unkeyed in `fixtureFor` above — so no hook reads it,
+  // and a collection key for an endpoint that answers 404 reads as coverage of
+  // a flow the product cannot reach.
+  safes: [], agents: [], transactions: [], contacts: [],
   recipients: [], delegations: [], owners: [], passkeys: [], tokens: [],
   payments: [], receipts: [], catalog: [], activity: [],
 }

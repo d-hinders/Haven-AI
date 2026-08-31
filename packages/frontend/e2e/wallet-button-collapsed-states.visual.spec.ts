@@ -137,7 +137,7 @@
  * a mutation proof: nothing reddened that the mutation could not have touched.
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+import { mockHavenApi, optDownToLegacyRail, seedAuthenticatedSession } from './fixtures/haven-api'
 import {
   SUPPORTED_CHAIN_ID_HEX,
   UNSUPPORTED_CHAIN_ID_HEX,
@@ -521,6 +521,23 @@ test.describe('WalletButton collapsed states', () => {
 
   test.beforeEach(async ({ page }) => {
     await mockHavenApi(page)
+    // #2264: this file is the sanctioned opt-DOWN, and the header above already
+    // named the dependency in as many words — "reaching the connected-EOA
+    // branch additionally requires a legacy-Safe (or empty-set) account, which
+    // is what this fixture is". It WAS what the fixture was, by OMISSION: the
+    // shared `testSafe` carried no `account_type`, so `railOf` read it as
+    // legacy. Now that the default is the live rail, a hybrid account with a
+    // hydrated signer set resolves a `delegator_passkey` even marker-less
+    // (#1969, owner decision 2026-08-26), the control announces as "Passkey",
+    // and all three captures here photograph the wrong branch. Measured, not
+    // predicted: the three failed on `toHaveAccessibleName` with
+    // `Received: "Passkey"` against the expected truncated address.
+    //
+    // So the dependency is now STATED rather than inherited. The three states
+    // this file captures are the legacy-rail renderings of `WalletButton`; the
+    // delegation rail's own signer offering is `wallet-signer-offering.spec.ts`,
+    // which opts UP for exactly the complementary reason.
+    await optDownToLegacyRail(page)
     await seedAuthenticatedSession(page)
   })
 

@@ -69,9 +69,6 @@
     "db-mock": 1,
     "positional": 2
   },
-  "packages/backend/src/rails/__tests__/allowance-nonce-coordinator.test.ts": {
-    "positional": 6
-  },
   "packages/backend/src/rails/__tests__/execution-rail.test.ts": {
     "db-mock": 1
   },
@@ -101,19 +98,15 @@
   },
   "packages/backend/src/routes/__tests__/agents-characterization.test.ts": {
     "db-mock": 1,
-    "positional": 28
+    "positional": 23
   },
   "packages/backend/src/routes/__tests__/agents.test.ts": {
     "db-mock": 1,
-    "positional": 12
+    "positional": 4
   },
   "packages/backend/src/routes/__tests__/analytics.test.ts": {
     "db-mock": 1,
     "positional": 4
-  },
-  "packages/backend/src/routes/__tests__/approvals.test.ts": {
-    "db-mock": 1,
-    "positional": 7
   },
   "packages/backend/src/routes/__tests__/auth-sql.characterization.test.ts": {
     "db-mock": 1,
@@ -129,7 +122,7 @@
   },
   "packages/backend/src/routes/__tests__/catalog.test.ts": {
     "db-mock": 1,
-    "positional": 2
+    "positional": 1
   },
   "packages/backend/src/routes/__tests__/contacts.test.ts": {
     "db-mock": 1,
@@ -199,7 +192,7 @@
     "positional": 12
   },
   "packages/backend/src/routes/__tests__/transactions.test.ts": {
-    "positional": 17
+    "positional": 11
   },
   "packages/backend/src/routes/__tests__/user-preferences.characterization.test.ts": {
     "db-mock": 1,

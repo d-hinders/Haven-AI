@@ -185,15 +185,21 @@ export async function insertDelegationIntent(
   return result.rows[0]
 }
 
-export const INSERT_LEGACY_INTENT_SQL = `INSERT INTO payment_intents (
-        agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-        to_address, amount_raw, amount_human, delegate_address,
-        allowance_nonce, sign_hash, status, expires_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending_signature',
-        NOW() + interval '10 minutes')
-      RETURNING *`
+export const INSERT_SEND_INTENT_SQL = `INSERT INTO payment_intents (
+          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+          to_address, amount_raw, amount_human, delegate_address,
+          allowance_nonce, sign_hash, send_idempotency_key, status, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending_signature',
+          NOW() + interval '10 minutes')
+        RETURNING id, status, expires_at`
 
-export interface NewLegacyIntent {
+/**
+ * The column set the send-rail insert writes. It used to be `NewLegacyIntent`,
+ * declared beside the AllowanceModule insert and borrowed here; #2264 deleted
+ * that insert (the rail retirement left it with no production caller) and the
+ * shape moved to its one real consumer rather than being deleted with it.
+ */
+export interface NewSendIntent {
   agentId: string
   userId: string
   safeAddress: string
@@ -206,37 +212,8 @@ export interface NewLegacyIntent {
   delegateAddress: string
   allowanceNonce: number
   signHash: string
+  sendIdempotencyKey: string | null
 }
-
-/** Legacy AllowanceModule transfer intent (`POST /payments`). */
-export async function insertLegacyIntent(
-  input: NewLegacyIntent,
-  db: Executor = pool,
-): Promise<PaymentIntentRow> {
-  const result = await db.query<PaymentIntentRow>(INSERT_LEGACY_INTENT_SQL, [
-    input.agentId,
-    input.userId,
-    input.safeAddress,
-    input.chainId,
-    input.tokenSymbol,
-    input.tokenAddress,
-    input.toAddress,
-    input.amountRaw,
-    input.amountHuman,
-    input.delegateAddress,
-    input.allowanceNonce,
-    input.signHash,
-  ])
-  return result.rows[0]
-}
-
-export const INSERT_SEND_INTENT_SQL = `INSERT INTO payment_intents (
-          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-          to_address, amount_raw, amount_human, delegate_address,
-          allowance_nonce, sign_hash, send_idempotency_key, status, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending_signature',
-          NOW() + interval '10 minutes')
-        RETURNING id, status, expires_at`
 
 export interface SendIntentRow {
   id: string
@@ -251,7 +228,7 @@ export interface SendIntentRow {
  * index, so the insert and its conflict semantics travel together here.
  */
 export async function insertSendIntent(
-  input: NewLegacyIntent & { sendIdempotencyKey: string | null },
+  input: NewSendIntent,
   db: Executor = pool,
 ): Promise<SendIntentRow> {
   const result = await db.query<SendIntentRow>(INSERT_SEND_INTENT_SQL, [

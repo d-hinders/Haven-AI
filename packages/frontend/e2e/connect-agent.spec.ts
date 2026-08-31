@@ -56,8 +56,17 @@ test.describe('Connect agent setup acceptance', () => {
     await expect(dialog.getByText(/Local connection verified/i)).toBeVisible()
     await expect(dialog.getByText('Verification details')).toHaveCount(0)
     await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible()
-    await expect(dialog.getByText('Approval unavailable')).toBeVisible()
-    await expect(dialog.getByText(/Connect a wallet or use a passkey/i)).toBeVisible()
+    // #2264: the DELEGATION-rail step 4 (`DelegationApprovalStep`), which this
+    // spec had never reached. The shared fixture carried no `account_type`, so
+    // `connectView.kind` resolved to `legacy_approval` and the two assertions
+    // that stood here — `LocalConnectionReady`'s "Approval unavailable"
+    // callout and its "Connect a wallet or use a passkey" block reason — were
+    // pinning the step-4 screen of a rail that answers HTTP 410 in production
+    // (#1986). The live rail's step 4 is a signed budget grant: the primary
+    // action NAMES what it grants (#1684), which is the assertion worth having
+    // on the screen that confers spend authority.
+    await expect(dialog.getByRole('button', { name: 'Approve budget' })).toBeVisible()
+    await expect(dialog.getByText('Approval unavailable')).toHaveCount(0)
     await expect(dialog).not.toContainText(/delegate_key|private_key|privateKey|HAVEN_DELEGATE_KEY/)
 
     // Measures `/agents` BEHIND the dialog, not the dialog. A fixed-position

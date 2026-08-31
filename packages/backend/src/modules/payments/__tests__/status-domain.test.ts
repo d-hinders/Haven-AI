@@ -134,17 +134,19 @@ describeDb('#2115 — the payment-status response cannot promise an approval', (
     expect([...seen].sort()).toEqual([...REACHABLE_STATUSES].sort())
   })
 
+  // #2264 dropped `INSERT_LEGACY_INTENT_SQL` from this list with the statement
+  // itself: the AllowanceModule rail is retired (#1440) and its insert had no
+  // production caller left, so it was writing `pending_signature` for a rail
+  // that answers 410 before any intent row is reached.
   it('the four INSERTs all write pending_signature and name no retired status', async () => {
     const {
       INSERT_DELEGATION_INTENT_SQL,
-      INSERT_LEGACY_INTENT_SQL,
       INSERT_SEND_INTENT_SQL,
       INSERT_MACHINE_INTENT_X402_KEY_SQL,
       INSERT_MACHINE_INTENT_MACHINE_KEY_SQL,
     } = await import('../../../infra/repositories/payment-intents.js')
     for (const sql of [
       INSERT_DELEGATION_INTENT_SQL,
-      INSERT_LEGACY_INTENT_SQL,
       INSERT_SEND_INTENT_SQL,
       INSERT_MACHINE_INTENT_X402_KEY_SQL,
       INSERT_MACHINE_INTENT_MACHINE_KEY_SQL,

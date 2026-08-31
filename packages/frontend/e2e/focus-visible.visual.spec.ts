@@ -59,8 +59,17 @@
  * `isRevoked` and `isArchived` are mutually exclusive, and `canUseWalletActions`
  * / `isDelegationAgent` split the operational branch further (the design pass on
  * #1831 made the same correction to that PR's "eight rings in one row"
- * framing). Against the shared `mockHavenApi` fixture's one active legacy agent
- * exactly three render, and they include **Revoke**, the destructive one.
+ * framing). Against the shared `mockHavenApi` fixture's one active agent
+ * exactly three render.
+ *
+ * #2264 changed WHICH three, and that is the point rather than an aside. The
+ * shared fixture carried no `account_type`, so `railOf` read it as a legacy
+ * Safe and the row was Edit · Pause · **Revoke** — the AllowanceModule teardown,
+ * on a rail that answers HTTP 410 in production (#1986). The default is now the
+ * live delegation rail, where the row is Edit · Pause · **Remove** (#1402).
+ * `Revoke` keeps its capture, seeded with an explicit legacy opt-down below,
+ * because it is still what a legacy account renders; what it no longer is, is
+ * what an ordinary user sees.
  *
  * So this was never a scoping choice: reaching the other five is FIXTURE work,
  * not capture work. #1873 does it, and the eleven are now eleven.
@@ -732,10 +741,22 @@ test.describe('driven focus-state visual regression', () => {
   // `/design-system`, which is why the blocking visual gate has never seen it
   // in any state, resting included. #1831 said so; this closes the focus half
   // only, and the resting half is filed separately.
+  //
+  // #2264: TWO here, not three. `Revoke` is a legacy-rail control —
+  // `canUseWalletActions && !isDelegationAgent` (`AgentCard.tsx`), because a
+  // Safe revoke is an AllowanceModule teardown and on a delegation agent the
+  // whole shutdown is Remove (#1402). It rendered against the shared fixture
+  // only because that fixture had no `account_type` and `railOf` read it as
+  // legacy; with the live-rail default it does not exist, and this loop failed
+  // on `toHaveCount(1)`. It moves to `seededControls` below with an explicit
+  // opt-DOWN, which is the honest place for a capture of a retired-rail screen.
+  //
+  // `Edit` and `Pause` stay: both are rail-independent. Their BASELINES move,
+  // because what is captured is the ROW — and the third control beside them is
+  // now `Remove`, which is what a live-rail user sees.
   const rowControls = [
     { slug: 'edit', label: 'Edit', tone: 'brand' },
     { slug: 'pause', label: 'Pause', tone: 'brand' },
-    { slug: 'revoke', label: 'Revoke', tone: 'danger' },
   ] as const
 
   for (const control of rowControls) {
@@ -788,7 +809,15 @@ test.describe('driven focus-state visual regression', () => {
         safe_name: 'Treasury',
       }),
       control: 'Open details for Ledger agent',
-      rowControls: ['Open details for Ledger agent', 'Pause Ledger agent'],
+      // #2264: `Remove` joins the row. `canUseWalletActions: false` hides Edit
+      // and Revoke, but Remove is gated on `isDelegationAgent` alone — so on
+      // the live rail this branch is three controls, not two. It read as two
+      // only because the shared fixture was legacy by omission.
+      rowControls: [
+        'Open details for Ledger agent',
+        'Pause Ledger agent',
+        'Remove Ledger agent',
+      ],
       tone: 'brand',
       label: 'Details',
     },
@@ -796,7 +825,8 @@ test.describe('driven focus-state visual regression', () => {
       slug: 'resume',
       agent: agentState({ id: 'agent-paused', name: 'Paused agent', status: 'paused' }),
       control: 'Resume Paused agent',
-      rowControls: ['Edit Paused agent', 'Resume Paused agent', 'Revoke Paused agent'],
+      // #2264: Remove, not Revoke — same rail branch as the row above.
+      rowControls: ['Edit Paused agent', 'Resume Paused agent', 'Remove Paused agent'],
       tone: 'brand',
       label: 'Resume from pause',
     },
@@ -806,14 +836,18 @@ test.describe('driven focus-state visual regression', () => {
       // is hidden and Remove IS the shutdown (#1402). That substitution is
       // visible in `rowControls` and is the branch's signature.
       //
-      // NOTE for anyone copying this seed: it inherits `testAgent`'s LEGACY
-      // `allowances` rows (Safe-module `token_address`/`allowance_amount`/
-      // `reset_period_min`), which a real `delegator_hybrid` agent would not
-      // carry — on that rail `allowances` is a derived view of
-      // `agent_delegations` (CLAUDE.md § Agent Model). It is correct HERE
-      // because `isDelegationAgent` gates only the action row (AgentCard.tsx),
-      // and the budget section is outside the captured region. Reuse this as a
-      // template for a capture that reads the budget section and it is wrong.
+      // #2264 retired the caveat that used to stand here. This seed inherited
+      // `testAgent`'s AllowanceModule-shaped `allowances` (atomic
+      // `allowance_amount`), which a real `delegator_hybrid` agent cannot
+      // carry; the shared fixture now holds the DERIVED delegation projection
+      // (`rails/delegation-budget-view.ts` — human-formatted amount, period in
+      // minutes), so the inherited row is the right shape and the template is
+      // safe to copy for a capture that reads the budget section too.
+      //
+      // The `account_type` override is now a no-op against the live-rail
+      // default and is KEPT deliberately: this capture's subject is the
+      // delegation branch, and a seed that states its own branch does not
+      // depend on a default staying put.
       agent: agentState({
         id: 'agent-delegation',
         name: 'Delegation agent',
@@ -823,6 +857,28 @@ test.describe('driven focus-state visual regression', () => {
       rowControls: ['Edit Delegation agent', 'Pause Delegation agent', 'Remove Delegation agent'],
       tone: 'danger',
       label: 'Remove (delegation)',
+    },
+    {
+      slug: 'revoke',
+      // #2264: the opt-DOWN. `Revoke` is the LEGACY rail's shutdown control and
+      // renders for no other kind of account, so its capture has to name the
+      // rail it belongs to instead of inheriting one. Same id and name as the
+      // shared agent, so the only difference from the pre-#2264 baseline is the
+      // rail marker the fixture used to omit.
+      //
+      // `allowances: []` travels with it: `GET /agents` returns the derived
+      // projection for a `delegator_hybrid` agent and `[]` for every other, and
+      // the `agent_allowances` read surface is retired (#1440/#2020), so a
+      // legacy agent carrying budget rows is emitted by nothing (#2224).
+      agent: agentState({ account_type: 'safe', allowances: [] }),
+      control: `Revoke ${testAgent.name}`,
+      rowControls: [
+        `Edit ${testAgent.name}`,
+        `Pause ${testAgent.name}`,
+        `Revoke ${testAgent.name}`,
+      ],
+      tone: 'danger',
+      label: 'Revoke (legacy)',
     },
     {
       slug: 'remove-revoked',

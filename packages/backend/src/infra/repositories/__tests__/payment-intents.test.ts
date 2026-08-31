@@ -26,7 +26,6 @@ import {
   findSendIntentByIdempotencyKey,
   getIntentStatus,
   insertDelegationIntent,
-  insertLegacyIntent,
   insertMachineIntent,
   insertSendIntent,
   inTransaction,
@@ -48,7 +47,22 @@ async function seedAgent(): Promise<{ agentId: string; userId: string }> {
   return { agentId: agent.rows[0].id, userId: user.rows[0].id }
 }
 
-function legacyInput(agentId: string, userId: string, overrides: Record<string, unknown> = {}) {
+/**
+ * A direct delegation-rail transfer intent — the shape `POST /payments` writes.
+ *
+ * This helper used to build the AllowanceModule-rail row, so every lifecycle
+ * test below seeded a retired-rail intent. #2264 deleted that insert with the
+ * rail (#1440 — the statement had no production caller and its
+ * `sign_hash`/raw-ECDSA sibling was already gone), and the tests move to the
+ * one insert `POST /payments` can actually reach. Nothing about the subject
+ * changes: the claim/release/confirm CAS guards are columns of
+ * `payment_intents`, not of a rail, and the delegation insert writes the same
+ * `pending_signature` + 10-minute expiry the retired one did — plus the four
+ * delegation columns the live rail fills. The `/send` cases below reuse it and
+ * override `sendIdempotencyKey`; `insertSendIntent` reads only the columns it
+ * names, so the delegation extras are inert there.
+ */
+function delegationInput(agentId: string, userId: string, overrides: Record<string, unknown> = {}) {
   return {
     agentId,
     userId,
@@ -62,6 +76,11 @@ function legacyInput(agentId: string, userId: string, overrides: Record<string, 
     delegateAddress: '0x00000000000000000000000000000000000000d1',
     allowanceNonce: 1,
     signHash: `0x${String(++seq).padStart(64, 'a')}`.slice(0, 66),
+    executionRail: 'delegation' as const,
+    delegationHash: `0x${String(++seq).padStart(64, 'c')}`.slice(0, 66),
+    budgetDelegationHash: `0x${String(++seq).padStart(64, 'c')}`.slice(0, 66),
+    preparedUserOp: '{"op":1}',
+    sendIdempotencyKey: null,
     ...overrides,
   }
 }
@@ -116,7 +135,7 @@ describeDb('payment-intents repository (#1223)', () => {
 
   it('EXACTLY ONE of N concurrent claims wins — the double-spend guard', async () => {
     const { agentId, userId } = await seedAgent()
-    const intent = await insertLegacyIntent(legacyInput(agentId, userId))
+    const intent = await insertDelegationIntent(delegationInput(agentId, userId))
 
     const outcomes = await Promise.all(
       Array.from({ length: 8 }, (_, i) =>
@@ -134,7 +153,7 @@ describeDb('payment-intents repository (#1223)', () => {
 
   it('a claim refuses an expired or already-progressed row', async () => {
     const { agentId, userId } = await seedAgent()
-    const stale = await insertLegacyIntent(legacyInput(agentId, userId))
+    const stale = await insertDelegationIntent(delegationInput(agentId, userId))
     await setExpired(stale.id)
     expect(await claimIntentForSubmission('0xsig', stale.id, agentId)).toBe(false)
 
@@ -146,7 +165,7 @@ describeDb('payment-intents repository (#1223)', () => {
     expect(await expireOverdueIntent(stale.id, agentId)).toBe(false) // no longer pending
 
     const other = await seedAgent()
-    const fresh = await insertLegacyIntent(legacyInput(agentId, userId))
+    const fresh = await insertDelegationIntent(delegationInput(agentId, userId))
     expect(await claimIntentForSubmission('0xsig', fresh.id, other.agentId)).toBe(false)
   })
 
@@ -154,7 +173,7 @@ describeDb('payment-intents repository (#1223)', () => {
 
   it('confirm requires a CLAIMED row, and a second confirm is refused', async () => {
     const { agentId, userId } = await seedAgent()
-    const intent = await insertLegacyIntent(legacyInput(agentId, userId))
+    const intent = await insertDelegationIntent(delegationInput(agentId, userId))
 
     // Confirm before claim: still pending_signature, must refuse.
     expect(
@@ -177,7 +196,7 @@ describeDb('payment-intents repository (#1223)', () => {
 
   it('releaseSubmittedClaim frees an unbroadcast claim — and can NEVER un-confirm a broadcast one (#717/#1119)', async () => {
     const { agentId, userId } = await seedAgent()
-    const intent = await insertLegacyIntent(legacyInput(agentId, userId))
+    const intent = await insertDelegationIntent(delegationInput(agentId, userId))
     await claimIntentForSubmission('0xsig', intent.id, agentId)
 
     // Relayer-budget refusal happens before any broadcast: release must
@@ -195,7 +214,7 @@ describeDb('payment-intents repository (#1223)', () => {
 
   it('failSubmittedIntent records the failure only on a claimed row', async () => {
     const { agentId, userId } = await seedAgent()
-    const intent = await insertLegacyIntent(legacyInput(agentId, userId))
+    const intent = await insertDelegationIntent(delegationInput(agentId, userId))
     await failSubmittedIntent('too early', intent.id, agentId)
     expect(await getIntentStatus(intent.id, agentId)).toBe('pending_signature')
 
@@ -210,8 +229,8 @@ describeDb('payment-intents repository (#1223)', () => {
 
   it('overdue expiry obeys the database clock on both sides of the boundary', async () => {
     const { agentId, userId } = await seedAgent()
-    const fresh = await insertLegacyIntent(legacyInput(agentId, userId))
-    const overdue = await insertLegacyIntent(legacyInput(agentId, userId))
+    const fresh = await insertDelegationIntent(delegationInput(agentId, userId))
+    const overdue = await insertDelegationIntent(delegationInput(agentId, userId))
     await setExpired(overdue.id)
 
     expect(await expireOverdueIntent(fresh.id, agentId)).toBe(false)
@@ -220,11 +239,11 @@ describeDb('payment-intents repository (#1223)', () => {
 
     // The per-agent sweep: only overdue+pending rows flip; confirmed rows
     // with a past expiry are untouched.
-    const confirmed = await insertLegacyIntent(legacyInput(agentId, userId))
+    const confirmed = await insertDelegationIntent(delegationInput(agentId, userId))
     await claimIntentForSubmission('0xsig', confirmed.id, agentId)
     await confirmSubmittedIntent({ txHash: `0x${'3'.repeat(64)}`, intentId: confirmed.id, usdValue: null, eurValue: null, agentId })
     await setExpired(confirmed.id)
-    const sweepTarget = await insertLegacyIntent(legacyInput(agentId, userId))
+    const sweepTarget = await insertDelegationIntent(delegationInput(agentId, userId))
     await setExpired(sweepTarget.id)
 
     await expireOverdueIntentsForAgent(agentId)
@@ -235,7 +254,7 @@ describeDb('payment-intents repository (#1223)', () => {
 
   it('expirePendingIntentReturningStatus reports the flip, or null when there was nothing to flip', async () => {
     const { agentId, userId } = await seedAgent()
-    const intent = await insertLegacyIntent(legacyInput(agentId, userId))
+    const intent = await insertDelegationIntent(delegationInput(agentId, userId))
     expect(await expirePendingIntentReturningStatus(intent.id, agentId)).toBe('expired')
     expect(await expirePendingIntentReturningStatus(intent.id, agentId)).toBeNull()
   })
@@ -244,11 +263,11 @@ describeDb('payment-intents repository (#1223)', () => {
 
   it('a duplicate ACTIVE send key throws 23505; failure frees the key (migration 020)', async () => {
     const { agentId, userId } = await seedAgent()
-    const first = await insertSendIntent({ ...legacyInput(agentId, userId), sendIdempotencyKey: 'send-1' })
+    const first = await insertSendIntent(delegationInput(agentId, userId, { sendIdempotencyKey: 'send-1' }))
     expect(first.status).toBe('pending_signature')
 
     await expect(
-      insertSendIntent({ ...legacyInput(agentId, userId), sendIdempotencyKey: 'send-1' }),
+      insertSendIntent(delegationInput(agentId, userId, { sendIdempotencyKey: 'send-1' })),
     ).rejects.toMatchObject({ code: '23505' })
 
     // The replay lookup finds the active winner…
@@ -257,7 +276,7 @@ describeDb('payment-intents repository (#1223)', () => {
     // …and a failed row releases the key for a fresh attempt.
     await db.query(`UPDATE payment_intents SET status = 'failed' WHERE id = $1`, [first.id])
     await expect(
-      insertSendIntent({ ...legacyInput(agentId, userId), sendIdempotencyKey: 'send-1' }),
+      insertSendIntent(delegationInput(agentId, userId, { sendIdempotencyKey: 'send-1' })),
     ).resolves.toBeTruthy()
     expect(await findSendIntentByIdempotencyKey(agentId, 'send-1')).not.toBeNull()
   })
@@ -332,7 +351,7 @@ describeDb('payment-intents repository (#1223)', () => {
     const { agentId, userId } = await seedAgent()
     await expect(
       inTransaction(async (tx) => {
-        await insertLegacyIntent(legacyInput(agentId, userId), tx)
+        await insertDelegationIntent(delegationInput(agentId, userId), tx)
         throw new Error('abort after insert')
       }),
     ).rejects.toThrow('abort after insert')
@@ -345,16 +364,15 @@ describeDb('payment-intents repository (#1223)', () => {
   it('listIntentsForAgent is newest-first and tenant-scoped; findIntentForAgent refuses the wrong agent', async () => {
     const { agentId, userId } = await seedAgent()
     const other = await seedAgent()
-    const a = await insertLegacyIntent(legacyInput(agentId, userId))
+    const a = await insertDelegationIntent(delegationInput(agentId, userId))
     await db.query(`UPDATE payment_intents SET created_at = NOW() - interval '1 hour' WHERE id = $1`, [a.id])
-    const b = await insertDelegationIntent({
-      ...legacyInput(agentId, userId),
-      executionRail: 'delegation',
-      delegationHash: `0x${'d'.repeat(64)}`,
-      budgetDelegationHash: `0x${'d'.repeat(64)}`,
-      preparedUserOp: '{"op":1}',
-    } as Parameters<typeof insertDelegationIntent>[0])
-    await insertLegacyIntent(legacyInput(other.agentId, other.userId))
+    const b = await insertDelegationIntent(
+      delegationInput(agentId, userId, {
+        delegationHash: `0x${'d'.repeat(64)}`,
+        budgetDelegationHash: `0x${'d'.repeat(64)}`,
+      }) as Parameters<typeof insertDelegationIntent>[0],
+    )
+    await insertDelegationIntent(delegationInput(other.agentId, other.userId))
 
     const list = await listIntentsForAgent(agentId)
     expect(list.map((r) => r.id)).toEqual([b.id, a.id])

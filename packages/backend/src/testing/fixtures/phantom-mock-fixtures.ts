@@ -67,3 +67,58 @@ vi.mock('../../modules/index.js', () => ({
 export const UNREADABLE_FACTORY = `
 vi.mock('../../rails/allowance-module.js', () => somethingImportedFromElsewhere)
 `
+
+/**
+ * The `async (importOriginal) => ({ ...(await importOriginal()), key })` shape.
+ *
+ * Added after review of #2307 found the first parser insisted on a literal
+ * empty `()` parameter list and therefore never saw this form at all — 26
+ * factories unscanned, three of them on `rails/allowance-module.js`, and a
+ * phantom key injected into one went undetected. The explicit overrides are
+ * what must be checked: the spread carries the real exports through, so an
+ * override naming a non-export is still a function nothing can call.
+ */
+export const IMPORT_ORIGINAL_WITH_PHANTOM = `
+vi.mock('../../rails/allowance-module.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../rails/allowance-module.js')>()),
+  getTokenBalance: vi.fn(),
+  executeAllowanceTransfer: vi.fn(),
+}))
+`
+
+/** Same shape, all overrides real. Must NOT be flagged. */
+export const IMPORT_ORIGINAL_CLEAN = `
+vi.mock('../../rails/allowance-module.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  getProvider: vi.fn(),
+}))
+`
+
+/**
+ * The `importActual` + `return { ...actual, override }` shape — 31 occurrences
+ * in the backend tree. The first parser skipped statement bodies silently; the
+ * second reported all 31 as unreadable, which would have been a red gate over a
+ * form that is perfectly readable. The returned literal's explicit keys are the
+ * overrides and must be checked like any other.
+ */
+export const IMPORT_ACTUAL_RETURN_WITH_PHANTOM = `
+vi.mock('../../rails/allowance-module.js', async () => {
+  const actual = await vi.importActual<typeof import('../../rails/allowance-module.js')>(
+    '../../rails/allowance-module.js',
+  )
+  return { ...actual, getProvider: vi.fn(), executeAllowanceTransfer: vi.fn() }
+})
+`
+
+/** A statement body whose return value is genuinely unreadable: REPORT, never skip. */
+export const UNREADABLE_STATEMENT_BODY = `
+vi.mock('../../rails/allowance-module.js', () => {
+  const built = Object.fromEntries(names.map((n) => [n, vi.fn()]))
+  return built.inner
+})
+`
+
+/** `vi.mock(spec)` with no factory — an auto-mock. Nothing to check, but counted. */
+export const AUTO_MOCK = `
+vi.mock('../../rails/allowance-module.js')
+`

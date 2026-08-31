@@ -842,6 +842,16 @@ describe('#1986/#1987: the spend machinery is GONE, not merely refused', () => {
    * names `recoverSigner` inside an endpoint DESCRIPTION — prose telling
    * integrators that the scheme is gone. Naming a deleted function in order to
    * say it is deleted must not be what trips a guard against it coming back.
+   *
+   * **The cost of stripping strings, stated rather than left implicit** (review
+   * finding, #2307): a reintroduction routed through a string would evade this
+   * — `obj['execute' + 'AllowanceTransfer']`, a computed member access, a
+   * dynamic import by name. That is accepted deliberately. The threat model
+   * here is ACCIDENTAL regrowth by ordinary editing, which is what actually
+   * happened three times (#1987 → #2048 → #2044/#1993); a contributor
+   * assembling a deleted money-path function name out of string fragments to
+   * get past a test is not a case a source scan can win, and the controls for
+   * it are code review and `.github/CODEOWNERS`, not this assertion.
    */
   function executableCode(src: string): string {
     let out = ''

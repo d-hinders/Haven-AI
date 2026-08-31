@@ -45,6 +45,14 @@ export interface ScanResult {
   unparseable: UnparseableTarget[]
   /** Factories actually checked — a scan that checks nothing must not read as a pass. */
   checkedFactories: number
+  /**
+   * `vi.mock(spec)` with no factory at all (auto-mock). Nothing to check, but
+   * counted so the guard test can pin checked + unparseable + autoMocked
+   * against the raw number of relative-spec `vi.mock` calls. Without that pin a
+   * parser change can quietly stop seeing a whole shape — which is exactly what
+   * review found on #2307's first draft.
+   */
+  autoMocked: number
   scannedTestFiles: number
 }
 
@@ -240,35 +248,114 @@ export function moduleExportNames(
   return { names }
 }
 
-/** Extract every `vi.mock(spec, () => <object|identifier>)` factory in a test file. */
-function factoriesIn(src: string): { spec: string; keys: string[] | null; ident?: string }[] {
-  const out: { spec: string; keys: string[] | null; ident?: string }[] = []
-  const re = /vi\.mock\(\s*'([^']+)'\s*,\s*(?:async\s*)?\(\)\s*=>\s*/g
+/**
+ * Extract every `vi.mock(...)` call in a test file and work out its factory keys.
+ *
+ * **Every `vi.mock` with a relative specifier is accounted for**, and that is a
+ * correctness requirement rather than thoroughness: a call this function does
+ * not recognise must come back as `unparseable`, never be dropped. Review of
+ * #2307 found the first draft silently ignored `vi.mock(spec, async
+ * (importOriginal) => ({ ...(await importOriginal()), key: vi.fn() }))` — it
+ * insisted on a literal empty `()` parameter list — which left 26 factories
+ * unscanned, three of them on `rails/allowance-module.js` itself, and a phantom
+ * key injected into one of them was not detected. A guard with a silent blind
+ * spot over the exact module the defect keeps regrowing on is the failure this
+ * file exists to prevent, so the parser now walks the call rather than
+ * pattern-matching one shape of it.
+ */
+function factoriesIn(
+  src: string,
+): { spec: string; keys: string[] | null; ident?: string; reason?: string; autoMock?: boolean }[] {
+  const out: { spec: string; keys: string[] | null; ident?: string; reason?: string; autoMock?: boolean }[] = []
+  const call = /vi\.mock\(/g
   let m: RegExpExecArray | null
-  while ((m = re.exec(src))) {
-    const spec = m[1]
-    const rest = src.slice(re.lastIndex)
-    if (rest.startsWith('(')) {
-      // () => ({ ... })
-      const parenEnd = matchDelimiter(src, re.lastIndex)
-      const inner = src.slice(re.lastIndex + 1, parenEnd).trim()
+  while ((m = call.exec(src))) {
+    const openParen = m.index + m[0].length - 1
+    const closeParen = matchDelimiter(src, openParen)
+    if (closeParen === -1) continue
+
+    // First argument must be a single-quoted specifier. The comma is OPTIONAL:
+    // `vi.mock(spec)` with no factory is an auto-mock, and requiring the comma
+    // made the parser miss it entirely — the same silent-drop class review
+    // found for parameterised factories.
+    const specMatch = /^\s*'([^']+)'\s*(?:,|(?=\)))/.exec(src.slice(openParen + 1, closeParen + 1))
+    if (!specMatch) continue // `vi.mock(SomeConst)` / no string spec — nothing to resolve
+    const spec = specMatch[1]
+
+    let i = openParen + 1 + specMatch[0].length
+    const rest = src.slice(i, closeParen)
+    if (!rest.trim()) {
+      out.push({ spec, keys: null, autoMock: true })
+      continue
+    }
+
+    // Skip `async`, then require an arrow function with ANY parameter list.
+    const arrow = /^\s*(?:async\s+)?\(([^)]*)\)\s*=>\s*/.exec(rest)
+    if (!arrow) {
+      out.push({ spec, keys: null, reason: 'second argument is not an arrow-function factory' })
+      continue
+    }
+    let bodyStart = i + arrow[0].length
+    while (bodyStart < closeParen && /\s/.test(src[bodyStart])) bodyStart++
+
+    const c = src[bodyStart]
+    if (c === '(') {
+      // `=> ({ ... })` — an object-literal expression body.
+      const parenEnd = matchDelimiter(src, bodyStart)
+      const inner = src.slice(bodyStart + 1, parenEnd).trim()
       if (inner.startsWith('{')) {
-        const braceStart = src.indexOf('{', re.lastIndex + 1)
+        const braceStart = src.indexOf('{', bodyStart + 1)
         const braceEnd = matchDelimiter(src, braceStart)
+        // A `...(await importOriginal())` spread carries the real module's
+        // exports through; `objectLiteralKeys` skips spreads and returns only
+        // the EXPLICIT overrides, which is exactly the set to check — an
+        // override naming a non-export is still a function nothing can call.
         out.push({ spec, keys: objectLiteralKeys(src.slice(braceStart + 1, braceEnd)) })
       } else {
-        const identMatch = inner.match(/^([A-Za-z_$][\w$]*)$/)
-        out.push({ spec, keys: null, ident: identMatch ? identMatch[1] : undefined })
+        const identMatch = /^([A-Za-z_$][\w$]*)$/.exec(inner)
+        out.push(
+          identMatch
+            ? { spec, keys: null, ident: identMatch[1] }
+            : { spec, keys: null, reason: 'factory returns a parenthesised expression that is not an object literal' },
+        )
       }
       continue
     }
-    if (rest.startsWith('{')) {
-      // () => { ... return { ... } } — a body, not an expression. Not the
-      // wholesale-replacement shape this guard is about; skipped by design.
+    if (c === '{') {
+      // `=> { const actual = await vi.importActual(...); return { ...actual, k } }`
+      // — a statement body. The first draft `continue`d past this shape
+      // (silent skip); the second reported all 31 occurrences as unreadable,
+      // which would have been a red gate over a form that is in fact perfectly
+      // readable. Read the RETURNED object literal: its explicit keys are the
+      // overrides, exactly as in the arrow-expression case.
+      const blockEnd = matchDelimiter(src, bodyStart)
+      const body = src.slice(bodyStart + 1, blockEnd)
+      const ret = /\breturn\s*(\{)/.exec(body)
+      if (ret) {
+        const braceStart = ret.index + ret[0].length - 1
+        const braceEnd = matchDelimiter(body, braceStart)
+        if (braceEnd !== -1) {
+          out.push({ spec, keys: objectLiteralKeys(body.slice(braceStart + 1, braceEnd)) })
+          continue
+        }
+      }
+      const retIdent = /\breturn\s+([A-Za-z_$][\w$]*)\s*;?\s*$/.exec(body.trimEnd())
+      out.push({
+        spec,
+        keys: null,
+        ident: retIdent ? retIdent[1] : undefined,
+        reason: retIdent
+          ? undefined
+          : 'factory has a statement body whose returned object literal could not be located',
+      })
       continue
     }
-    const identMatch = rest.match(/^([A-Za-z_$][\w$]*)\s*\)/)
-    out.push({ spec, keys: null, ident: identMatch ? identMatch[1] : undefined })
+    const identMatch = /^([A-Za-z_$][\w$]*)\s*(?:,|\)|$)/.exec(src.slice(bodyStart, closeParen + 1))
+    out.push(
+      identMatch
+        ? { spec, keys: null, ident: identMatch[1] }
+        : { spec, keys: null, reason: 'factory return value is not an object literal or a plain identifier' },
+    )
   }
   return out
 }
@@ -325,6 +412,7 @@ export function scanForPhantomMockKeys(root: string): ScanResult {
   const phantoms: PhantomKey[] = []
   const unparseable: UnparseableTarget[] = []
   let checkedFactories = 0
+  let autoMocked = 0
   const testFiles = listTestFiles(root)
 
   for (const testFile of testFiles) {
@@ -332,6 +420,10 @@ export function scanForPhantomMockKeys(root: string): ScanResult {
     for (const factory of factoriesIn(src)) {
       const resolved = resolveSpec(testFile, factory.spec)
       if (!resolved) continue // bare specifier — a real dependency, not our source tree
+      if (factory.autoMock) {
+        autoMocked++
+        continue
+      }
 
       let keys = factory.keys
       if (!keys && factory.ident) keys = identifierObjectKeys(src, factory.ident)
@@ -339,9 +431,11 @@ export function scanForPhantomMockKeys(root: string): ScanResult {
         unparseable.push({
           testFile,
           moduleSpec: factory.spec,
-          reason: factory.ident
-            ? `factory returns identifier \`${factory.ident}\`, whose object literal could not be located`
-            : 'factory return value is not an object literal or a plain identifier',
+          reason:
+            factory.reason ??
+            (factory.ident
+              ? `factory returns identifier \`${factory.ident}\`, whose object literal could not be located`
+              : 'factory return value is not an object literal or a plain identifier'),
         })
         continue
       }
@@ -371,5 +465,5 @@ export function scanForPhantomMockKeys(root: string): ScanResult {
     }
   }
 
-  return { phantoms, unparseable, checkedFactories, scannedTestFiles: testFiles.length }
+  return { phantoms, unparseable, checkedFactories, autoMocked, scannedTestFiles: testFiles.length }
 }

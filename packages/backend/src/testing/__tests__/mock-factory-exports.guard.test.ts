@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
+  listTestFiles,
   moduleExportNames,
   scanForPhantomMockKeys,
 } from '../mock-factory-exports.js'
@@ -14,9 +15,14 @@ import {
   BOUND_HOISTED_WITH_PHANTOM,
   CLEAN_FACTORY,
   HOISTED_IDENTIFIER_WITH_PHANTOMS,
+  IMPORT_ORIGINAL_CLEAN,
+  IMPORT_ORIGINAL_WITH_PHANTOM,
   INLINE_LITERAL_WITH_PHANTOM,
+  AUTO_MOCK,
+  IMPORT_ACTUAL_RETURN_WITH_PHANTOM,
   REAL_MODULE_SOURCE,
   UNREADABLE_FACTORY,
+  UNREADABLE_STATEMENT_BODY,
 } from '../fixtures/phantom-mock-fixtures.js'
 
 /**
@@ -57,6 +63,21 @@ describe('vi.mock factories may only name real exports', () => {
     // which is precisely the defect class this file exists to end.
     expect(result.scannedTestFiles).toBeGreaterThan(50)
     expect(result.checkedFactories).toBeGreaterThan(20)
+
+    // Every `vi.mock` with a RELATIVE specifier must be accounted for — either
+    // checked or reported unparseable. Review of #2307 found a whole factory
+    // shape falling through both, so the count is now pinned rather than
+    // trusted: a parser change that stops seeing a shape fails here instead of
+    // quietly shrinking the guard's reach. Bare specifiers (`viem`, `ethers`)
+    // are deliberately out of scope — they are real dependencies, not our
+    // source tree.
+    const relativeMockCalls = listTestFiles(BACKEND_SRC).reduce((n, f) => {
+      const src = fs.readFileSync(f, 'utf8')
+      return n + (src.match(/vi\.mock\(\s*'\./g)?.length ?? 0)
+    }, 0)
+    expect(result.checkedFactories + result.unparseable.length + result.autoMocked).toBe(
+      relativeMockCalls,
+    )
   })
 
   it('leaves no mock factory unparsed — an unreadable factory is a failure, never a skip', () => {
@@ -162,6 +183,52 @@ describe('the guard itself is falsifiable', () => {
     )
     expect(found.phantoms).toEqual([])
     expect(found.checkedFactories).toBe(1)
+  })
+
+  it('flags a phantom override in the `async (importOriginal) => ({ ...spread })` form', () => {
+    // The blind spot review found on #2307. The first parser required a
+    // literal empty `()` parameter list, so this shape — 26 occurrences in the
+    // backend tree, three of them on `rails/allowance-module.js` — was not
+    // checked, not reported, just invisible. A phantom injected into one of
+    // them went undetected. That is a silent skip, the exact thing this
+    // module's contract forbids.
+    const found = withFixture(withRealModule(IMPORT_ORIGINAL_WITH_PHANTOM), scanForPhantomMockKeys)
+    expect(found.phantoms.map((p) => p.key)).toEqual(['executeAllowanceTransfer'])
+    expect(found.unparseable).toEqual([])
+  })
+
+  it('passes the spread form when every explicit override is a real export', () => {
+    const found = withFixture(withRealModule(IMPORT_ORIGINAL_CLEAN), scanForPhantomMockKeys)
+    expect(found.phantoms).toEqual([])
+    expect(found.checkedFactories).toBe(1)
+  })
+
+  it('reads the returned literal of an `importActual` statement-body factory', () => {
+    // The other half of the same review finding. The first draft skipped
+    // statement bodies silently; naively reporting them instead would have
+    // failed the gate over 31 legitimate, perfectly readable factories. The
+    // returned object literal's explicit overrides are what get checked.
+    const found = withFixture(
+      withRealModule(IMPORT_ACTUAL_RETURN_WITH_PHANTOM),
+      scanForPhantomMockKeys,
+    )
+    expect(found.phantoms.map((p) => p.key)).toEqual(['executeAllowanceTransfer'])
+    expect(found.unparseable).toEqual([])
+  })
+
+  it('reports a statement body whose return value it genuinely cannot read', () => {
+    const found = withFixture(withRealModule(UNREADABLE_STATEMENT_BODY), scanForPhantomMockKeys)
+    expect(found.phantoms).toEqual([])
+    expect(found.unparseable).toHaveLength(1)
+    expect(found.checkedFactories).toBe(0)
+  })
+
+  it('counts a factory-less `vi.mock(spec)` as an auto-mock, not as checked', () => {
+    const found = withFixture(withRealModule(AUTO_MOCK), scanForPhantomMockKeys)
+    expect(found.phantoms).toEqual([])
+    expect(found.unparseable).toEqual([])
+    expect(found.checkedFactories).toBe(0)
+    expect(found.autoMocked).toBe(1)
   })
 
   it('reports an unreadable factory instead of silently passing it', () => {

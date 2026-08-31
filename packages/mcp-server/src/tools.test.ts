@@ -6228,4 +6228,19 @@ describe('#2145: the hosted resume description gates on the live retry trigger',
       ).not.toContain('nothing emits')
     }
   })
+
+  /**
+   * #2290: naming the trigger was only half of it. The remedy it points at
+   * runs through a binding, and haven_x402_sign_header cannot be reached
+   * without one — the description used to mention haven_sign only as an
+   * optional aside for a restarted signer, which is how the original reporter
+   * ended up at a dead end. Literal-only assertions: the tool names are the
+   * contract, and nothing here interprets a sentence.
+   */
+  it('names the binding step, not just the header step', () => {
+    const description = toolDescriptions.haven_resume_x402_payment
+    expect(description).toContain('haven_sign_x402')
+    expect(description).toContain('haven_x402_sign_header')
+    expect(description).toContain('x402_binding')
+  })
 })

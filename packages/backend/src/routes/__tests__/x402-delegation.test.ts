@@ -1623,6 +1623,283 @@ describe('x402 sign-context by payment_id (#1263)', () => {
   })
 })
 
+// ── #2290: the funded-but-undelivered escape from `already_executed` ──────────
+//
+// #2145 taught the status endpoint to answer `retry_original_x402_request` for
+// an eip3009 intent whose funding confirmed but whose merchant leg was never
+// delivered, and every route that could rebuild the merchant header refused it
+// — the diagnosis shipped without the cure. These pin BOTH halves: the one
+// state that now opens, and every neighbouring confirmed state that must stay
+// shut. Fail-closed is the property under change, so each refusal is its own
+// test rather than a shared negative.
+describe('x402 sign-context funded-but-unsettled resume (#2290)', () => {
+  let app: FastifyInstance
+  beforeAll(async () => {
+    process.env.X402_BINDING_PRIVATE_KEY =
+      '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
+    app = Fastify({ logger: false })
+    await app.register(x402Routes, { prefix: '/x402' })
+  })
+  afterAll(async () => app.close())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockCompute.mockResolvedValue(DELEGATE_ACCT)
+  })
+
+  // The merchant's own EIP-712 domain. A funded retry must sign against THIS,
+  // not a network default guessed by the x402 library — a wrong domain yields
+  // a signature the facilitator rejects (#2288).
+  const MERCHANT_EXTRA = { name: 'USD Coin', version: '2' }
+  const STORED_PAYMENT_REQUIRED = {
+    x402Version: 2,
+    resource: { url: 'https://merchant.example/resource' },
+    accepts: [{ scheme: 'exact', payTo: MERCHANT, extra: MERCHANT_EXTRA }],
+  }
+
+  /**
+   * A funded eip3009 intent: the quote window is LONG past (it bounded the
+   * funding leg, which confirmed), and `tx_hash` is set — the exact shape that
+   * used to answer 409 `already_executed`.
+   */
+  const FUNDED_ROW = {
+    id: INTENT_ID,
+    status: 'confirmed',
+    tx_hash: '0x' + '99'.repeat(32),
+    expires_at: new Date(Date.now() - 6 * 3600_000).toISOString(),
+    sign_hash: `0x${'56'.repeat(32)}`,
+    prepared_user_op: { sender: DELEGATE_ACCT, nonce: '1', callData: '0x' + 'ab'.repeat(64) },
+    to_address: ('0x' + 'ee'.repeat(20)).toLowerCase(),
+    x402_merchant_address: MERCHANT.toLowerCase(),
+    x402_resource_url: 'https://merchant.example/resource',
+    amount_raw: '100000',
+    amount_human: '0.1',
+    token_address: USDC.toLowerCase(),
+    token_symbol: 'USDC',
+    chain_id: 84532,
+    safe_address: '0x' + 'aa'.repeat(20),
+    machine_metadata: {
+      network: 'eip155:84532',
+      settlement_scheme: 'eip3009',
+      payment_required: STORED_PAYMENT_REQUIRED,
+    },
+  }
+
+  /**
+   * The DERIVED row `findIntentStatusRow` returns. `funded_but_unsettled` and
+   * `merchant_leg_reported` are joins over reconciliation events and evidence,
+   * not columns — which is why the gate reads this row and not the raw intent.
+   * The join's own correctness is pinned on real Postgres in
+   * `modules/payments/__tests__/x402-funded-unsettled-status.test.ts`.
+   */
+  function statusRow(over: Record<string, unknown> = {}) {
+    return {
+      id: INTENT_ID,
+      status: 'confirmed',
+      chain_id: 84532,
+      token_symbol: 'USDC',
+      token_address: USDC.toLowerCase(),
+      amount_human: '0.1',
+      amount_raw: '100000',
+      tx_hash: FUNDED_ROW.tx_hash,
+      expires_at: FUNDED_ROW.expires_at,
+      delegate_address: DELEGATE_SIGNER.address,
+      source: 'x402',
+      payment_rail: 'x402',
+      payment_resource_url: null,
+      x402_resource_url: 'https://merchant.example/resource',
+      merchant_address: null,
+      x402_merchant_address: MERCHANT.toLowerCase(),
+      machine_metadata: FUNDED_ROW.machine_metadata,
+      // Funded well past the merchant-report grace window.
+      confirmed_at: new Date(Date.now() - 6 * 3600_000).toISOString(),
+      funded_but_unsettled: false,
+      merchant_leg_reported: false,
+      ...over,
+    }
+  }
+
+  /** Answer the raw-intent read and the derived-status read independently. */
+  function serve(intent: Record<string, unknown>, derived: Record<string, unknown> | null) {
+    mockQuery.mockImplementation((sql: string) => {
+      const text = String(sql)
+      if (/WHERE pi\.id = \$1 AND pi\.agent_id = \$2/.test(text)) {
+        return Promise.resolve({ rows: derived ? [derived] : [] })
+      }
+      if (/WHERE id = \$1 AND agent_id = \$2/.test(text)) return Promise.resolve({ rows: [intent] })
+      return Promise.resolve({ rows: [] })
+    })
+  }
+
+  it('serves a rebuilt signing context for a funded intent whose merchant leg was never reported', async () => {
+    serve(FUNDED_ROW, statusRow())
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.payment_id).toBe(INTENT_ID)
+    // Same payload hash and the same digest commitment as any other rebuild —
+    // this widens who may FETCH a context, never what the signer will sign.
+    expect(body.sign_data.hash).toBe(`0x${'56'.repeat(32)}`)
+    const { hashTypedData } = await import('viem')
+    const derived = hashTypedData(body.sign_data.typed_data)
+    expect(body.x402_expected.typed_data_hash.toLowerCase()).toBe(derived.toLowerCase())
+    expect(body.x402_expected.amount).toBe('100000')
+    // Read-only: no second funding submit, and no row written.
+    expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE/i.test(String(c[0])))).toBe(false)
+  })
+
+  it('mints a FRESH window instead of re-serving the spent quote window', async () => {
+    // The stored expires_at is 6h past. Re-serving it would hand the signer a
+    // context its own assertX402PaymentWindowOpen refuses, so the rebuild
+    // would be dead on arrival for exactly the payments this path rescues.
+    serve(FUNDED_ROW, statusRow())
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(Date.parse(body.x402_expected.expires_at)).toBeGreaterThan(Date.now())
+    expect(body.x402_expected.expires_at).not.toBe(FUNDED_ROW.expires_at)
+    // The fresh value is what Haven SIGNED, not just what it echoed — a
+    // binding whose expiry disagrees with its signature verifies as tampered.
+    const signed = JSON.parse(body.x402_expected_auth.message.split('\n')[1])
+    expect(signed.expiresAt).toBe(body.x402_expected.expires_at)
+    // And nothing was written: the intent row keeps its spent quote window.
+    expect(mockQuery.mock.calls.some((c) => /UPDATE payment_intents/i.test(String(c[0])))).toBe(false)
+  })
+
+  it("carries the merchant's own EIP-712 domain through the rebuild", async () => {
+    serve(FUNDED_ROW, statusRow())
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.json().payment_required).toEqual(STORED_PAYMENT_REQUIRED)
+    expect(res.json().payment_required.accepts[0].extra).toEqual(MERCHANT_EXTRA)
+  })
+
+  it('stops naming the spent funding submit in its instructions', async () => {
+    serve(FUNDED_ROW, statusRow())
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    const { instructions } = res.json().sign_data
+    expect(instructions).not.toContain(`/payments/${INTENT_ID}/sign`)
+    expect(instructions).toMatch(/already confirmed/i)
+  })
+
+  // ── Every neighbouring confirmed state stays REFUSED ──────────────────────
+
+  it('still 409s a confirmed erc7710 intent — confirmed there IS settlement', async () => {
+    const metadata = { network: 'eip155:84532', settlement_scheme: 'erc7710' }
+    serve(
+      { ...FUNDED_ROW, machine_metadata: metadata },
+      statusRow({ machine_metadata: metadata }),
+    )
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error_code).toBe('already_executed')
+  })
+
+  it('still 409s once the merchant leg HAS been reported', async () => {
+    serve(FUNDED_ROW, statusRow({ merchant_leg_reported: true }))
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error_code).toBe('already_executed')
+  })
+
+  it('still 409s when the merchant REJECTED the retry (remedy is sweep, not resign)', async () => {
+    serve(FUNDED_ROW, statusRow({ funded_but_unsettled: true }))
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error_code).toBe('already_executed')
+  })
+
+  it('still 409s inside the merchant-report grace window', async () => {
+    // The agent may simply not have retried yet; the status endpoint says
+    // nothing to do here, so neither may this route.
+    serve(FUNDED_ROW, statusRow({ confirmed_at: new Date().toISOString() }))
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error_code).toBe('already_executed')
+  })
+
+  it('still 409s a confirmed intent with no settlement_scheme metadata (fails closed)', async () => {
+    const metadata = { network: 'eip155:84532' }
+    serve(
+      { ...FUNDED_ROW, machine_metadata: metadata },
+      statusRow({ machine_metadata: metadata }),
+    )
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error_code).toBe('already_executed')
+  })
+
+  it('still 409s when the derived status row is unreadable (fails closed)', async () => {
+    serve(FUNDED_ROW, null)
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error_code).toBe('already_executed')
+  })
+
+  it('a funded intent with no stored signing payload answers not_signable, not already_executed', async () => {
+    // The one path the `!fundedMerchantRetry` guard protects: the predicate
+    // holds, so the already-executed refusal is skipped, but the rebuild
+    // returns null because there is no prepared op to rebuild from. The
+    // fall-through then answers on STATUS. Pinned because it is otherwise an
+    // edit no test would catch (reviewer finding), not because this wording is
+    // the best possible one — `sign_context_unavailable` would describe it
+    // more precisely, and restructuring the fall-through to say so is not
+    // worth the risk on a path a confirmed eip3009 intent cannot reach: such
+    // an intent always carries the prepared op its funding leg was built from.
+    serve({ ...FUNDED_ROW, prepared_user_op: null }, statusRow())
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error_code).toBe('not_signable')
+  })
+
+  it('a PENDING intent past its quote window still 410s — the funding leg is still bounded', async () => {
+    // Criterion 3 relaxes the stale-window gate for FUNDED money only. An
+    // unfunded quote that ran out must still expire, or the window would stop
+    // bounding the leg it exists to bound.
+    serve(
+      { ...FUNDED_ROW, status: 'pending_signature', tx_hash: null },
+      statusRow({ status: 'pending_signature', tx_hash: null, confirmed_at: null }),
+    )
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(410)
+    expect(res.json().error_code).toBe('expired')
+  })
+})
+
 // ── GET /x402/:id/merchant-call-context — the settle-leg handoff (#1307) ──────
 describe('x402 merchant-call-context by payment_id (#1307)', () => {
   let app: FastifyInstance

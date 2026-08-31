@@ -158,6 +158,26 @@
 //     assumption as a finding.
 //
 // The escape is real, not notational: **write something GitHub does not parse.**
+// One form that is NOT an escape, measured the hard way on the pull request that
+// shipped this change: **HTML entity encoding.** Writing the verb as
+// `clos&#101;d #2268` leaves the regex below reporting the body clean, because
+// it matches raw text — and GitHub decodes the entity before parsing, so its own
+// `closingIssuesReferences` came back naming #2268. The pull request was going
+// to shut an `operator-verify` issue on merge while the local parse said it was
+// fine. Two lessons, kept because they cost something to learn:
+//
+//   * do not reach for entities; they hide the reference from readers and from
+//     this file, and from nothing that matters;
+//   * this is why the CLI prefers GitHub's `closingIssuesReferences` over the
+//     regex for the body. The regex is the offline path, the cross-check, and
+//     the only reading available for commits and the title — where nothing
+//     decodes entities either, so the exposure does not arise. On the body it
+//     has now been observed losing to the mechanism it approximates. A test
+//     below pins the non-decoding as deliberate, so its silence is not mistaken
+//     for permission.
+//
+// The forms that DO work:
+//
 //   * `Refs #2268` — the prescribed form, and what the report below recommends.
 //   * The keyword with a non-numeric placeholder: `Closes #<n>`. The
 //     pull-request template does this; so does this comment block.

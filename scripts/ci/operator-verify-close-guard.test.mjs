@@ -202,6 +202,38 @@ test('there is NO escape from the keyword — a fence or a quote does not help',
   }
 })
 
+test('HTML entities are NOT an escape — the regex misses them and GitHub does not', () => {
+  // Measured on the pull request that shipped this change. Writing the verb as
+  // `clos&#101;d #2268` left this parser reporting the body clean; GitHub
+  // decoded the entity and its own `closingIssuesReferences` named #2268, so
+  // the pull request was about to shut an `operator-verify` issue on merge
+  // while the local parse said it was fine.
+  //
+  // The non-decoding is pinned as DELIBERATE, not fixed: adding an entity
+  // decoder would be re-implementing more of GitHub's pipeline, and the CLI
+  // already prefers GitHub's own parse for the body precisely so it does not
+  // have to. Commits and the title, where the regex IS the only reading, are
+  // not HTML and nothing decodes entities in them.
+  const encoded = 'the commit that clos&#101;d #2268'
+  assert.deepEqual(parseClosingRefs(encoded), [], 'the regex matches raw text, by design')
+  assert.deepEqual(
+    parseClosingRefs(encoded.replace('&#101;', 'e')),
+    [2268],
+    'and GitHub sees THIS — decoded — which is why the CLI asks GitHub about the body',
+  )
+
+  // The guard still fails such a body in CI, because `closingIssuesReferences`
+  // is passed in as `closingRefs` and is authoritative over the local scan.
+  assert.equal(
+    findViolations({
+      body: encoded,
+      closingRefs: [2268],
+      labelsByIssue: { 2268: [OPERATOR_VERIFY_LABEL] },
+    }).length,
+    1,
+  )
+})
+
 test('the escape is to write what GitHub does not parse, and these forms do not', () => {
   // The forms the report recommends, and the ones this file, its docs and the
   // pull request that shipped it all had to use. If any of these starts

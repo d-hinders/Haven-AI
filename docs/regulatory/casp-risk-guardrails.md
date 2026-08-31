@@ -194,9 +194,12 @@ Haven backend
 > (`validateGenericSchemeRail`) rather than rewording them: both tested
 > `agent.execution_rail !== 'delegation'`, the same field `resolveExecutionRail`
 > reads, so the seam already refused every input they refused. The seam is once
-> again the only thing that decides both whether a retired-rail account may
-> spend and what it is told, on this route as on the others. What still
-> precedes the 410 there is rail-INDEPENDENT and makes no claim about any rail:
+> again the only thing that decides whether a retired-rail account may spend AND
+> the only thing that makes a rail-specific claim to it, on this route as on the
+> others. Note the second half is narrower than "the only thing that answers it",
+> deliberately: refusals that are not rail claims still precede the seam, and a
+> sentence that swallowed them would be false. What still precedes the 410 there
+> is rail-INDEPENDENT and makes no claim about any rail:
 > the route's structural `settlementScheme` enum check and token resolution —
 > the same position `POST /payments` puts its own gate in, and the same class as
 > the 401 auth hook. Pinned by

@@ -184,6 +184,95 @@ describe('ConfiguredAllowanceRow — configuration, not measurement (#1846)', ()
 })
 
 /**
+ * #2283: `allowance_amount` carries TWO wire shapes under one field name, and
+ * this row must render both as money.
+ *
+ * `AgentAllowance` — what `GET /agents` puts on `agent.allowances`, and this
+ * component's only input — is the HUMAN-decimal projection
+ * `rails/delegation-budget-view.ts` builds with `formatTokenValue`, so a
+ * 250 USDC weekly budget arrives as `'250.000000'`. The sibling
+ * `AgentConnectionAllowance` on the connect-setup routes is an ATOMIC integer
+ * string for the same field name (`openapi/spec.ts`, `allowanceAtomicAmount`).
+ *
+ * `formatConfiguredAllowance` used to tell them apart BY EXCEPTION —
+ * `BigInt('250.000000')` throws and a bare `catch` returned the string
+ * untouched — so `/agents` rendered `"250.000000 USDC per week"` where
+ * `/dashboard` and `/custody` rendered `250.00` for the same delegation.
+ *
+ * Why BOTH shapes are pinned here, not just the one that was broken: the
+ * atomic case was already covered (`configured()`'s fixture is atomic) and
+ * that is precisely why the bug survived — a single-shape test on a
+ * two-shape field is half a test, and this file's own #1846 header makes the
+ * same argument about pairing a presence assertion with an absence one. The
+ * pair is what has to hold: the same 250 USDC must render identically
+ * whichever shape the wire used.
+ *
+ * The assertions read the `.v2-tabular` amount span rather than the whole
+ * subtree, so they pin the formatted NUMBER exactly instead of a
+ * concatenation that also carries the symbol and the period label.
+ */
+describe('ConfiguredAllowanceRow — both wire shapes of allowance_amount (#2283)', () => {
+  function renderedAmount(allowance: AgentAllowance): string {
+    const { container } = render(<ConfiguredAllowanceRow allowance={allowance} chainId={CHAIN_ID} />)
+    const span = container.querySelector<HTMLElement>('.v2-tabular')
+    expect(span, 'ConfiguredAllowanceRow should render a .v2-tabular amount span').not.toBeNull()
+    return span?.textContent ?? ''
+  }
+
+  it('renders the delegation rail’s HUMAN-decimal string as a money figure', () => {
+    expect(
+      renderedAmount(configured({ allowance_amount: '250.000000', reset_period_min: 10080 })),
+      "the live rail emits '250.000000'; six trailing zeroes on the page whose " +
+        'job is "how much, which asset" is the #2283 defect',
+    ).toBe('250.00')
+  })
+
+  it('renders the legacy ATOMIC integer string as a money figure', () => {
+    expect(
+      renderedAmount(configured({ allowance_amount: '250000000', reset_period_min: 10080 })),
+      'the atomic shape must keep working — the fix removes the BigInt pre-parse, ' +
+        'not the atomic path, which now runs inside formatAllowanceAmount',
+    ).toBe('250.00')
+  })
+
+  it('renders one budget identically whichever shape the wire used', () => {
+    expect(renderedAmount(configured({ allowance_amount: '250.000000' }))).toBe(
+      renderedAmount(configured({ allowance_amount: '250000000' })),
+    )
+  })
+
+  it('leaves the raw decimal string off the screen entirely', () => {
+    const { container } = render(
+      <ConfiguredAllowanceRow
+        allowance={configured({ allowance_amount: '250.000000', reset_period_min: 10080 })}
+        chainId={CHAIN_ID}
+      />,
+    )
+    expect(
+      container.textContent ?? '',
+      'the catch used to return the wire string unformatted, so the raw value ' +
+        'reached the screen verbatim',
+    ).not.toContain('250.000000')
+  })
+
+  it('passes a genuinely unparseable value through unchanged', () => {
+    // The `catch` is gone, but its job is not: `formatAllowanceAmount` owns
+    // the fallback explicitly and documents it. Asserted here so the removal
+    // of the catch is not also the silent removal of a defined behaviour.
+    expect(renderedAmount(configured({ allowance_amount: 'not-a-number' }))).toBe('not-a-number')
+  })
+
+  it('positive control: distinct budgets render distinct figures', () => {
+    // Without this, a formatter that returned a constant — or that kept
+    // returning its input — would satisfy a lone equality assertion above.
+    expect(renderedAmount(configured({ allowance_amount: '250.000000' }))).not.toBe(
+      renderedAmount(configured({ allowance_amount: '25.000000' })),
+    )
+    expect(renderedAmount(configured({ allowance_amount: '25.000000' }))).toBe('25.00')
+  })
+})
+
+/**
  * #2224: the caption must describe where the limit is ENFORCED, not who
  * happens to be holding a copy of it.
  *

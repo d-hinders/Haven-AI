@@ -319,6 +319,12 @@ describe('agent connection setup routes', () => {
     expect(body.setup_prompt).toContain('write local Haven credential files under ~/.haven')
     expect(body.setup_prompt).toContain('update the local agent MCP config when supported')
     expect(body.setup_prompt).toContain('Run this exact command:')
+    expect(body.setup_prompt).toContain(
+      'Network access is expected: this command downloads the npm package and contacts the Haven API, so if your environment is sandboxed, run it with network access enabled or request network access escalation; that changes the execution environment, not the command, and is not a third command modification.',
+    )
+    expect(body.setup_prompt).toContain(
+      'Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.',
+    )
     // #1545: the backend is the source of truth for the prompt — pin the
     // --json discoverability sentence and the gate's one name here, not only
     // in the frontend/e2e mirrors.

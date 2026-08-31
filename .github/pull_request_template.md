@@ -61,6 +61,15 @@ the merge gate stops here.
 - [ ] External review requested
 - [ ] External review completed
 
+## Issue Link
+
+- [ ] `Closes #<n>` — the default: the merge closes the issue.
+- [ ] `Refs #<n>` — **operator-verify mode**: a human operator step is still
+      outstanding, so the issue must outlive the merge. `Closes` is a GitHub
+      keyword and closes the issue whatever this body says elsewhere, so a
+      sentence promising it stays open does not survive it. Label the issue
+      `operator-verify` as well — that is what the merge-time guard reads.
+
 ## Merge Readiness
 
 - CI: pending

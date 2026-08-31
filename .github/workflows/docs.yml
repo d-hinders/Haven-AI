@@ -53,6 +53,13 @@ jobs:
   validate:
     name: Docs front-matter & agent skills
     runs-on: ubuntu-latest
+    # Least privilege, scoped to this job so the advisory job's Vale reporter is
+    # unaffected. `issues: read` is what the close-keyword guard needs to see an
+    # `operator-verify` label; `pull-requests: read` is how it reads the body.
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
     # Both steps are local and dependency-free; they finish in seconds. A tight
     # bound means a hang fails fast and visibly instead of holding a PR.
     timeout-minutes: 5
@@ -92,6 +99,31 @@ jobs:
       - name: Test the docs validators
         if: always()
         run: node --test scripts/docs/*.test.mjs
+
+      # #2276: `Closes #<n>` is a GitHub keyword, so ship-next's operator-verify
+      # mode ("the issue stays OPEN, a human still has to run the live step")
+      # could only ever be prose — and it lost the first time it was used, on
+      # the merge of PR #2272. The rule now has a mechanism.
+      #
+      # It lives on THIS job for the reason the chain check above does: **Docs
+      # front-matter & agent skills** is already a required status check, so the
+      # rule is enforced the day it merges rather than the day someone remembers
+      # to edit the ruleset. `Repo CI config checks` — where the rest of
+      # scripts/ci/ runs — is NOT in the ruleset, so hosting it there would have
+      # produced an advisory red X that auto-merge sails past.
+      #
+      # `if: always()` so a red front-matter check does not hide this one, and
+      # pull-request-only: there is no body to read on a push to dev/main.
+      # The self-test also runs under the `scripts/ci/*.test.mjs` glob; it is
+      # repeated here because a guard whose self-test only runs in a non-required
+      # job can start passing vacuously without anything blocking.
+      - name: Operator-verify close-keyword guard
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --test scripts/ci/operator-verify-close-guard.test.mjs
+          node scripts/ci/operator-verify-close-guard.mjs --pr "${{ github.event.pull_request.number }}"
 
   # ── ADVISORY. Reports findings; must never gate a merge. Do not add this job
   # to the required-checks ruleset. ──

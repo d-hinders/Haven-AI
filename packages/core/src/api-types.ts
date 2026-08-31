@@ -1245,8 +1245,8 @@ export type paths = {
             cookie?: never;
         };
         /**
-         * One agent's payments, approvals and tool calls, newest first.
-         * @description A heterogeneous list discriminated by `type`: payment, approval, or mcp_tool_call. **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the three sources separately and the results are then merged and sorted, so this route can return up to three times `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.
+         * One agent's payments and tool calls, newest first.
+         * @description A heterogeneous list discriminated by `type`: payment or mcp_tool_call. (#2262: the third branch, `approval`, is gone — #2055 dropped `approval_requests` and this handler merges `payment_intents` and the MCP tool-call audit log, with no third source.) **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the two sources separately and the results are then merged and sorted, so this route can return up to twice `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.
          */
         get: operations["getAgentActivity"];
         put?: never;
@@ -1286,7 +1286,7 @@ export type paths = {
         };
         /**
          * Combined activity across every agent the caller owns.
-         * @description The same three entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` is always 0 since #2055 (the approval queue died with the Safe rail); the field survives for wire compatibility.
+         * @description The same two entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` is always 0 since #2055 (the approval queue died with the Safe rail); the field survives for wire compatibility.
          */
         get: operations["getActivityFeed"];
         put?: never;
@@ -3201,6 +3201,7 @@ export type components = {
             /** Format: uuid */
             payment_id: string;
             payment_intent_id?: string | null;
+            /** @description Retained for wire compatibility; ALWAYS null. #2055 dropped `approval_requests`, so no receipt can be anchored to an approval any more. */
             approval_request_id?: string | null;
             rail: string;
             /** @description Which settlement branch ran (eip3009 | erc7710), from the intent (#946). Null on legacy-rail receipts. */
@@ -9601,33 +9602,6 @@ export interface operations {
                             agent_name?: string;
                         } | {
                             /** @enum {string} */
-                            type: "approval";
-                            id: string;
-                            token: string | null;
-                            amount: string | null;
-                            to: string | null;
-                            reason?: string | null;
-                            status: string | null;
-                            tx_hash?: string | null;
-                            /** @description Synthesised when absent: an executed approval reports 'payment_confirmed'. */
-                            payment_proof_status?: string | null;
-                            payment_flow_status?: string | null;
-                            payment_attention_reason?: string | null;
-                            source?: string;
-                            x402_resource_url?: string | null;
-                            chain_id?: number | null;
-                            token_address?: string | null;
-                            safe_id?: string | null;
-                            safe_address?: string | null;
-                            safe_name?: string | null;
-                            explorer_url?: string | null;
-                            created_at: string;
-                            /** @description Feed only. */
-                            agent_id?: string;
-                            /** @description Feed only. */
-                            agent_name?: string;
-                        } | {
-                            /** @enum {string} */
                             type: "mcp_tool_call";
                             id: string;
                             tool_name: string;
@@ -9809,33 +9783,6 @@ export interface operations {
                             agent_name?: string;
                         } | {
                             /** @enum {string} */
-                            type: "approval";
-                            id: string;
-                            token: string | null;
-                            amount: string | null;
-                            to: string | null;
-                            reason?: string | null;
-                            status: string | null;
-                            tx_hash?: string | null;
-                            /** @description Synthesised when absent: an executed approval reports 'payment_confirmed'. */
-                            payment_proof_status?: string | null;
-                            payment_flow_status?: string | null;
-                            payment_attention_reason?: string | null;
-                            source?: string;
-                            x402_resource_url?: string | null;
-                            chain_id?: number | null;
-                            token_address?: string | null;
-                            safe_id?: string | null;
-                            safe_address?: string | null;
-                            safe_name?: string | null;
-                            explorer_url?: string | null;
-                            created_at: string;
-                            /** @description Feed only. */
-                            agent_id?: string;
-                            /** @description Feed only. */
-                            agent_name?: string;
-                        } | {
-                            /** @enum {string} */
                             type: "mcp_tool_call";
                             id: string;
                             tool_name: string;
@@ -9895,7 +9842,10 @@ export interface operations {
                 content: {
                     "application/json": {
                         steps: {
-                            /** @enum {string} */
+                            /**
+                             * @description Retained for wire compatibility with historical windows. THREE of these steps are permanently zero for any window after their retirement and a funnel built from them will show three dead stages: 'safe_deployed' and 'safe_imported' (410 since #1984 — Safe inflow is retired) and 'allowance_granted' (#2020 — the AllowanceModule rail no longer grants). Historical rows before those dates still count.
+                             * @enum {string}
+                             */
                             event: "signed_up" | "safe_deployed" | "safe_imported" | "agent_created" | "allowance_granted" | "safe_funded" | "first_payment_settled";
                             /** @description DISTINCT users who reached this step. */
                             users: number;

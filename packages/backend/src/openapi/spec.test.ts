@@ -638,6 +638,62 @@ describe('retired-rail residue in the published contract (#2105)', () => {
     })
   })
 
+  it('#2262: publishes retirement prose for all five retired approval enum values', () => {
+    // The path layer was swept clean (410 tombstones, "always 0 since #2055")
+    // and the shared schema constants were not. Before this, a raw-API
+    // integrator reading /openapi.json saw five approval values under the bare
+    // description "Stable Haven agent payment state phase." — no signal that
+    // nothing can produce them. The SDK user has been warned since #2101.
+    const phase = openapiSpec.components.schemas.AgentPaymentPhase as {
+      enum: string[]
+      'x-enumDescriptions'?: Record<string, string>
+    }
+    const nextAction = openapiSpec.components.schemas.AgentPaymentNextAction as {
+      enum: string[]
+      'x-enumDescriptions'?: Record<string, string>
+    }
+
+    // Positive control: an empty or absent map must not read as a pass, and
+    // the map must describe EVERY declared value, not only the retired five.
+    expect(Object.keys(phase['x-enumDescriptions'] ?? {}).sort()).toEqual([...phase.enum].sort())
+    expect(Object.keys(nextAction['x-enumDescriptions'] ?? {}).sort()).toEqual([...nextAction.enum].sort())
+
+    const retired: Array<[Record<string, string>, string]> = [
+      [phase['x-enumDescriptions']!, 'user_approval_required'],
+      [phase['x-enumDescriptions']!, 'user_execution_required'],
+      [phase['x-enumDescriptions']!, 'waiting_for_additional_approvals'],
+      [nextAction['x-enumDescriptions']!, 'wait_for_user_approval'],
+      [nextAction['x-enumDescriptions']!, 'wait_for_user_to_complete_payment'],
+    ]
+    expect(retired).toHaveLength(5)
+    for (const [map, value] of retired) {
+      expect(map[value], value).toMatch(/Retired wire value/)
+      expect(map[value], value).toMatch(/no live rail produces it/)
+      expect(map[value]!.toLowerCase(), value).toContain('stop and tell the user')
+    }
+
+    // Negative control: a live value must NOT be described as retired, so a
+    // build that stamped the retirement string over the whole map is caught.
+    expect(phase['x-enumDescriptions']!.payment_submitted).not.toMatch(/Retired wire value/)
+    expect(nextAction['x-enumDescriptions']!.sign_and_submit_payment).not.toMatch(/Retired wire value/)
+  })
+
+  it("#2262: the activity union declares no 'approval' branch the route cannot emit", () => {
+    // #2055 left agent-activity building its list from payment_intents + MCP
+    // tool invocations and nothing else, so a documented `type: 'approval'`
+    // member promised a response shape no handler can produce. #2120 deleted
+    // the fabricated fixture for this reason; the schema was not touched then.
+    for (const path of ['/agent-activity/{id}/activity', '/agent-activity/feed'] as const) {
+      const spec = openapiSpec.paths[path as keyof typeof openapiSpec.paths] as Record<string, any>
+      const json = JSON.stringify(spec)
+      expect(json, `${path} still documents an approval activity row`).not.toContain('"approval"')
+      // Positive control: the two branches the route CAN emit are still there,
+      // so an assertion passing because the path vanished is caught.
+      expect(json, `${path} lost its payment branch`).toContain('"payment"')
+      expect(json, `${path} lost its tool-call branch`).toContain('"mcp_tool_call"')
+    }
+  })
+
   it('keeps AgentPaymentStatus.kind approval_request as a documented wire-compat value', () => {
     // The retained case, and deliberately asymmetric with the deletions above:
     // this enum value is still declared by the backend's own status type and

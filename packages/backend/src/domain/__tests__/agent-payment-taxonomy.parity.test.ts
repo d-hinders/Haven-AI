@@ -10,9 +10,11 @@
  * SDK enums, so the wire surface would lie about what the backend can
  * actually emit.
  *
- * This test imports both modules and asserts the exported value sets and
- * description keysets are identical. Failure prints a clear diff so the gap
- * is obvious.
+ * This test imports both modules and asserts the exported value sets, key
+ * names, and — since #2262, when the mirror gained the per-value prose the
+ * served spec publishes as `x-enumDescriptions` — the description strings
+ * themselves are identical. Failure prints a clear diff so the gap is
+ * obvious.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -54,6 +56,47 @@ describe('agent payment taxonomy parity', () => {
     expect(Object.keys(backend.AgentPaymentRail).sort()).toEqual(
       Object.keys(sdk.AgentPaymentRail).sort(),
     )
+  })
+
+  // #2262: the doc comment above has always claimed this file asserts
+  // "description keysets are identical". It did not — there were no
+  // descriptions in the mirror to assert. Now the served spec carries the
+  // SDK's retirement prose through the mirror, so the strings themselves are
+  // pinned VALUE-for-value, not just by key: a reworded description on either
+  // side fails CI instead of silently forking into a second copy that drifts.
+  it('AgentPaymentPhase descriptions are the SDK strings verbatim', () => {
+    expect(backend.AgentPaymentPhaseDescriptions).toEqual(sdk.AgentPaymentPhaseDescriptions)
+  })
+
+  it('AgentPaymentNextAction descriptions are the SDK strings verbatim', () => {
+    expect(backend.AgentPaymentNextActionDescriptions).toEqual(sdk.AgentPaymentNextActionDescriptions)
+  })
+
+  it('the five retired approval values document their retirement, not a wait', () => {
+    // The point of shipping these into the spec at all. A raw-API integrator
+    // must be able to read, from `/openapi.json` alone, that these values are
+    // retired — the SDK user has had this since #2101.
+    const retiredPhases = [
+      sdk.AgentPaymentPhase.UserApprovalRequired,
+      sdk.AgentPaymentPhase.UserExecutionRequired,
+      sdk.AgentPaymentPhase.WaitingForAdditionalApprovals,
+    ]
+    for (const phase of retiredPhases) {
+      expect(backend.AgentPaymentPhaseDescriptions[phase], phase).toContain('Retired wire value')
+      expect(backend.AgentPaymentPhaseDescriptions[phase], phase).toContain('no live rail produces it')
+    }
+
+    const retiredNextActions = [
+      sdk.AgentPaymentNextAction.WaitForUserApproval,
+      sdk.AgentPaymentNextAction.WaitForUserToCompletePayment,
+    ]
+    for (const nextAction of retiredNextActions) {
+      expect(backend.AgentPaymentNextActionDescriptions[nextAction], nextAction).toContain('Retired wire value')
+      expect(
+        backend.AgentPaymentNextActionDescriptions[nextAction].toLowerCase(),
+        nextAction,
+      ).toContain('stop and tell the user')
+    }
   })
 
   it('AgentPaymentRail contains every MachinePaymentRail wire value', () => {

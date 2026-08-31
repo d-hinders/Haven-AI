@@ -122,3 +122,17 @@ vi.mock('../../rails/allowance-module.js', () => {
 export const AUTO_MOCK = `
 vi.mock('../../rails/allowance-module.js')
 `
+
+/**
+ * A DOUBLE-QUOTED specifier. Round-two review found this invisible to the
+ * detector and to the count-pinning auditor simultaneously, because each
+ * carried its own single-quote-only regex — the phantom undetected and the
+ * invariant silent. Unusual style in this repo, and that is exactly why it is
+ * dangerous: nobody would look for it.
+ */
+export const DOUBLE_QUOTED_SPEC_WITH_PHANTOM = `
+vi.mock("../../rails/allowance-module.js", () => ({
+  getProvider: vi.fn(),
+  executeAllowanceTransfer: vi.fn(),
+}))
+`

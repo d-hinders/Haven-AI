@@ -58,6 +58,26 @@ export interface ScanResult {
 
 const TEST_FILE_RE = /\.test\.ts$/
 
+/**
+ * The ONE definition of a `vi.mock` specifier, quote-agnostic.
+ *
+ * Round-two review of #2307 found the detector and the count-pinning auditor
+ * each carried their OWN single-quote-only regex, so a double-quoted
+ * `vi.mock("../../rails/allowance-module.js", …)` was invisible to both at once
+ * — the phantom undetected AND the invariant silent. Two regexes meant to
+ * cross-check each other cannot do so while they can drift apart, so there is
+ * now one exported source of truth and both read it. The invariant's promise —
+ * that a shape which stops being seen fails the gate — only holds if the
+ * auditor's notion of "a mock call" is strictly wider than the detector's, and
+ * the cheapest way to guarantee that is for them to be the same expression.
+ */
+export const MOCK_SPEC_QUOTES = `'"\``
+
+/** Count every `vi.mock` whose specifier is a RELATIVE path, in any quote style. */
+export function countRelativeMockCalls(src: string): number {
+  return (src.match(/vi\.mock\(\s*['"`]\./g) ?? []).length
+}
+
 export function listTestFiles(root: string): string[] {
   const out: string[] = []
   const walk = (dir: string) => {
@@ -274,13 +294,16 @@ function factoriesIn(
     const closeParen = matchDelimiter(src, openParen)
     if (closeParen === -1) continue
 
-    // First argument must be a single-quoted specifier. The comma is OPTIONAL:
-    // `vi.mock(spec)` with no factory is an auto-mock, and requiring the comma
-    // made the parser miss it entirely — the same silent-drop class review
-    // found for parameterised factories.
-    const specMatch = /^\s*'([^']+)'\s*(?:,|(?=\)))/.exec(src.slice(openParen + 1, closeParen + 1))
+    // First argument must be a quoted specifier, in ANY quote style — see
+    // MOCK_SPEC_QUOTES: a single-quote-only match was invisible to the detector
+    // and the auditor simultaneously (round-two review finding). The comma is
+    // OPTIONAL: `vi.mock(spec)` with no factory is an auto-mock, and requiring
+    // the comma made the parser miss it entirely.
+    const specMatch = /^\s*(['"`])((?:(?!\1)[^\\])+)\1\s*(?:,|(?=\)))/.exec(
+      src.slice(openParen + 1, closeParen + 1),
+    )
     if (!specMatch) continue // `vi.mock(SomeConst)` / no string spec — nothing to resolve
-    const spec = specMatch[1]
+    const spec = specMatch[2]
 
     let i = openParen + 1 + specMatch[0].length
     const rest = src.slice(i, closeParen)

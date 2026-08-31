@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
+  countRelativeMockCalls,
   listTestFiles,
   moduleExportNames,
   scanForPhantomMockKeys,
@@ -19,6 +20,7 @@ import {
   IMPORT_ORIGINAL_WITH_PHANTOM,
   INLINE_LITERAL_WITH_PHANTOM,
   AUTO_MOCK,
+  DOUBLE_QUOTED_SPEC_WITH_PHANTOM,
   IMPORT_ACTUAL_RETURN_WITH_PHANTOM,
   REAL_MODULE_SOURCE,
   UNREADABLE_FACTORY,
@@ -65,16 +67,22 @@ describe('vi.mock factories may only name real exports', () => {
     expect(result.checkedFactories).toBeGreaterThan(20)
 
     // Every `vi.mock` with a RELATIVE specifier must be accounted for — either
-    // checked or reported unparseable. Review of #2307 found a whole factory
-    // shape falling through both, so the count is now pinned rather than
-    // trusted: a parser change that stops seeing a shape fails here instead of
-    // quietly shrinking the guard's reach. Bare specifiers (`viem`, `ethers`)
-    // are deliberately out of scope — they are real dependencies, not our
-    // source tree.
-    const relativeMockCalls = listTestFiles(BACKEND_SRC).reduce((n, f) => {
-      const src = fs.readFileSync(f, 'utf8')
-      return n + (src.match(/vi\.mock\(\s*'\./g)?.length ?? 0)
-    }, 0)
+    // checked, reported unparseable, or counted as an auto-mock. Round-one
+    // review found a whole factory shape falling through all of them, so the
+    // count is pinned rather than trusted: a parser change that stops seeing a
+    // shape fails here instead of quietly shrinking the guard's reach.
+    //
+    // The counter is `countRelativeMockCalls` from the module itself, NOT a
+    // regex written here. Round two found the two had drifted to single-quote-
+    // only independently, so a double-quoted spec was invisible to the detector
+    // and the auditor at the same instant — an invariant that cannot fail is the
+    // defect this whole issue is about. One expression, imported, is the fix.
+    // Bare specifiers (`viem`, `ethers`) stay out of scope: real dependencies,
+    // not our source tree.
+    const relativeMockCalls = listTestFiles(BACKEND_SRC).reduce(
+      (n, f) => n + countRelativeMockCalls(fs.readFileSync(f, 'utf8')),
+      0,
+    )
     expect(result.checkedFactories + result.unparseable.length + result.autoMocked).toBe(
       relativeMockCalls,
     )
@@ -229,6 +237,19 @@ describe('the guard itself is falsifiable', () => {
     expect(found.unparseable).toEqual([])
     expect(found.checkedFactories).toBe(0)
     expect(found.autoMocked).toBe(1)
+  })
+
+  it('flags a phantom behind a DOUBLE-QUOTED specifier, and counts the call', () => {
+    // Round-two review finding. Both assertions matter: the first proves the
+    // detector sees it, the second proves the auditor counts it — they used to
+    // miss it together, which is the only way the count-pinning invariant can
+    // be fooled rather than tripped.
+    const found = withFixture(
+      withRealModule(DOUBLE_QUOTED_SPEC_WITH_PHANTOM),
+      scanForPhantomMockKeys,
+    )
+    expect(found.phantoms.map((p) => p.key)).toEqual(['executeAllowanceTransfer'])
+    expect(countRelativeMockCalls(DOUBLE_QUOTED_SPEC_WITH_PHANTOM)).toBe(1)
   })
 
   it('reports an unreadable factory instead of silently passing it', () => {

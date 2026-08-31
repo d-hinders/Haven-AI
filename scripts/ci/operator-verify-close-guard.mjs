@@ -40,10 +40,16 @@
 //     repository allows carry them to `dev`: a merge commit lands them verbatim,
 //     and a squash lands them concatenated, because
 //     `squash_merge_commit_message` is `COMMIT_MESSAGES`;
-//   * the pull-request **title**, which is the indirect one:
-//     `squash_merge_commit_title` is `COMMIT_OR_PR_TITLE`, so on a multi-commit
-//     squash the title becomes the subject line of a commit on `dev` and is
-//     parsed there.
+//   * the pull-request **title**, which reaches `dev` on BOTH of this
+//     repository's merge routes, not just one. `merge_commit_message` is
+//     `PR_TITLE`, so a merge commit — the route PR #2314 actually took — puts
+//     the title verbatim into the merge commit's message; and
+//     `squash_merge_commit_title` is `COMMIT_OR_PR_TITLE`, so a multi-commit
+//     squash makes it the subject line. Both are settings on this repository,
+//     read from `GET /repos/d-hinders/Haven-AI`. Recorded in full because the
+//     first draft of this comment named only the squash route, from which a
+//     later reader could conclude that title-scanning becomes unnecessary if
+//     squash merging is ever turned off. It would not (`haven-reviewer`).
 //
 // Enumerated and checked, so the next reader does not have to re-derive it:
 // issue comments and review comments are **not** emitters — GitHub scopes
@@ -95,13 +101,27 @@
 // exactly this reason. It is that `operator-verify mode` was never an assertion
 // in the first place. Every other phrase in the list below names the issue's
 // post-merge STATE ("stays open", "must outlive the merge"); that one named a
-// MODE, and naming a mode says nothing about this issue. It also earned nothing:
-// a sentence that genuinely declares the mode for an issue reaches for a state
-// word too, and is caught by the state phrases. What it uniquely matched was
-// authors declaring the mode does NOT apply — which the pull-request template
-// invites, since its Issue Link section offers a `Closes` / `Refs` pair and the
-// natural way to justify ticking `Closes` is to say the other option is not it.
-// So it is gone, and the list is state assertions only.
+// MODE, and naming a mode says nothing about this issue. What it uniquely
+// matched was authors declaring the mode does NOT apply — which the pull-request
+// template invites, since its Issue Link section offers a `Closes` / `Refs` pair
+// and the natural way to justify ticking `Closes` is to say the other option is
+// not it. So it is gone, and the list is state assertions only.
+//
+// **What that costs, stated plainly rather than waved away** (`haven-reviewer`
+// raised the first draft of this paragraph for overclaiming). A bare POSITIVE
+// mode-naming sentence with no state word — "#5 ships in operator-verify mode",
+// and `Closes #5` further down — was caught before and is not caught now. A test
+// below pins that, so it is a recorded trade rather than a silent hole. Three
+// things make it the right trade, and none of them is "it never happens":
+// the **label** is the primary signal and the skill requires it in this mode
+// (step 2), so the sentence was only ever the backstop for an author who already
+// skipped the required step; every phrasing that also asserts the STATE is still
+// caught, and the skill's own operator-verify prose ("Leave the issue OPEN")
+// reliably produces one; and the alternative — keeping the phrase and reading
+// negation — is prose interpretation, which is out of scope and was already
+// observed failing in production on PR #2326. In the uncaught case the label is
+// the only guaranteed signal. That is the limit; do not read it as an absence
+// of one.
 //
 // ## How an author quotes the keyword without firing this guard (#2320/#2327)
 //
@@ -286,11 +306,7 @@ export function findViolations({ body, title, commits = [], closingRefs, labelsB
   // The union across every emitter, plus whatever GitHub's own parse supplied.
   // A closing reference is a closing reference wherever it is written; the
   // source only matters for telling the author where to go and fix it.
-  const refs = []
-  for (const n of closingRefs ?? []) if (!refs.includes(n)) refs.push(n)
-  for (const source of sources) {
-    for (const n of parseClosingRefs(source.text)) if (!refs.includes(n)) refs.push(n)
-  }
+  const refs = allClosingRefs({ body, title, commits, closingRefs })
 
   const violations = []
   for (const issue of refs) {
@@ -356,24 +372,84 @@ export function renderReport(violations) {
 
 const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
+// One page of commits, asked for by GraphQL rather than by `gh pr view`.
+//
+// `gh pr view --json commits` exposes only `messageHeadline` and `messageBody`,
+// and `messageHeadline` is **truncated at 70 characters** with an ellipsis, the
+// remainder relocated to the FRONT of `messageBody`, also ellipsis-wrapped. So
+// rejoining the two does not reconstruct the message: it splits the subject line
+// mid-token and inserts a paragraph break that was never there. A commit subject
+// of `fix(ci): make the retry loop stop doubling background sync Closes #1234`
+// comes back as `...sync C…` + `…loses #1234`, and the keyword vanishes from a
+// message GitHub will still act on — a silent false GREEN in exactly the
+// mechanism #2320 exists to close, and one no error handling can catch because
+// the `gh` call succeeded. Raised by `haven-reviewer` on this change and
+// reproduced against this repository's own `7f7102ff` (headline 70 chars ending
+// `(#2…`, body beginning `…276)`).
+//
+// The `commit { message }` field is the untruncated original, so the guard reads
+// the same bytes GitHub parses.
+const COMMITS_QUERY = `
+query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $pr) {
+      commits(first: 100, after: $cursor) {
+        nodes { commit { oid message } }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}`
+
+/**
+ * Flatten a `commits` connection into the shape `findViolations` consumes.
+ * Pure, so the truncation regression above is testable without the network.
+ */
+export function commitsFromGraphQL(connection) {
+  return (connection?.nodes ?? [])
+    .map((n) => n?.commit)
+    .filter(Boolean)
+    .map((c) => ({ oid: c.oid, message: c.message ?? '' }))
+}
+
+function readCommits(pr, owner, name) {
+  const commits = []
+  let cursor = null
+  // Bounded: GitHub caps a pull request at 250 commits, so five pages is the
+  // ceiling and the loop cannot run away on a malformed `pageInfo`.
+  for (let page = 0; page < 5; page += 1) {
+    const args = [
+      'api', 'graphql',
+      '-f', `query=${COMMITS_QUERY}`,
+      '-F', `owner=${owner}`,
+      '-F', `name=${name}`,
+      '-F', `pr=${pr}`,
+    ]
+    if (cursor) args.push('-F', `cursor=${cursor}`)
+    const connection = JSON.parse(gh(args)).data.repository.pullRequest.commits
+    commits.push(...commitsFromGraphQL(connection))
+    if (!connection.pageInfo?.hasNextPage) return commits
+    cursor = connection.pageInfo.endCursor
+  }
+  // Fail CLOSED rather than silently reading a prefix of the commit list.
+  throw new Error('more than 500 commits on this pull request; refusing to read a partial list')
+}
+
 function readPullRequest(pr) {
   // `closingIssuesReferences` is GitHub's OWN parse of the body — the same
   // computation that will run at merge time. Preferring it over the local regex
   // means the guard is asking the mechanism, not re-implementing it; the regex
   // stays as the offline path, as a cross-check, and as the ONLY reading
   // available for the commit and title sources, which that field does not cover.
-  const view = JSON.parse(
-    gh(['pr', 'view', String(pr), '--json', 'body,title,commits,closingIssuesReferences']),
-  )
-  const refs = (view.closingIssuesReferences ?? []).map((r) => r.number)
-  const commits = (view.commits ?? []).map((c) => ({
-    oid: c.oid,
-    // `gh` splits a commit message into headline and body. GitHub parses the
-    // whole message, so rejoin it — #2320's keyword was in the BODY of
-    // `7f7102ff`, several paragraphs below its subject line.
-    message: [c.messageHeadline, c.messageBody].filter(Boolean).join('\n\n'),
-  }))
-  return { body: view.body ?? '', title: view.title ?? '', commits, closingRefs: refs }
+  const view = JSON.parse(gh(['pr', 'view', String(pr), '--json', 'body,title,closingIssuesReferences']))
+  const repo = JSON.parse(gh(['repo', 'view', '--json', 'owner,name']))
+  const commits = readCommits(pr, repo.owner.login, repo.name)
+  return {
+    body: view.body ?? '',
+    title: view.title ?? '',
+    commits,
+    closingRefs: (view.closingIssuesReferences ?? []).map((r) => r.number),
+  }
 }
 
 function readLabels(issues) {

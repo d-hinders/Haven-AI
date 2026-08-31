@@ -4,6 +4,7 @@ import {
   OPERATOR_VERIFY_LABEL,
   allClosingRefs,
   assertsStaysOpen,
+  commitsFromGraphQL,
   findViolations,
   logicalLines,
   parseClosingRefs,
@@ -238,6 +239,72 @@ test('the title is scanned because a squash makes it a commit subject on dev', (
   })
   assert.equal(violations.length, 1)
   assert.equal(violations[0].issue, 42)
+})
+
+// A subject line long enough that GitHub's `messageHeadline` truncates it, with
+// the closing keyword straddling the cut. 74 characters before `Closes`, so the
+// 70-character boundary lands inside the keyword itself.
+const STRADDLING_SUBJECT =
+  'fix(ci): stop the retry loop from doubling background sync requests Closes #1234'
+
+test('commit messages are read UNTRUNCATED — the headline+body rejoin loses keywords', () => {
+  // haven-reviewer, blocking, on this change. `gh pr view --json commits` gives
+  // only `messageHeadline` (cut at 70 characters, ellipsised) and `messageBody`
+  // (carrying the ellipsised remainder). Rejoining them splits the subject
+  // mid-token, so a keyword GitHub WILL act on disappears — a silent false
+  // GREEN that no error handling catches, because the `gh` call succeeded.
+  //
+  // First: the defect itself, pinned. If this assertion ever flips, `gh` has
+  // changed and the workaround below can be reconsidered.
+  const cut = 70
+  const truncated = {
+    messageHeadline: `${STRADDLING_SUBJECT.slice(0, cut - 1)}…`,
+    messageBody: `…${STRADDLING_SUBJECT.slice(cut - 1)}`,
+  }
+  const rejoined = [truncated.messageHeadline, truncated.messageBody].join('\n\n')
+  assert.deepEqual(
+    parseClosingRefs(rejoined),
+    [],
+    'the rejoin must be shown to LOSE the reference — that is why the source changed',
+  )
+
+  // Second: the source actually used. `commit { message }` over GraphQL is the
+  // original bytes, and the reference survives.
+  const commits = commitsFromGraphQL({
+    nodes: [{ commit: { oid: 'abc1234567', message: `${STRADDLING_SUBJECT}\n\nSome body.` } }],
+  })
+  assert.deepEqual(commits, [
+    { oid: 'abc1234567', message: `${STRADDLING_SUBJECT}\n\nSome body.` },
+  ])
+  assert.deepEqual(allClosingRefs({ commits }), [1234])
+  assert.equal(
+    findViolations({ commits, labelsByIssue: { 1234: [OPERATOR_VERIFY_LABEL] } }).length,
+    1,
+  )
+})
+
+test('commitsFromGraphQL survives an empty, absent or holey connection', () => {
+  assert.deepEqual(commitsFromGraphQL(undefined), [])
+  assert.deepEqual(commitsFromGraphQL({ nodes: [] }), [])
+  assert.deepEqual(commitsFromGraphQL({ nodes: [null, { commit: null }] }), [])
+  assert.deepEqual(commitsFromGraphQL({ nodes: [{ commit: { oid: 'a' } }] }), [
+    { oid: 'a', message: '' },
+  ])
+})
+
+test('the bare mode name being dropped is a RECORDED trade, not an oversight', () => {
+  // haven-reviewer, should-fix: the file used to claim the removed phrase
+  // "earned nothing". It did earn this one case, and the case is pinned here so
+  // nobody re-adds the phrase believing they found a hole. In this shape the
+  // `operator-verify` LABEL — which the skill requires in this mode — is the
+  // only remaining signal.
+  const body = '#5 ships in operator-verify mode.\n\nCloses #5'
+  assert.deepEqual(findViolations({ body }), [], 'not caught by the self-contradiction signal')
+  assert.equal(
+    findViolations({ body, labelsByIssue: { 5: [OPERATOR_VERIFY_LABEL] } }).length,
+    1,
+    'and the label still catches it',
+  )
 })
 
 test('refs are deduplicated across emitters and keep first-seen order', () => {

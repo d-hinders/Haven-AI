@@ -26,7 +26,12 @@ vi.mock('../../../rails/execution-rail.js', () => ({
   resolveExecutionRail: () => 'delegation',
   sessionRailRetired: () => ({ statusCode: 410, body: {} }),
 }))
-vi.mock('../../../infra/repositories/agents.js', () => ({ listAllowanceConfigForAgent: async () => [] }))
+// #2307: a `vi.mock('../../../infra/repositories/agents.js')` stood here
+// declaring `listAllowanceConfigForAgent`. #2020 deleted that function, and
+// `../allowances.js` does not import the agents repository at all — so the mock
+// replaced a module this unit never loads with a function that no longer
+// exists. Removed. (Found by `testing/__tests__/mock-factory-exports.guard`,
+// not by the #2307 census, which only looked for five allowance-module names.)
 
 const { handleGetAllowances } = await import('../allowances.js')
 

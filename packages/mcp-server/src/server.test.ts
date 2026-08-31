@@ -263,3 +263,63 @@ describe('buildHostedMcpServer', () => {
     expect(HOSTED_INSTRUCTIONS).not.toContain(HOSTED_SERVER_VERSION)
   })
 })
+
+// ── #2282: the mcp_transport case mismatch at the protocol boundary ──────────
+
+describe('mcp_transport at the MCP protocol boundary (#2282)', () => {
+  async function connectHosted() {
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const server = buildHostedMcpServer(haven)
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test-client', version: '0.0.0' })
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+    return { client, server }
+  }
+
+  it('advertises snake_case with additionalProperties: false on both settle-leg tools', async () => {
+    const { client, server } = await connectHosted()
+    const { tools } = await client.listTools()
+
+    for (const name of ['haven_settle_mcp_tool', 'haven_complete_mcp_tool']) {
+      const schema = tools.find((tool) => tool.name === name)!.inputSchema as {
+        properties: Record<string, any>
+      }
+      const transport = schema.properties.mcp_transport
+      expect(transport.required).toEqual(['handshake_required', 'source'])
+      expect(transport.additionalProperties).toBe(false)
+      expect(Object.keys(transport.properties)).toEqual(['handshake_required', 'source'])
+    }
+
+    await client.close()
+    await server.close()
+  })
+
+  it('refuses the SDK camelCase shape with a message naming the mismatch', async () => {
+    // #2282's second hazard: the caller's explicit-context retry must come back
+    // as something they can act on. A refusal that only says "handshake_required:
+    // Required" is true and useless to a caller holding `handshakeRequired`.
+    const { client, server } = await connectHosted()
+
+    const result = (await client.callTool({
+      name: 'haven_settle_mcp_tool',
+      arguments: {
+        payment_id: 'pay_x402',
+        signature: '0x' + '11'.repeat(65),
+        merchant_url: 'https://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'legacy' },
+        mcp_transport: { handshakeRequired: true, source: 'path' },
+        payment_header: 'eyJ4IjoxfQ==',
+      },
+    })) as { isError?: boolean; content: { type: string; text: string }[] }
+
+    expect(result.isError).toBe(true)
+    const text = result.content.map((part) => part.text).join('\n')
+    expect(text).toContain('handshake_required')
+    expect(text).toContain('handshakeRequired')
+    expect(text).toContain('snake_case')
+
+    await client.close()
+    await server.close()
+  })
+})

@@ -703,17 +703,21 @@ The instruction above assumes the deploy provider can run an authenticated
 `curl` *after* a deployment goes live. Railway offers neither half of that, as
 observed in the `Haven AI / dev` project on 2026-08-31:
 
-- **Project Settings → Webhooks is URL-only.** It takes a Webhook URL and event
-  types, with no header field — its own hint says it "will automatically format
-  the payload for Discord and Slack webhooks", i.e. it POSTs *Railway's* payload
-  to a URL. It therefore cannot send `Authorization: Bearer` and can never
-  authenticate against `POST /repos/:owner/:repo/dispatches`. This is a dead end,
-  not a misconfiguration.
+- **Project Settings → Webhooks exposes no header field**, on the evidence seen:
+  the *creation* form takes a Webhook URL and event types only, and its hint says
+  it "will automatically format the payload for Discord and Slack webhooks", i.e.
+  it POSTs *Railway's* payload to a URL. If that is the whole capability it cannot
+  send `Authorization: Bearer` and so cannot authenticate against
+  `POST /repos/:owner/:repo/dispatches`. **Not verified past the creation form** —
+  an edit view or a "custom payload" mode could expose headers; that hint naming
+  Discord and Slack specifically invites the question. Someone with the dashboard
+  open should settle it before this is quoted as settled.
 - **The service exposes a *pre*-deploy step, not a post-deploy one.**
   `@haven/backend` → Settings → Deploy offers a Custom Start Command and
-  `+ Add pre-deploy step`. A pre-deploy command runs *before* the new version is
-  live, so a dispatch fired there starts the harness against the **previous**
-  deployment — the same `headSha`-vs-deployed false coverage this document
+  `+ Add pre-deploy step`. The label is what was observed; that a pre-deploy
+  command runs *before* the new version is live is standard PaaS semantics rather
+  than something the screenshot demonstrates. On that reading a dispatch fired
+  there starts the harness against the **previous** deployment — the same `headSha`-vs-deployed false coverage this document
   refuses a `push` trigger for, and worse than the current gap for the same
   reason.
 
@@ -723,10 +727,21 @@ and scale event rather than on deploys, **and** requires a GitHub `Actions: writ
 token in the runtime environment of an internet-facing service; wrapping the
 Custom Start Command has both problems plus fragility.
 
-Scope of that observation: the Deploy settings panel was read from a screenshot
-that was not scrolled to its end. If a post-deploy hook exists further down, the
-first bullet changes and the second does not — a pre-deploy step is the wrong
-place regardless, and the Webhooks limitation stands on its own.
+Scope of these observations, stated so they are not quoted past their evidence:
+
+- The Deploy settings panel was read from a screenshot not scrolled to its end.
+  If a post-deploy hook exists further down, the timing bullet changes and the
+  Webhooks one does not.
+- The Webhooks finding rests on a blank *creation* form. That is consistent with
+  "no webhook is configured", but a list with zero items above an add-form and an
+  add-form with empty fields are different observations, and only the second was
+  definitely seen.
+- **Vercel was never checked.** The original text offered the dev deploy hook in
+  "the Railway dev backend (and/or the Vercel dev project)", and only Railway was
+  investigated. Vercel is dropped from the instruction above because the harness
+  is black-box against the deployed *backend*, so a frontend deploy is the wrong
+  thing to trigger on — not because Vercel was found incapable. If that reasoning
+  is ever revisited, its deploy hooks remain untested.
 
 **The route that replaces this is #2273** — trigger on GitHub's own
 `deployment_status` event, which needs no PAT in a third-party dashboard, puts no
@@ -751,13 +766,18 @@ default branch (`dev`, which is the only branch `repository_dispatch` ever runs
 from) and the workflow's enabled state are all correct. Each of those was a
 candidate cause and each is ruled out by that one observation.
 
-**What is left is the sender, and it was never configured.** That was three
-indistinguishable variants from inside this repository — never added, added with
-a `GH_DISPATCH_TOKEN` lacking `Actions: write` or expired, or added with a wrong
-`event_type` — until the Railway dashboard was opened on 2026-08-31 (#2268). It
-is the first: Project Settings → Webhooks is empty, and the `@haven/backend`
-Deploy settings invoke no `curl`. Consistent with "never once, for any event
-type, in the repo's whole history".
+**What is left is the sender, and the dashboard says nothing is sending.** That
+was three indistinguishable variants from inside this repository — never added,
+added with a `GH_DISPATCH_TOKEN` lacking `Actions: write` or expired, or added
+with a wrong `event_type` — until the Railway dashboard was opened on 2026-08-31
+(#2268). What was seen: Project Settings → Webhooks showing a blank creation form
+with no configured webhook, and `@haven/backend` Deploy settings invoking no
+`curl`. That points to **never added** and is consistent with "never once, for any
+event type, in the repo's whole history"; it does not strictly exclude a webhook
+configured somewhere not in view, which is why the scope note above distinguishes
+an empty list from a blank form. The distinction changes little in practice —
+per *Why this cannot be configured in Railway*, there is no supported place to
+put a working one either way.
 
 **Fixing it is not the operator action this section used to describe**, because
 Railway offers no place to put that hook — see *Why this cannot be configured in

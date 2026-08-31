@@ -20,6 +20,27 @@
  * alive for GET (list), PUT (rename, set default) and DELETE (unlink) — those
  * operate on EXISTING accounts, which must keep working (see
  * `hooks/useUserSafes.ts`). Only creation and import are gone.
+ *
+ * **Known limits — a partial net, documented here rather than implied to be a
+ * closed guarantee** (haven-reviewer, #2261; the same treatment `CLAUDE.md`
+ * gives the chain-default guard). All four were measured, not guessed:
+ *
+ * 1. Only a literal first argument is matched. `api.post(IMPORT_PATH, …)` with
+ *    the path hoisted to a `const`, and `` api.post(`/user/${'safes'}`, …) ``,
+ *    both pass green. Interpolation is excluded deliberately — `/user/safes/${id}`
+ *    is the LIVE rename route, and matching it would make the guard cry wolf on
+ *    the one thing that must keep working.
+ * 2. `git ls-files` sees tracked files only, so a reintroduction that has not
+ *    been `git add`ed yet is invisible locally. It is caught on the commit, i.e.
+ *    before CI, which is the point at which it would matter.
+ * 3. `packages/frontend/src` only. `packages/cli` is a second Haven API client
+ *    with no equivalent guard (checked on this branch: it uses `GET /user/safes`
+ *    and `PUT /user/safes/:id`, both live).
+ * 4. `.post` / `.put` call shape only, not a bare `fetch`. What makes that
+ *    adequate TODAY is that `ApiClient.request` is private (`lib/api.ts`), so
+ *    these are the frontend's only POST/PUT channel to the Haven backend — the
+ *    sole raw `fetch` outside `api.ts` is `lib/safe-tx.ts`, which targets Safe's
+ *    own transaction service. If that ever stops being true, widen this guard.
  */
 
 import { describe, expect, it } from 'vitest'

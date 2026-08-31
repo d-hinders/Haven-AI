@@ -137,7 +137,6 @@
     "packages/backend/src/routes/machine-payments.ts",
     "packages/backend/src/routes/payments.ts",
     "packages/backend/src/routes/safe-exec.ts",
-    "packages/backend/src/routes/x402-resources.ts",
     "packages/backend/src/routes/x402.ts",
     "packages/core/src/machine-payment-lifecycle.ts",
     "packages/sdk/src/signer.ts",

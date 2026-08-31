@@ -687,6 +687,146 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
     })
   })
 
+  describe('the 410 precedes TOKEN RESOLUTION too (#2274)', () => {
+    // Token resolution used to run ABOVE the rail gate on both routes, so a
+    // retired-rail account naming an unsupported asset was handed a 400
+    // carrying `supported: [...]` — the list of assets it can pay with —
+    // before anything told it the rail is gone and it can pay with none of
+    // them. Rail-INDEPENDENT (it asserts nothing false about any rail), which
+    // is why #2245 left it and filed it, and why it is a disclosure-ordering
+    // defect rather than a money defect: both outcomes are refusals.
+    //
+    // The gate now sits directly above token resolution on BOTH routes, so
+    // the only thing left above it is the structural, rail-independent input
+    // validation that decides whether there is a request at all — the same
+    // position `agentAuthMiddleware`'s 401 already occupies.
+    const UNSUPPORTED_ASSET = '0x00000000000000000000000000000000deadbeef'
+
+    it.each(RETIRED_RAILS)(
+      'POST /payments — %s naming an unsupported token gets the 410, not a supported-asset list',
+      async (_label, rail) => {
+        primeDb(authRoute(rail), railRoute(rail))
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/payments',
+          headers,
+          payload: { token: 'NOTATOKEN', amount: '0.01', to: RECIPIENT },
+        })
+
+        expect(res.statusCode, `expected the rail 410, got ${res.body}`).toBe(410)
+        expect(res.json().error).toBe(RETIRED_ACCOUNT)
+        expect(res.json().supported).toBeUndefined()
+        expectNothingHappened()
+      },
+    )
+
+    it.each(RETIRED_RAILS)(
+      'POST /x402/authorize — %s naming an unsupported asset gets the 410, not a supported-asset list',
+      async (_label, rail) => {
+        primeDb(authRoute(rail), railRoute(rail))
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/x402/authorize',
+          headers,
+          payload: {
+            url: 'https://merchant.example/resource',
+            payTo: RECIPIENT,
+            amount: '10000',
+            asset: UNSUPPORTED_ASSET,
+            network: 'base-sepolia',
+          },
+        })
+
+        expect(res.statusCode, `expected the rail 410, got ${res.body}`).toBe(410)
+        expect(res.json().error).toBe(RETIRED_ACCOUNT)
+        expect(res.json().supported).toBeUndefined()
+        expectNothingHappened()
+      },
+    )
+
+    it('POST /payments — a retired account naming an UNPARSEABLE amount for a real token also gets the 410', async () => {
+      // `parseTokenAmount` sits between token resolution and the old gate
+      // position, so it disclosed the same thing one step later: a refusal
+      // phrased in terms of a token the account cannot spend.
+      primeDb(authRoute('allowance_module'), railRoute('allowance_module'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/payments',
+        headers,
+        payload: { token: 'USDC', amount: '0.0000001', to: RECIPIENT },
+      })
+
+      expect(res.statusCode, `expected the rail 410, got ${res.body}`).toBe(410)
+      expect(res.json().error).toBe(RETIRED_ACCOUNT)
+      expectNothingHappened()
+    })
+
+    it('POSITIVE CONTROL — a DELEGATION account naming an unsupported token still gets its 400 WITH the supported list', async () => {
+      // Without this the fix above is satisfied by 410-ing every input shape
+      // on every rail. The supported-asset list is correct information for an
+      // account that can actually spend; the defect was disclosing it to one
+      // that cannot.
+      primeDb(authRoute('delegation'), railRoute('delegation'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/payments',
+        headers,
+        payload: { token: 'NOTATOKEN', amount: '0.01', to: RECIPIENT },
+      })
+
+      expect(res.statusCode, `delegation rail must still get its 400, got ${res.body}`).toBe(400)
+      expect(res.json().error).toContain('NOTATOKEN')
+      expect(Array.isArray(res.json().supported)).toBe(true)
+      expect(res.json().supported).toContain('USDC')
+    })
+
+    it('POSITIVE CONTROL — a DELEGATION account naming an unsupported x402 asset still gets its 400 WITH the supported list', async () => {
+      primeDb(authRoute('delegation'), railRoute('delegation'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/x402/authorize',
+        headers,
+        payload: {
+          url: 'https://merchant.example/resource',
+          payTo: RECIPIENT,
+          amount: '10000',
+          asset: UNSUPPORTED_ASSET,
+          network: 'base-sepolia',
+        },
+      })
+
+      expect(res.statusCode, `delegation rail must still get its 400, got ${res.body}`).toBe(400)
+      expect(res.json().error).toContain(UNSUPPORTED_ASSET)
+      expect(Array.isArray(res.json().supported)).toBe(true)
+      expect(x402DelegationMocks.runDelegationAuthorize).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['/payments', { token: 'USDC', amount: 'not-a-number', to: RECIPIENT }],
+      ['/x402/authorize', { url: 'https://m.example/r', payTo: RECIPIENT, amount: '0', asset: USDC, network: 'base-sepolia' }],
+    ])(
+      'STRUCTURAL validation still precedes the 410 on POST %s — the gate moved above token resolution, not above the request check',
+      async (url, payload) => {
+        // The bound on this change, stated as a test so it cannot drift into
+        // "410 for literally anything". A malformed request is not a request
+        // about a rail, and answering 410 to one would make the tombstone the
+        // route's error handler.
+        primeDb(authRoute('allowance_module'), railRoute('allowance_module'))
+
+        const res = await app.inject({ method: 'POST', url, headers, payload })
+
+        expect(res.statusCode, `expected the structural 400, got ${res.body}`).toBe(400)
+        expect(res.json().error).not.toBe(RETIRED_ACCOUNT)
+        expectNothingHappened()
+      },
+    )
+  })
+
   describe('both tombstones coexist on the seam', () => {
     it('a session-rail account still gets #834s OWN message, not this one', async () => {
       primeDb(authRoute('session_key'), railRoute('session_key'))

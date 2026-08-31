@@ -46,9 +46,20 @@
  *
  * It does NOT cover runtime error strings, code comments, or the `reason`
  * field of `buildAgentGuidance` — `reason` is built per-call inside a handler
- * and is not reachable from a static record, so the two guidance strings this
- * issue fixed there are pinned separately in `tools.test.ts`.
+ * and is not reachable from a static record.
+ *
+ * That sentence originally ended "...so the two guidance strings this issue
+ * fixed there are pinned separately in `tools.test.ts`." **That was false when
+ * written**: no test in this repository asserted a header name on either
+ * `reason`. Review caught it. Claiming a safety net that does not exist is
+ * worse than naming the gap, because the next person to revert either site
+ * sees green and believes it. The two `reason` strings are pinned in
+ * `tools.test.ts` NOW — search it for `PAYMENT-SIGNATURE` — and this paragraph
+ * stays as the reason that claim is worth re-checking rather than trusting.
  */
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { toolDescriptions as hostedDescriptions } from './tools.js'
 import { toolDescriptions as signerDescriptions } from '@haven_ai/signer'
@@ -142,5 +153,89 @@ describe('#2330 — no agent-facing surface names the v1 header alone', () => {
     expect(quote).toContain(V2_NAME)
     expect(quote).toContain(V1_NAME)
     expect(quote).toContain('retry the merchant YOURSELF')
+  })
+})
+
+/**
+ * #2330 (review finding) — the description sweep above could not have caught
+ * the surface review actually found: a copy-pasteable code sample on the
+ * public `/protocols/x402` page setting `'X-PAYMENT'` alone. A developer
+ * pasting it against a strict v2 merchant reproduces the epic's originating
+ * failure, and no description record contains it.
+ *
+ * So this scans the tree for the act of SETTING the header — an object-literal
+ * key, a `headers.set(...)`, or a header line in a Markdown code fence — and
+ * requires the file to name the v2 name somewhere too. File-level granularity
+ * on purpose: a file that sets this header and never mentions
+ * `PAYMENT-SIGNATURE` is the shape of the defect, and anything finer starts
+ * guessing at how far "nearby" reaches.
+ *
+ * It matches the ACT, not the mention, so the many legitimate discussions of
+ * the v1 name — historical changelog entries, retired-rail sections, spec
+ * references — are untouched without needing to be listed.
+ */
+const REPO_ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..')
+
+/** Setting the header: object-literal key, `.set(...)`, or a Markdown header line. */
+const SETS_V1_HEADER = /(['"`]X-PAYMENT['"`]\s*:)|(\.set\(\s*['"`]X-PAYMENT['"`])|(^\s*X-PAYMENT:\s*\S)/m
+
+const SCAN_ROOTS = ['packages', 'docs']
+const SKIP_DIRS = new Set(['node_modules', 'dist', '.next', 'coverage', '.turbo'])
+const SKIP_PATHS = [
+  // Historical compliance records: they describe what was true when written.
+  'docs/regulatory/casp-changelog/',
+  // The demo merchant RECEIVES; accepting the v1 alias is its documented job.
+  'packages/demo-merchant-mcp/',
+]
+const ALLOWLIST = new Map<string, string>([
+  [
+    'packages/sdk/src/mcp-merchant-transport.test.ts',
+    'plants a STALE X-PAYMENT on the caller init to prove deliverPayment ' +
+      'overwrites it — naming v1 alone is the point of the fixture',
+  ],
+])
+
+function* walk(dir: string): Generator<string> {
+  for (const entry of readdirSync(dir)) {
+    if (SKIP_DIRS.has(entry)) continue
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) yield* walk(full)
+    else if (/\.(ts|tsx|md)$/.test(entry)) yield full
+  }
+}
+
+describe('#2330 — nothing SETS the v1 header alone', () => {
+  it('every file that sets X-PAYMENT also names PAYMENT-SIGNATURE', () => {
+    const offenders: string[] = []
+    let scanned = 0
+    let setters = 0
+
+    for (const root of SCAN_ROOTS) {
+      for (const file of walk(join(REPO_ROOT, root))) {
+        const rel = relative(REPO_ROOT, file).split('\\').join('/')
+        if (SKIP_PATHS.some((skip) => rel.startsWith(skip))) continue
+        scanned += 1
+        const source = readFileSync(file, 'utf8')
+        if (!SETS_V1_HEADER.test(source)) continue
+        setters += 1
+        if (ALLOWLIST.has(rel)) continue
+        if (!source.includes(V2_NAME)) offenders.push(rel)
+      }
+    }
+
+    // Non-vacuity, both directions: the walk found files, and it found files
+    // that actually set the header. A broken glob would otherwise report a
+    // clean sweep of nothing — the exact way this test could go green while
+    // the next /protocols-style sample ships.
+    expect(scanned).toBeGreaterThan(100)
+    expect(setters).toBeGreaterThan(0)
+
+    expect(
+      offenders,
+      `these files set ${V1_NAME} without naming ${V2_NAME}. A strict x402 v2 merchant ` +
+        `reads only ${V2_NAME}; setting the legacy name alone is indistinguishable from ` +
+        'sending no header, and on the EIP-3009 bridge the funding leg has already moved ' +
+        'the money. Set both, or add an allowlist entry saying why v1 alone is correct here.',
+    ).toEqual([])
   })
 })

@@ -63,7 +63,15 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/sdk/src/**'],
-    'last-verified': '2026-08-28',
+    // #2292: re-verified and EDITED (the "Resuming an x402 payment" section
+    // only). The manual-retry examples showed the caller making the merchant
+    // call and then nothing — which was accurate before this PR and is a
+    // silent gap after it, since HavenClient.reportX402MerchantOutcome is now
+    // the only way Haven learns that outcome. The header example there also
+    // still sent X-PAYMENT alone; corrected to both names, matching the #2289
+    // paragraph this same doc already carries two sections below. The rest of
+    // the README was NOT re-verified in this pass.
+    'last-verified': '2026-08-31',
   },
   {
     doc: 'packages/signer/README.md',

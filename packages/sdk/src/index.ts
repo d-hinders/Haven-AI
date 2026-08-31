@@ -142,6 +142,9 @@ export {
 export type { X402PaymentHeaderContext, X402SchemeSelection } from './x402.js'
 export type { X402Erc7710Settlement } from './types.js'
 
+// #2292: the plain-HTTP merchant-outcome report (HavenClient.reportX402MerchantOutcome).
+export type { X402MerchantOutcome, X402MerchantOutcomeReport } from './merchant-completion.js'
+
 export {
   SWEEP_BASE_CHAIN_ID,
   SWEEP_BASE_USDC_ADDRESS,

@@ -3,9 +3,11 @@ import assert from 'node:assert/strict'
 import {
   OPERATOR_VERIFY_LABEL,
   allClosingRefs,
+  assemblePullRequest,
   assertsStaysOpen,
   commitsFromGraphQL,
   findViolations,
+  isPromotion,
   logicalLines,
   parseClosingRefs,
   pullRequestSources,
@@ -535,4 +537,119 @@ test('the report names the concrete replacement and the emitter that carried it'
   )
   assert.match(commitReport, /commit 7f7102ff's message/)
   assert.match(commitReport, /every commit message/)
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #2346 — the PROMOTION carve-out.
+//
+// Found by the 0.1.33-alpha.0 promotion, which this guard blocked on
+// `Closes #2268` carried by `dfe7d8ff` — a commit that merged into `dev` days
+// earlier and closed the issue then. The closure had already happened and been
+// reversed; the promotion could not repeat it, because `main` is not the
+// default branch. Every promotion carries historical commits by construction,
+// so this was a standing block on releases rather than a one-off.
+//
+// The carve-out is deliberately keyed on head === default branch rather than
+// base !== default branch. Those are different sets, and the difference is
+// `hotfix/* → main`, whose commits have NOT reached `dev` and whose keywords
+// fire for the first time on the sync-back.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('#2346: a promotion (dev → main) is recognised — its commits are already on the default branch', () => {
+  assert.equal(
+    isPromotion({ headRefName: 'dev', baseRefName: 'main', defaultBranch: 'dev' }),
+    true,
+  )
+})
+
+test('#2346: a hotfix into main is NOT a promotion — its commits reach dev later, on the sync-back', () => {
+  // The case the narrower "base !== default branch" rule would have got wrong.
+  // A hotfix branch is based on `main`; its keyword has never reached `dev`,
+  // so it must still be scanned.
+  assert.equal(
+    isPromotion({ headRefName: 'hotfix/2299-sweep-floor', baseRefName: 'main', defaultBranch: 'dev' }),
+    false,
+  )
+})
+
+test('#2346: an ordinary feature PR into dev is NOT a promotion', () => {
+  assert.equal(
+    isPromotion({ headRefName: 'fix/2343-mcp-transport', baseRefName: 'dev', defaultBranch: 'dev' }),
+    false,
+  )
+})
+
+test('#2346: a sync-back (main → dev) is NOT a promotion — it lands ON the default branch', () => {
+  // Base IS the default branch here, so keywords fire; this must stay scanned.
+  assert.equal(
+    isPromotion({ headRefName: 'main', baseRefName: 'dev', defaultBranch: 'dev' }),
+    false,
+  )
+})
+
+test('#2346: an unreadable default branch is NOT treated as a promotion — fail closed', () => {
+  // If `defaultBranchRef` comes back empty the guard must keep scanning rather
+  // than quietly exempt the pull request. A guard that stops looking when it
+  // cannot tell is the false-GREEN direction this file exists to refuse.
+  //
+  // The THIRD case is the one that earns this test. Mutation-checked: dropping
+  // the `Boolean(defaultBranch)` conjunct leaves the first two green, because
+  // `'dev' === undefined` is already false — they pass whether the guard is
+  // there or not. Only an unreadable branch on BOTH sides distinguishes them:
+  // `undefined === undefined` is true, so without the conjunct a pull request
+  // whose refs could not be read would be silently exempted, which is the
+  // worst possible direction for this to fail.
+  assert.equal(isPromotion({ headRefName: 'dev', baseRefName: 'main', defaultBranch: undefined }), false)
+  assert.equal(isPromotion({ headRefName: 'dev', baseRefName: 'main', defaultBranch: '' }), false)
+  assert.equal(
+    isPromotion({ headRefName: undefined, baseRefName: 'main', defaultBranch: undefined }),
+    false,
+  )
+})
+
+test('#2346: head === base === default branch is NOT a promotion — the shape the guard exists for', () => {
+  // haven-reviewer constructed this: dropping the `baseRefName !== defaultBranch`
+  // conjunct left all 35 tests green, because no case exercised head and base
+  // both equal to the default branch. It is reachable — `headRefName` is an
+  // unqualified branch name, so a fork branch coincidentally named `dev`
+  // targeting this repo's `dev` is exactly this shape. Under the mutant its
+  // commits would be dropped on a merge INTO the default branch, where keywords
+  // DO fire. That is the guard blinding itself on its own reason to exist.
+  assert.equal(isPromotion({ headRefName: 'dev', baseRefName: 'dev', defaultBranch: 'dev' }), false)
+})
+
+test('#2346: assemblePullRequest keeps body and title on a promotion, dropping only commits', () => {
+  // Closes the gap the shard previously only DECLARED. `readPullRequest` shells
+  // out to `gh`, so its wiring was untestable; the assembly is now a pure
+  // function, following `commitsFromGraphQL`'s precedent in this same file.
+  // Without this, a mutant that blanked body and title on a promotion passed
+  // the entire suite.
+  const view = {
+    body: 'Promote dev → main.\n\nCloses #2268',
+    title: 'Promote dev → main',
+    closingIssuesReferences: [],
+  }
+  const commits = [{ oid: 'dfe7d8ff', message: 'ci: something\n\nCloses #2268' }]
+
+  const promoted = assemblePullRequest({ view, commits, promotion: true })
+  assert.deepEqual(promoted.commits, [], 'commits are dropped on a promotion')
+  assert.equal(promoted.body, view.body, 'body survives — it is new text on this pull request')
+  assert.equal(promoted.title, view.title, 'title survives for the same reason')
+
+  const ordinary = assemblePullRequest({ view, commits, promotion: false })
+  assert.equal(ordinary.commits.length, 1, 'an ordinary pull request keeps its commits')
+})
+
+test('#2346: the carve-out drops ONLY the commit source — a promotion body still gets read', () => {
+  // Skipping commits must not become skipping the pull request. The body and
+  // title of a promotion are newly written text that no earlier merge carried,
+  // so a promotion whose body closes a held-open issue is still a violation.
+  const violations = findViolations({
+    body: 'Promote dev → main.\n\nCloses #2268',
+    title: 'Promote dev → main',
+    commits: [],
+    labelsByIssue: { 2268: [OPERATOR_VERIFY_LABEL] },
+  })
+  assert.equal(violations.length, 1)
+  assert.equal(violations[0].issue, 2268)
 })

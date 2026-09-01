@@ -481,19 +481,95 @@ function readCommits(pr, owner, name) {
   throw new Error('more than 500 commits on this pull request; refusing to read a partial list')
 }
 
+/**
+ * True for a PROMOTION pull request — one whose head IS the default branch
+ * (`dev → main` here).
+ *
+ * #2346: this is the one pull-request shape where the commit source cannot
+ * mean what the header above says it means. Every commit on a promotion is
+ * ALREADY on `dev` — that is what a promotion is — so each keyword it carries
+ * already reached the default branch and already fired, on the merge that put
+ * it there. Re-reading them at promotion time reports a closure that happened
+ * days ago and cannot happen again, and since every promotion carries
+ * historical commits by construction, it blocks every release rather than
+ * occasionally.
+ *
+ * It found real closures, which is why this is a scope fix and not a
+ * silencing: #2268 was closed twice by `dfe7d8ff` and quoted again by
+ * `7f7102ff`, exactly as this guard describes. Both were caught, reported and
+ * reopened at the time, ON the pull requests that carried them, which is where
+ * the guard can still do something about it. The promotion is where it can
+ * only re-litigate.
+ *
+ * Deliberately narrow in three directions. It keys on head === default branch,
+ * NOT on base !== default branch: a `hotfix/* → main` branch is based on
+ * `main`, and its commits have NOT reached `dev` yet — they arrive on the
+ * sync-back, where the keyword fires for the first time — so those are still
+ * scanned in full. It ALSO requires base !== default branch, so a pull request
+ * whose head and base are both `dev` is not a promotion: that is a merge INTO
+ * the default branch, where keywords fire, and dropping its commits would blind
+ * the guard on exactly the shape it exists for. And it drops only the COMMIT
+ * source: the body and title of a promotion are newly written text, so they
+ * stay scanned, and a promotion body that says `Closes #<n>` on a held-open
+ * issue is still caught.
+ *
+ * **Known boundary: these are branch NAMES, matched as strings.** `gh pr view`
+ * returns `headRefName` unqualified, so a fork whose branch is coincidentally
+ * named `dev`, targeting `main`, classifies as a promotion here. The impact is
+ * bounded — merging into non-default `main` closes nothing whatever the commits
+ * say — and `.github/workflows/dev-gate.yml` already trusts `head.ref` by string
+ * the same way, so this inherits an existing repository convention rather than
+ * introducing a weakness. Named because "narrow in three directions" should not
+ * quietly mean "narrow in the three I thought of" (haven-reviewer, #2346).
+ */
+function isPromotion({ headRefName, baseRefName, defaultBranch }) {
+  return Boolean(defaultBranch) && headRefName === defaultBranch && baseRefName !== defaultBranch
+}
+
 function readPullRequest(pr) {
   // `closingIssuesReferences` is GitHub's OWN parse of the body — the same
   // computation that will run at merge time. Preferring it over the local regex
   // means the guard is asking the mechanism, not re-implementing it; the regex
   // stays as the offline path, as a cross-check, and as the ONLY reading
   // available for the commit and title sources, which that field does not cover.
-  const view = JSON.parse(gh(['pr', 'view', String(pr), '--json', 'body,title,closingIssuesReferences']))
-  const repo = JSON.parse(gh(['repo', 'view', '--json', 'owner,name']))
-  const commits = readCommits(pr, repo.owner.login, repo.name)
+  const view = JSON.parse(
+    gh(['pr', 'view', String(pr), '--json', 'body,title,closingIssuesReferences,headRefName,baseRefName']),
+  )
+  const repo = JSON.parse(gh(['repo', 'view', '--json', 'owner,name,defaultBranchRef']))
+  const defaultBranch = repo.defaultBranchRef?.name
+  const promotion = isPromotion({
+    headRefName: view.headRefName,
+    baseRefName: view.baseRefName,
+    defaultBranch,
+  })
+  if (promotion) {
+    console.log(
+      `ℹ promotion pull request (${view.headRefName} → ${view.baseRefName}, default branch ` +
+        `${defaultBranch}): skipping the COMMIT source. Every commit here is already on the ` +
+        'default branch, so any closing keyword it carries fired on the merge that put it ' +
+        'there. Body and title are still read.',
+    )
+  }
+  const commits = promotion ? [] : readCommits(pr, repo.owner.login, repo.name)
+  return assemblePullRequest({ view, commits, promotion })
+}
+
+/**
+ * The pure half of `readPullRequest`: given an already-fetched `gh pr view`
+ * payload and commit list, produce the four sources `findViolations` reads.
+ *
+ * Extracted for the same reason `commitsFromGraphQL` was — so the wiring can be
+ * tested without shelling out. Its absence was a real hole: the promotion
+ * carve-out drops the COMMIT source and keeps body and title, and nothing
+ * proved the second half of that sentence. A mutant that blanked `body` and
+ * `title` on a promotion passed the whole suite (haven-reviewer, #2346, which
+ * also pointed at this file's own precedent for the fix).
+ */
+export function assemblePullRequest({ view, commits = [], promotion = false }) {
   return {
     body: view.body ?? '',
     title: view.title ?? '',
-    commits,
+    commits: promotion ? [] : commits,
     closingRefs: (view.closingIssuesReferences ?? []).map((r) => r.number),
   }
 }
@@ -569,6 +645,8 @@ function main(argv) {
   )
   return 0
 }
+
+export { isPromotion }
 
 /** The union of closing references across every emitter on the pull request. */
 export function allClosingRefs({ body, title, commits = [], closingRefs = [] }) {

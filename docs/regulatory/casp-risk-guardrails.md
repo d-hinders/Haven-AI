@@ -62,7 +62,7 @@ covers:
   - .github/workflows/publish.yml
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-31" # #2274: the #2245 "Current state" note under Core Design Principle corrected — it listed token resolution among the rail-INDEPENDENT checks still preceding the x402 rail 410, which #2274 moved below the gate on that route and on POST /payments together. Scope: that blockquote only; the rest of Core Design Principle was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
+last-verified: "2026-09-01" # #2246: § Product Copy Rules — the "Known compliance gap" paragraph is DELETED, because the gap it disclosed is fixed in the same change. Its two avoid-listed phrases ("Haven signs and settles the payment.", "Haven gave you the private key.") were live in `packages/frontend/src/components/UsingYourAgentInfo.tsx`, a file this doc `covers:` by exact path; both are gone and both are now literals in the frontend copy lint, so the rule is enforced rather than disclosed. Scope: that paragraph only — the Use/Avoid lists themselves are unchanged, and nothing else in this document was re-verified. Full analysis in docs/regulatory/casp-changelog/2026-09-01-2246.md. Prior: #2274: the #2245 "Current state" note under Core Design Principle corrected — it listed token resolution among the rail-INDEPENDENT checks still preceding the x402 rail 410, which #2274 moved below the gate on that route and on POST /payments together. Scope: that blockquote only; the rest of Core Design Principle was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -857,29 +857,6 @@ Avoid wording like:
 - Haven recommends the best yield.
 - Haven gave you the private key.
 - Haven signs and settles the payment.
-
-**Known compliance gap — `UsingYourAgentInfo.tsx`, re-measured 2026-08-30
-([#2246](https://github.com/d-hinders/Haven-AI/issues/2246)).** This paragraph
-previously pointed at #2063 as in flight. #2063 closed on 2026-08-26 and the
-gap survived it: PR #2075 correctly de-queued that file's queue-and-approve
-framing, and touched neither avoid-listed phrase. Two are live, not one:
-
-- line 33 — "Haven **signs and settles the payment** automatically — within the
-  agent's remaining allowance." Both halves are wrong on the live rail, not
-  only the avoid-listed phrase: Haven signs nothing (#1138 — the local signer
-  holds the delegate key), and on erc7710 direct settlement the *merchant*
-  redeems the chain while Haven submits no settlement transaction at all.
-  "allowance" is retired-rail vocabulary for what is now an owner-signed
-  budget delegation.
-- lines 11-14 — "Haven **gave you a credential — a private key** plus a small
-  JSON file". The earlier telling of this paragraph said the "gave you the
-  private key" phrase was gone. The literal string is; the claim the avoid-list
-  exists to prevent is not, and it is the modal's opening sentence.
-
-Do not copy either wording into new surfaces. The component is `covers:`-mapped
-by this document, so it is inside the perimeter rather than incidental copy;
-treat the covered UI as compliant with this rule only once #2246 lands, and
-delete this paragraph in the same change.
 
 ## Preferred Architecture Summary
 

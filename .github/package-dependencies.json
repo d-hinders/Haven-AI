@@ -65,8 +65,8 @@
       "dependsOn": ["sdk"]
     },
     "mcp_server": {
-      "dependsOn": ["sdk", "signer"],
-      "note": "@haven_ai/signer is a devDependency, consumed by src/hosted-signer-integration.test.ts. mcp_server_checks runs those tests, so the dependency is real for CI even though it is not shipped."
+      "dependsOn": ["mcp", "sdk", "signer"],
+      "note": "@haven_ai/signer and @haven_ai/mcp are devDependencies, consumed by src/hosted-signer-integration.test.ts and src/strict-tool-input.test.ts. mcp_server_checks runs those tests, so both dependencies are real for CI even though neither is shipped -- the mcp edge (#2348) exists so a rename in packages/mcp's toolSchemas fans out here, which is precisely what that test pins."
     },
     "signer": {
       "dependsOn": ["sdk"]

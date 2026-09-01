@@ -3942,6 +3942,58 @@ export const SCENARIOS = {
       await shoot(dialog, 'unresolved')
     },
   },
+  'using-your-agent': {
+    description:
+      'The "Use your agent" modal behind the onboarding guide\'s step-3 "Show me how" CTA (#2246)',
+    // ── Why this scenario exists ─────────────────────────────────────────
+    //
+    // `UsingYourAgentInfo.tsx` is the file #2246 fixed, and NO route capture
+    // could see it: it is a dialog behind a CTA that only exists in one
+    // onboarding state. #2246 was a pure product-copy change on a surface with
+    // zero rendered evidence, which the design-reviewer pass correctly refused
+    // to clear from source alone.
+    //
+    // TWO fixture overrides, and each is about REACHABILITY of the CTA rather
+    // than about anything the modal renders.
+    //
+    // 1. `hasFirstAgentPayment: false`. The shared fixture ships it TRUE, which
+    //    makes all three steps complete — `allOnboardingComplete` — so the
+    //    guide renders its celebration banner and step 3 carries no CTA at all
+    //    (`DashboardOnboardingGuide.tsx:117-120` only attaches the CTA when
+    //    `activeStep === 3`). Funds and agents come from the shared fixture
+    //    untouched, so steps 1 and 2 are genuinely complete and step 3 is
+    //    genuinely the active one.
+    // 2. `account_type: 'safe'` on the account. Same override, same reason, as
+    //    the `add-funds` scenario above: the shared fixture's
+    //    `delegator_hybrid` hydrates a signer set whose passkey is not on this
+    //    device, so `requiresOtherDevice` is true — and that flag gates
+    //    `showOnboardingGuide` itself (`DashboardClient.tsx:853-857`), so the
+    //    guide, the CTA and the modal are all unreachable. Nothing inside the
+    //    captured dialog depends on the rail: the modal takes only `open` and
+    //    `onClose`, and its copy is a static `PAGES` constant.
+    api(apiPath) {
+      if (apiPath === '/dashboard/overview') {
+        return { ...FIXTURE_OVERVIEW, onboardingProgress: { hasFirstAgentPayment: false } }
+      }
+      if (apiPath === '/auth/me') {
+        return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Show me how', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      // Waited on by the modal's own subtitle rather than a bare timeout: a run
+      // that opens some OTHER dialog fails here instead of shooting it under
+      // this scenario's filename.
+      await dialog.getByText('Make your first agent payment').waitFor({ timeout: 20_000 })
+      await shoot(dialog, 'modal')
+    },
+  },
   'catalog-budget-states': {
     description:
       'The /catalog card grid with all three budget states side by side — within budget, above budget, and unknown (#2295)',

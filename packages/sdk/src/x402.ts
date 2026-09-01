@@ -248,10 +248,17 @@ const NETWORK_TOKENS: Record<string, Record<string, { symbol: string; decimals: 
  * kept the v1 name for the one thing it *writes*, which is how a strict v2
  * merchant came to never see a payment header at all.
  *
- * Both outbound names are sent on every retry rather than switched on
- * `x402Version` (owner decision, 2026-08-31): a v1 merchant ignores the name
- * it does not know, a v2 merchant ignores the legacy one, and no version
+ * The 2026-08-31 owner decision was to send both outbound names on every
+ * retry rather than switch on `x402Version`: a v1 merchant ignores the name it
+ * does not know, a v2 merchant ignores the legacy one, and no version
  * heuristic has to be right for a payment to land.
+ *
+ * **That is no longer unconditional (#2341).** It held while the cost of a
+ * spare header was zero, and on the EIP-3009 bridge it still is. On erc7710 it
+ * is not: that header carries a whole delegation chain, and duplicating it
+ * overflowed the merchant's header limit — HTTP 431, every erc7710 settlement
+ * refused. `x402PaymentHeaderNamesFor` below is the live rule; read it rather
+ * than this paragraph, which records why the simpler rule was right first.
  */
 /** v2 client→server payment payload. The name a strict v2 merchant reads. */
 export const X402_PAYMENT_HEADER_NAME = 'PAYMENT-SIGNATURE'
@@ -262,11 +269,15 @@ export const X402_PAYMENT_REQUIRED_HEADER_NAME = 'PAYMENT-REQUIRED'
 /** v2 server→client settlement receipt. */
 export const X402_PAYMENT_RESPONSE_HEADER_NAME = 'PAYMENT-RESPONSE'
 /**
- * What the evidence record's `paymentProofHeaderName` reports, v2 name first.
+ * Both wire names, v2 first — the value an EIP-3009 retry actually sends.
  *
- * Both names go on the wire, so recording only one would make the audit trail
- * disagree with what was actually sent. Derived from the two constants rather
- * than written out, so the record cannot drift from the request.
+ * **Not the general answer any more (#2341), and not what a recorder should
+ * reach for.** This was the evidence record's `paymentProofHeaderName` while
+ * both names always went on the wire; erc7710 now sends one, so a recorder
+ * still reading this constant would log a legacy header that was never sent —
+ * exactly the drift the previous wording promised it prevented. Use
+ * `x402PaymentHeaderNamesSent(paymentHeader)`. Kept exported because it is a
+ * published surface and removing it would break consumers.
  */
 export const X402_PAYMENT_HEADER_NAMES_SENT =
   `${X402_PAYMENT_HEADER_NAME}, ${X402_LEGACY_PAYMENT_HEADER_NAME}`

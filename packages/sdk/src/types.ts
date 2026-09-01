@@ -1354,7 +1354,12 @@ export interface RawX402SettleResponse {
  */
 export interface X402Erc7710Settlement {
   paymentId: string
-  /** Pass verbatim as the `X-PAYMENT` header on the merchant retry. */
+  /**
+   * Pass verbatim as the `PAYMENT-SIGNATURE` header on the merchant retry —
+   * that name ALONE. erc7710 is always x402 v2, and this header carries the
+   * delegation chain, so also sending the legacy `X-PAYMENT` overflows the
+   * merchant's header limit (HTTP 431, #2341).
+   */
   paymentHeader: string
   /** The merchant address the child delegation is pinned to. */
   merchantPayTo: string

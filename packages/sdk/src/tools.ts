@@ -165,7 +165,7 @@ const AUTHORIZE_X402_DESCRIPTION =
   'When a paid API returns x402 payment requirements, use this tool to sign with the agent-owned delegate key; funding, when the scheme needs it, is redeemed from the agent budget delegation and is bounded by it. ' +
   'Haven relays signed transactions only; the agent key authorizes payment and on-chain limits enforce spend. ' +
   'A payment outside the on-chain budget is declined before any money moves — report the decline and ask the user to raise the budget in Haven; do not loop retries and do not wait for an approval, because none is queued. Preserve the original merchant/MCP session and x402 details. ' +
-  'On a manual HTTP retry set BOTH PAYMENT-SIGNATURE (x402 v2) and X-PAYMENT (v1) to the returned payment_header; a strict v2 merchant reads only the first.'
+  'On a manual HTTP retry always set PAYMENT-SIGNATURE (x402 v2) to the returned payment_header; a strict v2 merchant reads only that name. Also set X-PAYMENT (v1) on the EIP-3009 funding path for legacy merchants, but NEVER on erc7710 — that header carries a delegation chain and duplicating it is refused with HTTP 431.'
 
 // #2145: the backend now emits nextAction=retry_original_x402_request from
 // GET /payments/:id (agent-payment-status.ts) when the funding leg confirmed

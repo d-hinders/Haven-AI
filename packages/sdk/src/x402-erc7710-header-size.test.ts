@@ -172,7 +172,7 @@ describe('#2341 — erc7710 sends the v2 name alone', () => {
     ).toBe(header)
   })
 
-  it('the erc7710 request fits the default header limit; duplicated it would not', async () => {
+  it('the erc7710 request carries the header ONCE, saving kilobytes off the block', async () => {
     const { transport, seen } = transportWithCapture()
     const header = erc7710Header()
 

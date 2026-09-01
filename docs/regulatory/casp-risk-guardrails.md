@@ -757,7 +757,9 @@ The codebase should make it easy to prove:
 - Agent keys are not stored by Haven.
 - All executable transfers require external signatures.
 - On-chain caveat enforcers constrain every delegation redemption; external signatures and exact authenticated context constrain the EIP-3009 x402 merchant leg.
-- Users can revoke permissions outside Haven.
+- Users can revoke live delegation permissions outside Haven; retired legacy Safe
+  permissions remain outside Haven's control and may require an identified Safe
+  owner to manage.
 
 Add comments, docs, tests, and PR notes around these points when touching payment, agent authority, relaying, account setup, SDK, or demo payment flows.
 

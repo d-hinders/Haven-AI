@@ -502,6 +502,33 @@ export default function AccountDetailClient() {
               ))}
             </Card.Section>
           </div>
+        ) : agentsError && safeAgents.length > 0 ? (
+          <>
+            <div className="border-t border-warning/30 px-5 py-3 text-sm text-[var(--v2-ink-2)]">
+              <div className="flex flex-wrap items-center justify-between gap-3" role="alert">
+                <span>Showing the last successful agent records. Try again to refresh them.</span>
+                <Button variant="ghost" size="sm" onClick={() => refetchAgents()}>Try again</Button>
+              </div>
+            </div>
+            <Card.Section divided>
+              {safeAgents.map((agent) => {
+                const status = agentStatusPresentation(agent.status)
+                return (
+                  <Row
+                    key={agent.id}
+                    href={`/agents/${agent.id}`}
+                    title={agent.name}
+                    subtitle={agentAccessSummary(agent, chainId)}
+                    trailing={
+                      agent.status === 'active'
+                        ? undefined
+                        : <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+                    }
+                  />
+                )
+              })}
+            </Card.Section>
+          </>
         ) : agentsError ? (
           <div className="border-t border-[var(--v2-border)]">
             <EmptyState

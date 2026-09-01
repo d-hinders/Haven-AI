@@ -71,7 +71,10 @@ export function AgentCard({
 
   return (
     <>
-    <div className={`${entityCardClassName({ muted: isRevoked })} min-w-0`}>
+    <div
+      data-testid="agent-card"
+      className={`${entityCardClassName({ muted: isRevoked })} min-w-0`}
+    >
       {/* Header */}
       <div className="flex items-start gap-3 mb-4">
           <div

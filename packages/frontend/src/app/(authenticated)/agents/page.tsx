@@ -6,7 +6,7 @@ export default function AgentsPage() {
     <div className="max-w-5xl">
       <PageHeader
         title="Agents"
-        subtitle="Connect agents to Haven, set their rules, and control what they can spend."
+        subtitle="Connect delegation agents, set their rules, and review historical agent records."
       />
 
       <AgentPanel />

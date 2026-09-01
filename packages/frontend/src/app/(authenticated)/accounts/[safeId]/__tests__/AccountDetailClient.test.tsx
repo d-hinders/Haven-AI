@@ -257,6 +257,31 @@ describe('AccountDetailClient', () => {
     expect(screen.queryByText('No agents connected')).not.toBeInTheDocument()
   })
 
+  it('keeps readable agent records visible when a refresh fails', () => {
+    mockUseAgents.mockReturnValue({
+      agents: [
+        {
+          id: 'legacy-agent-1',
+          name: 'Historical agent',
+          safe_id: 'safe-1',
+          status: 'revoked',
+          account_type: 'safe',
+          allowances: [],
+        },
+      ],
+      loading: false,
+      error: 'Could not refresh agents',
+      refetch: vi.fn(),
+    })
+
+    render(<AccountDetailClient />)
+
+    expect(screen.getByText('Historical agent')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('last successful agent records')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+    expect(screen.queryByText('No agents connected')).not.toBeInTheDocument()
+  })
+
   it('shows last-activity metadata for agents', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-01T12:00:00Z'))

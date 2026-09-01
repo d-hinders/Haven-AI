@@ -74,9 +74,10 @@ last-verified: "2026-08-31" # #2313: the `@haven/frontend` component row listed 
 > Overview only — see the linked docs for detail. Keep this file short.
 
 Haven is non-custodial coordination software between AI agents and money.
-Agents request payments through high-level tools; Safe-originated funding and
-user payments follow user-approved on-chain authority, while agent-wallet
-merchant payments are signed locally and bound to exact payment context. One
+Agents request payments through high-level tools; live wallet payments follow
+owner-signed delegation authority, while historical Safe-originated funding is
+outside the live agent-payment path. Agent-wallet merchant payments are signed
+locally and bound to exact payment context. One
 line holds the security model:
 **API auth = identity, signature = authority, on-chain delegation state =
 enforcement.**

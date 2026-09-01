@@ -32,11 +32,13 @@ last-verified: "2026-08-31" # #2258: Re-read the legacy Safe retirement, live de
 # Haven — System Context
 
 A C4-L1 view of Haven's primary account-control and payment paths, grouped by
-**trust boundary**. User funds are held in the user's Haven wallet (a Safe smart
-account) until an owner- or delegate-authorized transfer; standard x402 can
-temporarily fund the agent-controlled delegate EOA. Owner authority remains
-with the user. Haven operates the web app, backend, hosted MCP, and gas relayers,
-but does not hold user or agent spending keys. The agent's delegate key stays in
+**trust boundary**. On the live delegation rail, user funds are held in the
+user's Haven wallet (a MetaMask Hybrid DeleGator smart account) until an owner-
+or delegate-authorized transfer; existing retired Safe accounts remain
+user-owned and readable. Standard x402 can temporarily fund the agent-controlled
+delegate EOA. Owner authority remains with the user. Haven operates the web app,
+backend, hosted MCP, and gas relayers, but does not hold user or agent spending
+keys. The agent's delegate key stays in
 its local signer or fully local MCP runtime.
 
 > **One live rail; this diagram is the retired baseline.** The diagram and notes

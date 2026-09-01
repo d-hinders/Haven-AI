@@ -182,8 +182,15 @@ describe('the fan-out the issue specifies', () => {
     assert.deepEqual(thenFor('sdk'), ['backend', 'connect', 'mcp', 'mcp_server', 'signer'])
   })
 
-  test('mcp fans out to connect — unchanged', () => {
-    assert.deepEqual(thenFor('mcp'), ['connect'])
+  test('mcp fans out to connect AND mcp_server', () => {
+    // mcp_server joined in #2348, on the identical reasoning that added it to
+    // `signer` below: packages/mcp-server/src/strict-tool-input.test.ts imports
+    // @haven_ai/mcp's toolSchemas, and mcp_server_checks runs it, so a rename in
+    // the LOCAL tool schemas could break that test with its job never running.
+    // The fan-out is the feature rather than a cost — that test exists precisely
+    // to notice a local rename, so it has to run when the local surface moves.
+    // Derived from the real dependency graph, not hand-added.
+    assert.deepEqual(thenFor('mcp'), ['connect', 'mcp_server'])
   })
 
   test('signer fans out to connect AND mcp_server', () => {

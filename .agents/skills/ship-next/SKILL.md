@@ -362,7 +362,8 @@ you need the reasoning. Never edit one without the other — CI will not let you
   hosted MCP deploys from `dev` and the money-flow harness drives it through
   `QA_HOSTED_MCP_URL`, so a green run really does cover it — the argument the
   frontend decision surfaces could not make. Scoped to `src/**` on a measured
-  2-of-55-commits delta for the package's README/Dockerfile/config files);
+  3-of-113-commits delta for the package's README/Dockerfile/config files —
+  the command and window are in the JSON note);
 - `db/migrations/`;
 - the safeguard's own control surface — `scripts/release-bump.mjs`,
   `scripts/ci/qa-freshness.mjs`, `scripts/ci/money-path.test.mjs`,

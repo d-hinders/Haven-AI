@@ -318,8 +318,9 @@ describe('money-path list stays in one piece', () => {
     }
 
     // The scoping half: the package's build and prose plumbing stays OUT.
-    // Measured before choosing src/** over the whole package: 2 of 55 commits in
-    // 90 days touched only these files, and a whole-package glob would have
+    // Measured before choosing src/** over the whole package: 3 of 113 first-parent
+    // commits in 90 days (git log --first-parent --since=2026-06-04 -- packages/mcp-server)
+    // touched only these files, and a whole-package glob would have
     // forced casp-risk-guardrails.md's `covers:` to widen to a Dockerfile.
     const plumbing = ['packages/mcp-server/README.md', 'packages/mcp-server/Dockerfile', 'packages/mcp-server/package.json']
     const all = [...runtime, ...loadMoneyPathControlGlobs()]

@@ -136,6 +136,37 @@ test('ordinary Haven sentences are not flagged (false-positive floor)', () => {
   assert.deepEqual(findCopyIssues('Haven cannot move funds outside the limits you approve.\n'), [])
 })
 
+// ── The two CASP avoid-list phrases (#2246) ──────────────────────────────────
+
+test('flags both CASP § Product Copy Rules phrases that shipped in the agent modal', () => {
+  // The two live strings from `components/UsingYourAgentInfo.tsx`, verbatim
+  // including the JSX interpolation and the entity the file actually carried.
+  const settles = findCopyIssues(
+    ", Haven signs and settles the payment automatically — within the agent&apos;s remaining allowance.\n",
+  )
+  assert.equal(settles.length, 1)
+  assert.equal(settles[0].phrase, 'haven signs and settles')
+
+  const gave = findCopyIssues("When you created your agent, Haven gave you a{' '}\n")
+  assert.equal(gave.length, 1)
+  assert.equal(gave[0].phrase, 'haven gave you')
+})
+
+test('the two nearby generalisations stay OUT, and here is what they would have hit', () => {
+  // Rejected on measurement, not taste. Both of these sentences are TRUE and
+  // live in the scanned set; banning the wider phrase would fail the run on
+  // correct copy — and one of them is the non-custody claim itself.
+  assert.deepEqual(findCopyIssues('Client signs and settles on‑chain.\n'), [])
+  assert.deepEqual(findCopyIssues('the account is the signer; Haven signs nothing.\n'), [])
+})
+
+test('#2246 is a phrase floor, not a claim detector — the reword still evades it', () => {
+  // The avoid list bans a CLAIM; this list can only hold a phrase. Pinned so a
+  // green run is never citable as "the modal makes no custody claim".
+  assert.deepEqual(findCopyIssues('the private key we issued you when you created the agent\n'), [])
+  assert.deepEqual(findCopyIssues('Haven gave\nyou a private key\n'), [])
+})
+
 // ── The extracted-copy naming convention (#2333) ─────────────────────────────
 
 test('the three rendered-copy modules #2333 found are on the allowlist', () => {

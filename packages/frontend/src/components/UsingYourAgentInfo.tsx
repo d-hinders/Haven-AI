@@ -9,14 +9,15 @@ const PAGES: InfoPage[] = [
     content: (
       <div className="space-y-5">
         <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
-          When you created your agent, Haven gave you a{' '}
-          <span className="font-medium text-[var(--v2-ink)]">credential</span> — a private key plus a small JSON
-          file that lets the agent sign payments within the budget you set. Hand it to your agent and it can pay
-          for x402-enabled APIs and services on your behalf.
+          When you created your agent, its{' '}
+          <span className="font-medium text-[var(--v2-ink)]">Haven credential</span> was generated on your own
+          device: a small JSON file with two parts. An API key identifies the agent to Haven, but cannot spend
+          by itself. A private signing key signs the agent&apos;s payments, and never reaches Haven&apos;s
+          backend. Once your agent has it, it can pay for x402-enabled APIs and services on your behalf.
         </p>
 
         <div className="space-y-3">
-          <InfoStep number={1} title="Give the credential to your agent">
+          <InfoStep number={1} title="Add the credential to your agent">
             Use the credential you saved when you created the agent. Paste it into your agent&apos;s code, drop
             the JSON into a file it loads, or set it as an environment variable such as{' '}
             <code className="rounded bg-[var(--v2-surface-2)] px-1.5 py-0.5 text-[12px] text-[var(--v2-ink)]">
@@ -30,22 +31,23 @@ const PAGES: InfoPage[] = [
             <code className="rounded bg-[var(--v2-surface-2)] px-1.5 py-0.5 text-[12px] text-[var(--v2-ink)]">
               402 Payment Required
             </code>
-            , Haven signs and settles the payment automatically — within the agent&apos;s remaining allowance.
+            , your agent&apos;s own key signs the payment automatically, within the budget you signed.
           </InfoStep>
 
           <InfoStep number={3} title="Watch the payment land here">
             The transaction appears in{' '}
             <span className="font-medium text-[var(--v2-ink)]">Recent transactions</span> on the dashboard.
-            Anything over the agent&apos;s remaining allowance is declined before any money moves — raise the
+            Anything above the agent&apos;s remaining budget is declined before any money moves — raise the
             budget, or wait for its reset period, if the agent needs more.
           </InfoStep>
         </div>
 
         <InfoNote label="Lost the credential?">
-          Haven shows the credential <span className="font-medium text-[var(--v2-ink)]">only once</span>, right
-          after you create an agent. The detail page lists the agent&apos;s allowances and delegate address, but
-          not the private key. If you didn&apos;t save it, create a new agent and store the credential somewhere
-          safe this time.
+          The credential is shown <span className="font-medium text-[var(--v2-ink)]">only once</span>, right
+          after you create an agent, and Haven cannot show it again. The detail page lists the agent&apos;s
+          budget and signing address, but not its private signing key — that key exists only in the copy you
+          saved. If you didn&apos;t save it, create a new agent and store the credential somewhere safe this
+          time.
         </InfoNote>
       </div>
     ),

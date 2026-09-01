@@ -4,8 +4,9 @@
  *
  * ## The defect this exists to prevent
  *
- * `resetDb()` awaits `initDbHarness()` as a documented guarantee (#1562), and
- * `initDbHarness()` brings this worker's schema to the migration head —
+ * `resetDb()` reaches the migration head before it empties anything, as a
+ * documented guarantee (#1562) — it awaits the same memoised run
+ * `initDbHarness()` exposes, which brings this worker's schema to head —
  * serialised across vitest workers by a global advisory lock, so a waiting
  * worker's cost is the sum of the migration runs ahead of it. That cost grows
  * with every migration and multiplies under CI contention. `vitest.config.ts`
@@ -24,8 +25,11 @@
  * measured **4634 ms against the 5000 ms budget**, versus **1162 ms** on green
  * `dev` — the same 223 files. So the failure is not a test getting slower in
  * proportion to load. It is a FIXED wall that only the call sites on the wrong
- * side of the hook/test line stand behind: 48 files put the harness in a hook
- * and cannot trip it; the two that did not, did.
+ * side of the hook/test line stand behind. Counted against `dev` with this
+ * file's own AST logic: 47 files call the harness from a hook and cannot trip
+ * the per-test budget; of the seven that call it from a test body, four are
+ * warmed by a hook of their own and one declares an explicit timeout. Exactly
+ * two were unbudgeted, and they are exactly the two that failed.
  *
  * ## The rule
  *

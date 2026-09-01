@@ -238,7 +238,8 @@ async function withSlowAnnouncement<T>(label: string, work: () => Promise<T>): P
     console.warn(
       `db-harness: ${label} has been running ` +
         `${Math.round((Date.now() - startedAt) / 1000)}s — the HARNESS SETUP is what is ` +
-        "slow here, not the test body. `resetDb()` awaits `initDbHarness()`, which brings " +
+        'slow here, not the test body. Both harness entry points await the same memoised ' +
+        'migration run, which brings ' +
         "this worker's schema to the migration head and serialises that run across vitest " +
         `workers on advisory lock ${MIGRATION_LOCK_KEY}, so a cold call under CI ` +
         'contention costs seconds. If this call sits in an `it` body it is charged to ' +
@@ -467,7 +468,10 @@ async function readSchemaShape(): Promise<SchemaShape> {
  * `TRUNCATE` path is kept as the fallback — chosen deterministically from
  * `planDeleteOrder` returning `null`, never by swallowing an error.
  *
- * AWAITS `initDbHarness()` first, deliberately. The #1555/#1559 outbound
+ * AWAITS the migration-head guarantee first, deliberately — the same memoised
+ * run `initDbHarness()` exposes, reached through the private `ensureMigrated()`
+ * so a cold reset announces itself once rather than twice (#2329). The
+ * #1555/#1559 outbound
  * files called `initDbHarness()` bare at describe-registration time — the
  * returned promise was never awaited, so whenever a NEW migration had to
  * apply (fresh CI schema), the first tests ran CONCURRENTLY with their own

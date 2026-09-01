@@ -12,7 +12,7 @@ covers:
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/loop-engineering.md
   - docs/contributing/loop-harness-index.md
-last-verified: "2026-09-01" # #2258: the coverage summary now distinguishes retired AllowanceModule work from live delegation-budget enforcement. The old summary presented allowance routing and owner-side allowance writes as current coverage even though the agent rail is retired. The unconditional haven-reviewer rule remains canonical in AGENTS.md.
+last-verified: "2026-09-01" # #2258: the coverage summary now distinguishes retired AllowanceModule work from live delegation-budget enforcement. The old summary presented allowance routing and owner-side allowance writes as current coverage even though the agent rail is retired. The unconditional haven-reviewer rule remains canonical in AGENTS.md. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected.
 ---
 
 # Haven Code Quality Loop

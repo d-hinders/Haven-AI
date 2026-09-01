@@ -264,9 +264,10 @@ describeDb('agents archive (#1401, real DB)', () => {
     return { userId: user.rows[0].id, agentId: agent.rows[0].id }
   }
 
-  it('archives only revoked agents; active/paused/pending_approval refuse', async () => {
+  it('refuses live-delegation agents regardless of status; archives revoked records without live authority', async () => {
     for (const status of ['active', 'paused', 'pending_approval']) {
       const { userId, agentId } = await seedAgent(status)
+      await seedDelegation(agentId, 'active')
       expect(await archiveAgent(agentId, userId)).toBeNull()
     }
     const { userId, agentId } = await seedAgent('revoked')

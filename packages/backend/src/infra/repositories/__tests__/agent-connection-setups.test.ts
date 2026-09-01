@@ -55,6 +55,7 @@ function newSetup(userId: string, safeId: string, overrides: Partial<NewSetup> =
     challengeId: randomUUID(),
     challengeMessage: 'sign me',
     issuePassport: false,
+    source: null,
     ...overrides,
   }
 }
@@ -91,6 +92,23 @@ describeDb('agent-connection-setups repository (#1225)', () => {
     expect(row!.status).toBe('awaiting_connection')
     expect(row!.safe_chain_id).toBe(84532) // the user_safes join carries the wallet
     expect(await listSetupAllowances(setup.id)).toHaveLength(2)
+  })
+
+  it('persists the discovery source at insert and returns it on every wide read (#2302)', async () => {
+    const { userId, safeId } = await seedUserAndSafe()
+    const tagged = newSetup(userId, safeId, { source: '402-page' })
+    await insertSetupWithAllowances(tagged, [USDC_ALLOWANCE])
+    const taggedRow = await findSetupForUser(tagged.id, userId)
+    expect(taggedRow!.source).toBe('402-page')
+    // The register path reads by token hash — the source must survive that
+    // projection too, since it is echoed into the agent_created funnel event.
+    const byToken = await findSetupByTokenHash(tagged.setupTokenHash)
+    expect(byToken!.source).toBe('402-page')
+
+    // Absent source is the normal (organic) case and stores as NULL.
+    const untagged = newSetup(userId, safeId)
+    await insertSetupWithAllowances(untagged, [USDC_ALLOWANCE])
+    expect((await findSetupForUser(untagged.id, userId))!.source).toBeNull()
   })
 
   it('a failing allowance write rolls back the SETUP row too — no half-approved agent', async () => {

@@ -23,6 +23,13 @@ import { HavenClient } from '@haven_ai/sdk'
 // #2348: the LOCAL surface, imported rather than restated — the crossover keys
 // this file smuggles have to be the ones @haven_ai/mcp really declares, or the
 // tests prove nothing about the divergence they exist for.
+//
+// KEEP THIS IMPORT TEST-ONLY. `@haven_ai/mcp` is a devDependency, and the
+// hosted server's Dockerfile does not `COPY packages/mcp` — its runner stage
+// runs `npm ci --omit=dev`, and its builder stage bundles only src/index.ts and
+// src/cli.ts, so nothing resolves this today. Moving it into non-test `src/`
+// would break the Docker builder on a workspace link pointing at a directory
+// the image never copied. (haven-reviewer, #2348.)
 import { toolSchemas as localToolSchemas, computeConsentHash, type ConsentInput } from '@haven_ai/mcp'
 import { buildHostedMcpServer } from './server.js'
 import {

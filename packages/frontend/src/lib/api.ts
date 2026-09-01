@@ -6,17 +6,6 @@ interface ApiError {
   statusCode?: number
 }
 
-export interface DeployPasskeySafeBody {
-  chain_id: number
-  salt_nonce?: string
-}
-
-export interface DeployPasskeySafeResponse {
-  safe_address: string
-  tx_hash: string
-  chain_id: number
-}
-
 export interface EnrollPasskeyBody {
   credential_id: string
   public_key_x: `0x${string}`
@@ -235,10 +224,6 @@ class ApiClient {
 
   delete<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: 'DELETE' })
-  }
-
-  deployPasskeySafe(body: DeployPasskeySafeBody): Promise<DeployPasskeySafeResponse> {
-    return this.post<DeployPasskeySafeResponse>('/safe/deploy', body)
   }
 
   enrollPasskey(body: EnrollPasskeyBody): Promise<EnrollPasskeyResponse> {

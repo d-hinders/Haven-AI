@@ -169,12 +169,63 @@ describe('buildX402PaymentHeader', () => {
   })
 
   it('consumes the x402 binding after signing a merchant header', async () => {
+    // The single-use property itself is UNCHANGED by #2291 — only how the
+    // refusal describes itself. The message moved from the generic
+    // "funding binding is required" (which also covers an id the signer never
+    // held) to one that says the binding was spent and names the remedy.
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
     const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
     await signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding)
     await expect(signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding)).rejects.toThrow(
-      'funding binding',
+      'already used',
     )
+  })
+
+  it('spends the binding on the v2 path too, not just v1 (#2291)', async () => {
+    // Found by mutation while shipping #2291: this file's PAYMENT_REQUIRED is
+    // x402Version 1, which exits through the early `if (x402Version < 2)`
+    // return. The v2 `finally` — the branch production actually takes — had no
+    // single-use coverage in this package at all; deleting it left every
+    // signer test green and was caught only by a cross-package integration
+    // test. Coverage of a security-relevant property should not depend on
+    // another package's suite, so the v2 branch is pinned here too.
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const v2Required = { ...PAYMENT_REQUIRED, x402Version: 2 }
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    await signer.buildX402PaymentHeader(v2Required, funding.x402Binding)
+    await expect(
+      signer.buildX402PaymentHeader(v2Required, funding.x402Binding),
+    ).rejects.toThrow('already used')
+  })
+
+  it('a window-expired binding does not claim a header was built (#2291 review)', async () => {
+    // Review finding: every retirement path shared one "already used" message,
+    // so a client that naively retried after a PAYMENT_WINDOW_EXPIRED error was
+    // told to "retry the merchant with THAT header" — when the window closed
+    // BEFORE any header was built and no such header exists. A confident lie is
+    // worse than the vague message it replaced.
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(
+      FUNDING_HASH,
+      await expectedX402({ expiresAt: new Date(Date.now() - 60_000).toISOString() }),
+    )
+    // First call: the window check retires the binding.
+    await expect(
+      signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding),
+    ).rejects.toThrow(/window/i)
+    // Second call with the same id: names what actually happened.
+    await expect(
+      signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding),
+    ).rejects.toThrow('no header exists to retry with')
+  })
+
+  it('reports an id it never held as unknown, not as re-use (#2291)', async () => {
+    // The two refusals need opposite remedies, so a signer that cannot tell
+    // them apart sends the caller to the wrong one — the #2291 report.
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    await expect(
+      signer.buildX402PaymentHeader(PAYMENT_REQUIRED, '00000000-0000-4000-8000-000000000000'),
+    ).rejects.toThrow('funding binding is required')
   })
 
   it('rejects a merchant mismatch before signing a header', async () => {

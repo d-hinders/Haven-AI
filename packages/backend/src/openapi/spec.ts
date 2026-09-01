@@ -23,6 +23,37 @@ const tokenSymbol = {
   maxLength: 20,
 } as const
 
+/**
+ * ── The two allowance amount shapes (#2295) ──────────────────────────────────
+ *
+ * `allowance_amount` carries TWO incompatible wire shapes under one field name,
+ * and for a long time nothing in the contract chain said which one a consumer
+ * was getting. #2283 was the cost: `formatConfiguredAllowance` discriminated
+ * between them BY EXCEPTION (`BigInt('250.000000')` throws, a bare `catch`
+ * returned the string unformatted), and `/agents` shipped
+ * `"250.000000 USDC per week"` to production.
+ *
+ * Both shapes are named schemas below so the split is readable from the spec
+ * alone. The shapes themselves are DELIBERATELY unchanged — the human-decimal
+ * projection is the historical `allowances` element shape that `GET /agents`,
+ * `GET /agents/{id}`, `PATCH /agents/{id}`, `GET /dashboard` and the CLI have
+ * always returned, so unifying it is a breaking wire change and a versioning
+ * decision, not a cleanup (recorded on #2295).
+ *
+ * Who produces which, measured rather than assumed:
+ *
+ *   ATOMIC  (`allowanceAtomicAmount`) — the connect-setup budget REQUEST.
+ *     Written by `POST /agent-connection-setups` and read back verbatim from
+ *     `agent_connection_setup_allowances` by `GET /agent-connection-setups/*`
+ *     (`routes/agent-connection-setups.ts` → `agent_budget[]`). Validated
+ *     `^[0-9]+$` and uint96-capped on the way in.
+ *
+ *   HUMAN   (`allowanceHumanAmount`) — the delegation-rail budget PROJECTION.
+ *     Every one of its emitters goes through `rails/delegation-budget-view.ts`,
+ *     which builds the string with `formatTokenValue(row.budget_atomic,
+ *     decimals)`. Since #2020 that view is the ONLY source of an `allowances`
+ *     array — the `agent_allowances` mirror is read nowhere.
+ */
 const allowanceAtomicAmount = {
   type: 'string',
   pattern: '^[0-9]+$',
@@ -30,7 +61,20 @@ const allowanceAtomicAmount = {
   // retired rail. It is now the delegation rail's ERC20PeriodTransferEnforcer
   // word size (`periodAmount`, see `modules/agents/rekey-carry.ts`), which is
   // the same width the AllowanceModule used. Constraint kept, reason corrected.
-  description: 'Decimal atomic token amount. Leading zeroes are accepted and canonicalized; effective amount must be positive and capped at uint96 — the word size of the delegation rail\'s ERC20PeriodTransferEnforcer.',
+  description: 'ATOMIC token amount — an integer string in the token\'s smallest unit (25 USDC is "25000000"). Leading zeroes are accepted and canonicalized; effective amount must be positive and capped at uint96 — the word size of the delegation rail\'s ERC20PeriodTransferEnforcer. NOT interchangeable with the human-decimal shape the delegation-rail budget projection returns for the same field name — see AgentAllowance.allowance_amount (#2295).',
+} as const
+
+/**
+ * The human-decimal counterpart. `formatTokenValue` emits `'0'` for a zero
+ * budget and otherwise `<integer>.<2–6 fraction digits>`, hence the pattern:
+ * a bare integer is legal here, which is precisely why no consumer can safely
+ * sniff the shape at runtime — `'250'` is 250 USDC as a human amount and
+ * 0.00025 USDC as an atomic one. The schema name is the discriminator.
+ */
+const allowanceHumanAmount = {
+  type: 'string',
+  pattern: '^[0-9]+(\\.[0-9]+)?$',
+  description: 'HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent\'s active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals). Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token\'s decimals first (#2295).',
 } as const
 
 const allowanceResetPeriodMin = {
@@ -4856,7 +4900,9 @@ export const openapiSpec = {
         operationId: 'recordMachinePaymentReconciliationEvent',
         summary: 'Record a merchant retry reconciliation event.',
         description:
-          'Records a post-payment reconciliation marker when the merchant/protocol retry rejects or needs follow-up after a confirmed payment. The event is audit context only; it does not move funds.',
+          'Records a post-payment reconciliation marker when the merchant/protocol retry rejects or needs follow-up after a confirmed payment. The event is audit context only; it does not move funds. '
+          + 'The payment is resolved scoped to the calling agent, so another agent\'s payment answers 404 with nothing written. '
+          + '#2292: an acceptance is terminal — a merchant_retry_rejected_after_payment on a payment that already carries a client-reported merchant response (machine_payment_evidence proof_status merchant_response_observed or protocol_receipt_attached) answers 409 rather than re-opening a stranded-funds flag on a delivered payment.',
         security: [{ AgentApiKey: [] }],
         requestBody: {
           required: true,
@@ -5762,6 +5808,9 @@ export const openapiSpec = {
       },
       AgentConnectionAllowanceInput: {
         type: 'object',
+        description:
+          'One requested budget on a connect setup. Its `allowance_amount` is ATOMIC — the opposite shape to ' +
+          'the identically named field on AgentAllowance, which is the human-decimal delegation projection (#2295).',
         required: ['token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
         properties: {
           token_address: address,
@@ -6092,13 +6141,18 @@ export const openapiSpec = {
       },
       AgentAllowance: {
         type: 'object',
+        description:
+          'One element of an agent\'s derived budget view (GET /agents, GET /agents/{id}, PATCH /agents/{id}). ' +
+          'Projected from the agent\'s ACTIVE delegations, never from stored allowance rows (#1090/#2020). ' +
+          'Its `allowance_amount` is HUMAN-DECIMAL — the opposite shape to the identically named field on ' +
+          'AgentConnectionAllowance, which is atomic (#2295).',
         required: ['id', 'agent_id', 'token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
         properties: {
           id: uuid,
           agent_id: uuid,
           token_address: address,
           token_symbol: { type: 'string' },
-          allowance_amount: { type: 'string' },
+          allowance_amount: allowanceHumanAmount,
           reset_period_min: { type: 'integer' },
         },
         additionalProperties: false,
@@ -6701,13 +6755,24 @@ export const openapiSpec = {
                 id: uuid,
                 token_address: address,
                 token_symbol: { type: 'string' },
-                configured_amount: { type: 'string' },
+                // #2295: same value as AgentAllowance.allowance_amount, same
+                // producer (rails/delegation-budget-view.ts), renamed on this
+                // wire. It sits one key above `onchain.amount`, which is the
+                // ATOMIC form of the same budget — two representations of one
+                // number, side by side, both previously bare strings.
+                configured_amount: allowanceHumanAmount,
                 reset_period_min: { type: 'integer' },
                 onchain: {
                   type: 'object',
                   required: ['amount', 'spent', 'remaining', 'effective_spent', 'reset_time_min', 'last_reset_min', 'nonce', 'is_reset_pending'],
                   properties: {
-                    amount: { type: 'string' },
+                    amount: {
+                      type: 'string',
+                      description:
+                        'The configured period budget in ATOMIC units — the same budget as the sibling ' +
+                        '`configured_amount`, which states it in whole token units. `spent`, `remaining` ' +
+                        'and `effective_spent` are atomic too (#2295).',
+                    },
                     spent: { type: 'string' },
                     remaining: { type: 'string' },
                     effective_spent: { type: 'string' },

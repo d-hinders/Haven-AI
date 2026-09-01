@@ -54,6 +54,7 @@ describe('buildHostedMcpServer', () => {
         'haven_quote_catalog_purchase',
         'haven_pay_x402_quote',
         'haven_quote_x402',
+        'haven_report_x402_outcome',
         'haven_resume_x402_payment',
         'haven_send',
         'haven_submit',
@@ -204,12 +205,22 @@ describe('buildHostedMcpServer', () => {
     // The chain itself still travels on the descriptions, by bare name.
     expect(byName.get('haven_quote_x402')).toContain('haven_pay_x402_quote')
     expect(byName.get('haven_pay_x402_quote')).toContain('expires_at')
-    expect(byName.get('haven_pay_x402_quote')).toContain('haven_x402_sign_header')
+    // #2291: this line used to read as "the quote path names its header tool".
+    // It still passes on the substring, but the sentence around it now says the
+    // OPPOSITE — do NOT call that tool on this path, because the one-shot
+    // returns the header inline. Asserted as the negation it now is, so the
+    // test cannot go on passing for a reason it no longer means.
+    expect(byName.get('haven_pay_x402_quote')).toContain('do NOT call haven_x402_sign_header')
+    expect(byName.get('haven_pay_x402_quote')).toContain('payment_header')
     expect(byName.get('haven_pay_mcp_tool')).toContain('haven_settle_mcp_tool')
     expect(byName.get('haven_pay_mcp_tool')).toContain('expires_at')
     expect(byName.get('haven_pay_mcp_tool')).toContain('signer_compatibility')
     expect(byName.get('haven_submit')).toContain('haven_x402_sign_header')
-    expect(byName.get('haven_resume_x402_payment')).toContain('haven_x402_sign_header')
+    // Same inversion on the resume path (#2290 wrote the contradictory order
+    // here; #2291 corrects it): the header comes from the one-shot's result.
+    expect(byName.get('haven_resume_x402_payment')).toContain(
+      'Do NOT pass its x402_binding to',
+    )
     expect(byName.get('haven_settle_mcp_tool')).toContain('no further Haven tool is needed')
     expect(byName.get('haven_complete_mcp_tool')).toContain('no further Haven tool is needed')
 

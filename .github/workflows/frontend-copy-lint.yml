@@ -2,9 +2,10 @@ name: Frontend copy lint
 
 # BLOCKING (#902): fail the PR on NEW banned technical terms from
 # docs/product/copy-guidelines.md in user-facing frontend copy (app/ +
-# components/), beyond the shrink-only baseline
-# (packages/frontend/copy-lint-baseline.json). Existing debt passes; growth
-# fails. See docs/contributing/ship-playbooks/frontend.md.
+# components/, plus the individually allowlisted prose files in the script's
+# SCAN_FILES — lib/ and hooks/ are otherwise UNSCANNED, #2317), beyond the
+# shrink-only baseline (packages/frontend/copy-lint-baseline.json). Existing
+# debt passes; growth fails. See docs/contributing/ship-playbooks/frontend.md.
 #
 # NO paths filter, on purpose: this check is required by the "Haven automerge
 # rules" ruleset, and a paths-filtered workflow never runs — so never reports —

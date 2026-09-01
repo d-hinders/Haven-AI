@@ -33,11 +33,6 @@ const { mockQuery, allowanceMocks, fiatMocks, evidenceMocks } = vi.hoisted(() =>
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
     getTokenBalance: vi.fn(),
-    getLatestBlockTimeSec: vi.fn(),
-    computeEffectiveAllowance: vi.fn(),
-    generateTransferHash: vi.fn(),
-    recoverSigner: vi.fn(),
-    executeAllowanceTransfer: vi.fn(),
   },
   fiatMocks: { getFiatValuesForTokenAmount: vi.fn() },
   evidenceMocks: { tryRecordMachinePaymentEvidenceBaseById: vi.fn() },
@@ -99,7 +94,6 @@ describe('x402↔MPP consolidation — characterization (PT-1)', () => {
 
   function queueOverAllowance() {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10_000n })
     // Delegate balance covers the shortfall, so the balance-aware pre-flight
     // passes and we fall into the over-allowance approval-queue branch.
     allowanceMocks.getTokenBalance.mockResolvedValueOnce(20_000n)
@@ -170,8 +164,6 @@ describe('x402↔MPP consolidation — characterization (PT-1)', () => {
   // Drive the within-allowance execute path so the payment_intents INSERT runs.
   function executeWithinAllowance() {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(`0x${'11'.repeat(32)}`)
     mockQuery
       .mockResolvedValueOnce({ rows: [AGENT] }) // auth
       .mockResolvedValueOnce({ rows: [] }) // existing intent lookup

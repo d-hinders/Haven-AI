@@ -1061,6 +1061,15 @@ export const FIXTURE_EMPTY_FALLBACK = {
   safes: [], agents: [], transactions: [], contacts: [],
   recipients: [], delegations: [], owners: [], passkeys: [], tokens: [],
   payments: [], receipts: [], catalog: [], activity: [],
+  // #2295: `entries` is `GET /catalog`'s collection key — `useCatalog` does
+  // `setEntries(res.entries)` (`hooks/useCatalog.ts:47`). It was missing, so
+  // `/catalog` fell through to this shape, stored `undefined`, and
+  // `CatalogPanel`'s `entries.map` took the whole route down into the error
+  // boundary. Exactly the #1075 failure this block's own comment describes,
+  // one key over: the sibling `catalog: []` above is not the key the hook
+  // reads, which is why it looked covered. Found by haven-design-reviewer on
+  // #2295 while trying to capture the surface that issue changes.
+  entries: [],
 }
 
 function slug(route) {
@@ -3931,6 +3940,113 @@ export const SCENARIOS = {
         .getByText(/can't confirm which network this account uses/)
         .waitFor({ timeout: 20_000 })
       await shoot(dialog, 'unresolved')
+    },
+  },
+  'catalog-budget-states': {
+    description:
+      'The /catalog card grid with all three budget states side by side — within budget, above budget, and unknown (#2295)',
+    // ── Why this scenario exists ─────────────────────────────────────────
+    //
+    // Before #2295, `withinBudget` compared a HUMAN-DECIMAL `allowance_amount`
+    // against an ATOMIC price with `BigInt()` inside a `try` whose `catch`
+    // returned `null`. On the delegation rail — the only rail that produces
+    // allowances at all since #2020 — that threw on every row, so the grid
+    // rendered the absent state on every card and the two answering states
+    // were unreachable in production. The `false` copy in particular had gone
+    // stale unnoticed while dead, still promising the retired approval queue.
+    //
+    // A route capture cannot evidence this on its own: the shared fixture
+    // serves no catalog entries, so `/catalog` photographs its empty state.
+    // Three entries against one agent's single 25 USDC budget produce all
+    // three states in one frame, which is the only way to judge whether they
+    // read as answer / answer / absence rather than as error states.
+    api(apiPath) {
+      if (apiPath === '/agents') {
+        // ONE active agent, ONE USDC budget, in the shape `GET /agents`
+        // actually returns: human-decimal, per `allowanceHumanAmount` and
+        // `rails/delegation-budget-view.ts`. An atomic string here would make
+        // the capture evidence of the bug rather than of the fix.
+        return {
+          agents: [
+            {
+              ...FIXTURE_AGENTS[0],
+              status: 'active',
+              allowances: [
+                {
+                  id: 'alw-catalog-fixture',
+                  agent_id: FIXTURE_AGENTS[0].id,
+                  token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+                  token_symbol: 'USDC',
+                  allowance_amount: '25.00',
+                  reset_period_min: 10080,
+                },
+              ],
+            },
+          ],
+        }
+      }
+      if (apiPath === '/catalog') {
+        const base = {
+          category: 'media', rail: 'x402', protocol: 'mcp', tool_name: 'create_text',
+          tool_arguments: null, asset_transfer_methods: null,
+          network: `eip155:${FIXTURE_SAFE.chain_id}`, status: 'active',
+          verified_at: '2026-08-30T09:00:00.000Z',
+          source: 'operator', domain_verified: false, verified_payable: false,
+        }
+        return {
+          entries: [
+            {
+              ...base, id: 'cat-within', name: 'Text generation',
+              description: 'Generate short-form text. Priced well inside the agent budget.',
+              resource_url: 'https://mcp.text.example/mcp',
+              price_display: '$0.01 USDC', price_atomic: '10000', asset: 'USDC',
+            },
+            {
+              // 99 USDC against a 25 USDC budget — the state that could not
+              // render before #2295.
+              ...base, id: 'cat-above', name: 'Bulk video render',
+              description: 'Render a full video. Priced above every configured agent budget.',
+              resource_url: 'https://mcp.video.example/mcp',
+              price_display: '$99.00 USDC', price_atomic: '99000000', asset: 'USDC',
+            },
+            {
+              // No agent holds an EURe budget, so the comparison has nothing
+              // to answer WITH — the honest unknown, and it must render as an
+              // absence rather than as a warning.
+              ...base, id: 'cat-unknown', name: 'Currency reference',
+              description: 'Priced in a token no agent has a budget for.',
+              resource_url: 'https://mcp.fx.example/mcp',
+              price_display: '€0.50 EURe', price_atomic: '500000000000000000', asset: 'EURe',
+            },
+          ],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/catalog`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      // Wait on the two ANSWERING states by their copy, not on the grid. The
+      // grid renders as soon as entries arrive, and the pre-#2295 defect
+      // rendered a complete, plausible-looking grid with no budget line on any
+      // card — so a capture that waited on the cards alone would have
+      // photographed the bug and called it evidence.
+      await page.getByText('Within your agent budget').first().waitFor({ timeout: 20_000 })
+      await page.getByText(/^Above every agent budget/).first().waitFor({ timeout: 20_000 })
+
+      // Positive control for the ABSENCE. The third card must render (its name
+      // is on screen) while carrying neither budget line — otherwise "no
+      // warning" would be indistinguishable from "card never rendered".
+      const unknownCard = page.locator('[data-testid="catalog-card-cat-unknown"]')
+      await unknownCard.waitFor({ timeout: 20_000 })
+      if ((await unknownCard.getByText(/agent budget/).count()) > 0) {
+        throw new Error(
+          'catalog-budget-states: the EURe card rendered a budget line; the unknown state is not absent',
+        )
+      }
+
+      await shoot(page.locator('main').first(), 'grid')
     },
   },
   // 'send-review' (#1856) is DELETED with its subject (#1989, epic #1440): it

@@ -152,8 +152,20 @@ merchant leg for you.
 recipient, amount, and token for a plain transfer. For an arbitrary,
 non-MCP x402 paywall: \`mcp__haven__haven_quote_x402\` to get a quote, then
 \`mcp__haven__haven_pay_x402_quote\` — follow the result's guidance fields
-first and sign in the local Haven signer. The pay tool performs the merchant
-retry itself, so do not wait on a signal while it runs. If the process
+first and sign in the local Haven signer. On THIS path Haven does not talk to
+the merchant: \`mcp__haven-signer__haven_sign_x402\` returns both
+\`signature\` and \`payment_header\`; relay \`signature\` with
+\`mcp__haven__haven_submit\`, then retry the paywalled URL yourself with
+\`payment_header\`. Do not pass that call's \`x402_binding\` to
+\`mcp__haven-signer__haven_x402_sign_header\` — the one-shot already spent it
+building the header, so the call can only refuse. Then tell Haven what the
+merchant answered: \`mcp__haven__haven_report_x402_outcome\` with the
+\`payment_id\`, \`outcome\` (\`"accepted"\` for a 2xx, else \`"rejected"\`)
+and the \`merchant_status\` you got. Because Haven never contacted that
+merchant, this is the only way it can learn the purchase failed — without it a
+failed purchase reads as complete for fifteen minutes. (The SDK's own
+\`haven_pay_x402\` tool does perform the merchant retry itself; that tool is
+not part of the hosted MCP surface.) If the process
 crashes after payment, a later \`mcp__haven__haven_get_payment_status\` call
 may report \`nextAction: 'retry_original_x402_request'\` — only then call
 \`mcp__haven__haven_resume_x402_payment\` with the preserved resume state or
@@ -168,9 +180,11 @@ payment id, instead of paying again.
 result, never a catalog price. \`haven_discover_tools\` prices are indicative
 (\`price_is_indicative\`) and can be stale. A read-only quote is informational
 only and does not reserve a price; the later paid call re-quotes and enforces
-the cap. The pay-tool result's \`amount\` / \`amount_atomic\` is the amount
-Haven authorizes for that call — a ceiling the merchant settles at or below —
-so present it as the most the user will pay.
+the cap. The pay-tool result's \`amount\` / \`amount_atomic\` is the merchant's
+own quoted price for that call — a ceiling the merchant settles at or below —
+so present it as the most the user will pay. It is a price, not an approval:
+the payment goes through only if it also fits the cap you set and the on-chain
+budget the user signed, which is enforced on-chain rather than by Haven.
 
 **Status:** \`mcp__haven__haven_get_payment_status\` with a \`payment_id\` to
 check on in-flight payments. Do not poll in a tight loop.

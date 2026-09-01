@@ -14,7 +14,7 @@
  * INTERLEAVES — the second acquisition is attempted while the first is
  * demonstrably still held, not before it starts and not after it finishes.
  */
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import pool from '../../db.js'
 import { describeDb, initDbHarness } from '../../infra/__tests__/helpers/db-harness.js'
 import { LEADER_LOCK_KEYS, runIfLeader, type PoolLike } from '../leader-lock.js'
@@ -26,6 +26,19 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const ALL_KEYS = Object.entries(LEADER_LOCK_KEYS)
 
 describeDb('catalogIngest leader lock (#1713)', () => {
+  // In a HOOK, not in the test bodies (#2329). This file's FIRST
+  // `initDbHarness()` pays the full migration run and, in CI, the wait for
+  // whichever vitest worker holds the migration advisory lock — the cost
+  // `vitest.config.ts`'s `hookTimeout: 120_000` exists to budget (#1372).
+  // Inside an `it` body it was charged to vitest's 5000 ms `testTimeout`
+  // instead, and two of these cases timed out on an unrelated pull request
+  // (#2295's run) with a bare "Test timed out in 5000ms" that named the lock
+  // test rather than the harness. Init is idempotent and memoised, so hoisting
+  // it costs the tests below one resolved-promise await.
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+
   it('every leader-lock key is distinct — a duplicate would silently merge two monitors', () => {
     // #1711 shipped a fix because its lock duplicated `accountDeploy`'s. This
     // is the cheap structural version of that lesson, and it fails loudly the
@@ -46,7 +59,6 @@ describeDb('catalogIngest leader lock (#1713)', () => {
     // start. `enteredFirst` resolves only once tick A is INSIDE its critical
     // section, and A stays inside until `releaseFirst` is called — so B's
     // attempt provably overlaps A's hold rather than merely following it.
-    await initDbHarness()
 
     let releaseFirst: () => void = () => {}
     const firstHolding = new Promise<void>((resolve) => {
@@ -99,7 +111,6 @@ describeDb('catalogIngest leader lock (#1713)', () => {
     // The control. If the test above ever passes because `runIfLeader` refuses
     // everything rather than because the lock excludes, this one fails too —
     // which is what tells the two apart.
-    await initDbHarness()
 
     let releaseFirst: () => void = () => {}
     const firstHolding = new Promise<void>((resolve) => {
@@ -139,7 +150,6 @@ describeDb('catalogIngest leader lock (#1713)', () => {
   })
 
   it('releases leadership, so the very next tick can win it again', async () => {
-    await initDbHarness()
     expect(await runIfLeader(LEADER_LOCK_KEYS.catalogIngest, async () => {}, asPool)).toBe(true)
     expect(await runIfLeader(LEADER_LOCK_KEYS.catalogIngest, async () => {}, asPool)).toBe(true)
 
@@ -154,7 +164,6 @@ describeDb('catalogIngest leader lock (#1713)', () => {
   })
 
   it('a tick that throws still frees the lock for the next replica', async () => {
-    await initDbHarness()
     await expect(
       runIfLeader(
         LEADER_LOCK_KEYS.catalogIngest,

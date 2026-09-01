@@ -11,7 +11,9 @@ An epic is a parent issue whose SUB-ISSUES are the loop's queue. Drive it with
 `ship-next epic=#<this-issue>` and repeat it with the client's loop capability
 when available. The workflow takes the open sub-issues
 lowest-number-first and closes each with `Closes #`, so the epic burns down on
-its own. You do NOT also need the `code-quality` label on the sub-issues; that
+its own. A sub-issue shipped in operator-verify mode is the exception: it is
+labelled `operator-verify`, its PR writes `Refs #` and it stays open until a
+human finishes the live step, so the epic will not burn that line down for you. You do NOT also need the `code-quality` label on the sub-issues; that
 label is for the standalone queue. See docs/contributing/autonomous-pr-loop.md.
 -->
 

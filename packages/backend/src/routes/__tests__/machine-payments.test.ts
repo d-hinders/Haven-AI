@@ -26,11 +26,6 @@ const { mockQuery, allowanceMocks, fiatMocks, reportingMocks } = vi.hoisted(() =
   mockQuery: vi.fn(),
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
-    getLatestBlockTimeSec: vi.fn(),
-    computeEffectiveAllowance: vi.fn(),
-    generateTransferHash: vi.fn(),
-    recoverSigner: vi.fn(),
-    executeAllowanceTransfer: vi.fn(),
   },
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
@@ -96,13 +91,26 @@ const challenge = {
   metadata: { demoResource: 'market-summary' },
 }
 
+/**
+ * "The refusal produced no authorization work."
+ *
+ * #2307 removed five of the six assertions that used to live here
+ * (`getLatestBlockTimeSec`, `computeEffectiveAllowance`, `generateTransferHash`,
+ * `recoverSigner`, `executeAllowanceTransfer`). None is an export of
+ * `rails/allowance-module.ts` — #1987 deleted them all — so each was a mock
+ * factory entry nothing could call, and each assertion passed unconditionally.
+ *
+ * `getTokenAllowance` IS a real export, so it stays. It is a weak guard on this
+ * route (nothing under `routes/machine-payments.ts` reaches it), which is why
+ * the query-log assertion is folded in here rather than left to the call site:
+ * that one reads what the handler actually did and goes red if the refusal
+ * stops preceding the work.
+ */
 function expectNoAuthorizationWork() {
   expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
-  expect(allowanceMocks.getLatestBlockTimeSec).not.toHaveBeenCalled()
-  expect(allowanceMocks.computeEffectiveAllowance).not.toHaveBeenCalled()
-  expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
-  expect(allowanceMocks.recoverSigner).not.toHaveBeenCalled()
-  expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
+  // Only the auth lookup ran. Anything else means the refusal was reached
+  // through code that had already started authorizing.
+  expect(sqlCalls().map((c) => c.sql).filter((sql) => !/api_key_hash = \$1/.test(sql))).toEqual([])
 }
 
 // ── Content-dispatch DB stub (#1226) ─────────────────────────────────────────
@@ -349,7 +357,6 @@ describe('machine payment routes', () => {
   describe('GET /allowances — Safe rail retired (#2020, reversing #1986)', () => {
     function expectNoAllowanceStateRead() {
       expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
-      expect(allowanceMocks.getLatestBlockTimeSec).not.toHaveBeenCalled()
       expect(sqlCalls().some((c) => /FROM agent_allowances|FROM agent_delegations/.test(c.sql))).toBe(false)
     }
 
@@ -442,7 +449,6 @@ describe('machine payment routes', () => {
       })
       // No Safe, no AllowanceModule on this rail — the contract read must not run.
       expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
-      expect(allowanceMocks.getLatestBlockTimeSec).not.toHaveBeenCalled()
       // agent_allowances is a frozen onboarding mirror on this rail (#1090) —
       // consulting it would report the onboarding budget forever.
       expect(sqlCalls().some((c) => /FROM agent_allowances/.test(c.sql))).toBe(false)
@@ -671,7 +677,6 @@ describe('machine payment routes', () => {
       })
 
       expect(response.statusCode).toBe(410)
-      expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
       expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
     })
 
@@ -1301,18 +1306,25 @@ describe('machine payment routes', () => {
       }
     }
 
-    function allowanceWithRemaining(remaining: bigint) {
+    /**
+     * A legacy account whose on-chain allowance would have been ample.
+     *
+     * #2307: this took a `remaining` argument and fed it to
+     * `computeEffectiveAllowance`, which is not an export — the arithmetic it
+     * configured could never run. The parameter is gone rather than left
+     * unused, because a fixture that appears to vary a spend limit while the
+     * limit is never consulted is exactly the misleading setup that made 56
+     * dead guards read as live ones. What remains is real: `getTokenAllowance`
+     * is an export, and priming it is what makes "the refusal fires before the
+     * allowance is even read" a meaningful thing to assert.
+     */
+    function primeAmpleLegacyAllowance() {
       allowanceMocks.getTokenAllowance.mockResolvedValue({
         amount: 1_000_000n,
         spent: 0n,
         resetTimeMin: 1440,
         lastResetMin: 0,
         nonce: 5,
-      })
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({
-        remaining,
-        effectiveSpent: 0n,
-        isResetPending: false,
       })
     }
 
@@ -1370,8 +1382,7 @@ describe('machine payment routes', () => {
       })
 
       it('creates a USDC payment intent within allowance and returns sign_data', async () => {
-        allowanceWithRemaining(1_000_000_000n)
-        allowanceMocks.generateTransferHash.mockResolvedValue(SEND_HASH)
+        primeAmpleLegacyAllowance()
 
         primeDb(AUTH, allowanceConfigured(true), insertIntent(sendIntentRow()))
 
@@ -1386,12 +1397,11 @@ describe('machine payment routes', () => {
         // for a signable pending_signature intent.
         expect(response.statusCode).toBe(410)
         expect(response.json()).toEqual(allowanceModuleRailRetired('account').body)
-        expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
         expect(findCall(/INSERT INTO payment_intents/)).toBeUndefined()
       })
 
       it('queues over-allowance transfer as pending_approval (202)', async () => {
-        allowanceWithRemaining(0n)
+        primeAmpleLegacyAllowance()
 
         primeDb(
           AUTH,
@@ -1409,9 +1419,16 @@ describe('machine payment routes', () => {
         // #1986: no approval queue reachable for a retired-rail account —
         // 410 fail-closed, nothing queued. Was: 202 pending_approval with a
         // manufactured approval_requests row.
+        //
+        // #2307: the "over-allowance" in this case's name is no longer
+        // expressible. It was set up by feeding remaining=0 to
+        // `computeEffectiveAllowance` — a non-export, so the arithmetic never
+        // ran and this fixture was byte-for-byte equivalent to the
+        // within-allowance one above. The two cases differ only in which
+        // pre-#1986 outcome they characterize; both now reach the same refusal
+        // by the same route, which is what fail-closed means.
         expect(response.statusCode).toBe(410)
         expect(response.json()).toEqual(allowanceModuleRailRetired('account').body)
-        expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
         expect(findCall(/INSERT INTO approval_requests/)).toBeUndefined()
       })
     })
@@ -1519,13 +1536,11 @@ describe('machine payment routes', () => {
         expect(response.statusCode).toBe(410)
         expect(response.json()).toEqual(allowanceModuleRailRetired('account').body)
         expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
-        expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
         expect(mockQuery).toHaveBeenCalledTimes(1) // auth only — no dedup lookup
       })
 
       it('persists the idempotency_key when creating a new intent', async () => {
-        allowanceWithRemaining(1_000_000_000n)
-        allowanceMocks.generateTransferHash.mockResolvedValue(SEND_HASH)
+        primeAmpleLegacyAllowance()
 
         primeDb(
           AUTH,
@@ -1550,8 +1565,7 @@ describe('machine payment routes', () => {
       })
 
       it('replays the winner when a concurrent insert wins the idempotency race', async () => {
-        allowanceWithRemaining(1_000_000_000n)
-        allowanceMocks.generateTransferHash.mockResolvedValue(SEND_HASH)
+        primeAmpleLegacyAllowance()
 
         const uniqueViolation = Object.assign(new Error('duplicate key value'), { code: '23505' })
         // Stateful counter kept from the original characterization (#1226
@@ -1626,7 +1640,6 @@ describe('machine payment routes', () => {
         // 200 reporting the real confirmed status.
         expect(response.statusCode).toBe(410)
         expect(response.json()).toEqual(allowanceModuleRailRetired('account').body)
-        expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
         expect(sqlCalls().some((c) => /LEFT JOIN machine_payment_reconciliation_events/.test(c.sql))).toBe(false)
       })
 

@@ -53,9 +53,23 @@ function formatDecimalParts({
 /**
  * Format an allowance amount for display.
  *
- * The backend stores `allowance_amount` as a raw on-chain bigint string
- * (e.g. `"5000000000000000000"` for 5 ETH with 18 decimals). This helper
- * divides by the token's decimals and trims to a humane display value.
+ * `allowance_amount` carries TWO wire shapes under one field name (#2295, and
+ * see the schema pair `allowanceAtomicAmount` / `allowanceHumanAmount` in the
+ * backend's `openapi/spec.ts`). `AgentConnectionAllowance` — the connect-setup
+ * budget request — is an ATOMIC bigint string (`"5000000000000000000"` for
+ * 5 ETH at 18 decimals). `AgentAllowance` on `Agent.allowances`, which is what
+ * `GET /agents`, `GET /agents/{id}`, `PATCH /agents/{id}` and `/dashboard`
+ * return, is the HUMAN-DECIMAL delegation projection (`"5.00"`).
+ *
+ * This helper takes both on purpose: it is the DISPLAY path, and both shapes
+ * render to the same string. The atomic path divides by the token's decimals;
+ * the decimal path re-trims an already-scaled value. That tolerance is why
+ * every display caller must route through here rather than reaching for
+ * `BigInt()` — the exception-as-type-test that produced #2283.
+ *
+ * It is NOT an arithmetic path. A caller that needs to COMPARE a budget
+ * against a price wants {@link humanAmountToAtomic}, which knows which shape
+ * it is given instead of inferring one.
  *
  * Stablecoins default to 2 decimal places and ETH defaults to 4, but
  * non-zero smaller amounts keep the extra precision needed to avoid
@@ -113,6 +127,36 @@ export function formatAllowanceAmount(
     minFractionDigits,
     maxFractionDigits,
   })
+}
+
+/**
+ * Scale a HUMAN-DECIMAL allowance amount into atomic units, for callers that
+ * need to do arithmetic on a budget rather than render it (#2295).
+ *
+ * ── Why this takes a shape rather than detecting one ─────────────────────────
+ *
+ * The two shapes are not distinguishable at runtime. `'250'` is a legal value
+ * in both: 250 USDC as a human amount, 0.00025 USDC as an atomic one — a
+ * factor of a million apart, with nothing in the string to separate them. Any
+ * helper that sniffs is guessing, and guessing wrong on a budget comparison
+ * silently answers the wrong question. So the caller states which shape it
+ * holds; the OpenAPI schema (`allowanceHumanAmount` vs `allowanceAtomicAmount`)
+ * is what tells the caller which one that is. An atomic value needs no helper
+ * at all — it is already `BigInt(value)`.
+ *
+ * Returns `null` for anything that is not a plain decimal number, rather than
+ * throwing: callers here are rendering a badge, and an unparseable budget
+ * means "cannot answer", never "no budget". Scientific notation is rejected
+ * for the same reason `formatAllowanceAmount` rejects it. Excess precision
+ * beyond the token's decimals truncates, which is the conservative direction
+ * for a "can this budget cover the price" test.
+ */
+export function humanAmountToAtomic(amount: string, decimals: number): bigint | null {
+  const match = amount.trim().match(/^(-)?(\d+)(?:\.(\d+))?$/)
+  if (!match) return null
+  const fraction = (match[3] ?? '').slice(0, decimals).padEnd(decimals, '0')
+  const magnitude = BigInt(`${match[2]}${fraction}` || '0')
+  return match[1] ? -magnitude : magnitude
 }
 
 /**

@@ -55,11 +55,6 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() 
   mockQuery: vi.fn(),
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
-    getLatestBlockTimeSec: vi.fn(),
-    computeEffectiveAllowance: vi.fn(),
-    generateTransferHash: vi.fn(),
-    recoverSigner: vi.fn(),
-    executeAllowanceTransfer: vi.fn(),
   },
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
@@ -190,15 +185,20 @@ describe('non-custody: authentication is not authority (Red Line #3)', () => {
     })
 
     expect(res.statusCode).toBe(400)
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
     expect(delegationMocks.submitDelegationPayment).not.toHaveBeenCalled()
   })
 
   it('#1986 RETIREMENT: the legacy rail refuses unconditionally — even a signature that WOULD have recovered to the delegate never spends', async () => {
     // Strongest form of "the legacy rail cannot spend": feed it the signature
     // that used to be the POSITIVE control (recovers to the delegate) and
-    // confirm it is refused before recovery is even attempted.
-    allowanceMocks.recoverSigner.mockReturnValue(AGENT.delegate_address)
+    // confirm it is still refused.
+    //
+    // #2307: "before recovery is even attempted" was asserted with a
+    // `recoverSigner` spy. There is no recovery to attempt — the scheme died
+    // with the rail (#1986) and the helper was deleted (#1987) — so the spy
+    // watched a non-export and could never fail. The refusal itself is the
+    // assertion, and the structural proof that no spend path survives lives in
+    // `allowance-rail-retired.test.ts` § "the spend machinery is GONE".
     primeDb(AUTH, intentById(legacyIntentRow()))
 
     const res = await app.inject({
@@ -210,8 +210,6 @@ describe('non-custody: authentication is not authority (Red Line #3)', () => {
 
     expect(res.statusCode).toBe(410)
     expect(res.json().error).toBe(allowanceModuleRailRetired('intent').body.error)
-    expect(allowanceMocks.recoverSigner).not.toHaveBeenCalled()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
   it('DELEGATION RAIL: refuses a shape-invalid signature locally, before any chain call', async () => {
@@ -250,7 +248,6 @@ describe('non-custody: authentication is not authority (Red Line #3)', () => {
     expect(res.statusCode).toBe(502)
     expect(res.json().status).toBe('failed')
     expect(delegationMocks.submitDelegationPayment).toHaveBeenCalledOnce()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
     // No confirmation write ever happened:
     expect(mockQuery.mock.calls.some((c) => /SET status = 'confirmed'/.test(String(c[0])))).toBe(false)
   })
@@ -268,8 +265,9 @@ describe('non-custody: authentication is not authority (Red Line #3)', () => {
 
     expect(res.statusCode).toBe(200)
     expect(res.json()).toMatchObject({ status: 'confirmed', tx_hash: TX_HASH })
+    // The gate that mattered was the on-chain acceptance, not the API key —
+    // which is what this assertion says. (#2307 removed a trailing
+    // `executeAllowanceTransfer` spy that watched a non-export.)
     expect(delegationMocks.submitDelegationPayment).toHaveBeenCalledOnce()
-    // The gate that mattered was the on-chain acceptance, not the API key.
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 })

@@ -596,11 +596,24 @@ describe('haven_pay_x402_quote', () => {
       payment_id: string
       idempotency_key: string
       payload_hash: string
+      next_tool: string
+      reason: string
       x402: Record<string, unknown>
     }>(await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }))
 
     expect(result.data.payment_id).toBe('pay_x402')
     expect(result.data.idempotency_key).toMatch(/^x402:/)
+    // #2291: next_tool was already right; the REASON beside it, in the SAME
+    // response object, named a successor the named tool cannot serve —
+    // "finish with haven_x402_sign_header" after a one-shot that spends its
+    // own binding building the header inline. A test asserting only next_tool
+    // stayed green while the pair contradicted itself. Cheap literal guards,
+    // the same shape the erc7710 branch already uses; nothing interprets a
+    // sentence.
+    expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
+    expect(result.data.reason).toContain('Do NOT call')
+    expect(result.data.reason).toContain('haven_x402_sign_header')
+    expect(result.data.reason).toContain('payment_header')
     expect(result.data.payload_hash).toBe('0xfunding')
     expect(result.data.x402.funding_to).toBe('0xDelegate')
     expect(result.data.x402.merchant_to).toBe('0xMerchant')
@@ -2383,7 +2396,12 @@ describe('haven_settle_mcp_tool', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
-        max_amount: '2000000',
+        // #2312 found `max_amount: '2000000'` here. haven_settle_mcp_tool has
+        // never declared it — the cap belongs on the prepare/pay leg, which is
+        // where it is checked against the live quote BEFORE any funding. So
+        // this test spent its life asserting a successful settle while the cap
+        // it thought it had set was being silently stripped. Removed rather
+        // than declared: the settle leg genuinely takes no cap.
         payment_header: VALID_PAYMENT_HEADER,
       }),
     )
@@ -3311,7 +3329,12 @@ describe('mcp_transport shape is refused loudly (#2282)', () => {
 
       const payload = await createToolHandlers(haven)[tool]({
         payment_id: 'pay_x402',
-        signature: SIG,
+        // #2312: `signature` is haven_settle_mcp_tool's alone — the settle leg
+        // relays the funding signature, the complete leg does not. This shared
+        // fixture used to send it to BOTH, and the permissive parse dropped it
+        // on the complete side without a word, so the test read as if the two
+        // tools took the same arguments. Sent only where it is declared.
+        ...(tool === 'haven_settle_mcp_tool' ? { signature: SIG } : {}),
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'buy_vpn',
         arguments: { plan: 'legacy' },
@@ -3957,6 +3980,7 @@ describe('structured agent guidance (#1308)', () => {
       next_action: string
       next_tool: string
       next_arguments: Record<string, unknown>
+      reason: string
       safe_to_continue: boolean
       agent_summary: Record<string, unknown>
       warnings: Array<{ code: string; message: string }>
@@ -5185,6 +5209,24 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
     // assembled by Haven on this path, never by haven_x402_sign_header.
     expect(res.data.reason).toContain("settlement_scheme: 'erc7710'")
     expect(res.data.reason).toContain('Do NOT call haven_x402_sign_header')
+    // #2330 added these two assertions, and #2341 INVERTS the second one.
+    // #2330 was right that this reason tells the agent to retry the merchant
+    // ITSELF and must therefore name the wire correctly; it was wrong about
+    // what correct is on THIS scheme. erc7710 is always x402 v2 and its header
+    // carries a delegation chain, so telling an agent to also send X-PAYMENT
+    // is telling it to overflow the merchant's header limit — HTTP 431, the
+    // funding-leg money already gone on the hosted path. The assertion that
+    // pinned the fix now pins the defect, which is why it is reversed here in
+    // place rather than deleted.
+    //
+    // The reason deliberately does not name the legacy header even to FORBID
+    // it. A first pass wrote "do not add X-PAYMENT", which failed this very
+    // assertion — `not.toContain` cannot tell an instruction from a
+    // prohibition. Rewording to "ONLY that header name" keeps the guard
+    // literal, costs fewer bytes against the #1591 mean, and avoids handing an
+    // agent a negated header name to be primed by.
+    expect(res.data.reason).toContain('PAYMENT-SIGNATURE')
+    expect(res.data.reason).not.toContain('X-PAYMENT')
   })
 
   it('the optional-cap nudge still fires on the erc7710 branch', async () => {
@@ -5446,6 +5488,11 @@ describe('haven_submit — erc7710 settle (#2041)', () => {
     // erc7710 has no Haven-submitted transaction, so there is no hash to fake.
     expect(res.data.tx_hash).toBeNull()
     expect(res.data.next_action).toBe(AgentPaymentNextAction.RetryOriginalX402Request)
+    // #2330 pinned both names here; #2341 reverses the legacy half for the
+    // same reason as the erc7710 branch above — this is the erc7710 submit
+    // path, where a duplicated header is refused with HTTP 431.
+    expect(res.data.reason).toContain('PAYMENT-SIGNATURE')
+    expect(res.data.reason).not.toContain('X-PAYMENT')
 
     // The signature went to settle, NOT to the funding relay.
     expect(calls.find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG })
@@ -6230,17 +6277,25 @@ describe('#2145: the hosted resume description gates on the live retry trigger',
   })
 
   /**
-   * #2290: naming the trigger was only half of it. The remedy it points at
-   * runs through a binding, and haven_x402_sign_header cannot be reached
-   * without one — the description used to mention haven_sign only as an
-   * optional aside for a restarted signer, which is how the original reporter
-   * ended up at a dead end. Literal-only assertions: the tool names are the
-   * contract, and nothing here interprets a sentence.
+   * #2290 wrote this test to pin that the resume description names the binding
+   * step and not only the header step. The premise was wrong: it asserted the
+   * description mentions haven_sign_x402 AND haven_x402_sign_header AND
+   * x402_binding, which the CORRECTED #2291 wording also satisfies — the
+   * corrected text names all three in order to say "do NOT chain them". So the
+   * test went on passing across a contract reversal, proving only that three
+   * substrings appear somewhere (review finding).
+   *
+   * Rewritten to pin the contract rather than the vocabulary: the resume path
+   * ends at the one-shot's inline payment_header, and the description must say
+   * so explicitly. Still literal-only — nothing here interprets a sentence.
    */
-  it('names the binding step, not just the header step', () => {
+  it('points the resume path at the inline payment_header, not a second signer call', () => {
     const description = toolDescriptions.haven_resume_x402_payment
     expect(description).toContain('haven_sign_x402')
+    expect(description).toContain('payment_header')
+    // The load-bearing half: the impossible chain is named as forbidden, not
+    // as the next step. A revert to either earlier wording drops this literal.
+    expect(description).toContain('Do NOT pass its x402_binding to')
     expect(description).toContain('haven_x402_sign_header')
-    expect(description).toContain('x402_binding')
   })
 })

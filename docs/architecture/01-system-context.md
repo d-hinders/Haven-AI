@@ -117,11 +117,11 @@ flowchart LR
   BE -->|unsigned payload + authenticated x402 context| MCP
   MCP -->|signing context| AGENT
   AGENT -->|payload hash or x402 context| SIGNER
-  SIGNER -->|signature or X-PAYMENT header| AGENT
+  SIGNER -->|signature or merchant payment header| AGENT
   SIGNER -.->|controls| DELEGATE
   AGENT -->|request paid resource| RESOURCE
   RESOURCE -->|402 Payment Required| AGENT
-  AGENT -->|retry with signed X-PAYMENT| RESOURCE
+  AGENT -->|retry with signed payment header: PAYMENT-SIGNATURE + X-PAYMENT| RESOURCE
 
   %% Haven execution
   BE -->|reads chain state<br/>and builds payload hashes| RPC

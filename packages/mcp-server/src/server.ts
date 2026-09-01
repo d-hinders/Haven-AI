@@ -3,13 +3,14 @@ import { HavenClient } from '@haven_ai/sdk'
 import {
   createToolHandlers,
   toolDescriptions,
+  toolInputSchema,
   toolSchemas,
   type HostedToolName,
   type ToolPayload,
 } from './tools.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.1.32-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.1.33-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -46,6 +47,21 @@ export const HOSTED_INSTRUCTIONS = [
   '(mcp__<server>__<tool>); if your runtime names servers differently (Codex',
   'config keys: haven, haven_signer), resolve via the paired next_tool_server +',
   'next_tool_name — the bare tool name on that logical server.',
+  '',
+  'When YOU retry a merchant yourself (the plain-HTTP x402 path), always set',
+  'PAYMENT-SIGNATURE (x402 v2) to the payment_header. A strict v2 merchant reads',
+  'only that name, so sending the legacy X-PAYMENT alone is indistinguishable',
+  'from sending no header at all — while on the EIP-3009 bridge the funding leg',
+  'has already moved the money.',
+  '',
+  'Whether to ALSO set X-PAYMENT (v1) depends on the scheme, and getting this',
+  'backwards costs a payment either way. On the EIP-3009 funding path: set both,',
+  'because lenient v1-only merchants are real and that header is small. On',
+  'erc7710: PAYMENT-SIGNATURE ONLY. An erc7710 payload is always x402 v2, so the',
+  'legacy name cannot help a merchant that can redeem a delegation chain, and',
+  'that header carries the whole chain — sending it twice overflows the',
+  "merchant's header limit and the request is refused with HTTP 431 before",
+  'anything is read.',
   '',
   'Signing and settling, every x402 payment tool: the response guidance names',
   'the signer tool — pass JUST { payment_id }; the signer fetches the exact',
@@ -134,22 +150,27 @@ export function buildHostedMcpServer(haven: HavenClient): McpServer {
   )
 
   const handlers = createToolHandlers(haven)
-  // The fluent `.tool(name, description, schema, handler)` overload keeps this
-  // in step with the local @haven_ai/mcp package's registration style.
+  // #2312: `registerTool`, NOT the fluent `.tool(name, description, schema,
+  // handler)` overload it replaced. The difference is load-bearing rather than
+  // stylistic: `.tool`'s schema position accepts only a raw shape and throws
+  // "received an unrecognized object" on the `ZodObject` that a strict tool
+  // needs, so a `.strict()` schema is unregisterable through it. `registerTool`
+  // passes a Zod schema through intact, and the SDK then enforces it in
+  // `validateToolInput` — which is the ONLY layer that sees an undeclared key,
+  // because the handler is called with the already-parsed arguments.
+  // Both forms advertise the identical JSON Schema; see `STRICT_INPUT_TOOLS`.
   const registerTool = (server as unknown as {
-    tool: (
+    registerTool: (
       name: string,
-      description: string,
-      schema: unknown,
+      config: { description: string; inputSchema: unknown },
       handler: (args: unknown) => Promise<unknown>,
     ) => void
-  }).tool.bind(server)
+  }).registerTool.bind(server)
 
   for (const name of Object.keys(toolSchemas) as HostedToolName[]) {
     registerTool(
       name,
-      toolDescriptions[name],
-      toolSchemas[name],
+      { description: toolDescriptions[name], inputSchema: toolInputSchema(name) },
       async (args: unknown) =>
         haven.withRequestContext({ 'X-Haven-MCP-Tool': name }, async () =>
           toMcpResult(await handlers[name](args)),

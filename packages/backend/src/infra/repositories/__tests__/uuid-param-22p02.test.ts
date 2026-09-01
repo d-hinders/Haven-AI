@@ -9,7 +9,7 @@
  * (`infra/http-error-handler.ts`). If Postgres ever stops raising 22P02 for
  * this input, the handler's mapping is dead code and THIS test is what says so.
  */
-import { expect, it } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
 import { describeDb, resetDb } from '../../__tests__/helpers/db-harness.js'
 import db from '../../../db.js'
 import { renameContactForUser, deleteContactForUser } from '../contacts.js'
@@ -26,8 +26,21 @@ import { renameContactForUser, deleteContactForUser } from '../contacts.js'
 const USER = '11111111-1111-4111-8111-111111111111'
 
 describeDb('malformed uuid against real Postgres (#1464)', () => {
-  it('a non-uuid id raises 22P02 — the code the error handler maps to 400', async () => {
+  // In a HOOK, not in the test bodies (#2329). `resetDb()` awaits
+  // `initDbHarness()`, so this file's FIRST call pays the full migration run
+  // and — in CI, where several vitest workers share one Postgres — the wait
+  // for whichever worker holds the migration advisory lock. That cost is what
+  // `vitest.config.ts`'s `hookTimeout: 120_000` is sized for (#1372); vitest's
+  // 5000 ms `testTimeout` never was. While these two `resetDb()` calls sat
+  // inside the `it` bodies they were charged to the 5000 ms budget, and this
+  // file timed out on two unrelated pull requests (#2274, and again in #2295's
+  // run — 4634 ms against 5000 ms, versus 1162 ms on green `dev`) with a bare
+  // "Test timed out in 5000ms" that named the test rather than the reset.
+  beforeEach(async () => {
     await resetDb()
+  })
+
+  it('a non-uuid id raises 22P02 — the code the error handler maps to 400', async () => {
     // Straight through the same repository function the route calls. The
     // harness runs real migrations, so contacts.id is a genuine UUID column.
     const err = await renameContactForUser('not-a-uuid', USER, 'X', db).then(
@@ -40,7 +53,6 @@ describeDb('malformed uuid against real Postgres (#1464)', () => {
   })
 
   it('a WELL-FORMED unknown uuid does not raise — it returns not-found, as before', async () => {
-    await resetDb()
     // The boundary that keeps the 404 semantics intact: a valid uuid that
     // matches nothing is a null result, never an error, so the
     // not-found-or-not-owned indistinguishability is untouched by #1464.

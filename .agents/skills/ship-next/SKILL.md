@@ -42,14 +42,18 @@ not pull it into the queue, but name it in the closeout so the user can choose
 between shipping the next item and unblocking the promotion path. A day of merged
 work behind a silently red gate is the failure this line exists to prevent.
 
-Before selecting new work, find any open pull request linked with `Closes #<issue>`.
+Before selecting new work, find any open pull request linked to the issue. Search
+for the issue number rather than the keyword (`gh pr list --search "<issue>"`): an
+operator-verify pull request deliberately carries **no** closing keyword (step 7 of
+*Commit And Pull Request*), so a `Closes #<issue>` lookup alone reports "no in-flight
+work" on exactly the pull requests whose issue is still open by design.
 
 - If it is waiting on CI or has a fixable failure, finish that pull request.
 - If it is waiting on a user decision, migration review, or UX decision, stop and report the blocker.
 - Start new work only when the selected source has no in-flight pull request.
 
-**Collision check — don't double-build parallel work.** The `Closes #<issue>`
-lookup only catches PRs bound to the *same* issue. A parallel session can be
+**Collision check — don't double-build parallel work.** The in-flight lookup above
+only catches PRs bound to the *same* issue. A parallel session can be
 mid-flight on the same surface under a different issue (the demo-merchant half
 of #452 was built twice before this was caught). Before implementing, glance
 for overlap:
@@ -241,7 +245,37 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
      (`haven-reviewer: passed | skipped because ___`, and on `area:frontend` the same for
      `haven-design-reviewer`) — an unfilled line blocks the merge gate below;
    - merge readiness: CI, local checks, review status, risk, why safe, residual risk, and merge order.
-7. Include `Closes #<issue>`.
+7. Include `Closes #<issue>` — **except in operator-verify mode**, where the issue
+   must outlive the merge. There, reference it without the keyword (`Refs #<issue>`)
+   and say in the body why. `Closes` is a GitHub keyword, not prose: on merge it
+   closes the issue whatever the body says elsewhere, so three separate written
+   promises that the issue stays open lose to one keyword — which is what happened
+   to [#2268](https://github.com/d-hinders/Haven-AI/issues/2268) on the merge of
+   PR #2272 ([#2276](https://github.com/d-hinders/Haven-AI/issues/2276)). This is
+   **enforced, not merely written**: `scripts/ci/operator-verify-close-guard.mjs`
+   runs inside the required *Docs front-matter & agent skills* check and fails a
+   pull request whose closing keyword targets an issue labelled `operator-verify`,
+   or one the pull request itself says stays open.
+
+   **The body is not the only place the keyword counts (#2320).** GitHub honours it
+   in every **commit message** that reaches the default branch — `dev` is the
+   default here, a merge commit lands the messages verbatim and a squash lands them
+   concatenated — and, via the squash subject, in the **pull-request title**. The
+   guard reads all three. It had to learn this the hard way: PR #2314, which
+   introduced the guard, had a blameless body — it closed only its own issue,
+   #2276 — and closed #2268 anyway, from a commit message that merely
+   *described* the original incident. The check was green on the surface it
+   read, and silent about the one that mattered.
+
+   **To write ABOUT the keyword without emitting it, use a form GitHub does not
+   parse.** A code fence or a blockquote is not one — a fenced keyword in a commit
+   message is exactly how #2268 was closed a second time, and the guard treats
+   fenced text in the body the same way, on the safe side of an unverified case.
+   The forms that work: `Refs #<n>`,
+   a non-numeric placeholder (`Closes #<n>`, as this line does), the issue number
+   with no keyword in front of it, or the keyword and the number in separate
+   sentences. There is deliberately **no opt-out marker**: the guard's constraint is
+   identical to GitHub's, so there is nothing an opt-out could truthfully assert.
 8. Monitor pull-request activity when the client supports it.
 
 ## Merge Gate
@@ -494,10 +528,20 @@ the issue stays open — never tick on assertion alone.
 **Operator-verify mode.** When the definition of done includes steps only a human
 operator can run (funded testnet keys, vendor dashboards, live end-to-end runs):
 
-1. Ship the code PR as usual — the merge is not blocked by the live step.
-2. Post a numbered, copy-pasteable operator checklist on the issue (exact commands,
-   env var names — never secret values — and the expected output of each step).
+1. Ship the code PR as usual — the merge is not blocked by the live step. **Reference
+   the issue without a closing keyword** (`Refs #<issue>`; see *Commit And Pull
+   Request* step 7), or the merge closes the very issue this mode exists to keep open.
+   Writing "the issue stays open" in the body does not survive `Closes` — the keyword
+   is the mechanism and the sentence is not. **Check the commit messages and the
+   pull-request title as well** (#2320): they reach `dev` too, and a clean body does
+   not excuse them.
+2. Apply the **`operator-verify` label to the issue**, and post a numbered,
+   copy-pasteable operator checklist on it (exact commands, env var names — never
+   secret values — and the expected output of each step). The label is what makes
+   step 1 enforceable rather than remembered: the close guard reads it off the issue,
+   so it holds however the pull-request body is later rewritten.
 3. Leave the issue OPEN in this state and say so in the report; do not close on
    "code merged".
 4. When the operator confirms (or pastes the output), verify it matches the expected
-   evidence, tick the checklist, and close with the evidence links.
+   evidence, tick the checklist, remove the `operator-verify` label, and close with
+   the evidence links.

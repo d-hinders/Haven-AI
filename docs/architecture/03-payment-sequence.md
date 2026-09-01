@@ -235,7 +235,7 @@ against that shape:
   ([packages/backend/src/modules/x402/x402-delegation.ts](../../packages/backend/src/modules/x402/x402-delegation.ts)).
   The agent signs its EIP-712 typed data (`signature_scheme:
   'eip712_delegation'`) and POSTs `/x402/:id/settle`, which returns the
-  merchant `X-PAYMENT` header. The merchant redeems the `[child, budget]`
+  merchant payment header. The merchant redeems the `[child, budget]`
   chain and settles account→merchant directly — the period budget is metered
   by the settlement itself; no funding leg.
 - **EIP-3009 fallback** (`payTo` = the agent's own delegate EOA, with

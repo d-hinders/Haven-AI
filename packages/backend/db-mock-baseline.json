@@ -215,7 +215,7 @@
   },
   "packages/backend/src/routes/__tests__/x402-consolidation.characterization.test.ts": {
     "db-mock": 1,
-    "positional": 18
+    "positional": 17
   },
   "packages/backend/src/routes/__tests__/x402-delegation.test.ts": {
     "db-mock": 1,
@@ -223,6 +223,6 @@
   },
   "packages/backend/src/routes/__tests__/x402.test.ts": {
     "db-mock": 1,
-    "positional": 42
+    "positional": 30
   }
 }

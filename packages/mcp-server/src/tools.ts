@@ -69,6 +69,7 @@ export type HostedToolName =
   | 'haven_quote_x402'
   | 'haven_pay_x402_quote'
   | 'haven_resume_x402_payment'
+  | 'haven_report_x402_outcome'
   | 'haven_get_payment_status'
   | 'haven_get_resume_state'
   | 'haven_list_receipts'
@@ -319,6 +320,30 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     payment_id: z.string().optional(),
     resume_state: z.record(z.string(), z.unknown()).optional(),
   },
+  haven_report_x402_outcome: {
+    // #2292: the plain-HTTP twin of haven_complete_mcp_tool's bookkeeping —
+    // see REPORT_X402_OUTCOME_DESCRIPTION for why it is a separate tool.
+    //
+    // Note what is NOT here: no merchant_url, no tx_hash, no resource_url, no
+    // amount. Everything Haven writes down is read from the payment's own
+    // record, so the report says what the merchant ANSWERED and cannot say
+    // what it was answering about.
+    payment_id: z.string().min(1),
+    outcome: z.enum(['accepted', 'rejected'], {
+      required_error:
+        'outcome is required: "accepted" if the merchant served the resource (2xx), ' +
+        '"rejected" if it refused (non-2xx).',
+    }),
+    merchant_status: z
+      .number()
+      .int()
+      .min(100)
+      .max(599)
+      .describe('The HTTP status the merchant returned to your retry.'),
+    // Truncated server-side; kept short because it is a diagnostic snippet,
+    // not a receipt.
+    merchant_body: z.string().max(4096).optional(),
+  },
   haven_get_payment_status: {
     payment_id: z.string().min(1),
   },
@@ -331,6 +356,149 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   haven_verify_receipt: {
     receipt: z.unknown(),
   },
+}
+
+// ── Strict input (#2312) ─────────────────────────────────────────────────────
+
+/**
+ * #2312: which hosted tools REFUSE an undeclared argument, and why each one is
+ * on this list rather than the list being "all of them".
+ *
+ * ## What was actually broken, measured
+ *
+ * #2292 added `parseStrict` below and pointed it at `haven_report_x402_outcome`.
+ * That guard **could not fire over the wire.** The MCP SDK validates a tool call
+ * against the registered input schema and hands the handler `parseResult.data`
+ * — the STRIPPED object — before our handler runs
+ * (`@modelcontextprotocol/sdk`'s `McpServer.validateToolInput`). So an undeclared
+ * `tx_hash` was gone by the time `parseStrict` looked for it: measured on
+ * 2026-09-01 by driving a real `InMemoryTransport` client against
+ * `buildHostedMcpServer`, where that exact call returned `success: true` and
+ * WROTE its reconciliation event. `parseStrict`'s own test calls the handler
+ * directly, which is the only place the property held.
+ *
+ * That is the same defect the guard was written to prevent, one layer up: a
+ * check that returns cleanly while being about a different question than its
+ * author thinks. So strictness has to be declared where the SDK enforces it —
+ * at registration (`toolInputSchema` below, consumed by `server.ts`) — and
+ * `parseStrict` stays as the second line for an embedder that imports
+ * `createToolHandlers` directly, which `index.ts` exports.
+ *
+ * ## Why this does NOT re-prompt operators
+ *
+ * Measured, not assumed. Two independent reasons, either one sufficient:
+ *
+ *   1. The advertised JSON Schema does not move. `zod-to-json-schema` already
+ *      emits `additionalProperties: false` for a strip-mode `z.object`, so the
+ *      loose and strict advertisements are BYTE-IDENTICAL for all 22 hosted
+ *      schemas (surface hash `cf41c32a83b10c54` both ways, against a control
+ *      mutation at `3c8ea4a1f4bc564b`). The advertisement was already strict;
+ *      only the behaviour was permissive.
+ *   2. `computeConsentHash` (`packages/mcp/src/consent.ts`) hashes identity +
+ *      tool NAMES + the allowance summary. It takes no schema argument at all,
+ *      and the hosted server has no consent gate in the first place — the gate
+ *      lives in `packages/mcp` and `packages/signer`.
+ *
+ * ## Which tools, and which deliberately not
+ *
+ * On the list: the money-path tools that read something from the payment's own
+ * RECORD rather than from arguments. Those have #2292's exact failure mode — a
+ * stripped key lets a caller believe it pinned a value it did not — and they
+ * are where a silent strip costs money.
+ *
+ * Deliberately NOT on the list, with the reason kept here rather than in a
+ * commit message:
+ *
+ *   - `haven_send`, `haven_pay_mcp_tool`, `haven_quote_x402`,
+ *     `haven_pay_x402_quote` — the LOCAL MCP (`packages/mcp/src/tools.ts`)
+ *     spells the same arguments differently: `idempotencyKey` (camelCase) where
+ *     the hosted surface takes `idempotency_key`, `quote` where the hosted
+ *     surface takes `payment_required`, and a `body` the hosted surface has no
+ *     field for. An agent carrying the local shape to the hosted server is
+ *     silently stripped TODAY — losing idempotency protection on a payment,
+ *     which is the duplicate-spend hazard. Strictness is the right answer there
+ *     too, but it converts a live silent path into a hard refusal and wants its
+ *     own change with the guidance updated alongside it — #2348.
+ *   - `haven_complete_mcp_tool` — it was IN this batch until the final base
+ *     re-check found a live caller for it, which is the whole reason that
+ *     re-check exists. Haven's own agent-facing skill text — downloaded as
+ *     `SKILL.md` from the connect success screen and auto-installed by
+ *     `@haven_ai/connect` — says of this tool: "Pass `payment_required`,
+ *     `arguments`, and `mcp_transport` verbatim from the quote/prepare
+ *     result." This tool has never declared `payment_required`; the 402 is
+ *     read from the stored record. So an agent following Haven's own
+ *     instructions passes it, has it silently dropped, and succeeds — this
+ *     issue's exact defect, live, in our own guidance. Making the tool strict
+ *     before fixing the guidance would convert Haven's documented flow into a
+ *     hard 400 for every agent carrying the shipped skill. The guidance is the
+ *     bug and it is fixed first: #2353, which owns both byte-pinned copies
+ *     (`packages/sdk/src/skill-content.ts` and the frontend twin) and this
+ *     tool's switch.
+ *   - `haven_get_agent`, `haven_get_allowances` — schema `{}`. Strict on an
+ *     empty object refuses EVERY key, so any client that decorates a
+ *     no-argument call breaks, for no money-path gain. #2349.
+ *   - everything else — batched, not exempted: #2349 takes the remainder and
+ *     adds the guard that stops a NEW tool joining `toolSchemas` without a
+ *     strict/permissive decision being made about it at all.
+ *
+ * The value is the `.strict()` message: a refusal a caller can act on beats a
+ * bare "unrecognized key". It is also what `parseStrict` reuses, so the two
+ * layers cannot drift into saying different things about the same tool.
+ */
+export const STRICT_INPUT_TOOLS = {
+  // #2292's originating tool. Every field a reporter reaches for and this tool
+  // does not declare — tx_hash, resource_url, amount, merchant_url — is one
+  // Haven reads from the payment's own record. Stripping it lets a caller
+  // believe it pinned the anchor when it did not.
+  haven_report_x402_outcome:
+    'The funding transaction, resource URL and amount are read from the payment record, ' +
+    'so a report cannot be pointed at a different payment.',
+  // The relay leg. Everything except which payment and which signature — the
+  // amount, the recipient, the rail, the typed data that was signed — comes
+  // from the stored intent. A stripped key here means relaying a signature for
+  // a different question than the caller asked.
+  haven_submit:
+    'Amount, recipient and rail come from the stored payment intent; this tool takes only ' +
+    'which payment, which signature, and (optionally) which settlement scheme that signature is for.',
+  // #1307: merchant_url / tool_name / arguments / mcp_transport are OPTIONAL
+  // because Haven rehydrates the stored MCP call context from payment_id, and
+  // it relays the funding signature: this one moves money before it delivers.
+  // A stripped key is invisible twice over — the call still succeeds, against
+  // the recorded context rather than the one the caller passed.
+  haven_settle_mcp_tool:
+    'The MCP call context is rehydrated from payment_id when you omit it, and this tool funds before ' +
+    'it delivers — an unrecognised key must not be dropped on the way to a transfer.',
+} as const satisfies Partial<Record<HostedToolName, string>>
+
+export type StrictInputToolName = keyof typeof STRICT_INPUT_TOOLS
+
+function isStrictInputTool(name: HostedToolName): name is StrictInputToolName {
+  return Object.prototype.hasOwnProperty.call(STRICT_INPUT_TOOLS, name)
+}
+
+/**
+ * The input schema `server.ts` registers for a tool.
+ *
+ * A raw shape for a permissive tool (what the SDK has always been given), and a
+ * `.strict()` `ZodObject` for a tool on the list above. Both advertise the same
+ * JSON Schema; only the enforcement differs. Note the registration API matters:
+ * the deprecated `.tool(name, description, schema, handler)` overload refuses a
+ * `ZodObject` in its schema position ("received an unrecognized object"), so
+ * `server.ts` uses `registerTool`, which passes a Zod schema through intact.
+ */
+export function toolInputSchema(name: HostedToolName): z.ZodRawShape | z.ZodTypeAny {
+  if (!isStrictInputTool(name)) return toolSchemas[name]
+  return z.object(toolSchemas[name]).strict(strictRefusalMessage(name))
+}
+
+function strictRefusalMessage(name: StrictInputToolName, keys?: readonly string[]): string {
+  const subject = keys && keys.length > 0
+    ? `${name} does not accept ${keys.map((k) => `"${k}"`).join(', ')}.`
+    : `${name} refuses an argument it does not declare.`
+  return (
+    `${subject} That is deliberate rather than an omission: ${STRICT_INPUT_TOOLS[name]} ` +
+    'Send only the fields this tool declares.'
+  )
 }
 
 // ── Legacy tool schemas (one release cycle compatibility shim) ───────────────
@@ -476,7 +644,7 @@ const QUOTE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
 
 const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
   summary:
-    'Final step of the decomposed x402 MCP purchase: deliver the signed X-PAYMENT header to the merchant and return the tool result.',
+    'Final step of the decomposed x402 MCP purchase: deliver the signed merchant payment header (both x402 wire names) and return the tool result.',
   behavior:
     'Pass payment_id and payment_header (from haven_x402_sign_header); merchant_url/tool_name/arguments/mcp_transport are optional — Haven rehydrates them by payment_id. Call only after haven_submit confirmed funding. The header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key. ' +
     'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true) when funding expired first; MERCHANT_REJECTED_AFTER_FUNDING means the delegate holds stranded funds — recover with haven_sweep_delegate.',
@@ -485,7 +653,7 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
 
 const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
   summary:
-    'Fast-path final step of the x402 MCP purchase: fund and settle in one call — relay the funding signature, then deliver the X-PAYMENT header and return the merchant tool result.',
+    'Fast-path final step of the x402 MCP purchase: fund and settle in one call — relay the funding signature, then deliver the merchant payment header and return the merchant tool result.',
   behavior:
     'Pass payment_id, signature, and (EIP-3009 shape only) payment_header; merchant/tool fields are optional — rehydrated by payment_id. If funding does not confirm it returns { payment_id, settled: false, funding_status } without contacting the merchant. Echoes payment_id on every outcome for reconciliation via haven_list_receipts / haven_get_payment_status. ' +
     'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING — stranded funds, recover with haven_sweep_delegate.',
@@ -507,11 +675,27 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'Returns { payment_id, payload_hash, expires_at, x402, signer_compatibility } — compact by default;',
   'include_signing_payload=true on a same-idempotency_key re-run returns the inline payload for an',
   'older signer. Over-budget is declined at prepare; nothing is ever held for later approval.',
-  'After signing and haven_submit confirms funding, build the header with haven_x402_sign_header and',
-  'retry the merchant YOURSELF — Haven never talks to this merchant and never holds the key.',
+  'The signer tool named in the response guidance (haven_sign_x402) returns payment_header INLINE',
+  'alongside the signature — it is a one-shot that spends its own binding building that',
+  'header, so do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
+  'signature via haven_submit, then retry the merchant YOURSELF with that payment_header,',
+  'setting PAYMENT-SIGNATURE (v2); X-PAYMENT (v1) unless erc7710.',
+  'Haven never talks to this merchant and never holds the key. The header is built before funding',
+  'confirms, so its validity window starts at signing: retry promptly, and on',
+  'PAYMENT_WINDOW_EXPIRED re-run this tool with the same idempotency_key.',
   'When the merchant advertises extra.assetTransferMethod "erc7710" and the account is on the',
   'delegation rail, this returns settlement_scheme "erc7710" instead: sign, then haven_submit with',
   'settlement_scheme "erc7710" returns the payment_header directly. No funding leg on that path.',
+  // #2292, placed AFTER the erc7710 sentence and scoped explicitly (haven-reviewer NIT): sitting
+  // between the 3009 retry and the erc7710 branch it read as though it applied to both. It does
+  // not — an erc7710 intent has no Haven funding transaction, so the report is refused there —
+  // and prose that has to be disambiguated by a downstream refusal is prose worth fixing.
+  // Re-attached to #2291's corrected chain: the retry moved from haven_x402_sign_header to
+  // haven_sign_x402's inline header, but it is still the AGENT's retry, which is exactly why its
+  // outcome has nowhere to go without this call.
+  'On the funding-leg (EIP-3009) shape ONLY, report what the merchant answered to your retry with',
+  'haven_report_x402_outcome. Nothing to report on erc7710: there confirmed already means the',
+  'merchant settled.',
 ].join(' ')
 
 // #2145: the backend now emits nextAction=retry_original_x402_request from
@@ -525,8 +709,13 @@ const PAY_X402_QUOTE_DESCRIPTION = [
 // restart". A binding is not optional — haven_x402_sign_header requires one —
 // and for a funded payment the fetch behind haven_sign was refused outright
 // (409 already_executed), so the sequence this tool pointed at could not be
-// completed at all. Both halves are fixed: the gate now serves this state, and
-// the description names the full order instead of an aside.
+// completed at all. #2290 opened that gate.
+// #2291: but #2290's replacement wording named the OTHER impossible order —
+// haven_sign_x402, then its binding into haven_x402_sign_header. The one-shot
+// spends its own binding building the header inline, so that second call can
+// only refuse. Corrected here to the one-shot contract: use the inline
+// payment_header. Recorded rather than silently reflowed because the same
+// contradiction has now been written into this file twice.
 const RESUME_X402_DESCRIPTION = [
   'Resume an authorized x402 payment: retrieve the signing context so the signer can rebuild the',
   'merchant payment header and the agent can retry the merchant.',
@@ -535,10 +724,39 @@ const RESUME_X402_DESCRIPTION = [
   'the process crashed between funding and the merchant retry. Any other nextAction reports a',
   'conflict instead of returning context; do not call this speculatively and do not pay again.',
   'Returns { payment_id, payment_required, x402 } in the haven_pay_x402_quote shape. Then call',
-  'haven_sign_x402 with this payment_id to mint an x402_binding — the funding leg is already spent,',
-  'so this signs nothing new on-chain and must not be re-submitted — and pass that binding to',
-  'haven_x402_sign_header to build the header. Retry the original resource_url with it.',
+  'haven_sign_x402 with this payment_id — the funding leg is already spent, so this signs nothing',
+  'new on-chain and its signature must not be re-submitted. Take payment_header from ITS result',
+  'and retry the original resource_url with it. Do NOT pass its x402_binding to',
+  'haven_x402_sign_header: that binding is already spent, and the call can only refuse.',
+  // #2292: same obligation as the first-attempt path — a resumed retry Haven did not make is
+  // just as unobservable as the original one.
+  'Then report the outcome with haven_report_x402_outcome.',
   'Carries no signer_compatibility of its own; an incompatible signer refuses at signing time.',
+].join(' ')
+
+// #2292: a NEW tool rather than a mode on haven_complete_mcp_tool.
+//
+// The two look adjacent — both end an x402 purchase and both write the same
+// two records — but they differ in the one place that matters: WHO called the
+// merchant. haven_complete_mcp_tool makes the call itself, so what it writes
+// is observed; this tool writes what the caller ASSERTS about a call Haven
+// deliberately did not make, because on the plain-HTTP path Haven never talks
+// to the merchant and never holds the key. Folding them together would put an
+// observed fact and an asserted one behind one name, with a flag deciding
+// which — and their arguments barely intersect (merchant_url / tool_name /
+// payment_header versus outcome / merchant_status). That is the mode flag
+// whose branches a caller has to learn, wearing the hat of deduplication.
+// Kept terse on purpose: the "why a separate tool" reasoning above is for
+// maintainers and does not belong in the served payload (#1591's per-tool
+// budget, which this description sits comfortably under). What an agent needs
+// is what it does, what to pass, what changes, and what it cannot do.
+const REPORT_X402_OUTCOME_DESCRIPTION = [
+  'Report what a plain-HTTP x402 merchant answered to a retry YOU made; Haven never contacts it, so',
+  'nothing else can. Pass payment_id, outcome ("accepted" for a 2xx, else "rejected"),',
+  'merchant_status, optional merchant_body. A rejection surfaces stranded funds on your next',
+  'haven_get_payment_status instead of a 15-minute wait. Evidence only, your own payments only: it',
+  'moves no money. Not for merchants Haven called for you — haven_complete_mcp_tool and',
+  'haven_settle_mcp_tool already record what they observed.',
 ].join(' ')
 
 const SWEEP_DELEGATE_DESCRIPTION = [
@@ -575,6 +793,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_quote_x402: QUOTE_X402_DESCRIPTION,
   haven_pay_x402_quote: PAY_X402_QUOTE_DESCRIPTION,
   haven_resume_x402_payment: RESUME_X402_DESCRIPTION,
+  haven_report_x402_outcome: REPORT_X402_OUTCOME_DESCRIPTION,
   haven_get_payment_status: composeDescription(sharedDescriptions.getPaymentStatus),
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
@@ -809,7 +1028,7 @@ export function createToolHandlers(
 
     haven_submit: async (input) =>
       runTool(async () => {
-        const args = parse('haven_submit', input)
+        const args = parseStrict('haven_submit', input)
         // #2041: the erc7710 branch, for the GENERIC plain-HTTP flow. The MCP
         // flow's equivalent lives in haven_settle_mcp_tool, which also CALLS
         // the merchant; a plain-HTTP merchant is retried by the agent itself,
@@ -855,8 +1074,10 @@ export function createToolHandlers(
               nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
               safeToContinue: true,
               reason:
-                'Retry the ORIGINAL merchant request yourself with this payment_header as the ' +
-                'X-PAYMENT header. Do NOT call haven_x402_sign_header: on this scheme Haven ' +
+                'Retry the ORIGINAL merchant request yourself, setting PAYMENT-SIGNATURE ' +
+                '(x402 v2) to this payment_header, and ONLY that header name on this scheme. ' +
+                'Do NOT call ' +
+                'haven_x402_sign_header: on this scheme Haven ' +
                 'assembled the header, there is nothing to build locally, and there is no funding ' +
                 'transaction to wait for or sweep — the merchant pulls from the treasury directly. ' +
                 'Do NOT call haven_resume_x402_payment either: nothing is pending, and that tool ' +
@@ -1525,7 +1746,7 @@ export function createToolHandlers(
 
     haven_settle_mcp_tool: async (input) =>
       runTool(async () => {
-        const args = parse('haven_settle_mcp_tool', input)
+        const args = parseStrict('haven_settle_mcp_tool', input)
         // ── #2282: the merchant-call context is resolved BEFORE anything is
         // submitted, on BOTH schemes. ──
         //
@@ -1907,7 +2128,8 @@ export function createToolHandlers(
                   "fetches the settlement child itself and verifies its caveats against Haven's " +
                   'signed context (#1455) before signing. Then call haven_submit with ' +
                   "settlement_scheme: 'erc7710' to receive the merchant payment_header, and retry " +
-                  'the original merchant request yourself with it as X-PAYMENT. Do NOT call ' +
+                  'the original merchant request yourself, setting PAYMENT-SIGNATURE ' +
+                  '(x402 v2) to it and ONLY that name on this scheme. Do NOT call ' +
                   'haven_x402_sign_header: on this scheme Haven assembles the header and there is ' +
                   'no funding transaction to wait for.',
                 summary: {
@@ -1944,12 +2166,20 @@ export function createToolHandlers(
               nextTool: 'mcp__haven-signer__haven_sign_x402',
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
+              // #2291: this said "relay via haven_submit and finish with
+              // haven_x402_sign_header", which next_tool made impossible —
+              // haven_sign_x402 is a one-shot that spends its own binding
+              // building the header, so the named successor could only refuse.
+              // One contract now, and it is the one the tool already implements.
               reason:
                 'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
                 'signer fetches payment_required itself; only if it reports the context carried ' +
-                'none, re-call with the payment_required you passed to this tool added VERBATIM). Then ' +
-                'relay via haven_submit and finish with ' +
-                'haven_x402_sign_header + the original merchant retry.',
+                'none, re-call with the payment_required you passed to this tool added VERBATIM). ' +
+                'It returns BOTH signature and payment_header. Relay signature via haven_submit, ' +
+                'then retry the original merchant URL yourself with payment_header. Do NOT call ' +
+                'haven_x402_sign_header: haven_sign_x402 already spent its binding building that ' +
+                'header, so that call can only refuse. The header is signed before funding ' +
+                'confirms, so retry promptly.',
               summary: {
                 payment_id: intent.paymentId,
                 status: intent.status,
@@ -2041,8 +2271,13 @@ export function createToolHandlers(
         }
 
         // Return the same signing context shape as haven_pay_x402_quote so the
-        // signer can call haven_x402_sign_header (or re-derive the binding via
-        // haven_sign if the binding was lost across a signer restart).
+        // signer can rebuild the merchant header from payment_id alone.
+        // #2291: this comment used to name haven_x402_sign_header here, which
+        // is the fourth place the pre-#2291 contract was written down. On this
+        // path the header comes from haven_sign_x402's own result — that
+        // one-shot spends its binding building it — and the description
+        // constant above (RESUME_X402_DESCRIPTION) is the agent-facing
+        // statement of the same thing.
         return {
           payment_id: state.paymentId,
           status: status.status,
@@ -2075,6 +2310,61 @@ export function createToolHandlers(
         // in @haven_ai/sdk for the single home of this "settled x402 only"
         // attach logic (was duplicated verbatim in both packages).
         return haven.getPaymentStatusWithPostPurchaseAllowance(args.payment_id)
+      }),
+
+    haven_report_x402_outcome: async (input) =>
+      runTool(async () => {
+        const args = parseStrict('haven_report_x402_outcome', input)
+        const report = await haven.reportX402MerchantOutcome({
+          paymentId: args.payment_id,
+          outcome: args.outcome,
+          merchantStatus: args.merchant_status,
+          ...(args.merchant_body ? { merchantBody: args.merchant_body } : {}),
+        })
+        // Re-read rather than predict. The status this returns is the one the
+        // agent would get from haven_get_payment_status on its next call, so
+        // "reflected on the NEXT call" is demonstrated in the report's own
+        // response instead of being asserted by the description. A status read
+        // that fails must not turn a RECORDED report into a reported failure —
+        // the write already happened and is not undone by a failed read.
+        let status: Awaited<ReturnType<HavenClient['getPaymentStatus']>> | null = null
+        try {
+          status = await haven.getPaymentStatus(report.paymentId)
+        } catch {
+          status = null
+        }
+        return {
+          payment_id: report.paymentId,
+          outcome: report.outcome,
+          recorded: report.recorded,
+          // Echoed so a reconciling human can see WHICH transaction the report
+          // was anchored to — and see that the agent did not choose it.
+          tx_hash: report.txHash,
+          resource_url: report.resourceUrl,
+          ...buildAgentGuidance({
+            nextAction:
+              status?.nextAction ??
+              (report.outcome === 'rejected'
+                ? AgentPaymentNextAction.SweepStrandedFunds
+                : AgentPaymentNextAction.None),
+            ...(report.outcome === 'rejected'
+              ? { nextTool: 'mcp__haven__haven_sweep_delegate' as const, nextArguments: {} }
+              : {}),
+            safeToContinue: true,
+            reason:
+              report.outcome === 'rejected'
+                ? 'Recorded. The merchant refused the paid retry, so the funding may be stranded on ' +
+                  'the delegate wallet — recover it with haven_sweep_delegate. Do NOT pay again for ' +
+                  'the same purchase.'
+                : 'Recorded. The purchase is complete and no longer reads as undelivered; no further ' +
+                  'Haven tool is needed.',
+            summary: {
+              payment_id: report.paymentId,
+              status: status?.status ?? 'confirmed',
+            },
+          }),
+          phase: status?.phase ?? null,
+        }
       }),
 
     haven_get_resume_state: async (input) =>
@@ -3045,6 +3335,51 @@ function parse<TName extends HostedToolName>(name: TName, input: unknown): Recor
   return z.object(toolSchemas[name]).parse(input ?? {})
 }
 
+/**
+ * #2292/#2312: `parse` with unknown keys REFUSED instead of stripped.
+ *
+ * `parse` above is a bare `z.object`, which silently drops anything it does
+ * not recognise — the exact shape #2282 found on `mcp_transport`, where a
+ * caller's argument was edited rather than validated and an unrecognised
+ * input parsed to the same value as an absent one.
+ *
+ * **This is the SECOND line of defence, not the first, and #2292 shipped it
+ * believing it was the only one.** Over the MCP transport the SDK has already
+ * validated and STRIPPED the arguments before a handler is called, so an
+ * unrecognised key never reaches here; the guard that actually fires on the
+ * wire is the strict registration schema (`toolInputSchema`, see
+ * `STRICT_INPUT_TOOLS` above for the measurement). What this still covers is
+ * the direct-embedder path — `createToolHandlers` is exported from `index.ts`
+ * — plus the unit tests, which call handlers directly.
+ *
+ * Which tools are strict, and why each, is declared once in
+ * `STRICT_INPUT_TOOLS`; both layers read their refusal text from there so they
+ * cannot drift into saying different things about the same tool.
+ */
+function parseStrict<TName extends StrictInputToolName>(name: TName, input: unknown): Record<string, any> {
+  const result = z.object(toolSchemas[name]).strict().safeParse(input ?? {})
+  if (result.success) return result.data
+  // TOP-LEVEL keys only. A nested strict object — `mcp_transport`, whose
+  // `.strict(MCP_TRANSPORT_CASE_HINT)` explains the snake_case boundary #2282
+  // found — also raises `unrecognized_keys`, at a non-empty path. Collecting
+  // those here would replace that tool-specific hint with this generic one and
+  // silently regress #2282's refusal message; the nested case falls through to
+  // `throw result.error`, exactly as the permissive `parse` did.
+  const unrecognized = result.error.issues.flatMap((issue) =>
+    issue.code === 'unrecognized_keys' && issue.path.length === 0 ? issue.keys : [],
+  )
+  if (unrecognized.length > 0) {
+    throw new HostedToolError({
+      code: 'INVALID_INPUT',
+      message: strictRefusalMessage(name, unrecognized),
+      statusCode: 400,
+      status: 'invalid_input',
+      phase: 'not_started',
+    })
+  }
+  throw result.error
+}
+
 class HostedToolError extends Error {
   readonly code: string
   readonly statusCode?: number
@@ -3376,7 +3711,7 @@ async function preflightMcpPaymentHeader(haven: HavenClient, args: Record<string
     throw new HostedToolError({
       code: 'INVALID_PAYMENT_HEADER',
       message:
-        'The X-PAYMENT header did not match the funded x402 intent. No funding was relayed. ' +
+        'The signed payment header did not match the funded x402 intent. No funding was relayed. ' +
         'Recreate the header with the local signer from this payment_id, then retry.',
       statusCode: 400,
       paymentId: args.payment_id,

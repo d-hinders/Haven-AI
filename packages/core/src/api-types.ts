@@ -1994,7 +1994,7 @@ export type paths = {
         put?: never;
         /**
          * Record a merchant retry reconciliation event.
-         * @description Records a post-payment reconciliation marker when the merchant/protocol retry rejects or needs follow-up after a confirmed payment. The event is audit context only; it does not move funds.
+         * @description Records a post-payment reconciliation marker when the merchant/protocol retry rejects or needs follow-up after a confirmed payment. The event is audit context only; it does not move funds. The payment is resolved scoped to the calling agent, so another agent's payment answers 404 with nothing written. #2292: an acceptance is terminal — a merchant_retry_rejected_after_payment on a payment that already carries a client-reported merchant response (machine_payment_evidence proof_status merchant_response_observed or protocol_receipt_attached) answers 409 rather than re-opening a stranded-funds flag on a delivered payment.
          */
         post: operations["recordMachinePaymentReconciliationEvent"];
         delete?: never;
@@ -2485,11 +2485,12 @@ export type components = {
          * @enum {string}
          */
         AgentConnectionSetupState: "awaiting_connection" | "connected_local" | "awaiting_wallet_approval" | "approval_in_progress" | "proposed" | "active" | "expired" | "cancelled" | "failed";
+        /** @description One requested budget on a connect setup. Its `allowance_amount` is ATOMIC — the opposite shape to the identically named field on AgentAllowance, which is the human-decimal delegation projection (#2295). */
         AgentConnectionAllowanceInput: {
             /** @example 0x1111111111111111111111111111111111111111 */
             token_address: string;
             token_symbol: string;
-            /** @description Decimal atomic token amount. Leading zeroes are accepted and canonicalized; effective amount must be positive and capped at uint96 — the word size of the delegation rail's ERC20PeriodTransferEnforcer. */
+            /** @description ATOMIC token amount — an integer string in the token's smallest unit (25 USDC is "25000000"). Leading zeroes are accepted and canonicalized; effective amount must be positive and capped at uint96 — the word size of the delegation rail's ERC20PeriodTransferEnforcer. NOT interchangeable with the human-decimal shape the delegation-rail budget projection returns for the same field name — see AgentAllowance.allowance_amount (#2295). */
             allowance_amount: string;
             reset_period_min: number;
         };
@@ -2692,6 +2693,7 @@ export type components = {
                 reset_period_min: number;
             } | null;
         };
+        /** @description One element of an agent's derived budget view (GET /agents, GET /agents/{id}, PATCH /agents/{id}). Projected from the agent's ACTIVE delegations, never from stored allowance rows (#1090/#2020). Its `allowance_amount` is HUMAN-DECIMAL — the opposite shape to the identically named field on AgentConnectionAllowance, which is atomic (#2295). */
         AgentAllowance: {
             /** Format: uuid */
             id: string;
@@ -2700,6 +2702,7 @@ export type components = {
             /** @example 0x1111111111111111111111111111111111111111 */
             token_address: string;
             token_symbol: string;
+            /** @description HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent's active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals). Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token's decimals first (#2295). */
             allowance_amount: string;
             reset_period_min: number;
         };
@@ -3181,9 +3184,11 @@ export type components = {
                 /** @example 0x1111111111111111111111111111111111111111 */
                 token_address: string;
                 token_symbol: string;
+                /** @description HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent's active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals). Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token's decimals first (#2295). */
                 configured_amount: string;
                 reset_period_min: number;
                 onchain: {
+                    /** @description The configured period budget in ATOMIC units — the same budget as the sibling `configured_amount`, which states it in whole token units. `spent`, `remaining` and `effective_spent` are atomic too (#2295). */
                     amount: string;
                     spent: string;
                     remaining: string;

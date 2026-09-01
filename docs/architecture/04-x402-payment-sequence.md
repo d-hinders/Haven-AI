@@ -30,7 +30,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-31" # chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-31" # #2274: the retired-rail gate paragraph in "Settlement-scheme reality and the EIP-3009 bridge" corrected — it named token resolution as still preceding the rail 410, which #2274 moved below the gate on this route and on POST /payments together. Scope: that paragraph only; the surrounding scheme-selection and 3009-mode prose was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: #2291: corrected the #2290 paragraph in "Resuming An Authorized Payment", which named haven_sign_x402 -> haven_x402_sign_header as the working remedy — a sequence the one-shot's spent binding cannot serve. Scope: that paragraph. The rest of the section, and the decomposed/recommended flows elsewhere in this doc, were re-read against the corrected contract and are accurate as written. Prior: chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -46,7 +46,7 @@ The live delegation-rail merchant x402 flow is scheme-specific:
    redeems the payment directly from the delegated account; there is no funding
    leg or delegate hot balance.
 2. On EIP-3009, Haven may first relay a signed funding leg to the delegated
-   account, then the agent signs the merchant `X-PAYMENT` header locally and
+   account, then the agent signs the merchant payment header locally and
    retries the merchant/resource request.
 
 > ⚠️ **The legacy AllowanceModule two-leg described below NO LONGER RUNS.**
@@ -116,6 +116,7 @@ Source of truth:
   route orchestration.
 - [`packages/mcp/src/tools.ts`](../../packages/mcp/src/tools.ts)
 - [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts)
+- [`packages/backend/src/modules/mpp/reconciliation.ts`](../../packages/backend/src/modules/mpp/reconciliation.ts) — `POST /machine-payments/reconciliation-events`, and the #2292 acceptance-is-terminal precedence rule.
 - [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
 
 ## Challenge And Header Semantics
@@ -816,14 +817,81 @@ is told to retry a merchant that was already paid, which is the safe side —
 x402 merchants answer a re-request of a settled purchase idempotently
 (#1519).
 
+**What is live since #2292: a way for the agent to say what happened.** The
+derivation above is deliberately server-side, and stays so — case 2 has to
+fire for an agent that never came back, which no client-written signal can
+provide. What #2292 changes is how long the *surviving* agent has to wait. On
+the plain-HTTP path Haven never contacts the merchant, so before #2292 both
+routes into `funded_but_unsettled` were out of reach there: the
+`merchant_retry_rejected_after_payment` event had exactly one producer, the
+SDK's own retry path, and a manually retried merchant could not write it; and
+the grace window is fifteen minutes. A demonstrably failed purchase therefore
+read `confirmed` / `payment_confirmed` / `none` for that whole window. Not a
+wrong status — an unobservable one.
+
+`haven_report_x402_outcome` (hosted MCP) and
+`HavenClient.reportX402MerchantOutcome` (SDK) close that. `rejected` posts the
+same `POST /machine-payments/reconciliation-events` the SDK path posts, so
+case 1 fires on the next status call; `accepted` posts `POST
+/machine-payments/evidence`, which upgrades `proof_status` to
+`merchant_response_observed` and therefore removes the payment from case 2's
+predicate permanently rather than until the window elapses.
+
+The report is caller-**asserted**, and the boundary is drawn the way #2092/#2096
+drew it for a caller-asserted settlement hash:
+
+- **Verified:** the payment resolves scoped to the calling agent (both routes
+  are `WHERE agent_id = $`, so a foreign payment is a 404); it is an x402
+  intent, `confirmed`, with a Haven funding transaction; the anchor tx hash and
+  resource URL are read from that record and are **not** arguments — the tool
+  refuses `tx_hash` / `resource_url` outright rather than stripping them; and
+  `merchant_status` must be a 100–599 integer that agrees with the asserted
+  outcome.
+- **Deliberately not verified:** that the merchant actually returned that
+  status, or that the resource was delivered. Checking would mean calling the
+  merchant, which is the property this path exists to preserve. Haven must not
+  start talking to this merchant, not even to be helpful.
+- **What a false report can therefore achieve:** on the reporter's own payment
+  only, either hiding its stranded-funds prompt or raising a spurious one. It
+  cannot move funds, cannot change the intent's status, amount or recipient,
+  cannot confirm a `submitted` erc7710 intent (that has no Haven tx hash and is
+  refused here — the on-chain-verified seam in `attachMachinePaymentEvidence`
+  stays the only door), and cannot block or unblock a sweep, which is driven by
+  the delegate's on-chain balance. A false `accepted` additionally triggers the
+  server's own post-settlement residue read, which re-flags stranded funds
+  independently.
+
+**Precedence between contradictory reports, decided once:** an acceptance is
+terminal. An acceptance after a rejection resolves the open event (the attach
+path already did this); a rejection after an acceptance is now refused with
+409 rather than opening a stranding on a delivered payment. Before #2292 the
+three orderings gave three different answers, none of them chosen. Delivery is
+the stronger fact, and an x402 merchant answers a re-request of a settled
+purchase idempotently (#1519), so a later 402 says something about the retry
+and not about whether the user got what they paid for.
+
 **What is live since #2290: the signing leg the remedy depends on.** Until
 #2290 the trigger above was reachable and its cure was not. `haven_sign_x402`
-mints the `x402_binding` that `haven_x402_sign_header` requires, and it gets
-the bytes from `GET /x402/:id/sign-context` — which refused **every**
-`confirmed` intent with `409 already_executed`, regardless of what
-`next_action` had just told the agent to do. An agent following the documented
-remedy reached a dead end four calls in, with the funding leg already spent
-(live case: payment `d480c3e4`, 0.01 USDC on the delegate EOA).
+builds the merchant header, and it gets the bytes from
+`GET /x402/:id/sign-context` — which refused **every** `confirmed` intent with
+`409 already_executed`, regardless of what `next_action` had just told the
+agent to do. An agent following the documented remedy reached a dead end four
+calls in, with the funding leg already spent (live case: payment `d480c3e4`,
+0.01 USDC on the delegate EOA).
+
+> **Correction (#2291).** This paragraph originally said `haven_sign_x402`
+> "mints the `x402_binding` that `haven_x402_sign_header` requires" — naming a
+> sequence that cannot execute. `haven_sign_x402` is a **one-shot**: it calls
+> `buildX402PaymentHeader` internally, which consumes the binding on every exit
+> path, so the binding it returns is already spent and the follow-up call can
+> only refuse. On the resume path the header is the `payment_header` in
+> `haven_sign_x402`'s own result; retry the merchant with that.
+> `haven_x402_sign_header` is the successor to **`haven_sign`**, which records
+> the context without consuming it — that decomposed flow, shown elsewhere in
+> this document, is unaffected. Recorded rather than silently rewritten because
+> the identical claim was written into three places at once (here,
+> `RESUME_X402_DESCRIPTION`, and the guidance `reason`), which says more about
+> how easily the two tools are conflated than about any one of the three.
 
 The gate now opens for exactly the state described above and no other, because
 it reads the *same* predicate over the *same* derived row:
@@ -1504,10 +1572,18 @@ either scheme branch — it can no longer slip into the legacy AllowanceModule
 flow below — and since #1986 an `allowance_module` account (or the LEFT-JOIN
 `null` most of that population carries) gets the Safe-rail 410 the same way.
 Since #2245 **nothing rail-dependent runs above that gate**, so neither
-tombstone can be diverted by a request field. What still precedes it is
-rail-INDEPENDENT and claims nothing about any rail: the route's structural
-`settlementScheme` enum check and token resolution — the same position `POST
-/payments` puts its own gate in, and the same class as the 401 auth hook.
+tombstone can be diverted by a request field. Since **#2274** token and amount
+resolution do not run above it either: they answer "which assets can you pay
+with", and for a retired-rail account the answer is none on every asset, so a
+400 carrying `supported: [...]` was a premature answer to a question the 410
+settles. Rail-INDEPENDENT residue — it asserted nothing false about a rail,
+which is why #2245 filed it rather than folding it in, and why it was fixed on
+`POST /x402/authorize` and `POST /payments` **together**: one route alone
+recreates the asymmetry #2245 removed. What still precedes the gate is the
+route's structural validation (`settlementScheme` enum shape, required fields,
+address and network checks) — the same position `POST /payments` puts its own
+gate in, and the same class as the 401 auth hook. A malformed request is still
+a 400 on both routes: the tombstone is not the route's error handler.
 
 **How 3009-mode works.** EIP-3009 (`transferWithAuthorization`) is ECDSA-based —
 the fund-holder must be an **EOA** that signs (USDC rejects EIP-1271 for it),

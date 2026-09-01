@@ -63,13 +63,44 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/sdk/src/**'],
-    'last-verified': '2026-08-28',
+    // #2341: re-verified and EDITED (every merchant-retry header instruction,
+    // six sites). #2330 made them all say "both names" — correct then, and
+    // wrong on erc7710 the moment #2341 scoped the send by scheme. This is the
+    // npm landing page, so two of the six are copy-pasteable `fetch` samples a
+    // developer would apply verbatim to an erc7710 payment and get HTTP 431.
+    // The bridged (EIP-3009) samples keep both names, which is right for them,
+    // and now SAY they are bridge-only rather than reading as the general
+    // rule. Caught by re-reading a doc the coupling gate listed as advisory —
+    // the blocking half only covers contract docs, so nothing would have
+    // stopped this shipping. Nothing else re-verified in this pass. Prior:
+    // #2330: re-verified and EDITED (the two remaining manual-retry mentions
+    // only). #2292 corrected the header example in the resume section; two
+    // other spots still told the reader the agent "retries with X-PAYMENT" —
+    // the same v1-only instruction #2330 removed from the tool descriptions,
+    // and the same defect the epic opened on. Both now name the pair. Nothing
+    // else re-verified in this pass. Prior:
+    // #2292: re-verified and EDITED (the "Resuming an x402 payment" section
+    // only). The manual-retry examples showed the caller making the merchant
+    // call and then nothing — which was accurate before this PR and is a
+    // silent gap after it, since HavenClient.reportX402MerchantOutcome is now
+    // the only way Haven learns that outcome. The header example there also
+    // still sent X-PAYMENT alone; corrected to both names, matching the #2289
+    // paragraph this same doc already carries two sections below. The rest of
+    // the README was NOT re-verified in this pass.
+    'last-verified': '2026-09-01',
   },
   {
     doc: 'packages/signer/README.md',
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/signer/src/**'],
+    // #2330: re-verified and EDITED (every merchant-header mention). This was
+    // the most out-of-date surface found: six spots named X-PAYMENT alone,
+    // including two "agent: retry merchant with X-PAYMENT" lines in the
+    // orchestration blocks — the literal instruction #2330 exists to remove.
+    // The artifact is now "merchant payment header" and the two retry lines
+    // name both wire names, matching the tool descriptions this change fixed
+    // in packages/signer/src/tools.ts. Nothing else re-verified. Prior:
     // #2243: first real verification pass since #2088 seeded this date. Every
     // claim in the body re-read against `packages/signer/src/**` and rewritten
     // where it had drifted: the tool table (two tools -> the four in
@@ -97,7 +128,16 @@ export const GOVERNED_PACKAGE_DOCS = [
     // locally during setup" paragraph under Custody — it describes
     // `packages/connect`, which is outside this doc's `covers:` and was not
     // read.
-    'last-verified': '2026-08-30',
+    // #2341: re-verified and EDITED (the two flow diagrams only). The erc7710
+    // diagram told the agent to retry "setting BOTH PAYMENT-SIGNATURE +
+    // X-PAYMENT" — the instruction that produces HTTP 431 on that scheme,
+    // sitting directly under the erc7710 haven_submit line. The EIP-3009
+    // diagram says the same thing and is CORRECT there, so it is annotated
+    // rather than changed, making the pair read as a deliberate contrast.
+    // Nothing flagged this file: the coupling gate did not list it, because
+    // the commit that broke it did not touch packages/signer/src. Found by
+    // sweeping, not by tooling. Rest of the README NOT re-verified.
+    'last-verified': '2026-09-01',
   },
   {
     doc: 'packages/mcp/README.md',
@@ -125,7 +165,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/mcp-server/src/**'],
-    'last-verified': '2026-08-27',
+    // #2330: re-verified and EDITED (the two merchant-header mentions only).
+    // The sequence diagram and the signer paragraph both named X-PAYMENT alone
+    // while the hosted server has relayed both wire names since #2289. Scope:
+    // those two lines; the rest of the README was NOT re-verified.
+    'last-verified': '2026-08-31',
   },
   {
     // The #1992 file. Its prose is mostly about BACKEND behaviour — which

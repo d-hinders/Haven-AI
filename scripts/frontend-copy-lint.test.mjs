@@ -98,3 +98,31 @@ test('the originating downloadable-prose file is on the allowlist', () => {
   // human from the connect-agent success screen and read by an agent (#2317).
   assert.ok(SCAN_FILES.includes('packages/frontend/src/lib/agent-skill-bundle.ts'))
 })
+
+// ── Attribution phrases (#2334) ──────────────────────────────────────────────
+
+test('flags the CASP attribution inversion this list was extended for', () => {
+  // The exact sentence that shipped in the downloadable SKILL.md (#2334).
+  const r = findCopyIssues(
+    "the pay-tool result's amount is the amount\nHaven authorizes for that call\n",
+  )
+  assert.equal(r.length, 1)
+  assert.equal(r[0].phrase, 'haven authorizes')
+  assert.equal(r[0].line, 2)
+})
+
+test('the attribution match is literal and single-line — say so, do not overclaim', () => {
+  // Both of these are the SAME inversion and BOTH go undetected. This test
+  // pins the guard's known ceiling so nobody reads a green run as "attribution
+  // was checked": rewording, and a line break between the two words, each
+  // evade it. Attribution is a human-review control (copy-guidelines.md
+  // § Core principle); this list is only the literal floor under it.
+  assert.deepEqual(findCopyIssues('authorization for that call comes from Haven\n'), [])
+  assert.deepEqual(findCopyIssues('is the amount Haven\nauthorizes for that call\n'), [])
+})
+
+test('ordinary Haven sentences are not flagged (false-positive floor)', () => {
+  // Haven-as-actor prose that is TRUE and must stay writable.
+  assert.deepEqual(findCopyIssues('Haven relays policy-limited account operations.\n'), [])
+  assert.deepEqual(findCopyIssues('Haven cannot move funds outside the limits you approve.\n'), [])
+})

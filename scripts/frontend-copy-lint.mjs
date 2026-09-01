@@ -133,6 +133,12 @@ export const SCAN_FILES = [
 // considered and rejected as #2317 rejected widening SCAN_DIRS, and #2332 is
 // the standing counter-example (`passkey.ts` carries a banned phrase in a
 // developer-facing throw and deliberately stays OUT).
+//
+// It is also not a substitute for reading the copy. The very first pass over
+// the newly-scanned files found a real one this cannot see — bare "delegate"
+// rendered on the primary transaction row (#2356) — because the matcher is
+// multi-word-literal by design and "delegate" is a legitimate identifier
+// everywhere else in the frontend. Human/design review is the control there.
 const LIB_DIR = join(REPO_ROOT, 'packages', 'frontend', 'src', 'lib')
 
 /** True when `rel`'s basename follows the extracted-copy naming convention. */

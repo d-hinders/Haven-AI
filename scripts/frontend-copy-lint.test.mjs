@@ -203,9 +203,26 @@ test('conventionGaps: allowlisted and exempted files are both accepted', () => {
   )
 })
 
+test('a stale CONVENTION_EXEMPT entry is detected', () => {
+  // The mechanism, over a NON-EMPTY map. The structural test below runs the
+  // real map, which is `{}` today and so cannot fail on its own — that pair is
+  // deliberate: this one proves the check works, that one proves the repo
+  // currently satisfies it. A stale exemption silently excuses a file that is
+  // no longer there — the dangling-allowlist-entry defect, one mechanism over.
+  const exempt = {
+    'packages/frontend/src/lib/agent-pause-copy.ts': 'still here',
+    'packages/frontend/src/lib/gone-copy.ts': 'deleted last month',
+  }
+  assert.deepEqual(
+    missingTargets(Object.keys(exempt), (rel) => existsSync(join(REPO_ROOT, rel))),
+    ['packages/frontend/src/lib/gone-copy.ts'],
+  )
+})
+
 test('every CONVENTION_EXEMPT entry resolves to a real file', () => {
-  // A stale exemption silently excuses a file that is no longer there — the
-  // dangling-allowlist-entry defect, one mechanism over.
+  // Structural: vacuously true while the map is empty, and that is the correct
+  // state to assert — it starts failing the moment someone exempts a file that
+  // is not there. The test above is what proves the check itself can fire.
   const missing = missingTargets(Object.keys(CONVENTION_EXEMPT), (rel) =>
     existsSync(join(REPO_ROOT, rel)),
   )

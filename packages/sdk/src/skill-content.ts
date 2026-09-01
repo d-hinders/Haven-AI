@@ -128,8 +128,14 @@ The paid call always obtains a fresh quote before it creates any intent. Then
 continue \`mcp__haven__haven_pay_mcp_tool\` →
 \`mcp__haven-signer__haven_sign\` → \`mcp__haven__haven_submit\` →
 \`mcp__haven-signer__haven_x402_sign_header\` →
-\`mcp__haven__haven_complete_mcp_tool\`. Pass \`payment_required\`,
-\`arguments\`, and \`mcp_transport\` verbatim from the quote/prepare result.
+\`mcp__haven__haven_complete_mcp_tool\`. Call that last step with
+\`payment_id\` and the signer's \`payment_header\` ONLY. It does not take
+\`payment_required\`: Haven rehydrates the merchant call context
+(\`merchant_url\`, \`tool_name\`, \`arguments\`, \`mcp_transport\`) and the
+402 server-side from \`payment_id\`, exactly as at settle. Pass that context
+explicitly only as a version-skew fallback when Haven has no stored context
+for the id — \`merchant_url\` and \`tool_name\` both or none together, never
+just one.
 The returned \`expires_at\` is the signing window; if a tool returns
 \`PAYMENT_WINDOW_EXPIRED\`, re-run the same quote/prepare tool with the same
 \`idempotency_key\`. Do not call the merchant yourself — Haven completes the

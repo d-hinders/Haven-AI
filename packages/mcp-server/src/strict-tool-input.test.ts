@@ -426,9 +426,13 @@ describe('#2363 — the shipped skill still matches what the exclusion comment c
   const completeSection = HAVEN_SKILL_MD.slice(HAVEN_SKILL_MD.indexOf('haven_complete_mcp_tool'))
 
   it('CONTROL: the skill really does discuss haven_complete_mcp_tool', () => {
-    // Without this, both assertions below would pass over an empty string —
-    // `indexOf` returning -1 slices the WHOLE document, but a rename of the
-    // tool would still leave the two literals unmatched for the wrong reason.
+    // The false-zero mode: if the tool is renamed in the skill, `indexOf`
+    // returns -1 and `slice(-1)` yields the document's LAST CHARACTER — a
+    // one-char string in which the negative assertion below passes for the
+    // wrong reason and the positive ones fail for the wrong reason. The
+    // `toContain` here is what actually catches that; the length check does
+    // NOT, because a one-character slice is still length 1. Kept as the
+    // second, weaker half only to catch an empty document.
     expect(HAVEN_SKILL_MD).toContain('haven_complete_mcp_tool')
     expect(completeSection.length).toBeGreaterThan(0)
   })

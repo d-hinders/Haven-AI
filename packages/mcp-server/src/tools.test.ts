@@ -6066,6 +6066,16 @@ describe('#2054 — erc7710-only merchants', () => {
       expect(res.success).toBe(false)
       expect((res as { code?: string }).code).toBe('ERC7710_RAIL_REQUIRED')
       expect((res as { message?: string }).message).toContain('could not be read')
+      // #2347: this refusal used to say Haven "refuses rather than AUTHORIZE on a
+      // guess" — Haven as the grammatical actor of an authority verb, on a string
+      // an agent reads mid-payment. Haven authorizes nothing; the owner-signed
+      // delegation and its on-chain caveat do. Two literal pins, no sentence
+      // interpretation: the corrected phrase is present, and the inversion cannot
+      // come back into THIS message. The copy lint cannot cover it —
+      // `packages/mcp-server/` is in neither its SCAN_DIRS nor its SCAN_FILES, and
+      // the phrase is non-adjacent, which its own ceiling note says it misses.
+      expect((res as { message?: string }).message).toContain('refuses rather than proceed on a guess')
+      expect((res as { message?: string }).message).not.toContain('than authorize')
       expect(x402Body()).toBeUndefined()
     })
 

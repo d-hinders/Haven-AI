@@ -49,6 +49,8 @@ interface CreateSetupBody {
   allowances?: AllowanceInput[]
   /** Advanced opt-in: generate a connector command for the fully-local MCP topology. */
   local_mcp?: boolean
+  /** Discovery-source slug for connect attribution (#2302); sanitized, never refused. */
+  source?: string
   /**
    * Opt in to an L0 Agent Passport (#972), mirroring `POST /agents`'
    * `issue_passport`. Absent/false is the DEFAULT and normal case. Recorded on
@@ -234,6 +236,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
           challengeId,
           challengeMessage,
           issuePassport: parsed.issuePassport,
+          source: parsed.source,
         },
         parsed.allowances,
       )
@@ -308,6 +311,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     let issuePassportForSetup = false
     let setupChainId = 0
     let setupUserId = ''
+    let setupSource: string | null = null
     try {
       await setups.inTransaction(async (tx) => {
         const setup = await setups.lockSetupByTokenHash(
@@ -361,6 +365,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         issuePassportForSetup = setup.issue_passport === true
         setupChainId = setup.safe_chain_id
         setupUserId = setup.user_id
+        setupSource = setup.source ?? null
 
         agentId = await setups.insertPendingAgent(
           {
@@ -395,7 +400,14 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
           tx,
         )
       })
-      emitFunnelEvent(setupUserId, 'agent_created', { agent_id: agentId, via: 'connection_setup' })
+      // #2302: the discovery source recorded at CREATE rides the funnel event so
+      // "attributed connects" and per-source time-to-first-payment are plain
+      // SQL over onboarding_events — no join back to the setups table needed.
+      emitFunnelEvent(setupUserId, 'agent_created', {
+        agent_id: agentId,
+        via: 'connection_setup',
+        ...(setupSource ? { source: setupSource } : {}),
+      })
       emitFunnelEvent(setupUserId, 'allowance_granted', { agent_id: agentId, via: 'connection_setup' })
     } catch (err) {
       if (err instanceof SetupRefusal) {
@@ -757,6 +769,7 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
   allowances: AllowanceInput[]
   localMcp: boolean
   issuePassport: boolean
+  source: string | null
 } | null {
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   if (!name) {
@@ -793,7 +806,21 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
     allowances: allowances.value,
     localMcp: body.local_mcp === true,
     issuePassport: body.issue_passport === true,
+    source: normalizeDiscoverySource(body.source),
   }
+}
+
+/**
+ * Discovery-source attribution (#2302). A lowercase slug naming where this
+ * setup came from (registry listing, the /402 page, a template, a skill).
+ * Sanitized, never refused: attribution is telemetry, and a malformed tag
+ * degrading to null must not block a connect. Mirrors the frontend's
+ * `parseDiscoverySource` — keep the two rules identical.
+ */
+export function normalizeDiscoverySource(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const slug = value.trim().toLowerCase()
+  return /^[a-z0-9][a-z0-9_-]{0,31}$/.test(slug) ? slug : null
 }
 
 // The command-path runtimes: Claude Code, Codex, and Cowork (which runs

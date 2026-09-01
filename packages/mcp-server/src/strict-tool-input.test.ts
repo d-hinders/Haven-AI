@@ -35,7 +35,6 @@ import {
 const VALID_ARGS: Record<StrictInputToolName, Record<string, unknown>> = {
   haven_report_x402_outcome: { payment_id: 'pay_x402', outcome: 'rejected', merchant_status: 402 },
   haven_submit: { payment_id: 'pay_1', signature: '0x' + 'ab'.repeat(32) },
-  haven_complete_mcp_tool: { payment_id: 'pay_1' },
   haven_settle_mcp_tool: { payment_id: 'pay_1', signature: '0x' + 'ab'.repeat(32) },
 }
 
@@ -46,7 +45,6 @@ const VALID_ARGS: Record<StrictInputToolName, Record<string, unknown>> = {
 const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   haven_report_x402_outcome: 'tx_hash',
   haven_submit: 'amount',
-  haven_complete_mcp_tool: 'resource_url',
   haven_settle_mcp_tool: 'merchant_address',
 }
 
@@ -123,7 +121,13 @@ describe('#2312 strict hosted tool input — over the real MCP transport', () =>
   it('CONTROL: a deliberately permissive tool still strips, and the handler still runs', async () => {
     // haven_get_payment_status is NOT on the strict list. If this assertion
     // ever flips to a refusal, the strict set was widened without deciding to.
+    // haven_complete_mcp_tool is checked here for a sharper reason: it was in
+    // batch 1 until the shipped agent skill was found telling agents to pass it
+    // an undeclared `payment_required` (#2353). Until that guidance is fixed,
+    // strictness on this tool is a 400 for every agent following Haven's own
+    // instructions, so its permissiveness is a DECISION and this pins it.
     expect(Object.keys(STRICT_INPUT_TOOLS)).not.toContain('haven_get_payment_status')
+    expect(Object.keys(STRICT_INPUT_TOOLS)).not.toContain('haven_complete_mcp_tool')
     const client = await connectedClient()
     const { text } = await callToolText(client, 'haven_get_payment_status', {
       payment_id: 'pay_1',

@@ -419,6 +419,21 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
  *     which is the duplicate-spend hazard. Strictness is the right answer there
  *     too, but it converts a live silent path into a hard refusal and wants its
  *     own change with the guidance updated alongside it — #2348.
+ *   - `haven_complete_mcp_tool` — it was IN this batch until the final base
+ *     re-check found a live caller for it, which is the whole reason that
+ *     re-check exists. Haven's own agent-facing skill text — downloaded as
+ *     `SKILL.md` from the connect success screen and auto-installed by
+ *     `@haven_ai/connect` — says of this tool: "Pass `payment_required`,
+ *     `arguments`, and `mcp_transport` verbatim from the quote/prepare
+ *     result." This tool has never declared `payment_required`; the 402 is
+ *     read from the stored record. So an agent following Haven's own
+ *     instructions passes it, has it silently dropped, and succeeds — this
+ *     issue's exact defect, live, in our own guidance. Making the tool strict
+ *     before fixing the guidance would convert Haven's documented flow into a
+ *     hard 400 for every agent carrying the shipped skill. The guidance is the
+ *     bug and it is fixed first: #2353, which owns both byte-pinned copies
+ *     (`packages/sdk/src/skill-content.ts` and the frontend twin) and this
+ *     tool's switch.
  *   - `haven_get_agent`, `haven_get_allowances` — schema `{}`. Strict on an
  *     empty object refuses EVERY key, so any client that decorates a
  *     no-argument call breaks, for no money-path gain. #2349.
@@ -446,14 +461,10 @@ export const STRICT_INPUT_TOOLS = {
     'Amount, recipient and rail come from the stored payment intent; this tool takes only ' +
     'which payment, which signature, and (optionally) which settlement scheme that signature is for.',
   // #1307: merchant_url / tool_name / arguments / mcp_transport are OPTIONAL
-  // because Haven rehydrates the stored MCP call context from payment_id. A
-  // stripped key is therefore invisible twice over — the call still succeeds,
-  // against the recorded context rather than the one the caller passed.
-  haven_complete_mcp_tool:
-    'The MCP call context is rehydrated from payment_id when you omit it, so an unrecognised key ' +
-    'does not fail loudly — the delivery would just run against the RECORDED context instead of yours.',
-  // As haven_complete_mcp_tool, plus it relays the funding signature: this one
-  // moves money before it delivers.
+  // because Haven rehydrates the stored MCP call context from payment_id, and
+  // it relays the funding signature: this one moves money before it delivers.
+  // A stripped key is invisible twice over — the call still succeeds, against
+  // the recorded context rather than the one the caller passed.
   haven_settle_mcp_tool:
     'The MCP call context is rehydrated from payment_id when you omit it, and this tool funds before ' +
     'it delivers — an unrecognised key must not be dropped on the way to a transfer.',
@@ -1729,7 +1740,7 @@ export function createToolHandlers(
 
     haven_complete_mcp_tool: async (input) =>
       runTool(async () => {
-        const args = parseStrict('haven_complete_mcp_tool', input)
+        const args = parse('haven_complete_mcp_tool', input)
         return deliverMerchantPayment(haven, args)
       }),
 

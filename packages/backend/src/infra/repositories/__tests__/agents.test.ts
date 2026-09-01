@@ -76,8 +76,15 @@ describeDb('delegation lifecycle owner read (#2025)', () => {
     )
     const [revoked, active] = await Promise.all(['revoked', 'active'].map(async (status) => {
       const result = await db.query<{ id: string }>(
-        `INSERT INTO agents (user_id, safe_id, name, status) VALUES ($1, $2, $3, $4) RETURNING id`,
-        [user.rows[0].id, safe.rows[0].id, `${status} grant`, status],
+        `INSERT INTO agents (user_id, safe_id, name, status, delegate_address)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [
+          user.rows[0].id,
+          safe.rows[0].id,
+          `${status} grant`,
+          status,
+          `0x${(status === 'revoked' ? '1' : '2').repeat(40)}`,
+        ],
       )
       return result.rows[0].id
     }))

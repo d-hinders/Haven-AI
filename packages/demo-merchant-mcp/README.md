@@ -109,9 +109,10 @@ Do not confuse it with backend demo surfaces:
 - Backend `/demo/mpp/*` is the internal Machine Payment Protocol smoke-test
   resource. It is not the CloudNest/NordShield merchant and does not expose the
   `buy_cloud_storage` or `buy_vpn` tools.
-- Backend `/x402/resources/*` is an experimental x402 resource registry/API
-  surface. It is not the hosted MCP merchant deployment agents should use for
-  demo product purchases.
+- The retired backend `/x402/resources/*` surface was an experimental x402
+  resource registry/API, not the hosted MCP merchant deployment agents should
+  use for demo product purchases. It is no longer registered; this package is
+  the standalone merchant path.
 
 ## Run
 

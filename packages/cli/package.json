@@ -1,7 +1,7 @@
 {
   "name": "@haven_ai/cli",
-  "version": "0.1.32-alpha.0",
-  "description": "Haven CLI — a terminal-native, scriptable parallel to the dashboard (login, read, and backend-only management).",
+  "version": "0.1.33-alpha.0",
+  "description": "Haven CLI — a terminal-native, scriptable parallel to the dashboard (login, read, and backend-only management) for budgeted, non-custodial agent payments.",
   "type": "module",
   "bin": {
     "haven": "dist/cli.js"
@@ -21,8 +21,11 @@
   "keywords": [
     "haven",
     "cli",
-    "agent",
-    "non-custodial"
+    "ai-agent",
+    "agent-payments",
+    "x402",
+    "non-custodial",
+    "budget"
   ],
   "license": "MIT",
   "repository": {
@@ -37,5 +40,6 @@
     "tsup": "^8.0.0",
     "typescript": "^5.6.0",
     "vitest": "^3.2.4"
-  }
+  },
+  "homepage": "https://haven.xyz"
 }

@@ -60,9 +60,22 @@ import fastifyJwt from '@fastify/jwt'
  *      (the #834 / #1328 precedent);
  *   2. the body is `allowanceModuleRailRetired(...)` VERBATIM, compared against
  *      the producer rather than a copied string;
- *   3. NOTHING was written — no INSERT, no UPDATE — and no chain call was made:
- *      the allowance was never read, the delegate was never funded, and
- *      `executeAllowanceTransfer` was never called;
+ *   3. NOTHING was written — no INSERT, no UPDATE — and no chain call was
+ *      made: the allowance was never read and the delegate was never funded.
+ *
+ *      **#2307 corrected this clause.** It used to end "and
+ *      `executeAllowanceTransfer` was never called", asserted with a spy. That
+ *      assertion could not fail: #1987 deleted the executor, and
+ *      `rails/allowance-module.ts` has never exported that name since, so the
+ *      `vi.mock` factory entry was a function nothing could reach. Vitest
+ *      accepts such an entry silently, which is how 56 of these accumulated
+ *      across seven files before #2307 counted them.
+ *
+ *      What replaces it is strictly stronger, and lives in
+ *      "the spend machinery is GONE, not merely refused" at the bottom of this
+ *      file: the executor is asserted ABSENT from backend production code,
+ *      rather than un-called on one request. A spy proves one path did not
+ *      spend; the absence proves no path can;
  *   4. it holds for the WHOLE retired population, not just the literal
  *      `execution_rail='allowance_module'`: the LEFT-JOIN `null` and an
  *      unknown column value reach the same executor and must refuse too.
@@ -103,11 +116,6 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks, x402DelegationMoc
     mockQuery: vi.fn(),
     allowanceMocks: {
       getTokenAllowance: vi.fn(),
-      getLatestBlockTimeSec: vi.fn(),
-      computeEffectiveAllowance: vi.fn(),
-      generateTransferHash: vi.fn(),
-      recoverSigner: vi.fn(),
-      executeAllowanceTransfer: vi.fn(),
       getTokenBalance: vi.fn(),
       getProvider: vi.fn(),
       getRelayerWallet: vi.fn(),
@@ -132,6 +140,9 @@ vi.mock('../../db.js', () => ({
 vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 vi.mock('../../rails/delegation-authorization.js', () => delegationMocks)
+
+import fs from 'node:fs'
+import path from 'node:path'
 
 import paymentRoutes from '../payments.js'
 import x402Routes from '../x402.js'
@@ -234,12 +245,22 @@ const intentRoute = (overrides: Record<string, unknown> = {}): DbRoute => [
 const sqlCalls = () => mockQuery.mock.calls.map((c) => String(c[0]))
 const writes = () => sqlCalls().filter((sql) => /^\s*(INSERT|UPDATE|DELETE)\b/i.test(sql.trim()))
 
-/** Every assertion that makes a 410 mean "fail-closed" rather than just "410". */
+/**
+ * Every assertion that makes a 410 mean "fail-closed" rather than just "410".
+ *
+ * #2307 removed two spies from this helper (`executeAllowanceTransfer`,
+ * `generateTransferHash`). Neither is an export of the mocked module, so
+ * neither could ever fail. Both remaining assertions are real: `writes()` reads
+ * the query log the handler actually produced, and `getTokenAllowance` is a
+ * genuine export of `rails/allowance-module.ts`.
+ *
+ * The "no spend happened" half of the old claim did not move to another spy —
+ * it moved to a structural assertion (see "the spend machinery is GONE" below),
+ * because after #1987 there is no spend function left for a spy to watch.
+ */
 function expectNothingHappened() {
   expect(writes(), `a write reached the database: ${writes().join(' | ')}`).toEqual([])
-  expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
-  expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
 }
 
 /**
@@ -324,13 +345,15 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
     })
   })
 
-  describe('POST /payments/:id/sign — the ONLY caller of executeAllowanceTransfer', () => {
+  // Historical name: this route WAS the only live caller of the deleted
+  // `executeAllowanceTransfer`. It is kept because the refusal it pins is the
+  // last line between a legacy intent authorized before #1986 and a transfer.
+  describe('POST /payments/:id/sign — the last line in front of a pre-#1986 intent', () => {
     it('refuses a pending legacy intent authorized before the retirement — 410, no transfer', async () => {
       // The pre-existing-intent case is the one that decides whether this
       // slice actually closes the rail: `POST /payments` refusing new intents
       // does nothing about the ones already sitting in `pending_signature`.
       primeDb(authRoute('allowance_module'), railRoute('allowance_module'), intentRoute())
-      allowanceMocks.recoverSigner.mockReturnValue(DELEGATE)
 
       const res = await app.inject({
         method: 'POST',
@@ -342,8 +365,12 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
       expect(res.statusCode).toBe(410)
       expect(res.json().error).toBe(RETIRED_INTENT)
       expectNothingHappened()
-      // Not even the signature was checked: the refusal precedes recovery.
-      expect(allowanceMocks.recoverSigner).not.toHaveBeenCalled()
+      // #2307: a `recoverSigner` spy stood here for "not even the signature was
+      // checked". Unfalsifiable — the raw-ECDSA recovery scheme died with the
+      // rail (#1986) and the helper was deleted (#1987), so the name is not an
+      // export and the spy could never have been called. The surviving claim is
+      // that nothing was written on the way to the 410, which
+      // `expectNothingHappened()` asserts against the real query log.
     })
 
     it('refuses an EXPIRED legacy intent without writing the expiry flip', async () => {
@@ -392,6 +419,199 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
         expectNothingHappened()
       },
     )
+  })
+
+  /**
+   * #2245 — a caller-supplied field must not decide WHICH refusal a
+   * retired-rail account gets.
+   *
+   * Before this slice `validateGenericSchemeRail` ran ABOVE the rail
+   * resolution in `modules/x402/authorize.ts`, so a retired-rail account that
+   * sent `settlementScheme: 'erc7710'` (or any `facilitatorAddresses`) never
+   * reached the tombstone above. It got a **400** whose body said *"the legacy
+   * AllowanceModule rail settles via EIP-3009 only"* — telling an agent, in a
+   * response body on a money-path route, that a rail #1986 has fail-closed
+   * would settle its payment, and inviting it to retry forever with a
+   * different scheme against a rail that answers 410 to everything.
+   *
+   * Money was never at risk either way: both branches are refusals, both are
+   * pure (`validateGenericSchemeRail` and `resolveExecutionRail` are both
+   * side-effect-free and read the SAME `agent.execution_rail` field), and
+   * nothing was read on-chain or written on either. `expectNothingHappened()`
+   * is asserted on every case below anyway, because that is the property that
+   * would silently invert if the fix were ever undone by re-raising a guard.
+   *
+   * The mutation that proves these: restore the
+   * `validateGenericSchemeRail(agent, settlementScheme, facilitatorAddresses)`
+   * call above the token resolution in `modules/x402/authorize.ts` and every
+   * `settlementScheme: 'erc7710'` / `facilitatorAddresses` case here goes red
+   * on a 400.
+   */
+  describe('a caller-supplied settlementScheme cannot divert the tombstone (#2245)', () => {
+    const baseX402 = {
+      url: 'https://merchant.example/resource',
+      payTo: RECIPIENT,
+      amount: '10000',
+      asset: USDC,
+      network: 'base-sepolia',
+    }
+
+    // The scheme-bearing shapes, on BOTH authorize aliases and the whole
+    // retired population. `eip3009` and the bare request are included as
+    // controls: they already got the 410 before #2245, so their presence here
+    // is what makes "for EVERY input shape" a claim rather than a slogan —
+    // and their staying green under the mutation is what shows the mutation
+    // is discriminating rather than blanket-red.
+    const SCHEME_SHAPES: Array<[string, Record<string, unknown>]> = [
+      ['settlementScheme: erc7710 (the diverted case)', { settlementScheme: 'erc7710' }],
+      ['settlementScheme: eip3009', { settlementScheme: 'eip3009' }],
+      ['facilitatorAddresses present (the #1058 diverted case)', { facilitatorAddresses: [RECIPIENT] }],
+      ['erc7710 AND facilitatorAddresses together', { settlementScheme: 'erc7710', facilitatorAddresses: [RECIPIENT] }],
+      ['no scheme field at all (the pre-#2245 control)', {}],
+    ]
+
+    for (const [railLabel, rail] of RETIRED_RAILS) {
+      for (const url of ['/x402/authorize', '/x402']) {
+        it.each(SCHEME_SHAPES)(
+          `POST ${url} on ${railLabel} with %s — 410, nothing written`,
+          async (_shapeLabel, extra) => {
+            primeDb(authRoute(rail), railRoute(rail))
+
+            const res = await app.inject({
+              method: 'POST',
+              url,
+              headers,
+              payload: { ...baseX402, ...extra },
+            })
+
+            expect(res.statusCode, `got ${res.body}`).toBe(410)
+            // Named, not merely "some 410" — and explicitly NOT the 400 the
+            // scheme guard used to produce.
+            expect(res.json().error).toBe(RETIRED_ACCOUNT)
+            expect(JSON.stringify(res.json())).not.toContain('EIP-3009')
+            expect(JSON.stringify(res.json())).not.toContain('delegation-rail account')
+            expectNothingHappened()
+          },
+        )
+      }
+    }
+
+    it('no surviving response body on this route describes the retired rail as settling', async () => {
+      // Acceptance criterion 2, asserted as a literal guard on the file that
+      // used to carry the sentence rather than as an interpretation of prose.
+      // `scheme-selection.ts` has no legitimate use of either literal: what
+      // remains in it is delegation-rail-INTERNAL shape checking, which never
+      // names the legacy rail.
+      const src = await import('node:fs/promises').then((fs) =>
+        fs.readFile(new URL('../../modules/x402/scheme-selection.ts', import.meta.url), 'utf8'),
+      )
+      // The refusal STRINGS are gone. The file's own #2245 rationale block
+      // quotes the deleted sentence to explain why it went, so the guard is
+      // scoped to the executable half.
+      const code = src
+        .split('\n')
+        .filter((line) => !/^\s*(\/\*|\*|\/\/)/.test(line))
+        .join('\n')
+      expect(code).not.toContain('AllowanceModule')
+      expect(code).not.toContain('delegation-rail account')
+    })
+
+    /**
+     * The OTHER direction, and the one PR #2052/#2056 says to check
+     * explicitly: the reorder must not make a LIVE-rail caller's answer worse.
+     * A delegation account that asks for a scheme its request SHAPE cannot
+     * settle still gets its own 400 from the delegation-rail-internal check
+     * (`validateDelegationSchemeShape`, where #946's real contract lives) —
+     * not a 410, and not a silent pass into settlement.
+     *
+     * This doubles as the x402 POSITIVE CONTROL for this route: reaching a
+     * delegation-rail-INTERNAL error proves the rail gate answered
+     * `delegation` and control entered the delegation branch. A version of
+     * this fix that 410'd everything would fail here, which the retired-rail
+     * cases above cannot detect on their own.
+     */
+    it('POSITIVE CONTROL — a DELEGATION account asking erc7710 with the funding payTo still gets its own scheme 400, not a 410', async () => {
+      primeDb(authRoute('delegation'), railRoute('delegation'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/x402/authorize',
+        headers,
+        // payTo = the agent's OWN delegate EOA is the 3009 funding shape;
+        // asking for erc7710 with it is the shape contradiction #946 guards.
+        payload: { ...baseX402, payTo: DELEGATE, settlementScheme: 'erc7710' },
+      })
+
+      expect(res.statusCode, `got ${res.body}`).toBe(400)
+      expect(res.json().error).toMatch(/payTo = the merchant/)
+      expect(res.json().error).not.toBe(RETIRED_ACCOUNT)
+      expectNothingHappened()
+    })
+
+    it('POSITIVE CONTROL — a DELEGATION account with a valid erc7710 shape is not refused at the rail seam', async () => {
+      // Weaker on purpose: it asserts only that the request passed BOTH the
+      // rail gate and the scheme shape check, since anything past that point
+      // needs chain estimation this suite deliberately does not mock. Without
+      // it, "410 nothing / 400 nothing" would still be satisfiable by a fix
+      // that refused every erc7710 request outright.
+      primeDb(authRoute('delegation'), railRoute('delegation'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/x402/authorize',
+        headers,
+        payload: { ...baseX402, settlementScheme: 'erc7710', facilitatorAddresses: [RECIPIENT] },
+      })
+
+      expect(res.statusCode).not.toBe(410)
+      expect(JSON.stringify(res.json())).not.toContain('retired')
+      expect(JSON.stringify(res.json())).not.toMatch(/payTo = the merchant/)
+    })
+
+    /**
+     * The residue, stated rather than glossed. Two refusals still precede the
+     * 410 on this route, and BOTH are rail-INDEPENDENT — neither makes a claim
+     * about any rail, which is the property #2245 is actually about:
+     *
+     *   - `routes/x402.ts`'s structural enum check on `settlementScheme`
+     *     (a value that is not a settlement scheme at all), and
+     *   - token resolution in `authorizeX402`, exactly where `POST /payments`
+     *     puts its own gate relative to the seam.
+     *
+     * Same class as the 401-precedes-410 case this file already pins.
+     */
+    it('a STRUCTURALLY invalid settlementScheme is still a 400 — and it makes no rail claim', async () => {
+      primeDb(authRoute('allowance_module'), railRoute('allowance_module'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/x402/authorize',
+        headers,
+        payload: { ...baseX402, settlementScheme: 'not-a-scheme' },
+      })
+
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toMatch(/settlementScheme must be/)
+      // The point of keeping it: it says nothing about what any rail settles.
+      expect(res.json().error).not.toContain('AllowanceModule')
+      expect(res.json().error).not.toContain('EIP-3009')
+      expectNothingHappened()
+    })
+
+    it('the same structural 400 is what a DELEGATION account gets too — the check never branched on rail', async () => {
+      primeDb(authRoute('delegation'), railRoute('delegation'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/x402/authorize',
+        headers,
+        payload: { ...baseX402, settlementScheme: 'not-a-scheme' },
+      })
+
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toMatch(/settlementScheme must be/)
+      expectNothingHappened()
+    })
   })
 
   describe('POST /machine-payments/send — writes rows even though it does not execute', () => {
@@ -465,6 +685,146 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
       expect(JSON.stringify(res.json())).not.toContain('retired')
       expectNothingHappened()
     })
+  })
+
+  describe('the 410 precedes TOKEN RESOLUTION too (#2274)', () => {
+    // Token resolution used to run ABOVE the rail gate on both routes, so a
+    // retired-rail account naming an unsupported asset was handed a 400
+    // carrying `supported: [...]` — the list of assets it can pay with —
+    // before anything told it the rail is gone and it can pay with none of
+    // them. Rail-INDEPENDENT (it asserts nothing false about any rail), which
+    // is why #2245 left it and filed it, and why it is a disclosure-ordering
+    // defect rather than a money defect: both outcomes are refusals.
+    //
+    // The gate now sits directly above token resolution on BOTH routes, so
+    // the only thing left above it is the structural, rail-independent input
+    // validation that decides whether there is a request at all — the same
+    // position `agentAuthMiddleware`'s 401 already occupies.
+    const UNSUPPORTED_ASSET = '0x00000000000000000000000000000000deadbeef'
+
+    it.each(RETIRED_RAILS)(
+      'POST /payments — %s naming an unsupported token gets the 410, not a supported-asset list',
+      async (_label, rail) => {
+        primeDb(authRoute(rail), railRoute(rail))
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/payments',
+          headers,
+          payload: { token: 'NOTATOKEN', amount: '0.01', to: RECIPIENT },
+        })
+
+        expect(res.statusCode, `expected the rail 410, got ${res.body}`).toBe(410)
+        expect(res.json().error).toBe(RETIRED_ACCOUNT)
+        expect(res.json().supported).toBeUndefined()
+        expectNothingHappened()
+      },
+    )
+
+    it.each(RETIRED_RAILS)(
+      'POST /x402/authorize — %s naming an unsupported asset gets the 410, not a supported-asset list',
+      async (_label, rail) => {
+        primeDb(authRoute(rail), railRoute(rail))
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/x402/authorize',
+          headers,
+          payload: {
+            url: 'https://merchant.example/resource',
+            payTo: RECIPIENT,
+            amount: '10000',
+            asset: UNSUPPORTED_ASSET,
+            network: 'base-sepolia',
+          },
+        })
+
+        expect(res.statusCode, `expected the rail 410, got ${res.body}`).toBe(410)
+        expect(res.json().error).toBe(RETIRED_ACCOUNT)
+        expect(res.json().supported).toBeUndefined()
+        expectNothingHappened()
+      },
+    )
+
+    it('POST /payments — a retired account naming an UNPARSEABLE amount for a real token also gets the 410', async () => {
+      // `parseTokenAmount` sits between token resolution and the old gate
+      // position, so it disclosed the same thing one step later: a refusal
+      // phrased in terms of a token the account cannot spend.
+      primeDb(authRoute('allowance_module'), railRoute('allowance_module'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/payments',
+        headers,
+        payload: { token: 'USDC', amount: '0.0000001', to: RECIPIENT },
+      })
+
+      expect(res.statusCode, `expected the rail 410, got ${res.body}`).toBe(410)
+      expect(res.json().error).toBe(RETIRED_ACCOUNT)
+      expectNothingHappened()
+    })
+
+    it('POSITIVE CONTROL — a DELEGATION account naming an unsupported token still gets its 400 WITH the supported list', async () => {
+      // Without this the fix above is satisfied by 410-ing every input shape
+      // on every rail. The supported-asset list is correct information for an
+      // account that can actually spend; the defect was disclosing it to one
+      // that cannot.
+      primeDb(authRoute('delegation'), railRoute('delegation'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/payments',
+        headers,
+        payload: { token: 'NOTATOKEN', amount: '0.01', to: RECIPIENT },
+      })
+
+      expect(res.statusCode, `delegation rail must still get its 400, got ${res.body}`).toBe(400)
+      expect(res.json().error).toContain('NOTATOKEN')
+      expect(Array.isArray(res.json().supported)).toBe(true)
+      expect(res.json().supported).toContain('USDC')
+    })
+
+    it('POSITIVE CONTROL — a DELEGATION account naming an unsupported x402 asset still gets its 400 WITH the supported list', async () => {
+      primeDb(authRoute('delegation'), railRoute('delegation'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/x402/authorize',
+        headers,
+        payload: {
+          url: 'https://merchant.example/resource',
+          payTo: RECIPIENT,
+          amount: '10000',
+          asset: UNSUPPORTED_ASSET,
+          network: 'base-sepolia',
+        },
+      })
+
+      expect(res.statusCode, `delegation rail must still get its 400, got ${res.body}`).toBe(400)
+      expect(res.json().error).toContain(UNSUPPORTED_ASSET)
+      expect(Array.isArray(res.json().supported)).toBe(true)
+      expect(x402DelegationMocks.runDelegationAuthorize).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['/payments', { token: 'USDC', amount: 'not-a-number', to: RECIPIENT }],
+      ['/x402/authorize', { url: 'https://m.example/r', payTo: RECIPIENT, amount: '0', asset: USDC, network: 'base-sepolia' }],
+    ])(
+      'STRUCTURAL validation still precedes the 410 on POST %s — the gate moved above token resolution, not above the request check',
+      async (url, payload) => {
+        // The bound on this change, stated as a test so it cannot drift into
+        // "410 for literally anything". A malformed request is not a request
+        // about a rail, and answering 410 to one would make the tombstone the
+        // route's error handler.
+        primeDb(authRoute('allowance_module'), railRoute('allowance_module'))
+
+        const res = await app.inject({ method: 'POST', url, headers, payload })
+
+        expect(res.statusCode, `expected the structural 400, got ${res.body}`).toBe(400)
+        expect(res.json().error).not.toBe(RETIRED_ACCOUNT)
+        expectNothingHappened()
+      },
+    )
   })
 
   describe('both tombstones coexist on the seam', () => {
@@ -554,9 +914,147 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
 
       expect(res.statusCode).toBe(410)
       expect(res.json().error).toBe(RETIRED_ACCOUNT)
+      // `getTokenAllowance` IS an export, so this one bites. (#2307 removed a
+      // `getLatestBlockTimeSec` spy alongside it, which was not.)
       expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
-      expect(allowanceMocks.getLatestBlockTimeSec).not.toHaveBeenCalled()
       expect(sqlCalls().some((sql) => /agent_allowances/.test(sql))).toBe(false)
     })
   })
+})
+
+/**
+ * #2307 — the coverage that REPLACES the 56 removed spies.
+ *
+ * Every one of those spies was trying to say the same thing: the retired rail
+ * did not spend. They said it by watching a function that does not exist, which
+ * is why none of them could fail. The claim is real, so it is re-stated here in
+ * a form that CAN fail — and in a stronger form than the spies had, because a
+ * spy proves one request did not spend while this proves no request can.
+ *
+ * #1987 deleted the write path outright: the executor, the transfer-hash
+ * builder, the raw-ECDSA signer recovery, and the allowance-state arithmetic.
+ * "Deleted" is a property of the source tree, so the source tree is what gets
+ * asserted. If any of these names returns to backend production code, the rail
+ * has grown a spend path back and this goes red by name.
+ *
+ * Scope note (the #2163 rule about matching the check to the claim): this scans
+ * `packages/backend/src` only, and the sentence above says "backend production
+ * code" for that reason. `packages/frontend/src/lib/allowance-math.ts` exports
+ * its own `computeEffectiveAllowance` — pure display arithmetic over a legacy
+ * account's on-chain state, which is a READ and is deliberately still there.
+ * It is not in scope for a claim about the backend's write path.
+ */
+describe('#1986/#1987: the spend machinery is GONE, not merely refused', () => {
+  const BACKEND_SRC = path.resolve(__dirname, '../..')
+
+  /** The write path #1987 deleted, by the name each symbol had. */
+  const DELETED_WRITE_PATH = [
+    'executeAllowanceTransfer',
+    'generateTransferHash',
+    'recoverSigner',
+    'getLatestBlockTimeSec',
+    'computeEffectiveAllowance',
+  ]
+
+  function productionSources(dir: string, acc: string[] = []): string[] {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name === 'dist') continue
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        // `__tests__` is test code; `testing/` is test INFRASTRUCTURE (the
+        // #2307 mock-factory guard and its fixture source, which necessarily
+        // spells the dead names out). Neither is production code.
+        if (entry.name === '__tests__' || entry.name === 'testing') continue
+        productionSources(full, acc)
+      } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+        acc.push(full)
+      }
+    }
+    return acc
+  }
+
+  /**
+   * Strip comments AND string literals, leaving executable code.
+   *
+   * Both exclusions are deliberate and were forced by real occurrences. A
+   * tombstone comment that names the dead symbol is the documentation this
+   * retirement wants (`routes/payments.ts:541` is one). And `openapi/spec.ts`
+   * names `recoverSigner` inside an endpoint DESCRIPTION — prose telling
+   * integrators that the scheme is gone. Naming a deleted function in order to
+   * say it is deleted must not be what trips a guard against it coming back.
+   *
+   * **The cost of stripping strings, stated rather than left implicit** (review
+   * finding, #2307): a reintroduction routed through a string would evade this
+   * — `obj['execute' + 'AllowanceTransfer']`, a computed member access, a
+   * dynamic import by name. That is accepted deliberately. The threat model
+   * here is ACCIDENTAL regrowth by ordinary editing, which is what actually
+   * happened three times (#1987 → #2048 → #2044/#1993); a contributor
+   * assembling a deleted money-path function name out of string fragments to
+   * get past a test is not a case a source scan can win, and the controls for
+   * it are code review and `.github/CODEOWNERS`, not this assertion.
+   */
+  function executableCode(src: string): string {
+    let out = ''
+    for (let i = 0; i < src.length; i++) {
+      const c = src[i]
+      const next = src[i + 1]
+      if (c === '/' && next === '/') {
+        const nl = src.indexOf('\n', i)
+        if (nl === -1) break
+        i = nl - 1
+        continue
+      }
+      if (c === '/' && next === '*') {
+        const end = src.indexOf('*/', i + 2)
+        if (end === -1) break
+        i = end + 1
+        continue
+      }
+      if (c === "'" || c === '"' || c === '`') {
+        const quote = c
+        i++
+        while (i < src.length && src[i] !== quote) {
+          if (src[i] === '\\') i++
+          i++
+        }
+        continue
+      }
+      out += c
+    }
+    return out
+  }
+
+  const sources = productionSources(BACKEND_SRC)
+
+  it('scans a real population of backend sources — an empty scan is not a pass', () => {
+    // The falsifiability floor (#1897's "false zeros" lesson): prove the
+    // instrument can see anything before a zero is allowed to mean something.
+    expect(sources.length).toBeGreaterThan(150)
+    expect(sources.some((f) => f.endsWith('rails/allowance-module.ts'))).toBe(true)
+  })
+
+  it('proves the instrument can say YES — a surviving read IS found by the same scan', () => {
+    // Positive control. Without this, the absence assertions below would pass
+    // just as happily against a broken matcher, which is the exact defect
+    // #2307 exists to end.
+    const hits = sources.filter((f) => /\bgetTokenBalance\b/.test(executableCode(fs.readFileSync(f, 'utf8'))))
+    expect(hits.length).toBeGreaterThan(0)
+  })
+
+  it.each(DELETED_WRITE_PATH)(
+    '`%s` appears nowhere in backend production code outside comments',
+    (symbol) => {
+      const re = new RegExp(`\\b${symbol}\\b`)
+      const offenders = sources
+        .filter((f) => re.test(executableCode(fs.readFileSync(f, 'utf8'))))
+        .map((f) => path.relative(BACKEND_SRC, f))
+      expect(
+        offenders,
+        `\`${symbol}\` is back in backend production code (${offenders.join(', ')}). ` +
+          'It was deleted by #1987 as part of retiring the AllowanceModule rail. ' +
+          'If the rail is genuinely being revived that is an owner decision (#1440), ' +
+          'not a test fix.',
+      ).toEqual([])
+    },
+  )
 })

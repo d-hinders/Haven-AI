@@ -17,11 +17,6 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() 
   mockQuery: vi.fn(),
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
-    getLatestBlockTimeSec: vi.fn(),
-    computeEffectiveAllowance: vi.fn(),
-    generateTransferHash: vi.fn(),
-    recoverSigner: vi.fn(),
-    executeAllowanceTransfer: vi.fn(),
     getProvider: vi.fn(),
     getRelayerWallet: vi.fn(),
   },
@@ -218,8 +213,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   // its own message. `rails/allowance-module.ts` and this case are scheduled
   // for deletion in #1987.
   it('CHARACTERIZATION: legacy intents never touch the session rail', async () => {
-    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '0.01', eur: '0.01' })
 
     primeDb(AUTH, intentById(intentRow()), claim(true), confirm(), evidenceLookup)
@@ -237,8 +230,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     // DISTINCT bodies, so a caller can tell which retirement it hit:
     expect(response.json().error).not.toBe(sessionRailRetired('intent').body.error)
     // Nothing verified, claimed, or executed:
-    expect(allowanceMocks.recoverSigner).not.toHaveBeenCalled()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
     expect(mockQuery.mock.calls.some((c) => /SET signature/.test(String(c[0])))).toBe(false)
   })
 
@@ -256,7 +247,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toMatch(/session rail is retired/)
     // Nothing verified, claimed, or executed:
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
     expect(mockQuery.mock.calls.some((c) => /SET signature/.test(String(c[0])))).toBe(false)
     // #993 hardening of the same contract: ZERO writes of any kind — the 410
     // must not leave an intent row, audit row, or status flip behind.
@@ -372,9 +362,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({ status: 'confirmed', tx_hash: TX_HASH })
     expect(delegationMocks.submitDelegationPayment).toHaveBeenCalledOnce()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
     // The legacy recover was NOT used — the chain validates this scheme:
-    expect(allowanceMocks.recoverSigner).not.toHaveBeenCalled()
   })
 
   it('POST /:id/sign fails closed when a delegation intent lost its prepared op', async () => {
@@ -422,9 +410,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   // scheduled for deletion in #1987.
   it('POST /payments stays on the legacy flow when the account is not migrated', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
-    allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
-    allowanceMocks.generateTransferHash.mockResolvedValue(USER_OP_HASH)
 
     // No rail state → retired (fail-closed).
     primeDb(AUTH, railState(null), allowanceConfigured(true), insertIntent(intentRow()))
@@ -438,7 +423,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
 
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
-    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
     expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
   })
 
@@ -455,6 +439,5 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     })
 
     expect(response.statusCode).toBe(410)
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 })

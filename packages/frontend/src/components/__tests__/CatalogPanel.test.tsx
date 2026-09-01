@@ -59,9 +59,16 @@ function entry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
   }
 }
 
+/**
+ * #2295: this fixture used to carry `allowance_amount: '5000000'` — the ATOMIC
+ * shape. `useAgents()` reads `GET /agents`, whose `allowance_amount` is the
+ * HUMAN-DECIMAL delegation projection, so the fixture was describing a wire
+ * shape the route does not emit and the suite could not see the live defect.
+ * `'5.00'` is the same 5 USDC budget in the shape production actually returns.
+ */
 const activeAgent = {
   status: 'active',
-  allowances: [{ token_symbol: 'USDC', allowance_amount: '5000000' }],
+  allowances: [{ token_symbol: 'USDC', allowance_amount: '5.00' }],
 }
 
 describe('agentInstruction', () => {
@@ -99,6 +106,54 @@ describe('withinBudget', () => {
     expect(withinBudget(entry(), [{ ...activeAgent, status: 'paused' }])).toBe(null)
     expect(withinBudget(entry({ asset: 'EURe' }), [activeAgent])).toBe(null)
     expect(withinBudget(entry({ price_atomic: null }), [activeAgent])).toBe(null)
+  })
+
+  /**
+   * #2295 — the second instance of the #2283 defect, and the one that was
+   * still live. `withinBudget` ran `BigInt(al.allowance_amount) >= price`
+   * inside a `try` whose `catch` returned `null`; on the human-decimal shape
+   * that `GET /agents` actually returns, the BigInt threw on every row and the
+   * badge silently answered "unknown" instead of "within budget".
+   *
+   * These assertions fail on the old implementation for the right reason: not
+   * because a decimal string is unusual, but because the badge must ANSWER.
+   */
+  describe('the human-decimal wire shape of allowance_amount (#2295)', () => {
+    const human = (amount: string) => [{ status: 'active', allowances: [{ token_symbol: 'USDC', allowance_amount: amount }] }]
+
+    it('answers rather than degrading to null on a decimal budget', () => {
+      // 5 USDC budget, 0.01 USDC price.
+      expect(withinBudget(entry(), human('5.00'))).toBe(true)
+      // The literal string from the #2283 report and the e2e fixture.
+      expect(withinBudget(entry(), human('250.000000'))).toBe(true)
+    })
+
+    it('scales by the token decimals rather than comparing raw digits', () => {
+      // The whole bug in one assertion. '5.00' is 5_000_000 atomic USDC, so it
+      // covers a 1 USDC price and not a 99 USDC one. Read as atomic digits
+      // ("500"), or scaled with 18 decimals instead of USDC's 6, either
+      // comparison comes out differently.
+      expect(withinBudget(entry({ price_atomic: '1000000' }), human('5.00'))).toBe(true)
+      expect(withinBudget(entry({ price_atomic: '99000000' }), human('5.00'))).toBe(false)
+      // Sub-cent precision survives the scaling: 0.000001 USDC is exactly 1
+      // atomic unit, so it covers a 1-unit price and not a 2-unit one.
+      expect(withinBudget(entry({ price_atomic: '1' }), human('0.000001'))).toBe(true)
+      expect(withinBudget(entry({ price_atomic: '2' }), human('0.000001'))).toBe(false)
+    })
+
+    it('treats a zero budget as a real answer, not an unknown', () => {
+      // `formatTokenValue` returns a bare '0' for a revoked/zero budget.
+      expect(withinBudget(entry(), human('0'))).toBe(false)
+    })
+
+    it('still says "cannot answer" when the units genuinely cannot be reconciled', () => {
+      // Unresolvable chain → unresolvable decimals. Guessing 18 for USDC would
+      // overstate the budget by 10^12 and paint a false "within budget".
+      expect(withinBudget(entry({ network: 'solana' }), human('5.00'))).toBe(null)
+      // An unparseable budget is unknown, never silently "over budget".
+      expect(withinBudget(entry(), human('not-a-number'))).toBe(null)
+      expect(withinBudget(entry(), human('1e6'))).toBe(null)
+    })
   })
 })
 
@@ -184,7 +239,13 @@ describe('CatalogPanel', () => {
     })
     render(<CatalogPanel />)
 
-    expect(screen.getByText(/Exceeds every agent allowance/)).toBeDefined()
+    // #2295: this assertion passed for a long time while `withinBudget` could
+    // never return `false` — the fixture's atomic-shaped allowance made the
+    // comparison work in the test and throw in production. It now pins copy a
+    // real user can reach, and pins that the copy does NOT promise the retired
+    // approval queue (#1440/#1986: the delegation rail declines, never queues).
+    expect(screen.getByText(/Above every agent budget/)).toBeDefined()
+    expect(screen.queryByText(/queue for approval/)).toBeNull()
   })
 
   it('renders empty and error states', () => {

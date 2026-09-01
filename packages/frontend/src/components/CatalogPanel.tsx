@@ -5,6 +5,7 @@ import { useCatalog, type CatalogEntry } from '@/hooks/useCatalog'
 import { useAgents } from '@/hooks/useAgents'
 import { useChainScope } from '@/hooks/useActiveChain'
 import { ALL_CHAINS, getChainConfig } from '@/lib/chains'
+import { getTokenDecimals, humanAmountToAtomic } from '@/lib/allowance-format'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { Select } from './ui/Select'
@@ -90,8 +91,26 @@ export function agentInstruction(entry: CatalogEntry): string {
 /**
  * Budget check against configured agent allowances: an entry is "within
  * budget" when at least one active agent has an allowance for the entry's
- * asset that covers the price. Configured amounts are atomic strings, same
- * unit as price_atomic.
+ * asset that covers the price.
+ *
+ * ── The units, stated because getting them wrong was silent (#2295) ──────────
+ *
+ * `entry.price_atomic` is atomic. `allowance_amount` on `Agent.allowances` is
+ * NOT — it is the human-decimal delegation projection (`"25.00"` for a 25 USDC
+ * budget), the same shape that produced the #2283 display bug. This function
+ * previously read `BigInt(al.allowance_amount) >= price` inside a `try` whose
+ * `catch` returned `null`, so on the delegation rail — the only rail that
+ * produces allowances at all since #2020 — the BigInt threw on every row and
+ * the badge silently degraded to "unknown" instead of answering. Its docstring
+ * asserted the opposite ("Configured amounts are atomic strings, same unit as
+ * price_atomic"), which is why nobody looked.
+ *
+ * The comparison is done in atomic units, with the human budget scaled up by
+ * the token's decimals rather than the price scaled down — no rounding, and
+ * `humanAmountToAtomic` is told which shape it has instead of inferring one.
+ * `null` still means "cannot answer" (no price, no matching allowance,
+ * unresolvable decimals, unparseable budget), never "over budget": this badge
+ * is advisory, and the on-chain caveat enforcer is what actually refuses.
  */
 export function withinBudget(
   entry: CatalogEntry,
@@ -103,12 +122,28 @@ export function withinBudget(
     .flatMap((a) => a.allowances)
     .filter((al) => al.token_symbol === entry.asset)
   if (candidates.length === 0) return null
+
+  const chainId = networkToChainId(entry.network)
+  const decimals = chainId != null ? getTokenDecimals(chainId, entry.asset) : undefined
+  // Without decimals the two units cannot be reconciled, and guessing 18 for
+  // a 6-decimal stablecoin would answer "within budget" by a factor of 10^12.
+  if (decimals == null) return null
+
+  let price: bigint
   try {
-    const price = BigInt(entry.price_atomic)
-    return candidates.some((al) => BigInt(al.allowance_amount) >= price)
+    price = BigInt(entry.price_atomic)
   } catch {
+    // `price_atomic` is the merchant's own advertised value, so a malformed
+    // one is a real possibility rather than a shape confusion.
     return null
   }
+  const budgets = candidates.map((al) => humanAmountToAtomic(al.allowance_amount, decimals))
+  if (budgets.some((budget) => budget != null && budget >= price)) return true
+  // A budget we could not parse is not a budget we know to be too small.
+  // Reporting `false` there would paint "over budget" on an agent that may
+  // well cover the price — the misleading direction. Only a set of budgets we
+  // fully understood, none of which covers the price, is an honest `false`.
+  return budgets.every((budget) => budget != null) ? false : null
 }
 
 function freshness(verifiedAt: string | null): string {
@@ -175,6 +210,23 @@ function CatalogCard({
         <span className="text-xs text-[var(--v2-ink-3)]">{freshness(entry.verified_at)}</span>
       </div>
 
+      {/*
+        #2295: all three states of this line became reachable only when
+        `withinBudget` stopped discriminating wire shapes by exception. The
+        `false` branch had been DEAD — the function could return `true` or
+        `null` and nothing else — and the copy it carried had gone stale
+        unnoticed: it said an over-budget purchase "would queue for approval",
+        which is retired AllowanceModule behaviour (#1440/#1986). The
+        delegation rail does not queue; an over-budget redemption reverts at
+        the caveat enforcer. Same correction `docs/operations/agent-qa.md`
+        made under #2140, applied to the last live instance.
+
+        Deliberately `--v2-warning`, not `--v2-danger`, and no pill or icon:
+        this line is ADVISORY. The badge is a client-side comparison against a
+        reported budget, and the thing that actually refuses a payment is the
+        on-chain enforcer — so it must not read as a hard block. `null`
+        renders nothing at all, which is absence rather than failure.
+      */}
       {budget !== null && (
         <p
           className={`text-xs font-medium ${
@@ -183,7 +235,7 @@ function CatalogCard({
         >
           {budget
             ? 'Within your agent budget'
-            : 'Exceeds every agent allowance — would queue for approval'}
+            : 'Above every agent budget — a payment would be declined'}
         </p>
       )}
 

@@ -463,6 +463,35 @@ function settlementSchemeOf(machineMetadata: unknown): string | null {
 }
 
 /**
+ * #2290: the funded-but-deliverable state — case 2 of `intentStateFor` below,
+ * the one that emits `retry_original_x402_request`.
+ *
+ * Exported because `GET /x402/:id/sign-context` opens its already-executed
+ * gate for exactly this state and no other. The remedy and the permission to
+ * act on it have to be the SAME predicate: #2145 shipped a diagnosis whose
+ * cure was unreachable, and a second, separately-worded copy of this
+ * condition would just move that failure rather than remove it. Any refusal
+ * here must therefore leave `intentStateFor` with nothing to promise.
+ *
+ * `!funded_but_unsettled` is load-bearing, not defensive: an open
+ * `merchant_retry_rejected_after_payment` event means the merchant was asked
+ * and said no, and case 1 below claims that row first. Its remedy is
+ * `sweep_stranded_funds` — reclaiming the money, not re-signing a header for
+ * a merchant that already refused it.
+ */
+export function isFundedX402AwaitingMerchantLeg(payment: PaymentIntentStatusRow): boolean {
+  return (
+    payment.status === 'confirmed' &&
+    !payment.funded_but_unsettled &&
+    railFor(payment) === AgentPaymentRail.X402 &&
+    settlementSchemeOf(payment.machine_metadata) === 'eip3009' &&
+    !payment.merchant_leg_reported &&
+    payment.confirmed_at !== null &&
+    merchantReportGraceElapsed(payment.confirmed_at)
+  )
+}
+
+/**
  * #2145: the phase/next_action/message for a payment-intent row, including
  * the two funded-but-unsettled overrides of the plain status mapping.
  *
@@ -485,7 +514,17 @@ function settlementSchemeOf(machineMetadata: unknown): string | null {
  *
  * Derived entirely from evidence Haven holds server-side: case 2 must fire
  * for an agent that never came back, which is exactly what a client-written
- * signal cannot provide. Scoped to `settlement_scheme === 'eip3009'`: on
+ * signal cannot provide. #2292 does NOT change that — it changes how long
+ * case 2 has to wait when the agent DID come back. The grace window was the
+ * only route to either state on the plain-HTTP flow, because case 1's
+ * reconciliation event was written solely by the SDK's own retry path and a
+ * manually retried merchant had no way to report anything. An agent-reported
+ * rejection now reaches case 1 directly, and an agent-reported acceptance
+ * writes the `merchant_response_observed` evidence row that makes
+ * `merchant_leg_reported` true — so a delivered purchase leaves case 2's
+ * predicate permanently, rather than entering it when the window elapses.
+ * Neither report is trusted with anything financial: see
+ * `MerchantCompletion.reportMerchantOutcome` in the SDK for the boundary. Scoped to `settlement_scheme === 'eip3009'`: on
  * erc7710 there is no funding leg and `confirmed` IS merchant settlement, and
  * an intent with no scheme metadata fails closed to the plain mapping.
  *
@@ -508,18 +547,11 @@ function intentStateFor(payment: PaymentIntentStatusRow): {
       message: "Haven's funding leg confirmed but the merchant rejected the payment retry. The delegate wallet may hold stranded funds — tell the user to review this payment in Haven.",
     }
   }
-  if (
-    payment.status === 'confirmed' &&
-    railFor(payment) === AgentPaymentRail.X402 &&
-    settlementSchemeOf(payment.machine_metadata) === 'eip3009' &&
-    !payment.merchant_leg_reported &&
-    payment.confirmed_at !== null &&
-    merchantReportGraceElapsed(payment.confirmed_at)
-  ) {
+  if (isFundedX402AwaitingMerchantLeg(payment)) {
     return {
       phase: AgentPaymentPhase.FundedButUnsettled,
       nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
-      message: "Haven's funding leg confirmed but no merchant response was ever recorded — the merchant has likely not been paid. Resume this payment to retry the original request; do not start a new payment for the same purchase.",
+      message: "Haven's funding leg confirmed but no merchant response was ever recorded — the merchant has likely not been paid. Resume this payment to retry the original request; do not start a new payment for the same purchase. Report what the merchant answers, so Haven records the outcome instead of waiting out this window again.",
     }
   }
   return paymentIntentState(payment.status)

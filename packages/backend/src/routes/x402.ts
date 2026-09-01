@@ -101,9 +101,14 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'idempotencyKey must be a non-empty string up to 128 characters' })
     }
 
-    // Structural checks only — the RAIL-dependent scheme rules (#946: erc7710
-    // requires a delegation-rail account; #1058: facilitatorAddresses too)
-    // live in the module's scheme-selection orchestration.
+    // Structural checks only, and rail-INDEPENDENT by construction — they
+    // reject a value that is not a settlement scheme at all, and say nothing
+    // about which rail could settle it. #2245 deleted the rail-DEPENDENT
+    // guards that used to follow (#946 erc7710 / #1058 facilitatorAddresses
+    // "requires a delegation-rail account"): a non-delegation account is now
+    // refused by the #1986 rail tombstone in `modules/x402/authorize.ts`, and
+    // the only scheme rules left are the delegation-rail-internal shape
+    // checks in `scheme-selection.ts`.
     const { settlementScheme } = request.body
     if (settlementScheme !== undefined && !['erc7710', 'eip3009'].includes(settlementScheme)) {
       return reply.code(400).send({ error: "settlementScheme must be 'erc7710' or 'eip3009'" })

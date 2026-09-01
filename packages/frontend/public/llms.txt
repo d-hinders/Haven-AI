@@ -1,0 +1,27 @@
+# Haven
+
+> Haven is the buy-side control layer for AI-agent payments: give your agent a budget, not your wallet. Agents pay x402 (HTTP 402) merchants autonomously within owner-set, on-chain-enforced budgets. Non-custodial — the agent never holds a key, Haven never holds funds, and every budget can be inspected and revoked without Haven.
+
+Haven connects agents through MCP (hosted, keyless) plus a local signer. Payments settle in USDC on Base via x402, using ERC-7710 delegated settlement natively and EIP-3009 as the compatibility path — so a Haven agent with an open (unpinned) budget can pay any standard x402 merchant today; recipient-pinned budgets settle via ERC-7710 only. Every payment produces a receipt: which agent, what it bought, which policy allowed it, and the on-chain proof.
+
+## Start here
+
+- [Your agent hit a 402 — how to pay it](https://haven.xyz/402.md): what HTTP 402 means and how an agent pays it with a budget, not a wallet
+- [Dashboard](https://app.haven.xyz): create an account (one passkey prompt), create an agent, set its budget, get the connect command
+
+## Packages (npm)
+
+- [@haven_ai/connect](https://www.npmjs.com/package/@haven_ai/connect): one-command local connector — installs the MCP runtime, generates the agent signing key locally
+- [@haven_ai/sdk](https://www.npmjs.com/package/@haven_ai/sdk): TypeScript SDK for direct integration (payments, x402 quote/pay/resume, allowances)
+- [@haven_ai/mcp](https://www.npmjs.com/package/@haven_ai/mcp): local MCP server for credential-file integrations
+- [@haven_ai/signer](https://www.npmjs.com/package/@haven_ai/signer): local edge signer — the delegate key never leaves the machine
+- [@haven_ai/cli](https://www.npmjs.com/package/@haven_ai/cli): terminal-native management
+
+## Trust and verification
+
+- [Independent exit tool](https://haven.xyz/exit/): inspect and revoke every agent budget with only a wallet and a public RPC — works even if Haven disappears
+- [Account recovery](https://docs.haven.xyz/product/account-recovery): signer-set management and recovery model
+
+## Optional
+
+- [Full agent-readable overview](https://haven.xyz/llms-full.txt): product model, payment flow, and integration surface in one file

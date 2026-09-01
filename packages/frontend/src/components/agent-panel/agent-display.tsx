@@ -37,16 +37,54 @@ function tokenDecimalsForAllowance(allowance: AgentAllowance, chainId: number): 
   return getTokenDecimals(chainId, allowance.token_symbol) ?? tokenDecimals(allowance.token_address, chainId)
 }
 
+/**
+ * Format a configured budget for display: `"250.000000"` renders as `250.00`.
+ *
+ * ── Why there is no `BigInt(...)` pre-parse and no `try`/`catch` (#2283) ─────
+ *
+ * `allowance_amount` carries TWO shapes across the API, under one field name.
+ * `AgentConnectionAllowance` (the connect-setup input) is an ATOMIC integer
+ * string; `AgentAllowance` — this function's only input — is the HUMAN-decimal
+ * projection `rails/delegation-budget-view.ts` builds with `formatTokenValue`,
+ * so `GET /agents` returns `'250.000000'` for a 250 USDC weekly budget.
+ *
+ * This helper used to discriminate between those shapes BY EXCEPTION:
+ * `BigInt('250.000000')` throws, and a bare `catch` returned the string
+ * unformatted. That is what put `"250.000000 USDC per week"` on `/agents`
+ * while `/dashboard` and `/custody` showed `250.00` for the same delegation —
+ * a catch used as a type test, failing silently in the one direction the live
+ * rail actually produces.
+ *
+ * The fix is the path those two surfaces already take. They call
+ * `formatAllowanceForToken`, a one-line wrapper that resolves decimals and
+ * hands the string STRAIGHT to `formatAllowanceAmount` — which owns the
+ * shape question explicitly, in one place: an atomic-bigint primary path, a
+ * decimal-string secondary path, and a documented, tested pass-through for a
+ * genuinely unparseable value. So this is the same single call, with the one
+ * thing `formatAllowanceForToken` lacks kept: an address-based decimals
+ * fallback for a token whose symbol the chain registry does not know.
+ *
+ * Nothing here can throw where the old `catch` was reachable. The remaining
+ * throw is `tokenDecimals`' `getChainConfig` on an UNKNOWN chain id, and the
+ * `catch` bought nothing real against it: `AllowanceBar` reaches the SAME
+ * unguarded helper on the same `chainId` under the same unregistered-chain
+ * precondition — more easily, in fact, since it does not need the symbol
+ * lookup to miss first. Stated precisely, because the review pass corrected a
+ * looser version of this sentence: the two are mutually exclusive branches in
+ * `AgentCard` (`hasNetworkAllowances ? AllowanceBar : ConfiguredAllowanceRow`),
+ * so this is parity of failure CLASS in a sibling branch, not a same-render
+ * proof that the crash already happens beside this row. The practical exposure
+ * is unchanged either way: `chainId` is app-controlled and bounded to the
+ * supported set before it reaches either component, never wire-controlled.
+ * Hardening `tokenDecimals`/`tokenSymbol` into total functions is a real but
+ * separate, pre-existing gap — deliberately not bundled into this fix.
+ */
 export function formatConfiguredAllowance(allowance: AgentAllowance, chainId: number): string {
-  try {
-    return formatAllowanceAmount(
-      BigInt(allowance.allowance_amount).toString(),
-      tokenDecimalsForAllowance(allowance, chainId),
-      { symbol: allowance.token_symbol },
-    )
-  } catch {
-    return allowance.allowance_amount
-  }
+  return formatAllowanceAmount(
+    allowance.allowance_amount,
+    tokenDecimalsForAllowance(allowance, chainId),
+    { symbol: allowance.token_symbol },
+  )
 }
 
 /**

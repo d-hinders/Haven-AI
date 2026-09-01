@@ -14,6 +14,30 @@
  * because a token is unlisted), `allowance_amount` is the human-formatted
  * budget, `reset_period_min` is the period in minutes.
  *
+ * ── This file is the SOLE producer of the human-decimal shape (#2295) ────────
+ *
+ * `allowance_amount` is one field name over two incompatible wire shapes.
+ * `formatTokenValue` below emits the HUMAN-DECIMAL one — `'250.00'` for a
+ * 250 USDC budget (it trims trailing zeroes to a two-digit minimum, so the
+ * `'250.000000'` quoted in #2283/#2295 is the shape but not the digits), and
+ * `'0'` for a zero budget. The connect-setup schemas emit the ATOMIC one,
+ * `'250000000'` for the same budget. They are named apart in `openapi/spec.ts` as
+ * `allowanceHumanAmount` / `allowanceAtomicAmount` — change the shape emitted
+ * here and that schema, and every consumer reading it, is wrong.
+ *
+ * Everything downstream of this function carries the human shape, on five
+ * emitters: `GET /agents`, `GET /agents/{id}` and `PATCH /agents/{id}`
+ * (`routes/agents.ts`), `GET /dashboard` (`routes/dashboard.ts`, as
+ * `allowanceAmount`), and `GET /machine-payments/allowances`
+ * (`modules/mpp/allowances.ts`, as `configured_amount`). Note the last one
+ * reports the SAME budget twice — `configured_amount` human, `onchain.amount`
+ * atomic from `budget_atomic` — so a consumer that mixes them up is off by
+ * `10 ** decimals`.
+ *
+ * `DerivedDelegationBudget.budget_atomic` is the atomic escape hatch: any
+ * consumer doing ARITHMETIC on a budget should take that field, never parse
+ * `allowance_amount` back.
+ *
  * Read/reporting path ONLY: enforcement stays the on-chain delegation.
  */
 

@@ -1,7 +1,7 @@
 {
   "name": "@haven_ai/mcp",
-  "version": "0.1.32-alpha.0",
-  "description": "Haven MCP server for local, non-custodial agent payments",
+  "version": "0.1.33-alpha.0",
+  "description": "Haven MCP server for local, non-custodial AI-agent payments — pay x402 (HTTP 402) APIs within on-chain-enforced budgets.",
   "engines": {
     "node": ">=22"
   },
@@ -36,9 +36,16 @@
   "keywords": [
     "haven",
     "mcp",
-    "agent",
+    "mcp-server",
+    "ai-agent",
+    "agent-payments",
+    "x402",
+    "402",
     "payments",
-    "x402"
+    "spending-limit",
+    "budget",
+    "usdc",
+    "non-custodial"
   ],
   "license": "MIT",
   "repository": {
@@ -47,7 +54,7 @@
     "directory": "packages/mcp"
   },
   "dependencies": {
-    "@haven_ai/sdk": "0.1.32-alpha.0",
+    "@haven_ai/sdk": "0.1.33-alpha.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^3.25.76"
   },
@@ -55,5 +62,6 @@
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.2.4"
-  }
+  },
+  "homepage": "https://haven.xyz"
 }

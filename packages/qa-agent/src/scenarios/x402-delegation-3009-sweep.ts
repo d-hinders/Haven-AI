@@ -25,8 +25,8 @@
  * ## Preconditions, and why they cause SKIPs rather than failures
  *
  * The merchant must be configured with `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb`,
- * and the dev backend wants `SWEEP_MIN_USDC=0` so a QA-sized stranding is above
- * the floor and exercises a real sweep. Neither is this scenario's to assert:
+ * and the dev backend may set `SWEEP_MIN_USDC=0` so even the tiniest QA stranding
+ * exercises a real sweep. Neither is this scenario's to assert:
  * a merchant that settles normally is an unmet precondition, not a sweep
  * regression, and reporting it as a failure would train operators to ignore
  * this line.
@@ -131,9 +131,9 @@ export const x402Delegation3009Sweep: Scenario = {
 
     if (prep.below_min) {
       return skip(
-        `stranded ${fmt(stranded)} USDC is below the sweep floor (${prep.min_usdc} USDC) — left as ` +
-          `dust by design (owner decision 2026-07-18). Set SWEEP_MIN_USDC=0 on the dev backend to ` +
-          `exercise a real sweep.`,
+        `stranded ${fmt(stranded)} USDC is below the sweep floor (${prep.min_usdc} USDC) — left on ` +
+          `the delegate until additional stranded funds accumulate. Set SWEEP_MIN_USDC=0 on the ` +
+          `dev backend to exercise a real sweep.`,
       )
     }
     if (prep.nothing_stranded || !prep.authorization) {
@@ -174,7 +174,7 @@ export const x402Delegation3009Sweep: Scenario = {
     // succeeding: a sweep that reports success while the funds stay put would
     // otherwise pass. Read the delegate again and require it below the floor.
     const after = await readUsdc(provider, delegateAddress)
-    const floor = ethers.parseUnits(String(prep.min_usdc ?? '1'), 6)
+    const floor = ethers.parseUnits(String(prep.min_usdc ?? '0.01'), 6)
     // `after > 0n` is load-bearing, not belt-and-braces. The dev backend runs
     // `SWEEP_MIN_USDC=0` so a QA-sized stranding is sweepable at all — and with
     // a floor of zero, a bare `after >= floor` is true for a perfectly swept

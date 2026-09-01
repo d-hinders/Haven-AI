@@ -68,6 +68,13 @@ for how the environments are wired, see
       `NEXT_PUBLIC_HAVEN_ENV` unset (no `DEV` badge) and keeps its own
       secrets / relayer key / RPCs (these live on the platforms, not in code —
       just confirm nothing dev-specific was hardcoded).
+- [ ] **Sweep recovery floor:** set the production backend's
+      `SWEEP_MIN_USDC=0.01` (or remove any legacy `1` override), redeploy, and
+      verify the effective value before relying on the code default. For the
+      exact recovery proof, use the operator sequence in
+      [`agent-qa.md`](./agent-qa.md): prepare a delegate holding exactly
+      `10000` atomic USDC, sign only through the local signer, submit, and
+      confirm the delegate is drained to the Haven wallet.
 - [ ] **npm:** if the batch includes a version bump, `publish.yml` publishes on
       merge — confirm the version and the intended dist-tag (`alpha` vs `latest`),
       then read the run's **per-package summary table**: a package can fail while

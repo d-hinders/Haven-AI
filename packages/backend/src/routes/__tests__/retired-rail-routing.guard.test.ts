@@ -142,7 +142,6 @@ const RETIRED_RAIL_SYMBOLS = [
 const PAYMENT_ENTRY_POINTS = [
   'routes/payments.ts',
   'routes/x402.ts',
-  'routes/x402-resources.ts',
   'routes/machine-payments.ts',
   'routes/agent-delegations.ts',
 ] as const

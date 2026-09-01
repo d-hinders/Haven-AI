@@ -126,6 +126,11 @@ export {
   X402PaymentHeaderValidationError,
   X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
   X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
+  X402_PAYMENT_HEADER_NAME,
+  X402_LEGACY_PAYMENT_HEADER_NAME,
+  X402_PAYMENT_REQUIRED_HEADER_NAME,
+  X402_PAYMENT_RESPONSE_HEADER_NAME,
+  X402_PAYMENT_HEADER_NAMES_SENT,
   buildX402ExpectedMessage,
   encodePaymentProof,
   // #1351: the address→{symbol,decimals} binding behind X402Quote.decimals.
@@ -136,6 +141,9 @@ export {
 
 export type { X402PaymentHeaderContext, X402SchemeSelection } from './x402.js'
 export type { X402Erc7710Settlement } from './types.js'
+
+// #2292: the plain-HTTP merchant-outcome report (HavenClient.reportX402MerchantOutcome).
+export type { X402MerchantOutcome, X402MerchantOutcomeReport } from './merchant-completion.js'
 
 export {
   SWEEP_BASE_CHAIN_ID,

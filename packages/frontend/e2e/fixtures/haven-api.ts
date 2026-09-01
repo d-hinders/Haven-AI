@@ -4,14 +4,45 @@ import { ACTIVE_SAFE_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '../../src/lib/a
 export const testSafeAddress = '0x1111111111111111111111111111111111111111'
 export const testRecipientAddress = '0x2222222222222222222222222222222222222222'
 
+/**
+ * The shared account — on the LIVE delegation rail (#2264, epic #1440).
+ *
+ * It carried no `account_type` at all until #2264, and `railOf` reads
+ * anything-but-`delegator_hybrid` as the legacy Safe rail
+ * (`lib/custody-rail.ts`), so every spec in this suite rendered the app as it
+ * looks for a **retired-rail** user. `browser_smoke` and `design_visual` were
+ * therefore pinning the pixel-and-DOM behaviour of a configuration that answers
+ * HTTP 410 in production (#1986): green, and true about nobody.
+ *
+ * The default is now the live rail and a legacy spec opts DOWN explicitly, the
+ * same inversion `scripts/screenshot.mjs` was corrected to across #2205/#2227/
+ * #2233. `legacySafe` below is the sanctioned opt-down.
+ *
+ * The value is `'safe'` / `'delegator_hybrid'` and never `null` or absent:
+ * migration `041_hybrid_accounts.ts` declares the column `VARCHAR(32) NOT NULL
+ * DEFAULT 'safe'` with `CHECK (account_type IN ('safe','delegator_hybrid'))`,
+ * so an absent value is not a state the backend can serve (#2202).
+ */
 export const testSafe = {
   id: 'safe-main',
   safe_address: testSafeAddress,
   chain_id: 8453,
   name: 'Operations',
   is_default: true,
+  account_type: 'delegator_hybrid',
   created_at: '2026-05-01T10:00:00.000Z',
 }
+
+/**
+ * The explicit opt-DOWN to the retired AllowanceModule rail (#2264).
+ *
+ * Spread over `testSafe` (and mirrored onto the agent, whose `account_type` is
+ * selected as `us.account_type` off the joined `user_safes` row — one account
+ * answers one value, #2202) by a spec whose SUBJECT is legacy-rail rendering.
+ * Anything that is merely rail-independent must NOT reach for this: the point
+ * of the inversion is that the retired rail appears only where a spec says so.
+ */
+export const legacySafe = { ...testSafe, account_type: 'safe' as const }
 
 export const testUser = {
   id: 'user-e2e',
@@ -34,14 +65,30 @@ export const testAgent = {
   safe_name: testSafe.name,
   api_key_prefix: 'haven_e2e',
   status: 'active',
+  // #2264: the agent's rail marker. It is not an `agents` column — every
+  // agent-row read selects it as `us.account_type` off the joined `user_safes`
+  // row (`infra/repositories/agents.ts`), so it must agree with `testSafe`,
+  // which this agent names via `safe_id`. A spec that opts DOWN to
+  // `legacySafe` has to move BOTH or it describes an account that cannot exist.
+  account_type: 'delegator_hybrid',
   created_at: '2026-05-02T10:00:00.000Z',
+  // #2264: the DERIVED delegation-budget projection, which is what fills this
+  // array on the live rail (`rails/delegation-budget-view.ts`): 250 USDC per
+  // 30 days, `allowance_amount` HUMAN-formatted and `reset_period_min` in
+  // minutes. It used to be `'250000000'` — atomic units, the AllowanceModule
+  // row shape — which `GET /agents` cannot emit for a `delegator_hybrid` agent
+  // and, since #2020 retired the allowance read surface, cannot emit for a
+  // legacy one either (`routes/agents.ts` returns `[]` there).
   allowances: [
     {
-      id: 'allowance-e2e',
+      // The derived row's `id` IS the delegation row's id
+      // (`deriveDelegationBudgets` maps `row.id` straight through), so the two
+      // must be the SAME literal — see the `/agents/:id/delegations` handler.
+      id: 'delegation-e2e',
       agent_id: 'agent-e2e',
       token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
       token_symbol: 'USDC',
-      allowance_amount: '250000000',
+      allowance_amount: '250.000000',
       reset_period_min: 43_200,
     },
   ],
@@ -121,10 +168,12 @@ export const dashboardOverview = {
       safeId: testSafe.id,
       safeName: testSafe.name,
       safeChainId: testSafe.chain_id,
+      // #2264: same derived projection as `testAgent.allowances`, in the
+      // dashboard route's camelCase wire shape (`routes/dashboard.ts`).
       allowances: [
         {
           tokenSymbol: 'USDC',
-          allowanceAmount: '250000000',
+          allowanceAmount: '250.000000',
           resetPeriodMin: 43_200,
         },
       ],
@@ -360,6 +409,89 @@ export async function mockHavenApi(page: Page) {
       return
     }
 
+    // #2264: the delegation rail's own per-agent reads, reached for the first
+    // time when the shared account stopped being a legacy Safe.
+    //
+    // `GET /agents/:id/delegations` is the agent's real spend authority — the
+    // rows `rails/delegation-budget-view.ts` projects into `agent.allowances`.
+    // `testAgent` gets the delegation its projection describes (250 USDC per
+    // 30 days), so the two cannot disagree; any OTHER agent id is one the
+    // connect flow just created, which by construction has no delegation until
+    // the budget is granted, so it gets an empty list rather than a 599.
+    if (method === 'GET' && path.startsWith('/agents/') && path.endsWith('/delegations')) {
+      const forTestAgent = path === `/agents/${testAgent.id}/delegations`
+      await fulfillJson(route, {
+        delegations: forTestAgent
+          ? [
+              {
+                id: 'delegation-e2e',
+                chain_id: testSafe.chain_id,
+                token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+                recipient_address: null,
+                delegation_hash: `0x${'4d'.repeat(32)}`,
+                version: 1,
+                status: 'active',
+                budget_atomic: '250000000',
+                period_seconds: 43_200 * 60,
+                start_date: '2026-05-02T10:00:00.000Z',
+                expires_at: Math.floor(Date.UTC(2027, 4, 2) / 1000),
+                created_at: '2026-05-02T10:00:00.000Z',
+              },
+            ]
+          : [],
+      })
+      return
+    }
+
+    // The agent-scoped twin of the account signer set (#888). Same account, so
+    // the same answer as `/accounts/hybrid/:address/signers` below — a device
+    // that can sign here can sign there.
+    if (method === 'GET' && path.startsWith('/agents/') && path.endsWith('/account-signers')) {
+      await fulfillJson(route, {
+        account_address: testSafeAddress,
+        chain_id: testSafe.chain_id,
+        owner_address: null,
+        passkeys: [
+          {
+            key_id: `0x${'11'.repeat(32)}`,
+            x: '0x1',
+            y: '0x2',
+            created_at: '2026-05-01T10:00:00.000Z',
+          },
+        ],
+      })
+      return
+    }
+
+    // #2264: the delegation rail's OWN signer-set read. The shared fixture had
+    // no handler for it, because until #2264 every spec rendered as a legacy
+    // Safe user and nothing on that rail calls it — so `browser_smoke` reached
+    // this route for the first time when the default flipped, and got the 599
+    // "Unmocked API route" that `unexpectedBrowserErrors` correctly failed on
+    // in 17 tests. One passkey and no EOA owner: the pure-passkey account
+    // epic #836 made the ordinary shape, and the state `useAccountSigners`
+    // needs before any signing path is offered.
+    if (
+      method === 'GET' &&
+      path.startsWith('/accounts/hybrid/') &&
+      path.endsWith('/signers')
+    ) {
+      await fulfillJson(route, {
+        account_address: testSafeAddress,
+        chain_id: testSafe.chain_id,
+        owner_address: null,
+        passkeys: [
+          {
+            key_id: `0x${'11'.repeat(32)}`,
+            x: '0x1',
+            y: '0x2',
+            created_at: '2026-05-01T10:00:00.000Z',
+          },
+        ],
+      })
+      return
+    }
+
     if (method === 'GET' && path === `/safe/${testSafeAddress}/details`) {
       await fulfillJson(route, {
         address: testSafeAddress,
@@ -384,6 +516,62 @@ export async function mockHavenApi(page: Page) {
     }
 
     await fulfillUnmockedRoute(route, method, path)
+  })
+}
+
+/**
+ * Opt this page DOWN to the retired AllowanceModule rail (#2264).
+ *
+ * Register it AFTER `mockHavenApi` — Playwright matches the most recently
+ * registered handler first, and this one defers to the shared fixture for every
+ * route it does not answer, via `route.fallback()`. Same layering as
+ * `focus-visible.visual.spec.ts`'s `seedAgents`, for the same reason: the
+ * shared fixture is read by a dozen specs, so a legacy account must not arrive
+ * there.
+ *
+ * BOTH sides move together. `account_type` is not an `agents` column — it is
+ * selected as `us.account_type` off the joined `user_safes` row — so a legacy
+ * account with a `delegator_hybrid` agent pointing at it is a row no query can
+ * produce (#2202). The agent's `allowances` empties for a related reason:
+ * `GET /agents` returns the derived delegation projection for a
+ * `delegator_hybrid` agent and `[]` for every other, and the `agent_allowances`
+ * read surface it used to mirror is retired (#1440/#2020), so a legacy agent
+ * carrying budget rows is union-legal on the wire and emitted by nothing
+ * (#2224).
+ *
+ * Use it only where the retired rail IS the subject, and say why at the call
+ * site. Anything rail-independent stays on the default.
+ */
+export async function optDownToLegacyRail(page: Page) {
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() !== 'GET') return route.fallback()
+
+    if (path === '/auth/me') {
+      await fulfillJson(route, { ...testUser, safes: [legacySafe] })
+      return
+    }
+    if (path === '/agents') {
+      await fulfillJson(route, {
+        agents: [{ ...testAgent, account_type: 'safe', allowances: [] }],
+      })
+      return
+    }
+    // The dashboard's own copy of the same projection, and it empties for the
+    // same reason: `routes/dashboard.ts` fills `allowancesByAgent` from the
+    // derived delegation view only for a `delegator_hybrid` account and hands
+    // every other agent `[]`. Left on the shared fixture, an opted-down page
+    // would serve a 250 USDC budget row for an account the backend would
+    // answer with none — the very shape this helper exists to keep out.
+    if (path === '/dashboard/overview') {
+      await fulfillJson(route, {
+        ...dashboardOverview,
+        agents: dashboardOverview.agents.map((agent) => ({ ...agent, allowances: [] })),
+      })
+      return
+    }
+    await route.fallback()
   })
 }
 

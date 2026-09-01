@@ -6,7 +6,7 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .github/CODEOWNERS
-last-verified: "2026-08-12" # #1341: re-verified queue readiness after ship-next gained #1289 active-claim coordination
+last-verified: "2026-08-31" # #2276: the queue-state table said a closed issue is done and implied every open issue is ready; an `operator-verify` issue is neither — merged code, open on purpose, not queueable. Added that one exception. Scope: the queue-state paragraph only; the issue-writing rigour section and the loop-template mapping were NOT re-verified. Prior: #1341: re-verified queue readiness after ship-next gained #1289 active-claim coordination
 ---
 
 # Backlogs moved to GitHub Issues
@@ -33,7 +33,9 @@ The loop reads **GitHub Issues**. Two sources (see
 Issue state *is* the backlog state: an open issue with no PR and no live claim
 or work overlap is **ready**, an open issue with an open Haven PR is **in
 flight**, and a **closed** issue is **done** (its PR closed it via
-`Closes #`).
+`Closes #`). Exception: an open issue labelled **`operator-verify`** is already
+implemented and on `dev` — its PR wrote `Refs #<n>` so the merge would leave a
+human's outstanding step a home (#2276). It is not ready work; don't queue it.
 
 ## Writing a loop-ready issue
 

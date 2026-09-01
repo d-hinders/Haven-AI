@@ -112,7 +112,26 @@ export async function getX402MerchantCallContext(
       merchant_url: stored.merchantUrl,
       tool_name: stored.toolName,
       arguments: stored.arguments ?? {},
-      ...(stored.mcpTransport ? { mcp_transport: stored.mcpTransport } : {}),
+      // #2343: convert the NESTED object too, not just the top-level fields.
+      // The stored blob is camelCase throughout (`X402McpCallContextInput`,
+      // and `storedMcpCallContext` validates it by reading `merchantUrl` /
+      // `toolName`), while this endpoint's contract — and the hosted tool
+      // boundary that consumes it — is snake_case. `merchant_url` and
+      // `tool_name` were converted; `mcp_transport` was passed through
+      // verbatim, so the wire carried a snake_case KEY with camelCase
+      // INNARDS. The SDK then read `.handshake_required` as undefined and the
+      // hosted `parseMcpTransport` refused Haven's own rehydrated value with
+      // INVALID_INPUT — advising the caller to rename a key the caller never
+      // sent, since the guided path settles with `{ payment_id, signature }`
+      // and nothing else.
+      ...(stored.mcpTransport
+        ? {
+            mcp_transport: {
+              handshake_required: stored.mcpTransport.handshakeRequired,
+              source: stored.mcpTransport.source,
+            },
+          }
+        : {}),
     },
   }
 }

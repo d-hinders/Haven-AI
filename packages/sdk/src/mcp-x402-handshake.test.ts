@@ -540,7 +540,7 @@ describe('completeX402MerchantCall — hosted merchant settlement leg', () => {
       txHash: fundingTxHash,
       resourceUrl: mcpUrl,
       merchantStatus: 200,
-      paymentProofHeaderName: 'X-PAYMENT',
+      paymentProofHeaderName: 'PAYMENT-SIGNATURE, X-PAYMENT',
       paymentProofHeader: 'PAYMENT_HEADER_ABC',
       protocolReceiptHeaderName: 'PAYMENT-RESPONSE',
     })

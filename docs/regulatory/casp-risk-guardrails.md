@@ -6,7 +6,6 @@ covers:
   - packages/backend/src/config.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
-  - packages/backend/src/routes/x402-resources.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/backend/src/modules/mpp/**
@@ -63,7 +62,7 @@ covers:
   - .github/workflows/publish.yml
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-30" # chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
+last-verified: "2026-08-31" # #2274: the #2245 "Current state" note under Core Design Principle corrected — it listed token resolution among the rail-INDEPENDENT checks still preceding the x402 rail 410, which #2274 moved below the gate on that route and on POST /payments together. Scope: that blockquote only; the rest of Core Design Principle was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -181,17 +180,47 @@ Haven backend
 > "kept, unreferenced", which was true when written and stopped being true two
 > slices later.
 >
-> One caveat, recorded rather than glossed ([#2245](https://github.com/d-hinders/Haven-AI/issues/2245)):
+> The one caveat this section carried — recorded by the #2244 re-verification
+> and now **closed** ([#2245](https://github.com/d-hinders/Haven-AI/issues/2245)):
 > on `POST /x402/authorize` a caller-supplied `settlementScheme: 'erc7710'` or
-> `facilitatorAddresses` is validated by `modules/x402/scheme-selection.ts`
-> *above* the rail resolution, so a retired-rail account with that field set
-> gets a 400 instead of the 410 tombstone. The seam remains the only thing that
-> decides whether the account may **spend** — both answers are refusals, both
-> fail-closed with nothing read on-chain and nothing written — but it is not,
-> on that one route, the only thing that decides what the account is **told**,
-> and the alternative message asserts that the retired rail settles. Filed as a
-> code fix; the sentence above is written to be true of the spend decision,
-> which is what this document guards.
+> `facilitatorAddresses` used to be validated *above* the rail resolution, so a
+> retired-rail account setting that field got a 400 — whose body asserted that
+> the retired rail "settles via EIP-3009 only" — instead of the 410 tombstone.
+> The spend decision was never affected (both answers were refusals, both
+> fail-closed with nothing read on-chain and nothing written), which is why the
+> sentence above was true throughout; what was affected was what the account
+> was TOLD. #2245 deleted those two rail-dependent guards
+> (`validateGenericSchemeRail`) rather than rewording them: both tested
+> `agent.execution_rail !== 'delegation'`, the same field `resolveExecutionRail`
+> reads, so the seam already refused every input they refused. The seam is once
+> again the only thing that decides whether a retired-rail account may spend AND
+> the only thing that makes a rail-specific claim to it, on this route as on the
+> others. Note the second half is narrower than "the only thing that answers it",
+> deliberately: refusals that are not rail claims still precede the seam, and a
+> sentence that swallowed them would be false. What still precedes the 410 there
+> is rail-INDEPENDENT and makes no claim about any rail: the route's structural
+> validation — required fields, address and network shape, and the
+> `settlementScheme` enum check — the same position `POST /payments` puts its own
+> gate in, and the same class as the 401 auth hook. Pinned by
+> `routes/__tests__/allowance-rail-retired.test.ts` → "a caller-supplied
+> settlementScheme cannot divert the tombstone (#2245)".
+>
+> **Token resolution no longer belongs in that list**
+> ([#2274](https://github.com/d-hinders/Haven-AI/issues/2274)). This sentence
+> named it as still preceding the 410, and it did, on both routes: a retired-rail
+> account naming an unsupported asset received a 400 carrying `supported: [...]`
+> — the assets it can pay with — before being told the rail is gone and it can
+> pay with none of them. Rail-INDEPENDENT, so the sentence above was true as
+> written and the spend decision was again never affected (both answers refusals,
+> nothing read on-chain, nothing written); what was affected was again what the
+> account was TOLD. #2274 moved the rail gate ABOVE token and amount resolution
+> on `POST /x402/authorize` and `POST /payments` **together** — one route alone
+> would recreate the asymmetry #2245 removed. Pinned by the same file →
+> "the 410 precedes TOKEN RESOLUTION too (#2274)", with positive controls proving
+> a delegation-rail account still receives its 400 *with* the supported list, and
+> a structural-precedence assertion proving the tombstone did not become the
+> route's error handler. Full analysis:
+> `docs/regulatory/casp-changelog/2026-08-31-2274.md`.
 >
 > Since #1986 (epic #1440) that covers BOTH retired rails — the session rail
 > (#834) and the legacy Safe AllowanceModule rail — so the delegation rail is

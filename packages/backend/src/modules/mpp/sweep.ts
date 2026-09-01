@@ -126,10 +126,12 @@ export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResul
     }
   }
 
-  // Sweep dust floor (#700, corrected): only recover a stranded balance worth the
-  // gas — at least SWEEP_MIN_USDC. Smaller "dust" is left on the delegate, since
-  // the relayer gas to sweep it would exceed the value returned. No authorization
-  // is stored, so /sweep/submit can't relay a below-floor sweep either. Balances
+  // Sweep balance floor (#700, recalibrated #2293): recover a stranded balance
+  // when it reaches SWEEP_MIN_USDC. This is a relayer-paid, gasless EIP-3009
+  // transfer on Base, so the default also recovers ordinary 0.01 USDC x402
+  // micropayments. A balance below the floor remains on the delegate until
+  // additional stranded funds bring it up to the floor. No authorization is
+  // stored below the floor, so /sweep/submit cannot relay it. Balances at or
   // above the floor (including large ones) are recovered normally.
   const minAtomic = parseTokenAmount(config.sweepMinUsdc, USDC_DECIMALS)
   if (balance < minAtomic) {
@@ -143,9 +145,9 @@ export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResul
         min_usdc: config.sweepMinUsdc,
         chain_id: agent.chain_id,
         message:
-          `Stranded ${formatTokenAmount(balance, USDC_DECIMALS)} USDC is below the sweep ` +
-          `floor of ${config.sweepMinUsdc} USDC — left on the delegate (recovering dust ` +
-          `would cost more gas than it returns).`,
+          `Stranded balance is ${formatTokenAmount(balance, USDC_DECIMALS)} USDC, below the ` +
+          `sweep floor of ${config.sweepMinUsdc} USDC — it remains on the delegate until ` +
+          `additional stranded funds bring the balance to at least the floor.`,
       },
     }
   }

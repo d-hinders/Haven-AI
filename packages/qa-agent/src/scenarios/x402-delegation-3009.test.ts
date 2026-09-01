@@ -265,9 +265,8 @@ describe('residuals', () => {
   })
 
   it('passes with sub-floor dust, and says so', async () => {
-    // Owner decision 2026-07-18: stranding up to the 1 USDC sweep floor is
-    // accepted, because sweeping it costs more gas than it recovers — but it
-    // must stay VISIBLE rather than silently tolerated.
+    // A balance below the 0.01 USDC sweep floor remains visible rather than
+    // silently tolerated until later stranded funds bring it to the threshold.
     balances(1_000_000n, 999_000n, 5_000n) // 0.005 USDC — the amount live QA saw
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(true)
@@ -275,7 +274,7 @@ describe('residuals', () => {
   })
 
   it('FAILS at or above the sweep floor — that is stranding, not dust', async () => {
-    balances(2_000_000n, 1_999_000n, 1_000_000n) // exactly 1 USDC left on the EOA
+    balances(2_000_000n, 1_999_000n, 10_000n) // exactly 0.01 USDC left on the EOA
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/stranding, not dust/)

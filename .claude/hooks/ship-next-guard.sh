@@ -40,7 +40,7 @@
 # not something I watched happen, and review was right to press on it.
 #
 # It is now a list of tokens keyed to issue numbers; the guard reads
-# `Closes #N` off the pull request and clears that token. See
+# `Closes #N` / `Refs #N` off the pull request and clears that token. See
 # fire_unless_ship_next below and ship-next-marker.sh.
 #
 # One residual gap, deliberately left on the noisy side: two consecutive
@@ -161,8 +161,9 @@ This warning does not block. It is on you.'
 # ## Matching is now PER ISSUE (#1028)
 #
 # The marker is a list of tokens (see ship-next-marker.sh), not a single flag.
-# This reads `Closes #N` off the pull request and clears that token, falling
-# back to one `*` when the invocation could not name an issue up front.
+# This reads `Closes #N` (or `Refs #N`, the operator-verify form — #2276) off
+# the pull request and clears that token, falling back to one `*` when the
+# invocation could not name an issue up front.
 #
 # Consuming a single flag was the old design, and it warned on the 2nd PR of a
 # session that shipped several issues under one skill invocation — a false
@@ -342,11 +343,29 @@ fire_unless_ship_next() {
   body="${pr_body:-}"
   [ -n "$body" ] || body=$(printf '%s' "$input" | jq -r '.tool_input.body // ""' 2>/dev/null) || body=""
 
-  # Every closing reference in that body, in order. GitHub itself closes each of
-  # them, so any is a legitimate match — but the KEYWORD is required: a bare
-  # `#1030` ("as in #1030") must never consume a token.
+  # Every ISSUE-BINDING reference in that body, in order. GitHub itself closes
+  # each closing keyword, so any is a legitimate match — but a keyword IS
+  # required: a bare `#1030` ("as in #1030") must never consume a token.
+  #
+  # `Refs #N` counts too (#2276), and it is not a closing keyword. In
+  # operator-verify mode the pull request deliberately does NOT close its issue
+  # — GitHub would close it on merge whatever the body promises — so it says
+  # `Refs #N` instead. Without this, the most disciplined pull requests in the
+  # repo would be the ones this guard warns about: a false positive on a
+  # COMPLIANT PR, which is the nag-fatigue failure this file exists to avoid.
+  # `Refs` binds the PR to the issue as explicitly as `Closes` does; only the
+  # merge-time side effect differs, and the token is about which issue was
+  # shipped, not about who closes it.
+  #
+  # `fix(es|ed)?` / `resolve(s|d)?` rather than `fix(|es|ed)` / `resolve(|s|d)`:
+  # an EMPTY alternative is a GNU extension. BSD grep and ugrep both reject the
+  # whole pattern ("empty (sub)expression"), `grep` exits non-zero, `issues`
+  # comes back empty, and every compliant pull request warns — on macOS the
+  # per-issue matching this file's #1028 section describes had simply never
+  # worked. Same language, portable spelling; verified by this file's own suite
+  # going 111/126 → 126/126 under BSD grep.
   issues=$(printf '%s' "$body" \
-    | grep -oiE '(clos(e|es|ed)|fix(|es|ed)|resolve(|s|d))[[:space:]]+#[0-9]+' 2>/dev/null \
+    | grep -oiE '(clos(e|es|ed)|fix(es|ed)?|resolve(s|d)?|refs?)[[:space:]]+#[0-9]+' 2>/dev/null \
     | tr -cd '0-9\n') || issues=""
 
   matched=""

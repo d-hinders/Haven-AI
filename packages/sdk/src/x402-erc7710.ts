@@ -84,10 +84,11 @@ export class X402Erc7710 {
    * settled when this returns** — that is why it does not return an
    * `X402Receipt`.
    *
-   * Requires a delegation-rail account. The backend enforces that
-   * (`validateGenericSchemeRail`), and so does this method, before building a
-   * request the backend would only reject: an error a client can explain is
-   * worth more than a 400 it has to decode.
+   * Requires a delegation-rail account. The backend enforces that at the
+   * rail seam — a non-delegation account gets the #1986 retired-rail 410 from
+   * `POST /x402/authorize` whatever scheme it asks for (#2245) — and so does
+   * this method, before building a request the backend would only reject: an
+   * error a client can explain is worth more than a refusal it has to decode.
    *
    * **MCP callers must pass `options.resourceUrl`.** An in-band MCP 402
    * challenge frequently carries no `resource` object at all, so
@@ -132,9 +133,10 @@ export class X402Erc7710 {
        * anyway, and #1348 pins that path to exactly one agent round-trip).
        *
        * This is an optimisation, not a trust boundary: omit it and the rail is
-       * read here, and either way the backend independently refuses erc7710
-       * from a non-delegation account (`validateGenericSchemeRail`). A caller
-       * that asserted the wrong rail would build a request the backend rejects.
+       * read here, and either way the backend independently refuses a
+       * non-delegation account at the rail seam (the #1986 410; #2245 removed
+       * the separate scheme-level 400). A caller that asserted the wrong rail
+       * would build a request the backend rejects.
        */
       delegationRail?: boolean
       /**

@@ -99,7 +99,37 @@ export function McpServerName({ value }: { value: string | null | undefined }) {
   }
 
   return (
-    <span className="inline-flex min-w-0 items-center gap-1">
+    /*
+      `[&>span]:min-w-0` is the second half of #2251's fit-the-track fix, and
+      the only child span here is `Tooltip`'s own wrapper.
+
+      `Tooltip` renders a non-`block` trigger as a bare
+      `<span className="inline-flex">` with no `min-width: 0` and no
+      `className` passthrough (`Tooltip.tsx:293, 365`). That wrapper is a flex
+      item of this row, so its automatic minimum size is its content's
+      min-content — and its content is the `truncate` chip below, which is
+      `white-space: nowrap`. The whole server name therefore became
+      incompressible and propagated all the way up to `AgentPanel`'s grid
+      column: `min-w-0` on this element, on the MCP row and on the header's
+      flex-1 block were all already present and all already collapsing to 0,
+      and this one un-shrinkable link in the middle defeated every one of them.
+
+      Measured, one inline style at a time, on a card seeded with the longest
+      legal `mcp_server_name` at 390: `min-width: 0` here took the chip from
+      264.9px to 62.5px, properly ellipsised. Without it, `AgentCard`'s
+      `min-w-0` caps the CARD at the 342px track but the chip renders 264.9px
+      inside an 86.5px box and simply spills out of the card instead.
+
+      Rejected: adding a `className` prop to `Tooltip`. It has 24 call sites
+      and no styling surface today; opening one to fix a single layout
+      participant invites arbitrary restyling of a primitive, and the four
+      other truncating call sites (`Address`, `WalletIdentityBlock`) shorten
+      their text in JS rather than with CSS, so none of them needs it.
+      Rejected: `min-w-0` unconditionally inside `Tooltip`'s wrapper — same
+      24 call sites, a behaviour change for every one of them, and no rendered
+      evidence for 23.
+    */
+    <span className="inline-flex min-w-0 items-center gap-1 [&>span]:min-w-0">
       {/*
         This tooltip STAYS, and the distinction is the point of #2043.
 

@@ -95,12 +95,11 @@ export const config = {
   coingeckoApiKey: process.env.COINGECKO_API_KEY ?? '',
   relayerPrivateKey: process.env.RELAYER_PRIVATE_KEY ?? '',
 
-  // Sweep dust floor in USDC (#700, corrected). The gasless delegate sweep only
-  // recovers a stranded balance when it is AT LEAST this much — smaller "dust"
-  // amounts are left on the delegate because recovering them would cost more
-  // relayer gas than the value returned. Human USDC string (6 decimals). Default
-  // 1; dev sets SWEEP_MIN_USDC=0 so QA's tiny stranded amounts still sweep.
-  sweepMinUsdc: process.env.SWEEP_MIN_USDC ?? '1',
+  // Sweep recovery floor in USDC (#700, recalibrated #2293). The delegate sweep
+  // is a relayer-paid, gasless EIP-3009 transfer on Base, so ordinary 0.01 USDC
+  // x402 micropayments remain recoverable. Human USDC string (6 decimals).
+  // Dev sets SWEEP_MIN_USDC=0 so QA's tiniest stranded amounts still sweep.
+  sweepMinUsdc: process.env.SWEEP_MIN_USDC ?? '0.01',
 
   // Chains this environment actually serves account deploys on (#679). Comma-
   // separated chain ids; **unset = all supported** (backward-compatible). Dev

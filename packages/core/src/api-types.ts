@@ -488,110 +488,6 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/x402/resources": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the caller's registered resources, newest first.
-         * @description Includes deactivated resources — active is a field, not a filter, so an owner can see what they took down. pay_to and challenge are null together when the linked Safe was detached.
-         */
-        get: operations["listX402Resources"];
-        put?: never;
-        /**
-         * Register a resource behind an x402 payment wall.
-         * @description Stores the resource and returns the 402 challenge a resource server embeds in its own responses. Price is ALWAYS atomic units (price_amount); price_human is derived for display only. Payment lands on the linked Safe — safe_id when given (ownership-checked), otherwise the user's default Safe; with neither, registration refuses rather than creating an unpayable resource.
-         */
-        post: operations["createX402Resource"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/x402/resources/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Deactivate a resource (soft delete).
-         * @description Sets active=false, scoped to the caller. The row is kept so existing receipts keep their resource, and the challenge endpoint answers 410 rather than 404 — a payer learns the resource retired, not that it never existed.
-         */
-        delete: operations["deactivateX402Resource"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/x402/receipts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List payments verified against the caller's resources (max 100, newest first).
-         * @description Receipts are written only by the verify endpoint, after on-chain verification. amount_human formats with the receipt token’s OWN decimals (#1630); a token this deployment does not recognise falls back to 6. amount_raw remains the authoritative field — amount_human is a display string.
-         */
-        get: operations["listX402Receipts"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/x402/resources/{id}/challenge": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * PUBLIC: fetch a resource's 402 payment challenge.
-         * @description No authentication — a challenge is public by construction, and it grants nothing: it states a price and a destination. NOTE THE SUCCESS CODE: this answers **402 Payment Required** with the challenge body, not 200, so a resource server can relay the status verbatim. 410 means the resource was deactivated; 503 means it has no payment address (its Safe was detached).
-         */
-        get: operations["getX402ResourceChallenge"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/x402/resources/{id}/verify": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * PUBLIC: verify a transaction paid for this resource, and mint a receipt.
-         * @description No authentication — verification reads the chain and the resource's own terms, so it grants the caller nothing they could not check themselves. The transaction must be an AllowanceModule transfer to the resource's Safe, in the resource's token, for at least its price. A tx_hash already used is a 409 (receipts are one-per-transaction, enforced before any RPC call). A failed verification is **402 with verified:false plus the expected terms** — a documented negative answer, not an error envelope.
-         */
-        post: operations["verifyX402Payment"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/agents/{id}/passport": {
         parameters: {
             query?: never;
@@ -1349,8 +1245,8 @@ export type paths = {
             cookie?: never;
         };
         /**
-         * One agent's payments, approvals and tool calls, newest first.
-         * @description A heterogeneous list discriminated by `type`: payment, approval, or mcp_tool_call. **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the three sources separately and the results are then merged and sorted, so this route can return up to three times `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.
+         * One agent's payments and tool calls, newest first.
+         * @description A heterogeneous list discriminated by `type`: payment or mcp_tool_call. (#2262: the third branch, `approval`, is gone — #2055 dropped `approval_requests` and this handler merges `payment_intents` and the MCP tool-call audit log, with no third source.) **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the two sources separately and the results are then merged and sorted, so this route can return up to twice `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.
          */
         get: operations["getAgentActivity"];
         put?: never;
@@ -1390,7 +1286,7 @@ export type paths = {
         };
         /**
          * Combined activity across every agent the caller owns.
-         * @description The same three entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` is always 0 since #2055 (the approval queue died with the Safe rail); the field survives for wire compatibility.
+         * @description The same two entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` is always 0 since #2055 (the approval queue died with the Safe rail); the field survives for wire compatibility.
          */
         get: operations["getActivityFeed"];
         put?: never;
@@ -2098,7 +1994,7 @@ export type paths = {
         put?: never;
         /**
          * Record a merchant retry reconciliation event.
-         * @description Records a post-payment reconciliation marker when the merchant/protocol retry rejects or needs follow-up after a confirmed payment. The event is audit context only; it does not move funds.
+         * @description Records a post-payment reconciliation marker when the merchant/protocol retry rejects or needs follow-up after a confirmed payment. The event is audit context only; it does not move funds. The payment is resolved scoped to the calling agent, so another agent's payment answers 404 with nothing written. #2292: an acceptance is terminal — a merchant_retry_rejected_after_payment on a payment that already carries a client-reported merchant response (machine_payment_evidence proof_status merchant_response_observed or protocol_receipt_attached) answers 409 rather than re-opening a stranded-funds flag on a delivered payment.
          */
         post: operations["recordMachinePaymentReconciliationEvent"];
         delete?: never;
@@ -2589,11 +2485,12 @@ export type components = {
          * @enum {string}
          */
         AgentConnectionSetupState: "awaiting_connection" | "connected_local" | "awaiting_wallet_approval" | "approval_in_progress" | "proposed" | "active" | "expired" | "cancelled" | "failed";
+        /** @description One requested budget on a connect setup. Its `allowance_amount` is ATOMIC — the opposite shape to the identically named field on AgentAllowance, which is the human-decimal delegation projection (#2295). */
         AgentConnectionAllowanceInput: {
             /** @example 0x1111111111111111111111111111111111111111 */
             token_address: string;
             token_symbol: string;
-            /** @description Decimal atomic token amount. Leading zeroes are accepted and canonicalized; effective amount must be positive and capped at uint96 — the word size of the delegation rail's ERC20PeriodTransferEnforcer. */
+            /** @description ATOMIC token amount — an integer string in the token's smallest unit (25 USDC is "25000000"). Leading zeroes are accepted and canonicalized; effective amount must be positive and capped at uint96 — the word size of the delegation rail's ERC20PeriodTransferEnforcer. NOT interchangeable with the human-decimal shape the delegation-rail budget projection returns for the same field name — see AgentAllowance.allowance_amount (#2295). */
             allowance_amount: string;
             reset_period_min: number;
         };
@@ -2794,6 +2691,7 @@ export type components = {
                 reset_period_min: number;
             } | null;
         };
+        /** @description One element of an agent's derived budget view (GET /agents, GET /agents/{id}, PATCH /agents/{id}). Projected from the agent's ACTIVE delegations, never from stored allowance rows (#1090/#2020). Its `allowance_amount` is HUMAN-DECIMAL — the opposite shape to the identically named field on AgentConnectionAllowance, which is atomic (#2295). */
         AgentAllowance: {
             /** Format: uuid */
             id: string;
@@ -2802,6 +2700,7 @@ export type components = {
             /** @example 0x1111111111111111111111111111111111111111 */
             token_address: string;
             token_symbol: string;
+            /** @description HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent's active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals). Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token's decimals first (#2295). */
             allowance_amount: string;
             reset_period_min: number;
         };
@@ -3283,9 +3182,11 @@ export type components = {
                 /** @example 0x1111111111111111111111111111111111111111 */
                 token_address: string;
                 token_symbol: string;
+                /** @description HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent's active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals). Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token's decimals first (#2295). */
                 configured_amount: string;
                 reset_period_min: number;
                 onchain: {
+                    /** @description The configured period budget in ATOMIC units — the same budget as the sibling `configured_amount`, which states it in whole token units. `spent`, `remaining` and `effective_spent` are atomic too (#2295). */
                     amount: string;
                     spent: string;
                     remaining: string;
@@ -3305,6 +3206,7 @@ export type components = {
             /** Format: uuid */
             payment_id: string;
             payment_intent_id?: string | null;
+            /** @description Retained for wire compatibility; ALWAYS null. #2055 dropped `approval_requests`, so no receipt can be anchored to an approval any more. */
             approval_request_id?: string | null;
             rail: string;
             /** @description Which settlement branch ran (eip3009 | erc7710), from the intent (#946). Null on legacy-rail receipts. */
@@ -6271,560 +6173,6 @@ export interface operations {
             };
             /** @description Error response */
             502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    listX402Resources: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Resources ordered by created_at DESC. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        resources: {
-                            /** Format: uuid */
-                            resource_id: string;
-                            name: string;
-                            description: string | null;
-                            /** @description Atomic units. */
-                            price_amount: string;
-                            /** @description Formatted with the token decimals; falls back to 6 for an unknown token. */
-                            price_human: string;
-                            /** @description Stored uppercase. */
-                            token_symbol: string;
-                            /** @description Read back verbatim from storage. The create route lowercases on insert, but x402_resources has NO lowercase CHECK constraint (unlike agent_delegations), so a row written any other way keeps its case — compare case-insensitively. */
-                            token_address: string;
-                            chain_id: number;
-                            /** @description Null when the linked Safe was detached (safe_id is ON DELETE SET NULL) — the resource stays listed but cannot be paid. */
-                            pay_to: string | null;
-                            active: boolean;
-                            /** Format: date-time */
-                            created_at: string;
-                            /** @description Null exactly when pay_to is null — a challenge cannot be built without a payment address. */
-                            challenge: {
-                                /** @example 1 */
-                                version: string;
-                                /** Format: uuid */
-                                resource_id: string;
-                                accepts: {
-                                    /** @example exact */
-                                    scheme: string;
-                                    /** @example eip155:8453 */
-                                    network: string;
-                                    /** @example 0x1111111111111111111111111111111111111111 */
-                                    asset: string;
-                                    /** @description Atomic units. */
-                                    maxAmountRequired: string;
-                                    /** @example 0x1111111111111111111111111111111111111111 */
-                                    payTo: string;
-                                    description: string;
-                                    extra: {
-                                        name: string;
-                                        authorize_endpoint: string;
-                                        verify_endpoint: string;
-                                    };
-                                }[];
-                            } | null;
-                        }[];
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    createX402Resource: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Trimmed; blank after trimming is a 400. */
-                    name: string;
-                    description?: string;
-                    /** @description Atomic units; must parse as an integer. */
-                    price_amount: string;
-                    /** @example 0x1111111111111111111111111111111111111111 */
-                    token_address: string;
-                    /** @description Stored uppercase. */
-                    token_symbol: string;
-                    /** @description Defaults to DEFAULT_CHAIN_ID (Base). */
-                    chain_id?: number;
-                    /**
-                     * Format: uuid
-                     * @description Must belong to the caller; omitted, the user's default Safe is used.
-                     */
-                    safe_id?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Resource registered; the challenge is ready to embed. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        resource_id: string;
-                        name: string;
-                        price_amount: string;
-                        price_human: string;
-                        token_symbol: string;
-                        token_address: string;
-                        chain_id: number;
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        pay_to: string;
-                        challenge: {
-                            /** @example 1 */
-                            version: string;
-                            /** Format: uuid */
-                            resource_id: string;
-                            accepts: {
-                                /** @example exact */
-                                scheme: string;
-                                /** @example eip155:8453 */
-                                network: string;
-                                /** @example 0x1111111111111111111111111111111111111111 */
-                                asset: string;
-                                /** @description Atomic units. */
-                                maxAmountRequired: string;
-                                /** @example 0x1111111111111111111111111111111111111111 */
-                                payTo: string;
-                                description: string;
-                                extra: {
-                                    name: string;
-                                    authorize_endpoint: string;
-                                    verify_endpoint: string;
-                                };
-                            }[];
-                        };
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    deactivateX402Resource: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource id. */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Resource deactivated. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    listX402Receipts: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Receipts ordered by verified_at DESC, capped at 100. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        receipts: {
-                            /** Format: uuid */
-                            receipt_id: string;
-                            /** Format: uuid */
-                            resource_id: string;
-                            resource_name: string;
-                            tx_hash: string;
-                            payer_address: string | null;
-                            amount_raw: string;
-                            /** @description Display string, formatted with the token's own decimals (6 for an unrecognised token). Read amount_raw for the authoritative value. */
-                            amount_human: string;
-                            chain_id: number;
-                            /** Format: date-time */
-                            verified_at: string;
-                        }[];
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    getX402ResourceChallenge: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource id. */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description The payment challenge (the success case for this route). */
-            402: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @example 1 */
-                        version: string;
-                        /** Format: uuid */
-                        resource_id: string;
-                        accepts: {
-                            /** @example exact */
-                            scheme: string;
-                            /** @example eip155:8453 */
-                            network: string;
-                            /** @example 0x1111111111111111111111111111111111111111 */
-                            asset: string;
-                            /** @description Atomic units. */
-                            maxAmountRequired: string;
-                            /** @example 0x1111111111111111111111111111111111111111 */
-                            payTo: string;
-                            description: string;
-                            extra: {
-                                name: string;
-                                authorize_endpoint: string;
-                                verify_endpoint: string;
-                            };
-                        }[];
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Resource deactivated. */
-            410: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Resource has no payment address configured. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    verifyX402Payment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource id. */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    tx_hash: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Payment verified on-chain; a receipt was stored. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        verified: true;
-                        /** Format: uuid */
-                        receipt_id: string;
-                        /** Format: uuid */
-                        resource_id: string;
-                        resource_name: string;
-                        /** @description Lowercased before storage. */
-                        tx_hash: string;
-                        payer_address: string | null;
-                        /** @description The VERIFIED on-chain amount, which can exceed the resource price. */
-                        amount_raw: string;
-                        amount_human: string;
-                        token_symbol: string;
-                        /** Format: date-time */
-                        verified_at: string;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Verification failed — the documented negative answer, with the terms the transaction had to meet. */
-            402: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        verified: false;
-                        reason: string;
-                        expected: {
-                            /** @example 0x1111111111111111111111111111111111111111 */
-                            to: string;
-                            /** @description From storage, so case is not guaranteed (see the list schema). */
-                            token: string;
-                            min_amount: string;
-                            chain_id: number;
-                        };
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description This transaction was already used as payment. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Resource deactivated. */
-            410: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Resource has no payment address. */
-            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10259,33 +9607,6 @@ export interface operations {
                             agent_name?: string;
                         } | {
                             /** @enum {string} */
-                            type: "approval";
-                            id: string;
-                            token: string | null;
-                            amount: string | null;
-                            to: string | null;
-                            reason?: string | null;
-                            status: string | null;
-                            tx_hash?: string | null;
-                            /** @description Synthesised when absent: an executed approval reports 'payment_confirmed'. */
-                            payment_proof_status?: string | null;
-                            payment_flow_status?: string | null;
-                            payment_attention_reason?: string | null;
-                            source?: string;
-                            x402_resource_url?: string | null;
-                            chain_id?: number | null;
-                            token_address?: string | null;
-                            safe_id?: string | null;
-                            safe_address?: string | null;
-                            safe_name?: string | null;
-                            explorer_url?: string | null;
-                            created_at: string;
-                            /** @description Feed only. */
-                            agent_id?: string;
-                            /** @description Feed only. */
-                            agent_name?: string;
-                        } | {
-                            /** @enum {string} */
                             type: "mcp_tool_call";
                             id: string;
                             tool_name: string;
@@ -10467,33 +9788,6 @@ export interface operations {
                             agent_name?: string;
                         } | {
                             /** @enum {string} */
-                            type: "approval";
-                            id: string;
-                            token: string | null;
-                            amount: string | null;
-                            to: string | null;
-                            reason?: string | null;
-                            status: string | null;
-                            tx_hash?: string | null;
-                            /** @description Synthesised when absent: an executed approval reports 'payment_confirmed'. */
-                            payment_proof_status?: string | null;
-                            payment_flow_status?: string | null;
-                            payment_attention_reason?: string | null;
-                            source?: string;
-                            x402_resource_url?: string | null;
-                            chain_id?: number | null;
-                            token_address?: string | null;
-                            safe_id?: string | null;
-                            safe_address?: string | null;
-                            safe_name?: string | null;
-                            explorer_url?: string | null;
-                            created_at: string;
-                            /** @description Feed only. */
-                            agent_id?: string;
-                            /** @description Feed only. */
-                            agent_name?: string;
-                        } | {
-                            /** @enum {string} */
                             type: "mcp_tool_call";
                             id: string;
                             tool_name: string;
@@ -10553,7 +9847,10 @@ export interface operations {
                 content: {
                     "application/json": {
                         steps: {
-                            /** @enum {string} */
+                            /**
+                             * @description Retained for wire compatibility with historical windows. THREE of these steps are permanently zero for any window after their retirement and a funnel built from them will show three dead stages: 'safe_deployed' and 'safe_imported' (410 since #1984 — Safe inflow is retired) and 'allowance_granted' (#2020 — the AllowanceModule rail no longer grants). Historical rows before those dates still count.
+                             * @enum {string}
+                             */
                             event: "signed_up" | "safe_deployed" | "safe_imported" | "agent_created" | "allowance_granted" | "safe_funded" | "first_payment_settled";
                             /** @description DISTINCT users who reached this step. */
                             users: number;

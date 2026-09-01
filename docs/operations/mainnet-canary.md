@@ -180,16 +180,17 @@ Every §3 leg executed and proven on Base mainnet (8453), account
 | x402, external merchant (Soundside 0.02) | funding `0xc93f43f5e4d0ccf563ff8799cd1781529403fe2b6b139e2402ea41b851f0d0ec`, settlement `0x82a7d7f7af109a57a01b665a74f5e670be67e3cbb0e9c4f52b826795ca6e03f6`, goods delivered |
 | Over-budget refusal | 2 USDC > remaining → `ERC20PeriodTransferEnforcer:transfer-amount-exceeded` reverted at PREPARE (simulation), nothing signed, no queue |
 | Revoke | dashboard Stop (one signature) → next payment 403 `Agent has no active budget delegation`, `readiness: needs_approval`, empty budget view |
-| Reconciliation (§4) | delegate residual exactly 2000 atomic = the two pre-fix Anchor fundings (`0x955ba720…`, `0x4fe50221…`, both 0.001); today's purchases left zero residual. The 0.002 stays below the 1 USDC sweep floor (#700) by design |
+| Reconciliation (§4) | delegate residual exactly 2000 atomic = the two pre-fix Anchor fundings (`0x955ba720…`, `0x4fe50221…`, both 0.001); today's purchases left zero residual. The 0.002 stayed below the 1 USDC sweep floor (#700) in effect for this historical run; #2293 lowers the production floor to 0.01 for future recovery |
 
 The x402 legs ran the **byte-free handoff** (#1263: the agent relayed only
 `payment_id`; the signer fetched the payload itself) on the 0.1.20-alpha.0
 train, which also carries the fixes this canary surfaced: #1254 (direct-path
 typed_data), #1255 (`typed_data_b64` transport), #1256 (EIP-3009 forward
 margin — the header showed ~10 min forward validity against the merchant's
-300 s requirement). Outstanding non-blockers: an Anchor re-test on the
-decomposed HTTP flow (its two failures predate #1256), and the #1269
-below-minimum sweep mapping reaching prod on the next promotion.
+300 s requirement). Outstanding non-blocker: an Anchor re-test on the
+decomposed HTTP flow (its two failures predate #1256). The #1269 below-minimum
+sweep mapping was promoted after this historical run; #2293 now lowers the
+production recovery floor to 0.01.
 
 ## 4.2 The erc7710 merchant canary (#1458) — NOT YET RUN
 

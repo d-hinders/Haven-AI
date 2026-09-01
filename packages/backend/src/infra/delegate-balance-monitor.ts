@@ -59,7 +59,7 @@ export interface DelegateBalanceReport {
 
 /** The sweep floor in atomic USDC — balances below it are expected dust. */
 export function sweepFloorAtomic(): bigint {
-  return ethers.parseUnits(config.sweepMinUsdc || '1', USDC_DECIMALS)
+  return ethers.parseUnits(config.sweepMinUsdc || '0.01', USDC_DECIMALS)
 }
 
 /** Aggregate-dust alert threshold in atomic USDC (env, default 25 USDC). */

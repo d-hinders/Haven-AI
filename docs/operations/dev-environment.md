@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-08-28" # chain-reset(#2159): compacted prior verification notes into git history. Re-verified the Base-Sepolia-only MERCHANT_REPORT_GRACE_MIN_OVERRIDE operator control: only a backend serving HAVEN_DEPLOY_CHAIN_IDS=84532 may set it, startup rejects every other deployment, and production retains the 15-minute default.
+last-verified: "2026-08-31" # #2293: the sweep setting in `.env.dev.example` remains deliberately `SWEEP_MIN_USDC=0`, while the production default is now `0.01` so ordinary micropayment balances are recoverable; the dev value keeps the 0.0005-USDC QA stranding sweepable. The template and the operator boundary below were re-read against the current config and QA scenario. Prior: #2268 (follow-up): the qa-freshness paragraph called the dead `dev-deployed` trigger "a deploy-provider configuration matter and not a repo one" and pointed at "the operator fix" in `agent-qa.md`. The same-day correction to that doc establishes there is no such fix — Railway offers no supported place for the authenticated call — so this sentence contradicted the doc it cited. Corrected to say no operator fix is available today and that #2273 (`deployment_status`) is the replacement, still unbuilt. Scope: ONLY that sentence was re-read and edited; branch mapping, service URLs, secrets handling and the rest of this doc were not re-verified in this pass. Prior: #2268: the § "Branch -> deploy mapping" qa-freshness paragraph gains the reason promotions block LATE — `qa-dev.yml`'s `repository_dispatch` (`dev-deployed`) trigger has never fired (0 of 156 runs, 2026-06-30 -> 2026-08-31, counted against the Actions API), so freshness rests on the nightly cron alone and a busy day on `dev` outruns it. That paragraph was re-read end to end against `dev-gate.yml` and `scripts/ci/qa-freshness.mjs` on this branch and is otherwise accurate; the #1047 `haven_api_url` validation it describes is unchanged (this PR's `qa-dev.yml` diff is comment-only). Scope: that paragraph ONLY. NOT re-verified: the env/secret tables, the seeding sections, the scenario list, or the x402 scheme-dispatch note. Prior: chain-reset(#2159): compacted prior verification notes into git history. Re-verified the Base-Sepolia-only MERCHANT_REPORT_GRACE_MIN_OVERRIDE operator control: only a backend serving HAVEN_DEPLOY_CHAIN_IDS=84532 may set it, startup rejects every other deployment, and production retains the 15-minute default.
 ---
 
 # Dev environment
@@ -160,6 +160,16 @@ check all three:
   logged with the dispatching actor — the quiet arbitrary-endpoint path is
   gone, though Railway itself is multi-tenant; the full residual-risk
   statement lives in autonomous-pr-loop.md's safety model.
+  **What actually keeps that run fresh is the nightly cron, alone (#2268).**
+  `qa-dev.yml` also declares a `repository_dispatch` (`dev-deployed`) trigger
+  meant to fire on every dev deploy, and it has never fired once — nothing sends
+  the dispatch, and there is **no operator fix available today**: Railway offers
+  no supported place for the authenticated call the setup describes, so the
+  replacement route is #2273 (`deployment_status`), still unbuilt (evidence:
+  agent-qa.md § *Post-deploy trigger*). So on
+  a busy day the merges outrun the cron and this gate blocks the promotion PR
+  correctly but late, which is where the pressure to reach for `qa-override`
+  comes from. Its silence is now reported by `guard-freshness.yml`.
   A **money-path `hotfix/*`** blocks outright: the harness tests a *deployed* backend and a
   hotfix is deployed nowhere until it merges, so no automatic evidence about it
   can exist. Bypass in both cases: the `qa-override` label, with a comment
@@ -193,6 +203,9 @@ Isolation rules that are non-negotiable for a payments product:
   (`RELAYER_PRIVATE_KEY_<chainId>`, #640/#678) — a mechanism that *permits*
   isolating testnet from mainnet keys, though the deployed posture shares one
   key (see above).
+- **Sweep recovery floor** — `SWEEP_MIN_USDC=0` in dev so the QA scenario's
+  0.0005-USDC stranded balance exercises the real gasless recovery path. The
+  production default is `0.01`; do not copy the dev override into production.
 - **QA crash/resume grace** — set
   `MERCHANT_REPORT_GRACE_MIN_OVERRIDE=0` on the dev **backend only** before
   running the #2159 funded-but-undelivered QA leg. The backend starts only when

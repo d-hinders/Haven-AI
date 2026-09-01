@@ -6,16 +6,15 @@ covers:
   - packages/frontend/src/lib/allowance-math.ts
   - packages/frontend/src/lib/loop-harness/**
   - packages/backend/src/modules/mpp/**
-  - packages/backend/src/routes/x402-resources.ts
   - packages/backend/package.json
   - packages/frontend/package.json
   - .github/workflows/ci.yml
-last-verified: "2026-08-25" # #2020: LP-1 WITHDRAWN — its target computeEffectiveAllowance lost its last caller when GET /machine-payments/allowances went 410 on the retired rail (owner reversal of #1986); function, harness and test:loop script deleted together, maintenance notes updated to LP-2-only. Prior: #1987: re-read against the AllowanceModule deletion. LP-1 STAYS and its target survives, but its stated purpose was wrong post-deletion (it drives the allowances report, not routing) — corrected. `domain/payment-coverage.ts` dropped from `covers:` (deleted), and two of the three candidate loops withdrawn because their surfaces are gone. LP-2 (frontend) untouched — that is #1989. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-31" # #2257: the withdrawn x402 transaction-verification candidate and its route consumer were re-read against the deletion; LP-2 and the allowance-module read-only infrastructure remain unchanged. Prior: #2020: LP-1 WITHDRAWN — its target computeEffectiveAllowance lost its last caller when GET /machine-payments/allowances went 410 on the retired rail (owner reversal of #1986); function, harness and test:loop script deleted together, maintenance notes updated to LP-2-only. Prior: #1987: re-read against the AllowanceModule deletion. LP-1 STAYS and its target survives, but its stated purpose was wrong post-deletion (it drives the allowances report, not routing) — corrected. `domain/payment-coverage.ts` dropped from `covers:` (deleted), and two of the three candidate loops withdrawn because their surfaces are gone. LP-2 (frontend) untouched — that is #1989. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Loop Harness Index
 
-Last updated: 2026-07-01
+Last updated: 2026-08-31 (#2257)
 
 The portfolio of **oracle-grounded differential loops** in this repo — see
 [`loop-engineering.md`](./loop-engineering.md) for the concept and the template.
@@ -60,7 +59,7 @@ work.
 | Candidate | Where | Oracle to define | Notes |
 | --- | --- | --- | --- |
 | ~~x402 coverage branching~~ | ~~`packages/backend/src/domain/payment-coverage.ts` (`decideCoverage`)~~ | — | **WITHDRAWN (#1987).** The file is deleted: coverage arithmetic was the AllowanceModule rail's, and the delegation rail does none — budget is metered on-chain by the caveat enforcers. There is nothing left to build a differential loop against. |
-| x402 tx verification decoder | `packages/backend/src/infra/chain/allowance-transfer-verifier.ts` (#994 extraction) | AllowanceModule calldata spec (decode `executeAllowanceTransfer`) | parsing/validation surface. #1987: the decoder survives — it verifies HISTORICAL inbound transfers for `POST /x402/resources/:id/verify`, which is Haven-as-merchant, not the retired spend path. Weak candidate now that no new such transfers can be created. |
+| ~~x402 tx verification decoder~~ | ~~`packages/backend/src/infra/chain/allowance-transfer-verifier.ts` (#994 extraction)~~ | — | **WITHDRAWN (#2257).** The final AllowanceModule decoder and its only Haven-as-merchant caller were deleted because no live caller can create or verify this retired transfer shape. The live delegation-rail x402 path uses `settlement-transfer-verifier.ts` instead. |
 | ~~Approval-flow state machine~~ | ~~`packages/backend/src/modules/mpp/**`~~ | — | **WITHDRAWN (#1987).** The approval queue was legacy-rail-only; `modules/mpp/authorize.ts` is deleted and the delegation rail has no approval queue at all. |
 
 ## Maintenance notes

@@ -8,11 +8,6 @@ const { mockQuery, allowanceMocks, fiatMocks, evidenceMocks } = vi.hoisted(() =>
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
     getTokenBalance: vi.fn(),
-    getLatestBlockTimeSec: vi.fn(),
-    computeEffectiveAllowance: vi.fn(),
-    generateTransferHash: vi.fn(),
-    recoverSigner: vi.fn(),
-    executeAllowanceTransfer: vi.fn(),
   },
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
@@ -231,7 +226,32 @@ describe('x402 routes', () => {
     expect(response.json()).toEqual({ error: 'Missing or invalid API key' })
   })
 
-  it('rejects settlementScheme erc7710 on the legacy rail — 3009 only there (#946)', async () => {
+  it('leaves the retired Haven-as-merchant resource surface as ordinary 404s (#2257)', async () => {
+    const retiredRoutes = [
+      { method: 'POST' as const, url: '/x402/resources' },
+      { method: 'GET' as const, url: '/x402/resources' },
+      { method: 'DELETE' as const, url: '/x402/resources/11111111-1111-1111-1111-111111111111' },
+      { method: 'GET' as const, url: '/x402/receipts' },
+      { method: 'GET' as const, url: '/x402/resources/11111111-1111-1111-1111-111111111111/challenge' },
+      { method: 'POST' as const, url: '/x402/resources/11111111-1111-1111-1111-111111111111/verify' },
+    ]
+
+    for (const route of retiredRoutes) {
+      const response = await app.inject(route)
+      expect(response.statusCode, `${route.method} ${route.url}`).toBe(404)
+      expect(response.json()).toMatchObject({ statusCode: 404 })
+    }
+  })
+
+  // #2245 (was: "rejects settlementScheme erc7710 on the legacy rail — 3009
+  // only there (#946)"). The #946 guard ran ABOVE the rail resolution, so this
+  // request used to get a 400 saying "the legacy AllowanceModule rail settles
+  // via EIP-3009 only" — a retired rail being told it settles, and one
+  // optional request field deciding WHICH refusal the account saw. #946's
+  // "fail loudly" rationale predates #1986: the loud failure is now the 410,
+  // and it is the accurate one. Same expectation, opposite direction — the
+  // scheme field must make NO difference to a retired-rail account.
+  it('a legacy-rail account asking erc7710 gets the #1986 410, not a scheme 400 (#2245)', async () => {
     primeDb(AUTH)
     const response = await app.inject({
       method: 'POST',
@@ -247,8 +267,12 @@ describe('x402 routes', () => {
         settlementScheme: 'erc7710',
       },
     })
-    expect(response.statusCode).toBe(400)
-    expect(response.json().error).toMatch(/delegation-rail account/)
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    // The specific sentence that used to come back, gone: a payment route must
+    // not tell a retired-rail caller that its rail settles.
+    expect(JSON.stringify(response.json())).not.toContain('EIP-3009')
+    expect(JSON.stringify(response.json())).not.toContain('delegation-rail account')
   })
 
   // #993 (review finding on #1120): the retired-rail 410 must hold on the
@@ -275,7 +299,9 @@ describe('x402 routes', () => {
 
   // #1058: same scheme confusion, same loud failure — a legacy-rail client
   // believing a redeemer pin exists must not silently proceed unpinned.
-  it('rejects facilitatorAddresses on the legacy rail — no settlement child exists there', async () => {
+  // #2245, the #1058 half of the same defect — see the note on the erc7710
+  // case above.
+  it('a legacy-rail account sending facilitatorAddresses gets the #1986 410, not a scheme 400 (#2245)', async () => {
     primeDb(AUTH)
     const response = await app.inject({
       method: 'POST',
@@ -291,14 +317,13 @@ describe('x402 routes', () => {
         facilitatorAddresses: ['0x' + '77'.repeat(20)],
       },
     })
-    expect(response.statusCode).toBe(400)
-    expect(response.json().error).toMatch(/delegation-rail account/)
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    expect(JSON.stringify(response.json())).not.toContain('delegation-rail account')
   })
 
   it('creates a funding intent to the delegate and records merchant metadata', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
 
     primeDb(
       AUTH,
@@ -334,12 +359,18 @@ describe('x402 routes', () => {
     })
 
     // #1986: the legacy AllowanceModule x402 flow is retired — the account
-    // never reaches funding-intent creation, and nothing about the merchant
-    // or the sign-hash gets computed or written.
+    // never reaches funding-intent creation, so nothing about the merchant
+    // is written.
+    //
+    // #2307: a `generateTransferHash` spy used to stand here, asserting that
+    // no sign-hash was computed. It could not fail — the symbol is not an export of
+    // `rails/allowance-module.js`, so the mock factory entry was a function
+    // nothing could ever reach. The sign-hash builder was DELETED by #1987,
+    // which is a stronger guarantee than a spy: `mock-factory-exports.guard`
+    // now fails if the name is reintroduced to a factory, and the
+    // no-write assertion below is what actually bites on this path.
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
-
-    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
 
     // No intent row was written for a rail that is gone.
     const insert = findCall(/INSERT INTO payment_intents/)
@@ -348,8 +379,6 @@ describe('x402 routes', () => {
 
   it('persists mcpCallContext into the legacy-rail intent metadata (#1307 write path)', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
-    allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
 
     primeDb(
       AUTH,
@@ -395,9 +424,7 @@ describe('x402 routes', () => {
     // sits exactly on the inclusive edge — it must execute, not 422 (insufficient)
     // or 202 (queue). A `>=` slip in decideCoverage would break precisely here.
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 20_000n })
     allowanceMocks.getTokenBalance.mockResolvedValueOnce(0n)
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
 
     primeDb(AUTH, ...POLICY_ROUTES, insertIntent({ id: PAYMENT_ID, expires_at: new Date('2026-05-10T20:00:00.000Z'), amount_raw: '20000' }))
 
@@ -420,15 +447,10 @@ describe('x402 routes', () => {
     // account is refused fail-closed before any coverage decision is made.
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
-    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
   })
 
   it('records one-shot x402 signatures without marking the payment submitted before execution', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
-    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.02, eur: 0.02 })
     evidenceMocks.tryRecordMachinePaymentEvidenceBaseById.mockResolvedValueOnce(undefined)
 
@@ -464,7 +486,6 @@ describe('x402 routes', () => {
 
     const signatureUpdate = findCall(/SET signature = \$1, signed_at = NOW\(\)/)
     expect(signatureUpdate).toBeUndefined()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
 
     const confirmedUpdate = findCall(/SET status = 'confirmed'/)
     expect(confirmedUpdate).toBeUndefined()
@@ -478,10 +499,6 @@ describe('x402 routes', () => {
   // all, for any amount, on this rail.
   it('funds the delegate with EXACTLY the challenge amount (#716 invariant)', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
-    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.02, eur: 0.02 })
     evidenceMocks.tryRecordMachinePaymentEvidenceBaseById.mockResolvedValueOnce(undefined)
 
@@ -511,19 +528,16 @@ describe('x402 routes', () => {
 
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
-    // The delegate is never funded at all — no hash generated, no transfer
-    // executed, for any amount, on the retired rail.
-    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
-    // No intent row was written either.
+    // The delegate is never funded at all, for any amount, on the retired
+    // rail — the 410 above precedes the funding leg, and no row is written.
+    // (#2307: the two `generateTransferHash` / `executeAllowanceTransfer`
+    // spies that stood here asserted nothing — neither is an export.)
     const insert = findCall(/INSERT INTO payment_intents/)
     expect(insert).toBeUndefined()
   })
 
   it('rejects an idempotency replay whose amount differs from the stored intent (#716 guard)', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
 
     primeDb(
       AUTH,
@@ -554,15 +568,10 @@ describe('x402 routes', () => {
     // is what fail-closed means.
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
   it('does not overwrite one-shot x402 terminal state after execution failures', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
-    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockRejectedValueOnce(new Error('relayer unavailable'))
 
     primeDb(
       AUTH,
@@ -595,16 +604,11 @@ describe('x402 routes', () => {
 
     const failedUpdate = findCall(/SET status = 'failed'/)
     expect(failedUpdate).toBeUndefined()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
     expect(evidenceMocks.tryRecordMachinePaymentEvidenceBaseById).not.toHaveBeenCalled()
   })
 
   it('does not record x402 evidence when a one-shot confirmation loses a terminal-state race', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
-    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.02, eur: 0.02 })
 
     primeDb(
@@ -633,13 +637,13 @@ describe('x402 routes', () => {
     })
 
     // #1986: the terminal-state race this pinned can no longer happen — the
-    // account is refused before execution runs, so `executeAllowanceTransfer`
-    // is never called at all (strictly stronger than "called once").
+    // account is refused before execution runs. The executor itself is gone
+    // (#1987), so the only thing left to assert is that no evidence was
+    // recorded — which is a real mock of a real export, and does bite.
     expect(response.statusCode).toBe(410)
     expect(response.json()).toMatchObject({
       error: allowanceModuleRailRetired('account').body.error,
     })
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
     expect(evidenceMocks.tryRecordMachinePaymentEvidenceBaseById).not.toHaveBeenCalled()
   })
 
@@ -661,7 +665,11 @@ describe('x402 routes', () => {
 
     expect(response.statusCode).toBe(400)
     expect(response.json().error).toBe('x402 network eip155:100 does not match agent chain 8453')
-    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    // #2307 coverage replacement. A phantom `generateTransferHash` spy stood
+    // here claiming "validation ran before any allowance work". Re-anchored
+    // onto the query log, which is real and DOES go red: if the validation
+    // were removed the handler would run on and issue further queries.
+    expect(sqlCalls().every((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)
   })
 
   it('rejects a malformed payTo address with 400 (address-validation guard)', async () => {
@@ -682,7 +690,11 @@ describe('x402 routes', () => {
 
     expect(response.statusCode).toBe(400)
     expect(response.json().error).toBe('Valid payTo address is required')
-    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    // #2307 coverage replacement. A phantom `generateTransferHash` spy stood
+    // here claiming "validation ran before any allowance work". Re-anchored
+    // onto the query log, which is real and DOES go red: if the validation
+    // were removed the handler would run on and issue further queries.
+    expect(sqlCalls().every((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)
   })
 
   it('rejects a malformed merchantPayTo address with 400', async () => {
@@ -704,7 +716,11 @@ describe('x402 routes', () => {
 
     expect(response.statusCode).toBe(400)
     expect(response.json().error).toBe('Valid merchantPayTo address is required')
-    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    // #2307 coverage replacement. A phantom `generateTransferHash` spy stood
+    // here claiming "validation ran before any allowance work". Re-anchored
+    // onto the query log, which is real and DOES go red: if the validation
+    // were removed the handler would run on and issue further queries.
+    expect(sqlCalls().every((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)
   })
 
   it('rejects malformed decimal atomic amounts before allowance checks', async () => {
@@ -755,7 +771,6 @@ describe('x402 routes', () => {
     expect(blankResponse.statusCode).toBe(400)
     expect(blankResponse.json().error).toBe('Amount (atomic units) is required')
     expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
-    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
     // Every rejected request only ever reached auth — none of the malformed
     // amounts triggered any further query.
     expect(sqlCalls().every((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)
@@ -790,7 +805,6 @@ describe('x402 routes', () => {
     // refuses the account first.
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
-    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
   })
 
   it('refreshes an expired duplicate pending x402 intent for the same idempotency key', async () => {
@@ -838,14 +852,12 @@ describe('x402 routes', () => {
     // looked up, so no refresh write is ever requested.
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
-    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
     expect(findCall(/SET allowance_nonce = \$1/)).toBeUndefined()
   })
 
   it('refreshes stale sign data when a duplicate pending intent has an old allowance nonce', async () => {
     const refreshedHash = `0x${'22'.repeat(32)}`
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 8 })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(refreshedHash)
 
     primeDb(
       AUTH,
@@ -879,14 +891,11 @@ describe('x402 routes', () => {
     // compared, so no refreshed hash is ever generated or written.
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
-    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
     expect(findCall(/SET allowance_nonce = \$1/)).toBeUndefined()
   })
 
   it('reloads rail-scoped existing x402 intents after insert idempotency conflicts', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
 
     primeDb(
       AUTH,
@@ -920,7 +929,6 @@ describe('x402 routes', () => {
 
   it('queues over-allowance x402 payments once with rail metadata', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10_000n })
     // Delegate already holds enough to satisfy the shortfall after the
     // top-up, so the pre-flight insufficient-funds check passes and we
     // fall through into the existing over-budget approval-queue path.
@@ -966,7 +974,6 @@ describe('x402 routes', () => {
     // pre-flight fails fast with a structured error the agent can act on
     // (next_action=fund_safe_or_raise_allowance).
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 5_000n })
     allowanceMocks.getTokenBalance.mockResolvedValueOnce(0n)
 
     primeDb(AUTH, ...POLICY_ROUTES)
@@ -1006,7 +1013,6 @@ describe('x402 routes', () => {
     // not silently round to "close enough", or merchant settlement would
     // revert downstream.
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10_000n })
     allowanceMocks.getTokenBalance.mockResolvedValueOnce(9_999n)
 
     primeDb(AUTH, ...POLICY_ROUTES)
@@ -1039,7 +1045,6 @@ describe('x402 routes', () => {
     // fire the insufficient-funds short-circuit on its own. The over-budget
     // approval-queue path (or the happy-path sign step) is what should run.
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 0n })
     allowanceMocks.getTokenBalance.mockResolvedValueOnce(50_000n)
 
     primeDb(
@@ -1076,7 +1081,6 @@ describe('x402 routes', () => {
     // distinct 502 from the allowance-read failure — agents and dashboards
     // distinguishing the two read paths can pick the right retry strategy.
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
     allowanceMocks.getTokenBalance.mockRejectedValueOnce(new Error('rpc timeout'))
 
     primeDb(AUTH, ...POLICY_ROUTES)
@@ -1168,7 +1172,6 @@ describe('x402 routes', () => {
 
   it('returns the existing approval when an over-allowance insert hits an idempotency conflict', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10_000n })
     // Delegate balance covers the shortfall so the pre-flight check passes
     // and we exercise the over-budget idempotency-conflict path.
     allowanceMocks.getTokenBalance.mockResolvedValueOnce(20_000n)

@@ -69,3 +69,40 @@ test('the committed baseline matches the tree (bootstrap parity, shrink-only fro
     'the tree grew past the committed db-mock baseline — move DB assertions to a repository test on the real-DB harness',
   )
 })
+
+// The phantom-entry guard (#2264), mirroring `scripts/ci/money-path.test.mjs`'s
+// "no phantom globs" assertion (#1897) one gate over.
+//
+// A baseline entry for a file the scan does not produce counts for is INERT in
+// one direction and NOISY in the other, and both halves were live on `dev`:
+//
+//   `newViolations()` iterates the SCANNED files, so the entry is never
+//   consulted — it silently grants its whole count as free positional-mock
+//   debt to whoever next creates a file at that path.
+//
+//   `hasShrunk()` iterates the BASELINE, so the entry keeps `lint:db-mocks`
+//   printing "counts are below the baseline — lock in the progress" on every
+//   backend PR, forever. A permanently-on nag is a nag nobody reads, which is
+//   how two deleted-file entries survived from #1987/#2055 to #2264.
+//
+// The check is against the SCANNED set rather than against `existsSync`,
+// because the two ways an entry goes inert are the same defect: the file was
+// deleted, OR it still exists and no longer contributes counts (every mock
+// removed, or a `// db-mock-exempt:` comment added). `existsSync` sees only the
+// first. The fix for either is the same one the nag already names:
+// `node scripts/db-mock-ratchet.mjs --update`.
+test('no phantom baseline entries — every entry names a file the scan still counts', async () => {
+  const counts = await scanAll()
+  const baseline = JSON.parse(await readFile(BASELINE_PATH, 'utf8'))
+  const phantom = Object.keys(baseline).filter((file) => !(file in counts))
+
+  assert.deepEqual(
+    phantom,
+    [],
+    'db-mock baseline entries that the scan no longer produces counts for. The ' +
+      'file was deleted, or it still exists and no longer mocks the database. ' +
+      'Either way the entry is inert (newViolations iterates the scan, not the ' +
+      'baseline) while keeping the shrink nag permanently on (hasShrunk ' +
+      'iterates the baseline). Run: node scripts/db-mock-ratchet.mjs --update',
+  )
+})

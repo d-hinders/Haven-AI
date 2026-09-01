@@ -54,6 +54,7 @@ describe('buildHostedMcpServer', () => {
         'haven_quote_catalog_purchase',
         'haven_pay_x402_quote',
         'haven_quote_x402',
+        'haven_report_x402_outcome',
         'haven_resume_x402_payment',
         'haven_send',
         'haven_submit',
@@ -204,12 +205,22 @@ describe('buildHostedMcpServer', () => {
     // The chain itself still travels on the descriptions, by bare name.
     expect(byName.get('haven_quote_x402')).toContain('haven_pay_x402_quote')
     expect(byName.get('haven_pay_x402_quote')).toContain('expires_at')
-    expect(byName.get('haven_pay_x402_quote')).toContain('haven_x402_sign_header')
+    // #2291: this line used to read as "the quote path names its header tool".
+    // It still passes on the substring, but the sentence around it now says the
+    // OPPOSITE — do NOT call that tool on this path, because the one-shot
+    // returns the header inline. Asserted as the negation it now is, so the
+    // test cannot go on passing for a reason it no longer means.
+    expect(byName.get('haven_pay_x402_quote')).toContain('do NOT call haven_x402_sign_header')
+    expect(byName.get('haven_pay_x402_quote')).toContain('payment_header')
     expect(byName.get('haven_pay_mcp_tool')).toContain('haven_settle_mcp_tool')
     expect(byName.get('haven_pay_mcp_tool')).toContain('expires_at')
     expect(byName.get('haven_pay_mcp_tool')).toContain('signer_compatibility')
     expect(byName.get('haven_submit')).toContain('haven_x402_sign_header')
-    expect(byName.get('haven_resume_x402_payment')).toContain('haven_x402_sign_header')
+    // Same inversion on the resume path (#2290 wrote the contradictory order
+    // here; #2291 corrects it): the header comes from the one-shot's result.
+    expect(byName.get('haven_resume_x402_payment')).toContain(
+      'Do NOT pass its x402_binding to',
+    )
     expect(byName.get('haven_settle_mcp_tool')).toContain('no further Haven tool is needed')
     expect(byName.get('haven_complete_mcp_tool')).toContain('no further Haven tool is needed')
 
@@ -261,5 +272,65 @@ describe('buildHostedMcpServer', () => {
     // literal or the package's own version constant would.
     expect(HOSTED_INSTRUCTIONS).not.toMatch(/\d+\.\d+\.\d+/)
     expect(HOSTED_INSTRUCTIONS).not.toContain(HOSTED_SERVER_VERSION)
+  })
+})
+
+// ── #2282: the mcp_transport case mismatch at the protocol boundary ──────────
+
+describe('mcp_transport at the MCP protocol boundary (#2282)', () => {
+  async function connectHosted() {
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const server = buildHostedMcpServer(haven)
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test-client', version: '0.0.0' })
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+    return { client, server }
+  }
+
+  it('advertises snake_case with additionalProperties: false on both settle-leg tools', async () => {
+    const { client, server } = await connectHosted()
+    const { tools } = await client.listTools()
+
+    for (const name of ['haven_settle_mcp_tool', 'haven_complete_mcp_tool']) {
+      const schema = tools.find((tool) => tool.name === name)!.inputSchema as {
+        properties: Record<string, any>
+      }
+      const transport = schema.properties.mcp_transport
+      expect(transport.required).toEqual(['handshake_required', 'source'])
+      expect(transport.additionalProperties).toBe(false)
+      expect(Object.keys(transport.properties)).toEqual(['handshake_required', 'source'])
+    }
+
+    await client.close()
+    await server.close()
+  })
+
+  it('refuses the SDK camelCase shape with a message naming the mismatch', async () => {
+    // #2282's second hazard: the caller's explicit-context retry must come back
+    // as something they can act on. A refusal that only says "handshake_required:
+    // Required" is true and useless to a caller holding `handshakeRequired`.
+    const { client, server } = await connectHosted()
+
+    const result = (await client.callTool({
+      name: 'haven_settle_mcp_tool',
+      arguments: {
+        payment_id: 'pay_x402',
+        signature: '0x' + '11'.repeat(65),
+        merchant_url: 'https://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'legacy' },
+        mcp_transport: { handshakeRequired: true, source: 'path' },
+        payment_header: 'eyJ4IjoxfQ==',
+      },
+    })) as { isError?: boolean; content: { type: string; text: string }[] }
+
+    expect(result.isError).toBe(true)
+    const text = result.content.map((part) => part.text).join('\n')
+    expect(text).toContain('handshake_required')
+    expect(text).toContain('handshakeRequired')
+    expect(text).toContain('snake_case')
+
+    await client.close()
+    await server.close()
   })
 })

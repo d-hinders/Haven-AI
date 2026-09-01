@@ -1,6 +1,8 @@
 import {
   AgentPaymentNextAction,
+  AgentPaymentNextActionDescriptions,
   AgentPaymentPhase,
+  AgentPaymentPhaseDescriptions,
   AgentPaymentRail,
 } from '../domain/agent-payment-taxonomy.js'
 
@@ -21,6 +23,37 @@ const tokenSymbol = {
   maxLength: 20,
 } as const
 
+/**
+ * ── The two allowance amount shapes (#2295) ──────────────────────────────────
+ *
+ * `allowance_amount` carries TWO incompatible wire shapes under one field name,
+ * and for a long time nothing in the contract chain said which one a consumer
+ * was getting. #2283 was the cost: `formatConfiguredAllowance` discriminated
+ * between them BY EXCEPTION (`BigInt('250.000000')` throws, a bare `catch`
+ * returned the string unformatted), and `/agents` shipped
+ * `"250.000000 USDC per week"` to production.
+ *
+ * Both shapes are named schemas below so the split is readable from the spec
+ * alone. The shapes themselves are DELIBERATELY unchanged — the human-decimal
+ * projection is the historical `allowances` element shape that `GET /agents`,
+ * `GET /agents/{id}`, `PATCH /agents/{id}`, `GET /dashboard` and the CLI have
+ * always returned, so unifying it is a breaking wire change and a versioning
+ * decision, not a cleanup (recorded on #2295).
+ *
+ * Who produces which, measured rather than assumed:
+ *
+ *   ATOMIC  (`allowanceAtomicAmount`) — the connect-setup budget REQUEST.
+ *     Written by `POST /agent-connection-setups` and read back verbatim from
+ *     `agent_connection_setup_allowances` by `GET /agent-connection-setups/*`
+ *     (`routes/agent-connection-setups.ts` → `agent_budget[]`). Validated
+ *     `^[0-9]+$` and uint96-capped on the way in.
+ *
+ *   HUMAN   (`allowanceHumanAmount`) — the delegation-rail budget PROJECTION.
+ *     Every one of its emitters goes through `rails/delegation-budget-view.ts`,
+ *     which builds the string with `formatTokenValue(row.budget_atomic,
+ *     decimals)`. Since #2020 that view is the ONLY source of an `allowances`
+ *     array — the `agent_allowances` mirror is read nowhere.
+ */
 const allowanceAtomicAmount = {
   type: 'string',
   pattern: '^[0-9]+$',
@@ -28,7 +61,20 @@ const allowanceAtomicAmount = {
   // retired rail. It is now the delegation rail's ERC20PeriodTransferEnforcer
   // word size (`periodAmount`, see `modules/agents/rekey-carry.ts`), which is
   // the same width the AllowanceModule used. Constraint kept, reason corrected.
-  description: 'Decimal atomic token amount. Leading zeroes are accepted and canonicalized; effective amount must be positive and capped at uint96 — the word size of the delegation rail\'s ERC20PeriodTransferEnforcer.',
+  description: 'ATOMIC token amount — an integer string in the token\'s smallest unit (25 USDC is "25000000"). Leading zeroes are accepted and canonicalized; effective amount must be positive and capped at uint96 — the word size of the delegation rail\'s ERC20PeriodTransferEnforcer. NOT interchangeable with the human-decimal shape the delegation-rail budget projection returns for the same field name — see AgentAllowance.allowance_amount (#2295).',
+} as const
+
+/**
+ * The human-decimal counterpart. `formatTokenValue` emits `'0'` for a zero
+ * budget and otherwise `<integer>.<2–6 fraction digits>`, hence the pattern:
+ * a bare integer is legal here, which is precisely why no consumer can safely
+ * sniff the shape at runtime — `'250'` is 250 USDC as a human amount and
+ * 0.00025 USDC as an atomic one. The schema name is the discriminator.
+ */
+const allowanceHumanAmount = {
+  type: 'string',
+  pattern: '^[0-9]+(\\.[0-9]+)?$',
+  description: 'HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent\'s active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals). Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token\'s decimals first (#2295).',
 } as const
 
 const allowanceResetPeriodMin = {
@@ -179,82 +225,6 @@ const signerActionBody = {
     signature_scheme: {
       type: 'string',
       enum: ['eip712_userop', 'webauthn_userop'],
-    },
-  },
-} as const
-
-
-// ── x402 demo-resource building blocks (#1446) ───────────────────────────────
-
-/**
- * The 402 challenge body a resource server embeds in its own 402 response.
- * Shape is fixed by _buildChallenge in routes/x402-resources.ts.
- */
-const x402Challenge = {
-  type: 'object',
-  required: ['version', 'resource_id', 'accepts'],
-  properties: {
-    version: { type: 'string', examples: ['1'] },
-    resource_id: { type: 'string', format: 'uuid' },
-    accepts: {
-      type: 'array',
-      items: {
-        type: 'object',
-        required: ['scheme', 'network', 'asset', 'maxAmountRequired', 'payTo', 'description', 'extra'],
-        properties: {
-          scheme: { type: 'string', examples: ['exact'] },
-          network: { type: 'string', examples: ['eip155:8453'] },
-          asset: address,
-          maxAmountRequired: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units.' },
-          payTo: address,
-          description: { type: 'string' },
-          extra: {
-            type: 'object',
-            required: ['name', 'authorize_endpoint', 'verify_endpoint'],
-            properties: {
-              name: { type: 'string' },
-              authorize_endpoint: { type: 'string' },
-              verify_endpoint: { type: 'string' },
-            },
-          },
-        },
-      },
-    },
-  },
-} as const
-
-/** One registered resource as the list route reshapes it. */
-const x402Resource = {
-  type: 'object',
-  required: [
-    'resource_id', 'name', 'description', 'price_amount', 'price_human',
-    'token_symbol', 'token_address', 'chain_id', 'pay_to', 'active',
-    'created_at', 'challenge',
-  ],
-  properties: {
-    resource_id: { type: 'string', format: 'uuid' },
-    name: { type: 'string' },
-    description: { type: ['string', 'null'] },
-    price_amount: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units.' },
-    price_human: { type: 'string', description: 'Formatted with the token decimals; falls back to 6 for an unknown token.' },
-    token_symbol: { type: 'string', description: 'Stored uppercase.' },
-    token_address: {
-      type: 'string',
-      pattern: '^0x[0-9a-fA-F]{40}$',
-      description:
-        "Read back verbatim from storage. The create route lowercases on insert, but x402_resources has NO lowercase CHECK constraint (unlike agent_delegations), so a row written any other way keeps its case — compare case-insensitively.",
-    },
-    chain_id: { type: 'integer' },
-    pay_to: {
-      type: ['string', 'null'],
-      pattern: '^0x[0-9a-fA-F]{40}$',
-      description: "Null when the linked Safe was detached (safe_id is ON DELETE SET NULL) — the resource stays listed but cannot be paid.",
-    },
-    active: { type: 'boolean' },
-    created_at: { type: 'string', format: 'date-time' },
-    challenge: {
-      oneOf: [x402Challenge, { type: 'null' }],
-      description: 'Null exactly when pay_to is null — a challenge cannot be built without a payment address.',
     },
   },
 } as const
@@ -549,39 +519,6 @@ const activityPayment = {
   },
 } as const
 
-/** One approval in an activity list. Narrower than a payment. */
-const activityApproval = {
-  type: 'object',
-  required: ['type', 'id', 'token', 'amount', 'to', 'status', 'created_at'],
-  properties: {
-    type: { type: 'string', enum: ['approval'] },
-    id: { type: 'string' },
-    token: { type: ['string', 'null'] },
-    amount: { type: ['string', 'null'] },
-    to: { type: ['string', 'null'] },
-    reason: { type: ['string', 'null'] },
-    status: { type: ['string', 'null'] },
-    tx_hash: { type: ['string', 'null'] },
-    payment_proof_status: {
-      type: ['string', 'null'],
-      description: "Synthesised when absent: an executed approval reports 'payment_confirmed'.",
-    },
-    payment_flow_status: { type: ['string', 'null'] },
-    payment_attention_reason: { type: ['string', 'null'] },
-    source: { type: 'string' },
-    x402_resource_url: { type: ['string', 'null'] },
-    chain_id: { type: ['integer', 'null'] },
-    token_address: { type: ['string', 'null'] },
-    safe_id: { type: ['string', 'null'] },
-    safe_address: { type: ['string', 'null'] },
-    safe_name: { type: ['string', 'null'] },
-    explorer_url: { type: ['string', 'null'] },
-    created_at: { type: 'string' },
-    agent_id: { type: 'string', description: 'Feed only.' },
-    agent_name: { type: 'string', description: 'Feed only.' },
-  },
-} as const
-
 /** One MCP tool call — the agent-facing audit log entry. */
 const activityToolCall = {
   type: 'object',
@@ -602,7 +539,17 @@ const activityToolCall = {
 } as const
 
 /** The heterogeneous activity entry, discriminated by `type`. */
-const activityEntry = { oneOf: [activityPayment, activityApproval, activityToolCall] } as const
+// #2055: `activityApproval` is REMOVED from this union, not deprecated in it.
+// The approval-request feed entries died with the `approval_requests` table —
+// `routes/agent-activity.ts` merges payments and MCP tool invocations and has
+// no third source, so a documented `type: 'approval'` branch described a
+// response shape the route cannot emit. #2120 already deleted the fabricated
+// `type: 'approval'` FIXTURE for this reason; the schema it was fixed against
+// was not touched then (#2262). Kept out of the union rather than tombstoned
+// inside it: a `oneOf` member is a promise to a code generator, and
+// `packages/core/src/api-types.ts` mirrors it into the frontend's
+// `ApiSchema<>` imports.
+const activityEntry = { oneOf: [activityPayment, activityToolCall] } as const
 
 /** Per-token spend totals, as the stats route shapes them. */
 const spendTotals = {
@@ -822,7 +769,7 @@ export const openapiSpec = {
     {
       name: 'x402',
       description:
-        'Agent-side x402 payment authorization, plus an EXPLORATORY merchant-side surface (resource registration, public verification, receipts). The merchant-side routes are not production facilitator functionality and must not be exposed or expanded without legal/product review — see docs/regulatory/casp-risk-guardrails.md.',
+        'Agent-side x402 payment authorization for independently signed payment payloads. Haven never receives the agent delegate private key and never treats an API key as payment authority.',
     },
     { name: 'Machine payments' },
     { name: 'Transactions' },
@@ -1871,260 +1818,6 @@ export const openapiSpec = {
           '404': errorResponse,
           '409': errorResponse,
           '502': errorResponse,
-        },
-      },
-    },
-    // ── x402 demo resources (#1446) ─────────────────────────────────────────
-    // REGULATORY PERIMETER, carried from routes/x402-resources.ts: this is
-    // EXPLORATORY merchant-side x402, not production facilitator
-    // functionality. Documenting it does not widen it — see
-    // docs/regulatory/casp-risk-guardrails.md before exposing or expanding
-    // resource registration, public verification, receipts or settlement.
-    '/x402/resources': {
-      post: {
-        tags: ['x402'],
-        operationId: 'createX402Resource',
-        summary: 'Register a resource behind an x402 payment wall.',
-        description:
-          "Stores the resource and returns the 402 challenge a resource server embeds in its own responses. Price is ALWAYS atomic units (price_amount); price_human is derived for display only. Payment lands on the linked Safe — safe_id when given (ownership-checked), otherwise the user's default Safe; with neither, registration refuses rather than creating an unpayable resource.",
-        security: [{ DashboardJwt: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['name', 'price_amount', 'token_address', 'token_symbol'],
-                properties: {
-                  name: { type: 'string', minLength: 1, description: 'Trimmed; blank after trimming is a 400.' },
-                  description: { type: 'string' },
-                  price_amount: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units; must parse as an integer.' },
-                  token_address: address,
-                  token_symbol: { type: 'string', minLength: 1, description: 'Stored uppercase.' },
-                  chain_id: { type: 'integer', description: 'Defaults to DEFAULT_CHAIN_ID (Base).' },
-                  safe_id: { type: 'string', format: 'uuid', description: "Must belong to the caller; omitted, the user's default Safe is used." },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '201': {
-            description: 'Resource registered; the challenge is ready to embed.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['resource_id', 'name', 'price_amount', 'price_human', 'token_symbol', 'token_address', 'chain_id', 'pay_to', 'challenge'],
-                  properties: {
-                    resource_id: { type: 'string', format: 'uuid' },
-                    name: { type: 'string' },
-                    price_amount: { type: 'string', pattern: '^[0-9]+$' },
-                    price_human: { type: 'string' },
-                    token_symbol: { type: 'string' },
-                    token_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$' },
-                    chain_id: { type: 'integer' },
-                    pay_to: address,
-                    challenge: x402Challenge,
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-        },
-      },
-      get: {
-        tags: ['x402'],
-        operationId: 'listX402Resources',
-        summary: "List the caller's registered resources, newest first.",
-        description:
-          'Includes deactivated resources — active is a field, not a filter, so an owner can see what they took down. pay_to and challenge are null together when the linked Safe was detached.',
-        security: [{ DashboardJwt: [] }],
-        responses: {
-          '200': {
-            description: 'Resources ordered by created_at DESC.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['resources'],
-                  properties: {
-                    resources: { type: 'array', items: x402Resource },
-                  },
-                },
-              },
-            },
-          },
-          '401': errorResponse,
-        },
-      },
-    },
-    '/x402/resources/{id}': {
-      delete: {
-        tags: ['x402'],
-        operationId: 'deactivateX402Resource',
-        summary: 'Deactivate a resource (soft delete).',
-        description:
-          'Sets active=false, scoped to the caller. The row is kept so existing receipts keep their resource, and the challenge endpoint answers 410 rather than 404 — a payer learns the resource retired, not that it never existed.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Resource id.' }],
-        responses: {
-          '200': {
-            description: 'Resource deactivated.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-        },
-      },
-    },
-    '/x402/receipts': {
-      get: {
-        tags: ['x402'],
-        operationId: 'listX402Receipts',
-        summary: 'List payments verified against the caller\'s resources (max 100, newest first).',
-        description:
-          'Receipts are written only by the verify endpoint, after on-chain verification. amount_human formats with the receipt token\u2019s OWN decimals (#1630); a token this deployment does not recognise falls back to 6. amount_raw remains the authoritative field \u2014 amount_human is a display string.',
-        security: [{ DashboardJwt: [] }],
-        responses: {
-          '200': {
-            description: 'Receipts ordered by verified_at DESC, capped at 100.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['receipts'],
-                  properties: {
-                    receipts: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        required: ['receipt_id', 'resource_id', 'resource_name', 'tx_hash', 'payer_address', 'amount_raw', 'amount_human', 'chain_id', 'verified_at'],
-                        properties: {
-                          receipt_id: { type: 'string', format: 'uuid' },
-                          resource_id: { type: 'string', format: 'uuid' },
-                          resource_name: { type: 'string' },
-                          tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
-                          payer_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
-                          amount_raw: { type: 'string', pattern: '^[0-9]+$' },
-                          amount_human: { type: 'string', description: "Display string, formatted with the token's own decimals (6 for an unrecognised token). Read amount_raw for the authoritative value." },
-                          chain_id: { type: 'integer' },
-                          verified_at: { type: 'string', format: 'date-time' },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          '401': errorResponse,
-        },
-      },
-    },
-    '/x402/resources/{id}/challenge': {
-      get: {
-        tags: ['x402'],
-        operationId: 'getX402ResourceChallenge',
-        summary: 'PUBLIC: fetch a resource\'s 402 payment challenge.',
-        description:
-          'No authentication — a challenge is public by construction, and it grants nothing: it states a price and a destination. NOTE THE SUCCESS CODE: this answers **402 Payment Required** with the challenge body, not 200, so a resource server can relay the status verbatim. 410 means the resource was deactivated; 503 means it has no payment address (its Safe was detached).',
-        security: [],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Resource id.' }],
-        responses: {
-          '402': {
-            description: 'The payment challenge (the success case for this route).',
-            content: { 'application/json': { schema: x402Challenge } },
-          },
-          '400': errorResponse,
-          '404': errorResponse,
-          '410': { ...errorResponse, description: 'Resource deactivated.' },
-          '503': { ...errorResponse, description: 'Resource has no payment address configured.' },
-        },
-      },
-    },
-    '/x402/resources/{id}/verify': {
-      post: {
-        tags: ['x402'],
-        operationId: 'verifyX402Payment',
-        summary: 'PUBLIC: verify a transaction paid for this resource, and mint a receipt.',
-        description:
-          "No authentication — verification reads the chain and the resource's own terms, so it grants the caller nothing they could not check themselves. The transaction must be an AllowanceModule transfer to the resource's Safe, in the resource's token, for at least its price. A tx_hash already used is a 409 (receipts are one-per-transaction, enforced before any RPC call). A failed verification is **402 with verified:false plus the expected terms** — a documented negative answer, not an error envelope.",
-        security: [],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Resource id.' }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['tx_hash'],
-                properties: { tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' } },
-              },
-            },
-          },
-        },
-        responses: {
-          '201': {
-            description: 'Payment verified on-chain; a receipt was stored.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['verified', 'receipt_id', 'resource_id', 'resource_name', 'tx_hash', 'payer_address', 'amount_raw', 'amount_human', 'token_symbol', 'verified_at'],
-                  properties: {
-                    verified: { type: 'boolean', enum: [true] },
-                    receipt_id: { type: 'string', format: 'uuid' },
-                    resource_id: { type: 'string', format: 'uuid' },
-                    resource_name: { type: 'string' },
-                    tx_hash: { type: 'string', pattern: '^0x[0-9a-f]{64}$', description: 'Lowercased before storage.' },
-                    payer_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
-                    amount_raw: { type: 'string', pattern: '^[0-9]+$', description: "The VERIFIED on-chain amount, which can exceed the resource price." },
-                    amount_human: { type: 'string' },
-                    token_symbol: { type: 'string' },
-                    verified_at: { type: 'string', format: 'date-time' },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '402': {
-            description: 'Verification failed — the documented negative answer, with the terms the transaction had to meet.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['verified', 'reason', 'expected'],
-                  properties: {
-                    verified: { type: 'boolean', enum: [false] },
-                    reason: { type: 'string' },
-                    expected: {
-                      type: 'object',
-                      required: ['to', 'token', 'min_amount', 'chain_id'],
-                      properties: {
-                        to: address,
-                        token: {
-                          type: 'string',
-                          pattern: '^0x[0-9a-fA-F]{40}$',
-                          description: 'From storage, so case is not guaranteed (see the list schema).',
-                        },
-                        min_amount: { type: 'string', pattern: '^[0-9]+$' },
-                        chain_id: { type: 'integer' },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          '404': errorResponse,
-          '409': { ...errorResponse, description: 'This transaction was already used as payment.' },
-          '410': { ...errorResponse, description: 'Resource deactivated.' },
-          '503': { ...errorResponse, description: 'Resource has no payment address.' },
         },
       },
     },
@@ -3790,9 +3483,9 @@ export const openapiSpec = {
       get: {
         tags: ['Dashboard'],
         operationId: 'getAgentActivity',
-        summary: "One agent's payments, approvals and tool calls, newest first.",
+        summary: "One agent's payments and tool calls, newest first.",
         description:
-          "A heterogeneous list discriminated by `type`: payment, approval, or mcp_tool_call. **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the three sources separately and the results are then merged and sorted, so this route can return up to three times `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.",
+          "A heterogeneous list discriminated by `type`: payment or mcp_tool_call. (#2262: the third branch, `approval`, is gone — #2055 dropped `approval_requests` and this handler merges `payment_intents` and the MCP tool-call audit log, with no third source.) **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the two sources separately and the results are then merged and sorted, so this route can return up to twice `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.",
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Agent id.' },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
@@ -3854,7 +3547,7 @@ export const openapiSpec = {
         operationId: 'getActivityFeed',
         summary: 'Combined activity across every agent the caller owns.',
         description:
-          "The same three entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` is always 0 since #2055 (the approval queue died with the Safe rail); the field survives for wire compatibility.",
+          "The same two entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` is always 0 since #2055 (the approval queue died with the Safe rail); the field survives for wire compatibility.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
@@ -3910,6 +3603,8 @@ export const openapiSpec = {
                           event: {
                             type: 'string',
                             enum: ['signed_up', 'safe_deployed', 'safe_imported', 'agent_created', 'allowance_granted', 'safe_funded', 'first_payment_settled'],
+                            description:
+                              "Retained for wire compatibility with historical windows. THREE of these steps are permanently zero for any window after their retirement and a funnel built from them will show three dead stages: 'safe_deployed' and 'safe_imported' (410 since #1984 — Safe inflow is retired) and 'allowance_granted' (#2020 — the AllowanceModule rail no longer grants). Historical rows before those dates still count.",
                           },
                           users: { type: 'integer', description: 'DISTINCT users who reached this step.' },
                           conversionFromPrev: { type: ['number', 'null'], description: 'Null when there is nothing to convert from: the first step, or any step whose predecessor counted zero users.' },
@@ -5205,7 +4900,9 @@ export const openapiSpec = {
         operationId: 'recordMachinePaymentReconciliationEvent',
         summary: 'Record a merchant retry reconciliation event.',
         description:
-          'Records a post-payment reconciliation marker when the merchant/protocol retry rejects or needs follow-up after a confirmed payment. The event is audit context only; it does not move funds.',
+          'Records a post-payment reconciliation marker when the merchant/protocol retry rejects or needs follow-up after a confirmed payment. The event is audit context only; it does not move funds. '
+          + 'The payment is resolved scoped to the calling agent, so another agent\'s payment answers 404 with nothing written. '
+          + '#2292: an acceptance is terminal — a merchant_retry_rejected_after_payment on a payment that already carries a client-reported merchant response (machine_payment_evidence proof_status merchant_response_observed or protocol_receipt_attached) answers 409 rather than re-opening a stranded-funds flag on a delivered payment.',
         security: [{ AgentApiKey: [] }],
         requestBody: {
           required: true,
@@ -5971,15 +5668,28 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      // #2262: these two enums publish five values no live rail can produce —
+      // `user_approval_required`, `user_execution_required`,
+      // `waiting_for_additional_approvals`, `wait_for_user_approval`,
+      // `wait_for_user_to_complete_payment`. They stay in the enum for wire
+      // compatibility, but under a bare `description:` the spec told a raw-API
+      // integrator only that the phase is "stable", while an SDK user reading
+      // the same taxonomy has been warned since #2101 that these are retired.
+      // `x-enumDescriptions` appeared ZERO times in the served spec before
+      // this. The prose is the SDK's own, mirrored through
+      // `domain/agent-payment-taxonomy.ts` and pinned verbatim by
+      // `agent-payment-taxonomy.parity.test.ts` — not a second copy.
       AgentPaymentPhase: {
         type: 'string',
         enum: Object.values(AgentPaymentPhase),
         description: 'Stable Haven agent payment state phase.',
+        'x-enumDescriptions': AgentPaymentPhaseDescriptions,
       },
       AgentPaymentNextAction: {
         type: 'string',
         enum: Object.values(AgentPaymentNextAction),
         description: 'Stable next action an agent should take for a Haven payment state.',
+        'x-enumDescriptions': AgentPaymentNextActionDescriptions,
       },
       AgentPaymentRail: {
         type: 'string',
@@ -6098,6 +5808,9 @@ export const openapiSpec = {
       },
       AgentConnectionAllowanceInput: {
         type: 'object',
+        description:
+          'One requested budget on a connect setup. Its `allowance_amount` is ATOMIC — the opposite shape to ' +
+          'the identically named field on AgentAllowance, which is the human-decimal delegation projection (#2295).',
         required: ['token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
         properties: {
           token_address: address,
@@ -6422,13 +6135,18 @@ export const openapiSpec = {
       },
       AgentAllowance: {
         type: 'object',
+        description:
+          'One element of an agent\'s derived budget view (GET /agents, GET /agents/{id}, PATCH /agents/{id}). ' +
+          'Projected from the agent\'s ACTIVE delegations, never from stored allowance rows (#1090/#2020). ' +
+          'Its `allowance_amount` is HUMAN-DECIMAL — the opposite shape to the identically named field on ' +
+          'AgentConnectionAllowance, which is atomic (#2295).',
         required: ['id', 'agent_id', 'token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
         properties: {
           id: uuid,
           agent_id: uuid,
           token_address: address,
           token_symbol: { type: 'string' },
-          allowance_amount: { type: 'string' },
+          allowance_amount: allowanceHumanAmount,
           reset_period_min: { type: 'integer' },
         },
         additionalProperties: false,
@@ -7031,13 +6749,24 @@ export const openapiSpec = {
                 id: uuid,
                 token_address: address,
                 token_symbol: { type: 'string' },
-                configured_amount: { type: 'string' },
+                // #2295: same value as AgentAllowance.allowance_amount, same
+                // producer (rails/delegation-budget-view.ts), renamed on this
+                // wire. It sits one key above `onchain.amount`, which is the
+                // ATOMIC form of the same budget — two representations of one
+                // number, side by side, both previously bare strings.
+                configured_amount: allowanceHumanAmount,
                 reset_period_min: { type: 'integer' },
                 onchain: {
                   type: 'object',
                   required: ['amount', 'spent', 'remaining', 'effective_spent', 'reset_time_min', 'last_reset_min', 'nonce', 'is_reset_pending'],
                   properties: {
-                    amount: { type: 'string' },
+                    amount: {
+                      type: 'string',
+                      description:
+                        'The configured period budget in ATOMIC units — the same budget as the sibling ' +
+                        '`configured_amount`, which states it in whole token units. `spent`, `remaining` ' +
+                        'and `effective_spent` are atomic too (#2295).',
+                    },
                     spent: { type: 'string' },
                     remaining: { type: 'string' },
                     effective_spent: { type: 'string' },
@@ -7074,7 +6803,11 @@ export const openapiSpec = {
           id: uuid,
           payment_id: uuid,
           payment_intent_id: { anyOf: [uuid, { type: 'null' }] },
-          approval_request_id: { anyOf: [uuid, { type: 'null' }] },
+          approval_request_id: {
+            anyOf: [uuid, { type: 'null' }],
+            description:
+              'Retained for wire compatibility; ALWAYS null. #2055 dropped `approval_requests`, so no receipt can be anchored to an approval any more.',
+          },
           rail: { type: 'string' },
           settlement_scheme: {
             type: ['string', 'null'],

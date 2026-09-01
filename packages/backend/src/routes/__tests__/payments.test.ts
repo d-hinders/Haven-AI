@@ -7,11 +7,6 @@ const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
-    getLatestBlockTimeSec: vi.fn(),
-    computeEffectiveAllowance: vi.fn(),
-    generateTransferHash: vi.fn(),
-    recoverSigner: vi.fn(),
-    executeAllowanceTransfer: vi.fn(),
   },
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
@@ -391,8 +386,6 @@ describe('payment routes', () => {
   // they originally proved. `rails/allowance-module.ts` and these cases are
   // scheduled for deletion in #1987.
   it('claims a pending signature intent before executing on-chain', async () => {
-    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '1.00', eur: '0.92' })
 
     primeDb(...signRoutes({ intent: pendingIntent(), claimWins: true }))
@@ -409,7 +402,6 @@ describe('payment routes', () => {
     // The rail refusal fires before the claim CAS — nothing was claimed or executed:
     expect(findCall(/SET signature[\s\S]*status = 'submitted'/)).toBeUndefined()
     expect(findCall(/SET status = 'confirmed'/)).toBeUndefined()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
   // #1328 (review finding on #1339): a PRE-EXISTING mpp_demo intent must be
@@ -445,7 +437,6 @@ describe('payment routes', () => {
     expect(response.json().error).not.toBe(allowanceModuleRailRetired('intent').body.error)
     // Nothing written, nothing executed:
     expect(findCall(/SET signature[\s\S]*status = 'submitted'/)).toBeUndefined()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
   // #717 (review B1 on #1119): this route claims the intent to 'submitted'
@@ -457,11 +448,7 @@ describe('payment routes', () => {
   // the 429 this case characterized) at all — it 410s first, with no claim
   // to release.
   it('releases the submitted claim on a relayer-budget 429 — the intent stays retryable', async () => {
-    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
     const { RelayerBudgetExceededError } = await import('../../infra/relayer-spend-guard.js')
-    allowanceMocks.executeAllowanceTransfer.mockRejectedValueOnce(
-      new RelayerBudgetExceededError('allowance_transfer', 60, 60),
-    )
 
     primeDb(...signRoutes({ intent: pendingIntent(), claimWins: true }))
 
@@ -478,15 +465,12 @@ describe('payment routes', () => {
     expect(findCall(/SET signature[\s\S]*status = 'submitted'/)).toBeUndefined()
     expect(findCall(/SET status = 'pending_signature'/)).toBeUndefined()
     expect(findCall(/SET status = 'failed'/)).toBeUndefined()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
   // #1986: the retirement gate fires before the claim → execute → confirm →
   // evidence pipeline this case exercised, so a legacy (`execution_rail`
   // unset) intent never reaches the evidence recorder at all.
   it('creates base evidence after a protocol payment is confirmed', async () => {
-    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '1.00', eur: '0.92' })
 
     const x402Fields = {
@@ -524,14 +508,11 @@ describe('payment routes', () => {
     expect(response.json().error).toBe(allowanceModuleRailRetired('intent').body.error)
     // No evidence written — the payment never confirmed, never even claimed:
     expect(findCall(/machine_payment_evidence/)).toBeUndefined()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
   // #1986: same gate, same reason — the confirmed status this case asserted
   // is unreachable for a legacy intent now.
   it('still returns confirmed when protocol evidence indexing fails', async () => {
-    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '1.00', eur: '0.92' })
 
     primeDb(
@@ -553,14 +534,12 @@ describe('payment routes', () => {
     expect(response.json()).toMatchObject({
       error: allowanceModuleRailRetired('intent').body.error,
     })
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
   // #1986: the retirement gate fires before the claim CAS this case's
   // `claimWins: false` setup was meant to lose against — a legacy intent
   // never reaches the CAS (or its double-claim 409) at all.
   it('does not execute when another request already claimed the payment intent', async () => {
-    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
 
     primeDb(
       ...signRoutes({
@@ -581,14 +560,12 @@ describe('payment routes', () => {
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toBe(allowanceModuleRailRetired('intent').body.error)
     expect(findCall(/SET signature[\s\S]*status = 'submitted'/)).toBeUndefined()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
   // #1986: the retirement gate runs BEFORE the "Check expiry" step this case
   // targeted — a legacy intent 410s on the rail refusal, never on expiry,
   // even when `overdueExpires: true` says the row is stale.
   it('returns expired when an intent expires before it can be claimed', async () => {
-    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
 
     primeDb(
       ...signRoutes({
@@ -609,7 +586,6 @@ describe('payment routes', () => {
     expect(response.json().error).toBe(allowanceModuleRailRetired('intent').body.error)
     // The expiry query never ran — the rail gate refused first:
     expect(findCall(/expires_at <= NOW\(\)/)).toBeUndefined()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
   // #1986: the retirement gate fires before `executeAllowanceTransfer` is
@@ -617,8 +593,6 @@ describe('payment routes', () => {
   // happens for a legacy intent — nothing is claimed, so nothing is marked
   // failed either.
   it('only marks submitted payment intents failed after execution errors', async () => {
-    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockRejectedValueOnce(new Error('relayer unavailable'))
 
     primeDb(...signRoutes({ intent: pendingIntent(), claimWins: true }))
 
@@ -632,7 +606,6 @@ describe('payment routes', () => {
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toBe(allowanceModuleRailRetired('intent').body.error)
     expect(findCall(/SET status = 'failed'/)).toBeUndefined()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
   // ── GET /:id and GET / — status reads with lazy expiry ─────────────────
@@ -773,7 +746,6 @@ describe('payment routes', () => {
       expect(findCall(/INSERT INTO payment_intents/)).toBeUndefined()
       expect(findCall(/send_idempotency_key = \$2/)).toBeUndefined()
       expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
-      expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
     })
 
     // #2055: was "replays a pending approval as 202 — a retry never opens a
@@ -811,9 +783,6 @@ describe('payment routes', () => {
 
     it('lazy-expires a stale pending row and creates fresh — the key never dead-ends (#961 M2)', async () => {
       allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
-      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
       primeDb(
         AUTH,
         intentKeyLookup([sendReplayRow({ expires_at: '2020-01-01T00:00:00.000Z' })]),
@@ -837,9 +806,6 @@ describe('payment routes', () => {
 
     it('a fresh create persists the key on the intent row', async () => {
       allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
-      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
       primeDb(
         AUTH,
         intentKeyLookup([]),
@@ -860,9 +826,6 @@ describe('payment routes', () => {
 
     it('an idempotency-key race (23505) replays the winner instead of erroring', async () => {
       allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
-      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
       let lookups = 0
       primeDb(
         AUTH,
@@ -957,9 +920,6 @@ describe('payment routes', () => {
 
     it('a request without a key behaves exactly as before — no lookups, no key persisted', async () => {
       allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
-      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
       primeDb(
         AUTH,
         [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
@@ -1005,8 +965,6 @@ describe('payment routes', () => {
 
     it('queues for approval (202) when amount exceeds remaining allowance', async () => {
       allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI / 2n })
 
       primeDb(...createRoutes)
 
@@ -1024,14 +982,10 @@ describe('payment routes', () => {
       // even if it tried.
       expect(sqlCalls().some((c) => /approval_requests/i.test(c.sql))).toBe(false)
       // generateTransferHash must NOT run on the refused path either.
-      expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
     })
 
     it('executes (201) when amount is within remaining allowance', async () => {
       allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
-      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
 
       primeDb(...createRoutes)
 
@@ -1051,9 +1005,6 @@ describe('payment routes', () => {
       // Inclusive boundary: amount == remaining must execute, not queue. Guards
       // against a `>=` slip in the shared decideCoverage decision.
       allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI })
-      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
 
       primeDb(...createRoutes)
 
@@ -1066,7 +1017,6 @@ describe('payment routes', () => {
 
       expect(response.statusCode).toBe(410)
       expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
-      expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
     })
   })
 })

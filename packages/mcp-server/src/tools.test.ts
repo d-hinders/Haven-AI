@@ -596,11 +596,24 @@ describe('haven_pay_x402_quote', () => {
       payment_id: string
       idempotency_key: string
       payload_hash: string
+      next_tool: string
+      reason: string
       x402: Record<string, unknown>
     }>(await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }))
 
     expect(result.data.payment_id).toBe('pay_x402')
     expect(result.data.idempotency_key).toMatch(/^x402:/)
+    // #2291: next_tool was already right; the REASON beside it, in the SAME
+    // response object, named a successor the named tool cannot serve —
+    // "finish with haven_x402_sign_header" after a one-shot that spends its
+    // own binding building the header inline. A test asserting only next_tool
+    // stayed green while the pair contradicted itself. Cheap literal guards,
+    // the same shape the erc7710 branch already uses; nothing interprets a
+    // sentence.
+    expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
+    expect(result.data.reason).toContain('Do NOT call')
+    expect(result.data.reason).toContain('haven_x402_sign_header')
+    expect(result.data.reason).toContain('payment_header')
     expect(result.data.payload_hash).toBe('0xfunding')
     expect(result.data.x402.funding_to).toBe('0xDelegate')
     expect(result.data.x402.merchant_to).toBe('0xMerchant')
@@ -3157,6 +3170,292 @@ describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context 
   })
 })
 
+// ── #2282: quote-first settle must not relay funding before the context check ─
+
+describe('haven_settle_mcp_tool: merchant-call context is checked BEFORE funding (#2282)', () => {
+  const SIG = '0x' + '11'.repeat(65)
+
+  /** The exact wire assertion that matters: did any funding relay leave? */
+  const fundingRelayed = () =>
+    calls.some((call) => call.method === 'POST' && call.url.endsWith('/payments/pay_x402/sign'))
+
+  it('does NOT relay funding when a quote-first intent has no stored merchant context', async () => {
+    // The #2282 repro: an intent created by haven_pay_x402_quote, which
+    // receives only the raw 402 and therefore stores no MCP call context.
+    // Route the funding relay as a SUCCESS so the assertion below cannot pass
+    // for the wrong reason — if the ordering regresses, the money moves.
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError(
+        'No stored merchant call context for this intent — pass merchant_url, tool_name, ' +
+          'arguments, and mcp_transport explicitly (version-skew fallback).',
+        409,
+      ),
+    )
+    const merchant = vi.spyOn(haven, 'completeX402MerchantCall')
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402',
+      signature: SIG,
+      payment_header: VALID_PAYMENT_HEADER,
+    })
+
+    // THE assertion: no funding userop was relayed. An error code alone is not
+    // enough — the pre-#2282 behaviour produced this same code with the money
+    // already gone, leaving a funded_but_unsettled intent.
+    expect(fundingRelayed()).toBe(false)
+    expect(merchant).not.toHaveBeenCalled()
+    if (payload.success) throw new Error('expected a context-unavailable failure')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantCallContextUnavailable)
+    expect(payload.next_action).toBe(AgentPaymentNextAction.RetryWithExplicitContext)
+  })
+
+  it('leaves the intent retryable in place: the same tool succeeds on an explicit-context retry', async () => {
+    // The point of refusing pre-funding rather than post-funding. The intent is
+    // still pending_signature, so the caller re-calls THIS tool with explicit
+    // context and it settles — no tool switch to haven_complete_mcp_tool, no
+    // funded_but_unsettled state to recover from.
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError('No stored merchant call context for this intent', 409),
+    )
+    const merchant = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' }, settlementTxHash: '0xsettle',
+    })
+    const handlers = createToolHandlers(haven)
+
+    const refused = await handlers.haven_settle_mcp_tool({
+      payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER,
+    })
+    expect(refused.success).toBe(false)
+    expect(fundingRelayed()).toBe(false)
+
+    const retry = ok<{ settled: boolean; funding_tx_hash: string | null }>(
+      await handlers.haven_settle_mcp_tool({
+        payment_id: 'pay_x402',
+        signature: SIG,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'legacy' },
+        mcp_transport: { handshake_required: true, source: 'path' },
+        payment_header: VALID_PAYMENT_HEADER,
+      }),
+    )
+
+    expect(fundingRelayed()).toBe(true)
+    expect(retry.data.settled).toBe(true)
+    expect(retry.data.funding_tx_hash).toBe('0xfund')
+    expect(merchant.mock.calls[0][0].mcpTransport).toEqual({ handshakeRequired: true, source: 'path' })
+  })
+
+  it('does NOT submit the erc7710 settlement child when the context is unavailable', async () => {
+    // The no-funding-leg scheme has the same shape: POST /x402/:id/settle
+    // consumes the signed settlement child, which cannot be re-signed.
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError('No stored merchant call context for this intent', 409),
+    )
+    const settle = vi.spyOn(haven, 'submitX402Erc7710')
+    const merchant = vi.spyOn(haven, 'completeX402MerchantCall')
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402',
+      signature: SIG,
+      // no payment_header => erc7710 branch
+    })
+
+    expect(settle).not.toHaveBeenCalled()
+    expect(merchant).not.toHaveBeenCalled()
+    if (payload.success) throw new Error('expected a context-unavailable failure')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantCallContextUnavailable)
+  })
+
+  it('guided path is unchanged: a rehydrated stored context still funds and settles, resolved exactly once', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const rehydrate = vi.spyOn(haven, 'getX402MerchantCallContext').mockResolvedValue({
+      paymentId: 'pay_x402',
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'buy_cloud_storage',
+      arguments: { tier: '50gb' },
+      mcpTransport: { handshakeRequired: true, source: 'bazaar' },
+    })
+    const merchant = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' }, settlementTxHash: '0xsettle',
+    })
+
+    const result = ok<{ settled: boolean }>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER,
+      }),
+    )
+
+    expect(result.data.settled).toBe(true)
+    expect(fundingRelayed()).toBe(true)
+    // Moving the resolve earlier must not double it: two GETs are two chances
+    // for the stored context to disagree with itself across one settle.
+    expect(rehydrate).toHaveBeenCalledTimes(1)
+    expect(merchant.mock.calls[0][0].mcpTransport).toEqual({ handshakeRequired: true, source: 'bazaar' })
+  })
+})
+
+// ── #2282: a wrong-shaped mcp_transport is refused, never silently dropped ────
+
+describe('mcp_transport shape is refused loudly (#2282)', () => {
+  const SIG = '0x' + '11'.repeat(65)
+
+  it.each(['haven_settle_mcp_tool', 'haven_complete_mcp_tool'] as const)(
+    '%s: the SDK camelCase shape is refused with a message naming the mismatch',
+    async (tool) => {
+      stubFetch({
+        'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+      })
+      const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+      const merchant = vi.spyOn(haven, 'completeX402MerchantCall')
+
+      const payload = await createToolHandlers(haven)[tool]({
+        payment_id: 'pay_x402',
+        signature: SIG,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'legacy' },
+        // The shape @haven_ai/sdk's X402McpTransport uses.
+        mcp_transport: { handshakeRequired: true, source: 'path' },
+        payment_header: VALID_PAYMENT_HEADER,
+      })
+
+      if (payload.success) throw new Error('expected a refusal, not a permissive parse')
+      expect(payload.code).toBe('INVALID_INPUT')
+      // Names the problem: the key, both spellings, and which boundary wins.
+      expect(payload.message).toContain('mcp_transport')
+      expect(payload.message).toContain('handshake_required')
+      expect(payload.message).toContain('handshakeRequired')
+      expect(payload.message).toMatch(/snake_case/)
+      // And it is a refusal BEFORE anything moved.
+      expect(calls.some((c) => c.url.endsWith('/payments/pay_x402/sign'))).toBe(false)
+      expect(merchant).not.toHaveBeenCalled()
+    },
+  )
+
+  it('refuses an unknown extra key rather than stripping it (the advertised additionalProperties: false)', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const merchant = vi.spyOn(haven, 'completeX402MerchantCall')
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      payment_id: 'pay_x402',
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+      mcp_transport: { handshake_required: true, source: 'path', handshakeRequired: true },
+      payment_header: VALID_PAYMENT_HEADER,
+    })
+
+    if (payload.success) throw new Error('expected the extra key to be refused, not stripped')
+    expect(payload.code).toBe('INVALID_INPUT')
+    expect(merchant).not.toHaveBeenCalled()
+  })
+
+  it('refuses a STORED context whose transport Haven cannot parse, instead of delivering without it', async () => {
+    // Defence in depth behind the tool schema: parseMcpTransport used to answer
+    // `undefined` — the same value "no transport was supplied" produces — for
+    // any shape it did not recognise, so a present-but-wrong transport was
+    // indistinguishable from an absent one at the last point anyone could tell.
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockResolvedValue({
+      paymentId: 'pay_x402',
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'buy_vpn',
+      arguments: {},
+      // A stored transport missing handshakeRequired (older/skewed producer).
+      mcpTransport: { source: 'path' } as never,
+    })
+    const merchant = vi.spyOn(haven, 'completeX402MerchantCall')
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402',
+      signature: SIG,
+      payment_header: VALID_PAYMENT_HEADER,
+    })
+
+    if (payload.success) throw new Error('expected the unparseable stored transport to be refused')
+    expect(payload.code).toBe('INVALID_INPUT')
+    expect(payload.message).toContain('mcp_transport')
+    // Refused pre-funding, like every other context problem on this tool.
+    expect(calls.some((c) => c.url.endsWith('/payments/pay_x402/sign'))).toBe(false)
+    expect(merchant).not.toHaveBeenCalled()
+  })
+
+  it('refuses a STORED context whose transport `source` is not a value Haven knows', async () => {
+    // haven-reviewer (#2282, should-fix): the shape guard above proves the
+    // missing-key branch; this one proves the bad-`source` branch, which the
+    // tool schema's enum cannot reach because only a REHYDRATED context gets
+    // here unvalidated. Same class as the rest of hazard 2 — an unrecognised
+    // value must not collapse into the "no transport supplied" answer.
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockResolvedValue({
+      paymentId: 'pay_x402',
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'buy_vpn',
+      arguments: {},
+      mcpTransport: { handshakeRequired: true, source: 'bogus' } as never,
+    })
+    const merchant = vi.spyOn(haven, 'completeX402MerchantCall')
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402',
+      signature: SIG,
+      payment_header: VALID_PAYMENT_HEADER,
+    })
+
+    if (payload.success) throw new Error('expected the unknown transport source to be refused')
+    expect(payload.code).toBe('INVALID_INPUT')
+    expect(payload.message).toContain('mcp_transport')
+    expect(calls.some((c) => c.url.endsWith('/payments/pay_x402/sign'))).toBe(false)
+    expect(merchant).not.toHaveBeenCalled()
+  })
+
+  it('a legitimate snake_case transport still settles (positive control)', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const merchant = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' }, settlementTxHash: '0xsettle',
+    })
+
+    const result = ok<{ settled: boolean }>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_x402',
+        signature: SIG,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'legacy' },
+        mcp_transport: { handshake_required: true, source: 'path' },
+        payment_header: VALID_PAYMENT_HEADER,
+      }),
+    )
+
+    expect(result.data.settled).toBe(true)
+    expect(calls.some((c) => c.url.endsWith('/payments/pay_x402/sign'))).toBe(true)
+    expect(merchant.mock.calls[0][0].mcpTransport).toEqual({ handshakeRequired: true, source: 'path' })
+  })
+})
+
 // ── custody invariant (all tools) ────────────────────────────────────────────
 
 describe('custody invariant', () => {
@@ -3671,6 +3970,7 @@ describe('structured agent guidance (#1308)', () => {
       next_action: string
       next_tool: string
       next_arguments: Record<string, unknown>
+      reason: string
       safe_to_continue: boolean
       agent_summary: Record<string, unknown>
       warnings: Array<{ code: string; message: string }>
@@ -4899,6 +5199,24 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
     // assembled by Haven on this path, never by haven_x402_sign_header.
     expect(res.data.reason).toContain("settlement_scheme: 'erc7710'")
     expect(res.data.reason).toContain('Do NOT call haven_x402_sign_header')
+    // #2330 added these two assertions, and #2341 INVERTS the second one.
+    // #2330 was right that this reason tells the agent to retry the merchant
+    // ITSELF and must therefore name the wire correctly; it was wrong about
+    // what correct is on THIS scheme. erc7710 is always x402 v2 and its header
+    // carries a delegation chain, so telling an agent to also send X-PAYMENT
+    // is telling it to overflow the merchant's header limit — HTTP 431, the
+    // funding-leg money already gone on the hosted path. The assertion that
+    // pinned the fix now pins the defect, which is why it is reversed here in
+    // place rather than deleted.
+    //
+    // The reason deliberately does not name the legacy header even to FORBID
+    // it. A first pass wrote "do not add X-PAYMENT", which failed this very
+    // assertion — `not.toContain` cannot tell an instruction from a
+    // prohibition. Rewording to "ONLY that header name" keeps the guard
+    // literal, costs fewer bytes against the #1591 mean, and avoids handing an
+    // agent a negated header name to be primed by.
+    expect(res.data.reason).toContain('PAYMENT-SIGNATURE')
+    expect(res.data.reason).not.toContain('X-PAYMENT')
   })
 
   it('the optional-cap nudge still fires on the erc7710 branch', async () => {
@@ -5160,6 +5478,11 @@ describe('haven_submit — erc7710 settle (#2041)', () => {
     // erc7710 has no Haven-submitted transaction, so there is no hash to fake.
     expect(res.data.tx_hash).toBeNull()
     expect(res.data.next_action).toBe(AgentPaymentNextAction.RetryOriginalX402Request)
+    // #2330 pinned both names here; #2341 reverses the legacy half for the
+    // same reason as the erc7710 branch above — this is the erc7710 submit
+    // path, where a duplicated header is refused with HTTP 431.
+    expect(res.data.reason).toContain('PAYMENT-SIGNATURE')
+    expect(res.data.reason).not.toContain('X-PAYMENT')
 
     // The signature went to settle, NOT to the funding relay.
     expect(calls.find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG })
@@ -5941,5 +6264,28 @@ describe('#2145: the hosted resume description gates on the live retry trigger',
         `${name} must not claim nothing emits a resume trigger — #2145 gave it a producer`,
       ).not.toContain('nothing emits')
     }
+  })
+
+  /**
+   * #2290 wrote this test to pin that the resume description names the binding
+   * step and not only the header step. The premise was wrong: it asserted the
+   * description mentions haven_sign_x402 AND haven_x402_sign_header AND
+   * x402_binding, which the CORRECTED #2291 wording also satisfies — the
+   * corrected text names all three in order to say "do NOT chain them". So the
+   * test went on passing across a contract reversal, proving only that three
+   * substrings appear somewhere (review finding).
+   *
+   * Rewritten to pin the contract rather than the vocabulary: the resume path
+   * ends at the one-shot's inline payment_header, and the description must say
+   * so explicitly. Still literal-only — nothing here interprets a sentence.
+   */
+  it('points the resume path at the inline payment_header, not a second signer call', () => {
+    const description = toolDescriptions.haven_resume_x402_payment
+    expect(description).toContain('haven_sign_x402')
+    expect(description).toContain('payment_header')
+    // The load-bearing half: the impossible chain is named as forbidden, not
+    // as the next step. A revert to either earlier wording drops this literal.
+    expect(description).toContain('Do NOT pass its x402_binding to')
+    expect(description).toContain('haven_x402_sign_header')
   })
 })

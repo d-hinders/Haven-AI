@@ -13,7 +13,10 @@ dropped once [#1023](https://github.com/d-hinders/Haven-AI/issues/1023) made
 that a CI required check. `ship-next-marker.sh` records that `/ship-next` is
 genuinely driving so the guard stays quiet on a compliant PR. It writes one
 **token per issue** ([#1028](https://github.com/d-hinders/Haven-AI/issues/1028));
-the guard reads `Closes #N` off the pull request and clears that token. It used
+the guard reads `Closes #N` off the pull request and clears that token — and
+since [#2276](https://github.com/d-hinders/Haven-AI/issues/2276) also `Refs #N`,
+the reference an operator-verify pull request writes in place of the closing
+keyword, so the guard does not warn on the most careful PRs in the repo. It used
 to be a single flag the guard consumed, which warned on the 2nd PR of a session
 that shipped several issues — a false positive on a *compliant* PR, i.e. the
 nag-fatigue failure the guard exists to avoid.

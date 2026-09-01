@@ -10,7 +10,7 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-08-28" # #2170: ruleset inventory re-verified against `GET /repos/d-hinders/Haven-AI/rulesets`, `GET /repos/d-hinders/Haven-AI/rules/branches/{main,dev}`, and both surviving ruleset definitions. It now names the two active rulesets and attributes the former "Move fast" protections without implying they were removed. Scope: § "One-time GitHub setup", step 3 only. Prior: #2164: § "Be precise about what gate 2 proves" gains the version-only exemption — a money-path file whose entire diff is an IN-PLACE release-bump version bump no longer counts as uncovered — shape-per-line plus symbol pairing, the latter added after review found three behavioural edits that shape matching alone excused. Named in the list rather than left to the script, because it NARROWS the net and an unstated narrowing is the failure this whole section is written against. Scope: that one bullet; the ruleset inventory and § "Merge policy A" were NOT re-verified in this pass. Prior: #2165: the ruleset inventory's "Dev gate" bullet said it enforces two checks; it now also carries a pull-request rule pinning `main` to merge-commits only, so the bullet gained that rule, why it lives in `Dev gate` rather than the ruleset that also covers `dev`, the `hotfix/* → main` answer, and the empirically-confirmed intersection semantics. Scope: that ONE bullet. Two stale claims in the same list were found and deliberately NOT fixed here, filed instead so this bump is not a rubber stamp — the list says "Three active rulesets" and describes a "Move fast, just don't break prod by accident" ruleset that no longer exists (`GET /repos/d-hinders/Haven-AI/rulesets` returns exactly two, 2026-08-28). Its three protections all survive under the remaining rulesets, verified the same day: require-PR and block-force-push are present twice each, and "Lint, Type-check & Build" is still a required context. Nothing else in this file was re-verified. Prior: #2004: § "Known CI flake signatures" re-read and the Base Sepolia RPC entry extended — the backend test job now reaches that endpoint itself (the executable proof of CASP Red Line #4 `eth_call`s the deployed caveat enforcers), and it FAILS rather than skips when the endpoint is unreachable in CI, so this signature can now redden a backend-only PR and not just `qa-dev`. The entry names the transport-vs-policy distinction and the `HAVEN_ENFORCER_PROBE_RPC_URL` override. Scope: that section only; the ruleset inventory, the money-path safety model and § "Merge policy A" were NOT re-verified in this pass. Prior: #1968: §"Merge policy A" re-read — the frontend bullet's "pauses for the user" is now "pauses", with clearing delegated to a clean re-review rather than a human ack, and a new bullet makes an unfilled `haven-reviewer:` verdict line a bar to arming auto-merge at all. The section's own safety claim is "CI + haven-reviewer", which a silently skipped pass makes false with nothing to read it off. The ruleset inventory and the money-path safety model were not re-verified in this pass. Prior: #1607: Known CI flake signatures section added (rerun-once policy; ship-next points here). Prior: #1341: re-verified loop stop and issue-readiness conditions after ship-next gained #1289 active-claim coordination
+last-verified: "2026-08-31" # #2320/#2327: the operator-verify paragraph attributed the guard to the pull-request BODY ("or one its own body says stays open") — true of the guard as shipped and false of GitHub, which parses commit messages on the default branch and the squash subject too. That sentence is corrected and a paragraph added naming the three emitters, the absence of a fence/blockquote escape, the forms that ARE safe, and the #2327 narrowing of the stays-open signal to state assertions. Verified against the live repo settings (merge_commit_message=PR_TITLE, squash_merge_commit_message=COMMIT_MESSAGES, squash_merge_commit_title=COMMIT_OR_PR_TITLE) and against PR #2314 as it actually merged — which corrected the anecdote: its body ends `Closes #2276`, its own issue, and never named #2268 with a keyword, so the guard was green on a true answer about the wrong surface. Issue #2320 states this the other way round; `haven-doc-reviewer` caught it. Scope: ONLY the operator-verify paragraph and the one added after it; the ruleset inventory, the money-path safety model, the flake signatures and the escape-hatch list were NOT re-verified. Prior: #2276: the loop's issue-lifecycle claims were unconditional — "each PR includes `Closes #<n>`", "a closed issue is done", "closed = implemented and on dev" — while ship-next's operator-verify mode requires the opposite for a shipped issue awaiting a human step. Three passages now carry the exception and name the `Refs #<n>` form, the `operator-verify` label and the merge-time guard that enforces them. Scope: ONLY those three passages plus the new operator-verify paragraph; the ruleset inventory, the money-path safety model, the flake signatures and the escape-hatch list were NOT re-verified in this pass. Prior: #2268 (follow-up): the "Known limit" paragraph ended by calling the dead `dev-deployed` trigger "a deploy-provider configuration matter" and pointing at an "operator fix" in `agent-qa.md`. That fix turned out not to exist — Railway offers no supported place for the authenticated call, so the same-day correction to `agent-qa.md` now says so, and this sentence contradicted it. Corrected to state that no operator fix exists today and that the replacement route is #2273 (unbuilt). Scope: ONLY that sentence was re-read and edited; the rest of the money-path safety model, the ruleset inventory, the flake signatures and the escape-hatch list were not re-verified in this pass. Prior: #2268: the money-path safety model's "Known limit" paragraph contrasted the `repository_dispatch: dev-deployed` trigger (headSha and deployed SHA coincide) against the nightly cron (they may not) as though both triggers fire. One does not: 0 of 156 `qa-dev.yml` runs, 2026-06-30 -> 2026-08-31, counted against the Actions API, and 0 repository_dispatch runs on any workflow in the repo's history. The paragraph now says so and points at agent-qa.md for the evidence and the operator fix. Raised by haven-doc-reviewer on PR for #2268; this file's `covers:` does not list `.github/workflows/qa-dev.yml`, so the coupling gate could not have found it. Scope: that one paragraph; the `git diff --name-only` rename limit beside it was re-read against `scripts/ci/qa-freshness.mjs` and is unchanged. NOT re-verified: the ruleset inventory, the escape-hatch list, the flake signatures, or any other section. Prior: #2170: ruleset inventory re-verified against `GET /repos/d-hinders/Haven-AI/rulesets`, `GET /repos/d-hinders/Haven-AI/rules/branches/{main,dev}`, and both surviving ruleset definitions. It now names the two active rulesets and attributes the former "Move fast" protections without implying they were removed. Scope: § "One-time GitHub setup", step 3 only. Prior: #2164: § "Be precise about what gate 2 proves" gains the version-only exemption — a money-path file whose entire diff is an IN-PLACE release-bump version bump no longer counts as uncovered — shape-per-line plus symbol pairing, the latter added after review found three behavioural edits that shape matching alone excused. Named in the list rather than left to the script, because it NARROWS the net and an unstated narrowing is the failure this whole section is written against. Scope: that one bullet; the ruleset inventory and § "Merge policy A" were NOT re-verified in this pass. Prior: #2165: the ruleset inventory's "Dev gate" bullet said it enforces two checks; it now also carries a pull-request rule pinning `main` to merge-commits only, so the bullet gained that rule, why it lives in `Dev gate` rather than the ruleset that also covers `dev`, the `hotfix/* → main` answer, and the empirically-confirmed intersection semantics. Scope: that ONE bullet. Two stale claims in the same list were found and deliberately NOT fixed here, filed instead so this bump is not a rubber stamp — the list says "Three active rulesets" and describes a "Move fast, just don't break prod by accident" ruleset that no longer exists (`GET /repos/d-hinders/Haven-AI/rulesets` returns exactly two, 2026-08-28). Its three protections all survive under the remaining rulesets, verified the same day: require-PR and block-force-push are present twice each, and "Lint, Type-check & Build" is still a required context. Nothing else in this file was re-verified. Prior: #2004: § "Known CI flake signatures" re-read and the Base Sepolia RPC entry extended — the backend test job now reaches that endpoint itself (the executable proof of CASP Red Line #4 `eth_call`s the deployed caveat enforcers), and it FAILS rather than skips when the endpoint is unreachable in CI, so this signature can now redden a backend-only PR and not just `qa-dev`. The entry names the transport-vs-policy distinction and the `HAVEN_ENFORCER_PROBE_RPC_URL` override. Scope: that section only; the ruleset inventory, the money-path safety model and § "Merge policy A" were NOT re-verified in this pass. Prior: #1968: §"Merge policy A" re-read — the frontend bullet's "pauses for the user" is now "pauses", with clearing delegated to a clean re-review rather than a human ack, and a new bullet makes an unfilled `haven-reviewer:` verdict line a bar to arming auto-merge at all. The section's own safety claim is "CI + haven-reviewer", which a silently skipped pass makes false with nothing to read it off. The ruleset inventory and the money-path safety model were not re-verified in this pass. Prior: #1607: Known CI flake signatures section added (rerun-once policy; ship-next points here). Prior: #1341: re-verified loop stop and issue-readiness conditions after ship-next gained #1289 active-claim coordination
 ---
 
 # Autonomous PR loop
@@ -50,7 +50,10 @@ Pieces:
 > human step.
 >
 > **`dev` is the repo's default branch**, so `Closes #<n>` closes the issue on the
-> **dev-merge** — closed = implemented and on dev. What's actually in **prod** is
+> **dev-merge** — closed = implemented and on dev. The converse does not hold:
+> a PR shipped in ship-next's *operator-verify mode* writes `Refs #<n>` instead,
+> precisely so the issue survives the merge while a human still has an outstanding
+> live step, so an OPEN issue can already be implemented and on `dev` (#2276). What's actually in **prod** is
 > tracked separately (issue state is not overloaded with promotion state): each
 > `dev → main` promotion cuts a **prod GitHub Release** (`.github/workflows/release.yml`)
 > with auto-generated notes, and the **pending-promotion digest**
@@ -93,7 +96,10 @@ overlap, or stuck CI.
 The queue is always **GitHub issues** — nothing is tracked in the repo. Issue
 state *is* the backlog state: an open issue with no PR and no live claim or work
 overlap is ready, an open issue with an open Haven PR is in flight, and a closed
-issue is done (its PR closed it via `Closes #`).
+issue is done (its PR closed it via `Closes #`). One deliberate exception, and it
+reads as ready when it is not: an issue labelled **`operator-verify`** has merged
+code and is waiting on a human step, so its PR wrote `Refs #<n>` and the merge left
+it open (#2276).
 
 You don't have to hand-write those issues. **Capture is its own step:**
 [`new-task "<description>"`](../../.agents/skills/new-task/SKILL.md) turns a one-line
@@ -122,6 +128,33 @@ Either way, each PR includes `Closes #<n>`, so merging closes the issue and
 GitHub stays the source of truth — there is no file to maintain. The only
 requirement: an issue must be defined well enough to implement — one with no
 acceptance criteria makes the loop stop and ask you to sharpen it.
+
+**The one exception is `operator-verify` mode (#2276).** When the definition of
+done includes a step only a human can run — a vendor dashboard, funded mainnet
+keys, a live end-to-end run — the code half ships and the issue must stay OPEN.
+`Closes` is a GitHub keyword, so writing "this issue stays open" in the body does
+not survive the merge: #2268 said so three times, in the issue, in its release
+comment and in PR #2272's own body, and the merge closed it anyway. Such a PR
+writes **`Refs #<n>`** and the issue carries the **`operator-verify`** label. That
+is enforced, not merely conventional — `scripts/ci/operator-verify-close-guard.mjs`
+runs inside the required *Docs front-matter & agent skills* check and fails a pull
+request whose closing keyword targets a labelled issue, or one the pull request
+itself says stays open.
+
+**The keyword counts wherever its text reaches `dev` (#2320)** — the body, every
+commit message on the pull request (a merge commit lands them verbatim; a squash
+lands them concatenated), and the title via the squash subject. The guard reads
+all three, after PR #2314 — whose body closed only its own issue, #2276, and was
+never at fault — closed #2268 anyway from a commit message that only *described*
+the incident. Two consequences worth
+stating: a code fence or blockquote is **not** an escape — a fenced keyword in a
+commit message is what closed #2268 the second time, and the guard treats a fenced
+keyword in the body the same way — and the way to write about it is a form GitHub
+does not parse
+(`Refs #<n>`, a non-numeric placeholder, or the number with no keyword before it).
+The narrower half of the same fix (#2327): the guard's stays-open signal now reads
+only assertions about the issue's post-merge **state**, so a body declaring that
+operator-verify mode does **not** apply no longer fails the check.
 
 You can run a single step manually with `ship-next` (without a client loop) to watch one
 PR go through before handing it the whole queue.
@@ -225,7 +258,17 @@ rule silently while printing a green check). That direction is the whole point.
 run's `headSha` — the branch tip when the run was *triggered*, not necessarily
 the SHA deployed to dev. For the `repository_dispatch: dev-deployed` trigger
 they coincide; for the nightly cron, a lagging or failed dev deploy makes the
-run's `headSha` overstate what was actually exercised. Also, `git diff
+run's `headSha` overstate what was actually exercised. **Read that sentence as
+describing one live case and one theoretical one (#2268):** the `dev-deployed`
+trigger has never fired — 0 of 156 `qa-dev.yml` runs, 2026-06-30 to
+2026-08-31 — so the exception above is in practice the only case, and the
+reassuring half of the contrast buys nothing today. Nothing sends the dispatch,
+and **no operator fix for it exists today**: Railway's dashboard offers no
+supported place to put the authenticated call the setup describes, so the route
+that replaces it is #2273 (`deployment_status`), which is not built yet. The
+evidence, that finding and the freshness alarm that now reports the trigger's
+silence are in [`agent-qa.md`](../operations/agent-qa.md) § *Post-deploy trigger
+(webhook setup)*. Also, `git diff
 --name-only` reports only a rename's destination path, so renaming a money-path
 file *out* of the glob list reads as a non-money-path change.
 

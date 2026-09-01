@@ -1,6 +1,6 @@
 {
   "name": "@haven_ai/connect",
-  "version": "0.1.32-alpha.0",
+  "version": "0.1.33-alpha.0",
   "description": "Haven connect — one command wires an AI agent to budgeted, non-custodial payments: installs the MCP runtime and generates the agent signing key locally, registering only the public address.",
   "engines": {
     "node": ">=22"
@@ -54,9 +54,9 @@
     "directory": "packages/connect"
   },
   "dependencies": {
-    "@haven_ai/mcp": "0.1.32-alpha.0",
-    "@haven_ai/sdk": "0.1.32-alpha.0",
-    "@haven_ai/signer": "0.1.32-alpha.0",
+    "@haven_ai/mcp": "0.1.33-alpha.0",
+    "@haven_ai/sdk": "0.1.33-alpha.0",
+    "@haven_ai/signer": "0.1.33-alpha.0",
     "ethers": "^6.13.0",
     "yaml": "^2.9.0"
   },

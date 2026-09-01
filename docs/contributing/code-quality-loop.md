@@ -12,7 +12,7 @@ covers:
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/loop-engineering.md
   - docs/contributing/loop-harness-index.md
-last-verified: "2026-08-21" # the haven-reviewer rule is unconditional (owner decision 2026-08-21) — this file scoped it to a risk list, which is the licence three skips in one session were drawn from. AGENTS.md is canonical. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-09-01" # #2258: the coverage summary now distinguishes retired AllowanceModule work from live delegation-budget enforcement. The old summary presented allowance routing and owner-side allowance writes as current coverage even though the agent rail is retired. The unconditional haven-reviewer rule remains canonical in AGENTS.md.
 ---
 
 # Haven Code Quality Loop
@@ -58,11 +58,14 @@ is a product/API scope decision, not an automatic quality fix.
 
 ## Coverage summary
 
-Hardened areas include allowance routing, payment terminal states, x402/MPP
-validation, delegate credential redaction, chain-scoped reads, owner-side
-allowance writes, reconciliation status, receipt contracts, reporting-feed
-deduplication, Fortnox token hygiene, and Fortnox/contact/reporting route
-invariants.
+Live hardened areas include payment terminal states, x402/MPP validation,
+delegation-budget enforcement, delegate credential redaction, chain-scoped
+reads, reconciliation status, receipt contracts, reporting-feed deduplication,
+Fortnox token hygiene, and Fortnox/contact/reporting route invariants.
+
+Historical coverage includes AllowanceModule routing and owner-side allowance
+writes. That rail is retired and fail-closed for agent payments; remaining
+allowance math is historical display/test coverage, not live agent authority.
 
 PT-1 x402/machine-payment consolidation is complete; see
 [`x402-mpp-consolidation.md`](x402-mpp-consolidation.md). User-triggered

@@ -99,7 +99,7 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
       const deleted = await deleteSafeForUser(safeId, sub, owned.is_default)
       if (!deleted) {
         return reply.code(409).send({
-          error: 'Cannot unlink this Haven wallet while an agent has a pending or active budget delegation',
+          error: 'Cannot unlink this Haven wallet while an agent has a pending or active budget delegation or recovery is in progress',
         })
       }
 

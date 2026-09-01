@@ -2144,7 +2144,7 @@ export const openapiSpec = {
         operationId: 'unlinkUserSafe',
         summary: 'Unlink a Safe from the Haven account.',
         description:
-          'Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one.',
+          'Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one. Unlinking is refused while an agent has a pending or active budget delegation or an in-flight recovery.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
         responses: {
@@ -2155,6 +2155,10 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
+          '409': {
+            ...errorResponse,
+            description: 'The Safe remains linked while a delegation or recovery is in progress.',
+          },
         },
       },
     },

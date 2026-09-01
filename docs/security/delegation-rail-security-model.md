@@ -5,6 +5,8 @@ contract: true
 covers:
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts
+  - packages/backend/src/routes/agents.ts
+  - packages/backend/src/routes/user-safes.ts
   - packages/backend/src/modules/agents/rekey-*.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/infra/repositories/agents.ts
@@ -180,9 +182,13 @@ on-chain. The refusal names the remedy that applies (`revoke-all` for live
 budgets, "revoke first" for a live credential) rather than one generic 409.
 Legacy AllowanceModule records are different: Haven may unlink the readable
 record at any status because archiving changes no old Safe permission. Owners
-manage that remaining permission outside Haven where they have access; the
-guard only ever REFUSES or files a record — it grants nothing, signs nothing,
-and touches no chain.
+manage that remaining permission outside Haven where they have access. This is
+record archival/unlinking, not an on-chain Safe permission change. Conversely,
+the unlink route refuses with `409` while a delegation agent has a pending or
+active delegation, or while a recovery sweep is prepared/submitting, so an
+in-flight live operation cannot lose its Safe binding. The guard only ever
+REFUSES or files a record — it grants nothing, signs nothing, and touches no
+chain.
 
 **Credential revocation closes new grant lifecycle steps (#2025).** An agent
 already revoked at request entry cannot build or activate a fresh delegation:

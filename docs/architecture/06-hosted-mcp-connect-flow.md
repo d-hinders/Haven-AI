@@ -6,6 +6,7 @@ covers:
   - packages/connect/**
   - packages/signer/**
   - packages/frontend/src/components/ConnectAgentModal.tsx
+  - packages/frontend/src/hooks/useAgentConnectionSetup.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
@@ -72,8 +73,11 @@ permissions require action by the Safe owner outside Haven.
    the local signer retains the delegate key as authority.
 
 Manual fallback is limited to the explicit, warning-gated surfaces that support
-it. Setup links and snippets may contain hosted identity configuration, but
-never a delegate key.
+it. Normal setup links and snippets may contain hosted identity configuration,
+but never a delegate key. A separate manual-recovery fallback may display a
+one-time delegate private key only after the user explicitly chooses that
+warning-gated recovery path; it is not part of hosted setup or routine
+connection snippets.
 
 ## Direct payment
 

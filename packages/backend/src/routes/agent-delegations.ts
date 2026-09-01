@@ -411,9 +411,31 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         // Lock the lifecycle row before changing delegation state. If a revoke
         // committed first, refuse; if it races us, it serializes after this
         // atomic activation and can still revoke the resulting authority.
-        if (!(await lockOwnedNonRevokedDelegationAgent(request.params.id, sub, client))) {
+        const lockedAgent = await lockOwnedNonRevokedDelegationAgent(request.params.id, sub, client)
+        if (!lockedAgent) {
           await client.query('ROLLBACK')
-          return reply.code(409).send({ error: 'Revoked agents cannot receive new budget delegations' })
+          return reply.code(409).send({ error: 'Agent cannot receive a budget while its account or re-key is unavailable' })
+        }
+        const currentDelegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
+          ownerAddress: lockedAgent.delegate_address as Address,
+        })
+        if (
+          typeof signed.delegate !== 'string' ||
+          signed.delegate.toLowerCase() !== currentDelegateAccountAddress.toLowerCase()
+        ) {
+          await client.query('ROLLBACK')
+          return reply.code(409).send({ error: 'Delegation was built for a previous delegate key' })
+        }
+        const activated = await client.query<{ id: string }>(
+          `UPDATE agent_delegations
+           SET status = 'active', delegation_json = $1, updated_at = NOW()
+           WHERE id = $2 AND status = 'pending'
+           RETURNING id`,
+          [JSON.stringify(signed), pending.id],
+        )
+        if (activated.rows.length !== 1) {
+          await client.query('ROLLBACK')
+          return reply.code(409).send({ error: 'Delegation is no longer pending' })
         }
         await client.query(
           `UPDATE agent_delegations SET status = 'replaced', updated_at = NOW()
@@ -421,12 +443,6 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
              AND recipient_address IS NOT DISTINCT FROM $3
              AND status = 'active'`,
           [request.params.id, pending.token_address, pending.recipient_address],
-        )
-        await client.query(
-          `UPDATE agent_delegations
-           SET status = 'active', delegation_json = $1, updated_at = NOW()
-           WHERE id = $2`,
-          [JSON.stringify(signed), pending.id],
         )
         // #1069: on the delegation rail the OWNER'S GRANT SIGNATURE is the
         // approval — there is no AllowanceModule wallet-approval step to flip

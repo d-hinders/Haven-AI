@@ -89,6 +89,7 @@ const sqlCalls = () => mockQuery.mock.calls.map((c) => ({ sql: String(c[0]), par
 const findCall = (re: RegExp) => sqlCalls().find((c) => re.test(c.sql))
 
 const AUTH_ROUTE: DbRoute = [/api_key_hash = \$1/, () => ({ rows: [AGENT] })]
+const BOUND_AGENT_ROUTE: DbRoute = [/FOR UPDATE OF a/, () => ({ rows: [{ safe_address: SAFE }] })]
 
 /** Sweep routes: the prepared-row read (optionally different after a lost claim) + the claim CAS. */
 function sweepRoutes(opts: {
@@ -99,6 +100,7 @@ function sweepRoutes(opts: {
   let reads = 0
   return [
     AUTH_ROUTE,
+    BOUND_AGENT_ROUTE,
     [/SET status = 'submitting'/, () => ({ rows: opts.claimWins ? [{ id: 'sweep-id' }] : [] })],
     [/FROM delegate_sweeps/, () => {
       reads += 1
@@ -152,7 +154,7 @@ describe('machine payment sweep routes', () => {
     })
 
     it('builds an authorization and binding when funds are stranded above the floor', async () => {
-      primeDb(AUTH_ROUTE)
+      primeDb(AUTH_ROUTE, BOUND_AGENT_ROUTE)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(2_000_000n) // 2 USDC ≥ 0.01 floor
       sweepMocks.buildSweepAuthorization.mockReturnValueOnce(AUTHZ)
       const expectedAuth = { version: 1, message: 'm', signature: '0xaa', signer: ATTACKER }
@@ -169,7 +171,7 @@ describe('machine payment sweep routes', () => {
     })
 
     it('builds an authorization when the balance is exactly the 0.01 USDC floor', async () => {
-      primeDb(AUTH_ROUTE)
+      primeDb(AUTH_ROUTE, BOUND_AGENT_ROUTE)
       allowanceMocks.getTokenBalance.mockResolvedValue(10_000n)
       sweepMocks.buildSweepAuthorization.mockReturnValueOnce({ ...AUTHZ, value: '10000' })
       sweepMocks.signSweepExpectedContext.mockResolvedValue({ version: 1 })
@@ -187,7 +189,7 @@ describe('machine payment sweep routes', () => {
       // reconciliation: agent.safe_address is the treasury Hybrid for
       // delegator accounts, and the route must stay rail-agnostic.
       const TREASURY_HYBRID = '0x' + '77'.repeat(20)
-      primeDb([
+      const treasuryAuthRoute: DbRoute = [
         /api_key_hash = \$1/,
         () => ({
           rows: [{
@@ -198,7 +200,12 @@ describe('machine payment sweep routes', () => {
             chain_id: 84532,
           }],
         }),
-      ])
+      ]
+      const treasuryBindingRoute: DbRoute = [
+        /FOR UPDATE OF a/,
+        () => ({ rows: [{ safe_address: TREASURY_HYBRID }] }),
+      ]
+      primeDb(treasuryAuthRoute, treasuryBindingRoute)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(2_000_000n)
       sweepMocks.buildSweepAuthorization.mockReturnValueOnce({ ...AUTHZ, to: TREASURY_HYBRID, chainId: 84532 })
       sweepMocks.signSweepExpectedContext.mockResolvedValueOnce('0xsigned')

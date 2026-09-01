@@ -77,6 +77,12 @@ export function registerAgentLastSeenHook(app: FastifyInstance, db?: QueryableLi
   })
 }
 
+/** Recovery is the one agent-key operation that remains valid after pause/revoke. */
+function isSweepRecoveryRequest(request: FastifyRequest): boolean {
+  const path = request.url.split('?', 1)[0]
+  return path.endsWith('/sweep/prepare') || path.endsWith('/sweep/submit')
+}
+
 // ── Middleware ─────────────────────────────────────────────────────
 
 /**
@@ -142,15 +148,20 @@ export async function agentAuthMiddleware(
     return reply.code(401).send({ error: 'Invalid or revoked API key' })
   }
 
-  // Positive allow-list: only 'active' and 'paused' agents are recognised;
-  // everything else (including 'revoked' and any future status strings) is
-  // rejected. Using an explicit allow-list prevents unknown future statuses
-  // from silently authenticating as active agents.
-  if (row.status === 'revoked' || (row.status !== 'active' && row.status !== 'paused')) {
+  const sweepRecoveryRequest = isSweepRecoveryRequest(request)
+
+  // Positive allow-list: active and paused agents are recognised for normal
+  // agent requests; revoked agents are recognised only by the exact sweep
+  // recovery routes above. Everything else (including future status strings)
+  // is rejected, so an unknown status cannot silently authenticate as active.
+  if (row.status === 'revoked' && !sweepRecoveryRequest) {
+    return reply.code(401).send({ error: 'Invalid or revoked API key' })
+  }
+  if (row.status !== 'active' && row.status !== 'paused' && row.status !== 'revoked') {
     return reply.code(401).send({ error: 'Invalid or revoked API key' })
   }
 
-  if (row.status === 'paused') {
+  if (row.status === 'paused' && !sweepRecoveryRequest) {
     return reply.code(403).send({
       error: 'agent_paused',
       detail:

@@ -609,7 +609,7 @@ export type paths = {
         post?: never;
         /**
          * Unlink a Safe from the Haven account.
-         * @description Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one.
+         * @description Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one. Unlinking is refused while an agent has a pending or active budget delegation or an in-flight recovery.
          */
         delete: operations["unlinkUserSafe"];
         options?: never;
@@ -6915,6 +6915,21 @@ export interface operations {
             };
             /** @description Error response */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The Safe remains linked while a delegation or recovery is in progress. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

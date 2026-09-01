@@ -188,6 +188,7 @@ import {
   GET_MERCHANT_RECEIPT_SQL,
   INSERT_MERCHANT_RECEIPT_SQL,
   INSERT_PREPARED_SWEEP_SQL,
+  LOCK_AGENT_SAFE_BINDING_SQL,
   INSERT_RESIDUE_EVENT_SQL,
   LIST_EVIDENCE_RECEIPTS_SQL,
   MARK_SWEEP_FAILED_SQL,
@@ -211,6 +212,9 @@ import {
   FIND_OLDEST_SAFE_FOR_USER_SQL,
   FIND_OWNED_SAFE_ADDRESS_SQL,
   FIND_OWNED_SAFE_DEFAULT_FLAG_SQL,
+  HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL,
+  HAS_OPEN_SWEEPS_FOR_SAFE_SQL,
+  LOCK_AGENTS_FOR_SAFE_SQL,
   LIST_SAFES_FOR_USER_SQL,
   LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL,
   ORPHAN_AGENTS_FOR_SAFE_SQL,
@@ -356,6 +360,9 @@ const QUERIES: SmokeQuery[] = [
   { name: 'user-safes: rename (tenant-scoped)', sql: RENAME_SAFE_FOR_USER_SQL },
   { name: 'user-safes: clear defaults in set-default tx', sql: CLEAR_DEFAULT_SAFES_FOR_USER_SQL },
   { name: 'user-safes: set default in set-default tx', sql: SET_SAFE_DEFAULT_SQL },
+  { name: 'user-safes: lock bound agents before unlink', sql: LOCK_AGENTS_FOR_SAFE_SQL },
+  { name: 'user-safes: live delegation guard before unlink', sql: HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL },
+  { name: 'user-safes: open recovery guard before unlink', sql: HAS_OPEN_SWEEPS_FOR_SAFE_SQL },
   { name: 'user-safes: orphan agents in delete tx', sql: ORPHAN_AGENTS_FOR_SAFE_SQL },
   { name: 'user-safes: orphan self-sign agents in delete tx (RESTRICT FK)', sql: ORPHAN_SELF_SIGN_AGENTS_FOR_SAFE_SQL },
   { name: 'user-safes: delete row', sql: DELETE_USER_SAFE_SQL },
@@ -419,6 +426,7 @@ const QUERIES: SmokeQuery[] = [
     name: 'auth: agent lookup by API key (chain_id fallback, #990)',
     sql: AGENT_BY_API_KEY_SQL,
   },
+  { name: 'delegate-sweeps: lock agent binding before prepare/submit', sql: LOCK_AGENT_SAFE_BINDING_SQL },
   {
     // IMPORTED since #999 — the pasted copy had drifted (it still selected
     // `a.session_permission_id`, which the real query dropped), which is

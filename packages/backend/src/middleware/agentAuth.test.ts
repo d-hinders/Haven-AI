@@ -15,6 +15,8 @@ vi.mock('../db.js', () => ({
 function buildApp() {
   const app = Fastify({ logger: false })
   app.get('/payment-tool', { preHandler: agentAuthMiddleware }, async () => ({ ok: true }))
+  app.post('/machine-payments/sweep/prepare', { preHandler: agentAuthMiddleware }, async () => ({ ok: true }))
+  app.post('/machine-payments/sweep/submit', { preHandler: agentAuthMiddleware }, async () => ({ ok: true }))
   return app
 }
 
@@ -106,6 +108,27 @@ describe('agentAuthMiddleware', () => {
       })
       expect(response.statusCode, status).toBe(401)
       expect(response.json().error).toBe('Invalid or revoked API key')
+      await app.close()
+    }
+  })
+
+  it('allows paused and revoked keys only for sweep recovery routes', async () => {
+    for (const status of ['paused', 'revoked']) {
+      const app = buildApp()
+      mockQuery.mockImplementation(async () => ({
+        rows: [{
+          id: 'agent-1', user_id: 'user-1', name: 'A',
+          delegate_address: '0x1111111111111111111111111111111111111111',
+          safe_address: '0x2222222222222222222222222222222222222222',
+          chain_id: 100, status,
+        }],
+      }))
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/sweep/prepare',
+        headers: { authorization: `Bearer sk_agent_${status}` },
+      })
+      expect(response.statusCode, status).toBe(200)
       await app.close()
     }
   })

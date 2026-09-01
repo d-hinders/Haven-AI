@@ -13,7 +13,7 @@
 import pool from '../../db.js'
 import { withTransaction, type Executor } from '../transaction.js'
 import type { RekeyStage } from '../../modules/agents/index.js'
-import { lockOwnedNonRevokedDelegationAgent } from './agents.js'
+import { lockOwnedAgentForRekeyDelegation } from './agents.js'
 
 export interface AgentRekeyRow {
   id: string
@@ -189,7 +189,7 @@ export async function insertRekeyDelegation(
     // lock through the insert makes the race deterministic: either the
     // pending replacement exists and unlink refuses, or the unlinked agent
     // fails the delegation-rail eligibility check and no row is created.
-    if (!(await lockOwnedNonRevokedDelegationAgent(row.agentId, row.userId, tx))) return false
+    if (!(await lockOwnedAgentForRekeyDelegation(row.agentId, row.userId, tx))) return false
     await tx.query(INSERT_REKEY_DELEGATION_SQL, [
       row.agentId,
       row.chainId,
@@ -226,14 +226,16 @@ export async function listPendingRekeyDelegations(
 
 export const ACTIVATE_REKEY_DELEGATION_SQL = `UPDATE agent_delegations
           SET status = 'active', delegation_json = $1, updated_at = NOW()
-        WHERE id = $2`
+        WHERE id = $2 AND status = 'pending'
+        RETURNING id`
 
 export async function activateRekeyDelegation(
   delegationId: string,
   signedDelegationJson: string,
   db: Executor = pool,
-): Promise<void> {
-  await db.query(ACTIVATE_REKEY_DELEGATION_SQL, [signedDelegationJson, delegationId])
+): Promise<boolean> {
+  const result = await db.query<{ id: string }>(ACTIVATE_REKEY_DELEGATION_SQL, [signedDelegationJson, delegationId])
+  return result.rows.length === 1
 }
 
 export const INSERT_REKEY_SQL = `INSERT INTO agent_rekeys
@@ -607,13 +609,19 @@ export async function completeRekey(
   db: Executor = pool,
 ): Promise<{ superseded: string[]; invalidatedIntents: string[] }> {
   return withTransaction(db, async (tx) => {
+    if (!(await lockOwnedAgentForRekeyDelegation(input.agentId, input.userId, tx))) {
+      throw new Error('re-key agent is no longer linked to a delegation account')
+    }
+
     // Retire any grant still ACTIVE in a slot this re-key is about to fill,
     // excluding this re-key's OWN rows — a carry and its steady partner share
     // a slot by construction and must not retire each other (#1698 review).
     const superseded = await replaceSupersededSiblings(input.agentId, input.rekeyId, tx)
 
     for (const row of input.signedDelegations) {
-      await activateRekeyDelegation(row.id, row.delegationJson, tx)
+      if (!(await activateRekeyDelegation(row.id, row.delegationJson, tx))) {
+        throw new Error('replacement delegation is no longer pending')
+      }
     }
 
     // Both halves of the credential set retire together (#1694): the delegate

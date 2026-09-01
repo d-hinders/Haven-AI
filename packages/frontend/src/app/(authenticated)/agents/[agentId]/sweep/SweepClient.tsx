@@ -1,12 +1,13 @@
 'use client'
 
-import { Check, ChevronLeft, Copy } from 'lucide-react'
+import { ChevronLeft } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import type { ApiSchema } from '@haven_ai/core'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useAgents } from '@/hooks/useAgents'
@@ -14,32 +15,6 @@ import { resolveChainOrNull } from '@/lib/chains'
 import { usdcSweepStatus } from '@/lib/sweep-eligibility'
 
 type DelegateBalance = ApiSchema<'DelegateBalance'>
-
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-
-  const copy = useCallback(async () => {
-    await navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }, [text])
-
-  return (
-    <Button type="button" variant="tertiary" size="sm" onClick={copy} aria-label="Copy recovery tool name">
-      {copied ? (
-        <>
-          <Icon icon={Check} className="h-3 w-3 text-[var(--v2-success)]" />
-          Copied
-        </>
-      ) : (
-        <>
-          <Icon icon={Copy} className="h-3 w-3" />
-          Copy
-        </>
-      )}
-    </Button>
-  )
-}
 
 export default function SweepClient({ agentId }: { agentId: string }) {
   const { agents } = useAgents()
@@ -240,7 +215,7 @@ export default function SweepClient({ agentId }: { agentId: string }) {
               <div className="rounded-lg bg-[var(--v2-surface-2)] px-4 py-3">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-medium text-[var(--v2-ink-3)]">MCP tool call</span>
-                  <CopyButton text={sweepCommand} />
+                  <CopyButton value={sweepCommand} label="recovery tool name" />
                 </div>
                 <code className="text-sm text-[var(--v2-ink)] font-mono">{sweepCommand}</code>
               </div>

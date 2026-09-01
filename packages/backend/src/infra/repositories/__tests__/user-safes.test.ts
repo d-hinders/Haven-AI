@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   FIND_OLDEST_SAFE_FOR_USER_SQL,
   HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL,
+  HAS_OPEN_SWEEPS_FOR_SAFE_SQL,
   LOCK_AGENTS_FOR_SAFE_SQL,
   FIND_OWNED_SAFE_ADDRESS_SQL,
   FIND_OWNED_SAFE_DEFAULT_FLAG_SQL,
@@ -141,6 +142,24 @@ describe('transaction functions keep their statement order and scope', () => {
     expect(calls.map(([sql]) => sql)).toEqual([
       LOCK_AGENTS_FOR_SAFE_SQL,
       HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL,
+    ])
+  })
+
+  it('deleteSafeForUser: keeps a Safe linked while recovery is prepared or submitting', async () => {
+    const calls: string[] = []
+    const db = {
+      query: async (sql: string) => {
+        calls.push(sql)
+        if (sql === HAS_OPEN_SWEEPS_FOR_SAFE_SQL) return { rows: [{ open: true }], rowCount: 1 }
+        return { rows: [], rowCount: 0 }
+      },
+    } as unknown as Executor
+
+    expect(await deleteSafeForUser('safe-1', OWNER, false, db)).toBe(false)
+    expect(calls).toEqual([
+      LOCK_AGENTS_FOR_SAFE_SQL,
+      HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL,
+      HAS_OPEN_SWEEPS_FOR_SAFE_SQL,
     ])
   })
 })

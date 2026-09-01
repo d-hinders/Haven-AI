@@ -15,7 +15,8 @@
  * - Deleting a Safe must orphan `self_sign_agents` rows BEFORE the delete —
  *   their RESTRICT foreign key otherwise blocks it (see the delete test).
  * - Deleting a Safe must not orphan an agent with a pending or active budget
- *   delegation; the transaction locks bound agent rows before checking this.
+ *   delegation or an in-flight sweep; the transaction locks bound agent rows
+ *   before checking this.
  * - The legacy `users.safe_address` column mirrors the default Safe; every
  *   default-pointer change keeps it in sync.
  *
@@ -203,6 +204,14 @@ export const HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL = `SELECT EXISTS (
            AND ad.status IN ('pending', 'active')
        ) AS live`
 
+export const HAS_OPEN_SWEEPS_FOR_SAFE_SQL = `SELECT EXISTS (
+         SELECT 1
+         FROM delegate_sweeps ds
+         JOIN agents a ON a.id = ds.agent_id
+         WHERE a.safe_id = $1 AND a.user_id = $2 AND ds.user_id = $2
+           AND ds.status IN ('prepared', 'submitting')
+       ) AS open`
+
 export const FIND_OLDEST_SAFE_FOR_USER_SQL = `SELECT id, safe_address FROM user_safes
              WHERE user_id = $1
              ORDER BY created_at ASC
@@ -220,7 +229,7 @@ export const CLEAR_LEGACY_USER_SAFE_ADDRESS_SQL = `UPDATE users SET safe_address
  * deleted Safe was the default (`wasDefault`, read by the caller's ownership
  * check) — promote the oldest remaining Safe and re-point the legacy mirror,
  * or clear the mirror when none remain. Returning false means the Safe was
- * kept intact because a delegation is still pending or active.
+ * kept intact because a delegation or recovery sweep is still in flight.
  */
 export async function deleteSafeForUser(
   safeId: string,
@@ -232,6 +241,8 @@ export async function deleteSafeForUser(
     await tx.query(LOCK_AGENTS_FOR_SAFE_SQL, [safeId, userId])
     const live = await tx.query<{ live: boolean }>(HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL, [safeId, userId])
     if (live.rows[0]?.live === true) return false
+    const openSweep = await tx.query<{ open: boolean }>(HAS_OPEN_SWEEPS_FOR_SAFE_SQL, [safeId, userId])
+    if (openSweep.rows[0]?.open === true) return false
 
     await tx.query(ORPHAN_AGENTS_FOR_SAFE_SQL, [safeId])
     await tx.query(ORPHAN_SELF_SIGN_AGENTS_FOR_SAFE_SQL, [safeId])

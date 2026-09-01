@@ -122,6 +122,35 @@ export async function lockOwnedNonRevokedDelegationAgent(
   agentId: string,
   userId: string,
   db: Executor,
+): Promise<{ delegate_address: string } | null> {
+  const result = await db.query<{ id: string; delegate_address: string | null }>(
+    `SELECT id, delegate_address FROM agents
+     WHERE id = $1 AND user_id = $2 AND status <> 'revoked'
+       AND EXISTS (
+         SELECT 1 FROM user_safes us
+         WHERE us.id = agents.safe_id AND us.account_type = 'delegator_hybrid'
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM agent_rekeys ar
+         WHERE ar.agent_id = agents.id
+           AND ar.stage IN ('preflight', 'revoked', 'metered', 'issued')
+       )
+     FOR UPDATE`,
+    [agentId, userId],
+  )
+  const row = result.rows[0]
+  return row?.delegate_address ? { delegate_address: row.delegate_address } : null
+}
+
+/**
+ * Locks a delegation agent for a re-key replacement grant. It is deliberately
+ * separate from the normal grant lock: normal grants are refused while a
+ * re-key is in flight, while the re-key's own replacement grants must pass.
+ */
+export async function lockOwnedAgentForRekeyDelegation(
+  agentId: string,
+  userId: string,
+  db: Executor,
 ): Promise<boolean> {
   const result = await db.query(
     `SELECT id FROM agents
@@ -129,6 +158,11 @@ export async function lockOwnedNonRevokedDelegationAgent(
        AND EXISTS (
          SELECT 1 FROM user_safes us
          WHERE us.id = agents.safe_id AND us.account_type = 'delegator_hybrid'
+       )
+       AND EXISTS (
+         SELECT 1 FROM agent_rekeys ar
+         WHERE ar.agent_id = agents.id
+           AND ar.stage IN ('preflight', 'revoked', 'metered', 'issued')
        )
      FOR UPDATE`,
     [agentId, userId],

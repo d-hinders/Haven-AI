@@ -2773,6 +2773,44 @@ export const SCENARIOS = {
       await shoot(main, 'account')
     },
   },
+  'retired-rail-agent': {
+    description:
+      'Legacy Safe agent list and archived detail with read-only retirement copy and restore action (#2258)',
+    api(apiPath) {
+      if (apiPath === '/agents') {
+        return {
+          agents: FIXTURE_AGENTS.map((agent) =>
+            agent.id === 'agent-ops'
+              ? { ...agent, archived_at: '2026-08-28T10:00:00.000Z' }
+              : agent,
+          ),
+        }
+      }
+      if (apiPath.startsWith('/agent-activity/')) return { activity: [] }
+      if (apiPath.startsWith('/agents/agent-ops/passport')) return { passport: null, standing: null }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText('Ops agent', { exact: true }).waitFor({ timeout: 20_000 })
+      await page.getByText('Removed', { exact: true }).waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main'), 'list')
+
+      await page.goto(`${BASE_URL}/agents/agent-ops`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const main = page.locator('main')
+      await main.waitFor({ timeout: 30_000 })
+      await page.getByRole('heading', { name: 'Ops agent' }).waitFor({ timeout: 20_000 })
+      await page.getByText(/Haven no longer sends payments from this account/i).waitFor({ timeout: 20_000 })
+      await page.getByRole('button', { name: 'Restore to list' }).waitFor({ timeout: 20_000 })
+      await refuseIfPresent(
+        page.getByRole('button', { name: 'Unlink agent', exact: true }),
+        'retired-rail-agent · Unlink button on archived detail',
+      )
+      await shoot(main, 'detail')
+    },
+  },
   'retired-rail-recovery': sweepRecoveryScenario(
     'Recover funds route with an eligible USDC balance and full agent/network/destination context (#2258)',
     undefined,

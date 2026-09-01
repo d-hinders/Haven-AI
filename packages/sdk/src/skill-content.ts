@@ -167,9 +167,11 @@ payment id, instead of paying again.
 result, never a catalog price. \`haven_discover_tools\` prices are indicative
 (\`price_is_indicative\`) and can be stale. A read-only quote is informational
 only and does not reserve a price; the later paid call re-quotes and enforces
-the cap. The pay-tool result's \`amount\` / \`amount_atomic\` is the amount
-Haven authorizes for that call — a ceiling the merchant settles at or below —
-so present it as the most the user will pay.
+the cap. The pay-tool result's \`amount\` / \`amount_atomic\` is the merchant's
+own quoted price for that call — a ceiling the merchant settles at or below —
+so present it as the most the user will pay. It is a price, not an approval:
+the payment goes through only if it also fits the cap you set and the on-chain
+budget the user signed, which is enforced on-chain rather than by Haven.
 
 **Status:** \`mcp__haven__haven_get_payment_status\` with a \`payment_id\` to
 check on in-flight payments. Do not poll in a tight loop.

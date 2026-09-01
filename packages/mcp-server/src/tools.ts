@@ -3008,10 +3008,18 @@ function wrongTool(code: string, message: string, suggested_tool?: string): Tool
 }
 
 /**
- * Pre-funding price guard. `authorizedAtomic` is the amount Haven would
- * authorize for the call — the ceiling the merchant can settle at
- * (`maxAmountRequired ?? amount`), i.e. the user's worst-case spend, which is
- * the right figure to cap. Throws a typed PRICE_EXCEEDS_MAX (preserved by
+ * Pre-funding price guard. `authorizedAtomic` is the MERCHANT's own quoted
+ * ceiling for the call — `maxAmountRequired ?? amount`, read straight off the
+ * merchant's 402 response by the SDK's `x402AuthorizationAmount`
+ * (`packages/sdk/src/x402.ts`). **Haven authorizes nothing here** (#2334,
+ * #2347): the figure is what the merchant may settle up to, i.e. the user's
+ * worst-case spend, which is the right figure to cap. "Authorization" in this
+ * function's names is the x402/EIP-3009 FUNDING LEG the amount travels into,
+ * never a grant of spend authority — that comes only from the owner-signed
+ * `erc20PeriodTransfer` delegation (`rails/delegation-policy.ts`, built
+ * unsigned and signed by the account owner) and the on-chain
+ * `ERC20PeriodTransferEnforcer` caveat it is redeemed under.
+ * Throws a typed PRICE_EXCEEDS_MAX (preserved by
  * normalizeError) when it exceeds the agent's cap, so the call fails
  * BEFORE any funding transfer. The on-chain allowance is still the hard gate;
  * this is an extra agent affordance against surprise overcharges within budget.
@@ -3283,7 +3291,7 @@ function requireSettleableSelection(
             'settle erc7710. No payment intent was created and no funds moved. Tell the user: ' +
             'paying this merchant needs the agent re-onboarded on the delegation rail.'
           : "This agent's account rail could not be read from Haven, so Haven refuses rather " +
-            'than authorize on a guess. No payment intent was created and no funds moved. ' +
+            'than proceed on a guess. No payment intent was created and no funds moved. ' +
             'Retry when haven_get_agent succeeds.'),
       statusCode: 403,
       nextAction: AgentPaymentNextAction.StopAndTellUser,

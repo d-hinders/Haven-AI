@@ -174,12 +174,18 @@ reasons, and none was fixed in that PR:
   antidote in this system — `scripts/ci/money-path.test.mjs` pins
   `casp-risk-guardrails.md`'s `covers:` against `.github/money-path-globs.json`,
   an *independent* list, so that one doc cannot silently narrow its own scope.
-  **The pin is one-directional and that is the whole of what it buys:** it is a
-  FLOOR, asserting every money-path glob is matched by something in `covers:`;
-  there is no assertion in the other direction, so an unrelated entry ADDED to
-  `covers:` is checked by nothing (measured — appending a marketing-page glob to
-  `covers:` leaves all 10 tests green). Nothing pins any other doc's `covers:`
-  in either direction.
+  **Be exact about what that pin asserts, because it is narrower than its
+  reputation** (counted against the JSON and the test, not inferred): it is a
+  one-directional FLOOR over **30 of the 46 globs** — every entry in the runtime
+  `globs` list (32) except the two its own `EXEMPT` map carves out
+  (`infra/chain/**`, `infra/repositories/**`, both deferred to the doc owner
+  under #1899), and **none of the 14 `controlGlobs`**, which the test
+  deliberately leaves out as CI configuration the doc reasons about
+  individually. Within that set it asserts every matched tracked file is also
+  matched by some `covers:` glob. There is **no** assertion in the other
+  direction, so an unrelated entry ADDED to `covers:` is checked by nothing —
+  measured by appending a marketing-page glob and watching all 10 tests stay
+  green. Nothing pins any other doc's `covers:` in either direction.
 - **The `last-verified` chain check** (`chain-integrity.mjs`) — the strongest
   remaining instance. `checkChain` verifies **containment** (every issue
   reference in the prior line survives into the new one) and nothing whatsoever

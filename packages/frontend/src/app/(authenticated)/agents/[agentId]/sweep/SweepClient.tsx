@@ -49,10 +49,32 @@ export default function SweepClient({ agentId }: { agentId: string }) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    api.get<DelegateBalance>(`/agents/${agentId}/delegate-balance`)
-      .then(setBalance)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load delegate balance.'))
-      .finally(() => setLoading(false))
+    // Clear the previous agent's result before starting the next request, and
+    // ignore late responses from a superseded route. Without both guards a
+    // client-side navigation can briefly show (or permanently retain) one
+    // agent's balance under another agent's name and destination.
+    setBalance(null)
+    setError(null)
+    setLoading(true)
+    let ignore = false
+
+    api
+      .get<DelegateBalance>(`/agents/${agentId}/delegate-balance`)
+      .then((data) => {
+        if (!ignore) setBalance(data)
+      })
+      .catch((err) => {
+        if (!ignore) {
+          setError(err instanceof Error ? err.message : 'Could not load delegate balance.')
+        }
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false)
+      })
+
+    return () => {
+      ignore = true
+    }
   }, [agentId])
 
   const usdcStatus = balance ? usdcSweepStatus(balance) : 'none'

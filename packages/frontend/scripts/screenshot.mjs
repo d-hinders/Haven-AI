@@ -1812,6 +1812,35 @@ function setBackupRecoveryStage(next) {
   backupRecoveryStage = next
 }
 
+/**
+ * Recovery-route evidence for the four balance outcomes (#2258). The shared
+ * fixture supplies the recoverable state; the other scenarios override only
+ * the delegate-balance response so each rendered branch is reachable without
+ * stubbing component state.
+ */
+function sweepRecoveryScenario(description, response, marker) {
+  return {
+    description,
+    api(apiPath) {
+      if (apiPath === `/agents/${FIXTURE_AGENTS[0].id}/delegate-balance`) return response
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents/${FIXTURE_AGENTS[0].id}/sweep`, {
+        waitUntil: 'networkidle',
+        timeout: 60_000,
+      })
+      await dismissMobileSidebar(page, vp)
+
+      const main = page.locator('main')
+      await main.waitFor({ timeout: 30_000 })
+      await page.getByRole('heading', { name: 'Recover funds' }).waitFor({ timeout: 20_000 })
+      await page.getByText(marker, { exact: true }).waitFor({ timeout: 20_000 })
+      await shoot(main, 'state')
+    },
+  }
+}
+
 // On-chain AllowanceModule fixtures were removed with the retired legacy
 // dashboard surfaces. The screenshot registry below only drives API-backed
 // and browser-visible states that remain supported.
@@ -2714,6 +2743,33 @@ export const SCENARIOS = {
       await shoot(main, 'account')
     },
   },
+  'retired-rail-recovery': sweepRecoveryScenario(
+    'Recover funds route with an eligible USDC balance and full agent/network/destination context (#2258)',
+    undefined,
+    'Recoverable balance',
+  ),
+  'retired-rail-recovery-below-minimum': sweepRecoveryScenario(
+    'Recover funds route with USDC below the configured recovery minimum and no recovery action (#2258)',
+    {
+      ...FIXTURE_DELEGATE_BALANCES['agent-research'],
+      usdc: '0.005',
+      usdc_atomic: '5000',
+    },
+    'Recovery minimum not met',
+  ),
+  'retired-rail-recovery-unknown': sweepRecoveryScenario(
+    'Recover funds route with an unverified recovery minimum and no recovery action (#2258)',
+    {
+      ...FIXTURE_DELEGATE_BALANCES['agent-research'],
+      sweep_min_usdc: 'not-a-number',
+    },
+    'Recovery minimum could not be verified',
+  ),
+  'retired-rail-recovery-error': sweepRecoveryScenario(
+    'Recover funds route when the delegate balance request fails (#2258)',
+    httpError(503, { error: 'Screenshot fixture: delegate balance unavailable' }),
+    'Could not load balance',
+  ),
   'connect-agent-approved': {
     description: 'Connect agent modal, step 4, the APPROVED ending (#1394)',
     // Separate scenario rather than a stage of `connect-agent`: that one pins

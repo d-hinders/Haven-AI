@@ -510,7 +510,7 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
 
 const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
   summary:
-    'Fast-path final step of the x402 MCP purchase: fund and settle in one call — relay the funding signature, then deliver the merchant payment header (both x402 wire names) and return the merchant tool result.',
+    'Fast-path final step of the x402 MCP purchase: fund and settle in one call — relay the funding signature, then deliver the merchant payment header and return the merchant tool result.',
   behavior:
     'Pass payment_id, signature, and (EIP-3009 shape only) payment_header; merchant/tool fields are optional — rehydrated by payment_id. If funding does not confirm it returns { payment_id, settled: false, funding_status } without contacting the merchant. Echoes payment_id on every outcome for reconciliation via haven_list_receipts / haven_get_payment_status. ' +
     'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING — stranded funds, recover with haven_sweep_delegate.',
@@ -536,7 +536,7 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'alongside the signature — it is a one-shot that spends its own binding building that',
   'header, so do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
   'signature via haven_submit, then retry the merchant YOURSELF with that payment_header,',
-  'setting BOTH PAYMENT-SIGNATURE (v2) and X-PAYMENT (v1) to it.',
+  'setting PAYMENT-SIGNATURE (v2); X-PAYMENT (v1) unless erc7710.',
   'Haven never talks to this merchant and never holds the key. The header is built before funding',
   'confirms, so its validity window starts at signing: retry promptly, and on',
   'PAYMENT_WINDOW_EXPIRED re-run this tool with the same idempotency_key.',
@@ -931,8 +931,9 @@ export function createToolHandlers(
               nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
               safeToContinue: true,
               reason:
-                'Retry the ORIGINAL merchant request yourself, setting BOTH PAYMENT-SIGNATURE ' +
-                '(x402 v2) and X-PAYMENT (v1) to this payment_header. Do NOT call ' +
+                'Retry the ORIGINAL merchant request yourself, setting PAYMENT-SIGNATURE ' +
+                '(x402 v2) to this payment_header, and ONLY that header name on this scheme. ' +
+                'Do NOT call ' +
                 'haven_x402_sign_header: on this scheme Haven ' +
                 'assembled the header, there is nothing to build locally, and there is no funding ' +
                 'transaction to wait for or sweep — the merchant pulls from the treasury directly. ' +
@@ -1984,8 +1985,8 @@ export function createToolHandlers(
                   "fetches the settlement child itself and verifies its caveats against Haven's " +
                   'signed context (#1455) before signing. Then call haven_submit with ' +
                   "settlement_scheme: 'erc7710' to receive the merchant payment_header, and retry " +
-                  'the original merchant request yourself, setting BOTH PAYMENT-SIGNATURE ' +
-                  '(x402 v2) and X-PAYMENT (v1) to it. Do NOT call ' +
+                  'the original merchant request yourself, setting PAYMENT-SIGNATURE ' +
+                  '(x402 v2) to it and ONLY that name on this scheme. Do NOT call ' +
                   'haven_x402_sign_header: on this scheme Haven assembles the header and there is ' +
                   'no funding transaction to wait for.',
                 summary: {

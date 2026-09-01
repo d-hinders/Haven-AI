@@ -148,9 +148,11 @@ export const x402Erc7710Settle: Scenario = {
       method: 'POST',
       headers: {
         ...MCP_HEADERS,
-        // Both wire names, as a real agent must (#2330).
+        // erc7710 is always x402 v2, and its header carries a whole
+        // delegation chain — sending the v1 alias too pushed the request
+        // past the merchant's header-size limit (HTTP 431, #2341). v2 name
+        // only here; the EIP-3009 scenarios still send both.
         'PAYMENT-SIGNATURE': settle.data.payment_header,
-        'X-PAYMENT': settle.data.payment_header,
       },
       body: mcpBody(2),
     })

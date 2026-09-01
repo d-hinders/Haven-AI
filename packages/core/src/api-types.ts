@@ -2751,6 +2751,8 @@ export type components = {
             usdc: string;
             usdc_atomic: string;
             usdc_address: string | null;
+            /** @description Minimum USDC balance eligible for gasless delegate recovery in human token units. */
+            sweep_min_usdc: string;
         };
         CreateAgentResponse: components["schemas"]["Agent"] & {
             api_key: string;

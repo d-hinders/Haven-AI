@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
 import type { ApiSchema } from '@haven_ai/core'
+import { usdcSweepStatus } from '@/lib/sweep-eligibility'
 
 /**
  * On-chain USDC + ETH balance of an agent's delegate EOA.
@@ -24,6 +25,8 @@ export interface UseDelegateBalanceResult {
    * nothing.
    */
   hasRecoverableUsdc: boolean
+  /** True when USDC exists but is below the backend's recovery minimum. */
+  hasBelowMinimumUsdc: boolean
   loading: boolean
   refetch: () => Promise<void>
 }
@@ -32,10 +35,10 @@ export interface UseDelegateBalanceResult {
  * Read the live on-chain balance of an agent's delegate wallet.
  *
  * The delegate only ever holds funds transiently during the x402 hot-wallet leg;
- * a non-zero balance here means funds stranded (merchant rejected/expired) and
- * are recoverable. Gating recovery UI on this — rather than on a funded-but-
- * unsettled payment record — means the prompt shows iff there is something to
- * actually recover. Pass `null` while the agent record is unresolved.
+ * a non-zero balance here means funds stranded (merchant rejected/expired).
+ * Recovery UI additionally checks the backend-configured minimum, because a
+ * dust balance cannot be swept by the gasless recovery path. Pass `null` while
+ * the agent record is unresolved.
  */
 export function useDelegateBalance(agentId: string | null): UseDelegateBalanceResult {
   const [balance, setBalance] = useState<DelegateBalance | null>(null)
@@ -85,7 +88,9 @@ export function useDelegateBalance(agentId: string | null): UseDelegateBalanceRe
   const hasStranded = Boolean(
     balance && (balance.usdc_atomic !== '0' || balance.eth_atomic !== '0'),
   )
-  const hasRecoverableUsdc = Boolean(balance && balance.usdc_atomic !== '0')
+  const sweepStatus = balance ? usdcSweepStatus(balance) : 'none'
+  const hasRecoverableUsdc = sweepStatus === 'recoverable'
+  const hasBelowMinimumUsdc = sweepStatus === 'below_minimum'
 
-  return { balance, hasStranded, hasRecoverableUsdc, loading, refetch: fetchData }
+  return { balance, hasStranded, hasRecoverableUsdc, hasBelowMinimumUsdc, loading, refetch: fetchData }
 }

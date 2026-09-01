@@ -429,8 +429,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // #2147 photographed the "Recoverable funds in agent wallet" banner's
       // unsettled-payment copy branch and reported, in the same PR, that the
       // capture did not prove what it looked like it proved: the banner is
-      // gated on `hasRecoverableUsdc` = `Boolean(balance && balance.usdc_atomic
-      // !== '0')` (`hooks/useDelegateBalance.ts:88`), and
+      // gated on `hasRecoverableUsdc`, which checks the configured sweep floor
+      // (`hooks/useDelegateBalance.ts:88-93`), and
       // `/agents/:id/delegate-balance` was UNKEYED — so it fell through to
       // `FIXTURE_EMPTY_FALLBACK`, which has no `usdc_atomic`, and `undefined
       // !== '0'` rendered the banner from a body with no balance in it.
@@ -520,15 +520,15 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       })
 
       it('serves the exact field set the route builds, and nothing else', () => {
-        // `routes/agents.ts:159-167` returns these eight keys; the named
-        // `DelegateBalance` schema (`openapi/spec.ts:6516-6528`) requires all
-        // eight. A missing one is how this bug worked — `usdc_atomic` absent
+        // `routes/agents.ts:159-172` returns these nine keys; the named
+        // `DelegateBalance` schema (`openapi/spec.ts:6516-6534`) requires all
+        // nine. A missing one is how this bug worked — `usdc_atomic` absent
         // reads as "not zero" — and an EXTRA one is a field the generated type
         // does not have, i.e. a shape the frontend could not have been written
         // against.
         const expected = [
           'chain_id', 'delegate_address', 'eth', 'eth_atomic',
-          'safe_address', 'usdc', 'usdc_address', 'usdc_atomic',
+          'safe_address', 'sweep_min_usdc', 'usdc', 'usdc_address', 'usdc_atomic',
         ]
         const served = agentIds()
           .map((id) => [id, balanceFor(id)] as const)
@@ -569,8 +569,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       })
 
       it('renders the AMOUNT-bearing sentence, not the degraded fallback', () => {
-        // `strandedSummary` (`AgentDetailClient.tsx:296-300`) needs
-        // `usdc_atomic !== '0'` AND a truthy `usdc`, or the banner degrades to
+        // `strandedSummary` (`AgentDetailClient.tsx:296-300`) needs a nonzero
+        // atomic amount AND a truthy `usdc`, or the banner degrades to
         // "Recover **it** to your Haven wallet" (#1098 made that deliberate:
         // "Recover undefined USDC" is worse). The real route always returns
         // both as strings, so the degraded branch is what a PARTIAL response
@@ -582,7 +582,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         for (const row of rows) {
           expect([row.id, typeof row.agent_id]).toEqual([row.id, 'string'])
           const body = balanceFor(row.agent_id as string) as { usdc_atomic: string; usdc: string }
-          expect([row.id, body.usdc_atomic !== '0']).toEqual([row.id, true]) // hasRecoverableUsdc
+          expect([row.id, BigInt(body.usdc_atomic) >= BigInt(10000)]).toEqual([row.id, true]) // configured 0.01 USDC floor
           expect([row.id, Boolean(body.usdc)]).toEqual([row.id, true]) // strandedSummary
         }
       })

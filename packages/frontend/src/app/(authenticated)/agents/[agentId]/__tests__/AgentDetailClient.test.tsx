@@ -155,6 +155,7 @@ describe('AgentDetailClient last-activity metadata', () => {
       balance: null,
       hasStranded: false,
       hasRecoverableUsdc: false,
+      hasBelowMinimumUsdc: false,
       loading: false,
       refetch: vi.fn(),
     })
@@ -244,6 +245,7 @@ describe('AgentDetailClient last-activity metadata', () => {
         usdc: '0.04',
         usdc_atomic: '40000',
         usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        sweep_min_usdc: '0.01',
       },
       hasStranded: true,
       hasRecoverableUsdc: true,
@@ -260,6 +262,33 @@ describe('AgentDetailClient last-activity metadata', () => {
     ).toHaveAttribute('href', '/agents/agent-1/sweep')
   })
 
+  it('explains when stranded USDC is below the recovery minimum without offering a sweep', () => {
+    mockUseDelegateBalance.mockReturnValue({
+      balance: {
+        delegate_address: '0x2222222222222222222222222222222222222222',
+        safe_address: SAFE.safe_address,
+        chain_id: 8453,
+        eth: '0',
+        eth_atomic: '0',
+        usdc: '0.005',
+        usdc_atomic: '5000',
+        usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        sweep_min_usdc: '0.01',
+      },
+      hasStranded: true,
+      hasRecoverableUsdc: false,
+      hasBelowMinimumUsdc: true,
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.getByText('Recovery minimum not met')).toBeInTheDocument()
+    expect(screen.getByText(/0\.005 USDC below the 0\.01 USDC recovery minimum/)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Recover funds to your Haven wallet' })).not.toBeInTheDocument()
+  })
+
   it('hides the recover-funds prompt for an ETH-only delegate (gasless path is USDC-only)', () => {
     mockUseDelegateBalance.mockReturnValue({
       balance: {
@@ -271,6 +300,7 @@ describe('AgentDetailClient last-activity metadata', () => {
         usdc: '0',
         usdc_atomic: '0',
         usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        sweep_min_usdc: '0.01',
       },
       hasStranded: true,
       hasRecoverableUsdc: false,
@@ -305,6 +335,7 @@ describe('AgentDetailClient last-activity metadata', () => {
         usdc,
         usdc_atomic: usdcAtomic,
         usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        sweep_min_usdc: '0.01',
       },
       hasStranded: true,
       hasRecoverableUsdc: true,
@@ -656,6 +687,7 @@ describe('AgentDetailClient last-activity metadata', () => {
         usdc: '0.04',
         usdc_atomic: '40000',
         usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        sweep_min_usdc: '0.01',
       },
       hasStranded: true,
       hasRecoverableUsdc: true,

@@ -323,7 +323,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   // mid-x402 → revoke) is the one that needs the recovery banner. Legacy Safe
   // records can also retain a delegate wallet, so the read stays available on
   // every agent detail page; a missing/unsupported delegate degrades silently.
-  const { balance: delegateBalance, hasRecoverableUsdc } = useDelegateBalance(
+  const { balance: delegateBalance, hasRecoverableUsdc, hasBelowMinimumUsdc } = useDelegateBalance(
     agent?.id ?? null,
   )
   // #1098: the human field can be absent while atomic is set (a partial API
@@ -676,6 +676,14 @@ export default function AgentDetailClient({ agentId }: Props) {
                 </Button>
               ) : null}
             </div>
+          </ApprovalRequiredBanner>
+        </div>
+      ) : null}
+
+      {hasBelowMinimumUsdc && delegateBalance ? (
+        <div className="mt-4">
+          <ApprovalRequiredBanner title="Recovery minimum not met" tone="neutral" density="compact">
+            Your agent’s wallet is holding {strandedSummary ?? 'USDC'} below the {delegateBalance.sweep_min_usdc} USDC recovery minimum. More stranded funds can bring the balance up to the minimum.
           </ApprovalRequiredBanner>
         </div>
       ) : null}

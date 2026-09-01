@@ -21,6 +21,7 @@ function balance(overrides: Partial<DelegateBalance> = {}): DelegateBalance {
     usdc: '0',
     usdc_atomic: '0',
     usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    sweep_min_usdc: '0.01',
     ...overrides,
   }
 }
@@ -40,6 +41,15 @@ describe('useDelegateBalance', () => {
     const eth = renderHook(() => useDelegateBalance('agent-eth'))
     await waitFor(() => expect(eth.result.current.hasStranded).toBe(true))
     expect(eth.result.current.hasRecoverableUsdc).toBe(false)
+  })
+
+  it('does not mark USDC below the configured sweep minimum as recoverable', async () => {
+    mockApiGet.mockResolvedValueOnce(balance({ usdc: '0.005', usdc_atomic: '5000' }))
+    const { result } = renderHook(() => useDelegateBalance('agent-dust'))
+
+    await waitFor(() => expect(result.current.hasBelowMinimumUsdc).toBe(true))
+    expect(result.current.hasRecoverableUsdc).toBe(false)
+    expect(result.current.hasStranded).toBe(true)
   })
 
   it('ignores a late response from a superseded agentId', async () => {

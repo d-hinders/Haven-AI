@@ -6243,7 +6243,7 @@ export const openapiSpec = {
        */
       DelegateBalance: {
         type: 'object',
-        required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address'],
+        required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address', 'sweep_min_usdc'],
         properties: {
           delegate_address: { type: 'string' },
           safe_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -6253,6 +6253,10 @@ export const openapiSpec = {
           usdc: { type: 'string' },
           usdc_atomic: { type: 'string' },
           usdc_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          sweep_min_usdc: {
+            type: 'string',
+            description: 'Minimum USDC balance eligible for gasless delegate recovery in human token units.',
+          },
         },
       },
       CreateAgentResponse: {

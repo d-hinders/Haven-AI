@@ -5,20 +5,15 @@ import { Icon } from '@/components/ui/Icon'
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/api'
+import type { ApiSchema } from '@haven_ai/core'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { useAgents } from '@/hooks/useAgents'
+import { resolveChainOrNull } from '@/lib/chains'
+import { usdcSweepStatus } from '@/lib/sweep-eligibility'
 
-interface DelegateBalance {
-  delegate_address: string
-  safe_address: string | null
-  chain_id: number
-  eth: string
-  eth_atomic: string
-  usdc: string
-  usdc_atomic: string
-  usdc_address: string | null
-}
+type DelegateBalance = ApiSchema<'DelegateBalance'>
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -30,10 +25,7 @@ function CopyButton({ text }: { text: string }) {
   }, [text])
 
   return (
-    <button
-      onClick={copy}
-      className="ml-2 inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)] hover:bg-[var(--v2-border)] transition-colors"
-    >
+    <Button type="button" variant="tertiary" size="sm" onClick={copy} aria-label="Copy recovery tool name">
       {copied ? (
         <>
           <Icon icon={Check} className="h-3 w-3 text-[var(--v2-success)]" />
@@ -45,11 +37,13 @@ function CopyButton({ text }: { text: string }) {
           Copy
         </>
       )}
-    </button>
+    </Button>
   )
 }
 
 export default function SweepClient({ agentId }: { agentId: string }) {
+  const { agents } = useAgents()
+  const agent = agents.find((item) => item.id === agentId)
   const [balance, setBalance] = useState<DelegateBalance | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -61,8 +55,14 @@ export default function SweepClient({ agentId }: { agentId: string }) {
       .finally(() => setLoading(false))
   }, [agentId])
 
-  const hasUsdc = balance && balance.usdc_atomic !== '0'
-  const hasEth = balance && balance.eth_atomic !== '0'
+  const usdcStatus = balance ? usdcSweepStatus(balance) : 'none'
+  const hasUsdc = usdcStatus === 'recoverable'
+  const hasEth = Boolean(balance && balance.eth_atomic !== '0')
+  const network = balance
+    ? resolveChainOrNull(balance.chain_id)?.name ?? `Chain ${balance.chain_id}`
+    : null
+  const agentLabel = agent?.name ?? 'Your agent'
+  const destination = balance?.safe_address ?? agent?.safe_address ?? 'Your Haven wallet'
 
   const sweepCommand = `haven_sweep_delegate`
 
@@ -70,7 +70,7 @@ export default function SweepClient({ agentId }: { agentId: string }) {
     <div className="max-w-2xl">
       <PageHeader
         title="Recover funds"
-        subtitle="Move funds left in your agent's wallet back to your Haven wallet."
+        subtitle={network ? `${agentLabel} · ${network}. Move eligible funds back to your Haven wallet.` : "Move eligible funds left in your agent's wallet back to your Haven wallet."}
       />
 
       <div className="mt-1 mb-6">
@@ -96,6 +96,34 @@ export default function SweepClient({ agentId }: { agentId: string }) {
             <p className="mt-1 text-sm text-[var(--v2-ink-3)]">{error}</p>
           </div>
         </Card>
+      ) : usdcStatus === 'below_minimum' && balance ? (
+        <Card>
+          <div className="px-6 py-8 text-center">
+            <p className="text-sm font-medium text-[var(--v2-ink)]">Recovery minimum not met</p>
+            <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+              {agentLabel}&apos;s wallet holds {balance.usdc} USDC on {network ?? `Chain ${balance.chain_id}`}, below the {balance.sweep_min_usdc} USDC recovery minimum. No recovery action is available until the balance reaches the minimum.
+            </p>
+            <div className="mt-4">
+              <Button href={`/agents/${agentId}`} variant="ghost" size="sm">
+                Back to agent
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : usdcStatus === 'unknown' && balance ? (
+        <Card>
+          <div className="px-6 py-8 text-center">
+            <p className="text-sm font-medium text-[var(--v2-ink)]">Recovery minimum could not be verified</p>
+            <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+              We could not verify whether {agentLabel}&apos;s USDC balance is eligible for recovery. No recovery action is available right now.
+            </p>
+            <div className="mt-4">
+              <Button href={`/agents/${agentId}`} variant="ghost" size="sm">
+                Back to agent
+              </Button>
+            </div>
+          </div>
+        </Card>
       ) : !hasUsdc ? (
         <Card>
           <div className="px-6 py-8 text-center">
@@ -117,6 +145,7 @@ export default function SweepClient({ agentId }: { agentId: string }) {
           <Card>
             <div className="px-6 py-5">
               <h2 className="text-sm font-semibold text-[var(--v2-ink)] mb-4">Recoverable balance</h2>
+              <p className="mb-3 text-xs text-[var(--v2-ink-3)]">{agentLabel} · {network ?? `Chain ${balance!.chain_id}`}</p>
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between py-2 border-b border-[var(--v2-border)]">
@@ -126,7 +155,7 @@ export default function SweepClient({ agentId }: { agentId: string }) {
                 <div className="flex items-center justify-between py-2">
                   <span className="text-sm text-[var(--v2-ink-3)]">Goes to your Haven wallet</span>
                   <span className="text-sm text-[var(--v2-ink-2)] font-mono text-right truncate max-w-[240px]">
-                    {balance!.safe_address ?? 'Your Haven wallet'}
+                    {destination}
                   </span>
                 </div>
               </div>
@@ -159,7 +188,7 @@ export default function SweepClient({ agentId }: { agentId: string }) {
               <div className="mt-4 rounded-lg bg-[var(--v2-surface-2)] px-4 py-3">
                 <p className="text-xs font-medium text-[var(--v2-ink-3)] mb-1">Or tell your agent in plain language:</p>
                 <p className="text-sm text-[var(--v2-ink-2)] italic">
-                  &quot;Sweep any stranded funds from the delegate wallet back to my Safe.&quot;
+                  &quot;Sweep any stranded funds from the delegate wallet back to my Haven wallet.&quot;
                 </p>
               </div>
 

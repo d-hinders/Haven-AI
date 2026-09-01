@@ -844,6 +844,7 @@ export const FIXTURE_DELEGATE_BALANCES = {
     usdc: STRANDED_INTENT.amount,
     usdc_atomic: STRANDED_INTENT.amount_raw,
     usdc_address: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,
+    sweep_min_usdc: '0.01',
   },
   // A delegate that holds nothing — the ordinary steady state, and the
   // CONTROL for the row above: `hasRecoverableUsdc` is false here for the
@@ -867,6 +868,7 @@ export const FIXTURE_DELEGATE_BALANCES = {
     usdc: '0',
     usdc_atomic: '0',
     usdc_address: resolveToken(FIXTURE_LEGACY_SAFE.chain_id, 'USDC').address,
+    sweep_min_usdc: '0.01',
   },
   // `agent-retired` has no delegate address, so the route never reaches the
   // balance reads — it answers 422 at `routes/agents.ts:140-142`. Served as a

@@ -526,7 +526,8 @@ export async function updateAgentProfile(
  * Legacy AllowanceModule agents have no rows here, so the NOT EXISTS passes
  * for them. Their Haven-side record may be unlinked at any status because
  * archiving it does not change the old Safe permission; the live delegation
- * rail remains revoke-first.
+ * rail remains revoke-first. The null-safe account predicate includes older
+ * rows whose legacy `account_type` was never backfilled.
  * Crash-window orphans (#1423: disabled on-chain, still `active` here) DO
  * block archiving, correctly: revoke-all heals them, and that is the same
  * remedy this refusal names.
@@ -538,7 +539,8 @@ export const ARCHIVE_AGENT_SQL = `UPDATE agents
            status = 'revoked'
            OR EXISTS (
                SELECT 1 FROM user_safes us
-               WHERE us.id = agents.safe_id AND us.account_type = 'safe'
+               WHERE us.id = agents.safe_id
+                 AND us.account_type IS DISTINCT FROM 'delegator_hybrid'
              )
          )
          AND NOT EXISTS (

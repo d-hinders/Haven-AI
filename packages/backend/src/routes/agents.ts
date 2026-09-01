@@ -17,6 +17,7 @@ import {
 } from '../modules/passport/index.js'
 import { formatTokenValue } from '../domain/tokens.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
+import { config } from '../config.js'
 import {
   agentExistsForUser,
   createAgent,
@@ -164,6 +165,10 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       usdc: formatTokenValue(usdcAtomic.toString(), 6),
       usdc_atomic: usdcAtomic.toString(),
       usdc_address: usdcConfig?.address ?? null,
+      // The UI uses the same configured floor as haven_sweep_delegate. Keep it
+      // on the balance response so recovery eligibility cannot drift between
+      // the read surface and the paid sweep path.
+      sweep_min_usdc: config.sweepMinUsdc,
     }
   })
 

@@ -231,10 +231,11 @@ Haven backend
 > had declared gone), and #2055 dropped the `approval_requests` table itself
 > under the recorded #2021 owner decision.
 > Since #1130 a valid key on a `pending_approval` agent gets a NAMED
-> `403 agent_pending_approval` with the required action, instead of the
-> false `401 Invalid or revoked API key` — the authentication gate stays a
-> positive allow-list (revoked and unknown statuses still 401), the refusal
-> just stopped lying about its cause.
+> `403 agent_pending_approval` with the required action on normal agent API
+> requests, instead of the false `401 Invalid or revoked API key` — the
+> authentication gate stays a positive allow-list (revoked and unknown statuses
+> still 401). The exact sweep-recovery routes are a narrow exception for
+> recovering stranded delegate balances; they grant no spending authority.
 > Since #988 the agents/user-safes data access lives in
 > `infra/repositories/` with tenant scoping as REQUIRED function parameters —
 > the `WHERE user_id = $1` authorization that used to hide in inline route

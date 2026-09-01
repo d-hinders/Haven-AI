@@ -521,7 +521,7 @@ describe('the budget rule itself, against fixtures', () => {
     expect(facts.unbudgeted).toEqual([])
   })
 
-  it("accepts the options-object spelling, it(name, { timeout }, fn)", () => {
+  it('accepts the options-object spelling, it(name, { timeout }, fn)', () => {
     const facts = at(`
       describeDb('x', () => {
         it('a', { timeout: 180_000 }, async () => {

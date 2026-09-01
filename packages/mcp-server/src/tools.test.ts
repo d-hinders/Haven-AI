@@ -2396,7 +2396,12 @@ describe('haven_settle_mcp_tool', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
-        max_amount: '2000000',
+        // #2312 found `max_amount: '2000000'` here. haven_settle_mcp_tool has
+        // never declared it — the cap belongs on the prepare/pay leg, which is
+        // where it is checked against the live quote BEFORE any funding. So
+        // this test spent its life asserting a successful settle while the cap
+        // it thought it had set was being silently stripped. Removed rather
+        // than declared: the settle leg genuinely takes no cap.
         payment_header: VALID_PAYMENT_HEADER,
       }),
     )
@@ -3324,7 +3329,12 @@ describe('mcp_transport shape is refused loudly (#2282)', () => {
 
       const payload = await createToolHandlers(haven)[tool]({
         payment_id: 'pay_x402',
-        signature: SIG,
+        // #2312: `signature` is haven_settle_mcp_tool's alone — the settle leg
+        // relays the funding signature, the complete leg does not. This shared
+        // fixture used to send it to BOTH, and the permissive parse dropped it
+        // on the complete side without a word, so the test read as if the two
+        // tools took the same arguments. Sent only where it is declared.
+        ...(tool === 'haven_settle_mcp_tool' ? { signature: SIG } : {}),
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'buy_vpn',
         arguments: { plan: 'legacy' },

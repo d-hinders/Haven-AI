@@ -358,6 +358,136 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   },
 }
 
+// ── Strict input (#2312) ─────────────────────────────────────────────────────
+
+/**
+ * #2312: which hosted tools REFUSE an undeclared argument, and why each one is
+ * on this list rather than the list being "all of them".
+ *
+ * ## What was actually broken, measured
+ *
+ * #2292 added `parseStrict` below and pointed it at `haven_report_x402_outcome`.
+ * That guard **could not fire over the wire.** The MCP SDK validates a tool call
+ * against the registered input schema and hands the handler `parseResult.data`
+ * — the STRIPPED object — before our handler runs
+ * (`@modelcontextprotocol/sdk`'s `McpServer.validateToolInput`). So an undeclared
+ * `tx_hash` was gone by the time `parseStrict` looked for it: measured on
+ * 2026-09-01 by driving a real `InMemoryTransport` client against
+ * `buildHostedMcpServer`, where that exact call returned `success: true` and
+ * WROTE its reconciliation event. `parseStrict`'s own test calls the handler
+ * directly, which is the only place the property held.
+ *
+ * That is the same defect the guard was written to prevent, one layer up: a
+ * check that returns cleanly while being about a different question than its
+ * author thinks. So strictness has to be declared where the SDK enforces it —
+ * at registration (`toolInputSchema` below, consumed by `server.ts`) — and
+ * `parseStrict` stays as the second line for an embedder that imports
+ * `createToolHandlers` directly, which `index.ts` exports.
+ *
+ * ## Why this does NOT re-prompt operators
+ *
+ * Measured, not assumed. Two independent reasons, either one sufficient:
+ *
+ *   1. The advertised JSON Schema does not move. `zod-to-json-schema` already
+ *      emits `additionalProperties: false` for a strip-mode `z.object`, so the
+ *      loose and strict advertisements are BYTE-IDENTICAL for all 22 hosted
+ *      schemas (surface hash `cf41c32a83b10c54` both ways, against a control
+ *      mutation at `3c8ea4a1f4bc564b`). The advertisement was already strict;
+ *      only the behaviour was permissive.
+ *   2. `computeConsentHash` (`packages/mcp/src/consent.ts`) hashes identity +
+ *      tool NAMES + the allowance summary. It takes no schema argument at all,
+ *      and the hosted server has no consent gate in the first place — the gate
+ *      lives in `packages/mcp` and `packages/signer`.
+ *
+ * ## Which tools, and which deliberately not
+ *
+ * On the list: the money-path tools that read something from the payment's own
+ * RECORD rather than from arguments. Those have #2292's exact failure mode — a
+ * stripped key lets a caller believe it pinned a value it did not — and they
+ * are where a silent strip costs money.
+ *
+ * Deliberately NOT on the list, with the reason kept here rather than in a
+ * commit message:
+ *
+ *   - `haven_send`, `haven_pay_mcp_tool`, `haven_quote_x402`,
+ *     `haven_pay_x402_quote` — the LOCAL MCP (`packages/mcp/src/tools.ts`)
+ *     spells the same arguments differently: `idempotencyKey` (camelCase) where
+ *     the hosted surface takes `idempotency_key`, `quote` where the hosted
+ *     surface takes `payment_required`, and a `body` the hosted surface has no
+ *     field for. An agent carrying the local shape to the hosted server is
+ *     silently stripped TODAY — losing idempotency protection on a payment,
+ *     which is the duplicate-spend hazard. Strictness is the right answer there
+ *     too, but it converts a live silent path into a hard refusal and wants its
+ *     own change with the guidance updated alongside it. Filed separately.
+ *   - `haven_get_agent`, `haven_get_allowances` — schema `{}`. Strict on an
+ *     empty object refuses EVERY key, so any client that decorates a
+ *     no-argument call breaks, for no money-path gain.
+ *   - everything else — batched, not exempted.
+ *
+ * The value is the `.strict()` message: a refusal a caller can act on beats a
+ * bare "unrecognized key". It is also what `parseStrict` reuses, so the two
+ * layers cannot drift into saying different things about the same tool.
+ */
+export const STRICT_INPUT_TOOLS = {
+  // #2292's originating tool. Every field a reporter reaches for and this tool
+  // does not declare — tx_hash, resource_url, amount, merchant_url — is one
+  // Haven reads from the payment's own record. Stripping it lets a caller
+  // believe it pinned the anchor when it did not.
+  haven_report_x402_outcome:
+    'The funding transaction, resource URL and amount are read from the payment record, ' +
+    'so a report cannot be pointed at a different payment.',
+  // The relay leg. Everything except which payment and which signature — the
+  // amount, the recipient, the rail, the typed data that was signed — comes
+  // from the stored intent. A stripped key here means relaying a signature for
+  // a different question than the caller asked.
+  haven_submit:
+    'Amount, recipient and rail come from the stored payment intent; this tool takes only ' +
+    'which payment, which signature, and (optionally) which settlement scheme that signature is for.',
+  // #1307: merchant_url / tool_name / arguments / mcp_transport are OPTIONAL
+  // because Haven rehydrates the stored MCP call context from payment_id. A
+  // stripped key is therefore invisible twice over — the call still succeeds,
+  // against the recorded context rather than the one the caller passed.
+  haven_complete_mcp_tool:
+    'The MCP call context is rehydrated from payment_id when you omit it, so an unrecognised key ' +
+    'does not fail loudly — the delivery would just run against the RECORDED context instead of yours.',
+  // As haven_complete_mcp_tool, plus it relays the funding signature: this one
+  // moves money before it delivers.
+  haven_settle_mcp_tool:
+    'The MCP call context is rehydrated from payment_id when you omit it, and this tool funds before ' +
+    'it delivers — an unrecognised key must not be dropped on the way to a transfer.',
+} as const satisfies Partial<Record<HostedToolName, string>>
+
+export type StrictInputToolName = keyof typeof STRICT_INPUT_TOOLS
+
+function isStrictInputTool(name: HostedToolName): name is StrictInputToolName {
+  return Object.prototype.hasOwnProperty.call(STRICT_INPUT_TOOLS, name)
+}
+
+/**
+ * The input schema `server.ts` registers for a tool.
+ *
+ * A raw shape for a permissive tool (what the SDK has always been given), and a
+ * `.strict()` `ZodObject` for a tool on the list above. Both advertise the same
+ * JSON Schema; only the enforcement differs. Note the registration API matters:
+ * the deprecated `.tool(name, description, schema, handler)` overload refuses a
+ * `ZodObject` in its schema position ("received an unrecognized object"), so
+ * `server.ts` uses `registerTool`, which passes a Zod schema through intact.
+ */
+export function toolInputSchema(name: HostedToolName): z.ZodRawShape | z.ZodTypeAny {
+  if (!isStrictInputTool(name)) return toolSchemas[name]
+  return z.object(toolSchemas[name]).strict(strictRefusalMessage(name))
+}
+
+function strictRefusalMessage(name: StrictInputToolName, keys?: readonly string[]): string {
+  const subject = keys && keys.length > 0
+    ? `${name} does not accept ${keys.map((k) => `"${k}"`).join(', ')}.`
+    : `${name} refuses an argument it does not declare.`
+  return (
+    `${subject} That is deliberate rather than an omission: ${STRICT_INPUT_TOOLS[name]} ` +
+    'Send only the fields this tool declares.'
+  )
+}
+
 // ── Legacy tool schemas (one release cycle compatibility shim) ───────────────
 export const legacyToolSchemas: Record<HostedToolNameLegacy, z.ZodRawShape> = {
   haven_x402_authorize: toolSchemas.haven_pay_x402_quote,
@@ -885,7 +1015,7 @@ export function createToolHandlers(
 
     haven_submit: async (input) =>
       runTool(async () => {
-        const args = parse('haven_submit', input)
+        const args = parseStrict('haven_submit', input)
         // #2041: the erc7710 branch, for the GENERIC plain-HTTP flow. The MCP
         // flow's equivalent lives in haven_settle_mcp_tool, which also CALLS
         // the merchant; a plain-HTTP merchant is retried by the agent itself,
@@ -1597,13 +1727,13 @@ export function createToolHandlers(
 
     haven_complete_mcp_tool: async (input) =>
       runTool(async () => {
-        const args = parse('haven_complete_mcp_tool', input)
+        const args = parseStrict('haven_complete_mcp_tool', input)
         return deliverMerchantPayment(haven, args)
       }),
 
     haven_settle_mcp_tool: async (input) =>
       runTool(async () => {
-        const args = parse('haven_settle_mcp_tool', input)
+        const args = parseStrict('haven_settle_mcp_tool', input)
         // ── #2282: the merchant-call context is resolved BEFORE anything is
         // submitted, on BOTH schemes. ──
         //
@@ -3193,37 +3323,42 @@ function parse<TName extends HostedToolName>(name: TName, input: unknown): Recor
 }
 
 /**
- * #2292: `parse` with unknown keys REFUSED instead of stripped.
+ * #2292/#2312: `parse` with unknown keys REFUSED instead of stripped.
  *
  * `parse` above is a bare `z.object`, which silently drops anything it does
  * not recognise — the exact shape #2282 found on `mcp_transport`, where a
  * caller's argument was edited rather than validated and an unrecognised
- * input parsed to the same value as an absent one. Left alone here for every
- * existing tool, because widening it is a behaviour change on twenty
- * already-shipped surfaces and belongs to whoever decides to make it.
+ * input parsed to the same value as an absent one.
  *
- * For a REPORT it is not a style question. Every field a reporter might reach
- * for and that this tool deliberately does not accept — `tx_hash`,
- * `resource_url`, `amount`, `merchant_url` — is a field whose value Haven
- * reads from the payment's own record instead. Stripping such a key would let
- * a caller believe it had pinned the anchor when it had not, which is worse
- * than either accepting or refusing it. So: refuse, and say which keys are
- * unrecognised.
+ * **This is the SECOND line of defence, not the first, and #2292 shipped it
+ * believing it was the only one.** Over the MCP transport the SDK has already
+ * validated and STRIPPED the arguments before a handler is called, so an
+ * unrecognised key never reaches here; the guard that actually fires on the
+ * wire is the strict registration schema (`toolInputSchema`, see
+ * `STRICT_INPUT_TOOLS` above for the measurement). What this still covers is
+ * the direct-embedder path — `createToolHandlers` is exported from `index.ts`
+ * — plus the unit tests, which call handlers directly.
+ *
+ * Which tools are strict, and why each, is declared once in
+ * `STRICT_INPUT_TOOLS`; both layers read their refusal text from there so they
+ * cannot drift into saying different things about the same tool.
  */
-function parseStrict<TName extends HostedToolName>(name: TName, input: unknown): Record<string, any> {
+function parseStrict<TName extends StrictInputToolName>(name: TName, input: unknown): Record<string, any> {
   const result = z.object(toolSchemas[name]).strict().safeParse(input ?? {})
   if (result.success) return result.data
+  // TOP-LEVEL keys only. A nested strict object — `mcp_transport`, whose
+  // `.strict(MCP_TRANSPORT_CASE_HINT)` explains the snake_case boundary #2282
+  // found — also raises `unrecognized_keys`, at a non-empty path. Collecting
+  // those here would replace that tool-specific hint with this generic one and
+  // silently regress #2282's refusal message; the nested case falls through to
+  // `throw result.error`, exactly as the permissive `parse` did.
   const unrecognized = result.error.issues.flatMap((issue) =>
-    issue.code === 'unrecognized_keys' ? issue.keys : [],
+    issue.code === 'unrecognized_keys' && issue.path.length === 0 ? issue.keys : [],
   )
   if (unrecognized.length > 0) {
     throw new HostedToolError({
       code: 'INVALID_INPUT',
-      message:
-        `${name} does not accept ${unrecognized.map((k) => `"${k}"`).join(', ')}. ` +
-        'That is deliberate rather than an omission: the funding transaction, resource URL and ' +
-        'amount are read from the payment record so a report cannot be pointed at a different ' +
-        'payment. Send only the fields this tool declares.',
+      message: strictRefusalMessage(name, unrecognized),
       statusCode: 400,
       status: 'invalid_input',
       phase: 'not_started',

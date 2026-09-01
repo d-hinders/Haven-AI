@@ -3,6 +3,7 @@ import { HavenClient } from '@haven_ai/sdk'
 import {
   createToolHandlers,
   toolDescriptions,
+  toolInputSchema,
   toolSchemas,
   type HostedToolName,
   type ToolPayload,
@@ -149,22 +150,27 @@ export function buildHostedMcpServer(haven: HavenClient): McpServer {
   )
 
   const handlers = createToolHandlers(haven)
-  // The fluent `.tool(name, description, schema, handler)` overload keeps this
-  // in step with the local @haven_ai/mcp package's registration style.
+  // #2312: `registerTool`, NOT the fluent `.tool(name, description, schema,
+  // handler)` overload it replaced. The difference is load-bearing rather than
+  // stylistic: `.tool`'s schema position accepts only a raw shape and throws
+  // "received an unrecognized object" on the `ZodObject` that a strict tool
+  // needs, so a `.strict()` schema is unregisterable through it. `registerTool`
+  // passes a Zod schema through intact, and the SDK then enforces it in
+  // `validateToolInput` — which is the ONLY layer that sees an undeclared key,
+  // because the handler is called with the already-parsed arguments.
+  // Both forms advertise the identical JSON Schema; see `STRICT_INPUT_TOOLS`.
   const registerTool = (server as unknown as {
-    tool: (
+    registerTool: (
       name: string,
-      description: string,
-      schema: unknown,
+      config: { description: string; inputSchema: unknown },
       handler: (args: unknown) => Promise<unknown>,
     ) => void
-  }).tool.bind(server)
+  }).registerTool.bind(server)
 
   for (const name of Object.keys(toolSchemas) as HostedToolName[]) {
     registerTool(
       name,
-      toolDescriptions[name],
-      toolSchemas[name],
+      { description: toolDescriptions[name], inputSchema: toolInputSchema(name) },
       async (args: unknown) =>
         haven.withRequestContext({ 'X-Haven-MCP-Tool': name }, async () =>
           toMcpResult(await handlers[name](args)),

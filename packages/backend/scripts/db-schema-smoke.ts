@@ -26,7 +26,10 @@
 import { getPool } from '../src/db.js'
 import { selectDelegation } from '../src/rails/delegation-authorization.js'
 import { runMigrations } from '../src/db/migrate.js'
-import { SELECT_DELEGATION_FOR_PAYMENT_SQL } from '../src/infra/repositories/delegation-budgets.js'
+import {
+  ACTIVATE_PENDING_DELEGATION_SQL,
+  SELECT_DELEGATION_FOR_PAYMENT_SQL,
+} from '../src/infra/repositories/delegation-budgets.js'
 import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-signers.js'
 import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
 import {
@@ -527,6 +530,10 @@ const QUERIES: SmokeQuery[] = [
     // IMPORTED since #999 — was a pasted copy.
     name: 'delegations: authorization selection (pinned wins over open, #829)',
     sql: SELECT_DELEGATION_FOR_PAYMENT_SQL,
+  },
+  {
+    name: 'delegations: conditional activation (pending only)',
+    sql: ACTIVATE_PENDING_DELEGATION_SQL,
   },
   // Repository extractions landed by #999 (baseline-to-zero): fee ledger,
   // Fortnox connection, reporting-feed dedup ledger, user passkeys, safe

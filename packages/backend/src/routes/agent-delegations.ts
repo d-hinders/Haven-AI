@@ -28,7 +28,7 @@
 import { RelayerBudgetExceededError } from '../infra/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import type { Hex, Address } from '../domain/chain-client.js'
-// dep-lint-exempt: 9 grant-lifecycle statements plus the activation transaction on a dedicated client (pool.connect); the guarded version/waiver checks must travel with their writes, making this a >100-line move deferred under #999
+// dep-lint-exempt: 9 grant-lifecycle statements on a dedicated client (pool.connect); the guarded version/waiver checks must travel with their writes, making this a >100-line move deferred under #999
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
@@ -56,6 +56,7 @@ import {
   readDisabledDelegationHashes,
 } from '../rails/delegation-rail.js'
 import {
+  activatePendingDelegation,
   listNonRevokedDelegationsForAgent,
   revokeDelegationsByHashes,
 } from '../infra/repositories/delegation-budgets.js'
@@ -426,14 +427,12 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           await client.query('ROLLBACK')
           return reply.code(409).send({ error: 'Delegation was built for a previous delegate key' })
         }
-        const activated = await client.query<{ id: string }>(
-          `UPDATE agent_delegations
-           SET status = 'active', delegation_json = $1, updated_at = NOW()
-           WHERE id = $2 AND status = 'pending'
-           RETURNING id`,
-          [JSON.stringify(signed), pending.id],
+        const activated = await activatePendingDelegation(
+          pending.id,
+          JSON.stringify(signed),
+          client,
         )
-        if (activated.rows.length !== 1) {
+        if (!activated) {
           await client.query('ROLLBACK')
           return reply.code(409).send({ error: 'Delegation is no longer pending' })
         }

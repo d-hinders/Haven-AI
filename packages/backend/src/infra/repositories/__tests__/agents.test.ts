@@ -275,7 +275,7 @@ describeDb('agents archive (#1401, real DB)', () => {
     expect(archived!.archived_at).toBeInstanceOf(Date)
   })
 
-  it.each(['active', 'paused'])('archives a legacy Safe record while it is %s (#2258)', async (status) => {
+  it.each(['active', 'paused', 'pending_approval'])('archives a legacy Safe record while it is %s (#2258)', async (status) => {
     const { userId, agentId } = await seedLegacyAgent(status)
     const archived = await archiveAgent(agentId, userId)
     expect(archived).not.toBeNull()

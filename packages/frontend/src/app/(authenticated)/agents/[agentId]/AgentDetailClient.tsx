@@ -320,11 +320,11 @@ export default function AgentDetailClient({ agentId }: Props) {
   // specifically on USDC, since the gasless recovery path is USDC-only. #1403:
   // the read is status-agnostic now — revoked agents resolve too, and that is
   // the POINT: the sequence that strands delegate funds (agent misbehaving
-  // mid-x402 → revoke) is the one that needs the recovery banner. The hook's
-  // catch treats errors as "nothing to recover", so a failing read degrades
-  // silently rather than blocking.
+  // mid-x402 → revoke) is the one that needs the recovery banner. Legacy Safe
+  // records can also retain a delegate wallet, so the read stays available on
+  // every agent detail page; a missing/unsupported delegate degrades silently.
   const { balance: delegateBalance, hasRecoverableUsdc } = useDelegateBalance(
-    agent?.account_type === 'delegator_hybrid' ? agentId : null,
+    agent?.id ?? null,
   )
   // #1098: the human field can be absent while atomic is set (a partial API
   // response mid-load) — "Recover undefined USDC" is worse than the generic

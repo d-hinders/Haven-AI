@@ -226,6 +226,13 @@ export default function AccountDetailClient() {
     ownerAccess: retiredRailOwnerAccess,
   } = useRetiredRailOwnerAccess(safe)
 
+  // A retired account may still be read in Haven, but Receive is an
+  // instruction to send funds into that account. Only a positively identified
+  // wallet owner has a known path to move those funds out again; passkey-only
+  // and unresolved owner states must not invite an irreversible deposit.
+  const canReceive =
+    safe?.account_type === 'delegator_hybrid' || retiredRailOwnerAccess === 'wallet'
+
   const {
     totalUsd,
     totalEur,
@@ -341,9 +348,11 @@ export default function AccountDetailClient() {
                     Send
                   </Button>
                 ) : null}
-                <Button variant="ghost" onClick={() => setReceiveOpen(true)}>
-                  Receive
-                </Button>
+                {canReceive ? (
+                  <Button variant="ghost" onClick={() => setReceiveOpen(true)}>
+                    Receive
+                  </Button>
+                ) : null}
               </>
             )}
             {/*
@@ -442,9 +451,13 @@ export default function AccountDetailClient() {
           ) : breakdown.length === 0 ? (
             <EmptyState
               title="No token balances yet"
-              body="Receive funds to see tokens in this Haven wallet."
+              body={
+                canReceive
+                  ? 'Receive funds to see tokens in this Haven wallet.'
+                  : 'Token balances remain readable here.'
+              }
               className="py-8"
-              action={safeAddress ? <Button size="sm" onClick={() => setReceiveOpen(true)}>Receive funds</Button> : null}
+              action={safeAddress && canReceive ? <Button size="sm" onClick={() => setReceiveOpen(true)}>Receive funds</Button> : null}
             />
           ) : (
             <>
@@ -785,11 +798,13 @@ export default function AccountDetailClient() {
           onSent={handleSendSuccess}
         />
       )}
-      <ReceiveFundsModal
-        open={receiveOpen}
-        safe={safe}
-        onClose={() => setReceiveOpen(false)}
-      />
+      {canReceive ? (
+        <ReceiveFundsModal
+          open={receiveOpen}
+          safe={safe}
+          onClose={() => setReceiveOpen(false)}
+        />
+      ) : null}
       {renameOpen && (
         <RenameModal
           safe={safe}

@@ -44,10 +44,12 @@ payment outside the budget, recipient pin or expiry **reverts during gas estimat
 rather than queueing for a human.
 
 The **legacy Safe + AllowanceModule rail is RETIRED** (epic #1440), not frozen: no account
-can be created or imported on it (#1984, four inflows answer HTTP 410), no account on it
-can spend (#1986, HTTP 410 on every payment and x402 entry point), and its execution
-machinery is deleted (#1987/#1988/#1989). Existing Safe accounts stay **fully readable** —
-balances, tokens, agents and history all render. The Smart Sessions session rail is
+can be created or imported on it (#1984, four inflows answer HTTP 410), Haven cannot
+initiate a payment from it through the retired paths (#1986, HTTP 410 on every payment
+and x402 entry point), and its execution machinery is deleted (#1987/#1988/#1989).
+Existing Safe accounts stay **fully readable** — balances, tokens, agents and history all
+render. Any residual AllowanceModule permission remains on-chain and outside Haven until
+the Safe owner revokes it externally. The Smart Sessions session rail is
 likewise retired (#834). See
 [`docs/security/delegation-rail-security-model.md`](docs/security/delegation-rail-security-model.md),
 [`docs/product/account-recovery.md`](docs/product/account-recovery.md) for what a legacy
@@ -335,7 +337,11 @@ Independent layers keep the API and signing boundaries separate:
 | **Haven policy mirror** | Pre-checks, audit trail, status, and copy — a mirror, never the real spend control | Haven backend |
 | **Credential scoping** | API-key identity, prefix display, rotation, and revocation state | Haven backend |
 
-If Haven is compromised, API keys alone cannot sign transactions. An account owner can pause or revoke an agent in Haven, and can revoke the underlying on-chain authority directly without needing Haven — see the [independent exit path](docs/exit/README.md).
+If Haven is compromised, API keys alone cannot sign transactions. For a live delegation
+agent, an account owner can pause or revoke it in Haven, and can revoke the underlying
+on-chain authority directly without needing Haven — see the [independent exit path](docs/exit/README.md).
+Legacy Safe records have no Haven pause or revoke controls; any residual Safe permission
+must be revoked externally by the Safe owner.
 
 Approver (Safe owner) management is **retired** (#1988/#1989, epic #1440). Haven never signed an owner change and no longer constructs one: the backend routes and the Settings surface are both deleted. Owners of a legacy Safe manage its owner set directly through Safe's own interfaces with their own key — which was always true, and is the reason removing Haven's builder takes nothing away that Haven was the only source of. `POST /safe/exec` stays open, so an owner-signed Safe transaction is still relayed for gas — but **#1989 also deleted the screen that composed one**, and the route is not the screen. A **wallet-owned** Safe loses nothing (sign at [app.safe.global](https://app.safe.global)); a **passkey-owned** Safe currently has **no self-serve way to move funds out**, because Haven's passkey Safe signer is a custom WebAuthn scheme Safe's own interfaces cannot drive. The epic's Base-mainnet census found no passkey-owned Safe, which is why this was accepted as a narrowing — but a census is not a proof and it does not cover non-mainnet accounts. Full user-facing wording: [`docs/product/account-recovery.md`](docs/product/account-recovery.md).
 

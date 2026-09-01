@@ -68,7 +68,7 @@ The four custody zones:
 |---|---|---|
 | **User** | password, browser JWT, owner EOA key or passkey authenticator | A stolen bearer token exposes account APIs but not signing authority. Enough owner credentials to meet the Safe threshold can change owners and move funds. |
 | **Haven-operated** | JWT signing secret, API-key hashes, public signer/passkey metadata, authorization-context key, gas relayer keys | Compromise exposes service data and relayer gas. Safe-held funds still require an existing allowance with a delegate signature or a threshold-valid owner signature. |
-| **Agent environment** | plaintext API key and local delegate key | Cannot use Haven's retired payment paths. Any residual Safe permission remains outside Haven and is managed through Safe's own interfaces by the Safe owner. |
+| **Agent environment** | plaintext API key and local delegate key | Cannot use Haven's retired payment paths. A legacy delegate key may still exercise residual AllowanceModule permission; the Safe owner must revoke that permission externally through Safe's own interfaces. |
 | **On-chain** | Safe state, AllowanceModule state | Authoritative source of truth |
 
 ```mermaid

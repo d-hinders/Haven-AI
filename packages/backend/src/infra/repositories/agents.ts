@@ -502,14 +502,17 @@ export async function updateAgentProfile(
 
 /**
  * #1401: archive replaces deletion. The row and every dependent audit row
- * stay; the agent just leaves the primary list. Requires `revoked` — archiving
- * is a filing action and must never be what stops spending. Idempotent
+ * stay; the agent just leaves the primary list. Live delegation agents require
+ * `revoked` — archiving is a filing action and must never be what stops
+ * spending. Legacy AllowanceModule records may be unlinked at any status
+ * because Haven no longer owns their authority. Idempotent
  * without timestamp churn: re-archiving keeps the ORIGINAL archived_at
  * (COALESCE keeps the first value; the WHERE still matches so the call
  * reports success).
  */
 /**
- * #1436: archiving requires BOTH a revoked credential and dead budgets.
+ * #1436: live delegation archiving requires BOTH a revoked credential and dead
+ * budgets.
  *
  * `status = 'revoked'` alone was not enough. Revoking an agent only flips this
  * table's status — it never touches `agent_delegations` — so revoke+archive
@@ -533,13 +536,10 @@ export const ARCHIVE_AGENT_SQL = `UPDATE agents
        WHERE id = $1 AND user_id = $2
          AND (
            status = 'revoked'
-           OR (
-             status IN ('active', 'paused')
-             AND EXISTS (
+           OR EXISTS (
                SELECT 1 FROM user_safes us
                WHERE us.id = agents.safe_id AND us.account_type = 'safe'
              )
-           )
          )
          AND NOT EXISTS (
            SELECT 1 FROM agent_delegations ad

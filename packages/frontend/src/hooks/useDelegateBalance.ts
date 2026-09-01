@@ -35,7 +35,7 @@ export interface UseDelegateBalanceResult {
  * a non-zero balance here means funds stranded (merchant rejected/expired) and
  * are recoverable. Gating recovery UI on this — rather than on a funded-but-
  * unsettled payment record — means the prompt shows iff there is something to
- * actually recover. Pass `null` to skip the fetch (e.g. revoked agents).
+ * actually recover. Pass `null` while the agent record is unresolved.
  */
 export function useDelegateBalance(agentId: string | null): UseDelegateBalanceResult {
   const [balance, setBalance] = useState<DelegateBalance | null>(null)

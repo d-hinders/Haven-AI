@@ -489,7 +489,7 @@ describe('AccountDetailClient', () => {
   })
 
   describe('owner send after the Safe-rail retirement (#1989)', () => {
-    it('offers no Send affordance on a legacy Safe account, and says why', () => {
+    it('offers no Send affordance on a wallet-owned legacy Safe account, and says why', () => {
       const legacySafe = { ...SAFE, account_type: 'safe' as const }
       mockUseAuth.mockReturnValue({
         user: {
@@ -503,6 +503,10 @@ describe('AccountDetailClient', () => {
         setActiveSafe: vi.fn(),
         loading: false,
         passkeys: [],
+      })
+      mockUseRetiredRailOwnerAccess.mockReturnValue({
+        ...mockUseSafeDetails(),
+        ownerAccess: 'wallet',
       })
       render(<AccountDetailClient />)
 
@@ -619,6 +623,8 @@ describe('AccountDetailClient', () => {
       const passkeyOnly = render(<AccountDetailClient />)
       expect(screen.getByText(/no self-serve way to move them out/i)).toBeInTheDocument()
       expect(screen.queryByText(/move them at any time/i)).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Receive' })).toBeNull()
+      expect(screen.queryByText(/Receive funds to see tokens/i)).toBeNull()
       passkeyOnly.unmount()
 
       // ── an UNRECOGNISED owner: claim nothing ─────────────────────────────
@@ -636,6 +642,8 @@ describe('AccountDetailClient', () => {
       ).toBeInTheDocument()
       expect(screen.queryByText(/move them at any time/i)).toBeNull()
       expect(screen.queryByText(/no self-serve way to move them out/i)).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Receive' })).toBeNull()
+      expect(screen.queryByText(/Receive funds to see tokens/i)).toBeNull()
       unrecognised.unmount()
 
       // ── unknown: claim NOTHING, while still rendering the notice ─────────
@@ -647,6 +655,8 @@ describe('AccountDetailClient', () => {
       ).toBeInTheDocument()
       expect(screen.queryByText(/move them at any time/i)).toBeNull()
       expect(screen.queryByText(/no self-serve way to move them out/i)).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Receive' })).toBeNull()
+      expect(screen.queryByText(/Receive funds to see tokens/i)).toBeNull()
     })
 
     it('keeps Send on a delegation account and shows it no retirement note', () => {

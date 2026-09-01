@@ -373,7 +373,8 @@ The enforcement clause above named the **legacy AllowanceModule rail** until
 #2105 corrected it. That rail is **RETIRED** (#1440): closed to new
 accounts (#1984), HTTP 410 on every payment and x402 entry point (#1986), and its
 machinery deleted (#1987/#1988/#1989). Existing Safe accounts stay READABLE but
-cannot spend. The Smart Sessions
+cannot spend through Haven's retired payment/API paths; any residual AllowanceModule
+permission remains outside Haven until the Safe owner revokes it externally. The Smart Sessions
 session rail is retired too (#834) — `session_key` accounts get HTTP 410 from
 `POST /payments`. On the **delegation rail** — the only rail that can pay
 (`account_type='delegator_hybrid'`, epic #821) the `API key = identity` and

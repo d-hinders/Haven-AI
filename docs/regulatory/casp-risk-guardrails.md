@@ -677,6 +677,11 @@ Implementation rule:
 
 **Connection setup never hands out another environment's hosted MCP endpoint (#1129).** The production hosted MCP URL is served as a built-in default only when the backend's own resolved public URL is the production host; any other deployment must set `HAVEN_HOSTED_MCP_URL` explicitly, or `/resolve` and `/register` refuse with an explicit configuration error naming the variable — raised before any state is written, so a misconfigured environment can neither consume the client's one-shot setup token nor leave a registration half-created, and an agent's credentials are never pointed at a different environment's backend. Fail-closed, same as the authority checks above.
 
+The legacy `wallet-approval` check is only a verification read for a retired
+Haven path. “The rail it approves can no longer spend” means Haven cannot
+initiate that payment path; it does not revoke a historical AllowanceModule
+permission. If one remains on-chain, the Safe owner must revoke it externally.
+
 ### Keep Agent Spend Authority Narrow
 
 Scope each agent authority by as many of these as possible:

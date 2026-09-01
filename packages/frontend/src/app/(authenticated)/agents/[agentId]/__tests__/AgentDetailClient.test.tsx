@@ -627,7 +627,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(calls[calls.length - 1][0]).toBe('agent-1')
   })
 
-  it('does not read delegate balance for a legacy agent (#2258)', () => {
+  it('reads delegate balance for a legacy agent so residual funds remain recoverable (#2258)', () => {
     const base = mockUseAgents()
     mockUseAgents.mockReturnValue({
       ...base,
@@ -641,7 +641,33 @@ describe('AgentDetailClient last-activity metadata', () => {
 
     const calls = mockUseDelegateBalance.mock.calls
     expect(calls.length).toBeGreaterThan(0)
-    expect(calls[calls.length - 1][0]).toBeNull()
+    expect(calls[calls.length - 1][0]).toBe('agent-1')
+  })
+
+  it('shows recovery for a legacy agent with a residual USDC balance (#2258)', () => {
+    mockAgentWith({ account_type: 'safe' })
+    mockUseDelegateBalance.mockReturnValue({
+      balance: {
+        delegate_address: '0x2222222222222222222222222222222222222222',
+        safe_address: SAFE.safe_address,
+        chain_id: 8453,
+        eth: '0',
+        eth_atomic: '0',
+        usdc: '0.04',
+        usdc_atomic: '40000',
+        usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      },
+      hasStranded: true,
+      hasRecoverableUsdc: true,
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.getByText('Recoverable funds in agent wallet')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Recover funds to your Haven wallet' }))
+      .toHaveAttribute('href', '/agents/agent-1/sweep')
   })
 
   // #1402: the Remove/Restore visibility gates on the detail footer.

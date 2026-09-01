@@ -89,7 +89,7 @@ sequenceDiagram
     Signer-->>Agent: signature, payment_header
     Agent->>Hosted: haven_settle_mcp_tool { payment_id, signature, payment_header, merchant context }
     Hosted->>Hosted: relay funding signature and wait for confirmation
-    Hosted->>Merchant: tools/call with signed X-PAYMENT header
+    Hosted->>Merchant: tools/call with signed payment header (both wire names)
     Merchant-->>Hosted: tool result
     Hosted-->>Agent: settled result + evidence/reconciliation status
 ```
@@ -102,7 +102,7 @@ Use these fully-qualified next steps when an agent discovers tools at runtime:
    signing window; if it passes, re-run this same tool with the same
    `idempotency_key`.
 2. `mcp__haven-signer__haven_sign_x402` signs the funding hash and builds the
-   merchant `X-PAYMENT` header locally. The delegate key never leaves this
+   merchant payment header locally. The delegate key never leaves this
    process.
 3. `mcp__haven__haven_settle_mcp_tool` relays the signed funding artifact, waits
    for confirmation, then relays the already-signed merchant header and records

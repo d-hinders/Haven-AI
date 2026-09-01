@@ -125,8 +125,8 @@ if (apiResponse.status === 402) {
   const receipt = await haven.authorizeX402(paymentRequired, {
     idempotencyKey: 'paid-api-data-2026-05-22',
   })
-  // Retry with BOTH names set to receipt.paymentHeader:
-  //   { 'PAYMENT-SIGNATURE': …, 'X-PAYMENT': … }   (v2 name, v1 name)
+  // Retry with { 'PAYMENT-SIGNATURE': receipt.paymentHeader }, and on the
+  // EIP-3009 bridge 'X-PAYMENT' too. NEVER both on erc7710 — see below.
   console.log(receipt.explorerUrl)
 }
 ```
@@ -210,7 +210,7 @@ const response = await haven.payX402Quote(quote)
 const data = await response.json()
 ```
 
-Merchant-verified x402 retries use the official EIP-3009 `exact` scheme on Base USDC (`base` / `eip155:8453`). Since #2289 `haven.fetch()` sends the payment under **both** wire names with the same value — `PAYMENT-SIGNATURE` (the x402 v2 name) and `X-PAYMENT` (v1) — so a merchant on either version reads it. Haven's older tx-hash proof helper remains exported for Haven-native integrations; it is a different payload that happens to have shared the v2 name, and it is not what `haven.fetch()` sends.
+Merchant-verified x402 retries use the official EIP-3009 `exact` scheme on Base USDC (`base` / `eip155:8453`). `haven.fetch()` sends the payment under `PAYMENT-SIGNATURE` (the x402 v2 name), and on the EIP-3009 bridge also under `X-PAYMENT` (v1), so a merchant on either version reads it. **On erc7710 it sends the v2 name ALONE**: that payload is always x402 v2, and its header carries a whole delegation chain, so duplicating it overflows the merchant's header limit and the request is refused with HTTP 431. If you build the retry yourself, follow the same rule. Haven's older tx-hash proof helper remains exported for Haven-native integrations; it is a different payload that happens to have shared the v2 name, and it is not what `haven.fetch()` sends.
 
 For standard x402, the `x402-wallet` identity is the agent delegate wallet, because that is the wallet that signs and settles the merchant payment. Integrations that scope access by Haven wallet/Safe address should use a Haven-native flow instead of standard merchant x402.
 
@@ -365,7 +365,7 @@ x402 tool-window failures:
 | `expired` | Payment expired before completion. | yes |
 | `failed` | Haven could not complete the payment. | yes |
 
-The merchant settlement leg of x402 (and the MPP retry) is the agent's own request to the merchant — it does not have a Haven `phase`. The payment is `funding_sent` until the agent retries with `X-PAYMENT` (x402) or the MPP proof header; from Haven's perspective the payment becomes `executed` only after the agent successfully resumes.
+The merchant settlement leg of x402 (and the MPP retry) is the agent's own request to the merchant — it does not have a Haven `phase`. The payment is `funding_sent` until the agent retries with the payment header (`PAYMENT-SIGNATURE`, plus `X-PAYMENT` on this bridged path) (x402) or the MPP proof header; from Haven's perspective the payment becomes `executed` only after the agent successfully resumes.
 
 ### `nextAction` reference
 
@@ -473,7 +473,8 @@ Think of bridged x402 as two separate legs:
   human step.
 - Merchant x402 leg: after the funding leg is complete, the agent resumes the
   same payment id and retries the original merchant request with the payment
-  header, under both `PAYMENT-SIGNATURE` and `X-PAYMENT`.
+  header, under `PAYMENT-SIGNATURE` and — on this bridged path only —
+  `X-PAYMENT`.
   Do not treat a new 402 probe or a new MCP session as a resume.
 
 For manual HTTP stacks, use `resumeAuthorizedX402()` to get the merchant header
@@ -489,6 +490,9 @@ const receipt = await haven.resumeAuthorizedX402({
 await fetch('https://paid-api.example.com/data', {
   headers: {
     'PAYMENT-SIGNATURE': receipt.paymentHeader!,
+    // Bridged (EIP-3009) resume only. On erc7710 send the v2 name ALONE —
+    // that header carries a delegation chain and duplicating it is refused
+    // with HTTP 431.
     'X-PAYMENT': receipt.paymentHeader!,
   },
 })
@@ -504,6 +508,7 @@ call — so Haven cannot learn what happened unless you tell it:
 const response = await fetch('https://paid-api.example.com/data', {
   headers: {
     'PAYMENT-SIGNATURE': receipt.paymentHeader!,
+    // Bridged (EIP-3009) resume only — see the erc7710 note above.
     'X-PAYMENT': receipt.paymentHeader!,
   },
 })
@@ -534,7 +539,7 @@ For MCP/SSE x402 tools, keep the same MCP session and JSON-RPC payload where the
 merchant requires it: initialize, retain `mcp-session-id`, send the original
 `tools/call`, parse the 402 challenge, wait for the funding leg to confirm if
 the payment is bridged, then resume with the same `payment_id` and retry the
-original `tools/call` with `X-PAYMENT`. Use a stable `idempotencyKey` for the
+original `tools/call`, setting BOTH `PAYMENT-SIGNATURE` (x402 v2) and `X-PAYMENT` (v1) to the header. Use a stable `idempotencyKey` for the
 user intent so fresh merchant quotes or sessions do not become duplicate Haven
 payments.
 

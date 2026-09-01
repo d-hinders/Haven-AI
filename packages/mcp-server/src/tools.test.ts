@@ -5199,6 +5199,24 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
     // assembled by Haven on this path, never by haven_x402_sign_header.
     expect(res.data.reason).toContain("settlement_scheme: 'erc7710'")
     expect(res.data.reason).toContain('Do NOT call haven_x402_sign_header')
+    // #2330 added these two assertions, and #2341 INVERTS the second one.
+    // #2330 was right that this reason tells the agent to retry the merchant
+    // ITSELF and must therefore name the wire correctly; it was wrong about
+    // what correct is on THIS scheme. erc7710 is always x402 v2 and its header
+    // carries a delegation chain, so telling an agent to also send X-PAYMENT
+    // is telling it to overflow the merchant's header limit — HTTP 431, the
+    // funding-leg money already gone on the hosted path. The assertion that
+    // pinned the fix now pins the defect, which is why it is reversed here in
+    // place rather than deleted.
+    //
+    // The reason deliberately does not name the legacy header even to FORBID
+    // it. A first pass wrote "do not add X-PAYMENT", which failed this very
+    // assertion — `not.toContain` cannot tell an instruction from a
+    // prohibition. Rewording to "ONLY that header name" keeps the guard
+    // literal, costs fewer bytes against the #1591 mean, and avoids handing an
+    // agent a negated header name to be primed by.
+    expect(res.data.reason).toContain('PAYMENT-SIGNATURE')
+    expect(res.data.reason).not.toContain('X-PAYMENT')
   })
 
   it('the optional-cap nudge still fires on the erc7710 branch', async () => {
@@ -5460,6 +5478,11 @@ describe('haven_submit — erc7710 settle (#2041)', () => {
     // erc7710 has no Haven-submitted transaction, so there is no hash to fake.
     expect(res.data.tx_hash).toBeNull()
     expect(res.data.next_action).toBe(AgentPaymentNextAction.RetryOriginalX402Request)
+    // #2330 pinned both names here; #2341 reverses the legacy half for the
+    // same reason as the erc7710 branch above — this is the erc7710 submit
+    // path, where a duplicated header is refused with HTTP 431.
+    expect(res.data.reason).toContain('PAYMENT-SIGNATURE')
+    expect(res.data.reason).not.toContain('X-PAYMENT')
 
     // The signature went to settle, NOT to the funding relay.
     expect(calls.find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG })

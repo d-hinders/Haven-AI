@@ -201,7 +201,7 @@ const SIGN_DESCRIPTION = [
 ].join(' ')
 
 const X402_SIGN_HEADER_DESCRIPTION = [
-  'Build and sign the EIP-3009 X-PAYMENT header for the merchant leg of an x402 payment.',
+  'Build and sign the EIP-3009 merchant payment header for the merchant leg of an x402 payment.',
   'The delegate key stays local — only the signed header crosses any boundary.',
   'Pass the payment_required from the original merchant 402 response and the x402_binding',
   'returned by haven_sign. It must be haven_sign — NOT haven_sign_x402, which is a',
@@ -210,14 +210,15 @@ const X402_SIGN_HEADER_DESCRIPTION = [
   'do not call this tool. The signer validates the merchant, amount, resource, asset, and',
   'network against the recorded funding context before signing, checks expires_at when present,',
   'and rejects mismatches or expired payment windows.',
-  'Returns { payment_header, accepted }. Set the merchant payment header to <payment_header> on',
-  'your retry. Only call after haven_submit has confirmed the funding step (nextAction=none or',
+  'Returns { payment_header, accepted }. On your retry set BOTH PAYMENT-SIGNATURE (x402 v2) and',
+  'X-PAYMENT (v1) to <payment_header>; a strict v2 merchant reads only the first.',
+  'Only call after haven_submit has confirmed the funding step (nextAction=none or',
   'the funding tx has a confirmed status). Next for paid MCP tools: call mcp__haven__haven_complete_mcp_tool.',
 ].join(' ')
 
 const SIGN_X402_DESCRIPTION = [
   'One-shot x402 signing for the fast 3-call flow: sign the funding hash AND build the EIP-3009',
-  'X-PAYMENT header in a single local call (equivalent to haven_sign followed by',
+  'merchant payment header in a single local call (equivalent to haven_sign followed by',
   'haven_x402_sign_header). The delegate key never leaves this process. From the haven_pay_mcp_tool',
   'result pass JUST payment_id — PREFERRED (#1263, #1355): this signer fetches the exact signing',
   'payload, expected context, and merchant payment_required from Haven itself, so nothing bulky',
@@ -237,7 +238,8 @@ const SIGN_X402_DESCRIPTION = [
   'haven_sign, not to this one. payment_header IS the header to use.',
   'Next: for a paid MCP tool, call mcp__haven__haven_settle_mcp_tool. For a direct plain-HTTP x402',
   'merchant (the haven_pay_x402_quote path), relay signature via mcp__haven__haven_submit and then',
-  'retry the original merchant URL YOURSELF with payment_header — Haven never contacts that merchant.',
+  'retry the original merchant URL YOURSELF, setting BOTH PAYMENT-SIGNATURE (x402 v2) and',
+  'X-PAYMENT (v1) to payment_header — Haven never contacts that merchant.',
 ].join(' ')
 
 const SIGN_SWEEP_DELEGATE_DESCRIPTION = [

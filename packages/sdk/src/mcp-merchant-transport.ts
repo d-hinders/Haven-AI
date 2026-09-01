@@ -1,9 +1,6 @@
 import type { X402McpTransport, X402PaymentRequired } from './types.js'
 import { MerchantTimeoutError } from './types.js'
-import {
-  X402_LEGACY_PAYMENT_HEADER_NAME,
-  X402_PAYMENT_HEADER_NAME,
-} from './x402.js'
+import { X402_PAYMENT_HEADER_NAMES, x402PaymentHeaderNamesFor } from './x402.js'
 
 export const DEFAULT_MERCHANT_TIMEOUT = 300_000
 export const MCP_NOTIFICATION_TIMEOUT = 10_000
@@ -193,15 +190,26 @@ export class McpMerchantTransport {
   /**
    * Deliver an already-signed x402 header without changing the caller body.
    *
-   * #2289: sets BOTH wire names to the same value. x402 v2 reads
-   * `PAYMENT-SIGNATURE`; v1 reads `X-PAYMENT`. Sending only the legacy name
-   * meant a strict v2 merchant never saw the header — indistinguishable, from
-   * the merchant's side, from sending no header at all, while on the EIP-3009
-   * bridge the funding leg had already moved the money.
+   * #2289: x402 v2 reads `PAYMENT-SIGNATURE`; v1 reads `X-PAYMENT`. Sending
+   * only the legacy name meant a strict v2 merchant never saw the header —
+   * indistinguishable, from the merchant's side, from sending no header at
+   * all, while on the EIP-3009 bridge the funding leg had already moved the
+   * money.
    *
-   * `set` (not `append`) on both, so a stale header on the caller's `init` is
+   * #2341: WHICH names go on is per-payload, not always both — see
+   * `x402PaymentHeaderNamesFor`. Both for EIP-3009; `PAYMENT-SIGNATURE` alone
+   * for erc7710, whose header carries a whole delegation chain and answered
+   * HTTP 431 when duplicated. The decision is made here rather than by the
+   * caller so every path inherits it, and it is read from the payload rather
+   * than passed in, because a flag a caller supplies is a flag a caller can
+   * get wrong.
+   *
+   * Always `set`, never `append`, so a stale header on the caller's `init` is
    * replaced rather than added to — a merchant that reads the first of two
-   * values would otherwise verify a superseded authorization.
+   * values would otherwise verify a superseded authorization. The name NOT
+   * being sent is deleted for the same reason: on erc7710 a stale `X-PAYMENT`
+   * left in place would be a superseded authorization we chose not to
+   * overwrite, which is worse than the duplicate this change removes.
    */
   async deliverPayment(
     url: string,
@@ -209,8 +217,11 @@ export class McpMerchantTransport {
     paymentHeader: string,
   ): Promise<Response> {
     const headers = new Headers(init?.headers)
-    headers.set(X402_PAYMENT_HEADER_NAME, paymentHeader)
-    headers.set(X402_LEGACY_PAYMENT_HEADER_NAME, paymentHeader)
+    const send = x402PaymentHeaderNamesFor(paymentHeader)
+    for (const name of X402_PAYMENT_HEADER_NAMES) {
+      if (send.includes(name)) headers.set(name, paymentHeader)
+      else headers.delete(name)
+    }
     return this.fetch(url, { ...init, headers })
   }
 

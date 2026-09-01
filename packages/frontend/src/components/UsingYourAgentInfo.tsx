@@ -11,8 +11,8 @@ const PAGES: InfoPage[] = [
         <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
           When you created your agent, its{' '}
           <span className="font-medium text-[var(--v2-ink)]">Haven credential</span> was generated on your own
-          device — a small JSON file holding an API key, which identifies the agent to Haven but cannot spend by
-          itself, and a private signing key, which signs the agent&apos;s payments and never reaches Haven&apos;s
+          device: a small JSON file with two parts. An API key identifies the agent to Haven, but cannot spend
+          by itself. A private signing key signs the agent&apos;s payments, and never reaches Haven&apos;s
           backend. Add it to your agent and it can pay for x402-enabled APIs and services on your behalf.
         </p>
 
@@ -31,8 +31,7 @@ const PAGES: InfoPage[] = [
             <code className="rounded bg-[var(--v2-surface-2)] px-1.5 py-0.5 text-[12px] text-[var(--v2-ink)]">
               402 Payment Required
             </code>
-            , the payment is signed by your agent&apos;s own key and constrained by the budget you signed —
-            automatically, with no extra step from you.
+            , your agent&apos;s own key signs the payment automatically, within the budget you signed.
           </InfoStep>
 
           <InfoStep number={3} title="Watch the payment land here">

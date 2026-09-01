@@ -611,7 +611,7 @@ export default function AccountDetailClient() {
           {/* Address */}
           <div>
             <p className="text-xs text-[var(--v2-ink-3)] mb-1">Haven wallet address</p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               {safeAddress ? (
                 <Tooltip label={safeAddress} mono>
                   <span className="text-sm font-mono text-[var(--v2-ink)]">
@@ -674,7 +674,7 @@ export default function AccountDetailClient() {
                 return (
                   <div
                     key={owner}
-                    className="flex flex-wrap items-center gap-2 py-1.5"
+                    className="flex flex-wrap items-center gap-3 py-1.5"
                   >
                     {ownerAlias ? (
                       <span className="text-sm font-medium text-[var(--v2-ink)]">

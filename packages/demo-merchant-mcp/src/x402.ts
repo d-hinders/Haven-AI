@@ -1257,11 +1257,12 @@ function assertResourceMatches(payload: PaymentPayload, paymentRequired: Payment
  * `extensions` is refused, with a message that names the rule rather than the
  * bare 400 the live facilitator that motivated this gives (#2360).
  *
- * Only fires when the challenge advertises extensions, and only on v2
- * payloads — v1 has no extensions concept. This is the check that stops the
- * QA harness validating Haven-against-Haven: a Haven client that stops
- * echoing fails HERE, on Sepolia, instead of at the first strict mainnet
- * facilitator.
+ * The version cross-check fires on every payload (this merchant only issues
+ * v2 challenges, so a mismatch is a refusal, never an exemption); the echo
+ * rule itself then applies when the challenge advertises extensions. This is
+ * the check that stops the QA harness validating Haven-against-Haven: a
+ * Haven client that stops echoing fails HERE, on Sepolia, instead of at the
+ * first strict mainnet facilitator.
  */
 function assertExtensionsEchoed(payload: PaymentPayload, paymentRequired: PaymentRequired): void {
   // Reviewer finding on #2361: without this cross-check, a payload that

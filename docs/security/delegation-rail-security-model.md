@@ -190,6 +190,11 @@ in-flight live operation cannot lose its Safe binding. The guard only ever
 REFUSES or files a record — it grants nothing, signs nothing, and touches no
 chain.
 
+The unlink guard also refuses while an agent re-key is in flight, so the Safe
+binding cannot disappear between re-key stages. This is a database
+serialization guard only: it grants nothing, signs nothing, and touches no
+chain.
+
 **Credential revocation closes new grant lifecycle steps (#2025).** An agent
 already revoked at request entry cannot build or activate a fresh delegation:
 both routes refuse before constructing a budget, parsing an owner signature,

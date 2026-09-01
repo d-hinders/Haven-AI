@@ -13,7 +13,7 @@ const PAGES: InfoPage[] = [
           <span className="font-medium text-[var(--v2-ink)]">Haven credential</span> was generated on your own
           device: a small JSON file with two parts. An API key identifies the agent to Haven, but cannot spend
           by itself. A private signing key signs the agent&apos;s payments, and never reaches Haven&apos;s
-          backend. Add it to your agent and it can pay for x402-enabled APIs and services on your behalf.
+          backend. Once your agent has it, it can pay for x402-enabled APIs and services on your behalf.
         </p>
 
         <div className="space-y-3">

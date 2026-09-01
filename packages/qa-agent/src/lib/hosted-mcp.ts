@@ -113,14 +113,21 @@ export function parseStreamableHttpBody(body: string): JsonRpcResponse {
  * anything else — so a refusal would surface as an unhandled throw naming the
  * transport, about an argument name.
  *
- * Matched on both the numeric code and the SDK's message prefix because the
- * two arrival shapes carry different halves: a JSON-RPC error object has the
- * code, an `isError` text result has only the prose.
+ * Matched on the MESSAGE ALONE, deliberately, and NOT on the `-32602` code.
+ * The first cut trusted the code, and review was right to reject it: the SDK
+ * raises `-32602` for `Tool <name> not found`, `Tool <name> disabled`,
+ * `Output validation error: …` and a malformed `tools/call` envelope too. Those
+ * are harness bugs (a stale tool name) or server bugs (Haven's own tool
+ * breaching its output schema), and classifying them as a caller's bad argument
+ * would let a scenario `fail()` cleanly on a defect it should have surfaced
+ * loudly — the exact swallowing this issue exists to end, one layer earlier.
+ *
+ * `Input validation error` is emitted by `validateToolInput` and nothing else;
+ * the output-schema case is `Output validation error`, a different prefix. One
+ * predicate over the message covers both arrival shapes, because the JSON-RPC
+ * error object and the `isError` text result carry the same text.
  */
-const MCP_INVALID_PARAMS = -32602
-
-function isInputValidationError(code: number | undefined, message: string | undefined): boolean {
-  if (code === MCP_INVALID_PARAMS) return true
+function isInputValidationError(message: string | undefined): boolean {
   return typeof message === 'string' && message.includes('Input validation error')
 }
 
@@ -137,7 +144,7 @@ function isInputValidationError(code: number | undefined, message: string | unde
  */
 export function unwrapToolPayload<T>(tool: string, response: JsonRpcResponse): T {
   if (response.error) {
-    if (isInputValidationError(response.error.code, response.error.message)) {
+    if (isInputValidationError(response.error.message)) {
       throw new HostedMcpToolError(tool, 'INVALID_INPUT', response.error.message ?? 'invalid arguments')
     }
     throw new HostedMcpTransportError(
@@ -154,7 +161,7 @@ export function unwrapToolPayload<T>(tool: string, response: JsonRpcResponse): T
   try {
     payload = JSON.parse(text)
   } catch {
-    if (isInputValidationError(undefined, text)) {
+    if (isInputValidationError(text)) {
       throw new HostedMcpToolError(tool, 'INVALID_INPUT', text)
     }
     // isError with a non-JSON body is how an unhandled server-side throw

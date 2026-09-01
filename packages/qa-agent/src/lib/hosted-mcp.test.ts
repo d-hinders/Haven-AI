@@ -129,6 +129,26 @@ describe('unwrapToolPayload — the doubled envelope (#1154)', () => {
     }
   })
 
+  it('CONTROL: -32602 alone is NOT enough — the SDK uses it for harness and server bugs', () => {
+    // Round-2 review finding. The SDK raises -32602 for `Tool <name> not found`,
+    // `Tool <name> disabled`, `Output validation error: …` and a malformed
+    // tools/call envelope. Those are a stale tool name or Haven's own tool
+    // breaching its output schema — a scenario must SURFACE them, not fail()
+    // cleanly as if the caller had sent a bad argument.
+    for (const message of [
+      'MCP error -32602: Tool haven_nope not found',
+      'MCP error -32602: Output validation error: Tool haven_submit has an output schema but no structured content was provided',
+    ]) {
+      try {
+        unwrapToolPayload('haven_submit', { error: { code: -32602, message } })
+        expect.unreachable('should have thrown')
+      } catch (err) {
+        expect(err).toBeInstanceOf(HostedMcpTransportError)
+        expect(err).not.toBeInstanceOf(HostedMcpToolError)
+      }
+    }
+  })
+
   it('CONTROL: an ordinary unparseable body is still a TRANSPORT fault', () => {
     // Without this the test above would pass just as well if every non-JSON
     // body were reclassified as a tool error, which would be the opposite bug.

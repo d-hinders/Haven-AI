@@ -308,6 +308,19 @@ describe('AgentCard action-row matrix (#1402)', () => {
     expect(onRestore).toHaveBeenCalled()
   })
 
+  it('archived active legacy agent: Restore only — archive state outranks lifecycle status', () => {
+    renderCard(
+      agentFixture({
+        status: 'active',
+        account_type: 'safe' as Agent['account_type'],
+        archived_at: '2026-06-01T00:00:00Z',
+      }),
+    )
+    expect(screen.queryByRole('button', { name: 'Unlink Research agent' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Remove Research agent' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Restore Research agent to the list' })).toBeTruthy()
+  })
+
   it('Remove opens the dialog; it is not mounted before that', () => {
     renderCard(agentFixture())
     expect(screen.queryByTestId('remove-agent-dialog')).toBeNull()

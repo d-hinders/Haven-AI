@@ -54,7 +54,7 @@ export function AgentCard({
   const isPaused = agent.status === 'paused'
   const isRevoked = agent.status === 'revoked'
   const isArchived = Boolean(agent.archived_at)
-  const isOperational = !isRevoked
+  const isOperational = !isRevoked && !isArchived
   const isDelegationAgent = agent.account_type === 'delegator_hybrid'
   const isBusy = busyAction !== null
 

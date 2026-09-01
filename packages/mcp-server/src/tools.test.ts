@@ -1097,11 +1097,14 @@ describe('haven_quote_mcp_tool', () => {
       payment_required?: unknown
       payment_id?: unknown
     }>(
+      // #2349: this call used to carry `max_amount: '2000000'`, which the
+      // quote tool has never declared — the #2312 `tools.test.ts:2399` shape
+      // again (a cap certified by a test while being discarded). The tool now
+      // refuses it, and the assertions below never depended on it.
       await handlers().haven_quote_mcp_tool({
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
-        max_amount: '2000000',
       }),
     )
 

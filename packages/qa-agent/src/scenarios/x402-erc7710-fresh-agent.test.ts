@@ -19,6 +19,8 @@ const TREASURY = '0x' + 'aa'.repeat(20)
 const DELEGATE_ACCOUNT = '0x' + 'bb'.repeat(20)
 const MERCHANT_URL = 'https://demo-merchant.example'
 const AMOUNT = 1500n
+const FACILITATOR = '0x' + 'fa'.repeat(20)
+const ASSET = '0x' + 'dd'.repeat(20)
 
 const { mockFetch, mockAuthorize, mockSettle, mockBalanceOf, mockGetCode, mockProvision, mockPay } =
   vi.hoisted(() => ({
@@ -88,21 +90,37 @@ function identity() {
   }
 }
 
+/**
+ * The decoded challenge — ONE object feeds the header AND the authorize-body
+ * pin below. Carries `extensions` in the dev demo merchant's shape
+ * (`DEMO_MERCHANT_EXTENSIONS`, packages/demo-merchant-mcp/src/x402.ts, #2361)
+ * so the pinned body is the post-#2364 challenge the settle-side echo is
+ * built from. Hand-copied, NOT imported (qa-agent does not depend on
+ * demo-merchant-mcp) and nothing re-syncs it — tolerable because the pin
+ * proves VERBATIM passthrough of whatever was decoded; the block's exact
+ * content is illustrative, not load-bearing.
+ */
+const CHALLENGE = {
+  x402Version: 2,
+  accepts: [{
+    scheme: 'exact',
+    amount: AMOUNT.toString(),
+    payTo: MERCHANT,
+    asset: ASSET,
+    network: 'base-sepolia',
+    maxTimeoutSeconds: 300,
+    extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR] },
+  }],
+  resource: { url: `${MERCHANT_URL}/mcp` },
+  extensions: {
+    'haven-demo': { version: '1', echoRule: 'x402 v2: clients must echo this extensions object in PaymentPayload' },
+  },
+}
+
 function challengeResponse() {
-  const challenge = {
-    accepts: [{
-      scheme: 'exact',
-      amount: AMOUNT.toString(),
-      payTo: MERCHANT,
-      asset: '0x' + 'dd'.repeat(20),
-      network: 'base-sepolia',
-      extra: { assetTransferMethod: 'erc7710' },
-    }],
-    resource: { url: `${MERCHANT_URL}/mcp` },
-  }
   return {
     status: 402,
-    headers: new Headers({ 'PAYMENT-REQUIRED': Buffer.from(JSON.stringify(challenge)).toString('base64') }),
+    headers: new Headers({ 'PAYMENT-REQUIRED': Buffer.from(JSON.stringify(CHALLENGE)).toString('base64') }),
     text: async () => '',
   }
 }
@@ -185,6 +203,34 @@ describe('the #1667 regression signal', () => {
     expect(result.detail).toMatch(/still has no code/)
     expect(result.detail).toMatch(/InvalidEOASignature/)
     expect(mockSettle).not.toHaveBeenCalled()
+  })
+})
+
+describe('the authorize body (#2384)', () => {
+  it('sends the decoded challenge VERBATIM as paymentRequired, with the erc7710 entry\'s fields', async () => {
+    // #2373: same pin as x402-erc7710-settle — the stored copy of this
+    // challenge feeds the settle-side resource/extensions echo (#2361), and
+    // dropping the field was invisible to unit CI. Deep-equal on purpose.
+    mockGetCode.mockResolvedValueOnce('0x').mockResolvedValueOnce('0x60016001')
+
+    const result = await x402Erc7710FreshAgent.run(ctx)
+
+    expect(result.pass).toBe(true)
+    expect(mockAuthorize).toHaveBeenCalledTimes(1)
+    expect(mockAuthorize).toHaveBeenCalledWith(expect.objectContaining({
+      url: `${MERCHANT_URL}/mcp`,
+      payTo: MERCHANT,
+      amount: AMOUNT.toString(),
+      asset: ASSET,
+      network: 'base-sepolia',
+      maxTimeoutSeconds: 300,
+      facilitatorAddresses: [FACILITATOR],
+      paymentRequired: CHALLENGE,
+    }))
+    // objectContaining is recursive-equal, not strict: pin the challenge
+    // strictly too, so an extra or undefined-valued key cannot slip past.
+    const [body] = mockAuthorize.mock.calls[0]
+    expect(body.paymentRequired).toStrictEqual(CHALLENGE)
   })
 })
 

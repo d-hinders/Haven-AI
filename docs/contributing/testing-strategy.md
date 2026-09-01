@@ -8,7 +8,7 @@ covers:
   - packages/backend/vitest.global-setup.ts
   - scripts/db-mock-ratchet.mjs
   - packages/backend/db-mock-baseline.json
-last-verified: "2026-08-30" # #2211: resetDb() now empties the worker schema with foreign-key-ordered DELETEs instead of one TRUNCATE ... RESTART IDENTITY CASCADE — same coverage (every table, every time), cost now set by rows written rather than by relation count: ~371 ms -> ~48 ms quiet, ~414-448 ms -> ~52-61 ms loaded, 861 s -> 345 s of backend test time; harness section re-read against db-harness.ts and the resetDb()-in-a-loop convention rewritten around the new mechanics (the convention itself stands). Prior: #2209: harness section re-read against db-harness.ts; adds the resetDb()-in-a-loop convention with measured per-call cost (~250 ms quiet / ~800 ms-1.2 s loaded at 38 tables) — no harness behaviour changed, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #2198: harness section re-read against db-harness.ts — the cross-worker migration lock now WAITS by polling pg_try_advisory_lock (shared helper db/advisory-lock.ts) instead of blocking in pg_advisory_lock, because a blocking waiter pins a snapshot that deadlocks CREATE INDEX CONCURRENTLY; no doc-visible change, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #1763: the no-database section is rewritten — the local default inverts to failing, HAVEN_SKIP_DB_TESTS=1 acknowledges a narrowed run, and the verdict prints after vitest's summary; harness section re-read against db-harness.ts, the beforeAll example unchanged and still preferred. Prior: resetDb now awaits initDbHarness (the un-awaited-init 42P01/40P01 CI flake); harness section re-read against db-harness.ts, example unchanged and still the preferred shape
+last-verified: "2026-09-01" # #2329: harness section re-read against db-harness.ts and gains § *Harness calls belong in a HOOK, not in a test body* — the `beforeAll`/`beforeEach` example was already here as a preference, and two files that ignored it charged the cold migration-run cost to vitest's 5000 ms `testTimeout` instead of the `hookTimeout: 120_000` `vitest.config.ts` sizes for it, reddening a required check twice on unrelated PRs (#2274, #2295). Records the rule, its two escapes, the structural guard that now enforces it, the new 2000 ms slow-call diagnostic, and why raising `testTimeout` was rejected (#2209's "would only have moved the date", one level up). Verified on this branch against native Postgres: the CI failure reproduces deterministically and passes after the fix; measured cold init 572 ms quiet at 73 migrations, warm `resetDb()` ~25 ms. Scope: the harness section and the new subsection only — resetDb()'s DELETE mechanics and the #2211 numbers above them were re-read but NOT re-measured, and nothing outside § *Using the harness* was re-verified. The rule is suite-scoped (a hook in a sibling `describe` does not warm a cold call) and resolves local helper functions to a fixed point in both directions — harness calls reached through a helper, and hooks REGISTERED through one, the latter found by haven-reviewer on re-review as the same hole through a different door. Its one stated limit (a call behind an object method) is pinned by a fixture rather than left implied, and the doc says so, because a guard read as a closed guarantee is worse than one whose edges are written down — both tightened after haven-reviewer reproduced a silent pass for each against the first draft. The hook/body file counts here are AST-derived against `origin/dev`, not grepped — haven-doc-reviewer caught an off-by-one (48 -> 47) in the first draft that came from an indentation heuristic, and the corrected sentence also names the third category the two-bucket framing had hidden (a file budgeted by its own explicit timeout). Prior: #2211: resetDb() now empties the worker schema with foreign-key-ordered DELETEs instead of one TRUNCATE ... RESTART IDENTITY CASCADE — same coverage (every table, every time), cost now set by rows written rather than by relation count: ~371 ms -> ~48 ms quiet, ~414-448 ms -> ~52-61 ms loaded, 861 s -> 345 s of backend test time; harness section re-read against db-harness.ts and the resetDb()-in-a-loop convention rewritten around the new mechanics (the convention itself stands). Prior: #2209: harness section re-read against db-harness.ts; adds the resetDb()-in-a-loop convention with measured per-call cost (~250 ms quiet / ~800 ms-1.2 s loaded at 38 tables) — no harness behaviour changed, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #2198: harness section re-read against db-harness.ts — the cross-worker migration lock now WAITS by polling pg_try_advisory_lock (shared helper db/advisory-lock.ts) instead of blocking in pg_advisory_lock, because a blocking waiter pins a snapshot that deadlocks CREATE INDEX CONCURRENTLY; no doc-visible change, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #1763: the no-database section is rewritten — the local default inverts to failing, HAVEN_SKIP_DB_TESTS=1 acknowledges a narrowed run, and the verdict prints after vitest's summary; harness section re-read against db-harness.ts, the beforeAll example unchanged and still preferred. Prior: resetDb now awaits initDbHarness (the un-awaited-init 42P01/40P01 CI flake); harness section re-read against db-harness.ts, example unchanged and still the preferred shape
 ---
 
 # Backend testing strategy: the real-database rule
@@ -168,6 +168,79 @@ So the convention **stands** — a loop that resets per case is still the wrong
 shape, and the reset is still the most expensive thing in a real-DB test — but
 it is no longer the only thing standing between the suite and the next
 migration.
+
+### Harness calls belong in a HOOK, not in a test body (#2329)
+
+The sibling of the rule above, and the reason the `beforeAll`/`beforeEach`
+example is a requirement rather than a preference.
+
+Both harness entry points can pay the **cold** cost. Each awaits the same
+memoised migration run — the one `initDbHarness()` exposes — which brings the
+worker's schema to the migration head and is serialised across workers on one
+advisory lock, so a waiting worker pays the runs queued ahead of it too. `vitest.config.ts` budgets exactly that
+with `hookTimeout: 120_000` (#1372) — and **that budget only applies to a call
+made from a hook**. The identical call as the first statement of an `it` body is
+charged to vitest's 5000 ms `testTimeout` instead, which was never sized for a
+migration run.
+
+That is not a theoretical gap. On [#2295](https://github.com/d-hinders/Haven-AI/issues/2295)'s
+CI run one bare `resetDb()` measured **4634 ms against that 5000 ms**, versus
+**1162 ms** on green `dev` with the same 223 files — so `collect` was flat, the
+suite had not grown, and what moved was execution under contention. Counted
+against `dev` with the TypeScript AST, **47** backend test files call the harness
+from a hook and could never trip the per-test budget; seven call it from a test
+body, of which four are warmed by a hook of their own and one more
+(`db-harness-lock-concurrency.test.ts`) declares an explicit 180 000 ms timeout.
+That leaves exactly two unbudgeted — and they are exactly the two that failed:
+`uuid-param-22p02.test.ts` and `catalog-ingest-lock.test.ts` timed out on pull
+requests they had nothing to do with, twice
+([#2274](https://github.com/d-hinders/Haven-AI/issues/2274), then #2295), each
+time reporting a bare `Test timed out in 5000ms` against an innocent test name.
+
+**The rule**, enforced by
+`helpers/__tests__/harness-call-budget.test.ts` over the TypeScript AST: a
+`resetDb()` / `initDbHarness()` call inside an `it` body is allowed only when
+
+1. a `beforeAll`/`beforeEach` in **that test's own `describe`, or an enclosing
+   one**, also calls the harness — so the cold run is already paid and the
+   in-body call is a warm one (~25 ms). This is how the harness's own suites
+   reset mid-test, where the reset **is** the subject. Suite-scoped rather than
+   file-scoped deliberately: a hook in a sibling block says nothing about a cold
+   call in this one, and the guard's first draft got that wrong; or
+2. that `it` declares an explicit timeout of its own — either spelling,
+   `it(name, fn, 180_000)` or `it(name, { timeout: 180_000 }, fn)` — as
+   `db-harness-lock-concurrency.test.ts` does to keep an unwarmed
+   `initDbHarness()` as its positive control.
+
+The guard resolves **local helper functions** to a fixed point in both
+directions — a `resetDb()` moved one function away from the test still counts,
+and a `beforeEach` registered inside a helper warms the suite that *calls* the
+helper rather than the whole file. It has two **stated limits**, both pinned by
+fixtures rather than left implied: a harness call behind an object method
+(`helpers.coldSetup()`) is invisible, and a suite body written as a named
+function reports a false positive. The second is the safe direction and is left
+as residue deliberately. Read a green run as "no unbudgeted cold call in the
+shapes the guard resolves", not as a closed guarantee.
+
+Either way the budget a harness call runs under is readable at the call site
+instead of inherited from where someone happened to type it.
+
+**Raising `testTimeout` was rejected, for #2209's reason one level up.** A bumped
+timeout "would only have moved the date" there; here it does not even have a date
+to move to. The cold path's worst case is a migration run plus every queued
+worker's run ahead of it — which is why the harness's own lock deadline is
+deliberately *larger* than `hookTimeout` — so any `testTimeout` big enough to
+cover it is one at which the per-test timeout no longer detects a hung test, and
+it would apply to all 223 backend files to protect two call sites. The repository
+already answered this once with two numbers for two kinds of cost; the fix keeps
+call sites on the right side of that line rather than moving the line.
+
+**And a slow harness call now says so.** `resetDb()`/`initDbHarness()` warn at
+2000 ms — chosen to land *inside* the 5000 ms budget, so the diagnosis reaches
+the log before any timeout could fire — naming the reset, the advisory lock and
+the hook/test distinction, and printing the total when it finishes. The old
+failure named an innocent test and said nothing about the cause, which is why
+diagnosing it took a `dev`-baseline comparison at all.
 
 ## The ratchet
 

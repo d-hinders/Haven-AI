@@ -117,6 +117,30 @@ export const BANNED = [
   ['passkey signer', 'secure passkey'],
   ['enroll signer', 'save your sign-in method'],
   ['webauthn credential', 'secure passkey'],
+  // ── Attribution phrases (#2334) ────────────────────────────────────────────
+  // Not terminology: these are CASP attribution inversions — copy that makes
+  // Haven the party granting spend authority, when the authority is the
+  // owner-signed budget delegation enforced on-chain and Haven only constructs
+  // and relays (`docs/regulatory/casp-risk-guardrails.md` § Product Copy Rules;
+  // `docs/product/copy-guidelines.md` § Core principle). #2334 shipped exactly
+  // one of these, in the downloadable SKILL.md, where a human reads it after
+  // "Download the skill" and an agent reads it as instructions.
+  //
+  // **What this can and cannot do.** It is a literal, single-line phrase match,
+  // so it catches the RECURRENCE of these specific formulations and nothing
+  // more: reword the same inversion ("authorization for that call comes from
+  // Haven") and it goes green, and a reflow that puts "Haven" and "authorizes"
+  // on different lines evades it too, because `findCopyIssues` scans line by
+  // line. Attribution is a human-review control (`copy-guidelines.md` § Core
+  // principle, and the design-review pass); this is the cheap literal floor
+  // under it, not a substitute. Measured before adding: zero occurrences of any
+  // of these across the whole scanned set other than the #2334 defect itself,
+  // so the false-positive cost is nil.
+  ['haven authorizes', "the owner-signed budget: 'the on-chain budget the user signed'"],
+  ['haven authorises', "the owner-signed budget: 'the on-chain budget the user signed'"],
+  ['haven approves', "the owner-signed budget: 'the on-chain budget the user signed'"],
+  ['haven grants', 'the user approves; Haven constructs and relays'],
+  ['haven permits', 'the user approves; Haven constructs and relays'],
 ]
 
 const IGNORE = 'copy-lint-ignore'

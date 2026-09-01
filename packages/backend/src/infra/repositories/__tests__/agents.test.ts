@@ -9,6 +9,7 @@ import {
   FIND_DELEGATE_AGENT_FOR_USER_SQL,
   FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
   FIND_USER_SAFE_ID_FOR_USER_SQL,
+  HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL,
   LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL,
   UPDATE_AGENT_PROFILE_SQL,
   agentExistsForUser,
@@ -24,6 +25,7 @@ import {
   listAgentsForUserAllStatuses,
   loadOwnedDelegationAgent,
   insertPendingDelegationForOwnedNonRevokedAgent,
+  lockOwnedNonRevokedDelegationAgent,
   pauseAgent,
   resumeAgent,
   revokeAgent,
@@ -113,6 +115,27 @@ function tenantExecutor(row: Record<string, unknown>): Executor & { query: Retur
   )
   return { query } as unknown as Executor & { query: typeof query }
 }
+
+describe('agent/re-key admission serialization', () => {
+  it('re-checks the re-key state after the agent row lock gets a fresh snapshot', async () => {
+    let call = 0
+    const query = vi.fn(async () => {
+      call += 1
+      if (call === 1) {
+        return {
+          rows: [{ id: 'agent-1', delegate_address: '0x1111111111111111111111111111111111111111' }],
+          rowCount: 1,
+        }
+      }
+      return { rows: [{ in_flight: true }], rowCount: 1 }
+    })
+    const db = { query } as unknown as Executor
+
+    expect(await lockOwnedNonRevokedDelegationAgent('agent-1', OWNER, db)).toBeNull()
+    expect(query).toHaveBeenNthCalledWith(1, expect.stringContaining('FOR UPDATE'), ['agent-1', OWNER])
+    expect(query).toHaveBeenNthCalledWith(2, HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL, ['agent-1'])
+  })
+})
 
 describe('the #1069 status-scoping asymmetry, pinned in SQL and in names', () => {
   it('list and single reads carry NO status filter — pending_approval agents are surfaced', () => {

@@ -27,6 +27,7 @@ import { getPool } from '../src/db.js'
 import { selectDelegation } from '../src/rails/delegation-authorization.js'
 import { runMigrations } from '../src/db/migrate.js'
 import {
+  HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL,
   LOCK_OWNED_AGENT_FOR_REKEY_OPENING_SQL,
 } from '../src/infra/repositories/agents.js'
 import {
@@ -544,6 +545,10 @@ const QUERIES: SmokeQuery[] = [
   {
     name: 'agents: lock before opening re-key',
     sql: LOCK_OWNED_AGENT_FOR_REKEY_OPENING_SQL,
+  },
+  {
+    name: 'agents: re-check in-flight re-key after row lock',
+    sql: HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL,
   },
   {
     name: 'safes: refuse unlink during in-flight re-key',

@@ -127,12 +127,14 @@ export async function agentAuthMiddleware(
     return reply.code(401).send({ error: 'Invalid or revoked API key' })
   }
 
+  const sweepRecoveryRequest = isSweepRecoveryRequest(request)
+
   // #1130: pending_approval is the NORMAL starting state for every connect-
   // modal agent (the key is issued at /register; activation happens at the
   // first budget grant) — a valid key must not read as "invalid or revoked".
   // Named branch BEFORE the allow-list rejection, mirroring `paused` below;
   // it never authenticates the request.
-  if (row.status === 'pending_approval') {
+  if (row.status === 'pending_approval' && !sweepRecoveryRequest) {
     return reply.code(403).send({
       error: 'agent_pending_approval',
       detail:
@@ -140,8 +142,6 @@ export async function agentAuthMiddleware(
         'budget grant for this agent — its API key starts working the moment the budget is active.',
     })
   }
-
-  const sweepRecoveryRequest = isSweepRecoveryRequest(request)
 
   // Archived records stay readable in the dashboard, and the exact sweep
   // recovery routes remain available while the original Safe binding exists.
@@ -159,7 +159,12 @@ export async function agentAuthMiddleware(
   if (row.status === 'revoked' && !sweepRecoveryRequest) {
     return reply.code(401).send({ error: 'Invalid or revoked API key' })
   }
-  if (row.status !== 'active' && row.status !== 'paused' && row.status !== 'revoked') {
+  if (
+    row.status !== 'active' &&
+    row.status !== 'paused' &&
+    row.status !== 'pending_approval' &&
+    row.status !== 'revoked'
+  ) {
     return reply.code(401).send({ error: 'Invalid or revoked API key' })
   }
 

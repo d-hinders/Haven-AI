@@ -130,17 +130,26 @@ export async function lockOwnedNonRevokedDelegationAgent(
          SELECT 1 FROM user_safes us
          WHERE us.id = agents.safe_id AND us.account_type = 'delegator_hybrid'
        )
-       AND NOT EXISTS (
-         SELECT 1 FROM agent_rekeys ar
-         WHERE ar.agent_id = agents.id
-           AND ar.stage IN ('preflight', 'revoked', 'metered', 'issued')
-       )
      FOR UPDATE`,
     [agentId, userId],
   )
   const row = result.rows[0]
-  return row?.delegate_address ? { delegate_address: row.delegate_address } : null
+  if (!row?.delegate_address) return null
+
+  // This must be a separate statement after the agent-row lock. In READ
+  // COMMITTED, a subquery in the locking SELECT can retain the statement
+  // snapshot it took before waiting for a concurrent re-key opener; the
+  // post-lock read gets a fresh snapshot and sees the committed re-key.
+  const inFlightRekey = await db.query<{ in_flight: boolean }>(HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL, [agentId])
+  if (inFlightRekey.rows[0]?.in_flight === true) return null
+  return { delegate_address: row.delegate_address }
 }
+
+export const HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL = `SELECT EXISTS (
+         SELECT 1 FROM agent_rekeys
+         WHERE agent_id = $1
+           AND stage IN ('preflight', 'revoked', 'metered', 'issued')
+       ) AS in_flight`
 
 /**
  * Lock the agent row before opening a re-key. This deliberately does not

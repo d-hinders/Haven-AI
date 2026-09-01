@@ -225,6 +225,36 @@ export const BANNED = [
   ['haven approves', "the owner-signed budget: 'the on-chain budget the user signed'"],
   ['haven grants', 'the user approves; Haven constructs and relays'],
   ['haven permits', 'the user approves; Haven constructs and relays'],
+  // ── The two CASP avoid-list phrases themselves (#2246) ─────────────────────
+  // #2334 added five phrases DERIVED from the § Core principle attribution
+  // rule. These two are different: they are avoid-list entries of
+  // `casp-risk-guardrails.md` § Product Copy Rules verbatim, and both were live
+  // in `components/UsingYourAgentInfo.tsx` — a file this gate has scanned by
+  // DIRECTORY the whole time, with no baseline entry, going green because
+  // nothing in `BANNED` described them. Two trackers (#2063, then #2347's
+  // repo-wide sweep) found the same copy by hand because no instrument could.
+  //
+  // The literals are SHORTER than the doc's sentences on purpose, and that is
+  // the measured part rather than a stylistic call. "Haven gave you the private
+  // key" as written matches nothing: the live defect said "Haven gave you a
+  // credential — a private key", split across a JSX interpolation and a line
+  // break. `haven gave you` catches it and the doc's own wording both. Both
+  // additions were measured across the full scanned set (149 files + the
+  // 8-entry SCAN_FILES allowlist) before landing: ZERO occurrences of either,
+  // and each fires on the pre-fix file. Two nearby generalisations were
+  // REJECTED on the same measurement rather than on taste, because each has a
+  // true-sentence false positive: `signs and settles` hits
+  // `app/protocols/x402/page.tsx` ("Client signs and settles on-chain" — the
+  // client does), and `haven signs` hits `components/AccountSignersCard.tsx`
+  // ("Haven signs nothing." — the correct non-custody claim, which this gate
+  // must never penalise).
+  //
+  // Same ceiling as the block above, and it is not hypothetical here: this is
+  // a single-line literal match. Reword the claim ("the key we issued you") and
+  // it goes green. The claim is what the avoid list bans; the phrase is only
+  // what a matcher can hold.
+  ['haven signs and settles', "the real actor: 'signed by your agent's key and constrained by the budget you signed'"],
+  ['haven gave you', 'the credential is generated on the user’s device; Haven never receives the signing key'],
 ]
 
 const IGNORE = 'copy-lint-ignore'

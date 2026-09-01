@@ -90,6 +90,12 @@ export default function SweepClient({ agentId }: { agentId: string }) {
     : null
   const agentLabel = agent?.name ?? 'Your agent'
   const destination = balance?.safe_address
+  const pageSubtitle =
+    balance && !hasVerifiedDestination
+      ? `${agentLabel} · ${network ?? `Chain ${balance.chain_id}`}. Recovery is unavailable without a verified Haven wallet.`
+      : network
+        ? `${agentLabel} · ${network}. Move eligible funds back to your Haven wallet.`
+        : "Move eligible funds left in your agent's wallet back to your Haven wallet."
 
   const sweepCommand = `haven_sweep_delegate`
 
@@ -97,7 +103,7 @@ export default function SweepClient({ agentId }: { agentId: string }) {
     <div className="max-w-2xl">
       <PageHeader
         title="Recover funds"
-        subtitle={network ? `${agentLabel} · ${network}. Move eligible funds back to your Haven wallet.` : "Move eligible funds left in your agent's wallet back to your Haven wallet."}
+        subtitle={pageSubtitle}
       />
 
       <div className="mt-1 mb-6">
@@ -116,7 +122,7 @@ export default function SweepClient({ agentId }: { agentId: string }) {
             className="px-6 py-8"
           >
             <div className="space-y-3">
-              <Skeleton variant="text" className="mx-auto h-4 w-40" />
+              <p className="text-center text-sm text-[var(--v2-ink-3)]">Checking recovery balance…</p>
               <Skeleton variant="text" className="mx-auto h-3 w-3/4 max-w-md" />
               <Skeleton className="mx-auto h-9 w-28" />
             </div>

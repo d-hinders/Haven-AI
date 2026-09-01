@@ -121,8 +121,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Archive a revoked agent (soft removal — history is kept).
-         * @description Replaces agent deletion (#1401). Requires status=revoked — archiving is a filing action and never the thing that stops spending. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.
+         * Archive an agent (soft removal — history is kept).
+         * @description Replaces agent deletion (#1401). Delegation agents require status=revoked and dead budgets because archiving is a filing action and never the thing that stops spending. Legacy Safe records may be unlinked at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.
          */
         post: operations["archiveAgent"];
         delete?: never;

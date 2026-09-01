@@ -28,7 +28,9 @@
  * **2. Under the touch-target floor — an ergonomics defect.** The documented
  * floor is 44px (`docs/product/design-system.md` § Buttons *Tap targets*,
  * #1726; `docs/product/design-review.md` § Responsive And States). Measured
- * hit rectangles on unchanged `dev`: **73 x 24** and **26 x 26**. Fixed with
+ * hit rectangles on unchanged `dev`: **73 x 24** and **26 x 26** (the 73 is a
+ * macOS reading; the same button renders 75 wide on the Linux CI runner, which
+ * is why only the HEIGHT is pinned hard — see `PAINT` below). Fixed with
  * the transparent-`::after` mechanism that section documents — vertical-only
  * for the labelled button, both axes for the icon square (#1766's deviation).
  *
@@ -95,9 +97,22 @@ const ACTIVE_DEFAULT_CARD = 'Operating wallet'
  * UNCHANGED by this fix. Both defects here are fixed without moving a pixel,
  * which is the whole point of the `::after` mechanism and of gating the
  * existing hover treatment rather than adding an override.
+ *
+ * WHICH OF THESE FOUR NUMBERS IS PLATFORM-STABLE, because one of them is not
+ * and it failed CI before this note existed. `Set active`'s WIDTH is a text
+ * measurement: it renders **72.6px on macOS and 75px on the Linux CI runner**,
+ * and an absolute pin on it is a font-metric assertion wearing a layout
+ * assertion's clothes. Every other figure here is geometry — the two heights
+ * come from `text-xs`/`py-1` and `p-1.5` line boxes, and the star's width is
+ * `p-1.5` twice plus a `w-3.5` icon, 6 + 14 + 6 — so those stay pinned hard.
+ *
+ * `setActive.w` is therefore kept only as a CEILING with real headroom, paired
+ * with the relational check below that expresses the actual rule ("the target
+ * grew sideways, the button did not"). A number nobody can reproduce on their
+ * own machine is worse than no number.
  */
 const PAINT = {
-  setActive: { w: 72.6, h: 24 },
+  setActive: { h: 24, maxW: 90 },
   star: { w: 26, h: 26 },
 }
 /** Sub-pixel tolerance on a paint assertion. Deliberately tight. */
@@ -287,10 +302,13 @@ test('/accounts: the card actions are VISIBLE on a touch device, with no hover a
   */
   const [setActive, star] = probe.buttons
   expect(
+    setActive.paint.h,
+    `"Set active" paints ${setActive.paint.w}x${setActive.paint.h}px — the height is not the documented ${PAINT.setActive.h}`,
+  ).toBeCloseTo(PAINT.setActive.h, 0)
+  expect(
     setActive.paint.w,
-    `"Set active" paints ${setActive.paint.w}x${setActive.paint.h}px, not the documented ${PAINT.setActive.w}x${PAINT.setActive.h}`,
-  ).toBeCloseTo(PAINT.setActive.w, 0)
-  expect(setActive.paint.h).toBeCloseTo(PAINT.setActive.h, 0)
+    `"Set active" paints ${setActive.paint.w}px wide, past the ${PAINT.setActive.maxW}px ceiling — that is a label or a padding change, not a reveal`,
+  ).toBeLessThanOrEqual(PAINT.setActive.maxW)
   expect(
     star.paint.w,
     `the star paints ${star.paint.w}x${star.paint.h}px, not the documented ${PAINT.star.w}x${PAINT.star.h}`,
@@ -329,6 +347,18 @@ test('/accounts: both card actions clear the 44px touch-target floor without mov
   expect(
     Math.abs(setActive.paint.h - PAINT.setActive.h),
     `"Set active" now paints ${setActive.paint.h}px tall — the target was supposed to grow, not the button`,
+  ).toBeLessThanOrEqual(PAINT_TOLERANCE)
+  /*
+    The vertical-only rule for the labelled button, stated as a RELATIONSHIP so
+    it holds on any platform's font metrics. `after:inset-x-0` means the
+    overlay spans the button's own width and adds none, so the hit rectangle
+    must be the border box sideways however wide the label renders. This is
+    what the absolute width pin used to imply and could not survive: 72.6px on
+    macOS, 75px on Linux CI.
+  */
+  expect(
+    setActive.hit.w - setActive.paint.w,
+    `"Set active"'s target is ${setActive.hit.w}px against a ${setActive.paint.w}px box — it has grown SIDEWAYS, which is what would let it swallow the star's taps`,
   ).toBeLessThanOrEqual(PAINT_TOLERANCE)
   expect(
     Math.abs(star.paint.h - PAINT.star.h),

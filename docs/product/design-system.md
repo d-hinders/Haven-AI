@@ -720,6 +720,13 @@ round:
   is the general form; 8px is not enough when the smaller control is an icon square, and
   the arithmetic (`(44 − painted) ÷ 2` against the gap) is the thing to run.
 
+**Every width in this paragraph is a macOS reading, and one of them moves.** `Set active`
+is a text button: 72.6px on macOS, **75px on the Linux CI runner**, so the reservation
+figures above shift with it and an absolute pin on that width fails CI as a font-metric
+assertion dressed up as a layout one — it did, once. Pin the geometry (the two heights,
+and the icon square's 6 + 14 + 6) and express the sideways rule as a relationship
+(`hit width − painted width ≈ 0` for an `inset-x-0` overlay) instead.
+
 `e2e/accounts-card-tap-target.mobile.spec.ts` pins all of it, and `/accounts` has no
 committed pixel baseline at any width — so, as with #2038, the blocking visual gate could
 not have seen any of this.

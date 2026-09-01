@@ -18,6 +18,7 @@ import type {
 import {
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
+  x402V2PaymentEnvelope,
 } from './x402.js'
 import { paymentStateFromRaw, throwPaymentStateError } from './payment-state.js'
 import { createErc20Contract, createJsonRpcProvider } from './provider.js'
@@ -284,11 +285,9 @@ export class X402FundingLeg {
     if (paymentRequired.x402Version < 2) return header
 
     const payment = decodeBase64Json<{ payload: unknown }>(header)
-    return encodeBase64Json({
-      x402Version: paymentRequired.x402Version,
-      accepted: option,
-      payload: payment.payload,
-    })
+    // #2361: the shared envelope carries the resource/extensions echoes —
+    // see `x402V2PaymentEnvelope`'s comment for why they are load-bearing.
+    return encodeBase64Json(x402V2PaymentEnvelope(paymentRequired, option, payment.payload))
   }
 
   // ── Receipt mapping ──────────────────────────────────────────────

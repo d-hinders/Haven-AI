@@ -15,6 +15,7 @@ import {
   assembleSettlementPayload,
   encodeXPaymentHeader,
 } from './x402-delegation.js'
+import { storedPaymentRequiredFromMetadata } from './sign-context.js'
 import { passportReferenceFor } from '../passport/index.js'
 import { markIntentSubmittedForSettlement } from '../../infra/repositories/x402-authorizations.js'
 import type { X402HandlerResult } from './types.js'
@@ -87,15 +88,35 @@ export async function settleX402(
       state.budget,
       state.delegateAccountAddress,
     )
-    const header = encodeXPaymentHeader(state.network, payload, {
-      amount: intent.amount_raw,
-      payTo: intent.to_address as `0x${string}`,
-      asset: intent.token_address as `0x${string}`,
-      // Pre-#1064 intents stored no echo value; 300 is the same default
-      // the child expiry was built with, so the echo stays consistent.
-      maxTimeoutSeconds: state.maxTimeoutSeconds ?? 300,
-      facilitatorAddresses: state.facilitatorAddresses,
-    })
+    // #2361: echo the stored challenge's `resource`/`extensions` into the
+    // envelope. The #1355 verbatim `machine_metadata.payment_required` is the
+    // source, so the echo is byte-faithful to the merchant's own 402; a
+    // pre-#1355 intent (or one authorized without a payment_required) simply
+    // omits both, which is the proven-compatible pre-#2361 shape.
+    const storedChallenge = storedPaymentRequiredFromMetadata(intent.machine_metadata)
+    const challengeResource = storedChallenge?.resource
+    const challengeExtensions = storedChallenge?.extensions
+    const header = encodeXPaymentHeader(
+      state.network,
+      payload,
+      {
+        amount: intent.amount_raw,
+        payTo: intent.to_address as `0x${string}`,
+        asset: intent.token_address as `0x${string}`,
+        // Pre-#1064 intents stored no echo value; 300 is the same default
+        // the child expiry was built with, so the echo stays consistent.
+        maxTimeoutSeconds: state.maxTimeoutSeconds ?? 300,
+        facilitatorAddresses: state.facilitatorAddresses,
+      },
+      {
+        ...(challengeResource && typeof challengeResource === 'object' && !Array.isArray(challengeResource)
+          ? { resource: challengeResource as Record<string, unknown> }
+          : {}),
+        ...(challengeExtensions && typeof challengeExtensions === 'object' && !Array.isArray(challengeExtensions)
+          ? { extensions: challengeExtensions as Record<string, unknown> }
+          : {}),
+      },
+    )
 
     // #976: the agent's own passport reference, so it can PRESENT rather
     // than have the merchant DISCOVER. Deliberately in Haven's response and

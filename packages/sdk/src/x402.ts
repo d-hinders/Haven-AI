@@ -165,7 +165,11 @@ export function normalizePaymentRequired(value: unknown): X402PaymentRequired | 
   const resourceUrl = candidate.resource?.url ?? first.resource
   if (!resourceUrl) return null
 
+  // #2361: spread the merchant's resource object FIRST so unknown fields
+  // survive — the v2 payment envelope echoes `resource` verbatim, and a
+  // reconstructed subset is a different object than the merchant advertised.
   const resource = {
+    ...(candidate.resource && typeof candidate.resource === 'object' ? candidate.resource : {}),
     url: resourceUrl,
     description: candidate.resource?.description ?? first.description,
     mimeType: candidate.resource?.mimeType ?? first.mimeType,
@@ -345,6 +349,45 @@ export function x402PaymentHeaderNamesFor(paymentHeader: string): readonly strin
  */
 export function x402PaymentHeaderNamesSent(paymentHeader: string): string {
   return x402PaymentHeaderNamesFor(paymentHeader).join(', ')
+}
+
+/**
+ * The x402 v2 payment envelope: `{x402Version, resource?, accepted, payload,
+ * extensions?}` per the spec's PaymentPayload (§5.2.2).
+ *
+ * The `resource` and `extensions` echoes are the #2361 fix, and they are not
+ * optional politeness: the spec makes the extensions echo a MUST ("the client
+ * must include at least the info received"), and CoinGecko's facilitator was
+ * live-bisected rejecting the echo-less envelope with a bare 400 while
+ * accepting the identical signature and `accepted`/`payload` bytes with the
+ * echoes added (#2360, Base mainnet, 2026-09-01). Both objects are echoed
+ * VERBATIM from the merchant's 402 — never reconstructed — and omitted when
+ * the challenge carries none, which keeps the envelope byte-identical to the
+ * pre-#2361 shape for echo-less merchants (Ampersend and Soundside settled
+ * that shape live, so omission is the proven-compatible default).
+ *
+ * The `accepted` wrap itself is #303's shape and predates this helper — see
+ * the #300/#303 history before "fixing" it: scheme/network live INSIDE
+ * `accepted` in v2, never at the top level.
+ */
+export function x402V2PaymentEnvelope(
+  paymentRequired: Pick<X402PaymentRequired, 'x402Version' | 'resource' | 'extensions'>,
+  accepted: X402PaymentOption,
+  payload: unknown,
+): Record<string, unknown> {
+  const resource = paymentRequired.resource
+  const extensions = paymentRequired.extensions
+  return {
+    x402Version: paymentRequired.x402Version,
+    ...(resource && typeof resource === 'object' && !Array.isArray(resource)
+      ? { resource }
+      : {}),
+    accepted,
+    payload,
+    ...(extensions && typeof extensions === 'object' && !Array.isArray(extensions)
+      ? { extensions }
+      : {}),
+  }
 }
 
 /**
@@ -740,7 +783,20 @@ export async function validateStandardX402PaymentHeader(
         throw new Error('context')
       }
     } else {
-      if (!hasOnlyKeys(decoded, ['x402Version', 'accepted', 'payload'])) throw new Error('shape')
+      // #2361: the v2 envelope may carry the `resource`/`extensions` echoes
+      // (spec PaymentPayload §5.2.2; the extensions echo is a spec MUST when
+      // the challenge advertises them). They are echoes of merchant data, not
+      // spend authority — validated structurally here, while the required
+      // key set stays exactly what it was.
+      if (!hasOnlyKeys(decoded, ['x402Version', 'accepted', 'payload'], ['resource', 'extensions'])) {
+        throw new Error('shape')
+      }
+      if ('resource' in decoded && (!decoded.resource || typeof decoded.resource !== 'object' || Array.isArray(decoded.resource))) {
+        throw new Error('shape')
+      }
+      if ('extensions' in decoded && (!decoded.extensions || typeof decoded.extensions !== 'object' || Array.isArray(decoded.extensions))) {
+        throw new Error('shape')
+      }
       const accepted = selectStandardPaymentOption([decoded.accepted as X402PaymentOption])
       if (!accepted || !matchesHeaderContext(accepted, context)) throw new Error('context')
     }
@@ -808,9 +864,13 @@ export async function validateStandardX402PaymentHeader(
   }
 }
 
-function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean {
-  return Object.keys(value).every((key) => allowed.includes(key)) &&
-    allowed.every((key) => key in value)
+function hasOnlyKeys(
+  value: Record<string, unknown>,
+  required: string[],
+  optional: string[] = [],
+): boolean {
+  return Object.keys(value).every((key) => required.includes(key) || optional.includes(key)) &&
+    required.every((key) => key in value)
 }
 
 function sameAddress(left: string, right: string): boolean {

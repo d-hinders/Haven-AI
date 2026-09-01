@@ -732,11 +732,14 @@ describe('Hosted MCP + Edge Signer integration', () => {
       }),
     )
 
-    // Decode the header and assert spec shape.
+    // Decode the header and assert spec shape. #2361: the envelope also
+    // echoes the challenge's `resource` verbatim (and `extensions` when the
+    // challenge advertises one — this fixture does not, so the key is absent).
     const decoded = JSON.parse(atob(result.payment_header)) as Record<string, unknown>
     const topLevelKeys = Object.keys(decoded).sort()
-    expect(topLevelKeys).toEqual(['accepted', 'payload', 'x402Version'])
+    expect(topLevelKeys).toEqual(['accepted', 'payload', 'resource', 'x402Version'])
     expect(decoded.x402Version).toBe(2)
+    expect(decoded.resource).toEqual(PAYMENT_REQUIRED.resource)
 
     const payload = decoded.payload as Record<string, unknown>
     expect(typeof payload.signature).toBe('string')

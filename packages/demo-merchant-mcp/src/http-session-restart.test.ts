@@ -108,7 +108,14 @@ async function signedHeader(pr: PaymentRequired): Promise<string> {
       nonce: auth.nonce as `0x${string}`,
     },
   })
-  const payload: PaymentPayload = { x402Version: 2, resource: pr.resource, accepted, payload: { authorization: auth, signature } }
+  const payload: PaymentPayload = {
+    x402Version: 2,
+    resource: pr.resource,
+    accepted,
+    payload: { authorization: auth, signature },
+    // #2361: echo the challenge's extensions per the enforced spec MUST.
+    ...(pr.extensions ? { extensions: pr.extensions } : {}),
+  }
   return encodePaymentSignatureHeader(payload)
 }
 

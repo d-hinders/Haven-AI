@@ -85,6 +85,8 @@ function erc7710Header(
       permissionContext: PERMISSION_CONTEXT,
       ...overrides,
     },
+    // #2361: echo the challenge's extensions per the enforced spec MUST.
+    ...(pr.extensions ? { extensions: pr.extensions } : {}),
   }
   return encodePaymentSignatureHeader(payload)
 }
@@ -161,6 +163,9 @@ describe('demo merchant experimental erc7710 rail', () => {
       resource: paymentRequired.resource,
       accepted: { ...paymentRequired.accepts[0], extra: { assetTransferMethod: ERC7710_TRANSFER_METHOD } },
       payload: { delegator: DELEGATOR, delegationManager: DELEGATION_MANAGER, permissionContext: PERMISSION_CONTEXT },
+      // #2361: echo-compliant so the refusal under test (method not offered)
+      // fires, not the extensions-echo gate that sits in front of it.
+      ...(paymentRequired.extensions ? { extensions: paymentRequired.extensions } : {}),
     }
     const rejected = await postBuyVpn(url, { [PAYMENT_SIGNATURE_HEADER]: encodePaymentSignatureHeader(forged) }, 2)
     const body = await rejected.json() as PaymentRequired
@@ -362,6 +367,9 @@ describe('demo merchant experimental erc7710 rail', () => {
       resource: storageRequired.resource,
       accepted: storageRequired.accepts.find((option) => option.extra?.assetTransferMethod === ERC7710_TRANSFER_METHOD)!,
       payload: { delegator: DELEGATOR, delegationManager: DELEGATION_MANAGER, permissionContext: PERMISSION_CONTEXT },
+      // #2361: echo-compliant so the refusal under test (cross-product reuse)
+      // fires, not the extensions-echo gate that sits in front of it.
+      ...(storageRequired.extensions ? { extensions: storageRequired.extensions } : {}),
     }
     const refused = await postBuyStorage(url, { [PAYMENT_SIGNATURE_HEADER]: encodePaymentSignatureHeader(reuse) }, 5)
     const refusedBody = await refused.json() as PaymentRequired

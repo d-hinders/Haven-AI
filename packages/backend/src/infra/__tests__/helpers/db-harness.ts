@@ -53,10 +53,12 @@
  *
  * So the rule, enforced structurally by
  * `helpers/__tests__/harness-call-budget.test.ts`: an in-body harness call is
- * allowed only when the file also calls the harness from a hook (making the
- * in-body call a warm one — this is how the harness's own suites reset
- * mid-test, where the reset IS the subject), or when that `it` declares an
- * explicit timeout of its own. Raising `testTimeout` instead was rejected:
+ * allowed only when a hook in that test's OWN `describe` (or an enclosing one)
+ * also calls the harness — making the in-body call a warm one, which is how
+ * the harness's own suites reset mid-test, where the reset IS the subject — or
+ * when that `it` declares an explicit timeout of its own. The guard follows
+ * local helper functions, so moving the call one function away does not hide
+ * it. Raising `testTimeout` instead was rejected:
  * the cold path's worst case is a migration run plus every queued worker's
  * run ahead of it, which is why the lock's own deadline is deliberately
  * LARGER than `hookTimeout` — any number big enough to cover it is a number
@@ -228,40 +230,30 @@ const SLOW_HARNESS_CALL_MS = 2_000
  * A fast call stays completely silent — the closing duration line is printed
  * only when the warning already fired, so the log gains nothing on a good run.
  */
-let announcing = 0
-
 async function withSlowAnnouncement<T>(label: string, work: () => Promise<T>): Promise<T> {
-  // Only the OUTERMOST harness call announces. `resetDb()` awaits
-  // `initDbHarness()`, so without this a slow cold reset prints the same
-  // paragraph twice and the reader has to work out that it is one event.
-  const outermost = announcing === 0
-  announcing += 1
   const startedAt = Date.now()
   let warned = false
-  const timer = outermost
-    ? setTimeout(() => {
-        warned = true
-        console.warn(
-          `db-harness: ${label} has been running ` +
-            `${Math.round((Date.now() - startedAt) / 1000)}s — the HARNESS SETUP is what is ` +
-            "slow here, not the test body. `resetDb()` awaits `initDbHarness()`, which brings " +
-            "this worker's schema to the migration head and serialises that run across vitest " +
-            `workers on advisory lock ${MIGRATION_LOCK_KEY}, so a cold call under CI ` +
-            'contention costs seconds. If this call sits in an `it` body it is charged to ' +
-            "vitest's 5000 ms testTimeout and will surface as an anonymous " +
-            '"Test timed out in 5000ms" naming an innocent test; move it into ' +
-            "`beforeAll`/`beforeEach`, where vitest.config.ts's hookTimeout budgets it " +
-            '(#2329).',
-        )
-      }, SLOW_HARNESS_CALL_MS)
-    : null
+  const timer = setTimeout(() => {
+    warned = true
+    console.warn(
+      `db-harness: ${label} has been running ` +
+        `${Math.round((Date.now() - startedAt) / 1000)}s — the HARNESS SETUP is what is ` +
+        "slow here, not the test body. `resetDb()` awaits `initDbHarness()`, which brings " +
+        "this worker's schema to the migration head and serialises that run across vitest " +
+        `workers on advisory lock ${MIGRATION_LOCK_KEY}, so a cold call under CI ` +
+        'contention costs seconds. If this call sits in an `it` body it is charged to ' +
+        "vitest's 5000 ms testTimeout and will surface as an anonymous " +
+        '"Test timed out in 5000ms" naming an innocent test; move it into ' +
+        "`beforeAll`/`beforeEach`, where vitest.config.ts's hookTimeout budgets it " +
+        '(#2329).',
+    )
+  }, SLOW_HARNESS_CALL_MS)
   // Never keep the process alive for a diagnostic.
-  timer?.unref?.()
+  timer.unref?.()
   try {
     return await work()
   } finally {
-    announcing -= 1
-    if (timer) clearTimeout(timer)
+    clearTimeout(timer)
     if (warned) {
       console.warn(`db-harness: ${label} finished after ${Date.now() - startedAt}ms.`)
     }
@@ -276,7 +268,17 @@ let ready: Promise<void> | null = null
  * test file.
  */
 export function initDbHarness(): Promise<void> {
-  ready ??= withSlowAnnouncement('initDbHarness()', async () => {
+  // The announcement wraps the PUBLIC entry point, while the memoised body
+  // below stays unannounced. That is what keeps a cold `resetDb()` — which
+  // awaits the same body — from printing the paragraph twice, WITHOUT a
+  // module-level "am I nested" flag: a flag cannot tell a nested call from a
+  // merely concurrent one, and would silence a genuinely separate slow call
+  // (haven-reviewer, #2329).
+  return withSlowAnnouncement('initDbHarness()', ensureMigrated)
+}
+
+function ensureMigrated(): Promise<void> {
+  ready ??= (async () => {
     // Explicitly qualified — CREATE SCHEMA ignores search_path.
     await db.query(`CREATE SCHEMA IF NOT EXISTS ${WORKER_SCHEMA}`)
     // SERIALISE migration runs across workers (#1562, found by #1559's CI):
@@ -323,7 +325,7 @@ export function initDbHarness(): Promise<void> {
     } finally {
       lockHolder.release()
     }
-  })
+  })()
   return ready
 }
 
@@ -486,7 +488,7 @@ export function resetDb(): Promise<void> {
 }
 
 async function performReset(): Promise<void> {
-  await initDbHarness()
+  await ensureMigrated()
   const { tables, fks, sequences } = await readSchemaShape()
   if (tables.length === 0) return
 

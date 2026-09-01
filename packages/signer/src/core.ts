@@ -17,6 +17,7 @@ import {
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
+  x402V2PaymentEnvelope,
   decodeBase64Json,
   encodeBase64Json,
   AgentPaymentFailureCode,
@@ -380,11 +381,15 @@ export function createEdgeSigner(
       // leak + data-retention violation for user payment context).
       try {
         const payment = decodeBase64Json<{ payload: unknown }>(header)
-        const wrapped = encodeBase64Json({
-          x402Version: paymentRequired.x402Version,
-          accepted: option,
-          payload: payment.payload,
-        })
+        // #2361: the shared v2 envelope echoes the challenge's `resource` and
+        // `extensions` verbatim when present — the extensions echo is a spec
+        // MUST, and its absence was live-bisected as the CoinGecko rejection
+        // cause (#2360). `paymentRequired` here is the caller's raw 402 JSON
+        // (the tools layer passes it through unnormalized), so the echo is
+        // byte-faithful to what the merchant advertised.
+        const wrapped = encodeBase64Json(
+          x402V2PaymentEnvelope(paymentRequired, option, payment.payload),
+        )
         return { paymentHeader: wrapped, accepted: option }
       } finally {
         x402Bindings.delete(x402Binding)

@@ -106,6 +106,8 @@ async function signedHeader(pr: PaymentRequired): Promise<string> {
     resource: pr.resource,
     accepted,
     payload: { authorization, signature },
+    // #2361: echo the challenge's extensions per the enforced spec MUST.
+    ...(pr.extensions ? { extensions: pr.extensions } : {}),
   }
   return encodePaymentSignatureHeader(payload)
 }

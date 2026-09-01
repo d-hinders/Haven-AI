@@ -584,12 +584,19 @@ describe('x402 helpers', () => {
     // top-level `scheme`/`network` keys leak in alongside `accepted`.
     // The strict key-set + exact-equality checks here would have failed
     // on PR #300's payload shape.
+    //
+    // #2361 adds the `resource` echo to the set (and `extensions` when the
+    // challenge carries one — this fixture does not, and the key must then
+    // be ABSENT, not empty: omission is the shape Ampersend and Soundside
+    // settled live). The echo is the challenge's resource VERBATIM.
     expect((payment as { accepted: unknown }).accepted).toEqual(accepted)
+    expect((payment as { resource: unknown }).resource).toEqual(paymentRequired.resource)
     expect(Object.keys(payment as object).sort()).toEqual(
-      ['accepted', 'payload', 'x402Version'].sort(),
+      ['accepted', 'payload', 'resource', 'x402Version'].sort(),
     )
     expect(payment).not.toHaveProperty('scheme')
     expect(payment).not.toHaveProperty('network')
+    expect(payment).not.toHaveProperty('extensions')
 
     expect(fetchMock.mock.calls[4][0]).toBe(`${backendUrl}/machine-payments/evidence`)
     const evidenceInit = fetchMock.mock.calls[4][1] as RequestInit
@@ -1109,12 +1116,17 @@ describe('x402 helpers', () => {
 
     // PR #300 regression guard — see the longer note on the earlier
     // payX402Quote test for the spec reference (Soundside docs item 5).
+    // #2361: the resume path builds the same envelope, so it carries the
+    // same resource echo (and no extensions key for an extensions-less
+    // challenge).
     expect((payment as { accepted: unknown }).accepted).toEqual(accepted)
+    expect((payment as { resource: unknown }).resource).toEqual(paymentRequired.resource)
     expect(Object.keys(payment as object).sort()).toEqual(
-      ['accepted', 'payload', 'x402Version'].sort(),
+      ['accepted', 'payload', 'resource', 'x402Version'].sort(),
     )
     expect(payment).not.toHaveProperty('scheme')
     expect(payment).not.toHaveProperty('network')
+    expect(payment).not.toHaveProperty('extensions')
   })
 
   it('retries the original x402 request from an approved payment id', async () => {
@@ -1641,8 +1653,41 @@ describe('x402 helpers', () => {
     }).fundingLeg.createPaymentHeader(paymentRequired, accepted)
 
     const decoded = JSON.parse(atob(header)) as Record<string, unknown>
-    expect(Object.keys(decoded).sort()).toEqual(['accepted', 'payload', 'x402Version'])
+    expect(Object.keys(decoded).sort()).toEqual(['accepted', 'payload', 'resource', 'x402Version'])
     expect(decoded.x402Version).toBe(2)
+    expect(decoded.accepted).toEqual(accepted)
+    expect(decoded.resource).toEqual(paymentRequired.resource)
+  })
+
+  it('echoes the challenge extensions verbatim in the v2 envelope (#2361)', async () => {
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    // The live bisection that found this (#2360): the same signature and
+    // accepted/payload bytes were rejected without these echoes and settled
+    // with them. The extensions echo is a spec MUST ("must include at least
+    // the info received"), so it is verbatim — nested content included —
+    // never reconstructed.
+    const extensions = {
+      bazaar: { info: { input: { method: 'GET' } }, schema: 'https://json-schema.org/draft-07/schema' },
+    }
+    const withExtensions: X402PaymentRequired = { ...paymentRequired, extensions }
+
+    const header = await (haven as unknown as {
+      fundingLeg: {
+        createPaymentHeader(pr: X402PaymentRequired, option: X402PaymentOption): Promise<string>
+      }
+    }).fundingLeg.createPaymentHeader(withExtensions, accepted)
+
+    const decoded = JSON.parse(atob(header)) as Record<string, unknown>
+    expect(Object.keys(decoded).sort()).toEqual(
+      ['accepted', 'extensions', 'payload', 'resource', 'x402Version'],
+    )
+    expect(decoded.extensions).toEqual(extensions)
+    expect(decoded.resource).toEqual(paymentRequired.resource)
     expect(decoded.accepted).toEqual(accepted)
   })
 })

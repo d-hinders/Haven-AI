@@ -201,6 +201,11 @@ export interface X402PaymentRequired {
     url: string
     description?: string
     mimeType?: string
+    // #2361: merchants may carry additional resource fields (the demo
+    // merchant's `serviceName`, for one). The v2 payment envelope echoes
+    // `resource` back VERBATIM, so unknown keys must survive normalization
+    // rather than being stripped into a shape the merchant never sent.
+    [key: string]: unknown
   }
   accepts: X402PaymentOption[]
   error?: string

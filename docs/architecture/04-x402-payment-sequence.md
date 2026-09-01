@@ -30,7 +30,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-31" # #2274: the retired-rail gate paragraph in "Settlement-scheme reality and the EIP-3009 bridge" corrected — it named token resolution as still preceding the rail 410, which #2274 moved below the gate on this route and on POST /payments together. Scope: that paragraph only; the surrounding scheme-selection and 3009-mode prose was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: #2291: corrected the #2290 paragraph in "Resuming An Authorized Payment", which named haven_sign_x402 -> haven_x402_sign_header as the working remedy — a sequence the one-shot's spent binding cannot serve. Scope: that paragraph. The rest of the section, and the decomposed/recommended flows elsewhere in this doc, were re-read against the corrected contract and are accurate as written. Prior: chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-09-01" # #2361: re-verified, EDITED — the v2 payment envelope now echoes the challenge's `resource`/`extensions` verbatim (spec MUST for extensions; live-bisected as a strict facilitator's rejection cause, #2360): the #1064 erc7710-header paragraph gains the echo paragraph, with the erc7710 source being the #1355 stored challenge at settle. The same pass fixed three #2341-stale claims that still said the paid retry sends BOTH header names unconditionally (the Challenge And Header Semantics sentence, the erc7710 quote-flow diagram, the Differences table row) — erc7710 sends PAYMENT-SIGNATURE alone since #2341. Scope: those five spots; the rest of the body NOT re-verified in this pass. Prior: #2274: the retired-rail gate paragraph in "Settlement-scheme reality and the EIP-3009 bridge" corrected — it named token resolution as still preceding the rail 410, which #2274 moved below the gate on this route and on POST /payments together. Scope: that paragraph only; the surrounding scheme-selection and 3009-mode prose was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: #2291: corrected the #2290 paragraph in "Resuming An Authorized Payment", which named haven_sign_x402 -> haven_x402_sign_header as the working remedy — a sequence the one-shot's spent binding cannot serve. Scope: that paragraph. The rest of the section, and the decomposed/recommended flows elsewhere in this doc, were re-read against the corrected contract and are accurate as written. Prior: chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -124,10 +124,14 @@ Source of truth:
 The SDK normalizes the merchant's 402 response into a `PaymentRequired` object.
 It accepts the v2 `PAYMENT-REQUIRED` header, the v1 `X-PAYMENT` challenge
 header, and a JSON-body fallback. When the delegate address is known, probes
-also send `x402-wallet`. The paid retry sets **both** payment header names to
-the same value — the v2 `PAYMENT-SIGNATURE` and the v1 `X-PAYMENT` (#2289) — so
-a strict merchant on either version reads it; a successful merchant response may
-include `PAYMENT-RESPONSE` evidence.
+also send `x402-wallet`. On the EIP-3009 path the paid retry sets **both**
+payment header names to the same value — the v2 `PAYMENT-SIGNATURE` and the v1
+`X-PAYMENT` (#2289) — so a strict merchant on either version reads it. On
+erc7710 the retry sends `PAYMENT-SIGNATURE` **alone** (#2341): that header
+carries a whole delegation chain, and duplicating it under both names crossed
+Node's default 16 KB header ceiling and turned every erc7710 settlement into
+an HTTP 431. A successful merchant response may include `PAYMENT-RESPONSE`
+evidence.
 
 `quoteX402()`, `haven_quote_x402`, `haven_quote_mcp_tool`, and
 `haven_quote_catalog_purchase` are read-only. The MCP variants establish the
@@ -321,8 +325,9 @@ haven_pay_x402_quote  → settlement child + settlement_scheme: "erc7710"
 haven_sign            → { payment_id } only; the signer fetches the child
 haven_submit          → { payment_id, signature, settlement_scheme: "erc7710" }
                         POST /x402/:id/settle → payment_header, tx_hash null
-agent retry           → PAYMENT-SIGNATURE: <payment_header>
-                        X-PAYMENT:         <payment_header>   (v1 alias)
+agent retry           → PAYMENT-SIGNATURE: <payment_header>   (ONLY — #2341:
+                        the header carries a delegation chain, and adding the
+                        X-PAYMENT copy doubles it past Node's 16 KB ceiling)
 ```
 
 There is no `haven_submit` funding relay to confirm and **no
@@ -973,7 +978,7 @@ print — which is exactly why the API-side mapping exists.
 | Payment target | Recipient address from agent intent | Merchant `payTo` from HTTP 402 challenge |
 | Amount units | Human decimal string | Atomic amount from x402 option |
 | Agent action after funding | None for direct confirmed payment | Retry original merchant/resource request |
-| Header sent to merchant | None | `PAYMENT-SIGNATURE` **and** `X-PAYMENT`, same value (#2289) |
+| Header sent to merchant | None | EIP-3009: `PAYMENT-SIGNATURE` **and** `X-PAYMENT`, same value (#2289); erc7710: `PAYMENT-SIGNATURE` alone (#2341) |
 | Payment authority | Delegate signature + on-chain allowance | Same for funding leg; EIP-3009 signature for merchant leg |
 | Restart recovery | Fetch payment status | Rehydrate stored x402 context by payment id (`getResumeState`); resume when status answers `retry_original_x402_request` (#2145) — see [Resuming An Authorized Payment](#resuming-an-authorized-payment) |
 
@@ -1517,6 +1522,18 @@ echo field-for-field before touching the chain, and the quoted
 echo the 300 default their child expiry was built with). The v1 payload-only
 shape made every v2 merchant reject with a generic failure — caught by the
 #1064 QA leg's first live run.
+
+**Since #2361 the envelope also echoes the merchant challenge's `resource`
+and `extensions` objects VERBATIM** — on this erc7710 path sourced from the
+#1355 verbatim `machine_metadata.payment_required` at settle (a pre-#1355
+intent simply omits both), and on the EIP-3009 path built into the envelope by
+the SDK/signer (`x402V2PaymentEnvelope`). The extensions echo is a spec MUST
+("the client must include at least the info received"), and its absence was
+live-bisected as a strict facilitator's rejection cause on Base mainnet
+(#2360): the identical signature and `accepted`/`payload` bytes were refused
+without the echoes and settled with them. A challenge that carries neither
+gets the pre-#2361 three-key envelope, byte-identical — the shape Ampersend
+and Soundside settled live.
 
 An explicit `settlementScheme` field is validated against that shape, so a
 confused client fails loudly instead of silently getting the wrong flow. **On

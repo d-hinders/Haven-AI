@@ -39,6 +39,17 @@ export type { SettlementMethod }
 
 const NETWORK: `${string}:${string}` = `eip155:${CHAIN_ID}`
 const MAX_TIMEOUT_SECONDS = 300
+/**
+ * #2361: the extensions block every 402 challenge advertises, exported so
+ * tests build echo-compliant payments from the same object the merchant
+ * advertises rather than a hand-copied twin.
+ */
+export const DEMO_MERCHANT_EXTENSIONS = {
+  'haven-demo': {
+    version: '1',
+    echoRule: 'x402 v2: clients must echo this extensions object in PaymentPayload',
+  },
+} as const
 // #1279: accepted forward-validity slack beyond the advertised timeout. Covers
 // clock skew plus client settlement margins (Haven's SDK signs
 // clamped-timeout + 300 s forward, #1256) without accepting year-long windows.
@@ -834,6 +845,9 @@ export function createX402PaymentProcessor(
 
     async verifyAndSettle(params) {
       const payload = decodePayment(params.paymentHeader)
+      // #2361: the echo rule is method-independent — enforce it before the
+      // scheme dispatch so both erc7710 and eip3009 payments are covered.
+      assertExtensionsEchoed(payload, params.paymentRequired)
       const method = paymentMethod(payload.accepted)
 
       let verified: VerifiedPayment
@@ -1069,6 +1083,14 @@ export function buildPaymentRequired(params: {
       serviceName: 'Haven Demo Merchant',
     },
     accepts,
+    // #2361: advertised so the echo rule below is EXERCISED, not just
+    // implemented. The v2 spec makes the extensions echo a client MUST, a
+    // live facilitator (CoinGecko's) rejects payments that drop it, and this
+    // merchant validating only what Haven happens to send is how two envelope
+    // defects reached mainnet (#2288's header name, #2360's missing echoes).
+    // Kept deliberately small: the whole challenge rides an HTTP header, and
+    // the echo doubles it back.
+    extensions: DEMO_MERCHANT_EXTENSIONS,
     error: 'Payment required',
   }
 }
@@ -1226,6 +1248,49 @@ function assertResourceMatches(payload: PaymentPayload, paymentRequired: Payment
   if (payload.resource.url !== paymentRequired.resource.url) {
     throw new PaymentError('Payment resource does not match quoted resource')
   }
+}
+
+/**
+ * #2361: enforce the x402 v2 extensions-echo rule — "the client must include
+ * at least the info received; it may append additional info but cannot delete
+ * or overwrite existing info." A payment that drops the challenge's
+ * `extensions` is refused, with a message that names the rule rather than the
+ * bare 400 the live facilitator that motivated this gives (#2360).
+ *
+ * Only fires when the challenge advertises extensions, and only on v2
+ * payloads — v1 has no extensions concept. This is the check that stops the
+ * QA harness validating Haven-against-Haven: a Haven client that stops
+ * echoing fails HERE, on Sepolia, instead of at the first strict mainnet
+ * facilitator.
+ */
+function assertExtensionsEchoed(payload: PaymentPayload, paymentRequired: PaymentRequired): void {
+  const advertised = (paymentRequired as { extensions?: unknown }).extensions
+  if (!advertised || typeof advertised !== 'object' || Array.isArray(advertised)) return
+  if (payload.x402Version !== 2) return
+  const echoed = (payload as { extensions?: unknown }).extensions
+  if (!echoed || typeof echoed !== 'object' || Array.isArray(echoed)) {
+    throw new PaymentError(
+      'Payment must echo the challenge\'s extensions object (x402 v2 extensions echo rule)',
+    )
+  }
+  if (!objectContainsSubset(advertised as Record<string, unknown>, echoed as Record<string, unknown>)) {
+    throw new PaymentError(
+      'Payment extensions must include the challenge\'s extensions unmodified (x402 v2: append-only, never delete or overwrite)',
+    )
+  }
+}
+
+/** Every key/value in `subset` present and deep-equal in `superset`; extra keys in `superset` are allowed. */
+function objectContainsSubset(subset: Record<string, unknown>, superset: Record<string, unknown>): boolean {
+  return Object.entries(subset).every(([key, value]) => {
+    if (!(key in superset)) return false
+    const other = superset[key]
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return !!other && typeof other === 'object' && !Array.isArray(other) &&
+        objectContainsSubset(value as Record<string, unknown>, other as Record<string, unknown>)
+    }
+    return JSON.stringify(value) === JSON.stringify(other)
+  })
 }
 
 async function verifyAuthorization(

@@ -5,6 +5,7 @@ import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymen
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
 import {
   createX402PaymentProcessor,
+  DEMO_MERCHANT_EXTENSIONS,
   PaymentError,
   SettlementRevertedError,
   PAYMENT_REQUIRED_HEADER,
@@ -102,6 +103,9 @@ async function signedHeader(
     resource: pr.resource,
     accepted,
     payload: { authorization, signature },
+    // #2361: echo the challenge's extensions — the spec MUST this merchant
+    // now enforces, so the fixture client behaves like a compliant one.
+    ...(pr.extensions ? { extensions: pr.extensions } : {}),
   }
   return encodePaymentSignatureHeader(payload)
 }
@@ -403,6 +407,67 @@ describe('x402 payment verification and settlement', () => {
       expectedAmount: 1_000n,
       paymentRequired: pr,
     })).rejects.toThrow('nonce must be 32 bytes')
+  })
+
+  // ── #2361: the x402 v2 extensions-echo rule, enforced ─────────────────────
+  // "The client must include at least the info received; it may append
+  // additional info but cannot delete or overwrite existing info." This
+  // merchant enforcing it is what stops the QA harness validating
+  // Haven-against-Haven — a Haven client that stops echoing fails HERE,
+  // on Sepolia, instead of at the first strict mainnet facilitator (#2360).
+  describe('extensions echo rule (#2361)', () => {
+    function settleInput(pr: PaymentRequired, header: string) {
+      return {
+        productId: 'vpn_basic' as const,
+        paymentHeader: header,
+        merchantAddress: MERCHANT,
+        expectedAmount: 1_000n,
+        paymentRequired: pr,
+      }
+    }
+
+    it('the 402 challenge advertises the extensions block the rule enforces', () => {
+      const pr = paymentRequired()
+      expect(pr.extensions).toEqual(DEMO_MERCHANT_EXTENSIONS)
+    })
+
+    it('rejects a payment that DROPS the advertised extensions', async () => {
+      const { processor } = makeProcessor()
+      const pr = paymentRequired()
+      const payload = decodePaymentSignatureHeader(await signedHeader(pr)) as PaymentPayload
+      delete (payload as { extensions?: unknown }).extensions
+
+      await expect(processor.verifyAndSettle(settleInput(pr, encodePaymentSignatureHeader(payload))))
+        .rejects.toThrow('must echo the challenge\'s extensions')
+    })
+
+    it('rejects a payment that OVERWRITES advertised extension info', async () => {
+      const { processor } = makeProcessor()
+      const pr = paymentRequired()
+      const payload = decodePaymentSignatureHeader(await signedHeader(pr)) as PaymentPayload
+      ;(payload as { extensions?: Record<string, unknown> }).extensions = {
+        'haven-demo': { version: '999', echoRule: 'rewritten' },
+      }
+
+      await expect(processor.verifyAndSettle(settleInput(pr, encodePaymentSignatureHeader(payload))))
+        .rejects.toThrow('append-only, never delete or overwrite')
+    })
+
+    it('accepts a payment that APPENDS to the echoed extensions', async () => {
+      const { processor, submit } = makeProcessor()
+      const pr = paymentRequired()
+      const payload = decodePaymentSignatureHeader(await signedHeader(pr)) as PaymentPayload
+      ;(payload as { extensions?: Record<string, unknown> }).extensions = {
+        ...DEMO_MERCHANT_EXTENSIONS,
+        clientNote: { sdk: 'haven' },
+      }
+
+      const settled = await processor.verifyAndSettle(
+        settleInput(pr, encodePaymentSignatureHeader(payload)),
+      )
+      expect(settled.txHash).toBe(TX_HASH)
+      expect(submit).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('rejects a bad signature', async () => {

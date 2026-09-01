@@ -40,6 +40,12 @@
 // allowlist entry pointing at a moved or deleted file is the same silent-hole
 // defect one level up.
 //
+// A hand-maintained list nobody is prompted to extend is a slower version of
+// the same hole, so since #2333 a NAMING CONVENTION is enforced under it:
+// `*-copy.ts` / `*-labels.ts` / `*Labels.ts` / any `.tsx` under `src/lib` must
+// be in SCAN_FILES or in CONVENTION_EXEMPT with a reason. See the block above
+// CONVENTION_EXEMPT for what that check can and cannot do.
+//
 //   node scripts/frontend-copy-lint.mjs            # check against the baseline
 //   node scripts/frontend-copy-lint.mjs --update   # rewrite the baseline (shrink
 //                                                   # or a reviewed, intentional add)
@@ -83,6 +89,18 @@ export const SCAN_FILES = [
   // moved them out of the scanned tree; the copy is as user-facing as it was.
   'packages/frontend/src/lib/agent-pause-copy.ts',
   'packages/frontend/src/lib/stranded-funds-copy.ts',
+  // Credential-row labels ("Passkey · added {date}", "Passkey N") rendered by
+  // WalletButton.tsx and AccountSignersCard.tsx. copy-guidelines.md § "Name
+  // credentials 'passkey'" (#1679) specifies this string by name (#2333).
+  'packages/frontend/src/lib/passkeyLabels.ts',
+  // Transaction-row copy — titles, initiator, status and the settlement-scheme
+  // label ("Payment sent by you", "Agent funds swept back", "Recovered",
+  // "x402 payment"). Extracted out of the row components so the table, the
+  // detail drawer and the CSV agree (#2333). `transaction-presentation.tsx`
+  // renders JSX: it is a file the DIRECTORY scan would already have caught had
+  // it lived one level up in `components/`.
+  'packages/frontend/src/lib/transaction-labels.ts',
+  'packages/frontend/src/lib/transaction-presentation.tsx',
   // The CANONICAL copy of the skill above, byte-pinned to the frontend inline
   // copy by a parity test. It is not a frontend file, but it is the copy the
   // connector auto-installs — i.e. the PRIMARY delivery path, of which the
@@ -90,6 +108,72 @@ export const SCAN_FILES = [
   // this issue's own defect one package over.
   'packages/sdk/src/skill-content.ts',
 ]
+
+// ── The naming convention behind the allowlist (#2333) ───────────────────────
+//
+// A hand-maintained list nobody is prompted to extend is a slower version of
+// the hole it closes. The #2195/#2230 extraction pattern — pull a shared
+// sentence out of `components/` into `lib/` so two surfaces say one fact
+// identically — removes copy from this gate EVERY time it is applied, and each
+// individual extraction is good practice. #2317 added four such files; #2333
+// found three more by hand a fortnight later. The next one will not announce
+// itself either.
+//
+// So the allowlist gets a NORMATIVE naming convention with a check under it:
+// extracted UI copy under `src/lib` is named `*-copy.ts`, `*-labels.ts` or
+// `*Labels.ts`, and any `.tsx` there renders by definition. A file matching
+// those shapes MUST be named in SCAN_FILES (or exempted below with a reason) —
+// otherwise the run fails, at the moment the file is added, naming it.
+//
+// **Read its ceiling honestly.** It matches NAMES, not content: call the next
+// extraction `transactionText.ts` and it stays invisible, exactly as today.
+// What it buys is that the documented convention now has teeth — following it
+// is enforced, and evading it is a deliberate act rather than the default. It
+// is not, and cannot be, a content classifier for `src/lib`; that was
+// considered and rejected as #2317 rejected widening SCAN_DIRS, and #2332 is
+// the standing counter-example (`passkey.ts` carries a banned phrase in a
+// developer-facing throw and deliberately stays OUT).
+//
+// It is also not a substitute for reading the copy. The very first pass over
+// the newly-scanned files found a real one this cannot see — bare "delegate"
+// rendered on the primary transaction row (#2356) — because the matcher is
+// multi-word-literal by design and "delegate" is a legitimate identifier
+// everywhere else in the frontend. Human/design review is the control there.
+const LIB_DIR = join(REPO_ROOT, 'packages', 'frontend', 'src', 'lib')
+
+/** True when `rel`'s basename follows the extracted-copy naming convention. */
+export function matchesCopyConvention(rel) {
+  const base = rel.split('/').pop() ?? ''
+  return /(-copy\.ts|-labels\.ts|Labels\.ts|\.tsx)$/.test(base)
+}
+
+// Convention matches that are genuinely NOT product copy. Each needs a reason,
+// and each must resolve to a real file — an exemption pointing at a deleted
+// file is the same silent-hole defect as a dangling allowlist entry. Empty on
+// purpose today: every current match is real copy and is allowlisted above.
+export const CONVENTION_EXEMPT = {}
+
+/**
+ * Every non-test source file under `packages/frontend/src/lib`, as
+ * repo-root-relative POSIX paths. Exported so the sibling test job checks the
+ * REAL tree against the same list `scanAll` does — a second walk implementation
+ * in the test could drift from this one and quietly agree with nothing.
+ */
+export async function libSourceFiles() {
+  return (await walk(LIB_DIR, []))
+    .map((f) => relative(REPO_ROOT, f).split(sep).join('/'))
+    .filter((f) => !f.includes('/__tests__/'))
+    .sort()
+}
+
+/**
+ * Pure core: which convention-matching files under `src/lib` are neither
+ * allowlisted nor exempted. `libFiles` are repo-root-relative POSIX paths.
+ */
+export function conventionGaps(libFiles, allowlist, exempt) {
+  const known = new Set([...allowlist, ...Object.keys(exempt)])
+  return libFiles.filter((f) => matchesCopyConvention(f) && !known.has(f))
+}
 
 /**
  * Pure core of the allowlist self-check: which of `entries` does `exists` say
@@ -141,6 +225,36 @@ export const BANNED = [
   ['haven approves', "the owner-signed budget: 'the on-chain budget the user signed'"],
   ['haven grants', 'the user approves; Haven constructs and relays'],
   ['haven permits', 'the user approves; Haven constructs and relays'],
+  // ── The two CASP avoid-list phrases themselves (#2246) ─────────────────────
+  // #2334 added five phrases DERIVED from the § Core principle attribution
+  // rule. These two are different: they are avoid-list entries of
+  // `casp-risk-guardrails.md` § Product Copy Rules verbatim, and both were live
+  // in `components/UsingYourAgentInfo.tsx` — a file this gate has scanned by
+  // DIRECTORY the whole time, with no baseline entry, going green because
+  // nothing in `BANNED` described them. Two trackers (#2063, then #2347's
+  // repo-wide sweep) found the same copy by hand because no instrument could.
+  //
+  // The literals are SHORTER than the doc's sentences on purpose, and that is
+  // the measured part rather than a stylistic call. "Haven gave you the private
+  // key" as written matches nothing: the live defect said "Haven gave you a
+  // credential — a private key", split across a JSX interpolation and a line
+  // break. `haven gave you` catches it and the doc's own wording both. Both
+  // additions were measured across the full scanned set (149 files + the
+  // 8-entry SCAN_FILES allowlist) before landing: ZERO occurrences of either,
+  // and each fires on the pre-fix file. Two nearby generalisations were
+  // REJECTED on the same measurement rather than on taste, because each has a
+  // true-sentence false positive: `signs and settles` hits
+  // `app/protocols/x402/page.tsx` ("Client signs and settles on-chain" — the
+  // client does), and `haven signs` hits `components/AccountSignersCard.tsx`
+  // ("Haven signs nothing." — the correct non-custody claim, which this gate
+  // must never penalise).
+  //
+  // Same ceiling as the block above, and it is not hypothetical here: this is
+  // a single-line literal match. Reword the claim ("the key we issued you") and
+  // it goes green. The claim is what the avoid list bans; the phrase is only
+  // what a matcher can hold.
+  ['haven signs and settles', "the real actor: 'signed by your agent's key and constrained by the budget you signed'"],
+  ['haven gave you', 'the credential is generated on the user’s device; Haven never receives the signing key'],
 ]
 
 const IGNORE = 'copy-lint-ignore'
@@ -232,6 +346,30 @@ async function scanAll() {
         'repoint the entry (or remove it if the prose is gone).',
     )
   }
+  const exemptMissing = missingTargets(Object.keys(CONVENTION_EXEMPT), (rel) =>
+    existsSync(join(REPO_ROOT, rel)),
+  )
+  if (exemptMissing.length > 0) {
+    throw new Error(
+      `copy-lint: CONVENTION_EXEMPT entries do not exist:\n${exemptMissing.map((m) => `  ${m}`).join('\n')}\n` +
+        'A stale exemption silently excuses a file that is no longer there — remove it.',
+    )
+  }
+
+  // The naming-convention check (#2333): a newly extracted copy module that
+  // follows the documented naming must be named in SCAN_FILES, or the gate goes
+  // narrower the moment it lands. Fail here, naming the file.
+  const gaps = conventionGaps(await libSourceFiles(), SCAN_FILES, CONVENTION_EXEMPT)
+  if (gaps.length > 0) {
+    throw new Error(
+      `copy-lint: prose-shaped files under src/lib are not scanned:\n${gaps.map((g) => `  ${g}`).join('\n')}\n` +
+        'Their names follow the extracted-UI-copy convention (*-copy.ts, *-labels.ts,\n' +
+        '*Labels.ts, or any .tsx — which renders), so the copy lint must read them.\n' +
+        'Add each to SCAN_FILES. If a file genuinely is not product copy, add it to\n' +
+        'CONVENTION_EXEMPT with a reason (see #2332 for what that looks like).',
+    )
+  }
+
   for (const rel of SCAN_FILES) files.push(join(REPO_ROOT, rel))
 
   const counts = {}

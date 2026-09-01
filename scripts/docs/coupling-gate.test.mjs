@@ -346,7 +346,15 @@ test1366('a changed shard satisfies the contract doc in strict mode (#1366)', ()
     [SHARDED_DOC],
     { strict: true },
   )
-  assert1366.deepStrictEqual(f, [])
+  // #1366's guarantee, restated as what it actually is: the shard clears the
+  // BLOCKING half. #2323 changed the other half — the doc is now reported, so
+  // this can no longer assert an empty array without also asserting the silence
+  // that let #2274 ship. `satisfiedByShard` non-empty is what `main()` reads to
+  // keep it out of `contractFindings`.
+  assert1366.strictEqual(f.length, 1)
+  assert1366.strictEqual(f[0].doc, SHARDED_DOC.doc)
+  assert1366.deepStrictEqual(f[0].satisfiedByShard, ['docs/regulatory/casp-changelog/2026-08-12-1399.md'])
+  assert1366.deepStrictEqual(f[0].editedOnlySatisfyMatches, [])
 })
 
 /**
@@ -403,15 +411,26 @@ test1366('a shard satisfies ONLY docs that declare it — not every contract doc
     [SHARDED_DOC, other],
     { strict: true },
   )
-  assert1366.strictEqual(f.length, 1)
-  assert1366.strictEqual(f[0].doc, other.doc)
+  // #2323: both docs are now reported, and the DIFFERENCE between them is the
+  // assertion — the one that declared the shard is shard-satisfied (advisory),
+  // the one that did not is a plain finding (blocking under strict).
+  assert1366.strictEqual(f.length, 2)
+  const byDoc = Object.fromEntries(f.map((x) => [x.doc, x]))
+  assert1366.deepStrictEqual(byDoc[other.doc].satisfiedByShard, [])
+  assert1366.deepStrictEqual(
+    byDoc[SHARDED_DOC.doc].satisfiedByShard,
+    ['docs/regulatory/casp-changelog/2026-08-12-1399.md'],
+  )
 })
 
 // #1496 — a doc with satisfied-by is satisfied by a shard, NOT by editing the
 // doc; and the strict error names that path. Three one-day merge conflicts
 // came from PRs editing the same last-verified line while their shards
 // already satisfied the gate — because the message never said so.
-test('a satisfied-by shard suppresses the strict contract finding (#1496)', () => {
+// #2323 renamed this from "suppresses the finding" to what it now does. The
+// old name was the defect stated as an intention: suppression covered the
+// advisory half too, so the doc vanished from the comment a reviewer reads.
+test('a satisfied-by shard clears the BLOCKING half but still reports the doc (#1496/#2323)', () => {
   const docs = [{
     doc: 'docs/regulatory/casp-risk-guardrails.md',
     covers: ['packages/backend/src/modules/x402/**'],
@@ -423,12 +442,14 @@ test('a satisfied-by shard suppresses the strict contract finding (#1496)', () =
     ['packages/backend/src/modules/x402/helpers.ts', 'docs/regulatory/casp-changelog/2026-08-16-1.md'],
     docs, { strict: true },
   )
-  assert.deepEqual(withShard, [])
+  assert.equal(withShard.length, 1)
+  assert.deepEqual(withShard[0].satisfiedByShard, ['docs/regulatory/casp-changelog/2026-08-16-1.md'])
   const withoutShard = implicatedDocs(
     ['packages/backend/src/modules/x402/helpers.ts'],
     docs, { strict: true },
   )
   assert.equal(withoutShard.length, 1)
+  assert.deepEqual(withoutShard[0].satisfiedByShard, [])
 })
 
 /**
@@ -570,7 +591,12 @@ test2192('adding a new shard still satisfies it (#2192)', () => {
     strict: true,
     added: new Set([NEW_SHARD]),
   })
-  assert2192.deepEqual(f, [], 'writing your own shard is the whole intended remedy')
+  // #2323: writing your own shard is still the whole intended remedy for the
+  // BLOCKING half — `satisfiedByShard` non-empty is exactly what keeps it out
+  // of `contractFindings`. What it no longer does is remove the doc from the
+  // report, which is the change this assertion had to be rewritten to see.
+  assert2192.equal(f.length, 1)
+  assert2192.deepEqual(f[0].satisfiedByShard, [NEW_SHARD])
 })
 
 test2192('a new shard PLUS an edit to an old one still satisfies it (#2192)', () => {
@@ -582,7 +608,9 @@ test2192('a new shard PLUS an edit to an old one still satisfies it (#2192)', ()
     strict: true,
     added: new Set([NEW_SHARD]),
   })
-  assert2192.deepEqual(f, [])
+  assert2192.equal(f.length, 1)
+  assert2192.deepEqual(f[0].satisfiedByShard, [NEW_SHARD], 'the ADDED match is the one that clears it')
+  assert2192.deepEqual(f[0].editedOnlySatisfyMatches, [], 'not a near-miss — it really is satisfied')
 })
 
 test2192('unknown add/modify status restores the pre-#2192 behaviour (#2192)', () => {
@@ -590,7 +618,8 @@ test2192('unknown add/modify status restores the pre-#2192 behaviour (#2192)', (
   // design and scoped to that path only: the job that gates a PR sets BASE_SHA
   // and always supplies real status.
   const f = implicatedDocs([MONEY_FILE, OLD_SHARD], [SHARDED_DOC], { strict: true, added: null })
-  assert2192.deepEqual(f, [])
+  assert2192.equal(f.length, 1)
+  assert2192.deepEqual(f[0].satisfiedByShard, [OLD_SHARD], 'unknown status stays permissive on the BLOCKING half')
 })
 
 test2192('a RENAMED shard does not count as added (#2192)', () => {
@@ -615,7 +644,9 @@ test2192('a deleted old shard alongside an UNRELATED new one still counts as add
     `M\t${MONEY_FILE}\nD\tdocs/regulatory/casp-changelog/2026-08-14-1403 3.md\nA\t${NEW_SHARD}\n`,
   )
   assert2192.ok(added.has(NEW_SHARD), 'the genuinely new shard must still count as added')
-  assert2192.deepEqual(implicatedDocs(files, [SHARDED_DOC], { strict: true, added }), [])
+  const f = implicatedDocs(files, [SHARDED_DOC], { strict: true, added })
+  assert2192.equal(f.length, 1)
+  assert2192.deepEqual(f[0].satisfiedByShard, [NEW_SHARD])
 })
 
 test2192('parseNameStatus reads status and path, tolerating renames and blanks', () => {
@@ -670,4 +701,148 @@ test2192('end-to-end: the real script PASSES the same diff once a new shard is a
     { cwd: ROOT2192, encoding: 'utf8' },
   )
   assert2192.doesNotMatch(output, /BLOCKING/)
+})
+
+// ── #2323: a shard clears the BLOCKING half without clearing the DOC ──────────
+//
+// The defect, stated as the two claims the green tick used to conflate:
+//   claimed  — "the coupled docs are consistent with this change"
+//   asserted — "a shard exists that claims to cover this change"
+// The second is the weaker one, and it is weaker precisely where the first
+// matters: a regulatory doc describing an ordering the code no longer has.
+//
+// #2274 (PR #2322) paid for it. That diff moved the retired-rail 410 above
+// token resolution on `/payments` and `/x402/authorize`, shipped a correct
+// shard, and went green — while `casp-risk-guardrails.md`'s #2245 Current-state
+// blockquote still listed token resolution as preceding the x402 410, a
+// sentence the same diff had just made false, in the very document the shard
+// was satisfying. `haven-doc-reviewer` caught it; the gate structurally could
+// not, because the shard match dropped the doc before the `covers:` check.
+//
+// The shard is written by the same person making the change, so this is
+// self-certification. No gate can check that a body was re-read. What it can do
+// is refuse to hide the doc, which is all this block asserts.
+
+import { test as test2323 } from 'node:test'
+import assert2323 from 'node:assert/strict'
+import { execFileSync as exec2323 } from 'node:child_process'
+import { mkdtempSync, readFileSync as readFileSync2323, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join as join2323 } from 'node:path'
+
+// #2274's real file set, as merged in f6eff356: the two routes it reordered and
+// the shard it wrote. Both routes are `covers:` entries of the guardrails doc;
+// the shard matches its `satisfied-by:` glob.
+const R2274_ROUTES = [
+  'packages/backend/src/routes/payments.ts',
+  'packages/backend/src/routes/x402.ts',
+]
+const R2274_SHARD = 'docs/regulatory/casp-changelog/2026-08-31-2274.md'
+const GUARDRAILS = 'docs/regulatory/casp-risk-guardrails.md'
+
+function runGate(changed, added) {
+  const dir = mkdtempSync(join2323(tmpdir(), 'coupling-2323-'))
+  const out = join2323(dir, 'comment.md')
+  let status = 0
+  let output = ''
+  try {
+    output = exec2323(
+      'node',
+      [
+        join2192(ROOT2192, 'scripts', 'docs', 'coupling-gate.mjs'),
+        '--strict',
+        `--changed=${changed.join(',')}`,
+        `--added=${added.join(',')}`,
+        `--out=${out}`,
+      ],
+      { cwd: ROOT2192, encoding: 'utf8' },
+    )
+  } catch (err) {
+    status = err.status ?? 1
+    output = `${err.stdout ?? ''}${err.stderr ?? ''}`
+  }
+  let comment = ''
+  try {
+    comment = readFileSync2323(out, 'utf8')
+  } catch {
+    comment = '' // no findings -> the gate writes nothing
+  }
+  rmSync(dir, { recursive: true, force: true })
+  return { status, output, comment }
+}
+
+test2323('#2274 RECONSTRUCTION: the real diff + its real shard now NAMES the parent doc', () => {
+  // Drives the real script against the repository's real front-matter, with
+  // #2274's real paths. Before this change the gate printed "no covered docs
+  // implicated" here and wrote no comment at all.
+  const { status, output, comment } = runGate([...R2274_ROUTES, R2274_SHARD], [R2274_SHARD])
+
+  // The shard still satisfies the coupling requirement. #1366/#1496 intact.
+  assert2323.equal(status, 0, 'a valid shard must still clear the strict gate — this is not a new block')
+  assert2323.doesNotMatch(output, /BLOCKING/)
+
+  // And the doc is no longer invisible.
+  assert2323.match(comment, /Parent docs cleared by a shard/)
+  assert2323.match(comment, new RegExp(GUARDRAILS.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  assert2323.match(comment, /satisfied by `docs\/regulatory\/casp-changelog\/2026-08-31-2274\.md`/)
+  assert2323.match(
+    comment,
+    /re-read against `packages\/backend\/src\/routes\/x402\.ts`/,
+    'naming the doc is not enough — the reader needs the files to re-read it AGAINST',
+  )
+  assert2323.match(
+    comment,
+    /certifies itself/,
+    'the section has to say WHY a green tick is not evidence here, or it reads as noise and gets skimmed',
+  )
+  assert2323.match(output, /shard-satisfied/, 'the console half must name it too — CI logs are read without the comment')
+})
+
+test2323('MUTATION PROOF: strip the shard and it becomes a hard BLOCK, not a re-read note', () => {
+  // The negative control for the test above. Without it, a gate that reported
+  // every doc unconditionally would pass it. Same diff, no shard: the finding
+  // must change CLASS, not just count — blocking, and NOT in the re-read
+  // section, whose whole premise is that the requirement was satisfied.
+  const { status, output, comment } = runGate(R2274_ROUTES, [])
+  assert2323.equal(status, 1, 'no shard on a money-path diff must still fail the strict gate')
+  assert2323.match(output, /BLOCKING/)
+  assert2323.doesNotMatch(comment, /Parent docs cleared by a shard/)
+  assert2323.match(comment, /Docs that may need updating/)
+})
+
+test2323('an unrelated diff draws NO re-read note — the shard alone does not summon one', () => {
+  // The other direction, and the one that decides whether this is a signal or
+  // a permanent banner. A PR that writes a shard but changes nothing the parent
+  // `covers:` must stay silent about it: the re-read request is keyed on the
+  // parent actually describing the changed code, which is why the satisfaction
+  // check now runs THROUGH the `covers:` test instead of short-circuiting past
+  // it. Frontend page is covered by no `covers:` entry of the guardrails doc.
+  const unrelated = 'packages/frontend/src/app/(marketing)/page.tsx'
+  const { status, comment } = runGate([unrelated, R2274_SHARD], [R2274_SHARD])
+  assert2323.equal(status, 0)
+  assert2323.doesNotMatch(comment, /casp-risk-guardrails/)
+})
+
+test2323('a test-only money-path diff with a shard draws no re-read note (noise control)', () => {
+  // `isIncidentalPath`'s reasoning applies here and deliberately does NOT apply
+  // to the blocking half: the strict carve-out exists so a contract doc whose
+  // covered paths are all tests cannot pass `--strict` silently. A shard-cleared
+  // finding never blocks, so it takes the noise-reduced match set instead —
+  // otherwise every test-only money-path PR would draw a re-read request for a
+  // change that, by that same reasoning, cannot make prose stale.
+  const { status, comment } = runGate(
+    ['packages/backend/src/rails/sweep.test.ts', R2274_SHARD],
+    [R2274_SHARD],
+  )
+  assert2323.equal(status, 0)
+  assert2323.doesNotMatch(comment, /casp-risk-guardrails/)
+})
+
+test2323('MUTATION PROOF: the same test-only diff WITHOUT a shard still blocks (#1076 carve-out intact)', () => {
+  // Negative control for the noise control above. If the incidental filter had
+  // been applied to the blocking half too, this would silently pass — the exact
+  // #1076 failure. It must still be red.
+  const { status, output } = runGate(['packages/backend/src/rails/sweep.test.ts'], [])
+  assert2323.equal(status, 1, 'a contract doc must still see a test-only change under --strict')
+  assert2323.match(output, /casp-risk-guardrails/)
 })

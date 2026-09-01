@@ -963,6 +963,9 @@ describe('x402 delegation-rail settlement (#830)', () => {
     const decoded = JSON.parse(Buffer.from(res.json().payment_header, 'base64').toString('utf8'))
     // v2 since #1064: the accepted-requirements echo rides alongside the
     // scheme payload — @x402/core v2 merchants match it field-for-field.
+    // #2361: this fixture row has NO machine_metadata, so it now also pins
+    // the pre-#1355 fallback — no stored challenge means no resource or
+    // extensions echo, never an empty one.
     expect(Object.keys(decoded).sort()).toEqual(['accepted', 'network', 'payload', 'scheme', 'x402Version'])
     expect(Object.keys(decoded.payload).sort()).toEqual([
       'delegationManager', 'delegator', 'permissionContext',
@@ -1057,6 +1060,98 @@ describe('x402 delegation-rail settlement (#830)', () => {
       assetTransferMethod: 'erc7710',
       facilitatorAddresses: facilitators,
     })
+  })
+
+  // #2361: the stored #1355 challenge's resource/extensions are echoed into
+  // the settle envelope VERBATIM — the live bisection on #2360 proved a
+  // strict facilitator rejects the echo-less envelope outright, and the
+  // stored copy is the merchant's own bytes rather than a reconstruction.
+  it('settle echoes the stored challenge resource and extensions (#2361)', async () => {
+    const childFixture = JSON.parse(JSON.stringify(buildBudgetDelegation({
+      agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
+      delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
+      budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
+    })))
+    const resource = {
+      url: 'https://merchant.example/resource',
+      mimeType: 'application/json',
+      serviceName: 'kept-verbatim',
+    }
+    const extensions = { bazaar: { info: { input: { method: 'GET' } } } }
+    mockQuery.mockImplementation((sql: string) => {
+      if (/SELECT id, status, execution_rail/.test(String(sql))) {
+        return Promise.resolve({ rows: [{
+          id: INTENT_ID, status: 'pending_signature', execution_rail: 'delegation',
+          prepared_user_op: {
+            child: childFixture, budget: signedBudget,
+            delegateAccountAddress: DELEGATE_ACCT, network: 'eip155:84532',
+          },
+          chain_id: 84532,
+          x402_resource_url: 'https://merchant.example/resource',
+          to_address: '0x' + 'cc'.repeat(20), amount_raw: '1000', token_address: USDC,
+          // The #1355 verbatim blob, as a JSONB-parsed object.
+          machine_metadata: {
+            network: 'eip155:84532', settlement_scheme: 'erc7710',
+            payment_required: { x402Version: 2, resource, accepts: [], extensions },
+          },
+        }] })
+      }
+      return Promise.resolve({ rows: [] })
+    })
+
+    const res = await app.inject({
+      method: 'POST', url: `/x402/${INTENT_ID}/settle`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { signature: await signChild(childFixture) },
+    })
+    expect(res.statusCode).toBe(200)
+    const decoded = JSON.parse(Buffer.from(res.json().payment_header, 'base64').toString('utf8'))
+    expect(Object.keys(decoded).sort()).toEqual(
+      ['accepted', 'extensions', 'network', 'payload', 'resource', 'scheme', 'x402Version'],
+    )
+    expect(decoded.resource).toEqual(resource)
+    expect(decoded.extensions).toEqual(extensions)
+  })
+
+  // The metadata-less (pre-#1355) fallback is pinned by the CHARACTERIZATION
+  // test above; this one covers the other driver shape.
+  it('settle tolerates machine_metadata handed back as a raw JSON string', async () => {
+    const childFixture = JSON.parse(JSON.stringify(buildBudgetDelegation({
+      agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
+      delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
+      budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
+    })))
+    const extensions = { bazaar: { schema: 'v1' } }
+    const stringMetadata = JSON.stringify({
+      settlement_scheme: 'erc7710',
+      payment_required: { x402Version: 2, resource: { url: 'https://merchant.example/resource' }, accepts: [], extensions },
+    })
+    mockQuery.mockImplementation((sql: string) => {
+      if (/SELECT id, status, execution_rail/.test(String(sql))) {
+        return Promise.resolve({ rows: [{
+          id: INTENT_ID, status: 'pending_signature', execution_rail: 'delegation',
+          prepared_user_op: {
+            child: childFixture, budget: signedBudget,
+            delegateAccountAddress: DELEGATE_ACCT, network: 'eip155:84532',
+          },
+          chain_id: 84532,
+          x402_resource_url: 'https://merchant.example/resource',
+          to_address: '0x' + 'cc'.repeat(20), amount_raw: '1000', token_address: USDC,
+          machine_metadata: stringMetadata,
+        }] })
+      }
+      return Promise.resolve({ rows: [] })
+    })
+
+    const res = await app.inject({
+      method: 'POST', url: `/x402/${INTENT_ID}/settle`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { signature: await signChild(childFixture) },
+    })
+    expect(res.statusCode).toBe(200)
+    const decoded = JSON.parse(Buffer.from(res.json().payment_header, 'base64').toString('utf8'))
+    expect(decoded.extensions).toEqual(extensions)
+    expect(decoded.resource).toEqual({ url: 'https://merchant.example/resource' })
   })
 
   // ── #976: present inline, verify authoritatively ─────────────────────────

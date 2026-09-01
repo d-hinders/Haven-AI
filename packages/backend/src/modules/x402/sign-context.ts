@@ -165,7 +165,13 @@ function signContextResponse(
   return { code: 200, body }
 }
 
-function storedPaymentRequiredFromMetadata(metadata: unknown): Record<string, unknown> | null {
+/**
+ * The #1355 verbatim `payment_required` out of a `machine_metadata` value,
+ * tolerant of the driver handing JSONB back parsed or as a string. Shared
+ * with the erc7710 settle handoff (#2361), which echoes the stored
+ * challenge's `resource`/`extensions` into the X-PAYMENT envelope.
+ */
+export function storedPaymentRequiredFromMetadata(metadata: unknown): Record<string, unknown> | null {
   let parsed: unknown = metadata
   if (typeof metadata === 'string') {
     try {

@@ -63,4 +63,62 @@ describe('validateStandardX402PaymentHeader (#1398)', () => {
     await expect(validateStandardX402PaymentHeader(header, context('0x0000000000000000000000000000000000000001')))
       .rejects.toEqual(expect.any(X402PaymentHeaderValidationError))
   })
+
+  // ── #2361: the v2 envelope's resource/extensions echoes ──────────────────
+  // The widened key set is EXACTLY {resource, extensions} on top of the
+  // required three — each case below pins one direction of that boundary, so
+  // a mutation that widens further (any-key tolerance) or narrows back (the
+  // pre-#2361 3-key wall, which would refuse every echoing signer) fails.
+
+  function rewrap(header: string, mutate: (decoded: Record<string, unknown>) => void): string {
+    const decoded = JSON.parse(Buffer.from(header, 'base64').toString('utf8')) as Record<string, unknown>
+    mutate(decoded)
+    return Buffer.from(JSON.stringify(decoded), 'utf8').toString('base64')
+  }
+
+  it('accepts the envelope with both echoes present (#2361)', async () => {
+    const { header, payer } = await signedHeader()
+    const withEchoes = rewrap(header, (decoded) => {
+      decoded.extensions = { bazaar: { info: { method: 'GET' } } }
+    })
+    await expect(validateStandardX402PaymentHeader(withEchoes, context(payer))).resolves.toBeUndefined()
+  })
+
+  it('still accepts the pre-#2361 three-key envelope a v0.1.33-and-earlier signer emits', async () => {
+    // The true old-signer shape, exercised end-to-end rather than inferred
+    // from hasOnlyKeys' semantics: strip BOTH echoes and the validator must
+    // accept — a deployed echo-less signer is never refused by the hosted
+    // relay preflight.
+    const { header, payer } = await signedHeader()
+    const bare = rewrap(header, (decoded) => {
+      delete decoded.resource
+      delete decoded.extensions
+    })
+    const decoded = JSON.parse(Buffer.from(bare, 'base64').toString('utf8')) as Record<string, unknown>
+    expect(Object.keys(decoded).sort()).toEqual(['accepted', 'payload', 'x402Version'])
+    await expect(validateStandardX402PaymentHeader(bare, context(payer))).resolves.toBeUndefined()
+  })
+
+  it('still rejects a stray top-level key beyond the echoes', async () => {
+    const { header, payer } = await signedHeader()
+    const stray = rewrap(header, (decoded) => {
+      decoded.network = 'base'
+    })
+    await expect(validateStandardX402PaymentHeader(stray, context(payer)))
+      .rejects.toEqual(expect.any(X402PaymentHeaderValidationError))
+  })
+
+  it('rejects a non-object resource or extensions echo', async () => {
+    const { header, payer } = await signedHeader()
+    const badResource = rewrap(header, (decoded) => {
+      decoded.resource = 'https://merchant.test/paid'
+    })
+    await expect(validateStandardX402PaymentHeader(badResource, context(payer)))
+      .rejects.toEqual(expect.any(X402PaymentHeaderValidationError))
+    const badExtensions = rewrap(header, (decoded) => {
+      decoded.extensions = ['bazaar']
+    })
+    await expect(validateStandardX402PaymentHeader(badExtensions, context(payer)))
+      .rejects.toEqual(expect.any(X402PaymentHeaderValidationError))
+  })
 })

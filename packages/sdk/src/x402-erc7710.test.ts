@@ -144,6 +144,35 @@ describe('settleX402Erc7710 (#1454)', () => {
       expect(posts[0].body.maxTimeoutSeconds).toBe(120)
     })
 
+    it('sends the full 402 challenge VERBATIM so the settle echo has something to echo (#2373)', async () => {
+      // The decomposed fields carry authority; the stored challenge carries
+      // the resource/extensions the settle envelope must echo (#2361). Every
+      // erc7710 payment omitted it, so machine_metadata.payment_required was
+      // null and merchants enforcing the extensions-echo MUST refused —
+      // caught by the first qa-dev run against the enforcing demo merchant.
+      const { client, posts } = harness()
+      const pr = {
+        ...paymentRequired([erc7710Option()]),
+        extensions: { bazaar: { info: { input: { method: 'GET' } } } },
+      } as X402PaymentRequired
+      await client.settleX402Erc7710(pr)
+      expect(posts[0].body.paymentRequired).toEqual(pr)
+    })
+
+    it('OMITS the challenge past 64KB rather than failing the payment (#2373)', async () => {
+      // Mirrors the 3009 path and the backend's own bound: the route 400s an
+      // oversized paymentRequired, so sending it would turn a big bazaar
+      // block into an unpayable merchant. Omission degrades to an echo-less
+      // envelope instead.
+      const { client, posts } = harness()
+      const pr = {
+        ...paymentRequired([erc7710Option()]),
+        extensions: { padding: 'x'.repeat(70_000) },
+      } as X402PaymentRequired
+      await client.settleX402Erc7710(pr)
+      expect(posts[0].body).not.toHaveProperty('paymentRequired')
+    })
+
     it('forwards mcpCallContext so settle can rehydrate by payment_id, and omits it when absent (#1547)', async () => {
       // #1307's rehydration only works when the authorize persisted a context;
       // the guided catalog path (#1305) depends on that holding on this scheme.

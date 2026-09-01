@@ -464,6 +464,10 @@ describe('HavenClient structural boundary', () => {
       'x402AssetTransferMethod',
       'x402AuthorizationAmount',
       'x402FacilitatorAddresses',
+      // #2361: the shared v2 payment envelope (resource/extensions echoes) —
+      // exported so the edge signer builds the same envelope as the SDK's
+      // own funding leg instead of a drifting copy.
+      'x402V2PaymentEnvelope',
     ])
   })
 

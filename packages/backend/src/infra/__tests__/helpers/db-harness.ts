@@ -31,11 +31,38 @@
  *   (dozens and growing — never a fixed number here, it goes stale; the
  *   first file per worker DOES pay the full run, which is why
  *   vitest.config.ts sets an explicit hookTimeout, #1372).
- * - `resetDb()` (call in `beforeEach`): empties every table in the worker
- *   schema except `schema_migrations`, and restarts every advanced sequence.
+ * - `resetDb()` (call in `beforeEach` — see the budget rule below): empties
+ *   every table in the worker schema except `schema_migrations`, and restarts
+ *   every advanced sequence.
  *   Since #2211 it does that with foreign-key-ordered `DELETE`s rather than
  *   `TRUNCATE`, because `TRUNCATE`'s cost is per-relation and therefore grew
  *   with the migration count; coverage is unchanged. See `resetDb` below.
+ *
+ * ## Call these from a HOOK, not from a test body (#2329)
+ *
+ * Both entry points can pay the COLD cost — the full migration run, plus (in
+ * CI, where several workers share one Postgres) the wait for whichever worker
+ * holds `MIGRATION_LOCK_KEY`. `vitest.config.ts` budgets exactly that with
+ * `hookTimeout: 120_000` (#1372), and that budget applies only to a call made
+ * from `beforeAll`/`beforeEach`. The same call as the first statement of an
+ * `it` body is charged to vitest's 5000 ms `testTimeout`, which was never
+ * sized for a migration run: on #2295's runner one bare `resetDb()` measured
+ * 4634 ms against that 5000 ms, versus 1162 ms on green `dev` — the same 223
+ * files — and two files timed out on pull requests that could not have caused
+ * it (#2274, #2295).
+ *
+ * So the rule, enforced structurally by
+ * `helpers/__tests__/harness-call-budget.test.ts`: an in-body harness call is
+ * allowed only when a hook in that test's OWN `describe` (or an enclosing one)
+ * also calls the harness — making the in-body call a warm one, which is how
+ * the harness's own suites reset mid-test, where the reset IS the subject — or
+ * when that `it` declares an explicit timeout of its own. The guard follows
+ * local helper functions, so moving the call one function away does not hide
+ * it. Raising `testTimeout` instead was rejected:
+ * the cold path's worst case is a migration run plus every queued worker's
+ * run ahead of it, which is why the lock's own deadline is deliberately
+ * LARGER than `hookTimeout` — any number big enough to cover it is a number
+ * at which the per-test timeout no longer detects a hung test.
  *
  * ## When Postgres is absent
  *
@@ -173,6 +200,67 @@ const LOCK_WAIT_TIMEOUT_MS = 10 * 60 * 1000
 /** When a wait becomes worth mentioning. Well inside `hookTimeout`. */
 const LOCK_SLOW_WAIT_MS = 30 * 1000
 
+/**
+ * When a harness call has been running long enough to be worth naming out loud.
+ *
+ * Sized to fire strictly INSIDE the smallest budget the call could be running
+ * under. A harness call reached from an `it` body is charged to vitest's
+ * default 5000 ms `testTimeout` and dies there with a bare
+ * "Test timed out in 5000ms" that names the test and says nothing about the
+ * reset — which is why #2274 and #2295 each cost a CI round trip before a
+ * `dev`-baseline comparison identified the harness at all. Warning at 2000 ms
+ * puts the diagnosis in the log BEFORE that timeout fires.
+ * `harness-call-budget.test.ts` keeps call sites out of that budget in the
+ * first place; this is the message for the case that reaches it anyway.
+ *
+ * Above the honest cold cost, so it is not noise: a full migration run measured
+ * 572 ms locally on an unloaded native Postgres (73 migrations, 2026-09-01) and
+ * 1162 ms on a green CI runner (#2295's `dev` baseline). It is the CONTENDED
+ * cold path that reaches seconds — that migration run plus the wait for
+ * whichever worker holds `MIGRATION_LOCK_KEY` — and that is exactly the case
+ * worth a line.
+ */
+const SLOW_HARNESS_CALL_MS = 2_000
+
+/**
+ * Run `work`, announcing it as the cause WHILE it is still slow.
+ *
+ * The same shape as `onSlowWait` above and for the same reason: a diagnosis
+ * printed after the fact never runs, because the timeout kills the test first.
+ * A fast call stays completely silent — the closing duration line is printed
+ * only when the warning already fired, so the log gains nothing on a good run.
+ */
+async function withSlowAnnouncement<T>(label: string, work: () => Promise<T>): Promise<T> {
+  const startedAt = Date.now()
+  let warned = false
+  const timer = setTimeout(() => {
+    warned = true
+    console.warn(
+      `db-harness: ${label} has been running ` +
+        `${Math.round((Date.now() - startedAt) / 1000)}s — the HARNESS SETUP is what is ` +
+        'slow here, not the test body. Both harness entry points await the same memoised ' +
+        "migration run, which brings this worker's schema to the migration head and " +
+        'serialises that run across vitest ' +
+        `workers on advisory lock ${MIGRATION_LOCK_KEY}, so a cold call under CI ` +
+        'contention costs seconds. If this call sits in an `it` body it is charged to ' +
+        "vitest's 5000 ms testTimeout and will surface as an anonymous " +
+        '"Test timed out in 5000ms" naming an innocent test; move it into ' +
+        "`beforeAll`/`beforeEach`, where vitest.config.ts's hookTimeout budgets it " +
+        '(#2329).',
+    )
+  }, SLOW_HARNESS_CALL_MS)
+  // Never keep the process alive for a diagnostic.
+  timer.unref?.()
+  try {
+    return await work()
+  } finally {
+    clearTimeout(timer)
+    if (warned) {
+      console.warn(`db-harness: ${label} finished after ${Date.now() - startedAt}ms.`)
+    }
+  }
+}
+
 let ready: Promise<void> | null = null
 
 /**
@@ -181,6 +269,16 @@ let ready: Promise<void> | null = null
  * test file.
  */
 export function initDbHarness(): Promise<void> {
+  // The announcement wraps the PUBLIC entry point, while the memoised body
+  // below stays unannounced. That is what keeps a cold `resetDb()` — which
+  // awaits the same body — from printing the paragraph twice, WITHOUT a
+  // module-level "am I nested" flag: a flag cannot tell a nested call from a
+  // merely concurrent one, and would silence a genuinely separate slow call
+  // (haven-reviewer, #2329).
+  return withSlowAnnouncement('initDbHarness()', ensureMigrated)
+}
+
+function ensureMigrated(): Promise<void> {
   ready ??= (async () => {
     // Explicitly qualified — CREATE SCHEMA ignores search_path.
     await db.query(`CREATE SCHEMA IF NOT EXISTS ${WORKER_SCHEMA}`)
@@ -370,8 +468,11 @@ async function readSchemaShape(): Promise<SchemaShape> {
  * `TRUNCATE` path is kept as the fallback — chosen deterministically from
  * `planDeleteOrder` returning `null`, never by swallowing an error.
  *
- * AWAITS `initDbHarness()` first, deliberately. The #1555/#1559 outbound
- * files called `initDbHarness()` bare at describe-registration time — the
+ * AWAITS the migration-head guarantee first, deliberately — the same memoised
+ * run `initDbHarness()` exposes, reached through the private `ensureMigrated()`
+ * so a cold reset announces itself once rather than twice (#2329). The
+ * #1555/#1559 outbound files called `initDbHarness()` bare at
+ * describe-registration time — the
  * returned promise was never awaited, so whenever a NEW migration had to
  * apply (fresh CI schema), the first tests ran CONCURRENTLY with their own
  * worker's migration DDL: 42P01 "relation does not exist" when a table was
@@ -383,8 +484,15 @@ async function readSchemaShape(): Promise<SchemaShape> {
  * Init is idempotent and memoised, so this costs one resolved-promise await
  * after the first call.
  */
-export async function resetDb(): Promise<void> {
-  await initDbHarness()
+export function resetDb(): Promise<void> {
+  // The announcement wraps the WHOLE reset, init included: a cold reset's cost
+  // is dominated by the migration run it awaits, and the point of the message
+  // is to name the harness rather than whichever test drew the short straw.
+  return withSlowAnnouncement('resetDb()', performReset)
+}
+
+async function performReset(): Promise<void> {
+  await ensureMigrated()
   const { tables, fks, sequences } = await readSchemaShape()
   if (tables.length === 0) return
 

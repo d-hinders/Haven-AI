@@ -164,8 +164,39 @@ describe('buildX402PaymentHeader', () => {
       Buffer.from(result.paymentHeader, 'base64').toString('utf8'),
     ) as Record<string, unknown>
 
-    expect(Object.keys(decoded).sort()).toEqual(['accepted', 'payload', 'x402Version'])
+    // #2361: the v2 envelope also echoes the challenge's `resource` verbatim
+    // (this fixture carries one; it carries no `extensions`, so that key must
+    // be ABSENT — omission is the pre-#2361 shape live merchants settled).
+    expect(Object.keys(decoded).sort()).toEqual(['accepted', 'payload', 'resource', 'x402Version'])
     expect(decoded.x402Version).toBe(2)
+    expect(decoded.resource).toEqual(PAYMENT_REQUIRED.resource)
+    expect(decoded).not.toHaveProperty('extensions')
+  })
+
+  it('echoes the challenge extensions verbatim in the v2 envelope (#2361)', async () => {
+    // Live-bisected on Base mainnet (#2360): a strict facilitator rejected
+    // the echo-less envelope with a bare 400 and settled the identical
+    // signature once `resource`/`extensions` were echoed. The echo must be
+    // VERBATIM — nested content included — never reconstructed.
+    const extensions = {
+      bazaar: { info: { input: { method: 'GET' } } },
+    }
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const result = await signer.buildX402PaymentHeader(
+      { ...PAYMENT_REQUIRED, x402Version: 2, extensions },
+      funding.x402Binding,
+    )
+
+    const decoded = JSON.parse(
+      Buffer.from(result.paymentHeader, 'base64').toString('utf8'),
+    ) as Record<string, unknown>
+
+    expect(Object.keys(decoded).sort()).toEqual(
+      ['accepted', 'extensions', 'payload', 'resource', 'x402Version'],
+    )
+    expect(decoded.extensions).toEqual(extensions)
+    expect(decoded.resource).toEqual(PAYMENT_REQUIRED.resource)
   })
 
   it('consumes the x402 binding after signing a merchant header', async () => {
@@ -331,9 +362,11 @@ describe('buildX402PaymentHeader', () => {
     }).not.toThrow()
     decoded = JSON.parse(atob(result.paymentHeader))
 
-    // ── 2. Top-level shape: { x402Version, accepted, payload } ──────────────
+    // ── 2. Top-level shape: { x402Version, resource, accepted, payload } ────
+    // (#2361: `resource` is the challenge echo; `extensions` would join it
+    // when the challenge advertises one — this fixture does not.)
     const topLevelKeys = Object.keys(decoded).sort()
-    expect(topLevelKeys).toEqual(['accepted', 'payload', 'x402Version'])
+    expect(topLevelKeys).toEqual(['accepted', 'payload', 'resource', 'x402Version'])
 
     // ── 3. x402Version matches the request ──────────────────────────────────
     expect(decoded.x402Version).toBe(2)

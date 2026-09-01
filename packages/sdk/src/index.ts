@@ -122,6 +122,7 @@ export {
   ERC7710_ASSET_TRANSFER_METHOD,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
+  x402V2PaymentEnvelope,
   validateStandardX402PaymentHeader,
   X402PaymentHeaderValidationError,
   X402_MAX_AUTHORIZATION_WINDOW_SECONDS,

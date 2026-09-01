@@ -358,6 +358,239 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   },
 }
 
+// ── Strict input (#2312) ─────────────────────────────────────────────────────
+
+/**
+ * #2312: which hosted tools REFUSE an undeclared argument, and why each one is
+ * on this list rather than the list being "all of them".
+ *
+ * ## What was actually broken, measured
+ *
+ * #2292 added `parseStrict` below and pointed it at `haven_report_x402_outcome`.
+ * That guard **could not fire over the wire.** The MCP SDK validates a tool call
+ * against the registered input schema and hands the handler `parseResult.data`
+ * — the STRIPPED object — before our handler runs
+ * (`@modelcontextprotocol/sdk`'s `McpServer.validateToolInput`). So an undeclared
+ * `tx_hash` was gone by the time `parseStrict` looked for it: measured on
+ * 2026-09-01 by driving a real `InMemoryTransport` client against
+ * `buildHostedMcpServer`, where that exact call returned `success: true` and
+ * WROTE its reconciliation event. `parseStrict`'s own test calls the handler
+ * directly, which is the only place the property held.
+ *
+ * That is the same defect the guard was written to prevent, one layer up: a
+ * check that returns cleanly while being about a different question than its
+ * author thinks. So strictness has to be declared where the SDK enforces it —
+ * at registration (`toolInputSchema` below, consumed by `server.ts`) — and
+ * `parseStrict` stays as the second line for an embedder that imports
+ * `createToolHandlers` directly, which `index.ts` exports.
+ *
+ * ## Why this does NOT re-prompt operators
+ *
+ * Measured, not assumed. Two independent reasons, either one sufficient:
+ *
+ *   1. The advertised JSON Schema does not move. `zod-to-json-schema` already
+ *      emits `additionalProperties: false` for a strip-mode `z.object`, so the
+ *      loose and strict advertisements are BYTE-IDENTICAL for all 22 hosted
+ *      schemas (surface hash `cf41c32a83b10c54` both ways, against a control
+ *      mutation at `3c8ea4a1f4bc564b`). The advertisement was already strict;
+ *      only the behaviour was permissive.
+ *   2. `computeConsentHash` (`packages/mcp/src/consent.ts`) hashes identity +
+ *      tool NAMES + the allowance summary. It takes no schema argument at all,
+ *      and the hosted server has no consent gate in the first place — the gate
+ *      lives in `packages/mcp` and `packages/signer`.
+ *
+ * ## Which tools, and which deliberately not
+ *
+ * On the list, batch 1 (#2312): the money-path tools that read something from
+ * the payment's own RECORD rather than from arguments. Those have #2292's exact
+ * failure mode — a stripped key lets a caller believe it pinned a value it did
+ * not — and they are where a silent strip costs money.
+ *
+ * On the list, batch 2 (#2348): the four tools the LOCAL MCP
+ * (`packages/mcp/src/tools.ts`) reaches under the same name with a DIFFERENT
+ * argument spelling. Measured over the transport on 2026-09-01 against
+ * `origin/dev` `c259d9ca`, not inferred from the schemas:
+ *
+ *   - `haven_send` — `idempotencyKey` stripped, and `POST /payments` then goes
+ *     out as `{token, amount, to}` with NO `idempotency_key` field at all
+ *     (`client.ts` spreads it conditionally). Total loss: the backend's replay
+ *     contract never engages, so a retry is a second spend. The strongest case
+ *     here.
+ *   - `haven_pay_mcp_tool` — `idempotencyKey` stripped, and the SDK then falls
+ *     back to `buildX402IdempotencyKey(paymentRequired, option)`: a hash of the
+ *     merchant quote over a 300_000 ms bucket. Not a total loss — a REPLACED
+ *     replay scope, which is the worse shape to reason about, because it
+ *     de-dupes two genuinely distinct purchases of the same item inside one
+ *     bucket and fails to de-dupe a retry that crosses a bucket boundary.
+ *   - `haven_quote_x402` — the local-only `body` is stripped and the hosted
+ *     probe fires with an EMPTY body (measured: `POST /paid :: `), so the quote
+ *     describes a request the caller never made. `idempotencyKey` is stripped
+ *     too, but a quote creates no payment, so that half costs nothing directly.
+ *   - `haven_pay_x402_quote` — the headline crossover, `quote` for
+ *     `payment_required`, ALREADY failed loudly and always has: `payment_required`
+ *     is a required field, so the SDK's own validation refuses with
+ *     `-32602 … "payment_required" Required` and makes zero Haven calls. Only
+ *     `idempotencyKey` was silent here. Stated because the divergence table in
+ *     #2348 reads as though both keys were equally silent, and they were not.
+ *
+ * ## Refuse loudly, or CONVERGE on one spelling? (#2348)
+ *
+ * Convergence is the destination and a hard refusal is the on-ramp, not a
+ * substitute: refusing loudly and diverging forever is a worse end state than
+ * refusing loudly on the way to one spelling. Convergence is deliberately NOT
+ * taken here, for a reason that is about release mechanics rather than taste —
+ * `@haven_ai/mcp` is PUBLISHED, so renaming `idempotencyKey` → `idempotency_key`
+ * on the local surface is a breaking change to an installed package's argument
+ * contract, and that is a release-train decision with a deprecation window,
+ * not a parse decision. Filed as #2366. Two things this refusal does in the
+ * meantime that a silent strip did not: it tells a caller which spelling to
+ * use, and it makes the divergence countable instead of invisible.
+ *
+ * `haven_quote_x402`'s `body` is the one case where refusing REMOVES a
+ * capability the silent strip was faking: the hosted surface has no field to
+ * route a request payload to, so a body-bearing paywall is now honestly
+ * unquotable here rather than dishonestly quotable. That is the right way
+ * round — a wrong quote is worse than no quote — but it is a gap, and #2366
+ * carries it.
+ *
+ * Deliberately NOT on the list, with the reason kept here rather than in a
+ * commit message:
+ *
+ *   - `haven_complete_mcp_tool` — it was IN this batch until the final base
+ *     re-check found a live caller for it, which is the whole reason that
+ *     re-check exists. Haven's own agent-facing skill text — downloaded as
+ *     `SKILL.md` from the connect success screen and auto-installed by
+ *     `@haven_ai/connect` — SAID of this tool: "Pass `payment_required`,
+ *     `arguments`, and `mcp_transport` verbatim from the quote/prepare
+ *     result." This tool has never declared `payment_required`; the 402 is
+ *     read from the stored record. So an agent following Haven's own
+ *     instructions passed it, had it silently dropped, and succeeded — this
+ *     issue's exact defect, live, in our own guidance.
+ *
+ *     **That guidance is FIXED, and the blocker has MOVED (#2363).** #2353's
+ *     PR #2359 rewrote the paragraph in both byte-pinned copies
+ *     (`packages/sdk/src/skill-content.ts` and its frontend twin
+ *     `packages/frontend/src/lib/agent-skill-bundle.ts`): the skill now says
+ *     to call this tool with `payment_id` and the signer's `payment_header`
+ *     ONLY, and names `payment_required` as a field it does not take. #2359
+ *     shipped the copies and deliberately did NOT ship this tool's switch, so
+ *     do not read the paragraph above as "the guidance is still wrong, so we
+ *     still cannot" — that premise is spent.
+ *
+ *     What gates the switch now is ROLLOUT, not correctness. The skill is
+ *     AUTO-INSTALLED on the caller's machine, so an unknown number of agents
+ *     carry the OLD copy on disk right now; flipping this tool strict before
+ *     the corrected copy propagates would still turn Haven's own documented
+ *     flow into a hard 400 for every one of them — and now for a reason that
+ *     no longer exists anywhere in this repository, which is the harder
+ *     failure to diagnose, not the easier one. #2353 stays OPEN for exactly
+ *     that decision and owns the switch; the propagation evidence is what it
+ *     is waiting on, not another guidance fix. Related: #2366 (converge the
+ *     local and hosted argument spellings) and #2349 (batch 3).
+ *
+ *     Both halves of that premise are pinned, not merely written down.
+ *     `packages/sdk/src/skill-content.test.ts` asserts the deleted imperative
+ *     stays deleted and the correction stays present; the `#2363` block in
+ *     `strict-tool-input.test.ts` re-asserts the same two literals HERE, so a
+ *     revert of the skill text goes red in the suite of the file that carries
+ *     this exclusion rather than only in the SDK's.
+ *   - `haven_get_agent`, `haven_get_allowances` — schema `{}`. Strict on an
+ *     empty object refuses EVERY key, so any client that decorates a
+ *     no-argument call breaks, for no money-path gain. #2349.
+ *   - everything else — batched, not exempted: #2349 takes the remainder and
+ *     adds the guard that stops a NEW tool joining `toolSchemas` without a
+ *     strict/permissive decision being made about it at all.
+ *
+ * The value is the `.strict()` message: a refusal a caller can act on beats a
+ * bare "unrecognized key". It is also what `parseStrict` reuses, so the two
+ * layers cannot drift into saying different things about the same tool.
+ */
+export const STRICT_INPUT_TOOLS = {
+  // #2292's originating tool. Every field a reporter reaches for and this tool
+  // does not declare — tx_hash, resource_url, amount, merchant_url — is one
+  // Haven reads from the payment's own record. Stripping it lets a caller
+  // believe it pinned the anchor when it did not.
+  haven_report_x402_outcome:
+    'The funding transaction, resource URL and amount are read from the payment record, ' +
+    'so a report cannot be pointed at a different payment.',
+  // The relay leg. Everything except which payment and which signature — the
+  // amount, the recipient, the rail, the typed data that was signed — comes
+  // from the stored intent. A stripped key here means relaying a signature for
+  // a different question than the caller asked.
+  haven_submit:
+    'Amount, recipient and rail come from the stored payment intent; this tool takes only ' +
+    'which payment, which signature, and (optionally) which settlement scheme that signature is for.',
+  // #1307: merchant_url / tool_name / arguments / mcp_transport are OPTIONAL
+  // because Haven rehydrates the stored MCP call context from payment_id, and
+  // it relays the funding signature: this one moves money before it delivers.
+  // A stripped key is invisible twice over — the call still succeeds, against
+  // the recorded context rather than the one the caller passed.
+  haven_settle_mcp_tool:
+    'The MCP call context is rehydrated from payment_id when you omit it, and this tool funds before ' +
+    'it delivers — an unrecognised key must not be dropped on the way to a transfer.',
+  // ── #2348, the camelCase crossover ──────────────────────────────────────
+  // Each message NAMES the local spelling, the way MCP_TRANSPORT_CASE_HINT
+  // does for mcp_transport (#2282): the value of refusing here is telling a
+  // caller holding `idempotencyKey` what is wrong with it, not that a key was
+  // unrecognised.
+  haven_send:
+    'This is the HOSTED surface, which spells the key idempotency_key (snake_case). ' +
+    'The local MCP (@haven_ai/mcp) spells it idempotencyKey — carrying that spelling here ' +
+    'used to be dropped in silence, and the payment then reached POST /payments with no ' +
+    'idempotency_key at all, so the replay contract never engaged and a retry spent twice.',
+  haven_pay_mcp_tool:
+    'This is the HOSTED surface, which spells the key idempotency_key (snake_case). ' +
+    'The local MCP (@haven_ai/mcp) spells it idempotencyKey — carrying that spelling here ' +
+    'used to be dropped in silence, and the SDK then fell back to a key DERIVED from the ' +
+    "merchant quote inside a 5-minute bucket, so the caller's own replay scope was " +
+    'silently replaced by a different one rather than merely lost.',
+  haven_quote_x402:
+    'This is the HOSTED surface. It takes url, method and headers only. The local MCP ' +
+    '(@haven_ai/mcp) additionally takes body and idempotencyKey — carrying either here used ' +
+    'to be dropped in silence, and a body-bearing POST was then probed with an EMPTY body, ' +
+    'so the quote described a different request than the one the caller meant to pay for. ' +
+    'The hosted surface has no body field to route it to; quote a GET resource, or use ' +
+    'haven_pay_mcp_tool for a merchant that needs a request payload.',
+  haven_pay_x402_quote:
+    'This is the HOSTED surface, which takes payment_required and idempotency_key ' +
+    '(snake_case). The local MCP (@haven_ai/mcp) takes quote and idempotencyKey. Passing ' +
+    'quote already failed loudly here, because payment_required is required — it is ' +
+    'idempotencyKey that was dropped in silence, replacing the caller\'s replay scope with ' +
+    'a key derived from the quote. Pass payment_required (the paymentRequired field of a ' +
+    'haven_quote_x402 result) and idempotency_key.',
+} as const satisfies Partial<Record<HostedToolName, string>>
+
+export type StrictInputToolName = keyof typeof STRICT_INPUT_TOOLS
+
+function isStrictInputTool(name: HostedToolName): name is StrictInputToolName {
+  return Object.prototype.hasOwnProperty.call(STRICT_INPUT_TOOLS, name)
+}
+
+/**
+ * The input schema `server.ts` registers for a tool.
+ *
+ * A raw shape for a permissive tool (what the SDK has always been given), and a
+ * `.strict()` `ZodObject` for a tool on the list above. Both advertise the same
+ * JSON Schema; only the enforcement differs. Note the registration API matters:
+ * the deprecated `.tool(name, description, schema, handler)` overload refuses a
+ * `ZodObject` in its schema position ("received an unrecognized object"), so
+ * `server.ts` uses `registerTool`, which passes a Zod schema through intact.
+ */
+export function toolInputSchema(name: HostedToolName): z.ZodRawShape | z.ZodTypeAny {
+  if (!isStrictInputTool(name)) return toolSchemas[name]
+  return z.object(toolSchemas[name]).strict(strictRefusalMessage(name))
+}
+
+function strictRefusalMessage(name: StrictInputToolName, keys?: readonly string[]): string {
+  const subject = keys && keys.length > 0
+    ? `${name} does not accept ${keys.map((k) => `"${k}"`).join(', ')}.`
+    : `${name} refuses an argument it does not declare.`
+  return (
+    `${subject} That is deliberate rather than an omission: ${STRICT_INPUT_TOOLS[name]} ` +
+    'Send only the fields this tool declares.'
+  )
+}
+
 // ── Legacy tool schemas (one release cycle compatibility shim) ───────────────
 export const legacyToolSchemas: Record<HostedToolNameLegacy, z.ZodRawShape> = {
   haven_x402_authorize: toolSchemas.haven_pay_x402_quote,
@@ -816,7 +1049,7 @@ export function createToolHandlers(
 
     haven_send: async (input) =>
       runTool(async () => {
-        const args = parse('haven_send', input)
+        const args = parseStrict('haven_send', input)
         try {
           const intent = await haven.createIntent({
             token: args.asset,
@@ -885,7 +1118,7 @@ export function createToolHandlers(
 
     haven_submit: async (input) =>
       runTool(async () => {
-        const args = parse('haven_submit', input)
+        const args = parseStrict('haven_submit', input)
         // #2041: the erc7710 branch, for the GENERIC plain-HTTP flow. The MCP
         // flow's equivalent lives in haven_settle_mcp_tool, which also CALLS
         // the merchant; a plain-HTTP merchant is retried by the agent itself,
@@ -953,7 +1186,7 @@ export function createToolHandlers(
 
     haven_pay_mcp_tool: async (input) =>
       runTool(async () => {
-        const args = parse('haven_pay_mcp_tool', input)
+        const args = parseStrict('haven_pay_mcp_tool', input)
         // #1351: shape-check the cap FIRST — a contradictory cap is refused
         // here, before the merchant is even contacted.
         const cap = readMaxAmountCap(args, { required: true })
@@ -1603,7 +1836,7 @@ export function createToolHandlers(
 
     haven_settle_mcp_tool: async (input) =>
       runTool(async () => {
-        const args = parse('haven_settle_mcp_tool', input)
+        const args = parseStrict('haven_settle_mcp_tool', input)
         // ── #2282: the merchant-call context is resolved BEFORE anything is
         // submitted, on BOTH schemes. ──
         //
@@ -1789,7 +2022,18 @@ export function createToolHandlers(
       }),
 
     haven_quote_x402: async (input) => {
-      const args = parse('haven_quote_x402', input)
+      // #2348: parsed INSIDE a failure envelope. Unlike batch 1's three, this
+      // handler and haven_pay_x402_quote below parse before their `runTool`,
+      // so a validation error escaped the direct-embedder path as a raw throw
+      // rather than a ToolFailure. That was already true of the permissive
+      // `parse` (a missing `url` threw a ZodError), but strictness makes the
+      // path reachable often enough that leaving it would be a real defect.
+      let args: Record<string, any>
+      try {
+        args = parseStrict('haven_quote_x402', input)
+      } catch (err) {
+        return normalizeError(err)
+      }
       const init: RequestInit = {}
       if (args.method) init.method = args.method
       if (args.headers) init.headers = args.headers
@@ -1830,7 +2074,14 @@ export function createToolHandlers(
     },
 
     haven_pay_x402_quote: async (input) => {
-      const args = parse('haven_pay_x402_quote', coerceJsonField(input, 'payment_required'))
+      // #2348: see haven_quote_x402 above — same pre-`runTool` parse, same
+      // normalisation, same reason.
+      let args: Record<string, any>
+      try {
+        args = parseStrict('haven_pay_x402_quote', coerceJsonField(input, 'payment_required'))
+      } catch (err) {
+        return normalizeError(err)
+      }
       // #1469: agent-supplied shape, sanitized through the SAME normalizer the
       // parsed-Response path uses — it drops null/non-object accepts[] entries
       // and validates the envelope. The raw cast this replaced let a null hole
@@ -2865,10 +3116,18 @@ function wrongTool(code: string, message: string, suggested_tool?: string): Tool
 }
 
 /**
- * Pre-funding price guard. `authorizedAtomic` is the amount Haven would
- * authorize for the call — the ceiling the merchant can settle at
- * (`maxAmountRequired ?? amount`), i.e. the user's worst-case spend, which is
- * the right figure to cap. Throws a typed PRICE_EXCEEDS_MAX (preserved by
+ * Pre-funding price guard. `authorizedAtomic` is the MERCHANT's own quoted
+ * ceiling for the call — `maxAmountRequired ?? amount`, read straight off the
+ * merchant's 402 response by the SDK's `x402AuthorizationAmount`
+ * (`packages/sdk/src/x402.ts`). **Haven authorizes nothing here** (#2334,
+ * #2347): the figure is what the merchant may settle up to, i.e. the user's
+ * worst-case spend, which is the right figure to cap. "Authorization" in this
+ * function's names is the x402/EIP-3009 FUNDING LEG the amount travels into,
+ * never a grant of spend authority — that comes only from the owner-signed
+ * `erc20PeriodTransfer` delegation (`rails/delegation-policy.ts`, built
+ * unsigned and signed by the account owner) and the on-chain
+ * `ERC20PeriodTransferEnforcer` caveat it is redeemed under.
+ * Throws a typed PRICE_EXCEEDS_MAX (preserved by
  * normalizeError) when it exceeds the agent's cap, so the call fails
  * BEFORE any funding transfer. The on-chain allowance is still the hard gate;
  * this is an extra agent affordance against surprise overcharges within budget.
@@ -3140,7 +3399,7 @@ function requireSettleableSelection(
             'settle erc7710. No payment intent was created and no funds moved. Tell the user: ' +
             'paying this merchant needs the agent re-onboarded on the delegation rail.'
           : "This agent's account rail could not be read from Haven, so Haven refuses rather " +
-            'than authorize on a guess. No payment intent was created and no funds moved. ' +
+            'than proceed on a guess. No payment intent was created and no funds moved. ' +
             'Retry when haven_get_agent succeeds.'),
       statusCode: 403,
       nextAction: AgentPaymentNextAction.StopAndTellUser,
@@ -3193,37 +3452,42 @@ function parse<TName extends HostedToolName>(name: TName, input: unknown): Recor
 }
 
 /**
- * #2292: `parse` with unknown keys REFUSED instead of stripped.
+ * #2292/#2312: `parse` with unknown keys REFUSED instead of stripped.
  *
  * `parse` above is a bare `z.object`, which silently drops anything it does
  * not recognise — the exact shape #2282 found on `mcp_transport`, where a
  * caller's argument was edited rather than validated and an unrecognised
- * input parsed to the same value as an absent one. Left alone here for every
- * existing tool, because widening it is a behaviour change on twenty
- * already-shipped surfaces and belongs to whoever decides to make it.
+ * input parsed to the same value as an absent one.
  *
- * For a REPORT it is not a style question. Every field a reporter might reach
- * for and that this tool deliberately does not accept — `tx_hash`,
- * `resource_url`, `amount`, `merchant_url` — is a field whose value Haven
- * reads from the payment's own record instead. Stripping such a key would let
- * a caller believe it had pinned the anchor when it had not, which is worse
- * than either accepting or refusing it. So: refuse, and say which keys are
- * unrecognised.
+ * **This is the SECOND line of defence, not the first, and #2292 shipped it
+ * believing it was the only one.** Over the MCP transport the SDK has already
+ * validated and STRIPPED the arguments before a handler is called, so an
+ * unrecognised key never reaches here; the guard that actually fires on the
+ * wire is the strict registration schema (`toolInputSchema`, see
+ * `STRICT_INPUT_TOOLS` above for the measurement). What this still covers is
+ * the direct-embedder path — `createToolHandlers` is exported from `index.ts`
+ * — plus the unit tests, which call handlers directly.
+ *
+ * Which tools are strict, and why each, is declared once in
+ * `STRICT_INPUT_TOOLS`; both layers read their refusal text from there so they
+ * cannot drift into saying different things about the same tool.
  */
-function parseStrict<TName extends HostedToolName>(name: TName, input: unknown): Record<string, any> {
+function parseStrict<TName extends StrictInputToolName>(name: TName, input: unknown): Record<string, any> {
   const result = z.object(toolSchemas[name]).strict().safeParse(input ?? {})
   if (result.success) return result.data
+  // TOP-LEVEL keys only. A nested strict object — `mcp_transport`, whose
+  // `.strict(MCP_TRANSPORT_CASE_HINT)` explains the snake_case boundary #2282
+  // found — also raises `unrecognized_keys`, at a non-empty path. Collecting
+  // those here would replace that tool-specific hint with this generic one and
+  // silently regress #2282's refusal message; the nested case falls through to
+  // `throw result.error`, exactly as the permissive `parse` did.
   const unrecognized = result.error.issues.flatMap((issue) =>
-    issue.code === 'unrecognized_keys' ? issue.keys : [],
+    issue.code === 'unrecognized_keys' && issue.path.length === 0 ? issue.keys : [],
   )
   if (unrecognized.length > 0) {
     throw new HostedToolError({
       code: 'INVALID_INPUT',
-      message:
-        `${name} does not accept ${unrecognized.map((k) => `"${k}"`).join(', ')}. ` +
-        'That is deliberate rather than an omission: the funding transaction, resource URL and ' +
-        'amount are read from the payment record so a report cannot be pointed at a different ' +
-        'payment. Send only the fields this tool declares.',
+      message: strictRefusalMessage(name, unrecognized),
       statusCode: 400,
       status: 'invalid_input',
       phase: 'not_started',

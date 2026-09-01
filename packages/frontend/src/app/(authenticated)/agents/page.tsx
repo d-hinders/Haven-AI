@@ -6,7 +6,7 @@ export default function AgentsPage() {
     <div className="max-w-5xl">
       <PageHeader
         title="Agents"
-        subtitle="Connect delegation agents, set their rules, and review historical agent records."
+        subtitle="Delegation agents use on-chain rules; historical agent records remain readable."
       />
 
       <AgentPanel />

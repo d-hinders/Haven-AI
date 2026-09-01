@@ -126,7 +126,11 @@ const proof = await haven.x402.authorize({
 })
 
 const data = await fetch(url, {
-  headers: { 'X-PAYMENT': proof.token },
+  // x402 v2 reads PAYMENT-SIGNATURE; v1 reads X-PAYMENT. Set both.
+  headers: {
+    'PAYMENT-SIGNATURE': proof.token,
+    'X-PAYMENT': proof.token,
+  },
 }).then(r => r.json())`}</CodeBlock>
       </Section>
 

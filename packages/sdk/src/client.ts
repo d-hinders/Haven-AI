@@ -67,7 +67,7 @@ import {
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
-  X402_PAYMENT_HEADER_NAMES_SENT,
+  x402PaymentHeaderNamesSent,
 } from './x402.js'
 import type {
   SweepAuthorization,
@@ -1223,7 +1223,7 @@ export class HavenClient {
    * Deliver an already-signed x402 payment header to the merchant and return
    * the merchant's response. Used by the hosted MCP server to complete the
    * merchant leg of an MCP tool payment after the edge signer has built the
-   * `X-PAYMENT` header.
+   * merchant payment header.
    *
    * Custody note: this never needs the delegate key. It relays a signed,
    * amount/merchant/nonce-bound EIP-3009 authorization the edge signer already
@@ -1233,13 +1233,14 @@ export class HavenClient {
    * says the merchant was Bazaar-discoverable, runs a fresh `initialize`
    * handshake (the quote-time session is gone once funding confirms; the x402
    * challenge is stateless w.r.t. the MCP session, so a fresh session is
-   * accepted), threads the session + wallet headers, sets `X-PAYMENT`, and
+   * accepted), threads the session + wallet headers, sets the x402 payment
+   * header under the names that scheme requires (#2341), and
    * collapses an SSE JSON-RPC response to its `result`.
    */
   /**
    * Wait for a payment's Safe→delegate funding tx to reach ≥1 on-chain
    * confirmation. The hosted x402 completion path MUST call this after funding
-   * and before delivering the X-PAYMENT header, so the merchant's
+   * and before delivering the merchant payment header, so the merchant's
    * balanceOf(delegate) / transferWithAuthorization verification sees the funded
    * balance — otherwise it rejects with "Payment verification failed". The
    * SDK's local path already does this (see `X402FundingLeg.authorize`); the hosted
@@ -1372,7 +1373,7 @@ export class HavenClient {
           txHash: evidenceTxHash,
           resourceUrl: evidenceContext.resourceUrl,
           merchantStatus: surfaced.status,
-          paymentProofHeaderName: X402_PAYMENT_HEADER_NAMES_SENT,
+          paymentProofHeaderName: x402PaymentHeaderNamesSent(input.paymentHeader),
           paymentProofHeader: input.paymentHeader,
           protocolReceiptHeaderName: protocolReceiptHeader ? 'PAYMENT-RESPONSE' : undefined,
           protocolReceiptHeader,

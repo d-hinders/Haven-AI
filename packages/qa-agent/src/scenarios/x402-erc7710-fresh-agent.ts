@@ -167,7 +167,14 @@ export const x402Erc7710FreshAgent: Scenario = {
 
     const paid = await fetch(mcpUrl, {
       method: 'POST',
-      headers: { ...MCP_HEADERS, 'X-PAYMENT': settle.data.payment_header },
+      headers: {
+        ...MCP_HEADERS,
+        // erc7710 is always x402 v2, and its header carries a whole
+        // delegation chain — sending the v1 alias too pushed the request past
+        // the merchant's header-size limit (HTTP 431, #2341). v2 name only
+        // here; the EIP-3009 scenarios still send both.
+        'PAYMENT-SIGNATURE': settle.data.payment_header,
+      },
       body: mcpBody(2),
     })
     if (paid.status === 402) {

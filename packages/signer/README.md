@@ -5,7 +5,7 @@ that's very nearly all it does. It pairs with the hosted, keyless
 `@haven_ai/mcp-server`: the hosted server identifies the agent, constructs
 unsigned payloads and relays signatures; this one signs. **The delegate key
 never leaves this process** — it is not part of any request or response, and
-only signatures (and the standard x402 `X-PAYMENT` header) ever come out.
+only signatures (and the standard x402 merchant payment header) ever come out.
 
 Design: [`docs/architecture/07-edge-signer.md`](../../docs/architecture/07-edge-signer.md).
 Contract: [`docs/architecture/06-hosted-mcp-connect-flow.md`](../../docs/architecture/06-hosted-mcp-connect-flow.md).
@@ -44,7 +44,7 @@ It exposes four stdio MCP tools, all sign-only:
 |---|---|---|
 | `haven_sign` | Sign one payment. Preferred form is `{ payment_id }` alone — the signer fetches the exact payload itself. Signs an EIP-712 typed-data payload on the delegation rail (a redemption, or an erc7710 settlement child), or a bare `payload_hash` on a v1 context; for the EIP-3009 x402 bridge it also records the funding context and returns a binding | `{ signature }` or `{ signature, x402_binding }` |
 | `haven_sign_x402` | One-shot x402: funding signature **and** the merchant header in a single local call (`haven_sign` + `haven_x402_sign_header`). `{ payment_id }` alone is the preferred call | `{ signature, x402_binding, payment_header, accepted }` |
-| `haven_x402_sign_header` | Build + sign the EIP-3009 `X-PAYMENT` header, only when the fresh merchant `payment_required` matches the recorded `x402_binding` | `{ payment_header, accepted }` |
+| `haven_x402_sign_header` | Build + sign the EIP-3009 merchant payment header, only when the fresh merchant `payment_required` matches the recorded `x402_binding` | `{ payment_header, accepted }` |
 | `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless EIP-3009 sweep that recovers stranded funds from the delegate wallet back to your own account. Never broadcasts | `{ signature }` |
 
 The `initialize` handshake advertises which binding versions this signer
@@ -105,7 +105,9 @@ no delegate hot balance and no `haven_x402_sign_header` step:
 hosted:  haven_pay_x402_quote      -> settlement child + settlement_scheme: erc7710
 local:   haven_sign { payment_id } -> child signature (caveats verified locally)
 hosted:  haven_submit { settlement_scheme: "erc7710" } -> payment_header
-agent:   retry merchant with X-PAYMENT
+agent:   retry merchant, setting PAYMENT-SIGNATURE ONLY (never X-PAYMENT:
+         this header carries a delegation chain and duplicating it is
+         refused with HTTP 431)
 ```
 
 x402 — **EIP-3009 bridge**, the fallback for merchants without facilitator-side
@@ -116,8 +118,9 @@ bounded funding leg:
 hosted:  haven_pay_x402_quote     -> { payment_id, payload_hash, x402.expected }
 local:   haven_sign + expected    -> funding signature + x402_binding
 hosted:  haven_submit             -> funds account -> delegate EOA
-local:   haven_x402_sign_header   -> X-PAYMENT header only if binding matches
-agent:   retry merchant with X-PAYMENT
+local:   haven_x402_sign_header   -> payment header only if binding matches
+agent:   retry merchant, setting BOTH PAYMENT-SIGNATURE + X-PAYMENT
+         (both names are correct HERE — the bridged header is small)
 ```
 
 On the bridge, pass `x402.expected` from the hosted quote unchanged into the
@@ -129,7 +132,7 @@ challenge has a different amount, merchant recipient, resource URL, token asset
 or network than the recorded funding intent, refuses an expired window, and
 consumes the binding after one header.
 
-The `X-PAYMENT` header's validity window starts when it is signed, not when
+The merchant payment header's validity window starts when it is signed, not when
 funding confirms — so relay it promptly.
 
 ## What the signer refuses to sign

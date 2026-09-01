@@ -9,7 +9,8 @@
  * all on PRs that touched no backend code).
  *
  * The fix has two halves: those call sites now await in `beforeAll`, and —
- * the half THIS file pins — `resetDb()` awaits `initDbHarness()` itself, so
+ * the half THIS file pins — `resetDb()` reaches the migration head itself
+ * first (awaiting the same memoised run `initDbHarness()` exposes), so
  * any future file that forgets the await degrades to correct instead of to a
  * race. This file deliberately performs NO explicit init: `resetDb()` in
  * `beforeEach` is its first and only harness call, and the test then requires

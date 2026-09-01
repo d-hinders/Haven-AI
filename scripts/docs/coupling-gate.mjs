@@ -342,18 +342,56 @@ export function implicatedDocs(changed, docs, { strict = false, added = null } =
     // `added === null` means the caller could not determine add/modify status
     // (a bare `--changed=` list), and restores the pre-#2192 behaviour. The
     // gating CI job always supplies it.
+    //
+    // #2323: satisfaction no longer means SILENCE. It used to `continue` here,
+    // which dropped the doc before the `covers` check below — so a parent doc
+    // cleared by a shard was not merely un-blocked, it was never NAMED, in
+    // either posture. Measured on this file before the change, with
+    // `casp-risk-guardrails.md`'s real front matter and one covered code file:
+    //
+    //   code only                  strict + advisory -> 1 finding  (parent named)
+    //   code + ADDED shard         strict + advisory -> 0 findings (parent absent)
+    //   code + EDITED shard        strict + advisory -> 1 finding  (#2192)
+    //
+    // The middle row is the defect. On #2274 (PR #2322) the shard was correct
+    // and the gate was green while `casp-risk-guardrails.md`'s #2245 blockquote
+    // still described an ordering that same diff had just removed. Nobody
+    // re-read the parent because nothing asked them to — the advisory comment
+    // the reviewer would have read did not mention the doc at all.
+    //
+    // The shard is written by the same person making the change, so
+    // shard-satisfies-parent is self-certification: the author asserts their
+    // change is documented and the gate accepts the assertion as the evidence.
+    // This document says so about itself, at
+    // `casp-risk-guardrails.md` § "the perimeter argument": the declaration is
+    // "satisfied by *presence*".
+    //
+    // What changed and what deliberately did NOT:
+    //   - the BLOCKING half is untouched. A qualifying added shard still clears
+    //     `--strict`, exactly as #1366/#1496 intend. Requiring a parent edit
+    //     instead would reinstate the `last-verified` line collision that #1366
+    //     moved records into shards to escape (four PRs in one day) and that
+    //     #1496 saw three more of, and would buy a rubber-stamped date — worse
+    //     than a stale one, because the staleness audit ranks on it.
+    //   - the doc is now REPORTED, as its own finding class, so the advisory
+    //     comment names it and the doc-reviewer has something to be routed at.
+    //
+    // That is the honest ceiling for a gate: it cannot verify that a body was
+    // re-read. It can refuse to hide the doc.
     const satisfiedMatches = satisfiedBy
       ? changed.filter((f) => satisfiedBy.some((glob) => globToRegExp(glob).test(f)))
       : []
+    let satisfiedByShard = []
     if (satisfiedMatches.length > 0) {
       const qualifying = added === null
         ? satisfiedMatches
         : satisfiedMatches.filter((f) => added.has(f))
-      if (qualifying.length > 0) continue
+      if (qualifying.length > 0) satisfiedByShard = qualifying
       // Matched the glob, but every match was an EDIT to a pre-existing file.
-      // Fall through and report the doc, carrying the near-miss so the error
-      // message can say WHY an apparently-satisfying edit did not satisfy.
-      editedOnlySatisfyMatches = satisfiedMatches
+      // Report the doc as a normal (blocking, under strict) finding, carrying
+      // the near-miss so the error message can say WHY an apparently-satisfying
+      // edit did not satisfy.
+      else editedOnlySatisfyMatches = satisfiedMatches
     }
     if (!covers || covers.length === 0) continue
     // (#1824) No same-day suppression. See the header: a doc this change
@@ -366,7 +404,19 @@ export function implicatedDocs(changed, docs, { strict = false, added = null } =
     // that should have been red is the whole defect this gate exists to prevent.
     // Without it, a test-only PR against a wildcard-covered money-path package
     // (`packages/sdk/src/**`, `packages/signer/**`) passes strict silently.
-    const filterIncidental = !(strict && contract)
+    //
+    // #2323: the expression gains ONE conjunct — it was `!(strict && contract)`
+    // and reads `!(strict && contract && satisfiedByShard.length === 0)`, so it
+    // is unchanged for every finding that can block. A shard-satisfied doc does
+    // not get the carve-out, because the
+    // carve-out exists specifically so the BLOCKING half cannot under-report
+    // (a contract doc whose covered paths are all test files would otherwise
+    // pass `--strict` silently). A shard-satisfied finding never blocks, so it
+    // takes the noise-reduced match set instead — otherwise every test-only
+    // money-path PR that writes a shard would draw a re-read request for a
+    // change that, by `isIncidentalPath`'s own reasoning, cannot make prose
+    // stale. Blocking behaviour is byte-identical to before.
+    const filterIncidental = !(strict && contract && satisfiedByShard.length === 0)
     const matched = new Set()
     for (const glob of covers) {
       const exact = !/[*?]/.test(glob)
@@ -384,6 +434,10 @@ export function implicatedDocs(changed, docs, { strict = false, added = null } =
         contract: Boolean(contract),
         matched: [...matched].sort(),
         editedOnlySatisfyMatches: [...editedOnlySatisfyMatches].sort(),
+        // #2323: non-empty means "cleared by these ADDED shards". Such a
+        // finding is advisory by construction — see `contractFindings` in
+        // `main()`, which is the single place that decides what blocks.
+        satisfiedByShard: [...satisfiedByShard].sort(),
       })
     }
   }
@@ -454,27 +508,79 @@ async function main() {
   const docsByPath = new Map(docs.map((d) => [d.doc, d]))
   const findings = implicatedDocs(changed, docs, { strict, added })
   const hasFindings = findings.length > 0
-  const contractFindings = findings.filter((f) => f.contract)
+  // #2323: a doc cleared by an ADDED shard is reported but never blocks. This
+  // is the ONLY place that decides what blocks, so the two claims the gate used
+  // to conflate are now separated in exactly one line: "the coupling
+  // requirement is satisfied" (shard present) and "somebody re-read the parent"
+  // (which no gate can check, and which is why the finding below exists).
+  const shardFindings = findings.filter((f) => f.satisfiedByShard?.length)
+  const coverFindings = findings.filter((f) => !f.satisfiedByShard?.length)
+  const contractFindings = coverFindings.filter((f) => f.contract)
+
+  const line = (f) => {
+    const age = ageDays(f.lastVerified)
+    return `(last verified ${f.lastVerified}, ${age === null ? 'unknown' : `${age}d ago`})`
+  }
 
   if (hasFindings) {
     let body = '<!-- docs-coupling-gate -->\n'
-    body += '### 📝 Docs that may need updating\n\n'
-    body +=
-      'This PR changes code that the docs below describe (via their `covers:` ' +
-      'front-matter), but those docs were not touched. Please confirm each is ' +
-      'still accurate — or update it and bump `last-verified`. ' +
-      'Docs marked ⚠️ are **contract docs** — the blocking check fails until ' +
-      'they are touched in this PR; the rest are advisory.\n\n'
-    for (const f of findings) {
-      const age = ageDays(f.lastVerified)
-      const ageStr = age === null ? 'unknown' : `${age}d ago`
-      const mark = f.contract ? '⚠️ ' : ''
-      body += `- ${mark}\`${f.doc}\` (last verified ${f.lastVerified}, ${ageStr})\n`
-      for (const m of f.matched) body += `  - matched \`${m}\`\n`
+    if (coverFindings.length > 0) {
+      body += '### 📝 Docs that may need updating\n\n'
+      body +=
+        'This PR changes code that the docs below describe (via their `covers:` ' +
+        'front-matter), but those docs were not touched. Please confirm each is ' +
+        'still accurate — or update it and bump `last-verified`. ' +
+        'Docs marked ⚠️ are **contract docs** — the blocking check fails until ' +
+        'they are touched in this PR; the rest are advisory.\n\n'
+      for (const f of coverFindings) {
+        const mark = f.contract ? '⚠️ ' : ''
+        body += `- ${mark}\`${f.doc}\` ${line(f)}\n`
+        for (const m of f.matched) body += `  - matched \`${m}\`\n`
+      }
+      body += '\n'
+    }
+    // #2323: its OWN section, not a bullet folded into the list above. The
+    // list above is where "the one ⚠️ finding that mattered on #1076 was
+    // skimmed past in a list of eleven" — and this finding is the one whose
+    // whole content is "a green tick is not evidence here".
+    if (shardFindings.length > 0) {
+      body += '### 🔍 Parent docs cleared by a shard — body not re-read\n\n'
+      body +=
+        'The coupling requirement for each doc below is **satisfied**: this PR ' +
+        'adds a file matching its `satisfied-by:` glob, so nothing blocks and ' +
+        'the doc needs no edit. That is the intended flow (#1366) and this is ' +
+        'not a failure.\n\n' +
+        'It is here because the shard is written by the author of the change, ' +
+        'so it certifies itself: it asserts the change is documented, and the ' +
+        'gate accepts the assertion as the evidence. Nothing has re-read the ' +
+        "parent's body against this diff. On #2274 that is exactly how a false " +
+        'sentence shipped past a green tick — the shard was correct and the ' +
+        "parent still described an ordering the diff had just removed.\n\n" +
+        '**Please re-read the named sections against the matched files.** If ' +
+        'the body is still accurate, say so in the PR — leaving it untouched is ' +
+        'a legitimate outcome and a rubber-stamped `last-verified` is worse ' +
+        'than a stale one. If it is not, fix it here.\n\n'
+      for (const f of shardFindings) {
+        body += `- \`${f.doc}\` ${line(f)}\n`
+        body += `  - satisfied by ${f.satisfiedByShard.map((s) => `\`${s}\``).join(', ')}\n`
+        for (const m of f.matched) body += `  - re-read against \`${m}\`\n`
+      }
+      body += '\n'
     }
     await writeFile(outPath, body, 'utf8')
-    console.log(`Coupling gate: ${findings.length} doc(s) may need updating.`)
-    for (const f of findings) console.log(`  - ${f.contract ? '[contract] ' : ''}${f.doc}`)
+    if (coverFindings.length > 0) {
+      console.log(`Coupling gate: ${coverFindings.length} doc(s) may need updating.`)
+      for (const f of coverFindings) console.log(`  - ${f.contract ? '[contract] ' : ''}${f.doc}`)
+    }
+    if (shardFindings.length > 0) {
+      console.log(
+        `Coupling gate: ${shardFindings.length} parent doc(s) cleared by a shard — ` +
+        'coupling satisfied, body NOT re-read (advisory, #2323):',
+      )
+      for (const f of shardFindings) {
+        console.log(`  - [shard-satisfied] ${f.doc} (via ${f.satisfiedByShard.join(', ')})`)
+      }
+    }
   } else {
     console.log('Coupling gate: no covered docs implicated by the changed files.')
   }

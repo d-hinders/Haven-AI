@@ -65,6 +65,26 @@
  *   one function away, had no `it` ancestor and so was never even classified.
  *   `harnessReachingLocals` now resolves local functions that reach the harness
  *   to a fixed point, so a chain of helpers is followed rather than one hop.
+ * - **Round two: a hook REGISTERED via a helper reopened the first hole.**
+ *   `function registerHooks() { beforeEach(() => resetDb()) }` puts the hook
+ *   lexically inside the helper, not inside the `describe` that calls it, so
+ *   the ancestor walk found no suite and fell back to file scope — marking a
+ *   wholly separate, genuinely cold sibling suite warm. Same defect, different
+ *   door. `hookRegisteringLocals` resolves that indirection the same way, and
+ *   warming now comes from the helper's CALL site, where the suite really is
+ *   an ancestor.
+ *
+ * ## Known limit, stated so a green run is not over-read
+ *
+ * A harness call behind an **object method** — `helpers.coldSetup()` — is
+ * invisible: `calleeRoot` flattens the property chain to `helpers`, which
+ * matches no local function name, so nothing attributes the call to the test.
+ * Deliberately not chased: resolving arbitrary property-access indirection is a
+ * different order of complexity for a much rarer shape than the three above,
+ * each of which came from a real defect. A fixture below PINS this limit as a
+ * fact rather than leaving it implied, so the day someone closes it the
+ * expectation fails and says where to look. Read a green run as "no unbudgeted
+ * cold call in the shapes this guard resolves", never as "none exists".
  *
  * ## Why not simply raise `testTimeout`
  *
@@ -177,7 +197,7 @@ type FileFacts = {
  * followed rather than only one hop — the #2329 review's second finding: a
  * `resetDb()` moved one function away was invisible to the first draft.
  */
-function harnessReachingLocals(sf: ts.SourceFile): Set<string> {
+function localFunctionBodies(sf: ts.SourceFile): Map<string, ts.Node> {
   const bodies = new Map<string, ts.Node>()
   const collect = (node: ts.Node): void => {
     if (ts.isFunctionDeclaration(node) && node.name && node.body) {
@@ -192,37 +212,91 @@ function harnessReachingLocals(sf: ts.SourceFile): Set<string> {
     ts.forEachChild(node, collect)
   }
   collect(sf)
+  return bodies
+}
 
-  const reaching = new Set<string>()
+/**
+ * Iterate `seed` over the local call graph to a fixed point: a name qualifies
+ * when its body satisfies `hits`, or calls a name that already qualifies.
+ */
+function fixedPoint(
+  bodies: Map<string, ts.Node>,
+  hits: (node: ts.Node, qualified: Set<string>) => boolean,
+): Set<string> {
+  const qualified = new Set<string>()
   for (let changed = true; changed; ) {
     changed = false
     for (const [name, body] of bodies) {
-      if (reaching.has(name)) continue
+      if (qualified.has(name)) continue
       let hit = false
       const scan = (node: ts.Node): void => {
         if (hit) return
-        if (ts.isCallExpression(node)) {
-          const callee = calleeRoot(node)
-          if (callee && (HARNESS_CALLS.has(callee) || reaching.has(callee))) {
-            hit = true
-            return
-          }
+        if (hits(node, qualified)) {
+          hit = true
+          return
         }
         ts.forEachChild(node, scan)
       }
       scan(body)
       if (hit) {
-        reaching.add(name)
+        qualified.add(name)
         changed = true
       }
     }
   }
-  return reaching
+  return qualified
+}
+
+function harnessReachingLocals(sf: ts.SourceFile): Set<string> {
+  return fixedPoint(localFunctionBodies(sf), (node, qualified) => {
+    if (!ts.isCallExpression(node)) return false
+    const callee = calleeRoot(node)
+    return callee !== null && (HARNESS_CALLS.has(callee) || qualified.has(callee))
+  })
+}
+
+/**
+ * Local function names that REGISTER a harness hook when called — directly
+ * (`function registerHooks() { beforeEach(() => resetDb()) }`) or through
+ * another local that does.
+ *
+ * The second thing haven-reviewer found (#2329), and the same hole as the
+ * first reached through a different door. A hook registered inside a helper is
+ * lexically nested under the helper, not under the `describe` that calls it, so
+ * the ancestor walk found no suite and fell back to file scope — which marked
+ * EVERY suite in the file warm, including a genuinely cold sibling. The fix is
+ * the one already in this file: resolve the indirection to a fixed point, then
+ * warm from the helper's CALL site, where the suite really is an ancestor.
+ */
+function hookRegisteringLocals(sf: ts.SourceFile, harnessLocals: Set<string>): Set<string> {
+  return fixedPoint(localFunctionBodies(sf), (node, qualified) => {
+    if (!ts.isCallExpression(node)) return false
+    const callee = calleeRoot(node)
+    if (callee === null) return false
+    if (qualified.has(callee)) return true
+    if (!HOOK_OPENERS.has(callee)) return false
+    // A hook counts only if its callback actually reaches the harness.
+    let reaches = false
+    const scan = (n: ts.Node): void => {
+      if (reaches) return
+      if (ts.isCallExpression(n)) {
+        const inner = calleeRoot(n)
+        if (inner !== null && (HARNESS_CALLS.has(inner) || harnessLocals.has(inner))) {
+          reaches = true
+          return
+        }
+      }
+      ts.forEachChild(n, scan)
+    }
+    for (const arg of node.arguments) scan(arg)
+    return reaches
+  })
 }
 
 function readHarnessCallFacts(source: string, fileName: string): FileFacts {
   const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true)
   const indirect = harnessReachingLocals(sf)
+  const hookRegistrars = hookRegisteringLocals(sf, indirect)
   const sites: Site[] = []
   const unbudgeted: Site[] = []
   let sawIndirect = false
@@ -271,9 +345,29 @@ function readHarnessCallFacts(source: string, fileName: string): FileFacts {
     return { kind, test, suite }
   }
 
+  /**
+   * Is `node` lexically inside a NAMED local function, rather than inside an
+   * inline callback that a `describe`/`it`/hook opener was handed?
+   *
+   * The distinction the file-scope fallback needs. An inline callback is part
+   * of the suite that received it, so the ancestor walk finds the right suite.
+   * A named helper is not: its declaration site says nothing about which suite
+   * will call it, so a hook registered there must warm nothing from HERE — its
+   * warming comes from the helper's call sites below.
+   */
+  function insideNamedLocal(node: ts.Node): boolean {
+    for (let p: ts.Node | undefined = node.parent; p; p = p.parent) {
+      if (ts.isFunctionDeclaration(p)) return true
+      if (ts.isArrowFunction(p) || ts.isFunctionExpression(p)) {
+        if (p.parent && ts.isVariableDeclaration(p.parent)) return true
+      }
+    }
+    return false
+  }
+
   // Pass 1: record which suites a hook warms, including every ancestor suite's
   // descendants — a hook in an outer describe warms the inner ones too.
-  const hookNodes: ts.Node[] = []
+  const warmFrom: ts.Node[] = []
   const findHooks = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const callee = calleeRoot(node)
@@ -281,14 +375,23 @@ function readHarnessCallFacts(source: string, fileName: string): FileFacts {
         const ctx = contextOf(node)
         if (ctx.kind === 'hook') {
           sawHook = true
-          hookNodes.push(ctx.suite)
+          // A hook whose ancestor walk found no suite AND which lives in a
+          // named local warms nothing here: the suite is decided where the
+          // helper is CALLED, not where it is written.
+          if (!(ctx.suite === FILE_SCOPE && insideNamedLocal(node))) warmFrom.push(ctx.suite)
         }
+      }
+      // ...and the call site of a helper that registers such a hook warms the
+      // suite it is called from.
+      if (callee && hookRegistrars.has(callee) && !insideNamedLocal(node)) {
+        sawHook = true
+        warmFrom.push(contextOf(node).suite)
       }
     }
     ts.forEachChild(node, findHooks)
   }
   findHooks(sf)
-  for (const suite of hookNodes) warmedSuites.add(suite)
+  for (const suite of warmFrom) warmedSuites.add(suite)
 
   const warmed = (suite: ts.Node): boolean => {
     for (let p: ts.Node | undefined = suite; p; p = p.parent) {
@@ -488,6 +591,89 @@ describe('the budget rule itself, against fixtures', () => {
       })
     `)
     expect(facts.unbudgeted.map((s) => s.via)).toEqual(['outer'])
+  })
+
+  it('a hook registered VIA A HELPER warms only the suite that calls it (haven-reviewer, round 2)', () => {
+    // The same hole as finding 1, reached through a different door. The hook is
+    // lexically inside `registerHooks`, not inside `describeDb('A')`, so the
+    // ancestor walk found no suite and fell back to FILE_SCOPE — which marked
+    // the wholly separate, genuinely cold suite B warm too. B's test is exactly
+    // the #2274/#2295 shape, and the guard waved it through.
+    const facts = at(`
+      function registerHooks() {
+        beforeEach(async () => {
+          await resetDb()
+        })
+      }
+      describeDb('A', () => {
+        registerHooks()
+        it('warm', async () => {
+          await resetDb()
+        })
+      })
+      describeDb('B', () => {
+        it('cold', async () => {
+          await resetDb()
+        })
+      })
+    `)
+    expect(facts.sawHook).toBe(true)
+    // Suite A's in-body call is warmed by its own registerHooks() call; suite
+    // B's is not warmed by anything, so line 15 — B's cold reset — is the one
+    // and only violation.
+    expect(facts.unbudgeted.map((s) => s.line)).toEqual([15])
+  })
+
+  it('a top-level helper call registers file-scope hooks, warming the whole file', () => {
+    // The direction that must still pass: called outside any describe, the
+    // helper really does register hooks for every suite in the file.
+    const facts = at(`
+      function registerHooks() {
+        beforeEach(async () => {
+          await resetDb()
+        })
+      }
+      registerHooks()
+      describeDb('A', () => {
+        it('warm', async () => {
+          await resetDb()
+        })
+      })
+    `)
+    expect(facts.unbudgeted).toEqual([])
+  })
+
+  it('KNOWN LIMIT: a harness call behind an object METHOD is not seen at all', () => {
+    // Named, not chased (haven-reviewer, round 2, agreed as a scope boundary).
+    // `calleeRoot` flattens `helpers.coldSetup()` to `helpers`, which matches
+    // no local function name, so the call is invisible — neither flagged nor
+    // excused. Resolving arbitrary property-access indirection is a different
+    // order of complexity for a much rarer shape than the two above, which were
+    // reproduced from real defect classes.
+    //
+    // This test exists so a green run is never citable as "no unbudgeted cold
+    // call exists in this repository". It pins the limit as a FACT, so the day
+    // someone closes it, this expectation fails and says where to look.
+    const facts = at(`
+      const helpers = {
+        async coldSetup() {
+          await resetDb()
+        },
+      }
+      describeDb('x', () => {
+        it('a', async () => {
+          await helpers.coldSetup()
+        })
+      })
+    `)
+    // The `resetDb()` inside the method IS seen as a call site — it is right
+    // there in the source — but it has no `it`/hook ancestor, so it classifies
+    // as neither. What is invisible is the LINK: `helpers.coldSetup()` in the
+    // test body resolves to no known local, so nothing attributes the cold call
+    // to that test and nothing is flagged.
+    expect(facts.sites.map((s) => s.line)).toEqual([4])
+    expect(facts.unbudgeted).toEqual([])
+    expect(facts.sawInBody).toBe(false)
   })
 
   it('does not read the names out of comments or strings', () => {

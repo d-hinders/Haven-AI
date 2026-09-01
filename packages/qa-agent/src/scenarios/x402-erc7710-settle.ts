@@ -117,6 +117,10 @@ export const x402Erc7710Settle: Scenario = {
       facilitatorAddresses: erc7710Entry.extra?.facilitatorAddresses?.length
         ? erc7710Entry.extra.facilitatorAddresses
         : undefined,
+      // #2373: the settle-side resource/extensions echo (#2361) is built from
+      // the stored copy of THIS challenge — omitting it is how every erc7710
+      // payment failed the echo-enforcing merchant.
+      paymentRequired: challenge as unknown as Record<string, unknown>,
     })
     if (!auth.ok || !auth.data.payment_id) {
       return fail(`authorize failed (${auth.status}): ${JSON.stringify(auth.data).slice(0, 200)}`)

@@ -135,6 +135,9 @@ export const x402Erc7710FreshAgent: Scenario = {
       facilitatorAddresses: erc7710Entry.extra?.facilitatorAddresses?.length
         ? erc7710Entry.extra.facilitatorAddresses
         : undefined,
+      // #2373: same challenge passthrough as x402-erc7710-settle — the stored
+      // copy feeds the settle-side resource/extensions echo (#2361).
+      paymentRequired: challenge as unknown as Record<string, unknown>,
     })
     if (!auth.ok || !auth.data.payment_id) {
       return fail(`fresh-agent authorize failed (${auth.status}): ${JSON.stringify(auth.data).slice(0, 200)}`)

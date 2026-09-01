@@ -99,6 +99,14 @@ export interface X402AuthorizeBody {
    *  VERBATIM — pins the settlement child's redeemer caveat and rides the
    *  header echo (the v2 matcher requires it as a subset). */
   facilitatorAddresses?: string[]
+  /**
+   * #2373: the FULL decoded 402 challenge, persisted verbatim by the backend
+   * (#1355) so the erc7710 settle handoff can echo its resource/extensions
+   * into the merchant envelope (#2361). Raw-API callers that omit it get an
+   * echo-less envelope, which an echo-enforcing merchant (the dev demo
+   * merchant since #2364; CoinGecko live) refuses.
+   */
+  paymentRequired?: Record<string, unknown>
 }
 
 export interface ApiResponse<T> {

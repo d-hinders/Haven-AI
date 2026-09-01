@@ -29,8 +29,8 @@
   "scripts": {
     "build": "npm --prefix ../sdk run build && tsup",
     "start": "node dist/cli.js",
-    "test": "npm --prefix ../sdk run build && npm --prefix ../signer run build && vitest run",
-    "typecheck": "npm --prefix ../sdk run build && npm --prefix ../signer run build && tsc --noEmit"
+    "test": "npm --prefix ../sdk run build && npm --prefix ../mcp run build && npm --prefix ../signer run build && vitest run",
+    "typecheck": "npm --prefix ../sdk run build && npm --prefix ../mcp run build && npm --prefix ../signer run build && tsc --noEmit"
   },
   "keywords": [
     "haven",

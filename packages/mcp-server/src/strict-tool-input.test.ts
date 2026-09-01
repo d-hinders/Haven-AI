@@ -431,8 +431,9 @@ describe('#2363 — the shipped skill still matches what the exclusion comment c
     // one-char string in which the negative assertion below passes for the
     // wrong reason and the positive ones fail for the wrong reason. The
     // `toContain` here is what actually catches that; the length check does
-    // NOT, because a one-character slice is still length 1. Kept as the
-    // second, weaker half only to catch an empty document.
+    // NOT, because a one-character slice is still length 1. The length check
+    // is redundant belt-and-braces, not the sole catcher of anything — an
+    // empty document fails `toContain` on its own too.
     expect(HAVEN_SKILL_MD).toContain('haven_complete_mcp_tool')
     expect(completeSection.length).toBeGreaterThan(0)
   })

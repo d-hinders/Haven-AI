@@ -138,6 +138,76 @@ describe('#2312 strict hosted tool input — over the real MCP transport', () =>
   })
 })
 
+/**
+ * #2353 — the measured half of the CONTROL above.
+ *
+ * The control asserts `haven_complete_mcp_tool` is absent from
+ * `STRICT_INPUT_TOOLS`, which pins the DECISION. This block pins the
+ * BEHAVIOUR that decision produces, over the same real transport, using the
+ * exact call Haven's shipped `SKILL.md` used to instruct: `payment_required`
+ * alongside the declared arguments.
+ *
+ * It is a characterization test of a live permissive path, not an endorsement
+ * of it. Its job is to make the silent strip visible and to make the eventual
+ * strictness switch impossible to land by accident: the day
+ * `haven_complete_mcp_tool` joins `STRICT_INPUT_TOOLS`, this goes red and
+ * whoever flips it has to come here and say so.
+ */
+describe('#2353 — haven_complete_mcp_tool silently drops `payment_required` today', () => {
+  const SKILL_INSTRUCTED_ARGS = {
+    payment_id: 'pay_1',
+    payment_header: 'x402-header',
+    // Everything below this line IS declared by the tool.
+    merchant_url: 'https://merchant.test/mcp',
+    tool_name: 'fetch_report',
+    arguments: { tier: '50gb' },
+    mcp_transport: { handshake_required: false, source: 'path' },
+  } as const
+
+  it('accepts the undeclared key at the transport and never carries it anywhere', async () => {
+    const client = await connectedClient()
+    const { text } = await callToolText(client, 'haven_complete_mcp_tool', {
+      ...SKILL_INSTRUCTED_ARGS,
+      payment_required: { accepts: [{ amount: '1000000', payTo: '0xMERCHANT' }] },
+    })
+
+    // 1. No refusal: validation let the undeclared key through, stripped.
+    expect(text.toLowerCase()).not.toContain('unrecognized')
+    expect(text).not.toContain('payment_required')
+    // 2. The call reached the handler and talked to Haven — a strip, not a
+    //    refusal. This is what makes the defect silent: the agent's call
+    //    SUCCEEDS at the transport, so nothing tells it the 402 it pinned was
+    //    discarded.
+    expect(fetches.length).toBeGreaterThan(0)
+  })
+
+  it('CONTROL: the same harness DOES see a declared key arrive', async () => {
+    // Without this, the assertion above cannot distinguish "the key was
+    // stripped" from "the harness cannot observe arguments at all" — the
+    // false-zero shape. `merchant_url` + `tool_name` are declared, and
+    // supplying them takes the EXPLICIT context branch of
+    // resolveMerchantCallContext, which skips the rehydration GET. Omitting
+    // them takes the rehydration branch and issues it. So the presence or
+    // absence of that one request is a direct read of whether a declared
+    // argument survived the transport.
+    const withContext = await connectedClient()
+    await callToolText(withContext, 'haven_complete_mcp_tool', SKILL_INSTRUCTED_ARGS)
+    const explicit = [...fetches]
+
+    fetches.length = 0
+    const withoutContext = await connectedClient()
+    await callToolText(withoutContext, 'haven_complete_mcp_tool', {
+      payment_id: SKILL_INSTRUCTED_ARGS.payment_id,
+      payment_header: SKILL_INSTRUCTED_ARGS.payment_header,
+    })
+    const rehydrated = [...fetches]
+
+    const CONTEXT_GET = 'GET /x402/pay_1/merchant-call-context'
+    expect(explicit).not.toContain(CONTEXT_GET)
+    expect(rehydrated).toContain(CONTEXT_GET)
+  })
+})
+
 describe('#2312 strict hosted tool input — the direct-embedder path', () => {
   // `createToolHandlers` is exported from index.ts, so a caller can bypass the
   // MCP server entirely. `parseStrict` is what covers that path.

@@ -97,6 +97,27 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toMatch(/both or\s+none/)
   })
 
+  it('never tells the agent to pass haven_complete_mcp_tool a `payment_required` (#2353)', () => {
+    // The tool has never declared `payment_required`; since #1307 the 402 is
+    // read from the stored record by payment_id. This skill told agents to
+    // pass it anyway, the hosted server silently stripped it, and the call
+    // succeeded — so the agent believed it had pinned the 402 it quoted.
+    //
+    // A blanket `not.toContain('payment_required')` is NOT available here:
+    // the signer paragraph above legitimately names the field (the signer
+    // fetches it, and an older backend needs it re-sent), and
+    // `haven_pay_x402_quote` really does declare it. So this guards the one
+    // sentence that was wrong, by the shape that made it wrong — an
+    // imperative to PASS the field — rather than by the field's mere
+    // presence.
+    const complete = HAVEN_SKILL_MD.slice(HAVEN_SKILL_MD.indexOf('haven_complete_mcp_tool'))
+    expect(complete).not.toMatch(/Pass\s+`payment_required`/)
+    // And it says what to send instead, with the reason, so a future edit
+    // that deletes the correction is visible rather than merely silent.
+    expect(complete).toMatch(/does not take\s+`payment_required`/)
+    expect(complete).toMatch(/`payment_id`\s+and the signer's\s+`payment_header`\s+ONLY/)
+  })
+
   it('distinguishes stop-and-sweep from verify-then-sweep (#1300 mutation guard)', () => {
     expect(HAVEN_SKILL_MD).toContain('MERCHANT_UNRESPONSIVE_AFTER_FUNDING')
     expect(HAVEN_SKILL_MD).toContain('Stop-and-sweep')

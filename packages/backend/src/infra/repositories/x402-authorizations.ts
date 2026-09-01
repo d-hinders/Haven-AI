@@ -245,7 +245,7 @@ export async function failPendingX402Intent(
 // ── erc7710 settle handoff (#830) ────────────────────────────────────────────
 
 export const FIND_SETTLE_INTENT_SQL = `SELECT id, status, execution_rail, prepared_user_op, chain_id, x402_resource_url,
-                to_address, amount_raw, token_address
+                to_address, amount_raw, token_address, machine_metadata
          FROM payment_intents
          WHERE id = $1 AND agent_id = $2`
 
@@ -259,6 +259,13 @@ export interface SettleIntentRow {
   to_address: string
   amount_raw: string
   token_address: string
+  /**
+   * #2361: carries the #1355 verbatim `payment_required`, whose
+   * `resource`/`extensions` the settle handoff echoes into the X-PAYMENT
+   * envelope. `Record` when the driver parsed the JSONB, `string` on drivers
+   * that hand it back raw, `null` for pre-#1355 intents.
+   */
+  machine_metadata: Record<string, unknown> | string | null
 }
 
 export async function findSettleIntent(

@@ -134,6 +134,40 @@ describe('assembleSettlementPayload + header (#830)', () => {
       extra: { assetTransferMethod: 'erc7710' },
     })
     expect(decoded.payload.delegator.toLowerCase()).toBe(DELEGATE_ACCT.toLowerCase())
+    // #2361: no challengeEcho argument means no resource/extensions keys —
+    // omitted, never empty. The exact key set pins it two-sidedly.
+    expect(Object.keys(decoded).sort()).toEqual(['accepted', 'network', 'payload', 'scheme', 'x402Version'])
+  })
+
+  // #2361: the stored merchant challenge's resource/extensions ride the
+  // envelope verbatim — a strict facilitator (live-bisected on #2360) rejects
+  // the envelope without them when its challenge advertised them.
+  it('echoes the challenge resource and extensions verbatim when provided (#2361)', () => {
+    const built = buildSettlementDelegation(req())
+    const payload = assembleSettlementPayload(
+      84532, built.child, ('0x' + 'ef'.repeat(65)) as `0x${string}`, signedBudget, DELEGATE_ACCT,
+    )
+    const resource = { url: 'https://merchant.example/paid', serviceName: 'kept-verbatim' }
+    const extensions = { bazaar: { info: { input: { method: 'GET' } } } }
+    const header = encodeXPaymentHeader(
+      'base-sepolia',
+      payload,
+      {
+        amount: '1000',
+        payTo: ('0x' + 'cc'.repeat(20)) as `0x${string}`,
+        asset: USDC as `0x${string}`,
+        maxTimeoutSeconds: 300,
+      },
+      { resource, extensions },
+    )
+    const decoded = JSON.parse(Buffer.from(header, 'base64').toString('utf8'))
+    expect(Object.keys(decoded).sort()).toEqual(
+      ['accepted', 'extensions', 'network', 'payload', 'resource', 'scheme', 'x402Version'],
+    )
+    expect(decoded.resource).toEqual(resource)
+    expect(decoded.extensions).toEqual(extensions)
+    // The accepted echo is untouched by the addition.
+    expect(decoded.accepted.extra).toEqual({ assetTransferMethod: 'erc7710' })
   })
 
   // #1058: @x402/core's v2 matcher requires the merchant's advertised extra to

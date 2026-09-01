@@ -241,11 +241,27 @@ export function encodeXPaymentHeader(
   network: string,
   payload: X402Erc7710Payload,
   accepted: X402AcceptedEcho,
+  challengeEcho?: {
+    /** The merchant 402's `resource` object, echoed VERBATIM (#2361). */
+    resource?: Record<string, unknown>
+    /**
+     * The merchant 402's `extensions` object, echoed VERBATIM. The v2 spec
+     * makes this echo a MUST when the challenge carries one ("the client
+     * must include at least the info received"), and #2360's live bisection
+     * proved a strict facilitator rejects the echo-less envelope outright.
+     */
+    extensions?: Record<string, unknown>
+  },
 ): string {
+  const resource = challengeEcho?.resource
+  const extensions = challengeEcho?.extensions
   const body = {
     x402Version: 2,
     scheme: 'exact',
     network,
+    ...(resource && typeof resource === 'object' && !Array.isArray(resource)
+      ? { resource }
+      : {}),
     accepted: {
       scheme: 'exact',
       network,
@@ -261,6 +277,9 @@ export function encodeXPaymentHeader(
       },
     },
     payload,
+    ...(extensions && typeof extensions === 'object' && !Array.isArray(extensions)
+      ? { extensions }
+      : {}),
   }
   return Buffer.from(JSON.stringify(body), 'utf8').toString('base64')
 }

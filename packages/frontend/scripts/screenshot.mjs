@@ -2786,7 +2786,8 @@ export const SCENARIOS = {
           ),
         }
       }
-      if (apiPath.startsWith('/agent-activity/')) return { activity: [] }
+      if (apiPath.endsWith('/stats') && apiPath.startsWith('/agent-activity/')) return FIXTURE_AGENT_STATS
+      if (apiPath.endsWith('/activity') && apiPath.startsWith('/agent-activity/')) return { activity: [] }
       if (apiPath.startsWith('/agents/agent-ops/passport')) return { passport: null, standing: null }
       return undefined
     },

@@ -215,11 +215,12 @@ time reporting a bare `Test timed out in 5000ms` against an innocent test name.
 The guard resolves **local helper functions** to a fixed point in both
 directions — a `resetDb()` moved one function away from the test still counts,
 and a `beforeEach` registered inside a helper warms the suite that *calls* the
-helper rather than the whole file. It has one **stated limit**: a harness call
-behind an object method (`helpers.coldSetup()`) is invisible, which the guard
-pins in a fixture rather than leaving implied. Read a green run as "no
-unbudgeted cold call in the shapes the guard resolves", not as a closed
-guarantee.
+helper rather than the whole file. It has two **stated limits**, both pinned by
+fixtures rather than left implied: a harness call behind an object method
+(`helpers.coldSetup()`) is invisible, and a suite body written as a named
+function reports a false positive. The second is the safe direction and is left
+as residue deliberately. Read a green run as "no unbudgeted cold call in the
+shapes the guard resolves", not as a closed guarantee.
 
 Either way the budget a harness call runs under is readable at the call site
 instead of inherited from where someone happened to type it.

@@ -74,9 +74,21 @@
  *   warming now comes from the helper's CALL site, where the suite really is
  *   an ancestor.
  *
- * ## Known limit, stated so a green run is not over-read
+ * ## Known limits, stated so a green run is not over-read
  *
- * A harness call behind an **object method** — `helpers.coldSetup()` — is
+ * **1. A suite body written as a named function is not resolved back to its
+ * suite.** `const suiteBody = () => { … }; describeDb('x', suiteBody)` puts the
+ * hook and the test inside a named local, so the ancestor walk finds no suite
+ * for either and the in-body call is reported. Measured, not assumed: it
+ * reports one violation on that shape. This is the SAFE direction — a false
+ * positive is loud and fixable at the call site, where a false negative is the
+ * defect this file exists to prevent — and the shape appears nowhere in the
+ * tree today. Left as residue rather than resolved with a fourth indirection
+ * mechanism: this file is already three fixes deep, every one of them a repair
+ * of the fix before it, and the rework cap (#2163) says to stop patching and
+ * document at exactly that point rather than keep going.
+ *
+ * **2. A harness call behind an object method** — `helpers.coldSetup()` — is
  * invisible: `calleeRoot` flattens the property chain to `helpers`, which
  * matches no local function name, so nothing attributes the call to the test.
  * Deliberately not chased: resolving arbitrary property-access indirection is a
@@ -674,6 +686,39 @@ describe('the budget rule itself, against fixtures', () => {
     expect(facts.sites.map((s) => s.line)).toEqual([4])
     expect(facts.unbudgeted).toEqual([])
     expect(facts.sawInBody).toBe(false)
+  })
+
+  it('KNOWN LIMIT: a suite body written as a named function reports a false positive', () => {
+    // Pinned as a fact, in the safe direction. Both the hook and the test live
+    // inside `suiteBody`, so neither resolves to the `describeDb` that receives
+    // it, and the in-body call is reported even though the hook really does
+    // warm it. Loud rather than silent, absent from the tree, and deliberately
+    // left as residue — see "Known limits" in the header for why this file
+    // stops adding indirection mechanisms here.
+    const facts = at(`
+      const suiteBody = () => {
+        beforeEach(async () => { await resetDb() })
+        it('a', async () => { await resetDb() })
+      }
+      describeDb('x', suiteBody)
+    `)
+    expect(facts.unbudgeted.map((s) => s.line)).toEqual([4])
+  })
+
+  it('a registrar reached through ANOTHER helper still warms the calling suite', () => {
+    // The direction that must NOT regress: the hook-registrar fixed point
+    // follows a chain, so `outer()` in the describe body warms it.
+    const facts = at(`
+      function registerHooks() {
+        beforeEach(async () => { await resetDb() })
+      }
+      function outer() { registerHooks() }
+      describeDb('A', () => {
+        outer()
+        it('warm', async () => { await resetDb() })
+      })
+    `)
+    expect(facts.unbudgeted).toEqual([])
   })
 
   it('does not read the names out of comments or strings', () => {

@@ -3,6 +3,7 @@
  * settlement compiler runs REAL so the child delegation and header are genuine.
  */
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify, { type FastifyInstance } from 'fastify'
 
 const {
@@ -1959,8 +1960,39 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
     expect(body.mcp_transport).toEqual({ handshake_required: true, source: 'path' })
     expect(typeof body.mcp_transport.handshake_required).toBe('boolean')
     expect('handshakeRequired' in body.mcp_transport).toBe(false)
+    // #2343 (review): the OpenAPI schema for this endpoint ALWAYS declared the
+    // correct snake_case nested shape with additionalProperties:false, and the
+    // generated @haven_ai/core type always matched it. This one line would have
+    // failed CI the moment the bug shipped — the stray `handshakeRequired` key
+    // is rejected outright — instead of it surviving to a live qa-dev failure.
+    // The assertions above pin the specific values; this pins the CONTRACT, and
+    // it is the one that generalises to the next field added here.
+    expectMatchesSpec('GET', '/x402/{id}/merchant-call-context', body)
     // Read-only: nothing was written.
     expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE/i.test(String(c[0])))).toBe(false)
+  })
+
+  it('omits mcp_transport entirely when none was stored (#2343)', async () => {
+    // The other half of the ternary this fix edits. A context without a
+    // transport must omit the key, not emit an empty or half-built object —
+    // absent and malformed are different answers to the hosted boundary.
+    serveIntentRow([{
+      ...CALL_CONTEXT_ROW,
+      machine_metadata: {
+        network: 'eip155:84532',
+        mcp_call_context: {
+          merchantUrl: 'https://merchant.example/mcp',
+          toolName: 'buy_cloud_storage',
+        },
+      },
+    }])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect('mcp_transport' in res.json()).toBe(false)
+    expectMatchesSpec('GET', '/x402/{id}/merchant-call-context', res.json())
   })
 
   it('404s an unknown or foreign payment id (same answer on purpose)', async () => {

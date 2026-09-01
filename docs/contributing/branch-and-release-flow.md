@@ -7,7 +7,7 @@ covers:
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
   - .github/workflows/publish.yml
-last-verified: "2026-08-31" # #2276: the issue-lifecycle half of this doc read as though every merge closes its issue. It does not: ship-next's operator-verify mode ships the code and keeps the issue open for a human step, which `Closes #<n>` silently defeats (#2268, closed by PR #2272's merge). The `dev`-merge bullet, the issue-state table and the agent checklist now carry the `Refs #<n>` / `operator-verify` exception. Scope: those three passages only — the branch model, the promotion/merge-method rules, the branch-lifetime section and the release wiring were NOT re-verified in this pass. Prior: #2165: the never-squash promotion rule is now ENFORCED by the `Dev gate` ruleset (`allowed_merge_methods: ["merge"]` on any PR based on `main`), not left to the reader — it was prose-only and #2161 was squash-merged by a UI default. Section gains the enforcement note, the `hotfix/* → main` answer (branch rulesets gate the ref written to, so head-branch names do not matter) and why `dev` deliberately keeps squash. The rest of the section was re-read against the live rulesets: the BEHIND/sync-back rule and the `-s ours` recovery pointer still hold, and #2162 exercised the sync-back end to end. Prior: #1500: Branch-lifetime section added; the #1335/#1336 sync-back rule (dev re-absorbs main's merge commit post-promotion) still holds
+last-verified: "2026-08-31" # #2320/#2327: the two operator-verify passages (the `dev`-default bullet and the agent checklist) both scoped the `Refs #<n>` rule to the pull-request body. Both now name the commit messages and the title, which reach `dev` as well — PR #2314 closed #2268 from a commit while its body was correct — it closed only its own issue, #2276, confirmed against the merged pull request. Scope: those two bullets only; the branch model, the promotion/merge-method rules, the issue-state table, the branch-lifetime section and the release wiring were NOT re-verified in this pass. Prior: #2276: the issue-lifecycle half of this doc read as though every merge closes its issue. It does not: ship-next's operator-verify mode ships the code and keeps the issue open for a human step, which `Closes #<n>` silently defeats (#2268, closed by PR #2272's merge). The `dev`-merge bullet, the issue-state table and the agent checklist now carry the `Refs #<n>` / `operator-verify` exception. Scope: those three passages only — the branch model, the promotion/merge-method rules, the branch-lifetime section and the release wiring were NOT re-verified in this pass. Prior: #2165: the never-squash promotion rule is now ENFORCED by the `Dev gate` ruleset (`allowed_merge_methods: ["merge"]` on any PR based on `main`), not left to the reader — it was prose-only and #2161 was squash-merged by a UI default. Section gains the enforcement note, the `hotfix/* → main` answer (branch rulesets gate the ref written to, so head-branch names do not matter) and why `dev` deliberately keeps squash. The rest of the section was re-read against the live rulesets: the BEHIND/sync-back rule and the `-s ours` recovery pointer still hold, and #2162 exercised the sync-back end to end. Prior: #1500: Branch-lifetime section added; the #1335/#1336 sync-back rule (dev re-absorbs main's merge commit post-promotion) still holds
 ---
 
 # Branch & release flow
@@ -28,7 +28,10 @@ feature/* or claude/*  →  dev  →  main
   is the default branch — **closes any issue referenced with `Closes #<n>`**.
   A pull request that must NOT close its issue (ship-next's *operator-verify
   mode*, where a human step is still outstanding) writes `Refs #<n>` instead;
-  prose saying the issue stays open does not survive the keyword (#2276).
+  prose saying the issue stays open does not survive the keyword (#2276). The
+  keyword is honoured in the **commit messages** that reach `dev` and in the title
+  via the squash subject, not only in the body — so a clean body is not sufficient
+  (#2320).
 - **A closed issue means "implemented and on `dev`"**, not "in production".
 - **`main` is production.** Only `dev` or `hotfix/*` may merge in (enforced by
   `dev-gate`). Each promotion to `main` cuts a **`prod-*` GitHub Release** and
@@ -217,7 +220,9 @@ close on dev-merge). Full ruleset/auto-merge setup is in
   "issue closed" as "shipped to prod".
 - **Except in operator-verify mode:** when a human operator step is still
   outstanding, label the issue `operator-verify` and reference it as `Refs #<n>`,
-  so the merge leaves it open. A required check fails the PR if a closing keyword
-  targets such an issue — the rule is enforced rather than remembered (#2276).
+  so the merge leaves it open — **in the commit messages and the title as well as
+  the body**, since all three reach `dev` (#2320). A required check fails the PR if
+  a closing keyword targets such an issue, wherever on the PR it is written — the
+  rule is enforced rather than remembered (#2276).
 - Promotion to prod is a separate human step; prod state lives in the `prod-*`
   Releases and the pending-promotion issue.

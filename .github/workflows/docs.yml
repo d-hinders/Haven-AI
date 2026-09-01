@@ -112,6 +112,15 @@ jobs:
       # scripts/ci/ runs — is NOT in the ruleset, so hosting it there would have
       # produced an advisory red X that auto-merge sails past.
       #
+      # #2320 widened what it reads. GitHub honours the keyword in every commit
+      # message that reaches the default branch and — via the squash subject — in
+      # the title, not only in the body. The guard proved that on itself: PR #2314's
+      # body closed only its own issue (#2276) and this step went green on it,
+      # while a commit message narrating the original incident closed #2268 a
+      # second time on the merge.
+      # `gh pr view --json commits,title` covers those; the `pull-requests: read`
+      # scope above is what reads them, so no permission change was needed.
+      #
       # `if: always()` so a red front-matter check does not hide this one, and
       # pull-request-only: there is no body to read on a push to dev/main.
       # The self-test also runs under the `scripts/ci/*.test.mjs` glob; it is

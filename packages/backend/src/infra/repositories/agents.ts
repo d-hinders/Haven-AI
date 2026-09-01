@@ -525,9 +525,11 @@ export async function updateAgentProfile(
  *
  * Legacy AllowanceModule agents have no rows here, so the NOT EXISTS passes
  * for them. Their Haven-side record may be unlinked at any status because
- * archiving it does not change the old Safe permission; the live delegation
- * rail remains revoke-first. The null-safe account predicate includes older
- * rows whose legacy `account_type` was never backfilled.
+ * archiving it does not change the old Safe permission; after account unlink
+ * the missing Safe row is still archivable when no live delegation remains.
+ * The live delegation rail remains revoke-first, and the live-delegation
+ * exclusion is what prevents an unlinked delegation agent from being filed
+ * while it still holds spend authority.
  * Crash-window orphans (#1423: disabled on-chain, still `active` here) DO
  * block archiving, correctly: revoke-all heals them, and that is the same
  * remedy this refusal names.
@@ -542,6 +544,14 @@ export const ARCHIVE_AGENT_SQL = `UPDATE agents
                WHERE us.id = agents.safe_id
                  AND us.account_type IS DISTINCT FROM 'delegator_hybrid'
              )
+           OR (
+             agents.safe_id IS NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM agent_delegations ad_unlinked
+               WHERE ad_unlinked.agent_id = agents.id
+                 AND ad_unlinked.status IN ('pending', 'active')
+             )
+           )
          )
          AND NOT EXISTS (
            SELECT 1 FROM agent_delegations ad
@@ -578,7 +588,8 @@ export async function archiveAgent(
 
 /**
  * Clears archived_at and nothing else — the agent returns to the primary
- * list still `revoked`. Un-archiving restores no authority of any kind.
+ * list with the same status it had before archiving. Un-archiving restores no
+ * authority of any kind.
  */
 export const UNARCHIVE_AGENT_SQL = `UPDATE agents
        SET archived_at = NULL, updated_at = NOW()
@@ -675,7 +686,8 @@ export const AGENT_BY_API_KEY_SQL = `
          a.status,
          COALESCE(us.safe_address, u.safe_address) as safe_address,
          COALESCE(us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
-         us.execution_rail, us.account_type
+         us.execution_rail, us.account_type,
+         (us.id IS NOT NULL) AS has_bound_safe
   FROM agents a
   JOIN users u ON a.user_id = u.id
   LEFT JOIN user_safes us ON a.safe_id = us.id
@@ -691,6 +703,7 @@ export interface AgentAuthRow {
   status: string
   execution_rail: string | null
   account_type: string | null
+  has_bound_safe: boolean
 }
 
 /**

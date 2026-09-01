@@ -89,6 +89,17 @@ interface DelegateSweepRow {
  * it. The delegate never needs ETH and the hosted server never holds the key.
  */
 export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResult> {
+  // Agent auth normally rejects this state. Keep the money path fail-closed
+  // as a second boundary because an account can be unlinked between auth and
+  // handler execution, and never construct a transfer to a mutable fallback
+  // wallet address.
+  if (agent.has_bound_safe === false) {
+    return {
+      statusCode: 422,
+      body: { error: 'Agent is no longer linked to a Haven wallet; recovery is unavailable.' },
+    }
+  }
+
   if (!isSweepableChain(agent.chain_id)) {
     return {
       statusCode: 422,

@@ -987,7 +987,7 @@ export const openapiSpec = {
         operationId: 'archiveAgent',
         summary: 'Archive an agent (soft removal — history is kept).',
         description:
-          'Replaces agent deletion (#1401). Delegation agents require status=revoked and dead budgets because archiving is a filing action and never the thing that stops spending. Legacy Safe records may be unlinked at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.',
+          'Replaces agent deletion (#1401). Delegation agents require status=revoked and no pending or active budget delegations because archiving is a filing action and never the thing that stops spending. Linked legacy Safe records may be archived at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. An agent whose Safe was already unlinked is archivable when no live delegation remains. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -1022,7 +1022,7 @@ export const openapiSpec = {
         operationId: 'unarchiveAgent',
         summary: 'Return an archived agent to the primary list.',
         description:
-          'Clears archived_at and nothing else — the agent remains revoked; un-archiving restores no authority of any kind. Idempotent on a non-archived agent.',
+          'Clears archived_at and nothing else — the agent keeps the status it had when archived. For delegation agents, the archive contract requires revoked status and no live budgets; legacy Safe records can return with their prior active, paused, pending_approval, or revoked status. Un-archiving restores no authority of any kind. Idempotent on a non-archived agent.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -6237,9 +6237,9 @@ export const openapiSpec = {
       },
       /**
        * #1445: lifted out of the inline `/agents/{id}/delegate-balance`
-       * response so consumers can name it. An inline schema generates an
-       * anonymous type, which is why the frontend hand-wrote this one instead
-       * of importing it — identical shape, no behaviour change.
+       * response so consumers can name it. The frontend imports the generated
+       * `ApiSchema<'DelegateBalance'>` type from this component; keep this
+       * schema as the load-bearing source for the response shape.
        */
       DelegateBalance: {
         type: 'object',

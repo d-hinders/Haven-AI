@@ -360,7 +360,10 @@ Money and risk clarity:
 - Use `TransactionActivityRow` for short non-sortable previews such as
   Dashboard. Use card/compact `TransactionsTable` for scoped sortable histories.
 - Use `Payment sent` (neutral), `Received payment`, and `Agent payment by [agent name]` before using technical transaction language. `Payment sent by you` is reserved for human-initiated payments only (#2097); a transaction with no attribution renders as `Payment sent` with an explicit unknown initiator — never `You`.
-- For x402 payments, collapse the internal Safe-to-agent funding step into one merchant-facing row such as `x402 payment by [agent name]`.
+- For x402 payments, collapse the historical Safe-to-agent funding step into
+  one merchant-facing row such as `x402 payment by [agent name]`. Live
+  delegation-rail x402 payments have no funding leg; the row still represents
+  the agent payment, while any legacy Safe funding is historical only.
 - Show the money path as a compact `From [wallet/counterparty] -> To [wallet/counterparty]` line instead of repeating wallet, initiator, and counterparty in a separate metadata row.
 - Keep amount in its own cell; date and the external-details link are separate
   columns or controls.

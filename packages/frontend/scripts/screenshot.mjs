@@ -1467,6 +1467,17 @@ export class ScenarioHttpError {
 /** Sugar for the above, so a scenario reads `return httpError(500)`. */
 export const httpError = (status, body) => new ScenarioHttpError(status, body)
 
+/** A scenario response that stays pending long enough to capture loading UI. */
+export class ScenarioHttpDelay {
+  constructor(delayMs, body) {
+    this.delayMs = delayMs
+    this.body = body
+  }
+}
+
+/** Sugar for a delayed fixture response used by loading-state captures. */
+export const delayedHttp = (delayMs, body) => new ScenarioHttpDelay(delayMs, body)
+
 /**
  * No dashboard surface reads legacy Safe AllowanceModule state during render.
  * Chain-fed capture guards are intentionally retired with those surfaces.
@@ -1493,7 +1504,8 @@ export const STALE_BUSY_DECLARATIONS = []
  * shared fixture does not key (or keys differently); returning `undefined`
  * falls through to the normal fixture, so a scenario only states what is
  * special about it. Returning a `ScenarioHttpError` answers that one route
- * with a failure instead (#1725).
+ * with a failure instead (#1725); `delayedHttp` keeps it pending long enough
+ * to capture a loading branch.
  */
 async function newFixtureContext(browser, vp, scenario) {
   const context = await browser.newContext({
@@ -1607,7 +1619,19 @@ async function newFixtureContext(browser, vp, scenario) {
         body: JSON.stringify(scenarioBody.body),
       })
     }
-    if (scenarioBody !== undefined) return json(scenarioBody)
+    if (scenarioBody instanceof ScenarioHttpDelay) {
+      await sleep(scenarioBody.delayMs)
+      if (scenarioBody.body instanceof ScenarioHttpError) {
+        return route.fulfill({
+          status: scenarioBody.body.status,
+          contentType: 'application/json',
+          body: JSON.stringify(scenarioBody.body.body),
+        })
+      }
+      if (scenarioBody.body !== undefined) return json(scenarioBody.body)
+    } else if (scenarioBody !== undefined) {
+      return json(scenarioBody)
+    }
 
     if (api === '/auth/me') return json(FIXTURE_USER)
     if (api === '/user/safes') return json({ safes: FIXTURE_USER.safes })
@@ -1818,16 +1842,18 @@ function setBackupRecoveryStage(next) {
  * the delegate-balance response so each rendered branch is reachable without
  * stubbing component state.
  */
-function sweepRecoveryScenario(description, response, marker) {
+function sweepRecoveryScenario(description, response, marker, { delayMs = 0 } = {}) {
   return {
     description,
     api(apiPath) {
-      if (apiPath === `/agents/${FIXTURE_AGENTS[0].id}/delegate-balance`) return response
+      if (apiPath === `/agents/${FIXTURE_AGENTS[0].id}/delegate-balance`) {
+        return delayMs > 0 ? delayedHttp(delayMs, response) : response
+      }
       return undefined
     },
     async run({ page, vp, shoot }) {
       await page.goto(`${BASE_URL}/agents/${FIXTURE_AGENTS[0].id}/sweep`, {
-        waitUntil: 'networkidle',
+        waitUntil: delayMs > 0 ? 'domcontentloaded' : 'networkidle',
         timeout: 60_000,
       })
       await dismissMobileSidebar(page, vp)
@@ -1835,7 +1861,11 @@ function sweepRecoveryScenario(description, response, marker) {
       const main = page.locator('main')
       await main.waitFor({ timeout: 30_000 })
       await page.getByRole('heading', { name: 'Recover funds' }).waitFor({ timeout: 20_000 })
-      await page.getByText(marker, { exact: true }).waitFor({ timeout: 20_000 })
+      if (delayMs > 0) {
+        await page.getByRole('status', { name: marker }).waitFor({ timeout: 20_000 })
+      } else {
+        await page.getByText(marker, { exact: true }).waitFor({ timeout: 20_000 })
+      }
       await shoot(main, 'state')
     },
   }
@@ -2748,6 +2778,27 @@ export const SCENARIOS = {
     undefined,
     'Recoverable balance',
   ),
+  'retired-rail-recovery-unlinked': sweepRecoveryScenario(
+    'Recover funds route when the agent has no verified Haven wallet destination (#2258)',
+    {
+      delegate_address: '0x2222222222222222222222222222222222222222',
+      safe_address: null,
+      chain_id: 8453,
+      eth: '0',
+      eth_atomic: '0',
+      usdc: '1.00',
+      usdc_atomic: '1000000',
+      usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      sweep_min_usdc: '0.01',
+    },
+    'Recovery unavailable',
+  ),
+  'retired-rail-recovery-loading': sweepRecoveryScenario(
+    'Recover funds route while the delegate balance is still loading (#2258)',
+    undefined,
+    'Checking recovery balance',
+    { delayMs: 2_000 },
+  ),
   'retired-rail-recovery-below-minimum': sweepRecoveryScenario(
     'Recover funds route with USDC below the configured recovery minimum and no recovery action (#2258)',
     {
@@ -2768,7 +2819,7 @@ export const SCENARIOS = {
   'retired-rail-recovery-error': sweepRecoveryScenario(
     'Recover funds route when the delegate balance request fails (#2258)',
     httpError(503, { error: 'Screenshot fixture: delegate balance unavailable' }),
-    'Could not load balance',
+    'Could not load recovery balance',
   ),
   'connect-agent-approved': {
     description: 'Connect agent modal, step 4, the APPROVED ending (#1394)',

@@ -266,9 +266,9 @@ means undeclared fields accumulate silently, and consumers generating clients
 from the spec never learn the fields exist.
 
 `DelegateBalance` was also lifted out of the inline
-`/agents/{id}/delegate-balance` response into a named component. An inline
-schema generates an anonymous type, which is precisely why the frontend
-hand-wrote a copy instead of importing one.
+`/agents/{id}/delegate-balance` response into a named component. The frontend
+now imports the generated `ApiSchema<'DelegateBalance'>` type, so the OpenAPI
+component is the load-bearing source for that response shape.
 
 **The same thing happened again with re-key, and the gate caught it (#1701).**
 The six #1698 routes were documented in the same PR that added them, but their

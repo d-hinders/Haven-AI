@@ -335,11 +335,12 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // POST /agents/:id/archive — soft-archive an agent (#1401). Delegation
-  // agents require status='revoked' and dead budgets so archiving is never the
-  // thing that stops spending. Legacy Safe records may be unlinked at any
-  // status because this only removes the Haven-side record and leaves the old
-  // Safe permission untouched. Both paths keep every dependent audit row and
-  // are idempotent (re-archiving keeps the original archived_at).
+  // agents require status='revoked' and no live budgets so archiving is never
+  // the thing that stops spending. Linked legacy Safe records may be unlinked
+  // at any status because this only removes the Haven-side record and leaves
+  // the old Safe permission untouched. An already-unlinked record is eligible
+  // when it has no live delegation. Both paths keep every dependent audit row
+  // and are idempotent (re-archiving keeps the original archived_at).
   //
   // #1436: it also requires DEAD BUDGETS. Revoking only flips the agent's
   // status, so revoke+archive without revoke-all used to file an agent under
@@ -373,8 +374,8 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // POST /agents/:id/unarchive — return the agent to the primary list. The
-  // status stays exactly as it was (revoked): un-archiving restores no
-  // authority of any kind.
+  // status stays exactly as it was: un-archiving restores no authority of any
+  // kind.
   app.post<{ Params: { id: string } }>('/:id/unarchive', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { id } = request.params

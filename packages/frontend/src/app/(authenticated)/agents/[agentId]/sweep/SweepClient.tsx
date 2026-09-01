@@ -2,13 +2,13 @@
 
 import { Check, ChevronLeft, Copy } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import type { ApiSchema } from '@haven_ai/core'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { useAgents } from '@/hooks/useAgents'
 import { resolveChainOrNull } from '@/lib/chains'
 import { usdcSweepStatus } from '@/lib/sweep-eligibility'
@@ -47,44 +47,49 @@ export default function SweepClient({ agentId }: { agentId: string }) {
   const [balance, setBalance] = useState<DelegateBalance | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const requestGeneration = useRef(0)
 
-  useEffect(() => {
+  const loadBalance = useCallback(() => {
+    const generation = ++requestGeneration.current
     // Clear the previous agent's result before starting the next request, and
-    // ignore late responses from a superseded route. Without both guards a
-    // client-side navigation can briefly show (or permanently retain) one
-    // agent's balance under another agent's name and destination.
+    // Ignore late responses from a superseded route with a generation guard.
+    // Without both guards, navigation can briefly show one agent's balance
+    // under another agent's name and destination.
     setBalance(null)
     setError(null)
     setLoading(true)
-    let ignore = false
 
     api
       .get<DelegateBalance>(`/agents/${agentId}/delegate-balance`)
       .then((data) => {
-        if (!ignore) setBalance(data)
+        if (generation === requestGeneration.current) setBalance(data)
       })
-      .catch((err) => {
-        if (!ignore) {
-          setError(err instanceof Error ? err.message : 'Could not load delegate balance.')
+      .catch(() => {
+        if (generation === requestGeneration.current) {
+          setError("We couldn't check this agent's wallet right now. Please try again.")
         }
       })
       .finally(() => {
-        if (!ignore) setLoading(false)
+        if (generation === requestGeneration.current) setLoading(false)
       })
-
-    return () => {
-      ignore = true
-    }
   }, [agentId])
 
+  useEffect(() => {
+    void loadBalance()
+    return () => {
+      requestGeneration.current += 1
+    }
+  }, [loadBalance])
+
   const usdcStatus = balance ? usdcSweepStatus(balance) : 'none'
-  const hasUsdc = usdcStatus === 'recoverable'
+  const hasVerifiedDestination = Boolean(balance?.safe_address)
+  const hasUsdc = usdcStatus === 'recoverable' && hasVerifiedDestination
   const hasEth = Boolean(balance && balance.eth_atomic !== '0')
   const network = balance
     ? resolveChainOrNull(balance.chain_id)?.name ?? `Chain ${balance.chain_id}`
     : null
   const agentLabel = agent?.name ?? 'Your agent'
-  const destination = balance?.safe_address ?? agent?.safe_address ?? 'Your Haven wallet'
+  const destination = balance?.safe_address
 
   const sweepCommand = `haven_sweep_delegate`
 
@@ -96,26 +101,53 @@ export default function SweepClient({ agentId }: { agentId: string }) {
       />
 
       <div className="mt-1 mb-6">
-        <Link
-          href={`/agents/${agentId}`}
-          className="inline-flex items-center gap-1.5 text-sm text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
-        >
+        <Button href={`/agents/${agentId}`} variant="tertiary" size="sm" className="-ml-3">
           <Icon icon={ChevronLeft} className="h-3.5 w-3.5" />
           Back to agent
-        </Link>
+        </Button>
       </div>
 
       {loading ? (
         <Card>
-          <div className="px-6 py-8 text-center text-sm text-[var(--v2-ink-3)]">
-            Checking delegate balance…
+          <div
+            role="status"
+            aria-busy="true"
+            aria-label="Checking recovery balance"
+            className="px-6 py-8"
+          >
+            <div className="space-y-3">
+              <Skeleton variant="text" className="mx-auto h-4 w-40" />
+              <Skeleton variant="text" className="mx-auto h-3 w-3/4 max-w-md" />
+              <Skeleton className="mx-auto h-9 w-28" />
+            </div>
           </div>
         </Card>
       ) : error ? (
         <Card>
-          <div className="px-6 py-6">
-            <p className="text-sm font-medium text-[var(--v2-danger)]">Could not load balance</p>
+          <div role="alert" className="px-6 py-6">
+            <p className="text-sm font-medium text-[var(--v2-danger)]">
+              Could not load recovery balance
+            </p>
             <p className="mt-1 text-sm text-[var(--v2-ink-3)]">{error}</p>
+            <div className="mt-4">
+              <Button type="button" variant="ghost" size="sm" onClick={() => void loadBalance()}>
+                Try again
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : balance && !hasVerifiedDestination ? (
+        <Card>
+          <div className="px-6 py-8 text-center">
+            <p className="text-sm font-medium text-[var(--v2-ink)]">Recovery unavailable</p>
+            <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+              This agent is no longer linked to a Haven wallet, so the recovery destination cannot be verified. No recovery action is available.
+            </p>
+            <div className="mt-4">
+              <Button href={`/agents/${agentId}`} variant="ghost" size="sm">
+                Back to agent
+              </Button>
+            </div>
           </div>
         </Card>
       ) : usdcStatus === 'below_minimum' && balance ? (
@@ -177,7 +209,7 @@ export default function SweepClient({ agentId }: { agentId: string }) {
                 <div className="flex items-center justify-between py-2">
                   <span className="text-sm text-[var(--v2-ink-3)]">Goes to your Haven wallet</span>
                   <span className="text-sm text-[var(--v2-ink-2)] font-mono text-right truncate max-w-[240px]">
-                    {destination}
+                    {destination!}
                   </span>
                 </div>
               </div>
@@ -217,8 +249,8 @@ export default function SweepClient({ agentId }: { agentId: string }) {
               <div className="mt-4 rounded-lg border border-[var(--v2-border)] px-4 py-3">
                 <p className="text-xs text-[var(--v2-ink-3)]">
                   <strong className="text-[var(--v2-ink-2)]">Why does my agent do this, not Haven?</strong>{' '}
-                  The delegate signing key exists only in your agent&apos;s runtime — Haven never holds it.
-                  This is by design (MiCA/CASP compliance): Haven cannot construct signed transactions on your behalf.
+                  The delegate signing key exists only in your agent&apos;s runtime — Haven never holds it,
+                  so Haven cannot construct signed transactions on your behalf.
                 </p>
               </div>
             </div>

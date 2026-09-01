@@ -157,4 +157,32 @@ describe('agentAuthMiddleware', () => {
 
     await app.close()
   })
+
+  it('rejects an agent whose Safe binding was removed even if the user mirror has another address', async () => {
+    const app = buildApp()
+    mockQuery.mockResolvedValueOnce({
+      rows: [{
+        id: 'agent-unlinked',
+        user_id: 'user-1',
+        name: 'Historical Agent',
+        delegate_address: '0x1111111111111111111111111111111111111111',
+        // This is the mutable users.safe_address fallback, not the agent's
+        // original destination. The explicit binding flag must win.
+        safe_address: '0x3333333333333333333333333333333333333333',
+        chain_id: 8453,
+        status: 'active',
+        has_bound_safe: false,
+      }],
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/payment-tool',
+      headers: { authorization: 'Bearer sk_agent_unlinked' },
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(response.json().error).toBe('Agent is no longer linked to a Haven wallet')
+    await app.close()
+  })
 })

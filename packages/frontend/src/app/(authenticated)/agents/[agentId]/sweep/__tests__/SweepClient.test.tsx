@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DelegateBalance } from '@/hooks/useDelegateBalance'
@@ -68,5 +68,31 @@ describe('SweepClient', () => {
 
     expect(screen.getByText('1.00')).toBeInTheDocument()
     expect(screen.queryByText('999.00')).not.toBeInTheDocument()
+  })
+
+  it('keeps the loading state announced while the balance is pending', () => {
+    mockApiGet.mockImplementation(() => new Promise<DelegateBalance>(() => {}))
+
+    render(<SweepClient agentId="agent-1" />)
+
+    expect(screen.getByRole('status', { name: 'Checking recovery balance' })).toBeInTheDocument()
+  })
+
+  it('hides raw errors and retries the recovery balance request', async () => {
+    mockApiGet
+      .mockRejectedValueOnce(new Error('Screenshot fixture: delegate balance unavailable'))
+      .mockResolvedValueOnce(balance('1.00', '1000000'))
+
+    render(<SweepClient agentId="agent-1" />)
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Could not load recovery balance')
+    expect(alert).toHaveTextContent("We couldn't check this agent's wallet right now. Please try again.")
+    expect(alert).not.toHaveTextContent('Screenshot fixture')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+
+    await waitFor(() => expect(screen.getByText('1.00')).toBeInTheDocument())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })

@@ -128,6 +128,16 @@ describe('machine payment sweep routes', () => {
   const headers = { authorization: 'Bearer sk_agent_test' }
 
   describe('POST /sweep/prepare', () => {
+    it('fails closed when the agent no longer has a bound Safe', async () => {
+      primeDb([/api_key_hash = \$1/, () => ({ rows: [{ ...AGENT, has_bound_safe: false }] })])
+
+      const res = await app.inject({ method: 'POST', url: '/machine-payments/sweep/prepare', headers })
+
+      expect(res.statusCode).toBe(403)
+      expect(res.json().error).toBe('Agent is no longer linked to a Haven wallet')
+      expect(allowanceMocks.getTokenBalance).not.toHaveBeenCalled()
+    })
+
     it('returns nothing_stranded when the delegate is empty (no row inserted)', async () => {
       primeDb(AUTH_ROUTE)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(0n)

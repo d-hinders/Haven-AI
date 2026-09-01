@@ -9,6 +9,7 @@ import {
   FIXTURE_EMPTY_FALLBACK,
   SCENARIOS,
   ScenarioHttpError,
+  ScenarioHttpDelay,
 } from '../../scripts/screenshot.mjs'
 import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
 
@@ -517,6 +518,13 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
             expect([agent.id, answer instanceof ScenarioHttpError]).toEqual([agent.id, false])
           }
         }
+      })
+
+      it('keeps the recovery loading capture pending instead of photographing the settled branch', () => {
+        const loading = scenarioWithApi('retired-rail-recovery-loading')
+        const response = loading.api('/agents/agent-research/delegate-balance', 'GET') as unknown
+        expect(response).toBeInstanceOf(ScenarioHttpDelay)
+        expect(response).toMatchObject({ delayMs: 2_000, body: undefined })
       })
 
       it('serves the exact field set the route builds, and nothing else', () => {

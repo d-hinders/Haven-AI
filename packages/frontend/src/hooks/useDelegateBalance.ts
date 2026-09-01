@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
 import type { ApiSchema } from '@haven_ai/core'
 import { usdcSweepStatus } from '@/lib/sweep-eligibility'
@@ -8,9 +8,8 @@ import { usdcSweepStatus } from '@/lib/sweep-eligibility'
 /**
  * On-chain USDC + ETH balance of an agent's delegate EOA.
  *
- * #1445: the spec described this response inline, which generates an anonymous
- * type — so the frontend hand-wrote a matching copy. The schema is named
- * (`DelegateBalance`) now, and this is the generated type.
+ * #1445: the response is a named OpenAPI component, so this hook uses the
+ * generated `DelegateBalance` type rather than restating the wire shape.
  */
 export type DelegateBalance = ApiSchema<'DelegateBalance'>
 
@@ -43,54 +42,52 @@ export interface UseDelegateBalanceResult {
 export function useDelegateBalance(agentId: string | null): UseDelegateBalanceResult {
   const [balance, setBalance] = useState<DelegateBalance | null>(null)
   const [loading, setLoading] = useState(false)
+  const requestGeneration = useRef(0)
 
   const fetchData = useCallback(async () => {
-    if (!agentId) return
+    if (!agentId) {
+      requestGeneration.current += 1
+      setBalance(null)
+      setLoading(false)
+      return
+    }
+
+    const generation = ++requestGeneration.current
+    // A manual refetch is allowed to overlap the initial request. Clear the
+    // old result and accept only the newest response so the CTA cannot drift
+    // back to a previous agent or an earlier balance.
+    setBalance(null)
     setLoading(true)
     try {
-      setBalance(await api.get<DelegateBalance>(`/agents/${agentId}/delegate-balance`))
+      const next = await api.get<DelegateBalance>(`/agents/${agentId}/delegate-balance`)
+      if (generation === requestGeneration.current) setBalance(next)
     } catch {
       // Revoked agents (404) / agents without a delegate (422) / RPC hiccups:
       // treat as "nothing to recover" rather than surfacing an error here.
-      setBalance(null)
+      if (generation === requestGeneration.current) setBalance(null)
     } finally {
-      setLoading(false)
+      if (generation === requestGeneration.current) setLoading(false)
     }
   }, [agentId])
 
   useEffect(() => {
-    if (!agentId) {
-      setBalance(null)
-      return
-    }
-    // Clear immediately so a stale balance from the previous agent can't briefly
-    // render the wrong recover amount/link during client-side navigation.
-    setBalance(null)
-    setLoading(true)
-    let ignore = false
-    api
-      .get<DelegateBalance>(`/agents/${agentId}/delegate-balance`)
-      .then((data) => {
-        if (!ignore) setBalance(data)
-      })
-      .catch(() => {
-        if (!ignore) setBalance(null)
-      })
-      .finally(() => {
-        if (!ignore) setLoading(false)
-      })
+    void fetchData()
     return () => {
       // Ignore a late response from a superseded agentId.
-      ignore = true
+      requestGeneration.current += 1
     }
-  }, [agentId])
+  }, [fetchData])
 
   const hasStranded = Boolean(
     balance && (balance.usdc_atomic !== '0' || balance.eth_atomic !== '0'),
   )
   const sweepStatus = balance ? usdcSweepStatus(balance) : 'none'
-  const hasRecoverableUsdc = sweepStatus === 'recoverable'
-  const hasBelowMinimumUsdc = sweepStatus === 'below_minimum'
+  // A balance without the bound Safe address is readable for diagnosis, but
+  // it is not eligible for a recovery CTA: the sweep destination cannot be
+  // verified after an account unlink.
+  const hasVerifiedDestination = Boolean(balance?.safe_address)
+  const hasRecoverableUsdc = sweepStatus === 'recoverable' && hasVerifiedDestination
+  const hasBelowMinimumUsdc = sweepStatus === 'below_minimum' && hasVerifiedDestination
 
   return { balance, hasStranded, hasRecoverableUsdc, hasBelowMinimumUsdc, loading, refetch: fetchData }
 }

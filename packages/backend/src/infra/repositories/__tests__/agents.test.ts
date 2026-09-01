@@ -287,6 +287,21 @@ describeDb('agents archive (#1401, real DB)', () => {
     expect(row.rows[0].archived_at).not.toBeNull()
   })
 
+  it('archives a legacy record after its Safe was unlinked, without requiring revocation (#2258)', async () => {
+    const { userId, agentId } = await seedLegacyAgent('active')
+    await db.query(`UPDATE agents SET safe_id = NULL WHERE id = $1`, [agentId])
+
+    const archived = await archiveAgent(agentId, userId)
+
+    expect(archived).not.toBeNull()
+    const row = await db.query<{ status: string; archived_at: Date | null }>(
+      `SELECT status, archived_at FROM agents WHERE id = $1`,
+      [agentId],
+    )
+    expect(row.rows[0]).toMatchObject({ status: 'active' })
+    expect(row.rows[0].archived_at).not.toBeNull()
+  })
+
   // #1436: revoking flips only agents.status — it never touches
   // agent_delegations. So "revoked" alone was never proof that the agent had
   // stopped spending, and archiving on that basis filed an agent under

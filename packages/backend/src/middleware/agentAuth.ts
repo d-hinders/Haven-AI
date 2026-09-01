@@ -26,6 +26,8 @@ export interface AgentContext {
   /** The account's execution rail (#821): 'delegation' routes to the new rail. */
   execution_rail?: string | null
   account_type?: string | null
+  /** False when the agent's Safe row was removed; recovery must fail closed. */
+  has_bound_safe?: boolean
 }
 
 // Extend Fastify request
@@ -151,6 +153,15 @@ export async function agentAuthMiddleware(
     return reply.code(403).send({ error: 'Agent has no delegate address configured' })
   }
 
+  // `safe_address` intentionally falls back to the user's legacy mirror for
+  // older agent endpoints. That fallback is unsafe for recovery after an
+  // account unlink: the mirror may now point at a different wallet. Keep the
+  // agent authenticated only when its original Safe binding still exists, and
+  // let callers that do not need a destination retain the legacy behaviour.
+  if (row.has_bound_safe === false) {
+    return reply.code(403).send({ error: 'Agent is no longer linked to a Haven wallet' })
+  }
+
   if (!row.safe_address) {
     return reply.code(403).send({ error: 'No Safe deployed for this account' })
   }
@@ -165,5 +176,9 @@ export async function agentAuthMiddleware(
     status: row.status,
     execution_rail: row.execution_rail ?? null,
     account_type: row.account_type ?? null,
+    // Characterization fakes from before this field existed omit it; the
+    // real query always returns a boolean. Treat an omitted value as bound so
+    // those fakes keep exercising the legacy auth branches.
+    has_bound_safe: row.has_bound_safe ?? true,
   }
 }

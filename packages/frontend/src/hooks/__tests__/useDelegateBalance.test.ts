@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockApiGet = vi.fn()
@@ -52,6 +52,17 @@ describe('useDelegateBalance', () => {
     expect(result.current.hasStranded).toBe(true)
   })
 
+  it('does not expose recovery eligibility without a verified destination', async () => {
+    mockApiGet.mockResolvedValueOnce(
+      balance({ usdc: '1.00', usdc_atomic: '1000000', safe_address: null }),
+    )
+    const { result } = renderHook(() => useDelegateBalance('agent-unlinked'))
+
+    await waitFor(() => expect(result.current.balance?.usdc_atomic).toBe('1000000'))
+    expect(result.current.hasRecoverableUsdc).toBe(false)
+    expect(result.current.hasBelowMinimumUsdc).toBe(false)
+  })
+
   it('ignores a late response from a superseded agentId', async () => {
     // First agent's fetch resolves slowly; second agent's resolves first.
     let resolveOld: (b: DelegateBalance) => void = () => {}
@@ -72,5 +83,34 @@ describe('useDelegateBalance', () => {
     resolveOld(balance({ usdc: '999.0', usdc_atomic: '999000000' }))
     await Promise.resolve()
     expect(result.current.balance?.usdc_atomic).toBe('1000000')
+  })
+
+  it('ignores a late response from an older manual refetch', async () => {
+    mockApiGet.mockResolvedValueOnce(balance({ usdc: '1.00', usdc_atomic: '1000000' }))
+    const { result } = renderHook(() => useDelegateBalance('agent-1'))
+    await waitFor(() => expect(result.current.balance?.usdc_atomic).toBe('1000000'))
+
+    let resolveOld: (b: DelegateBalance) => void = () => {}
+    mockApiGet.mockImplementationOnce(
+      () => new Promise<DelegateBalance>((resolve) => { resolveOld = resolve }),
+    )
+    mockApiGet.mockResolvedValueOnce(balance({ usdc: '2.00', usdc_atomic: '2000000' }))
+
+    let oldRefetch!: Promise<void>
+    let newRefetch!: Promise<void>
+    await act(async () => {
+      oldRefetch = result.current.refetch()
+      newRefetch = result.current.refetch()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(result.current.balance?.usdc_atomic).toBe('2000000'))
+
+    await act(async () => {
+      resolveOld(balance({ usdc: '999.00', usdc_atomic: '999000000' }))
+      await oldRefetch
+      await newRefetch
+    })
+
+    expect(result.current.balance?.usdc_atomic).toBe('2000000')
   })
 })

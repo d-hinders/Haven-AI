@@ -180,7 +180,7 @@ npm run dev
 6. Save the one-time Haven credential when the Done step appears
 7. Use **Connect your agent** to add Haven to Claude Code, Cursor, VS Code, Codex CLI, OpenCode, Goose, Amp, or another runtime
 
-The credential contains an agent API key and a delegate signing key. Haven stores only the API-key hash/prefix and never stores the delegate private key. If the API key is exposed or lost, use **Payment credentials** on the agent detail page to rotate it; the new key is shown once and the old key stops working. If the **delegate signing key** is exposed or lost, a delegation-rail agent is **re-keyed**, not replaced: the same agent gets a new signing key and a new API key, keeping its id, name, history and the remainder of its budget — see [Replacing an agent's signing key](docs/product/agent-key-rotation.md). Legacy AllowanceModule agents are historical records only in Haven, without payment-credential, pause/resume, re-key, or revoke controls. Owners manage any remaining Safe permission outside Haven where they have access; replacement agents use the live delegation flow.
+The credential contains an agent API key and a delegate signing key. Haven stores only the API-key hash/prefix and never stores the delegate private key. If the API key is exposed or lost, use **Payment credentials** on the agent detail page to rotate it; the new key is shown once and the old key stops working. If the **delegate signing key** is exposed or lost, a delegation-rail agent is **re-keyed**, not replaced: the same agent gets a new signing key and a new API key, keeping its id, name, history and the remainder of its budget — see [Replacing an agent's signing key](docs/product/agent-key-rotation.md). Legacy AllowanceModule agents are historical records only in the dashboard, without payment-credential, pause/resume, re-key, or revoke controls there. Owners manage any remaining Safe permission outside Haven where they have access; replacement agents use the live delegation flow.
 
 ## Agent Integration
 
@@ -340,7 +340,7 @@ Independent layers keep the API and signing boundaries separate:
 If Haven is compromised, API keys alone cannot sign transactions. For a live delegation
 agent, an account owner can pause or revoke it in Haven, and can revoke the underlying
 on-chain authority directly without needing Haven — see the [independent exit path](docs/exit/README.md).
-Legacy Safe records have no Haven pause or revoke controls; any residual Safe permission
+The dashboard exposes no pause or revoke controls for legacy Safe records; any residual Safe permission
 must be revoked externally by the Safe owner.
 
 Approver (Safe owner) management is **retired** (#1988/#1989, epic #1440). Haven never signed an owner change and no longer constructs one: the backend routes and the Settings surface are both deleted. Owners of a legacy Safe manage its owner set directly through Safe's own interfaces with their own key — which was always true, and is the reason removing Haven's builder takes nothing away that Haven was the only source of. `POST /safe/exec` stays open, so an owner-signed Safe transaction is still relayed for gas — but **#1989 also deleted the screen that composed one**, and the route is not the screen. A **wallet-owned** Safe loses nothing (sign at [app.safe.global](https://app.safe.global)); a **passkey-owned** Safe currently has **no self-serve way to move funds out**, because Haven's passkey Safe signer is a custom WebAuthn scheme Safe's own interfaces cannot drive. The epic's Base-mainnet census found no passkey-owned Safe, which is why this was accepted as a narrowing — but a census is not a proof and it does not cover non-mainnet accounts. Full user-facing wording: [`docs/product/account-recovery.md`](docs/product/account-recovery.md).
@@ -375,11 +375,15 @@ Dashboard endpoints use the signed-in user's JWT. The OpenAPI contract is served
 |---|---|---|
 | Dashboard auth | None/JWT | `/auth/signup`, `/auth/login`, `/auth/me` |
 | Haven wallets | JWT | `/user/safes` (list/rename/re-default/unlink), balances and account views. Creating or importing a Safe is **retired** — `/user/safes` POST, `/user/safes/deploy`, `/safe/deploy` and `PUT /user/safe` all answer 410 (#1984), with the implementations behind them deleted (#1988); new accounts come from `/accounts/hybrid` |
-| Agents | JWT | `/agents`, `/agents/:id`, `/agents/:id/pause`, `/agents/:id/resume`, `/agents/:id/revoke`, `/agents/:id/rotate-key`, `/agents/:id/allowances` |
+| Agents | JWT | `/agents`, `/agents/:id`, `/agents/:id/pause`, `/agents/:id/resume`, `/agents/:id/revoke`, `/agents/:id/rotate-key` |
 | Agent payments | API key | `/payments`, `/payments/:id/sign`, `/payments/:id`, `/payments` |
 | Agent info | API key | `/machine-payments/agent`, `/machine-payments/allowances`, `/machine-payments/receipts`, `/machine-payments/:id/status`, resume-state endpoints |
 | x402 | API key or protocol challenge | `/x402` (the legacy internal `mpp_demo` flow at `/demo/mpp/*` and `POST /machine-payments/authorize` is retired — the latter now refuses with HTTP 410, #1328) |
 | Activity | JWT | `/agent-activity/*` for payments, MCP tool calls, and last activity |
+
+`/agents/:id/allowances` and `/agents/:id/allowances/:tokenAddress` are retired
+410 tombstones. Live agent budgets are signed delegation grants, not allowance
+rows.
 
 ### Payment intent request
 

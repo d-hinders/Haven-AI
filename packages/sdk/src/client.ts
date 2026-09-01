@@ -1233,7 +1233,8 @@ export class HavenClient {
    * says the merchant was Bazaar-discoverable, runs a fresh `initialize`
    * handshake (the quote-time session is gone once funding confirms; the x402
    * challenge is stateless w.r.t. the MCP session, so a fresh session is
-   * accepted), threads the session + wallet headers, sets both x402 wire names, and
+   * accepted), threads the session + wallet headers, sets the x402 payment
+   * header under the names that scheme requires (#2341), and
    * collapses an SSE JSON-RPC response to its `result`.
    */
   /**

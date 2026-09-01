@@ -738,7 +738,11 @@ value on every merchant retry.
 > alone, two named no header, and nothing named `PAYMENT-SIGNATURE` to an agent
 > — so an operator or agent following Haven's own guidance by hand reproduced
 > the v1-only defect no matter which runtime or backend they were on. #2330
-> makes every such instruction name both names and guards the property. This is
+> makes every such instruction name both names and guards the property.
+> **Superseded in part by #2341:** on the erc7710 scheme the instruction now
+> names `PAYMENT-SIGNATURE` ALONE, because that header carries a delegation
+> chain and duplicating it is refused with HTTP 431. Both names remain correct,
+> and remain the instruction, on the EIP-3009 bridge. This is
 > still not a version-skew axis: it is a description-only change, no tool is
 > added, removed or renamed, and an older runtime simply carries older guidance
 > text rather than failing closed against a newer backend. That choice is made entirely inside whichever

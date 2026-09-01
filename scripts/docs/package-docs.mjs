@@ -128,7 +128,16 @@ export const GOVERNED_PACKAGE_DOCS = [
     // locally during setup" paragraph under Custody — it describes
     // `packages/connect`, which is outside this doc's `covers:` and was not
     // read.
-    'last-verified': '2026-08-30',
+    // #2341: re-verified and EDITED (the two flow diagrams only). The erc7710
+    // diagram told the agent to retry "setting BOTH PAYMENT-SIGNATURE +
+    // X-PAYMENT" — the instruction that produces HTTP 431 on that scheme,
+    // sitting directly under the erc7710 haven_submit line. The EIP-3009
+    // diagram says the same thing and is CORRECT there, so it is annotated
+    // rather than changed, making the pair read as a deliberate contrast.
+    // Nothing flagged this file: the coupling gate did not list it, because
+    // the commit that broke it did not touch packages/signer/src. Found by
+    // sweeping, not by tooling. Rest of the README NOT re-verified.
+    'last-verified': '2026-09-01',
   },
   {
     doc: 'packages/mcp/README.md',

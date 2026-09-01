@@ -156,8 +156,8 @@ export async function agentAuthMiddleware(
   // `safe_address` intentionally falls back to the user's legacy mirror for
   // older agent endpoints. That fallback is unsafe for recovery after an
   // account unlink: the mirror may now point at a different wallet. Keep the
-  // agent authenticated only when its original Safe binding still exists, and
-  // let callers that do not need a destination retain the legacy behaviour.
+  // agent authenticated only when its original Safe binding still exists;
+  // callers can reconnect or rebind through the supported account flow.
   if (row.has_bound_safe === false) {
     return reply.code(403).send({ error: 'Agent is no longer linked to a Haven wallet' })
   }

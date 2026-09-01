@@ -63,6 +63,16 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/sdk/src/**'],
+    // #2341: re-verified and EDITED (every merchant-retry header instruction,
+    // six sites). #2330 made them all say "both names" — correct then, and
+    // wrong on erc7710 the moment #2341 scoped the send by scheme. This is the
+    // npm landing page, so two of the six are copy-pasteable `fetch` samples a
+    // developer would apply verbatim to an erc7710 payment and get HTTP 431.
+    // The bridged (EIP-3009) samples keep both names, which is right for them,
+    // and now SAY they are bridge-only rather than reading as the general
+    // rule. Caught by re-reading a doc the coupling gate listed as advisory —
+    // the blocking half only covers contract docs, so nothing would have
+    // stopped this shipping. Nothing else re-verified in this pass. Prior:
     // #2330: re-verified and EDITED (the two remaining manual-retry mentions
     // only). #2292 corrected the header example in the resume section; two
     // other spots still told the reader the agent "retries with X-PAYMENT" —
@@ -77,7 +87,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // still sent X-PAYMENT alone; corrected to both names, matching the #2289
     // paragraph this same doc already carries two sections below. The rest of
     // the README was NOT re-verified in this pass.
-    'last-verified': '2026-08-31',
+    'last-verified': '2026-09-01',
   },
   {
     doc: 'packages/signer/README.md',

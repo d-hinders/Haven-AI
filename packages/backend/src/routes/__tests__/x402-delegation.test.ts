@@ -1948,7 +1948,17 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
     expect(body.merchant_url).toBe('https://merchant.example/mcp')
     expect(body.tool_name).toBe('buy_cloud_storage')
     expect(body.arguments).toEqual({ tier: '50gb' })
-    expect(body.mcp_transport).toEqual({ handshakeRequired: true, source: 'path' })
+    // #2343 REVERSES this assertion. It previously read
+    // `toEqual({ handshakeRequired: true, source: 'path' })` — pinning the
+    // defect as correct, which is why it shipped: the endpoint emitted a
+    // snake_case KEY with camelCase INNARDS, and the one test that looked at
+    // the value agreed with it. This endpoint's contract is snake_case, the
+    // same shape the hosted `mcpTransportArg` / `parseMcpTransport` boundary
+    // accepts. Asserted both ways on purpose — the wrong key being ABSENT is
+    // half the property, and `toEqual` alone would pass on a merged object.
+    expect(body.mcp_transport).toEqual({ handshake_required: true, source: 'path' })
+    expect(typeof body.mcp_transport.handshake_required).toBe('boolean')
+    expect('handshakeRequired' in body.mcp_transport).toBe(false)
     // Read-only: nothing was written.
     expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE/i.test(String(c[0])))).toBe(false)
   })

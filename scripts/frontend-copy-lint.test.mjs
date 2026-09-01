@@ -5,7 +5,16 @@ import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { findCopyIssues, newViolations, missingTargets, SCAN_FILES } from './frontend-copy-lint.mjs'
+import {
+  findCopyIssues,
+  newViolations,
+  missingTargets,
+  matchesCopyConvention,
+  conventionGaps,
+  libSourceFiles,
+  CONVENTION_EXEMPT,
+  SCAN_FILES,
+} from './frontend-copy-lint.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -125,4 +134,111 @@ test('ordinary Haven sentences are not flagged (false-positive floor)', () => {
   // Haven-as-actor prose that is TRUE and must stay writable.
   assert.deepEqual(findCopyIssues('Haven relays policy-limited account operations.\n'), [])
   assert.deepEqual(findCopyIssues('Haven cannot move funds outside the limits you approve.\n'), [])
+})
+
+// ── The extracted-copy naming convention (#2333) ─────────────────────────────
+
+test('the three rendered-copy modules #2333 found are on the allowlist', () => {
+  // passkeyRowLabel renders the credential row (WalletButton, AccountSignersCard);
+  // the transaction pair renders every row title, initiator and status.
+  for (const f of [
+    'packages/frontend/src/lib/passkeyLabels.ts',
+    'packages/frontend/src/lib/transaction-labels.ts',
+    'packages/frontend/src/lib/transaction-presentation.tsx',
+  ]) {
+    assert.ok(SCAN_FILES.includes(f), `${f} must be scanned`)
+  }
+})
+
+test('matchesCopyConvention: the extracted-copy names match', () => {
+  assert.ok(matchesCopyConvention('packages/frontend/src/lib/agent-pause-copy.ts'))
+  assert.ok(matchesCopyConvention('packages/frontend/src/lib/transaction-labels.ts'))
+  assert.ok(matchesCopyConvention('packages/frontend/src/lib/passkeyLabels.ts'))
+  // Any .tsx under lib renders by definition — the directory scan would have
+  // caught it one level up in components/.
+  assert.ok(matchesCopyConvention('packages/frontend/src/lib/transaction-presentation.tsx'))
+})
+
+test('matchesCopyConvention: genuine utilities do NOT match', () => {
+  // #2332 is the standing counter-example: passkey.ts carries a banned phrase
+  // in a developer-facing throw and deliberately stays out of the gate. If this
+  // check ever pulled it in, the convention would have become the `src/lib`
+  // sweep #2317 rejected.
+  for (const f of [
+    'packages/frontend/src/lib/passkey.ts',
+    'packages/frontend/src/lib/passkeyErrors.ts',
+    'packages/frontend/src/lib/allowance-module.ts',
+    'packages/frontend/src/lib/format.ts',
+    'packages/frontend/src/lib/api.ts',
+  ]) {
+    assert.equal(matchesCopyConvention(f), false, `${f} must not be forced into the gate`)
+  }
+})
+
+test('conventionGaps: an unlisted extracted-copy module fails the run', () => {
+  // The whole point: the NEXT extraction is caught when it lands, not a
+  // fortnight later by a human re-reading src/lib.
+  const gaps = conventionGaps(
+    [
+      'packages/frontend/src/lib/agent-pause-copy.ts',
+      'packages/frontend/src/lib/new-banner-copy.ts',
+      'packages/frontend/src/lib/format.ts',
+    ],
+    ['packages/frontend/src/lib/agent-pause-copy.ts'],
+    {},
+  )
+  assert.deepEqual(gaps, ['packages/frontend/src/lib/new-banner-copy.ts'])
+})
+
+test('conventionGaps: allowlisted and exempted files are both accepted', () => {
+  const files = [
+    'packages/frontend/src/lib/a-copy.ts',
+    'packages/frontend/src/lib/b-labels.ts',
+  ]
+  assert.deepEqual(
+    conventionGaps(files, ['packages/frontend/src/lib/a-copy.ts'], {
+      'packages/frontend/src/lib/b-labels.ts': 'not copy: pure column-key map',
+    }),
+    [],
+  )
+})
+
+test('a stale CONVENTION_EXEMPT entry is detected', () => {
+  // The mechanism, over a NON-EMPTY map. The structural test below runs the
+  // real map, which is `{}` today and so cannot fail on its own — that pair is
+  // deliberate: this one proves the check works, that one proves the repo
+  // currently satisfies it. A stale exemption silently excuses a file that is
+  // no longer there — the dangling-allowlist-entry defect, one mechanism over.
+  const exempt = {
+    'packages/frontend/src/lib/agent-pause-copy.ts': 'still here',
+    'packages/frontend/src/lib/gone-copy.ts': 'deleted last month',
+  }
+  assert.deepEqual(
+    missingTargets(Object.keys(exempt), (rel) => existsSync(join(REPO_ROOT, rel))),
+    ['packages/frontend/src/lib/gone-copy.ts'],
+  )
+})
+
+test('every CONVENTION_EXEMPT entry resolves to a real file', () => {
+  // Structural: vacuously true while the map is empty, and that is the correct
+  // state to assert — it starts failing the moment someone exempts a file that
+  // is not there. The test above is what proves the check itself can fire.
+  const missing = missingTargets(Object.keys(CONVENTION_EXEMPT), (rel) =>
+    existsSync(join(REPO_ROOT, rel)),
+  )
+  assert.deepEqual(missing, [], `CONVENTION_EXEMPT entries do not exist: ${missing.join(', ')}`)
+})
+
+test('the REAL src/lib tree has no unscanned prose-shaped file', async () => {
+  // The structural half of the convention: run over the actual tree, with the
+  // same walk `scanAll` uses. Neutering the check in the script leaves the lint
+  // green (it has nothing to report) — this is what goes red instead, which is
+  // #2317's own lesson about a sibling test job catching a silently-narrowed
+  // gate.
+  const gaps = conventionGaps(await libSourceFiles(), SCAN_FILES, CONVENTION_EXEMPT)
+  assert.deepEqual(
+    gaps,
+    [],
+    `add these to SCAN_FILES (or CONVENTION_EXEMPT with a reason): ${gaps.join(', ')}`,
+  )
 })

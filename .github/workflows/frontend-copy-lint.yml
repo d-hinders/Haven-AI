@@ -3,7 +3,9 @@ name: Frontend copy lint
 # BLOCKING (#902): fail the PR on NEW banned technical terms from
 # docs/product/copy-guidelines.md in user-facing frontend copy (app/ +
 # components/, plus the individually allowlisted prose files in the script's
-# SCAN_FILES — lib/ and hooks/ are otherwise UNSCANNED, #2317), beyond the
+# SCAN_FILES — lib/ and hooks/ are otherwise UNSCANNED, #2317; since #2333 a
+# convention-named copy module under src/lib that is NOT allowlisted fails the
+# run rather than being skipped), beyond the
 # shrink-only baseline (packages/frontend/copy-lint-baseline.json). Existing
 # debt passes; growth fails. See docs/contributing/ship-playbooks/frontend.md.
 #

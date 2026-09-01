@@ -573,9 +573,19 @@ export const SUPPORTED_SWEEP_BINDING_VERSIONS: readonly number[] = [1]
  *
  * The version travels inside the Haven-signed binding message, so the message
  * also tells the caller not to "fix" it by rewriting the field — an agent that
- * does would invalidate the signature and misrepresent what Haven authorised.
+ * does would invalidate the signature and misrepresent what Haven declared.
  * That instruction is NOT weakened by structuring the refusal: this function
  * still throws before any content check runs, and nothing is ever signed.
+ *
+ * #2347: that word was "authorised" until this change, and the reading was
+ * always the correct one — Haven does sign this message. It is now "declared",
+ * the word `settlement-child.ts` already uses for this exact binding ("proves
+ * Haven *declared* a payload … it says nothing about what the payload MEANS"),
+ * because on an agent-facing refusal inside a payment flow the broader word
+ * invites the #2334 misreading that Haven is what authorises the spend. It is
+ * not; the owner-signed delegation and its on-chain caveat are. The property
+ * claimed is unchanged — only the verb naming it. Full argument in
+ * `docs/regulatory/casp-changelog/2026-09-01-2347.md`.
  *
  * Exported so a test can pin the historical case (a v2 context against a signer
  * whose set was `{1}`) that this signer can no longer produce on its own. The
@@ -618,7 +628,7 @@ export function assertSupportedBindingVersion(
   throw new HavenUnsupportedSignerVersionError(
     `${ceiling} Nothing was signed. Do not rewrite the version field to a supported ` +
       'value: it is part of the Haven-signed binding message, so changing it invalidates ' +
-      'the signature and would misrepresent what Haven authorised.',
+      'the signature and would misrepresent what Haven declared.',
     code,
     supported,
     received,

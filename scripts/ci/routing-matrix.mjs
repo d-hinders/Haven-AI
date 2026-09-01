@@ -140,9 +140,9 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['packages/mcp/src/index.ts'],
-    expect: ['code', 'mcp', 'connect'],
+    expect: ['code', 'mcp', 'connect', 'mcp_server'],
     kind: CONTRACT,
-    why: 'connect bundles the MCP runtime it hands out, so it must rebuild when mcp changes.',
+    why: 'connect bundles the MCP runtime it hands out, so it must rebuild when mcp changes. mcp_server joined in #2348 on the same reasoning as the signer row below: its strict-tool-input test imports @haven_ai/mcp toolSchemas to pin the local-vs-hosted argument spellings against the real local surface rather than restating them as literals, and mcp_server_checks runs that test -- so a rename in the local schemas must run it, which is exactly what the pin is for.',
   },
   {
     files: ['packages/signer/src/index.ts'],

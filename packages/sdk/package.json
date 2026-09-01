@@ -1,6 +1,6 @@
 {
   "name": "@haven_ai/sdk",
-  "version": "0.1.32-alpha.0",
+  "version": "0.1.33-alpha.0",
   "description": "TypeScript SDK for Haven — give AI agents budgeted, non-custodial payment ability. Pay x402 (HTTP 402) APIs in USDC within on-chain-enforced spending limits; the agent never holds funds or keys.",
   "engines": {
     "node": ">=22"

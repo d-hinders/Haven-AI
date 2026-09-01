@@ -5897,6 +5897,12 @@ export const openapiSpec = {
             type: 'boolean',
             description: 'Opt in to an L0 Agent Passport for the agent this setup creates. Default false.',
           },
+          source: {
+            type: 'string',
+            maxLength: 64,
+            description:
+              'Discovery-source slug for connect attribution (#2302) — e.g. 402-page, registry, template, skill. Sanitized server-side; a malformed value is stored as null rather than refused.',
+          },
         },
         additionalProperties: false,
       },

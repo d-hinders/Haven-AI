@@ -10,6 +10,7 @@ import {
   type AllowanceSetup,
 } from '@/lib/allowance-module'
 import { api, getResolvedApiBaseUrl } from '@/lib/api'
+import { resolveDiscoverySource } from '@/lib/discovery'
 import type { ApiSchema } from '@haven_ai/core'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -637,6 +638,14 @@ export function useAgentConnectionSetup({
           reset_period_min: allowance.resetTimeMin,
         })),
         issue_passport: issuePassport || undefined,
+        // #2302: discovery-source attribution. URL ?src= wins when present;
+        // otherwise the first-touch value captured to localStorage at landing
+        // (DiscoverySourceCapture in the root layout) — the query string does
+        // not survive the login hop on its own. Sanitized here AND server-side.
+        source:
+          typeof window !== 'undefined'
+            ? resolveDiscoverySource(window.location.search) ?? undefined
+            : undefined,
       })
       setSetup(response)
       setCancelled(false)

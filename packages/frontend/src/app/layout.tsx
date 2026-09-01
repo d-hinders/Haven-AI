@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import Providers from './providers'
+import DiscoverySourceCapture from '@/components/DiscoverySourceCapture'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -15,6 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className={`${inter.className} bg-[var(--v2-bg)] text-[var(--v2-ink)] antialiased`}>
+        <DiscoverySourceCapture />
         <Providers>{children}</Providers>
       </body>
     </html>

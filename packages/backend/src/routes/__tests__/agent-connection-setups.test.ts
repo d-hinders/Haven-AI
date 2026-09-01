@@ -385,6 +385,48 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
+  it('persists a sanitized discovery source, and degrades a malformed one to null (#2302)', async () => {
+    const app = await buildApp()
+    primeDb(safeLookup())
+
+    const tagged = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        allowances: [ALLOWANCE],
+        source: '  402-Page ',
+      },
+    })
+    expect(tagged.statusCode).toBe(201)
+    let insertSetup = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO agent_connection_setups'),
+    )
+    expect((insertSetup?.[1] as unknown[])[13]).toBe('402-page')
+
+    // A malformed tag is telemetry, not input worth refusing: 201, stored null.
+    mockClientQuery.mockClear()
+    primeDb(safeLookup())
+    const malformed = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        allowances: [ALLOWANCE],
+        source: '<script>alert(1)</script>',
+      },
+    })
+    expect(malformed.statusCode).toBe(201)
+    insertSetup = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO agent_connection_setups'),
+    )
+    expect((insertSetup?.[1] as unknown[])[13]).toBeNull()
+
+    await app.close()
+  })
+
   it('appends --local to the connector command when local_mcp is requested for a supported runtime', async () => {
     const app = await buildApp()
     primeDb(safeLookup())

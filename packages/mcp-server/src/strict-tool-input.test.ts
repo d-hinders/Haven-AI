@@ -19,7 +19,10 @@ import { z } from 'zod'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-schema-compat.js'
-import { HavenClient } from '@haven_ai/sdk'
+// #2363: HAVEN_SKILL_MD is the canonical shipped skill text — imported, not
+// restated, so the premise pin at the bottom of this file reads the real
+// string rather than a copy that can drift from it.
+import { HavenClient, HAVEN_SKILL_MD } from '@haven_ai/sdk'
 // #2348: the LOCAL surface, imported rather than restated — the crossover keys
 // this file smuggles have to be the ones @haven_ai/mcp really declares, or the
 // tests prove nothing about the divergence they exist for.
@@ -391,5 +394,68 @@ describe('#2312 — strictness does not change what is advertised', () => {
     }
     // And a permissive tool still hands the SDK the raw shape it always did.
     expect(toolInputSchema('haven_get_payment_status')).toBe(toolSchemas.haven_get_payment_status)
+  })
+})
+
+/**
+ * #2363 — the `haven_complete_mcp_tool` exclusion's PREMISE, pinned where the
+ * exclusion lives.
+ *
+ * `STRICT_INPUT_TOOLS`' doc block argues, in prose, that this tool stays
+ * permissive because the shipped `SKILL.md` USED TO instruct an undeclared
+ * `payment_required` — past tense since #2359 fixed it — and that what now
+ * gates the switch is ROLLOUT of the corrected copy, not its correctness.
+ * That argument is only as good as its premise, and #2363 exists because the
+ * premise changed under the comment and nothing said so.
+ *
+ * `packages/sdk/src/skill-content.test.ts` already pins both literals, and
+ * it is the primary guard — this is deliberately the SAME two assertions, not
+ * a better one. What it adds is WHERE it goes red: a revert of the skill text
+ * fails the suite of the file carrying the exclusion, with a message naming
+ * the comment, so whoever repairs the skill is told the rationale above needs
+ * re-reading too. Cross-package by design; `@haven_ai/sdk` is already a
+ * dependency of this package and already imported at the top of this file.
+ *
+ * Two literals, no sentence interpretation — `ship-next` § Rework caps rule 1.
+ * The broader "check skill prose against tool schemas" guard was prototyped
+ * and REJECTED on measurement (1 true positive, 10 false positives; see
+ * `docs/product/copy-guidelines.md` § Enforcement). This is the cheap literal
+ * floor under human review, never a substitute for it.
+ */
+describe('#2363 — the shipped skill still matches what the exclusion comment claims', () => {
+  const completeSection = HAVEN_SKILL_MD.slice(HAVEN_SKILL_MD.indexOf('haven_complete_mcp_tool'))
+
+  it('CONTROL: the skill really does discuss haven_complete_mcp_tool', () => {
+    // The false-zero mode: if the tool is renamed in the skill, `indexOf`
+    // returns -1 and `slice(-1)` yields the document's LAST CHARACTER — a
+    // one-char string in which the negative assertion below passes for the
+    // wrong reason and the positive ones fail for the wrong reason. The
+    // `toContain` here is what actually catches that; the length check does
+    // NOT, because a one-character slice is still length 1. The length check
+    // is redundant belt-and-braces, not the sole catcher of anything — an
+    // empty document fails `toContain` on its own too.
+    expect(HAVEN_SKILL_MD).toContain('haven_complete_mcp_tool')
+    expect(completeSection.length).toBeGreaterThan(0)
+  })
+
+  it('the deleted imperative stays deleted, so the comment\'s past tense stays true', () => {
+    // If this fails: `SKILL.md` tells agents to pass `payment_required` again,
+    // so the STRICT_INPUT_TOOLS bullet's "that guidance is FIXED" is false and
+    // the blocker is correctness again, not rollout. Fix both.
+    expect(completeSection).not.toMatch(/Pass\s+`payment_required`/)
+  })
+
+  it('the correction stays present, so the rollout framing keeps its subject', () => {
+    // If this fails: there is no corrected copy to propagate, and "what gates
+    // the switch is ROLLOUT" in the STRICT_INPUT_TOOLS bullet has nothing to
+    // refer to.
+    expect(completeSection).toMatch(/does not take\s+`payment_required`/)
+    expect(completeSection).toMatch(/`payment_id`\s+and the signer's\s+`payment_header`\s+ONLY/)
+  })
+
+  it('and the tool it argues about is still permissive', () => {
+    // The comment justifies an EXCLUSION. If the tool ever joins the set, this
+    // whole block is about a decision that was reversed.
+    expect(Object.keys(STRICT_INPUT_TOOLS)).not.toContain('haven_complete_mcp_tool')
   })
 })

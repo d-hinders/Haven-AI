@@ -460,17 +460,40 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
  *     re-check found a live caller for it, which is the whole reason that
  *     re-check exists. Haven's own agent-facing skill text — downloaded as
  *     `SKILL.md` from the connect success screen and auto-installed by
- *     `@haven_ai/connect` — says of this tool: "Pass `payment_required`,
+ *     `@haven_ai/connect` — SAID of this tool: "Pass `payment_required`,
  *     `arguments`, and `mcp_transport` verbatim from the quote/prepare
  *     result." This tool has never declared `payment_required`; the 402 is
  *     read from the stored record. So an agent following Haven's own
- *     instructions passes it, has it silently dropped, and succeeds — this
- *     issue's exact defect, live, in our own guidance. Making the tool strict
- *     before fixing the guidance would convert Haven's documented flow into a
- *     hard 400 for every agent carrying the shipped skill. The guidance is the
- *     bug and it is fixed first: #2353, which owns both byte-pinned copies
- *     (`packages/sdk/src/skill-content.ts` and the frontend twin) and this
- *     tool's switch.
+ *     instructions passed it, had it silently dropped, and succeeded — this
+ *     issue's exact defect, live, in our own guidance.
+ *
+ *     **That guidance is FIXED, and the blocker has MOVED (#2363).** #2353's
+ *     PR #2359 rewrote the paragraph in both byte-pinned copies
+ *     (`packages/sdk/src/skill-content.ts` and its frontend twin
+ *     `packages/frontend/src/lib/agent-skill-bundle.ts`): the skill now says
+ *     to call this tool with `payment_id` and the signer's `payment_header`
+ *     ONLY, and names `payment_required` as a field it does not take. #2359
+ *     shipped the copies and deliberately did NOT ship this tool's switch, so
+ *     do not read the paragraph above as "the guidance is still wrong, so we
+ *     still cannot" — that premise is spent.
+ *
+ *     What gates the switch now is ROLLOUT, not correctness. The skill is
+ *     AUTO-INSTALLED on the caller's machine, so an unknown number of agents
+ *     carry the OLD copy on disk right now; flipping this tool strict before
+ *     the corrected copy propagates would still turn Haven's own documented
+ *     flow into a hard 400 for every one of them — and now for a reason that
+ *     no longer exists anywhere in this repository, which is the harder
+ *     failure to diagnose, not the easier one. #2353 stays OPEN for exactly
+ *     that decision and owns the switch; the propagation evidence is what it
+ *     is waiting on, not another guidance fix. Related: #2366 (converge the
+ *     local and hosted argument spellings) and #2349 (batch 3).
+ *
+ *     Both halves of that premise are pinned, not merely written down.
+ *     `packages/sdk/src/skill-content.test.ts` asserts the deleted imperative
+ *     stays deleted and the correction stays present; the `#2363` block in
+ *     `strict-tool-input.test.ts` re-asserts the same two literals HERE, so a
+ *     revert of the skill text goes red in the suite of the file that carries
+ *     this exclusion rather than only in the SDK's.
  *   - `haven_get_agent`, `haven_get_allowances` — schema `{}`. Strict on an
  *     empty object refuses EVERY key, so any client that decorates a
  *     no-argument call breaks, for no money-path gain. #2349.

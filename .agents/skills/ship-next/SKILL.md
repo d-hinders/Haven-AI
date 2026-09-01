@@ -353,6 +353,16 @@ you need the reasoning. Never edit one without the other — CI will not let you
   actually lives here since #987 — the `domain/machine-payment-lifecycle.ts` line
   above guards the backend re-export shim, not the code — #1905);
 - `middleware/agentAuth.ts`;
+- `packages/mcp-server/src/**` (the hosted MCP tool surface — #2300. `tools.ts`
+  decides *whether* a funding userop is relayed and *in what order*, and four
+  money defects lived in it with no money-path label by the file half: #2282's
+  funding-before-merchant-context relay, #2312's silently stripped `tx_hash`,
+  #2348's stripped `idempotencyKey` that made a retry a second spend, and
+  #2051's merchant-steerable cap bypass. Runtime `globs`, not control: the
+  hosted MCP deploys from `dev` and the money-flow harness drives it through
+  `QA_HOSTED_MCP_URL`, so a green run really does cover it — the argument the
+  frontend decision surfaces could not make. Scoped to `src/**` on a measured
+  2-of-55-commits delta for the package's README/Dockerfile/config files);
 - `db/migrations/`;
 - the safeguard's own control surface — `scripts/release-bump.mjs`,
   `scripts/ci/qa-freshness.mjs`, `scripts/ci/money-path.test.mjs`,

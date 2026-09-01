@@ -160,7 +160,7 @@ describe('agentAuthMiddleware', () => {
 
   it('rejects an agent whose Safe binding was removed even if the user mirror has another address', async () => {
     const app = buildApp()
-    mockQuery.mockResolvedValueOnce({
+    mockQuery.mockImplementation(async () => ({
       rows: [{
         id: 'agent-unlinked',
         user_id: 'user-1',
@@ -173,7 +173,7 @@ describe('agentAuthMiddleware', () => {
         status: 'active',
         has_bound_safe: false,
       }],
-    })
+    }))
 
     const response = await app.inject({
       method: 'GET',

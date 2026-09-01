@@ -7,7 +7,7 @@ covers:
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
   - .github/workflows/publish.yml
-last-verified: "2026-08-31" # #2320/#2327: the two operator-verify passages (the `dev`-default bullet and the agent checklist) both scoped the `Refs #<n>` rule to the pull-request body. Both now name the commit messages and the title, which reach `dev` as well — PR #2314 closed #2268 from a commit while its body was correct — it closed only its own issue, #2276, confirmed against the merged pull request. Scope: those two bullets only; the branch model, the promotion/merge-method rules, the issue-state table, the branch-lifetime section and the release wiring were NOT re-verified in this pass. Prior: #2276: the issue-lifecycle half of this doc read as though every merge closes its issue. It does not: ship-next's operator-verify mode ships the code and keeps the issue open for a human step, which `Closes #<n>` silently defeats (#2268, closed by PR #2272's merge). The `dev`-merge bullet, the issue-state table and the agent checklist now carry the `Refs #<n>` / `operator-verify` exception. Scope: those three passages only — the branch model, the promotion/merge-method rules, the branch-lifetime section and the release wiring were NOT re-verified in this pass. Prior: #2165: the never-squash promotion rule is now ENFORCED by the `Dev gate` ruleset (`allowed_merge_methods: ["merge"]` on any PR based on `main`), not left to the reader — it was prose-only and #2161 was squash-merged by a UI default. Section gains the enforcement note, the `hotfix/* → main` answer (branch rulesets gate the ref written to, so head-branch names do not matter) and why `dev` deliberately keeps squash. The rest of the section was re-read against the live rulesets: the BEHIND/sync-back rule and the `-s ours` recovery pointer still hold, and #2162 exercised the sync-back end to end. Prior: #1500: Branch-lifetime section added; the #1335/#1336 sync-back rule (dev re-absorbs main's merge commit post-promotion) still holds
+last-verified: "2026-09-02" # #2387: this doc taught the closing keyword by illustration only — seven code-spanned sites in the body (lines 28, 30, 45, 114, 115, 218, 222 on `origin/dev` 435b958d; `/usr/bin/grep -nE '`(Closes|Refs) #'`, control first: `/usr/bin/grep -c 'dev'` = 46 lines) and no sentence saying what an author EMITS, while the `CLAUDE.md` Branch model callout that #2385 fixed names this file as the canonical reference. One note added under the TL;DR, quoting `autonomous-pr-loop.md`'s operative sentence verbatim rather than paraphrasing the rule a fourth time, with the #2337 evidence for why bare is a rule and not a style; plus a pointer on the agent checklist's `Closes` bullet. No illustration lost its code span; the `Refs #<n>` exception is untouched and the note names it as the one case the bare closing keyword is wrong. Scope: ONLY the new note and that pointer; the branch model, the promotion/merge-method rules, the issue-state table, the branch-lifetime section and the release wiring were NOT re-verified in this pass. Prior: #2320/#2327: the two operator-verify passages (the `dev`-default bullet and the agent checklist) both scoped the `Refs #<n>` rule to the pull-request body. Both now name the commit messages and the title, which reach `dev` as well — PR #2314 closed #2268 from a commit while its body was correct — it closed only its own issue, #2276, confirmed against the merged pull request. Scope: those two bullets only; the branch model, the promotion/merge-method rules, the issue-state table, the branch-lifetime section and the release wiring were NOT re-verified in this pass. Prior: #2276: the issue-lifecycle half of this doc read as though every merge closes its issue. It does not: ship-next's operator-verify mode ships the code and keeps the issue open for a human step, which `Closes #<n>` silently defeats (#2268, closed by PR #2272's merge). The `dev`-merge bullet, the issue-state table and the agent checklist now carry the `Refs #<n>` / `operator-verify` exception. Scope: those three passages only — the branch model, the promotion/merge-method rules, the branch-lifetime section and the release wiring were NOT re-verified in this pass. Prior: #2165: the never-squash promotion rule is now ENFORCED by the `Dev gate` ruleset (`allowed_merge_methods: ["merge"]` on any PR based on `main`), not left to the reader — it was prose-only and #2161 was squash-merged by a UI default. Section gains the enforcement note, the `hotfix/* → main` answer (branch rulesets gate the ref written to, so head-branch names do not matter) and why `dev` deliberately keeps squash. The rest of the section was re-read against the live rulesets: the BEHIND/sync-back rule and the `-s ours` recovery pointer still hold, and #2162 exercised the sync-back end to end. Prior: #1500: Branch-lifetime section added; the #1335/#1336 sync-back rule (dev re-absorbs main's merge commit post-promotion) still holds
 ---
 
 # Branch & release flow
@@ -36,6 +36,33 @@ feature/* or claude/*  →  dev  →  main
 - **`main` is production.** Only `dev` or `hotfix/*` may merge in (enforced by
   `dev-gate`). Each promotion to `main` cuts a **`prod-*` GitHub Release** and
   refreshes the **pending-promotion** issue.
+
+> **Every keyword in this document is quoted, never emitted — write yours bare
+> (#2382).** The code spans around `Closes #<n>` and `Refs #<n>` on this page are
+> the doc writing *about* the keyword, in a form GitHub does not parse; they are
+> not part of what you type. The rule is stated once, in
+> [`autonomous-pr-loop.md`](autonomous-pr-loop.md), and quoted here rather than
+> rephrased: *"The keyword you actually emit is bare, in the body, the
+> pull-request title and the commit messages alike; the pull-request template's
+> Issue Link placeholders are bare for the same reason."* A backticked keyword in a
+> **body** reads as correct and closes nothing — GitHub's body parse respects
+> Markdown rendering (PR #2364, #2382) — while the same bytes in a **commit
+> message** or the **title**, which nothing renders, do close the issue (#2320).
+>
+> That asymmetry is why bare is a rule and not a style. Every way of quoting or
+> escaping the keyword that has been tried either still fires or hides it from
+> the merge-time guard while GitHub still acts: a fenced or blockquoted keyword
+> is parsed — a code span in a commit message is how #2268 was closed a second
+> time, by the pull request that shipped the guard; an HTML entity is decoded by
+> GitHub before parsing, while the guard's regex sees only the raw bytes. The
+> guard's own reading had a blind spot of the same shape until #2337: a keyword
+> straddling the 70th character of a commit subject came back from
+> `gh pr view --json commits` split mid-token, invisible to the guard and live
+> to GitHub. All three were measured in #2337, where the guard grew its
+> commit-message and title readers. Bare is the one form GitHub and the guard
+> read identically. The
+> `Refs #<n>` exception above is the one case the bare *closing* keyword is
+> wrong — and `Refs` is written bare too, so the issue stays linked.
 
 ## Branches
 
@@ -215,8 +242,9 @@ close on dev-merge). Full ruleset/auto-merge setup is in
 
 ## For agents (and `ship-next`)
 
-- Branch off `dev`; open PRs with base `dev`; include `Closes #<n>` — the
-  dev-merge closes the issue. **Don't** manually close issues, and **don't** read
+- Branch off `dev`; open PRs with base `dev`; include `Closes #<n>`, written
+  bare (see the note under the TL;DR) — the dev-merge closes the issue. **Don't**
+  manually close issues, and **don't** read
   "issue closed" as "shipped to prod".
 - **Except in operator-verify mode:** when a human operator step is still
   outstanding, label the issue `operator-verify` and reference it as `Refs #<n>`,

@@ -148,14 +148,28 @@
 //   * For **commit messages and the title**, fencing provably does not help.
 //     Neither is rendered as Markdown by anything, and `7f7102ff` closed #2268
 //     with the keyword inside a code span. Measured.
-//   * For the **body**, whether GitHub's `closingIssuesReferences` respects
-//     Markdown rendering is **not established here**, and the honest answer is
-//     that nobody on this change verified it. `haven-doc-reviewer` tried and
-//     could not construct a clean discriminating example. The guard assumes it
-//     does not, because that is the safe direction — over-firing costs one
-//     reworded sentence, and under-firing costs a silently closed issue, which
-//     is the asymmetry this whole file is built on. Do not restate the
-//     assumption as a finding.
+//   * For the **body**, this once said the question was not established, and
+//     that nobody had managed to construct a clean discriminating example. One
+//     arrived (#2382), and it settles it the other way: GitHub's
+//     `closingIssuesReferences` DOES respect Markdown rendering, so a keyword
+//     inside a code span in the BODY parses as nothing. The input condition:
+//     PR #2364's body carried the keyword backticked. Three independent readings
+//     of the outcome, all agreeing — `closingIssuesReferences` on the merged pull
+//     request came back EMPTY; no commit message or title named the issue with a
+//     parseable keyword (checked under this file's own over-firing regex, so a
+//     fenced one would have counted); and #2361 was then closed by hand 109
+//     seconds after the merge, actor `d-hinders`, `commit_id: null` on the
+//     timeline event. Counted carefully: the backticked body is the condition
+//     under test, not a fourth reading of the result.
+//
+//     The guard nonetheless still treats a fenced BODY keyword as live. That is
+//     now a deliberate over-fire rather than an assumption, and it stays: the
+//     identical bytes in a commit message or the title DO close the issue —
+//     nothing renders those as Markdown — and this guard reads all three
+//     surfaces together, so a body-only exemption would be an escape hatch on
+//     the one surface an author is most likely to copy from. Over-firing costs
+//     one reworded sentence; under-firing costs a silently closed issue, which
+//     is the asymmetry this whole file is built on.
 //
 // The escape is real, not notational: **write something GitHub does not parse.**
 // One form that is NOT an escape, measured the hard way on the pull request that

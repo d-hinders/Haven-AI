@@ -126,6 +126,10 @@ export async function lockOwnedNonRevokedDelegationAgent(
   const result = await db.query(
     `SELECT id FROM agents
      WHERE id = $1 AND user_id = $2 AND status <> 'revoked'
+       AND EXISTS (
+         SELECT 1 FROM user_safes us
+         WHERE us.id = agents.safe_id AND us.account_type = 'delegator_hybrid'
+       )
      FOR UPDATE`,
     [agentId, userId],
   )
@@ -683,7 +687,7 @@ export async function resumeAgent(
  */
 export const AGENT_BY_API_KEY_SQL = `
   SELECT a.id, a.user_id, a.name, a.delegate_address,
-         a.status,
+         a.status, a.archived_at,
          COALESCE(us.safe_address, u.safe_address) as safe_address,
          COALESCE(us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
          us.execution_rail, us.account_type,
@@ -701,6 +705,7 @@ export interface AgentAuthRow {
   safe_address: string | null
   chain_id: number
   status: string
+  archived_at: string | null
   execution_rail: string | null
   account_type: string | null
   has_bound_safe: boolean

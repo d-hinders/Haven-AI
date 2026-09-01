@@ -13,6 +13,7 @@
 import pool from '../../db.js'
 import { withTransaction, type Executor } from '../transaction.js'
 import type { RekeyStage } from '../../modules/agents/index.js'
+import { lockOwnedNonRevokedDelegationAgent } from './agents.js'
 
 export interface AgentRekeyRow {
   id: string
@@ -167,6 +168,7 @@ export const INSERT_REKEY_DELEGATION_SQL = `INSERT INTO agent_delegations (
 export async function insertRekeyDelegation(
   row: {
     agentId: string
+    userId: string
     chainId: number
     tokenAddress: string
     recipientAddress: string | null
@@ -181,22 +183,30 @@ export async function insertRekeyDelegation(
     carryRole: string
   },
   db: Executor = pool,
-): Promise<void> {
-  await db.query(INSERT_REKEY_DELEGATION_SQL, [
-    row.agentId,
-    row.chainId,
-    row.tokenAddress,
-    row.recipientAddress ? row.recipientAddress.toLowerCase() : null,
-    row.delegationHash,
-    row.delegationJson,
-    row.version,
-    row.budgetAtomic,
-    row.periodSeconds,
-    row.startDate,
-    row.expiresAt,
-    row.rekeyId,
-    row.carryRole,
-  ])
+): Promise<boolean> {
+  return withTransaction(db, async (tx) => {
+    // Safe unlink locks this same agent row before orphaning it. Holding the
+    // lock through the insert makes the race deterministic: either the
+    // pending replacement exists and unlink refuses, or the unlinked agent
+    // fails the delegation-rail eligibility check and no row is created.
+    if (!(await lockOwnedNonRevokedDelegationAgent(row.agentId, row.userId, tx))) return false
+    await tx.query(INSERT_REKEY_DELEGATION_SQL, [
+      row.agentId,
+      row.chainId,
+      row.tokenAddress,
+      row.recipientAddress ? row.recipientAddress.toLowerCase() : null,
+      row.delegationHash,
+      row.delegationJson,
+      row.version,
+      row.budgetAtomic,
+      row.periodSeconds,
+      row.startDate,
+      row.expiresAt,
+      row.rekeyId,
+      row.carryRole,
+    ])
+    return true
+  })
 }
 
 export const LIST_PENDING_REKEY_DELEGATIONS_SQL = `SELECT id, delegation_hash, delegation_json FROM agent_delegations

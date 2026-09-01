@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   FIND_OLDEST_SAFE_FOR_USER_SQL,
+  HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL,
+  LOCK_AGENTS_FOR_SAFE_SQL,
   FIND_OWNED_SAFE_ADDRESS_SQL,
   FIND_OWNED_SAFE_DEFAULT_FLAG_SQL,
   CLEAR_DEFAULT_SAFES_FOR_USER_SQL,
@@ -121,5 +123,24 @@ describe('transaction functions keep their statement order and scope', () => {
     expect(sqls.findIndex((s) => s.includes('self_sign_agents'))).toBeLessThan(
       sqls.findIndex((s) => s.startsWith('DELETE FROM user_safes')),
     )
+  })
+
+  it('deleteSafeForUser: keeps a Safe linked when an agent still has live delegation authority', async () => {
+    const calls: Array<[string, unknown[] | undefined]> = []
+    const db = {
+      query: async (sql: string, values?: unknown[]) => {
+        calls.push([sql, values])
+        if (sql === HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL) {
+          return { rows: [{ live: true }], rowCount: 1 }
+        }
+        return { rows: [], rowCount: 0 }
+      },
+    } as unknown as Executor
+
+    expect(await deleteSafeForUser('safe-1', OWNER, false, db)).toBe(false)
+    expect(calls.map(([sql]) => sql)).toEqual([
+      LOCK_AGENTS_FOR_SAFE_SQL,
+      HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL,
+    ])
   })
 })

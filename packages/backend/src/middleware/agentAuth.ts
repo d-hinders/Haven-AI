@@ -23,6 +23,8 @@ export interface AgentContext {
   safe_address: string
   chain_id: number
   status: string
+  /** Present for API-key lookups; older in-process fixtures may omit it. */
+  archived_at?: string | null
   /** The account's execution rail (#821): 'delegation' routes to the new rail. */
   execution_rail?: string | null
   account_type?: string | null
@@ -133,6 +135,13 @@ export async function agentAuthMiddleware(
     })
   }
 
+  // Archived records stay readable in the dashboard, but their API keys must
+  // no longer authenticate. Check this independently of lifecycle status:
+  // legacy records may be archived while still marked active or paused.
+  if (row.archived_at) {
+    return reply.code(401).send({ error: 'Invalid or revoked API key' })
+  }
+
   // Positive allow-list: only 'active' and 'paused' agents are recognised;
   // everything else (including 'revoked' and any future status strings) is
   // rejected. Using an explicit allow-list prevents unknown future statuses
@@ -174,6 +183,7 @@ export async function agentAuthMiddleware(
     safe_address: row.safe_address,
     chain_id: row.chain_id,
     status: row.status,
+    archived_at: row.archived_at ?? null,
     execution_rail: row.execution_rail ?? null,
     account_type: row.account_type ?? null,
     // Characterization fakes from before this field existed omit it; the

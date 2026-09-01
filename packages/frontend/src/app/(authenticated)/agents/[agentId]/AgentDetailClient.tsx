@@ -589,13 +589,24 @@ export default function AgentDetailClient({ agentId }: Props) {
       {currentAgent.account_type !== 'delegator_hybrid' ? (
         <div className="mt-6">
           <RetiredRailNotice ownerAccess={retiredRail.ownerAccess} />
-          {!isArchived ? (
+          {isArchived ? (
+            <div className="mt-3 flex justify-end">
+              <Button
+                onClick={() => void handleRestore()}
+                disabled={pendingAction !== null}
+                variant="ghost"
+                size="sm"
+              >
+                {pendingAction === 'restore' ? 'Restoring…' : 'Restore to list'}
+              </Button>
+            </div>
+          ) : (
             <div className="mt-3 flex justify-end">
               <Button variant="danger" size="sm" onClick={() => setRemoveOpen(true)}>
                 Unlink agent
               </Button>
             </div>
-          ) : null}
+          )}
         </div>
       ) : null}
 

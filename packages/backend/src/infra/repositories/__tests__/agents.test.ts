@@ -68,10 +68,16 @@ describeDb('delegation lifecycle owner read (#2025)', () => {
       `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
       [`grant-eligibility-${Date.now()}@test.example`],
     )
+    const safe = await db.query<{ id: string }>(
+      `INSERT INTO user_safes (user_id, safe_address, name, is_default, account_type)
+       VALUES ($1, '0x1111111111111111111111111111111111111111', 'Delegation account', true, 'delegator_hybrid')
+       RETURNING id`,
+      [user.rows[0].id],
+    )
     const [revoked, active] = await Promise.all(['revoked', 'active'].map(async (status) => {
       const result = await db.query<{ id: string }>(
-        `INSERT INTO agents (user_id, name, status) VALUES ($1, $2, $3) RETURNING id`,
-        [user.rows[0].id, `${status} grant`, status],
+        `INSERT INTO agents (user_id, safe_id, name, status) VALUES ($1, $2, $3, $4) RETURNING id`,
+        [user.rows[0].id, safe.rows[0].id, `${status} grant`, status],
       )
       return result.rows[0].id
     }))

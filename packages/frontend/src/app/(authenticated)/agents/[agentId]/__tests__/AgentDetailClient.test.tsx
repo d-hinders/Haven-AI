@@ -789,6 +789,14 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.getByRole('button', { name: 'Restore to list' })).toBeInTheDocument()
   })
 
+  it('offers Restore to list for an archived legacy record without adding authority (#2258)', () => {
+    mockAgentWith({ account_type: undefined, status: 'revoked', archived_at: '2026-06-01T00:00:00Z' })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getByRole('button', { name: 'Restore to list' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Unlink agent' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Remove agent' })).not.toBeInTheDocument()
+  })
+
   it('double-clicking Restore fires unarchive ONCE — pendingAction guards it (#1402)', async () => {
     let release!: () => void
     const unarchiveAgent = vi.fn(

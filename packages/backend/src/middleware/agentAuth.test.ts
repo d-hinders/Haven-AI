@@ -66,19 +66,17 @@ describe('agentAuthMiddleware', () => {
     await app.close()
   })
 
-  it('an ARCHIVED agent\'s key is rejected — pinned, not an emergent property (#1401)', async () => {
-    // Archive requires status='revoked' and the allow-list only admits
-    // active/paused, so this holds by construction today. The test exists so
-    // a future status refactor cannot silently let archived agents
-    // authenticate: the row below is exactly what an archived agent looks
-    // like, and it must 401.
+  it('an ARCHIVED active agent\'s key is rejected — status alone cannot reopen it (#1401)', async () => {
+    // Legacy records may be archived while still marked active or paused.
+    // Archive is a filing action, not a lifecycle transition, so auth must
+    // check archived_at independently of the positive status allow-list.
     const app = buildApp()
     mockQuery.mockImplementation(async () => ({
       rows: [{
         id: 'agent-1', user_id: 'user-1', name: 'A',
         delegate_address: '0x1111111111111111111111111111111111111111',
         safe_address: '0x2222222222222222222222222222222222222222',
-        chain_id: 100, status: 'revoked', archived_at: '2026-08-14T12:00:00.000Z',
+        chain_id: 100, status: 'active', archived_at: '2026-08-14T12:00:00.000Z',
       }],
     }))
     const response = await app.inject({

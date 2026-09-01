@@ -667,6 +667,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       const loaded = await loadStep(request, reply)
       if (!loaded) return reply
       const { agent, rekey } = loaded
+      const { sub } = request.user as { sub: string }
       // THE ordering guard. `metered` is only reachable through `revoked`, so
       // requiring it here forbids issue-before-revoke structurally rather
       // than by convention.
@@ -809,8 +810,9 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
               .send({ error: 'Could not build the replacement delegation', details: safeDetails(err) })
           }
           const hash = delegationIdentity(delegation)
-          await insertRekeyDelegation({
+          const inserted = await insertRekeyDelegation({
             agentId: request.params.id,
+            userId: sub,
             chainId: agent.chain_id,
             tokenAddress: entry.token_address,
             recipientAddress: entry.recipient_address,
@@ -824,6 +826,9 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
             rekeyId: rekey.id,
             carryRole: piece.role,
           })
+          if (inserted === false) {
+            return reply.code(409).send({ error: 'Unlinked agents cannot receive new budget delegations' })
+          }
           built.push({
             delegation_hash: hash,
             carry_role: piece.role,

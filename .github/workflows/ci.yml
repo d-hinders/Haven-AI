@@ -457,6 +457,21 @@ jobs:
           npm run lint:wire-types
           npm run lint:wire-types:test
 
+      # #2318. The OWNING invocation, and the reason it is here rather than
+      # only beside the pixel gate: a pull request that touches nothing but
+      # this guard must still run it. `design_visual` is gated on the frontend
+      # surface, so routing has to reach the guard through a `<flag>_checks`
+      # job — which is exactly what `.github/root-guard-ownership.json` records
+      # and `scripts/ci/root-guard-ownership.test.mjs` checks (#1626). Here it
+      # is the GUARD (it exits non-zero on an empty baseline tree); in
+      # `design_visual` the same command is the SUMMARY, printed next to the
+      # tick a reader is about to over-read. Same command in both places on
+      # purpose — two spellings of one check is how they drift.
+      - name: Visual baseline inventory (#2318)
+        run: |
+          npm run visual:baselines
+          npm run visual:baselines:test
+
       - name: Run frontend unit tests
         run: npm run test -w packages/frontend
 
@@ -631,14 +646,40 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: packages/frontend
 
-      # Blocking visual guard (#897): /design-system pixel-compared against
-      # committed Linux baselines. Intended changes: regenerate via the
+      # Blocking visual guard (#897): every `*.visual.spec.ts`, pixel-compared
+      # against committed Linux baselines. Intended changes: regenerate via the
       # "Update visual baselines" workflow (workflow_dispatch on the branch).
-      - name: Visual regression — /design-system
+      #
+      # ── The step name used to say `/design-system`, and that was the bug ────
+      #
+      # #2318. This step has run `playwright test .visual.spec.ts` since #897,
+      # which is now five spec files — `/design-system`, four element-scoped
+      # clips on `/agents`, and (new in #2318) whole-page captures of
+      # `/dashboard` and `/transactions`. The name named one of them, so the
+      # tick was read as "the UI is unchanged" while measuring a set nobody
+      # could see from here. Adding routes narrows that gap; the summary step
+      # below closes the part adding routes cannot, by naming the compared
+      # baselines where the person reading the tick is looking.
+      #
+      # The JOB name (`Design visual regression`) is deliberately NOT renamed:
+      # it is the identity a branch ruleset matches a required check by, so
+      # renaming it silently drops the requirement on `dev` until someone
+      # updates the ruleset by hand. Step names carry no such contract.
+      - name: Visual regression — every *.visual.spec.ts
         run: npm run test:visual -w packages/frontend
         env:
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
           NEXT_TELEMETRY_DISABLED: 1
+
+      # #2318. Runs on success AND on failure: a reader who has just seen this
+      # gate go red needs the inventory at least as much as one who saw it go
+      # green. It exits non-zero only on an empty baseline tree — the case where
+      # the gate above passes having compared nothing (Playwright writes missing
+      # snapshots on a first run), which is #1738's blank-capture family one
+      # level up. Self-tested in `Repo CI config checks`.
+      - name: Report which baselines were compared
+        if: always()
+        run: npm run visual:baselines
 
       - name: Upload visual diff artifacts
         if: failure()

@@ -103,6 +103,7 @@ import {
   markRevoked,
   nextDelegationVersion,
   openRekey,
+  RekeyOpenConflictError,
   type AgentRekeyRow,
   type CarrySnapshotEntry,
   type RekeyAgentRow,
@@ -136,6 +137,15 @@ function orderingReply(reply: FastifyReply, err: RekeyOrderingError): FastifyRep
     required_stage: err.required,
     detail: err.message,
   })
+}
+
+function isPgUniqueViolation(err: unknown): boolean {
+  return Boolean(
+    err &&
+      typeof err === 'object' &&
+      'code' in err &&
+      (err as { code?: unknown }).code === '23505',
+  )
 }
 
 /**
@@ -330,15 +340,34 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       }
     }
 
-    const rekey = await openRekey({
-      agentId: request.params.id,
-      userId: sub,
-      oldDelegateAddress: agent.delegate_address,
-      newDelegateAddress: new_delegate_address,
-      residualAtomic: residualAtomic.toString(),
-      residualTokenAddress: residualAtomic > 0n ? (residualToken as string) : null,
-      residualDisposition: residualAtomic > 0n ? (disposition as string) : 'none',
-    })
+    let rekey: AgentRekeyRow
+    try {
+      rekey = await openRekey({
+        agentId: request.params.id,
+        userId: sub,
+        oldDelegateAddress: agent.delegate_address,
+        newDelegateAddress: new_delegate_address,
+        residualAtomic: residualAtomic.toString(),
+        residualTokenAddress: residualAtomic > 0n ? (residualToken as string) : null,
+        residualDisposition: residualAtomic > 0n ? (disposition as string) : 'none',
+      })
+    } catch (err) {
+      if (!(err instanceof RekeyOpenConflictError) && !isPgUniqueViolation(err)) throw err
+      const existing = await findInFlightRekey(request.params.id)
+      if (existing) {
+        return reply.code(409).send({
+          error: 'rekey_already_in_flight',
+          rekey_id: existing.id,
+          stage: existing.stage,
+          new_delegate_address: existing.new_delegate_address,
+          detail: 'A re-key is already in progress for this agent. Finish or abandon it first.',
+        })
+      }
+      return reply.code(409).send({
+        error: 'rekey_unavailable',
+        detail: 'The agent account changed while this re-key was starting. Refresh and try again.',
+      })
+    }
 
     const targets = await listNonRevokedDelegationsForAgent(request.params.id)
     return reply.code(201).send({

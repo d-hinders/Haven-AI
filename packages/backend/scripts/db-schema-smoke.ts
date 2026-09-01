@@ -27,12 +27,17 @@ import { getPool } from '../src/db.js'
 import { selectDelegation } from '../src/rails/delegation-authorization.js'
 import { runMigrations } from '../src/db/migrate.js'
 import {
+  LOCK_OWNED_AGENT_FOR_REKEY_OPENING_SQL,
+} from '../src/infra/repositories/agents.js'
+import {
   ACTIVATE_PENDING_DELEGATION_SQL,
   SELECT_DELEGATION_FOR_PAYMENT_SQL,
 } from '../src/infra/repositories/delegation-budgets.js'
 import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-signers.js'
 import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
 import {
+  HAS_IN_FLIGHT_REKEYS_FOR_SAFE_SQL,
+} from '../src/infra/repositories/user-safes.js'
   CLAIM_NEXT_OUTBOUND_TX_SQL,
   CLAIM_ORPHANED_OUTBOUND_TX_SQL,
   COUNT_LANE_ATTEMPTS_AT_NONCE_SQL,
@@ -534,6 +539,14 @@ const QUERIES: SmokeQuery[] = [
   {
     name: 'delegations: conditional activation (pending only)',
     sql: ACTIVATE_PENDING_DELEGATION_SQL,
+  },
+  {
+    name: 'agents: lock before opening re-key',
+    sql: LOCK_OWNED_AGENT_FOR_REKEY_OPENING_SQL,
+  },
+  {
+    name: 'safes: refuse unlink during in-flight re-key',
+    sql: HAS_IN_FLIGHT_REKEYS_FOR_SAFE_SQL,
   },
   // Repository extractions landed by #999 (baseline-to-zero): fee ledger,
   // Fortnox connection, reporting-feed dedup ledger, user passkeys, safe

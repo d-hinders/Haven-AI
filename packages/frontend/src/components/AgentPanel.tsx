@@ -23,6 +23,7 @@ import { Skeleton } from './ui/Skeleton'
  * `./agent-panel/`.
  */
 export default function AgentPanel() {
+  const removedAgentsPanelId = 'removed-agent-list'
   const panel = useAgentPanelState()
   const { activeSafe } = useAuth()
   const retiredRail = useRetiredRailOwnerAccess(activeSafe)
@@ -264,7 +265,10 @@ export default function AgentPanel() {
           {removedAgents.length > 0 && (
             <div className="pt-1">
               <button
+                type="button"
                 onClick={() => panel.setShowRemovedAgents((prev) => !prev)}
+                aria-expanded={panel.showRemovedAgents}
+                aria-controls={removedAgentsPanelId}
                 className="inline-flex min-h-11 items-center gap-2 rounded-md px-1 text-xs text-[var(--v2-ink-2)] transition-colors hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]"
               >
                 <Icon
@@ -277,26 +281,30 @@ export default function AgentPanel() {
             </div>
           )}
 
-          {panel.showRemovedAgents && (
-            <div className="grid items-start gap-4 lg:grid-cols-2">
-              {removedAgents.map((agent) => (
-                <AgentCard
-                  key={agent.id}
-                  agent={agent}
-                  onViewDetails={panel.handleViewDetails}
-                  onEdit={panel.handleEdit}
-                  onPause={panel.handlePause}
-                  onResume={panel.handleResume}
-                  onRevokeCredential={panel.revokeAgentCredential}
-                  onArchive={panel.handleArchive}
-                  onRestore={panel.handleRestore}
-                  busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
-                  canUseWalletActions={panel.agentUsesActiveSafe(agent)}
-                  chainId={agent.safe_chain_id ?? chainId}
-                />
-              ))}
-            </div>
-          )}
+          <div
+            id={removedAgentsPanelId}
+            hidden={!panel.showRemovedAgents}
+            role="group"
+            aria-label="Removed agents"
+            className="grid items-start gap-4 lg:grid-cols-2"
+          >
+            {removedAgents.map((agent) => (
+              <AgentCard
+                key={agent.id}
+                agent={agent}
+                onViewDetails={panel.handleViewDetails}
+                onEdit={panel.handleEdit}
+                onPause={panel.handlePause}
+                onResume={panel.handleResume}
+                onRevokeCredential={panel.revokeAgentCredential}
+                onArchive={panel.handleArchive}
+                onRestore={panel.handleRestore}
+                busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
+                canUseWalletActions={panel.agentUsesActiveSafe(agent)}
+                chainId={agent.safe_chain_id ?? chainId}
+              />
+            ))}
+          </div>
 
         </div>
       )}

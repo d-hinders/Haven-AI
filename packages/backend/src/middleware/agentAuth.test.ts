@@ -90,6 +90,25 @@ describe('agentAuthMiddleware', () => {
     await app.close()
   })
 
+  it('allows an ARCHIVED agent key only for exact sweep recovery routes', async () => {
+    const app = buildApp()
+    mockQuery.mockResolvedValue({
+      rows: [{
+        id: 'agent-1', user_id: 'user-1', name: 'A',
+        delegate_address: '0x1111111111111111111111111111111111111111',
+        safe_address: '0x2222222222222222222222222222222222222222',
+        chain_id: 100, status: 'revoked', archived_at: '2026-08-14T12:00:00.000Z',
+      }],
+    })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/sweep/prepare',
+      headers: { authorization: 'Bearer sk_agent_archived' },
+    })
+    expect(response.statusCode).toBe(200)
+    await app.close()
+  })
+
   it('revoked and unknown future statuses still 401 — the allow-list stays positive', async () => {
     for (const status of ['revoked', 'some_future_status']) {
       const app = buildApp()

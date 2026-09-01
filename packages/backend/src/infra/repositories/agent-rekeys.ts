@@ -13,7 +13,10 @@
 import pool from '../../db.js'
 import { withTransaction, type Executor } from '../transaction.js'
 import type { RekeyStage } from '../../modules/agents/index.js'
-import { lockOwnedAgentForRekeyDelegation } from './agents.js'
+import {
+  lockOwnedAgentForRekeyDelegation,
+  lockOwnedAgentForRekeyOpening,
+} from './agents.js'
 
 export interface AgentRekeyRow {
   id: string
@@ -244,10 +247,18 @@ export const INSERT_REKEY_SQL = `INSERT INTO agent_rekeys
    VALUES ($1, $2, LOWER($3), LOWER($4), $5, LOWER($6), $7)
    RETURNING *`
 
+export class RekeyOpenConflictError extends Error {
+  constructor() {
+    super('The agent is no longer eligible to open a re-key')
+    this.name = 'RekeyOpenConflictError'
+  }
+}
+
 /**
- * Open a re-key. The partial unique index on the in-flight stages is what
- * makes "at most one re-key per agent" true rather than merely checked — a
- * second concurrent open raises a unique violation instead of racing.
+ * Open a re-key. The agent-row lock serializes this insert with new-grant
+ * admission, while the partial unique index makes "at most one re-key per
+ * agent" true rather than merely checked — a second concurrent open still
+ * raises a unique violation instead of racing.
  */
 export async function openRekey(
   input: {
@@ -261,16 +272,21 @@ export async function openRekey(
   },
   db: Executor = pool,
 ): Promise<AgentRekeyRow> {
-  const result = await db.query<AgentRekeyRow>(INSERT_REKEY_SQL, [
-    input.agentId,
-    input.userId,
-    input.oldDelegateAddress,
-    input.newDelegateAddress,
-    input.residualAtomic,
-    input.residualTokenAddress,
-    input.residualDisposition,
-  ])
-  return result.rows[0]
+  return withTransaction(db, async (tx) => {
+    if (!(await lockOwnedAgentForRekeyOpening(input.agentId, input.userId, tx))) {
+      throw new RekeyOpenConflictError()
+    }
+    const result = await tx.query<AgentRekeyRow>(INSERT_REKEY_SQL, [
+      input.agentId,
+      input.userId,
+      input.oldDelegateAddress,
+      input.newDelegateAddress,
+      input.residualAtomic,
+      input.residualTokenAddress,
+      input.residualDisposition,
+    ])
+    return result.rows[0]
+  })
 }
 
 export const FIND_REKEY_SQL = `SELECT * FROM agent_rekeys WHERE id = $1 AND agent_id = $2`

@@ -212,6 +212,14 @@ export const HAS_OPEN_SWEEPS_FOR_SAFE_SQL = `SELECT EXISTS (
            AND ds.status IN ('prepared', 'submitting')
        ) AS open`
 
+export const HAS_IN_FLIGHT_REKEYS_FOR_SAFE_SQL = `SELECT EXISTS (
+         SELECT 1
+         FROM agent_rekeys ar
+         JOIN agents a ON a.id = ar.agent_id
+         WHERE a.safe_id = $1 AND a.user_id = $2
+           AND ar.stage IN ('preflight', 'revoked', 'metered', 'issued')
+       ) AS in_flight`
+
 export const FIND_OLDEST_SAFE_FOR_USER_SQL = `SELECT id, safe_address FROM user_safes
              WHERE user_id = $1
              ORDER BY created_at ASC
@@ -229,7 +237,8 @@ export const CLEAR_LEGACY_USER_SAFE_ADDRESS_SQL = `UPDATE users SET safe_address
  * deleted Safe was the default (`wasDefault`, read by the caller's ownership
  * check) — promote the oldest remaining Safe and re-point the legacy mirror,
  * or clear the mirror when none remain. Returning false means the Safe was
- * kept intact because a delegation or recovery sweep is still in flight.
+ * kept intact because a delegation, recovery sweep, or re-key is still in
+ * flight.
  */
 export async function deleteSafeForUser(
   safeId: string,
@@ -243,6 +252,11 @@ export async function deleteSafeForUser(
     if (live.rows[0]?.live === true) return false
     const openSweep = await tx.query<{ open: boolean }>(HAS_OPEN_SWEEPS_FOR_SAFE_SQL, [safeId, userId])
     if (openSweep.rows[0]?.open === true) return false
+    const inFlightRekey = await tx.query<{ in_flight: boolean }>(HAS_IN_FLIGHT_REKEYS_FOR_SAFE_SQL, [
+      safeId,
+      userId,
+    ])
+    if (inFlightRekey.rows[0]?.in_flight === true) return false
 
     await tx.query(ORPHAN_AGENTS_FOR_SAFE_SQL, [safeId])
     await tx.query(ORPHAN_SELF_SIGN_AGENTS_FOR_SAFE_SQL, [safeId])

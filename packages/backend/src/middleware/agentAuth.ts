@@ -141,14 +141,16 @@ export async function agentAuthMiddleware(
     })
   }
 
-  // Archived records stay readable in the dashboard, but their API keys must
-  // no longer authenticate. Check this independently of lifecycle status:
-  // legacy records may be archived while still marked active or paused.
-  if (row.archived_at) {
+  const sweepRecoveryRequest = isSweepRecoveryRequest(request)
+
+  // Archived records stay readable in the dashboard, and the exact sweep
+  // recovery routes remain available while the original Safe binding exists.
+  // No normal API operation passes this branch: archiving cannot silently
+  // restore spending authority, but removal can honestly promise that a
+  // stranded balance remains recoverable later.
+  if (row.archived_at && !sweepRecoveryRequest) {
     return reply.code(401).send({ error: 'Invalid or revoked API key' })
   }
-
-  const sweepRecoveryRequest = isSweepRecoveryRequest(request)
 
   // Positive allow-list: active and paused agents are recognised for normal
   // agent requests; revoked agents are recognised only by the exact sweep

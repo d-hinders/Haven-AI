@@ -143,6 +143,34 @@ export async function lockOwnedNonRevokedDelegationAgent(
 }
 
 /**
+ * Lock the agent row before opening a re-key. This deliberately does not
+ * check `agent_rekeys`: the INSERT's partial unique index remains the race
+ * guard for two simultaneous opens, while this row lock serializes opening
+ * against a new-grant transaction that uses the same agent lock.
+ */
+export const LOCK_OWNED_AGENT_FOR_REKEY_OPENING_SQL = `SELECT id, delegate_address FROM agents
+     WHERE id = $1 AND user_id = $2 AND status <> 'revoked'
+       AND delegate_address IS NOT NULL
+       AND EXISTS (
+         SELECT 1 FROM user_safes us
+         WHERE us.id = agents.safe_id AND us.account_type = 'delegator_hybrid'
+       )
+     FOR UPDATE`
+
+export async function lockOwnedAgentForRekeyOpening(
+  agentId: string,
+  userId: string,
+  db: Executor,
+): Promise<{ delegate_address: string } | null> {
+  const result = await db.query<{ id: string; delegate_address: string | null }>(
+    LOCK_OWNED_AGENT_FOR_REKEY_OPENING_SQL,
+    [agentId, userId],
+  )
+  const row = result.rows[0]
+  return row?.delegate_address ? { delegate_address: row.delegate_address } : null
+}
+
+/**
  * Locks a delegation agent for a re-key replacement grant. It is deliberately
  * separate from the normal grant lock: normal grants are refused while a
  * re-key is in flight, while the re-key's own replacement grants must pass.

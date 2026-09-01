@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseAuth = vi.hoisted(() => vi.fn())
@@ -139,5 +139,24 @@ describe('AgentPanel rail affordances', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Showing the last loaded records')
     expect(screen.getByText('Research agent')).toBeInTheDocument()
+  })
+
+  it('exposes Removed as an accessible disclosure', () => {
+    setAgents([agent({ id: 'archived-agent', name: 'Old agent', archived_at: '2026-06-01T00:00:00Z' })])
+
+    render(<AgentPanel />)
+
+    const toggle = screen.getByRole('button', { name: /Removed\s*\(1\)/ })
+    const controlled = document.getElementById('removed-agent-list')
+    expect(controlled).not.toBeNull()
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveAttribute('aria-controls', 'removed-agent-list')
+    expect(controlled).toHaveAttribute('hidden')
+
+    fireEvent.click(toggle)
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('Old agent')).toBeVisible()
+    expect(controlled).not.toHaveAttribute('hidden')
   })
 })

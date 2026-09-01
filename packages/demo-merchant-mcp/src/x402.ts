@@ -1264,9 +1264,20 @@ function assertResourceMatches(payload: PaymentPayload, paymentRequired: Payment
  * facilitator.
  */
 function assertExtensionsEchoed(payload: PaymentPayload, paymentRequired: PaymentRequired): void {
+  // Reviewer finding on #2361: without this cross-check, a payload that
+  // merely DECLARES `x402Version: 1` skipped the echo rule entirely — this
+  // merchant only ever issues v2 challenges and has no v1 verification path,
+  // so a version mismatch is a refusal, never an exemption. The gate exists
+  // to catch Haven-client regressions before a strict mainnet facilitator
+  // does; a client bug that drops the echo AND misreports the version must
+  // not sail through.
+  if (payload.x402Version !== paymentRequired.x402Version) {
+    throw new PaymentError(
+      `Payment x402Version ${String(payload.x402Version)} does not match the challenge's ${String(paymentRequired.x402Version)}`,
+    )
+  }
   const advertised = (paymentRequired as { extensions?: unknown }).extensions
   if (!advertised || typeof advertised !== 'object' || Array.isArray(advertised)) return
-  if (payload.x402Version !== 2) return
   const echoed = (payload as { extensions?: unknown }).extensions
   if (!echoed || typeof echoed !== 'object' || Array.isArray(echoed)) {
     throw new PaymentError(

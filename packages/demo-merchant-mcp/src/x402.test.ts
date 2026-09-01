@@ -441,6 +441,21 @@ describe('x402 payment verification and settlement', () => {
         .rejects.toThrow('must echo the challenge\'s extensions')
     })
 
+    it('rejects a version-mismatch dodge: declaring x402Version 1 does not skip the echo rule', async () => {
+      // Reviewer probe on #2361: the first cut early-returned on
+      // `payload.x402Version !== 2`, so a payload that dropped the echo AND
+      // declared v1 settled successfully. This merchant only issues v2
+      // challenges — a version mismatch is a refusal, never an exemption.
+      const { processor } = makeProcessor()
+      const pr = paymentRequired()
+      const payload = decodePaymentSignatureHeader(await signedHeader(pr)) as PaymentPayload
+      delete (payload as { extensions?: unknown }).extensions
+      ;(payload as { x402Version: number }).x402Version = 1
+
+      await expect(processor.verifyAndSettle(settleInput(pr, encodePaymentSignatureHeader(payload))))
+        .rejects.toThrow('does not match the challenge')
+    })
+
     it('rejects a payment that OVERWRITES advertised extension info', async () => {
       const { processor } = makeProcessor()
       const pr = paymentRequired()

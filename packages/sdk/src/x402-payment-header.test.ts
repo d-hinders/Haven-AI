@@ -84,6 +84,21 @@ describe('validateStandardX402PaymentHeader (#1398)', () => {
     await expect(validateStandardX402PaymentHeader(withEchoes, context(payer))).resolves.toBeUndefined()
   })
 
+  it('still accepts the pre-#2361 three-key envelope a v0.1.33-and-earlier signer emits', async () => {
+    // The true old-signer shape, exercised end-to-end rather than inferred
+    // from hasOnlyKeys' semantics: strip BOTH echoes and the validator must
+    // accept — a deployed echo-less signer is never refused by the hosted
+    // relay preflight.
+    const { header, payer } = await signedHeader()
+    const bare = rewrap(header, (decoded) => {
+      delete decoded.resource
+      delete decoded.extensions
+    })
+    const decoded = JSON.parse(Buffer.from(bare, 'base64').toString('utf8')) as Record<string, unknown>
+    expect(Object.keys(decoded).sort()).toEqual(['accepted', 'payload', 'x402Version'])
+    await expect(validateStandardX402PaymentHeader(bare, context(payer))).resolves.toBeUndefined()
+  })
+
   it('still rejects a stray top-level key beyond the echoes', async () => {
     const { header, payer } = await signedHeader()
     const stray = rewrap(header, (decoded) => {

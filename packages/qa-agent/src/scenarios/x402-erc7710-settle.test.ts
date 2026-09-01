@@ -18,6 +18,20 @@ const DELEGATE = new Wallet(DELEGATE_KEY).address
 const MERCHANT = '0x' + 'cc'.repeat(20)
 const TREASURY = '0x' + 'aa'.repeat(20)
 const MERCHANT_URL = 'https://demo-merchant.example'
+const FACILITATOR = '0x' + 'fa'.repeat(20)
+/**
+ * Same shape the dev demo merchant advertises (`DEMO_MERCHANT_EXTENSIONS`,
+ * packages/demo-merchant-mcp/src/x402.ts, #2361) — here so the pinned
+ * authorize body is the post-#2364 challenge the settle-side echo is built
+ * from, not a pre-extensions one. Hand-copied, NOT imported (qa-agent does
+ * not depend on demo-merchant-mcp) and nothing re-syncs it: if the merchant's
+ * block changes this stays as it is. That is tolerable because the pin below
+ * proves VERBATIM passthrough of whatever was decoded — the block's exact
+ * content is illustrative, not load-bearing.
+ */
+const CHALLENGE_EXTENSIONS = {
+  'haven-demo': { version: '1', echoRule: 'x402 v2: clients must echo this extensions object in PaymentPayload' },
+}
 
 const { mockFetch, mockGetAgent, mockAuthorize, mockSettle, mockGetPayment, mockBalanceOf } =
   vi.hoisted(() => ({
@@ -64,8 +78,18 @@ const ctx = {
   },
 } as unknown as ScenarioContext
 
+/** The decoded challenge — ONE object feeds the header AND the authorize-body pin. */
+function challengePayload(accepts: Array<Record<string, unknown>>) {
+  return {
+    x402Version: 2,
+    accepts,
+    resource: { url: `${MERCHANT_URL}/vpn` },
+    extensions: CHALLENGE_EXTENSIONS,
+  }
+}
+
 function challengeResponse(accepts: Array<Record<string, unknown>>) {
-  const payload = { x402Version: 2, accepts, resource: { url: `${MERCHANT_URL}/vpn` } }
+  const payload = challengePayload(accepts)
   return {
     status: 402,
     headers: new Headers({ 'PAYMENT-REQUIRED': Buffer.from(JSON.stringify(payload)).toString('base64') }),
@@ -79,7 +103,8 @@ const ERC7710_ACCEPTS = {
   payTo: MERCHANT,
   asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
   network: 'base-sepolia',
-  extra: { assetTransferMethod: 'erc7710' },
+  maxTimeoutSeconds: 300,
+  extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR] },
 }
 
 function servedResponse() {
@@ -153,6 +178,45 @@ describe('the scheme discriminator', () => {
     expect(result.pass).toBe(false)
     expect(result.detail).toMatch(/eip712_userop/)
     expect(mockSettle).not.toHaveBeenCalled()
+  })
+})
+
+describe('the authorize body (#2384)', () => {
+  it('sends the decoded challenge VERBATIM as paymentRequired, with the erc7710 entry\'s fields', async () => {
+    // #2373: the settle-side resource/extensions echo (#2361) is built from
+    // the STORED copy of this challenge. Dropping `paymentRequired` from the
+    // scenario passed unit CI and was caught only by the live qa-dev run —
+    // this is the unit pin. Deep-equal on purpose: a filtered or re-encoded
+    // copy (say, `accepts` without `extensions`) is exactly the regression.
+    mockFetch
+      .mockResolvedValueOnce(challengeResponse([ERC7710_ACCEPTS]))
+      .mockResolvedValueOnce(servedResponse())
+    balances({
+      [TREASURY.toLowerCase()]: [10_000n, 9_000n],
+      [MERCHANT.toLowerCase()]: [0n, 1_000n],
+      [DELEGATE.toLowerCase()]: [500n, 500n],
+    })
+    mockAuthorize.mockResolvedValue({ ok: true, status: 201, data: { payment_id: 'p-1', sign_data: SIGN_DATA } })
+    mockSettle.mockResolvedValue({ ok: true, status: 200, data: { payment_header: 'aGVhZGVy' } })
+
+    const result = await x402Erc7710Settle.run(ctx)
+
+    expect(result.pass).toBe(true)
+    expect(mockAuthorize).toHaveBeenCalledTimes(1)
+    expect(mockAuthorize).toHaveBeenCalledWith(expect.objectContaining({
+      url: `${MERCHANT_URL}/vpn`,
+      payTo: MERCHANT,
+      amount: '1000',
+      asset: ERC7710_ACCEPTS.asset,
+      network: 'base-sepolia',
+      maxTimeoutSeconds: 300,
+      facilitatorAddresses: [FACILITATOR],
+      paymentRequired: challengePayload([ERC7710_ACCEPTS]),
+    }))
+    // objectContaining is recursive-equal, not strict: pin the challenge
+    // strictly too, so an extra or undefined-valued key cannot slip past.
+    const [body] = mockAuthorize.mock.calls[0]
+    expect(body.paymentRequired).toStrictEqual(challengePayload([ERC7710_ACCEPTS]))
   })
 })
 

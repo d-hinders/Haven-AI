@@ -69,7 +69,7 @@ export const toolDescriptions = {
     selectionGuidance:
       'Prefer this over the quote+pay split when the agent just wants the paid resource and does not need to inspect the price first. If you already have a quote from haven_quote_x402, use haven_pay_x402_quote instead. Do not use for read-only allowance, budget, spend-limit, remaining-amount, reset-period, or what-can-I-spend questions; use the allowance lookup tool instead.',
     behavior:
-      'Calls the URL, parses any HTTP 402 x402 challenge, signs the payment locally, then retries the original request with the signed payment header (sent under both x402 wire names, PAYMENT-SIGNATURE and X-PAYMENT) and returns the merchant response. Settlement is either direct account-to-merchant with no funding leg, or a bridge that first redeems the agent\'s budget delegation to fund the delegate wallet for an EIP-3009 authorization. A payment outside the on-chain budget is declined before any money moves; nothing is queued for a human to approve later. If the resource returns a non-402 status, returns it unchanged without contacting Haven.',
+      'Calls the URL, parses any HTTP 402 x402 challenge, signs the payment locally, then retries the original request with the signed payment header (sent under PAYMENT-SIGNATURE, plus the legacy X-PAYMENT on the EIP-3009 path only) and returns the merchant response. Settlement is either direct account-to-merchant with no funding leg, or a bridge that first redeems the agent\'s budget delegation to fund the delegate wallet for an EIP-3009 authorization. A payment outside the on-chain budget is declined before any money moves; nothing is queued for a human to approve later. If the resource returns a non-402 status, returns it unchanged without contacting Haven.',
     nextActionGuidance:
       'Preserve the returned resume_state or paymentId — either identifies this payment if you need to ask about it later. ' +
       'This tool performs the merchant retry itself, so do not wait on a signal while the call is in flight. ' +
@@ -80,7 +80,7 @@ export const toolDescriptions = {
     summary:
       'Resume an x402 payment whose Haven-side authorization already succeeded but whose merchant retry did not complete.',
     behavior:
-      'Accepts either resume_state or payment_id, validates the original x402 details against the authorized Haven funding, and retries the merchant request with the signed payment header (sent under both x402 wire names, PAYMENT-SIGNATURE and X-PAYMENT). No new Haven payment is created.',
+      'Accepts either resume_state or payment_id, validates the original x402 details against the authorized Haven funding, and retries the merchant request with the signed payment header (sent under PAYMENT-SIGNATURE, plus the legacy X-PAYMENT on the EIP-3009 path only). No new Haven payment is created.',
     nextActionGuidance:
       'Only call this after haven_get_payment_status reports nextAction=retry_original_x402_request — that means Haven\'s funding leg confirmed but no merchant response was ever recorded, most often because the process crashed between funding and the merchant retry. ' +
       'Any other nextAction reports a conflict instead of retrying, so do not call this speculatively. ' +

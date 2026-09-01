@@ -67,7 +67,7 @@ import {
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
-  X402_PAYMENT_HEADER_NAMES_SENT,
+  x402PaymentHeaderNamesSent,
 } from './x402.js'
 import type {
   SweepAuthorization,
@@ -1233,7 +1233,8 @@ export class HavenClient {
    * says the merchant was Bazaar-discoverable, runs a fresh `initialize`
    * handshake (the quote-time session is gone once funding confirms; the x402
    * challenge is stateless w.r.t. the MCP session, so a fresh session is
-   * accepted), threads the session + wallet headers, sets both x402 wire names, and
+   * accepted), threads the session + wallet headers, sets the x402 payment
+   * header under the names that scheme requires (#2341), and
    * collapses an SSE JSON-RPC response to its `result`.
    */
   /**
@@ -1372,7 +1373,7 @@ export class HavenClient {
           txHash: evidenceTxHash,
           resourceUrl: evidenceContext.resourceUrl,
           merchantStatus: surfaced.status,
-          paymentProofHeaderName: X402_PAYMENT_HEADER_NAMES_SENT,
+          paymentProofHeaderName: x402PaymentHeaderNamesSent(input.paymentHeader),
           paymentProofHeader: input.paymentHeader,
           protocolReceiptHeaderName: protocolReceiptHeader ? 'PAYMENT-RESPONSE' : undefined,
           protocolReceiptHeader,

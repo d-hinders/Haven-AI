@@ -105,7 +105,9 @@ no delegate hot balance and no `haven_x402_sign_header` step:
 hosted:  haven_pay_x402_quote      -> settlement child + settlement_scheme: erc7710
 local:   haven_sign { payment_id } -> child signature (caveats verified locally)
 hosted:  haven_submit { settlement_scheme: "erc7710" } -> payment_header
-agent:   retry merchant, setting BOTH PAYMENT-SIGNATURE + X-PAYMENT
+agent:   retry merchant, setting PAYMENT-SIGNATURE ONLY (never X-PAYMENT:
+         this header carries a delegation chain and duplicating it is
+         refused with HTTP 431)
 ```
 
 x402 — **EIP-3009 bridge**, the fallback for merchants without facilitator-side
@@ -118,6 +120,7 @@ local:   haven_sign + expected    -> funding signature + x402_binding
 hosted:  haven_submit             -> funds account -> delegate EOA
 local:   haven_x402_sign_header   -> payment header only if binding matches
 agent:   retry merchant, setting BOTH PAYMENT-SIGNATURE + X-PAYMENT
+         (both names are correct HERE — the bridged header is small)
 ```
 
 On the bridge, pass `x402.expected` from the hosted quote unchanged into the

@@ -248,10 +248,17 @@ const NETWORK_TOKENS: Record<string, Record<string, { symbol: string; decimals: 
  * kept the v1 name for the one thing it *writes*, which is how a strict v2
  * merchant came to never see a payment header at all.
  *
- * Both outbound names are sent on every retry rather than switched on
- * `x402Version` (owner decision, 2026-08-31): a v1 merchant ignores the name
- * it does not know, a v2 merchant ignores the legacy one, and no version
+ * The 2026-08-31 owner decision was to send both outbound names on every
+ * retry rather than switch on `x402Version`: a v1 merchant ignores the name it
+ * does not know, a v2 merchant ignores the legacy one, and no version
  * heuristic has to be right for a payment to land.
+ *
+ * **That is no longer unconditional (#2341).** It held while the cost of a
+ * spare header was zero, and on the EIP-3009 bridge it still is. On erc7710 it
+ * is not: that header carries a whole delegation chain, and duplicating it
+ * overflowed the merchant's header limit — HTTP 431, every erc7710 settlement
+ * refused. `x402PaymentHeaderNamesFor` below is the live rule; read it rather
+ * than this paragraph, which records why the simpler rule was right first.
  */
 /** v2 client→server payment payload. The name a strict v2 merchant reads. */
 export const X402_PAYMENT_HEADER_NAME = 'PAYMENT-SIGNATURE'
@@ -262,14 +269,83 @@ export const X402_PAYMENT_REQUIRED_HEADER_NAME = 'PAYMENT-REQUIRED'
 /** v2 server→client settlement receipt. */
 export const X402_PAYMENT_RESPONSE_HEADER_NAME = 'PAYMENT-RESPONSE'
 /**
- * What the evidence record's `paymentProofHeaderName` reports, v2 name first.
+ * Both wire names, v2 first — the value an EIP-3009 retry actually sends.
  *
- * Both names go on the wire, so recording only one would make the audit trail
- * disagree with what was actually sent. Derived from the two constants rather
- * than written out, so the record cannot drift from the request.
+ * **Not the general answer any more (#2341), and not what a recorder should
+ * reach for.** This was the evidence record's `paymentProofHeaderName` while
+ * both names always went on the wire; erc7710 now sends one, so a recorder
+ * still reading this constant would log a legacy header that was never sent —
+ * exactly the drift the previous wording promised it prevented. Use
+ * `x402PaymentHeaderNamesSent(paymentHeader)`. Kept exported because it is a
+ * published surface and removing it would break consumers.
  */
 export const X402_PAYMENT_HEADER_NAMES_SENT =
   `${X402_PAYMENT_HEADER_NAME}, ${X402_LEGACY_PAYMENT_HEADER_NAME}`
+
+/**
+ * Every payment header name Haven may put on the wire, v2 first.
+ *
+ * `deliverPayment` iterates this rather than the pair it is sending, so a name
+ * it is NOT sending is explicitly deleted from the caller's headers instead of
+ * being left as-is. Leaving one would resurrect the stale-header bug #2289
+ * closed with `set`, one scheme over.
+ */
+export const X402_PAYMENT_HEADER_NAMES = [
+  X402_PAYMENT_HEADER_NAME,
+  X402_LEGACY_PAYMENT_HEADER_NAME,
+] as const
+
+/**
+ * Which payment header names to put on the wire for THIS payload (#2341).
+ *
+ * #2289 set both names unconditionally, and on the EIP-3009 bridge that is
+ * right: the header is a signature plus a six-field authorization, doubling it
+ * costs nothing, and lenient v1-only merchants are real. On **erc7710** it is
+ * not right, and it is not merely wasteful — the header carries the whole
+ * `[child, budget]` delegation chain plus the UserOperation, so sending it
+ * twice pushed the request past the server header-size limit and merchants
+ * answered **HTTP 431 Request Header Fields Too Large**. Every erc7710
+ * settlement failed, with the funding leg already spent on the hosted path.
+ *
+ * The rule is by SCHEME, not by byte count, because the scheme is what makes
+ * the alias pointless rather than merely large: an erc7710 payload is always
+ * `x402Version: 2` (the backend's `encodeXPaymentHeader` hardcodes it), and a
+ * merchant that can redeem a delegation chain is by construction running x402
+ * v2 plus the MetaMask erc7710 extension — it reads `PAYMENT-SIGNATURE`. The
+ * legacy name cannot help it and can only cost the request. A size threshold
+ * would be an arbitrary number that changes behaviour silently near its edge.
+ *
+ * An unreadable header falls back to BOTH names — the #2289 behaviour. Haven
+ * builds this value itself, so a parse failure means something is already
+ * wrong; the conservative answer there is the one that keeps v1 merchants
+ * working rather than the one that happens to fix a size problem we cannot
+ * confirm this payload has.
+ */
+export function x402PaymentHeaderNamesFor(paymentHeader: string): readonly string[] {
+  const both = [X402_PAYMENT_HEADER_NAME, X402_LEGACY_PAYMENT_HEADER_NAME]
+  let decoded: { accepted?: unknown } | null
+  try {
+    decoded = decodeBase64Json<{ accepted?: unknown }>(paymentHeader)
+  } catch {
+    return both
+  }
+  const accepted = decoded?.accepted
+  if (!accepted || typeof accepted !== 'object' || Array.isArray(accepted)) return both
+  return isErc7710Option(accepted as X402PaymentOption) ? [X402_PAYMENT_HEADER_NAME] : both
+}
+
+/**
+ * What the evidence record's `paymentProofHeaderName` must say for THIS
+ * payload, derived from the same decision the request makes.
+ *
+ * `X402_PAYMENT_HEADER_NAMES_SENT` was a constant when the answer was always
+ * both. It no longer always is, so a recorder still reading the constant would
+ * claim an erc7710 request carried a legacy header it never sent — the exact
+ * drift that constant's own comment was written to prevent, one scheme later.
+ */
+export function x402PaymentHeaderNamesSent(paymentHeader: string): string {
+  return x402PaymentHeaderNamesFor(paymentHeader).join(', ')
+}
 
 /**
  * Parse an HTTP 402 response into x402 PaymentRequired data.

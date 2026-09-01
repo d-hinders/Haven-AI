@@ -332,8 +332,8 @@ export function AgentCard({
               </>
             ) : null}
             {/* #1402: Remove stops the live delegation and archives its
-                credential. A legacy agent can only be unlinked after its owner
-                has already revoked the old authority outside Haven. */}
+                credential. Unlink archives a legacy record only; it never
+                changes the old Safe permission. */}
             {isDelegationAgent ? (
               <>
                 <span className="text-[var(--v2-border-strong)]">|</span>
@@ -346,7 +346,19 @@ export function AgentCard({
                   Remove
                 </button>
               </>
-            ) : null}
+            ) : (
+              <>
+                <span className="text-[var(--v2-border-strong)]">|</span>
+                <button
+                  onClick={() => setRemoveModalOpen(true)}
+                  disabled={isBusy}
+                  aria-label={`Unlink ${agent.name}`}
+                  className={DANGER_ACTION_BUTTON_CLASS}
+                >
+                  Unlink
+                </button>
+              </>
+            )}
           </>
         )}
         {isRevoked && !isArchived && (
@@ -358,10 +370,12 @@ export function AgentCard({
             <button
               onClick={() => setRemoveModalOpen(true)}
               disabled={isBusy}
-              aria-label={`Remove ${agent.name}`}
+              aria-label={`${isDelegationAgent ? 'Remove' : 'Unlink'} ${agent.name}`}
               className={DANGER_ACTION_BUTTON_CLASS}
             >
-              {busyAction === 'archive' ? 'Removing...' : 'Remove'}
+              {busyAction === 'archive'
+                ? isDelegationAgent ? 'Removing...' : 'Unlinking...'
+                : isDelegationAgent ? 'Remove' : 'Unlink'}
             </button>
           </>
         )}

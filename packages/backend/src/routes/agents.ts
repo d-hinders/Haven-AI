@@ -325,14 +325,16 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   app.delete<{ Params: { id: string } }>('/:id', async (_request, reply) => {
     return reply.code(410).send({
       error:
-        'Deleting agents is retired: removal is an archive, and history is kept. Use POST /agents/:id/archive on a revoked agent instead.',
+        'Deleting agents is retired: removal is an archive, and history is kept. Use POST /agents/:id/archive to remove a legacy record or after revoking a delegation agent.',
     })
   })
 
-  // POST /agents/:id/archive — soft-archive a REVOKED agent (#1401). A filing
-  // action only: requires status='revoked' so archiving is never the thing
-  // that stops spending, keeps every dependent audit row, and is idempotent
-  // (re-archiving keeps the original archived_at, no timestamp churn).
+  // POST /agents/:id/archive — soft-archive an agent (#1401). Delegation
+  // agents require status='revoked' and dead budgets so archiving is never the
+  // thing that stops spending. Legacy Safe records may be unlinked at any
+  // status because this only removes the Haven-side record and leaves the old
+  // Safe permission untouched. Both paths keep every dependent audit row and
+  // are idempotent (re-archiving keeps the original archived_at).
   //
   // #1436: it also requires DEAD BUDGETS. Revoking only flips the agent's
   // status, so revoke+archive without revoke-all used to file an agent under

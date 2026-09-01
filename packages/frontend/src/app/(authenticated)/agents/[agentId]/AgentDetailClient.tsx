@@ -589,7 +589,7 @@ export default function AgentDetailClient({ agentId }: Props) {
       {currentAgent.account_type !== 'delegator_hybrid' ? (
         <div className="mt-6">
           <RetiredRailNotice ownerAccess={retiredRail.ownerAccess} />
-          {isRevoked && !isArchived ? (
+          {!isArchived ? (
             <div className="mt-3 flex justify-end">
               <Button variant="danger" size="sm" onClick={() => setRemoveOpen(true)}>
                 Unlink agent

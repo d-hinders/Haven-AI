@@ -718,8 +718,8 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument()
   })
 
-  it('offers Unlink on a revoked legacy agent after authority is already gone (#2258)', () => {
-    mockAgentWith({ account_type: undefined, status: 'revoked' })
+  it('offers Unlink on an active legacy record without an authority action (#2258)', () => {
+    mockAgentWith({ account_type: undefined, status: 'active' })
     render(<AgentDetailClient agentId="agent-1" />)
     expect(screen.getByRole('button', { name: 'Unlink agent' })).toBeInTheDocument()
   })

@@ -247,6 +247,23 @@ describeDb('agents archive (#1401, real DB)', () => {
     return { userId: user.rows[0].id, agentId: agent.rows[0].id }
   }
 
+  async function seedLegacyAgent(status: string): Promise<{ userId: string; agentId: string }> {
+    const user = await db.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`archive-legacy-u${++seq}-${Date.now()}@test.example`],
+    )
+    const safe = await db.query<{ id: string }>(
+      `INSERT INTO user_safes (user_id, safe_address, name, is_default, account_type)
+       VALUES ($1, $2, 'Legacy account', true, 'safe') RETURNING id`,
+      [user.rows[0].id, `0x${(++seq).toString(16).padStart(40, '0')}`],
+    )
+    const agent = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, safe_id, name, status) VALUES ($1, $2, 'Legacy archive test', $3) RETURNING id`,
+      [user.rows[0].id, safe.rows[0].id, status],
+    )
+    return { userId: user.rows[0].id, agentId: agent.rows[0].id }
+  }
+
   it('archives only revoked agents; active/paused/pending_approval refuse', async () => {
     for (const status of ['active', 'paused', 'pending_approval']) {
       const { userId, agentId } = await seedAgent(status)
@@ -256,6 +273,18 @@ describeDb('agents archive (#1401, real DB)', () => {
     const archived = await archiveAgent(agentId, userId)
     expect(archived).not.toBeNull()
     expect(archived!.archived_at).toBeInstanceOf(Date)
+  })
+
+  it.each(['active', 'paused'])('archives a legacy Safe record while it is %s (#2258)', async (status) => {
+    const { userId, agentId } = await seedLegacyAgent(status)
+    const archived = await archiveAgent(agentId, userId)
+    expect(archived).not.toBeNull()
+    const row = await db.query<{ status: string; archived_at: Date | null }>(
+      `SELECT status, archived_at FROM agents WHERE id = $1`,
+      [agentId],
+    )
+    expect(row.rows[0].status).toBe(status)
+    expect(row.rows[0].archived_at).not.toBeNull()
   })
 
   // #1436: revoking flips only agents.status — it never touches

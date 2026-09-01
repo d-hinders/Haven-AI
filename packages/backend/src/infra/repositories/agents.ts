@@ -521,14 +521,26 @@ export async function updateAgentProfile(
  * spend, so the database is where that promise belongs.
  *
  * Legacy AllowanceModule agents have no rows here, so the NOT EXISTS passes
- * for them — their authority is torn down by the on-chain revoke path instead.
+ * for them. Their Haven-side record may be unlinked at any status because
+ * archiving it does not change the old Safe permission; the live delegation
+ * rail remains revoke-first.
  * Crash-window orphans (#1423: disabled on-chain, still `active` here) DO
  * block archiving, correctly: revoke-all heals them, and that is the same
  * remedy this refusal names.
  */
 export const ARCHIVE_AGENT_SQL = `UPDATE agents
        SET archived_at = COALESCE(archived_at, NOW()), updated_at = NOW()
-       WHERE id = $1 AND user_id = $2 AND status = 'revoked'
+       WHERE id = $1 AND user_id = $2
+         AND (
+           status = 'revoked'
+           OR (
+             status IN ('active', 'paused')
+             AND EXISTS (
+               SELECT 1 FROM user_safes us
+               WHERE us.id = agents.safe_id AND us.account_type = 'safe'
+             )
+           )
+         )
          AND NOT EXISTS (
            SELECT 1 FROM agent_delegations ad
            WHERE ad.agent_id = agents.id AND ad.status IN ('pending', 'active')
@@ -549,7 +561,7 @@ export async function agentHasLiveDelegations(
   return result.rows[0]?.live === true
 }
 
-/** Returns null when nothing matched (missing, foreign, not revoked, or still holding live delegations). */
+/** Returns null when nothing matched (missing, foreign, ineligible, or still holding live delegations). */
 export async function archiveAgent(
   agentId: string,
   userId: string,

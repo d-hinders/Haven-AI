@@ -1,10 +1,9 @@
 'use client'
 
-import { ArrowRight, Check, Clipboard, EllipsisVertical, X } from 'lucide-react'
+import { Check, Clipboard, EllipsisVertical, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import Link from 'next/link'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
 import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { useBalances } from '@/hooks/useBalances'
@@ -318,7 +317,11 @@ export default function AccountDetailClient() {
     <div className="max-w-5xl space-y-6">
       <PageHeader
         title={safe.name}
-        subtitle="Control the funds, agent access, and recent activity for this Haven wallet."
+        subtitle={
+          safe.account_type === 'delegator_hybrid'
+            ? 'Control the funds, agent access, and recent activity for this Haven wallet.'
+            : 'Review balances, readable agent records, and recent activity for this Haven wallet.'
+        }
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {safe.is_default && (user?.safes?.length ?? 0) > 1 ? (
@@ -410,12 +413,14 @@ export default function AccountDetailClient() {
         <div className="p-4 sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-base font-semibold text-[var(--v2-ink)]">Token balances</h2>
-            <button
+            <Button
+              type="button"
+              variant="tertiary"
+              size="sm"
               onClick={handleBalancesRefresh}
-              className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
             >
               Refresh
-            </button>
+            </Button>
           </div>
           {portfolioLoading ? (
             <div role="status" aria-busy="true" aria-label="Loading token balances" className="space-y-2">
@@ -476,13 +481,14 @@ export default function AccountDetailClient() {
         <div className="px-5 pt-5 sm:px-6 sm:pt-6">
           <div className="flex items-center gap-3">
             <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent access</h2>
-            <Link
+            <Button
               href="/agents"
-              className="inline-flex items-center gap-1 text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+              variant="tertiary"
+              size="sm"
+              trailingIcon
             >
               View all agents
-              <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
-            </Link>
+            </Button>
           </div>
           <p className="mt-1 max-w-2xl pb-5 text-sm leading-relaxed text-[var(--v2-ink-2)]">
             {safe.account_type === 'delegator_hybrid'
@@ -634,13 +640,14 @@ export default function AccountDetailClient() {
             ) : detailsError ? (
               <span className="inline-flex flex-col items-start gap-2 text-sm text-[var(--v2-ink-2)]">
                 {approvalCopy}
-                <button
+                <Button
                   type="button"
+                  variant="tertiary"
+                  size="sm"
                   onClick={refetchDetails}
-                  className="text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"
                 >
                   Try again
-                </button>
+                </Button>
               </span>
             ) : (
               <span className="text-sm text-[var(--v2-ink-3)]">—</span>
@@ -718,13 +725,14 @@ export default function AccountDetailClient() {
             <div className="flex items-center gap-3">
               <h2 className="text-base font-semibold text-[var(--v2-ink)]">Transaction history</h2>
               {!txLoading && total > 0 ? (
-                <Link
+                <Button
                   href={`/transactions?safeId=${encodeURIComponent(safeId)}`}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+                  variant="tertiary"
+                  size="sm"
+                  trailingIcon
                 >
                   View all
-                  <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
-                </Link>
+                </Button>
               ) : null}
             </div>
             <p className="mt-1 text-sm text-[var(--v2-ink-3)]">

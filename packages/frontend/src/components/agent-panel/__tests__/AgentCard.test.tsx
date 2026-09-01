@@ -272,9 +272,13 @@ describe('AgentCard action-row matrix (#1402)', () => {
     expect(container.querySelector('.allowance-fill')).toBeNull()
   })
 
-  it('active legacy agent: no authority actions are shown while operational', () => {
+  it('active legacy agent: Rename and Unlink are shown, but no authority actions', () => {
     renderCard(agentFixture({ account_type: 'safe' as Agent['account_type'] }))
     expect(screen.getByRole('button', { name: 'Rename Research agent' })).toBeTruthy()
+    const unlink = screen.getByRole('button', { name: 'Unlink Research agent' })
+    expect(unlink).toBeTruthy()
+    expect(unlink.className).toContain('min-h-11')
+    expect(unlink.className).toContain('min-w-11')
     expect(screen.queryByRole('button', { name: 'Revoke Research agent' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Remove Research agent' })).toBeNull()
   })
@@ -286,10 +290,10 @@ describe('AgentCard action-row matrix (#1402)', () => {
     expect(screen.queryByRole('button', { name: /resume/i })).toBeNull()
   })
 
-  it('revoked-not-archived agent (any rail): status note + Remove, no Restore', () => {
+  it('revoked-not-archived agent: delegation Remove, legacy Unlink, no Restore', () => {
     renderCard(agentFixture({ status: 'revoked', account_type: 'safe' as Agent['account_type'] }))
     expect(screen.getByText('Network access already revoked')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Remove Research agent' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Unlink Research agent' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Restore/ })).toBeNull()
   })
 

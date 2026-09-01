@@ -520,6 +520,24 @@ test('/accounts: the hover actions reserve their own width and never cover the n
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: 900 })
 
+    // (a0) HIDDEN UNTIL HOVERED, on a device that can hover (#2241).
+    //
+    // #2241 moved the reveal from a bare `opacity-0 group-hover:opacity-100`
+    // to a `(hover: hover)`-gated form, so that a touch device — which can
+    // never satisfy `group-hover` — gets the controls visible instead of
+    // invisible-and-still-tappable. This project is `chromium-desktop`, a
+    // hover-capable pointer, and the OTHER half of that change is that
+    // nothing here moves: the actions must still be hidden until the card is
+    // hovered. Without this the touch fix could be "achieved" by dropping the
+    // hover treatment entirely, and no test in either file would notice.
+    await page.mouse.move(0, 0)
+    const unhovered = await readCardSettled(page, ACTION_CARD_NAME)
+    expect(unhovered.actionsRect, `@${width}px: the action card renders no actions at all`).not.toBeNull()
+    expect(
+      unhovered.actionsOpacity,
+      `@${width}px: the actions are at opacity ${unhovered.actionsOpacity} with the pointer off the card — on a hover-capable pointer they are meant to stay hidden until hover`,
+    ).toBeLessThan(0.01)
+
     // (a) The action-bearing card, hovered.
     const achievedOpacity = await hoverCardUntilActionsVisible(page, ACTION_CARD_NAME)
     const hovered = await readCardSettled(page, ACTION_CARD_NAME)
@@ -575,6 +593,143 @@ test('/accounts: the hover actions reserve their own width and never cover the n
 })
 
 /**
+ * FOCUS, not hover — the state #2241 said nobody had captured, and the one
+ * `haven-design-reviewer` could not clear from screenshots (#2241, raised on
+ * this PR's own first rendered pass).
+ *
+ * Two distinct questions, and the second is the one #2241's fix could have
+ * broken without anybody noticing:
+ *
+ *  1. **Does `focus-within` still reveal?** The reveal used to be a bare
+ *     `focus-within:opacity-100`. It is now `[@media(hover:hover)]:focus-within`,
+ *     so on a hover-capable pointer — this project — a keyboard user must still
+ *     get the controls by tabbing to them. Nothing else in either spec would
+ *     catch that variant being dropped along with the `group-hover` one, since
+ *     the mobile spec never enters this branch at all.
+ *  2. **Does the focus ring clip?** #2241 listed this as explicitly not
+ *     captured. The star sits at the card's right content edge and takes a
+ *     `focus-visible:ring-2` — an outset ring, painted OUTSIDE the border box —
+ *     so the question is whether the card's own padding absorbs it. Asserted as
+ *     geometry (the ring box inside the card's padding box) rather than as a
+ *     class string, for the same reason as everything else in this file.
+ *
+ * Both widths, because the padding differs (`p-5` at 390, `sm:p-6` at 1280) and
+ * the 1280 grid gives the card a different width entirely.
+ */
+test('/accounts: focus reveals the actions and the ring clears the card edge', async ({ page }) => {
+  test.slow()
+  await mockHavenApi(page)
+  await seedAuthenticatedSession(page)
+  await serveAccounts(page, [
+    { ...testSafe, name: ORDINARY_NAME, is_default: true },
+    { ...SECOND_SAFE, name: ACTION_CARD_NAME },
+  ])
+  await openAccounts(page)
+
+  /*
+    The ring width is READ from the rendered `box-shadow` rather than pinned to
+    the `ring-2` in the class string. A constant here would make the clearance
+    check blind to the one edit most likely to cause the clip it is watching
+    for — someone widening the ring — which is the shape of guard #2241's own
+    mutation pass exists to reject.
+  */
+
+  for (const width of WIDTHS) {
+    await page.setViewportSize({ width, height: 900 })
+    // Start from the resting state, so the reveal below is attributable to
+    // focus and not to a pointer left on the card by an earlier read.
+    await page.mouse.move(0, 0)
+    await dismissMobileSidebar(page)
+    const star = page.locator(
+      `a[aria-label="${ACTION_CARD_NAME}"] button[aria-label="Set ${ACTION_CARD_NAME} as default"]`,
+    )
+    await star.scrollIntoViewIfNeeded()
+    /*
+      Focus the star BY KEYBOARD, not with `locator.focus()`.
+
+      `:focus-visible` is a heuristic on the last input modality: after the
+      pointer work above (and `dismissMobileSidebar`'s tap), Chromium treats a
+      programmatic `focus()` as pointer-initiated and paints NO ring. The first
+      draft of this test did exactly that and read a 0px ring at 390 — which is
+      why the ring width is asserted to be non-zero below rather than trusted.
+      Focusing the sibling and pressing Tab makes the modality keyboard, which
+      is the state a keyboard user is actually in.
+    */
+    await page
+      .locator(`a[aria-label="${ACTION_CARD_NAME}"] button[aria-label="Set ${ACTION_CARD_NAME} as active"]`)
+      .focus()
+    await page.keyboard.press('Tab')
+    await page.waitForTimeout(400)
+
+    const reading = await readCardSettled(page, ACTION_CARD_NAME)
+    expect(
+      reading.actionsOpacity,
+      `@${width}px: the actions are at opacity ${reading.actionsOpacity} with the star focused — \`focus-within\` no longer reveals them, so a keyboard user cannot see what they are on`,
+    ).toBeGreaterThan(0.9)
+
+    const ring = await page.evaluate(
+      ({ label, buttonLabel }) => {
+        const card = document.querySelector(`a[aria-label="${label}"]`) as HTMLElement
+        const btn = card.querySelector(`button[aria-label="${buttonLabel}"]`) as HTMLElement
+        const focused = document.activeElement === btn
+        const cardBox = card.getBoundingClientRect()
+        const cs = getComputedStyle(card)
+        const pad = {
+          top: parseFloat(cs.paddingTop) || 0,
+          right: parseFloat(cs.paddingRight) || 0,
+          bottom: parseFloat(cs.paddingBottom) || 0,
+          left: parseFloat(cs.paddingLeft) || 0,
+        }
+        /*
+          Tailwind paints a ring as an outset `box-shadow` with a spread. Take
+          the widest px value in the shadow list — the ring plus any offset —
+          so a `ring-2` -> `ring-8` edit moves this number instead of being
+          invisible to it.
+        */
+        const shadow = getComputedStyle(btn).boxShadow
+        const ringWidth = Math.max(
+          0,
+          ...(shadow.match(/(-?[\d.]+)px/g) ?? []).map((v) => Math.abs(parseFloat(v))),
+        )
+        const b = btn.getBoundingClientRect()
+        return {
+          focused,
+          ringWidth,
+          // Clearance from each edge of the ring box to the card's BORDER box.
+          // Positive means the ring is inside the card entirely.
+          clearance: {
+            right: +(cardBox.right - (b.right + ringWidth)).toFixed(1),
+            top: +(b.top - ringWidth - cardBox.top).toFixed(1),
+            bottom: +(cardBox.bottom - (b.bottom + ringWidth)).toFixed(1),
+          },
+          padRight: pad.right,
+          padTop: pad.top,
+        }
+      },
+      { label: ACTION_CARD_NAME, buttonLabel: `Set ${ACTION_CARD_NAME} as default` },
+    )
+
+    // Non-vacuity: a clearance measured on an UNfocused button says nothing
+    // about a focus ring.
+    expect(reading.actionsRect, `@${width}px: the card renders no actions`).not.toBeNull()
+    expect(ring.focused, `@${width}px: the star never took focus`).toBe(true)
+    // ...and it must actually be PAINTING a ring, or a clearance measured with
+    // a zero-width ring is a clearance for no ring at all.
+    expect(
+      ring.ringWidth,
+      `@${width}px: the focused star paints no ring (box-shadow width ${ring.ringWidth}px)`,
+    ).toBeGreaterThan(0)
+
+    for (const [edge, value] of Object.entries(ring.clearance)) {
+      expect(
+        value,
+        `@${width}px: the focused star's ${ring.ringWidth}px ring overhangs the card's ${edge} edge by ${(-value).toFixed(1)}px (card padding right ${ring.padRight}px, top ${ring.padTop}px)`,
+      ).toBeGreaterThanOrEqual(0)
+    }
+  }
+})
+
+/**
  * The COMPOUND state — one badge AND one action on the same card.
  *
  * Raised by `haven-reviewer` as a coverage gap, and it was right: every other
@@ -594,7 +749,7 @@ test('/accounts: the hover actions reserve their own width and never cover the n
  *
  * and asserts on both that the badge is on the name's line, the button never
  * covers the name, and the reservation is still exactly what the button
- * measures — a single 26px star reserves 26px, not the 102.6px of a full pair
+ * measures — a single 26px star reserves 26px, not the 108.6px of a full pair
  * and not the 48px of the old `pr-12`. That last reading is the one no other
  * test in this file can produce, because nowhere else does a card render a
  * PARTIAL actions block.

@@ -190,24 +190,88 @@ function SafeCard({
         {/*
           Rendered only when it has something to render, so an active+default
           card reserves nothing. Buttons stop link navigation for themselves.
+
+          THE REVEAL IS GATED ON `(hover: hover)`, NOT ON `:hover` ALONE — #2241.
+
+          It used to be a bare `opacity-0 group-hover:opacity-100`. Measured on
+          `chromium-mobile` (Pixel 5, 393x727, `(hover: none)` and
+          `(pointer: coarse)` both true) against unchanged `dev`, that produced
+          a defect the issue did not name and which is worse than the one it
+          did: the wrapper read `opacity: 0`, and `elementFromPoint` at each
+          button's centre STILL RETURNED THE BUTTON. `opacity: 0` paints
+          nothing and hit-tests normally, so the card carried an invisible
+          73 x 24px "Set active" and an invisible 26 x 26px star in its
+          top-right corner — the exact spot a finger lands to open the account.
+          A tap there did not navigate (both handlers call `preventDefault()`
+          and `stopPropagation()`); it silently changed the default account,
+          which is a server write. So these controls were not "unreachable on
+          touch", which is what #2241 assumed. They were INVISIBLE and still
+          live: undiscoverable and tap-stealing at the same time.
+
+          Gating the whole hover treatment on `(hover: hover)` fixes both ends
+          at once. A hover-capable pointer keeps the reveal-on-hover exactly as
+          before; a touch device never enters the hover branch at all, so the
+          wrapper stays at its default opacity 1 and the controls are simply
+          visible. Expressed as "the hover-gating only exists where hover
+          exists" rather than as a `[@media(hover:none)]:opacity-100` override,
+          because the override form is two `opacity` utilities of equal
+          specificity racing on source order — this form has nothing to race.
+
+          THIS COSTS THE TITLE ROW NOTHING, and that is measured, not assumed.
+          `opacity-0` is not `hidden`: since #2236 the actions are this row's
+          second column in normal flow, so their width was ALREADY reserved on
+          every card that renders them, hover or no hover — 102.6px before this
+          change, 108.6px after it, the whole 6px being the gap below. Revealing them on
+          touch fills space the row was already paying for and shows nothing
+          new to a hover user. The only width this diff adds is the gap below.
+
+          `gap-2.5` (10px), not `gap-1` (4px), and the 4 -> 10 is bought by the
+          star's tap target rather than chosen for rhythm. See the button.
         */}
         {(!isActive || !safe.is_default) && (
-          <div className="flex flex-shrink-0 items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+          <div className="flex flex-shrink-0 items-center gap-2.5 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100">
             {!isActive && (
+              /*
+                Tap target: the documented `Button` mechanism, borrowed
+                verbatim and VERTICAL-ONLY (`docs/product/design-system.md`
+                § Buttons *Tap targets*, #1726). Painted 72.6 x 24px, so only
+                the height was under the 44px floor; growing it sideways is
+                what the design system explicitly forbids, because a labelled
+                control already clears 44px on its long axis and a sideways
+                overlay swallows its neighbour's taps. `relative` is required
+                — this button is statically positioned, so without it the
+                overlay resolves against some ancestor (#1766's note).
+              */
               <button
                 type="button"
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSetActive() }}
-                className="rounded-md px-2 py-1 text-xs font-medium text-[var(--v2-brand)] hover:bg-[var(--v2-brand-soft)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                className="relative rounded-md px-2 py-1 text-xs font-medium text-[var(--v2-brand)] hover:bg-[var(--v2-brand-soft)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 after:absolute after:inset-x-0 after:top-1/2 after:h-11 after:-translate-y-1/2 after:content-['']"
                 aria-label={`Set ${safe.name} as active`}
               >
                 Set active
               </button>
             )}
             {!safe.is_default && (
+              /*
+                An icon-only square has no long axis, so this one grows in BOTH
+                axes — the #1766 deviation, and the same `h-11 w-11` centred
+                overlay `WalletButton.tsx` uses. Painted 26 x 26px; 44 - 26 = 18
+                means 9px of overhang per edge.
+
+                THAT OVERHANG IS WHY THE GAP MOVED. At `gap-1` the star's
+                target would have reached 9px into a 4px gap and overlapped
+                "Set active"'s own box by 5px — the neighbour-swallowing the
+                design system's "keep at least 8px between stacked controls"
+                rule exists to prevent, and invisible by construction. `gap-2.5`
+                (10px) leaves 1px of clearance instead. The cost is 6px of the
+                title row on the cards that render both buttons, taken from a
+                reservation #2236 made honest; `e2e/accounts-card-tap-target.
+                mobile.spec.ts` pins the clearance so nobody tightens it back.
+              */
               <button
                 type="button"
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSetDefault() }}
-                className="p-1.5 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                className="relative p-1.5 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
                 aria-label={`Set ${safe.name} as default`}
               >
                 <Icon icon={Star} className="w-3.5 h-3.5" />

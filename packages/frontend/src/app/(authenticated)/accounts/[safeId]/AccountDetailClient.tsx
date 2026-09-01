@@ -1,6 +1,6 @@
 'use client'
 
-import { Check, Clipboard, EllipsisVertical, X } from 'lucide-react'
+import { EllipsisVertical, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -22,6 +22,7 @@ import RetiredRailNotice from '@/components/RetiredRailNotice'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { CopyButton } from '@/components/ui/CopyButton'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,31 +45,6 @@ import { formatAgentLastActivity } from '@/lib/agent-last-seen'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
-
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  const { toast } = useToast()
-  const copy = async () => {
-    await navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-    toast.success('Address copied')
-  }
-  return (
-    <button
-      onClick={copy}
-      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-      title="Copy"
-      aria-label="Copy address"
-    >
-      {copied ? (
-        <Icon icon={Check} className="w-3.5 h-3.5 text-[var(--v2-success)] animate-check-pop" />
-      ) : (
-        <Icon icon={Clipboard} className="w-3.5 h-3.5" />
-      )}
-    </button>
-  )
-}
 
 function formatFiatValue(value: number, currency: 'USD' | 'EUR'): string {
   return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
@@ -634,7 +610,7 @@ export default function AccountDetailClient() {
               ) : (
                 <span className="text-sm font-mono text-[var(--v2-ink)]">—</span>
               )}
-              {safeAddress && <CopyButton text={safeAddress} />}
+              {safeAddress && <CopyButton value={safeAddress} label="address" />}
               {safeAddress && <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', safeAddress)} label="Open wallet address externally" />}
             </div>
           </div>
@@ -707,7 +683,7 @@ export default function AccountDetailClient() {
                         </span>
                       </Tooltip>
                     )}
-                    <CopyButton text={owner} />
+                    <CopyButton value={owner} label="address" />
                     <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', owner)} label="Open approver externally" />
                     <StatusBadge>{APPROVER_TYPE_LABEL[approverType]}</StatusBadge>
                     {isYou && (

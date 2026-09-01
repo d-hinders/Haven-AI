@@ -84,7 +84,8 @@ reason each remaining tool is deliberately still permissive, is
 `STRICT_INPUT_TOOLS` in `packages/mcp-server/src/tools.ts` — not restated here,
 because a second copy drifts. The four tools above are the ones where the
 divergence is not the failure mode; the camelCase crossover tools are
-deliberately still permissive and tracked separately.
+deliberately still permissive and tracked in
+[#2348](https://github.com/d-hinders/Haven-AI/issues/2348).
 
 Treat the registered tool unions in `packages/mcp/src/tools.ts`,
 `packages/mcp-server/src/tools.ts`, and `packages/signer/src/tools.ts` as the

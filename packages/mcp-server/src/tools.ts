@@ -418,11 +418,13 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
  *     silently stripped TODAY — losing idempotency protection on a payment,
  *     which is the duplicate-spend hazard. Strictness is the right answer there
  *     too, but it converts a live silent path into a hard refusal and wants its
- *     own change with the guidance updated alongside it. Filed separately.
+ *     own change with the guidance updated alongside it — #2348.
  *   - `haven_get_agent`, `haven_get_allowances` — schema `{}`. Strict on an
  *     empty object refuses EVERY key, so any client that decorates a
- *     no-argument call breaks, for no money-path gain.
- *   - everything else — batched, not exempted.
+ *     no-argument call breaks, for no money-path gain. #2349.
+ *   - everything else — batched, not exempted: #2349 takes the remainder and
+ *     adds the guard that stops a NEW tool joining `toolSchemas` without a
+ *     strict/permissive decision being made about it at all.
  *
  * The value is the `.strict()` message: a refusal a caller can act on beats a
  * bare "unrecognized key". It is also what `parseStrict` reuses, so the two

@@ -99,17 +99,47 @@ export function parseStreamableHttpBody(body: string): JsonRpcResponse {
 }
 
 /**
+ * #2312: an argument the tool does not declare is a TOOL-level refusal, and it
+ * does not arrive in Haven's envelope.
+ *
+ * The four strict hosted tools are refused by the MCP SDK's own
+ * `validateToolInput`, which runs BEFORE the handler — so `runTool` never wraps
+ * it and there is no `{ success: false, code: 'INVALID_INPUT' }` to parse. What
+ * arrives is JSON-RPC `-32602` / the literal text `Input validation error: …`,
+ * which the doubled-envelope unwrapper below would otherwise read as an
+ * unparseable body and report as a TRANSPORT fault. That is the wrong
+ * classification in the one way that matters here: the scenarios that call
+ * these tools catch `HostedMcpToolError` and `fail()` cleanly, and rethrow
+ * anything else — so a refusal would surface as an unhandled throw naming the
+ * transport, about an argument name.
+ *
+ * Matched on both the numeric code and the SDK's message prefix because the
+ * two arrival shapes carry different halves: a JSON-RPC error object has the
+ * code, an `isError` text result has only the prose.
+ */
+const MCP_INVALID_PARAMS = -32602
+
+function isInputValidationError(code: number | undefined, message: string | undefined): boolean {
+  if (code === MCP_INVALID_PARAMS) return true
+  return typeof message === 'string' && message.includes('Input validation error')
+}
+
+/**
  * Unwrap the doubled envelope: MCP `content[].text` → Haven `{ success, data }`.
  *
  * A `success: false` payload is a TOOL-level refusal (policy, expiry, merchant
  * error) and is raised as {@link HostedMcpToolError} so a scenario can tell it
  * apart from a transport fault — the two mean completely different things when
- * a QA leg goes red.
+ * a QA leg goes red. Since #2312 a schema refusal is raised the same way even
+ * though it never reaches that envelope; see `isInputValidationError` above.
  *
  * Exported for unit tests.
  */
 export function unwrapToolPayload<T>(tool: string, response: JsonRpcResponse): T {
   if (response.error) {
+    if (isInputValidationError(response.error.code, response.error.message)) {
+      throw new HostedMcpToolError(tool, 'INVALID_INPUT', response.error.message ?? 'invalid arguments')
+    }
     throw new HostedMcpTransportError(
       `hosted MCP JSON-RPC error on ${tool}: ${response.error.message ?? JSON.stringify(response.error)}`,
     )
@@ -124,6 +154,9 @@ export function unwrapToolPayload<T>(tool: string, response: JsonRpcResponse): T
   try {
     payload = JSON.parse(text)
   } catch {
+    if (isInputValidationError(undefined, text)) {
+      throw new HostedMcpToolError(tool, 'INVALID_INPUT', text)
+    }
     // isError with a non-JSON body is how an unhandled server-side throw
     // surfaces; report the text rather than a parse failure.
     throw new HostedMcpTransportError(`hosted MCP ${tool} returned non-JSON content: ${text.slice(0, 200)}`)

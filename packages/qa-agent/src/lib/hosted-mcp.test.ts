@@ -99,6 +99,50 @@ describe('unwrapToolPayload — the doubled envelope (#1154)', () => {
     )
   })
 
+  it('raises a TOOL error for a strict-schema refusal, in both arrival shapes (#2312)', () => {
+    // The four strict hosted tools are refused by the MCP SDK BEFORE the
+    // handler, so there is no Haven `{ success: false }` envelope to read. The
+    // real wire text, reproduced verbatim from a live InMemoryTransport call:
+    const wireText =
+      'MCP error -32602: Input validation error: Invalid arguments for tool haven_submit: [\n' +
+      '  {\n    "code": "unrecognized_keys",\n    "keys": [\n      "amount"\n    ]\n  }\n]'
+
+    for (const response of [
+      // (a) as an isError text result — what the SDK client surfaces.
+      { result: { isError: true, content: [{ type: 'text', text: wireText }] } },
+      // (b) as a JSON-RPC error object — what a raw Streamable-HTTP call sees.
+      { error: { code: -32602, message: wireText } },
+    ]) {
+      try {
+        unwrapToolPayload('haven_submit', response)
+        expect.unreachable('should have thrown')
+      } catch (err) {
+        // The load-bearing half: a TOOL error, not a transport fault. The
+        // scenarios that call these tools catch HostedMcpToolError and fail()
+        // cleanly, and RETHROW anything else — so misclassifying an argument
+        // name as a broken session is an unhandled throw in a QA leg.
+        expect(err).toBeInstanceOf(HostedMcpToolError)
+        expect(err).not.toBeInstanceOf(HostedMcpTransportError)
+        expect((err as HostedMcpToolError).code).toBe('INVALID_INPUT')
+        expect((err as HostedMcpToolError).message).toContain('unrecognized_keys')
+      }
+    }
+  })
+
+  it('CONTROL: an ordinary unparseable body is still a TRANSPORT fault', () => {
+    // Without this the test above would pass just as well if every non-JSON
+    // body were reclassified as a tool error, which would be the opposite bug.
+    try {
+      unwrapToolPayload('haven_submit', {
+        result: { isError: true, content: [{ type: 'text', text: 'TypeError: undefined is not a function' }] },
+      })
+      expect.unreachable('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(HostedMcpTransportError)
+      expect(err).not.toBeInstanceOf(HostedMcpToolError)
+    }
+  })
+
   it('passes an un-enveloped payload through verbatim', () => {
     // Not every hosted tool wraps; inventing a `data` that isn't there would
     // silently blank the result.

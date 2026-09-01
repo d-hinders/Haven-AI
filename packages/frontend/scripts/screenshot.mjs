@@ -2793,8 +2793,10 @@ export const SCENARIOS = {
     async run({ page, vp, shoot }) {
       await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
+      const removedToggle = page.getByRole('button', { name: /Removed/ })
+      await removedToggle.waitFor({ timeout: 20_000 })
+      await removedToggle.click()
       await page.getByText('Ops agent', { exact: true }).waitFor({ timeout: 20_000 })
-      await page.getByText('Removed', { exact: true }).waitFor({ timeout: 20_000 })
       await shoot(page.locator('main'), 'list')
 
       await page.goto(`${BASE_URL}/agents/agent-ops`, { waitUntil: 'networkidle', timeout: 60_000 })

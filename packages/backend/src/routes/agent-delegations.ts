@@ -97,6 +97,8 @@ export const IN_FLIGHT_REKEY_REFUSAL =
   'A key rotation is in flight for this agent — finish or abandon the re-key before granting a new budget'
 export const UNAVAILABLE_AGENT_REFUSAL =
   'Agent cannot receive a budget while its account or re-key is unavailable'
+/** #2331's rotated-delegate-key refusal; #2415 kept the wording byte-identical. */
+export const ROTATED_DELEGATE_KEY_REFUSAL = 'Delegation was built for a previous delegate key'
 
 /**
  * Name the reason a pending-grant insert was refused (#2416).
@@ -445,6 +447,32 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       }
 
       const signed = { ...JSON.parse(pending.delegation_json), signature }
+
+      // ── Derive the delegate's account address BEFORE the transaction (#2415) ──
+      // #2331 put the "built for a previous delegate key" guard INSIDE the open
+      // transaction, where `computeHybridAccountAddress` costs one RPC
+      // (`rails/hybrid-provisioning.ts`) while the agent row lock and a pooled
+      // connection are both held. A slow or hanging RPC then blocked every
+      // other writer that lock serializes: Safe unlink, re-key open, re-key
+      // completion, and sibling activations for the same agent.
+      //
+      // The guard's guarantee survives without the network call, split in two.
+      // Derive here from `agent.delegate_address` — the pre-lock read — and
+      // under the lock assert the locked row still carries that exact key.
+      // Together those say the derived address IS the current delegate's
+      // account at commit time, which is what the guard needs; a re-key that
+      // committed in between changes the key and is refused exactly as before.
+      // Deliberately NOT a stored column: the delegate address computed at
+      // `build` time is by construction the `delegate` field already inside
+      // `delegation_json`, so comparing the two proves nothing about rotation.
+      if (!agent.delegate_address) {
+        return reply.code(409).send({ error: UNAVAILABLE_AGENT_REFUSAL })
+      }
+      const preLockDelegateKey = agent.delegate_address
+      const expectedDelegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
+        ownerAddress: preLockDelegateKey as Address,
+      })
+
       // Activate the new grant and mark any previously ACTIVE grant for the
       // same (token, recipient) slot as replaced — the on-chain kill of the
       // old one is the revoke flow (compose for immediate replacement).
@@ -464,15 +492,23 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           await client.query('ROLLBACK')
           return reply.code(409).send({ error: UNAVAILABLE_AGENT_REFUSAL })
         }
-        const currentDelegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
-          ownerAddress: lockedAgent.delegate_address as Address,
-        })
+        // #2415: this is what the lock now buys, in one refusal because it is
+        // one question — "is this delegation for the delegate key that is
+        // current at COMMIT time?" — answered by two halves that must both
+        // hold. The address was derived above from `preLockDelegateKey`, so
+        // the locked row still carrying that key is what makes the derivation
+        // current (a re-key that committed in between fails here); and the
+        // stored delegation's own `delegate` must be that derived account.
+        // Same refusal and wording as #2331's, with no RPC held across the
+        // lock. Kept as one `if` so the transaction gains no second ROLLBACK
+        // call site (`lint:deps` counts inline SQL per file, shrink-only).
         if (
+          lockedAgent.delegate_address.toLowerCase() !== preLockDelegateKey.toLowerCase() ||
           typeof signed.delegate !== 'string' ||
-          signed.delegate.toLowerCase() !== currentDelegateAccountAddress.toLowerCase()
+          signed.delegate.toLowerCase() !== expectedDelegateAccountAddress.toLowerCase()
         ) {
           await client.query('ROLLBACK')
-          return reply.code(409).send({ error: 'Delegation was built for a previous delegate key' })
+          return reply.code(409).send({ error: ROTATED_DELEGATE_KEY_REFUSAL })
         }
         // Sweep the slot's OTHER active grants, then flip the pending row —
         // one repository call that owns the order and excludes the new row by

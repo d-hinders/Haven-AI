@@ -111,8 +111,10 @@ import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession, testSafe,
 const TOUCH_TARGET_FLOOR = 44
 
 /**
- * The only card that renders actions: both buttons are gated on `!isActive` /
- * `!safe.is_default`, so the seeded active+default account renders neither.
+ * The only card that renders an action. Since #2374 there is ONE button and it
+ * is gated on `!isActive` alone, so the seeded active account renders none —
+ * whether or not it is also the default. (`ACTIVE_DEFAULT_CARD` keeps its name
+ * because the fixture still seeds it as both; only the gate narrowed.)
  */
 const ACTION_CARD = 'Imported Safe'
 const ACTIVE_DEFAULT_CARD = 'Operating wallet'

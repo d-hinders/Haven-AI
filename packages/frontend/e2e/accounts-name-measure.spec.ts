@@ -951,7 +951,9 @@ test('/accounts: a lone NON-default account offers no set-default control', asyn
     await page.setViewportSize({ width, height: 900 })
     const reading = await readCardSettled(page, ORDINARY_NAME)
 
-    // Non-vacuity: the page really rendered this account.
+    // Non-vacuity, in TWO parts, and the second was missing until
+    // `haven-reviewer` found it. (a) the page really rendered this account —
+    // read through `readCard`'s `h3` lookup.
     expect(
       reading.text,
       `@${width}px: the lone account card did not render its name — every absence below would be vacuous`,
@@ -977,6 +979,27 @@ test('/accounts: a lone NON-default account offers no set-default control', asyn
         `${el.getAttribute('aria-label') ?? ''} ${el.textContent ?? ''}`.trim(),
       ),
     )
+    /*
+      (b) — and the SAME scan must be shown able to return something.
+
+      `haven-reviewer` was right that (a) alone borrows its confidence: it
+      proves the card rendered, through `readCard`'s `h3` lookup, and says
+      nothing about whether `document.querySelectorAll('button, a[role=...]')`
+      — the query the absence claim below actually rests on — can find a
+      control at all. A scan that has never returned anything is not evidence
+      of an absence.
+
+      This card is the seeded ACTIVE account, so it deliberately renders no
+      action of its own; the control that proves the scan works is the
+      sidebar's account switcher, which is on every authenticated page. Naming
+      what it found in the message keeps a future failure diagnosable rather
+      than just "expected > 0".
+    */
+    expect(
+      controls.length,
+      `@${width}px: the control scan found NOTHING on the whole page — it cannot yet distinguish "no set-default control" from "nothing rendered". It saw ${JSON.stringify(controls)}`,
+    ).toBeGreaterThan(0)
+
     expect(
       controls.filter((n) => /default/i.test(n)),
       `@${width}px: a lone NON-default account offers ${JSON.stringify(controls.filter((n) => /default/i.test(n)))} — #2374 removed the card's set-default control, and this is the state in which it was most misleading`,

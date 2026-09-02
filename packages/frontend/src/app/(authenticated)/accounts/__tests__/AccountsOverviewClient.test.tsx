@@ -81,6 +81,21 @@ describe('AccountsOverviewClient — active account (#629)', () => {
 
     fireEvent.click(screen.getByLabelText('Set Sepolia account as active'))
     expect(mockSetActiveSafe).toHaveBeenCalledWith(SEPOLIA)
+    /*
+      ONCE, not just "with the right argument" — this is the last place
+      `stopPropagation()` is still observable (#2374).
+
+      The card's own `onClick` and this button's handler now make the IDENTICAL
+      call with the IDENTICAL argument, because the set-default star that used
+      to give the two distinguishable effects is gone. At the e2e layer that
+      makes containment unobservable and the assertion was removed rather than
+      reworded into something that cannot fail. Here it survives: React's
+      synthetic events are delegated, so a handler that stops propagation keeps
+      the Link's `onClick` from running, and the difference shows up as a call
+      COUNT even though the call itself is idempotent. Raised by
+      `haven-reviewer` on this change.
+    */
+    expect(mockSetActiveSafe).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -214,12 +229,33 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
   it('offers no set-default control for a lone NON-default account either', () => {
     const LONE = safe('lone1', 'Lone account', 8453, false)
     mockUseUserSafes.mockReturnValue({ safes: [LONE], loading: false })
-    mockUseAuth.mockReturnValue({ activeSafe: LONE, setActiveSafe: mockSetActiveSafe })
+    /*
+      `activeSafe: null` — no account selected yet — and that is load-bearing
+      rather than incidental. `haven-reviewer` found this arm's non-vacuity
+      check proving less than it looked: with the lone account ALSO active,
+      the card renders no button at all, so `controlsMentioning` had nothing
+      to find and the positive control had to come from `getByLabelText`, a
+      different query path than the absence scan uses. A scan that has never
+      been shown to return anything is not evidence of an absence.
+
+      Leaving the account unselected renders `Set active`, so the SAME scan
+      that must come back empty for /default/i must come back non-empty for
+      /active/i. The state under test is unchanged in the way that matters —
+      one account, `is_default: false`, so both badges are suppressed and
+      `/accounts/<id>` hides its own set-default action.
+    */
+    mockUseAuth.mockReturnValue({ activeSafe: null, setActiveSafe: mockSetActiveSafe })
 
     render(<AccountsOverviewClient />)
 
-    // Non-vacuity: the card is there under its own name.
+    // Non-vacuity: the card is there under its own name, AND the absence scan
+    // itself demonstrably finds a real control before it is trusted to find
+    // none.
     expect(screen.getByLabelText('Lone account')).toBeInTheDocument()
+    expect(
+      controlsMentioning(/active/i).some((n) => n.includes('Set Lone account as active')),
+      `the absence scan found no set-active control to prove itself on — it saw ${JSON.stringify(controlsMentioning(/active/i))}`,
+    ).toBe(true)
 
     // The state the star was worst in: no badge says "default" anywhere, the
     // detail page hides the same action here, and the star rendered anyway.

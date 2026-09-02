@@ -176,6 +176,10 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       tokenAddress,
       amountRaw,
       amountHuman,
+      // #2263: kept deliberately. `allowance_nonce` is NOT NULL and carries no
+      // information on this rail — every writer passes 0 — but it is still
+      // published as `sign_data.components.nonce`, so dropping the column is a
+      // money-path wire change rather than a schema cleanup. See migration 075.
       allowanceNonce: 0,
       signHash: fundingAuth.prepared.userOpHash,
       resourceUrl: url,
@@ -456,6 +460,10 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     tokenAddress,
     amountRaw,
     amountHuman,
+    // #2263: kept deliberately. `allowance_nonce` is NOT NULL and carries no
+    // information on this rail — every writer passes 0 — but it is still
+    // published as `sign_data.components.nonce`, so dropping the column is a
+    // money-path wire change rather than a schema cleanup. See migration 075.
     allowanceNonce: 0,
     signHash: built.childHash,
     resourceUrl: url,

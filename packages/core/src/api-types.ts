@@ -9576,7 +9576,6 @@ export interface operations {
                             explorer_url?: string | null;
                             /** @description Which on-chain mechanism moved the money (#799). */
                             execution_rail?: string | null;
-                            session_permission_id?: string | null;
                             /** @description Which delegation authorized a delegation-rail payment (#829). */
                             delegation_hash?: string | null;
                             confirmed_at?: string | null;
@@ -9757,7 +9756,6 @@ export interface operations {
                             explorer_url?: string | null;
                             /** @description Which on-chain mechanism moved the money (#799). */
                             execution_rail?: string | null;
-                            session_permission_id?: string | null;
                             /** @description Which delegation authorized a delegation-rail payment (#829). */
                             delegation_hash?: string | null;
                             confirmed_at?: string | null;

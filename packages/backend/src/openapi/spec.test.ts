@@ -130,10 +130,14 @@ describe('openapiSpec', () => {
 
     it('gives each shape its own pattern, so neither is a bare string', () => {
       expect(atomicSchema.pattern).toBe('^[0-9]+$')
-      expect(humanSchema.pattern).toBe('^[0-9]+(\\.[0-9]+)?$')
+      expect(humanSchema.pattern).toBe('^(0|[0-9]+\\.[0-9]{2,6})$')
       expect(humanSchema.pattern).not.toBe(atomicSchema.pattern)
-      // The description has to say which unit, or the pattern alone leaves
-      // `'250'` ambiguous between 250 USDC and 0.00025 USDC.
+      // The description still has to say which unit. Since #2408 the pattern
+      // does discriminate — it rejects a bare `'250'` — but that is a guard
+      // against a drifting EMITTER, not a label for a reader: `'0'` is legal
+      // in both shapes, and a human who sees only `^(0|[0-9]+\.[0-9]{2,6})$`
+      // still cannot tell whole tokens from atomic units. The word ATOMIC or
+      // HUMAN-DECIMAL is what says which.
       expect(atomicSchema.description).toMatch(/ATOMIC/)
       expect(humanSchema.description).toMatch(/HUMAN-DECIMAL/)
     })
@@ -145,6 +149,79 @@ describe('openapiSpec', () => {
       // `BigInt('250.000000')` throwing is exactly how #2283 discriminated;
       // the contract now says it without an exception.
       expect(() => BigInt('250.000000')).toThrow()
+    })
+
+    /**
+     * #2408: the human pattern REJECTS an atomic value. This is the assertion
+     * the loose `^[0-9]+(\.[0-9]+)?$` could not make, and its absence was a
+     * measured hole, not a theoretical one — #2392 watched a view emitting the
+     * atomic `budget_atomic` pass the `GET /dashboard/overview` round trip,
+     * caught only by a hand-written `'1.00'` literal in one test file.
+     *
+     * It is legitimate ONLY because `formatTokenValue` is the sole emitter and
+     * its output set is narrower than a bare integer; the case below pins that
+     * premise against the real function rather than restating it.
+     */
+    it('rejects an ATOMIC value in the human-decimal field (#2408)', () => {
+      const human = new RegExp(humanSchema.pattern)
+      // The exact values the two-shapes reports quote as indistinguishable.
+      for (const atomicValue of ['500', '1000000', '250000000', '25000000', '10000000000000000000']) {
+        expect(human.test(atomicValue)).toBe(false)
+      }
+      // …while every human form still validates, including the six-digit
+      // fixture form no current producer emits.
+      for (const humanValue of ['1.00', '25.00', '250.00', '0.000001', '250.000000']) {
+        expect(human.test(humanValue)).toBe(true)
+      }
+      // '0' is the deliberate exception: identical in both shapes, so both
+      // patterns must accept it. A tightening that excluded it would reject a
+      // zero budget, which is a real response.
+      expect(human.test('0')).toBe(true)
+      expect(new RegExp(atomicSchema.pattern).test('0')).toBe(true)
+      // A single fraction digit is not reachable: formatTokenValue pads to a
+      // two-digit minimum. Seven is not reachable either: it caps at six.
+      expect(human.test('1.0')).toBe(false)
+      expect(human.test('1.0000001')).toBe(false)
+    })
+
+    /**
+     * #2408: the premise the pattern above rests on, measured against the real
+     * emitter over its whole input domain rather than a handful of samples.
+     *
+     * `budget_atomic` is validated `/^\d+$/`, positive and <= uint96 on the way
+     * in (`routes/agent-delegations.ts`), and `decimals` is either a chain-
+     * registry value or `tokenView`'s 18 fallback. If any (value, decimals)
+     * pair in that domain produced something the pattern rejects, the schema
+     * would refuse a legitimate response — so this sweeps it.
+     */
+    it('formatTokenValue cannot emit anything the human pattern rejects (#2408)', () => {
+      const human = new RegExp(humanSchema.pattern)
+      const MAX_UINT96 = (1n << 96n) - 1n
+      const offenders: string[] = []
+      const edges = ['', '0', '1', '9', '10', '500', '1000000', '250000000',
+        '000500000000', MAX_UINT96.toString(), '1'.repeat(29)]
+      for (const decimals of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 18, 24, 30]) {
+        for (const value of edges) {
+          const out = formatTokenValue(value, decimals)
+          if (!human.test(out)) offenders.push(`${value}@${decimals} -> ${out}`)
+        }
+        // Deterministic sweep across magnitudes rather than a random one: a
+        // guard that samples differently each run cannot be reproduced from a
+        // failure message.
+        for (let digits = 1; digits <= 29; digits++) {
+          for (const lead of ['1', '5', '9']) {
+            const value = lead + '0'.repeat(digits - 1)
+            if (BigInt(value) > MAX_UINT96) continue
+            const out = formatTokenValue(value, decimals)
+            if (!human.test(out)) offenders.push(`${value}@${decimals} -> ${out}`)
+            const mixed = lead + '1234567890'.repeat(3).slice(0, digits - 1)
+            if (BigInt(mixed) > MAX_UINT96) continue
+            const mixedOut = formatTokenValue(mixed, decimals)
+            if (!human.test(mixedOut)) offenders.push(`${mixed}@${decimals} -> ${mixedOut}`)
+          }
+        }
+      }
+      expect(offenders).toEqual([])
     })
 
     it('validates what rails/delegation-budget-view.ts actually emits', () => {
@@ -177,6 +254,10 @@ describe('openapiSpec', () => {
       // must be rejected by the atomic pattern, or the two schemas do not in
       // fact separate the shapes.
       expect(produced.filter((v) => atomic.test(v))).toEqual(['0'])
+      // #2408, the other direction: an ATOMIC value must be rejected by the
+      // HUMAN pattern too. Before #2408 this half was missing, and it is the
+      // half that catches an emitter drifting to `budget_atomic`.
+      expect(['250000000', '1', '5000000000000000000'].filter((v) => human.test(v))).toEqual([])
     })
 
     it('keeps the delegation projection wired to formatTokenValue', async () => {

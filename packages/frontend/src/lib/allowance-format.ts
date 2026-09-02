@@ -58,8 +58,10 @@ function formatDecimalParts({
  * backend's `openapi/spec.ts`). `AgentConnectionAllowance` — the connect-setup
  * budget request — is an ATOMIC bigint string (`"5000000000000000000"` for
  * 5 ETH at 18 decimals). `AgentAllowance` on `Agent.allowances`, which is what
- * `GET /agents`, `GET /agents/{id}`, `PATCH /agents/{id}` and `/dashboard`
- * return, is the HUMAN-DECIMAL delegation projection (`"5.00"`).
+ * `GET /agents`, `GET /agents/{id}`, `PUT /agents/{id}` and `/dashboard`
+ * return, is the HUMAN-DECIMAL delegation projection (`"5.00"`). (There is no
+ * `PATCH /agents/{id}` — this comment named one that has never existed, the
+ * same stale row #2392 corrected in the backend's own copies of this list.)
  *
  * This helper takes both on purpose: it is the DISPLAY path, and both shapes
  * render to the same string. The atomic path divides by the token's decimals;
@@ -135,14 +137,31 @@ export function formatAllowanceAmount(
  *
  * ── Why this takes a shape rather than detecting one ─────────────────────────
  *
- * The two shapes are not distinguishable at runtime. `'250'` is a legal value
- * in both: 250 USDC as a human amount, 0.00025 USDC as an atomic one — a
- * factor of a million apart, with nothing in the string to separate them. Any
- * helper that sniffs is guessing, and guessing wrong on a budget comparison
- * silently answers the wrong question. So the caller states which shape it
- * holds; the OpenAPI schema (`allowanceHumanAmount` vs `allowanceAtomicAmount`)
- * is what tells the caller which one that is. An atomic value needs no helper
- * at all — it is already `BigInt(value)`.
+ * The two shapes are not distinguishable at runtime, and #2408 does not change
+ * that — read what it did change carefully, because the two are easy to
+ * conflate.
+ *
+ * What #2408 changed is the CONTRACT: because `formatTokenValue` is the sole
+ * emitter of the human shape and returns only `'0'` or
+ * `<integer>.<2–6 fraction digits>`, the `allowanceHumanAmount` pattern is now
+ * `^(0|[0-9]+\.[0-9]{2,6})$` and a backend response carrying an atomic value in
+ * a human field fails the spec round trip. That is a guard on the SERVER's
+ * emitters, checked in the backend's own tests.
+ *
+ * What it does NOT change is this helper's rule. A value arriving here is a
+ * string, not a schema: `'0'` is legal and identical in both shapes, and the
+ * narrowness of the produced set is a fact about one emitter rather than a
+ * property the string carries — so a helper that inferred the shape from the
+ * text would be trusting a server-side invariant it cannot see, which is the
+ * same class of mistake as #2283's `BigInt`-throw sniff, just better
+ * disguised. This comment used to say `'250'` was "a legal value in both",
+ * which the tightened schema makes false; the conclusion it supported is
+ * unchanged and stated on its own terms above.
+ *
+ * So the caller states which shape it holds; the OpenAPI schema
+ * (`allowanceHumanAmount` vs `allowanceAtomicAmount`) is what tells the caller
+ * which one that is. An atomic value needs no helper at all — it is already
+ * `BigInt(value)`.
  *
  * Returns `null` for anything that is not a plain decimal number, rather than
  * throwing: callers here are rendering a badge, and an unparseable budget

@@ -299,15 +299,24 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
     expect(response.statusCode).toBe(200)
     const body = response.json()
     const agent = body.agents.find((a: { id: string }) => a.id === AGENT_UUID)
-    // Two pins, deliberately both (#2392). The literal is the ONLY thing that
-    // pins the human-decimal DIGITS: `DashboardAgentAllowance.allowanceAmount`
-    // is a bare `string` in openapi/spec.ts, and even the named
-    // `allowanceHumanAmount` pattern admits a bare integer, so a route that
-    // started emitting the atomic `budget_atomic` ('1000000') one nesting
-    // below would pass every schema check and fail only here. The round trip
-    // pins what the literal cannot: the field SET, the types, the enum and
-    // the uuid formats of the whole overview envelope, against the same
-    // schema the dashboard's generated wire types are built from.
+    // Two pins, deliberately both (#2392, revised by #2408).
+    //
+    // The literal was once the ONLY thing pinning the human-decimal DIGITS:
+    // `DashboardAgentAllowance.allowanceAmount` was a bare `string` (#2400
+    // named it) and the `allowanceHumanAmount` pattern admitted a bare
+    // integer, so a route that started emitting the atomic `budget_atomic`
+    // ('1000000') one nesting below passed every schema check and failed only
+    // here. That was measured, not feared — it is what #2392 observed.
+    //
+    // #2408 closed it: the pattern is now `^(0|[0-9]+\.[0-9]{2,6})$`, which
+    // `formatTokenValue` can always satisfy and an atomic value never can, so
+    // `expectMatchesSpec` below now catches that mutation on its own
+    // (mutation-proven both ways on #2408's branch). The literal STAYS as
+    // belt-and-braces: it pins the exact digits, where the pattern only pins
+    // the shape — '2.00' for a '1000000' budget would still pass the schema.
+    // The round trip pins what neither literal can: the field SET, the types,
+    // the enum and the uuid formats of the whole overview envelope, against
+    // the same schema the dashboard's generated wire types are built from.
     expectMatchesSpec('GET', '/dashboard/overview', body)
     expect(agent.allowances).toEqual([
       { tokenSymbol: 'USDC', allowanceAmount: '1.00', resetPeriodMin: 1440 },

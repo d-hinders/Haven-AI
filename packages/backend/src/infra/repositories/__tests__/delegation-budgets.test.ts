@@ -295,3 +295,140 @@ describeDb('batch revocation (#1400, real DB)', () => {
     expect(await revokeDelegationsByHashes(agentId, hashes)).toHaveLength(0)
   })
 })
+
+/**
+ * #2411 real-DB proof of the activation sequence. #2331 reordered the
+ * route's transaction so the "retire the slot's active grants" sweep ran
+ * AFTER the pending row was flipped active — and the sweep had no `id <>`
+ * exclusion, so it retired the row it had just activated. Every activation
+ * committed with ZERO active rows in the slot; the first payment 403ed on
+ * `SELECT_DELEGATION_FOR_PAYMENT_SQL`. The mocked route test could not see
+ * it: a stateless mock cannot observe that a sweep matched the row a previous
+ * statement wrote. Only Postgres can, so this is where the invariant lives.
+ */
+import { withTransaction } from '../../transaction.js'
+import {
+  activatePendingDelegationInSlot,
+  replaceOtherActiveDelegationsInSlot,
+} from '../delegation-budgets.js'
+
+const SIGNED_JSON = '{"signed":"capability","signature":"0xowner"}'
+
+async function statusOf(id: string): Promise<string> {
+  const row = await db.query<{ status: string }>(
+    `SELECT status FROM agent_delegations WHERE id = $1`,
+    [id],
+  )
+  return row.rows[0].status
+}
+
+describeDb('activation replace sweep (#2411, real DB)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  it('activating a pending grant over an older active one leaves EXACTLY ONE active row in the slot — the new one — and the payment selector returns it', async () => {
+    const agent = await seedUserAndAgent('Activation agent')
+    const older = await seedDelegation({
+      agentId: agent,
+      status: 'active',
+      recipientAddress: null,
+      createdAt: '2026-08-01T00:00:00Z',
+    })
+    const fresh = await seedDelegation({
+      agentId: agent,
+      status: 'pending',
+      recipientAddress: null,
+      delegationJson: '{"signed":"not yet"}',
+    })
+    // Neighbours the sweep must NOT reach: a recipient-pinned grant is a
+    // different slot (#829 relies on both coexisting), another token is
+    // another slot, and another agent's open grant is another agent's.
+    const pinned = await seedDelegation({ agentId: agent, status: 'active', recipientAddress: RECIPIENT })
+    const otherToken = await seedDelegation({ agentId: agent, status: 'active', tokenAddress: '0x' + '11'.repeat(20) })
+    const otherAgent = await seedUserAndAgent('Bystander agent')
+    const foreign = await seedDelegation({ agentId: otherAgent, status: 'active', recipientAddress: null })
+
+    // The route's sequence: lock, sweep-then-activate, commit.
+    const activated = await withTransaction(db, (tx) =>
+      activatePendingDelegationInSlot(
+        {
+          agentId: agent,
+          delegationId: fresh,
+          tokenAddress: USDC,
+          recipientAddress: null,
+          signedDelegationJson: SIGNED_JSON,
+        },
+        tx,
+      ),
+    )
+    expect(activated).toBe(true)
+
+    const slot = await db.query<{ id: string; status: string }>(
+      `SELECT id, status FROM agent_delegations
+       WHERE agent_id = $1 AND token_address = $2 AND recipient_address IS NULL`,
+      [agent, USDC],
+    )
+    const active = slot.rows.filter((r) => r.status === 'active')
+    expect(active.map((r) => r.id)).toEqual([fresh])
+    expect(slot.rows.find((r) => r.id === older)?.status).toBe('replaced')
+
+    // What the 403 bottomed out in: the payment selector must find the NEW
+    // grant (a recipient the pinned grant does not cover, so the open slot
+    // answers).
+    const other = '0x00000000000000000000000000000000000000bb'
+    const selected = await selectDelegationForPayment(agent, USDC, other)
+    const freshRow = await db.query<{ delegation_hash: string }>(
+      `SELECT delegation_hash FROM agent_delegations WHERE id = $1`,
+      [fresh],
+    )
+    expect(selected).not.toBeNull()
+    expect(selected!.delegation_hash).toBe(freshRow.rows[0].delegation_hash)
+    expect(selected!.delegation_json).toBe(SIGNED_JSON)
+
+    for (const untouched of [pinned, otherToken, foreign]) {
+      expect(await statusOf(untouched)).toBe('active')
+    }
+  })
+
+  it('the sweep excludes the row being activated BY ID — correct whichever order a caller runs the two statements in', async () => {
+    // Isolates the `AND id <> $4` half from the ordering half: with the
+    // exception row ALREADY active (the #2331 order, activate-then-sweep),
+    // the sweep must leave it alone and retire only its sibling.
+    const agent = await seedUserAndAgent('Exclusion agent')
+    const sibling = await seedDelegation({ agentId: agent, status: 'active', recipientAddress: null })
+    const kept = await seedDelegation({ agentId: agent, status: 'active', recipientAddress: null })
+
+    const retired = await replaceOtherActiveDelegationsInSlot(agent, USDC, null, kept)
+    expect(retired).toEqual([sibling])
+    expect(await statusOf(kept)).toBe('active')
+    expect(await statusOf(sibling)).toBe('replaced')
+  })
+
+  it('a row that is no longer pending activates nothing, and the caller\'s rollback undoes the sweep', async () => {
+    const agent = await seedUserAndAgent('Stale agent')
+    const older = await seedDelegation({ agentId: agent, status: 'active', recipientAddress: null })
+    const revoked = await seedDelegation({ agentId: agent, status: 'revoked', recipientAddress: null })
+
+    const abandon = new Error('abandon')
+    await expect(
+      withTransaction(db, async (tx) => {
+        const activated = await activatePendingDelegationInSlot(
+          { agentId: agent, delegationId: revoked, tokenAddress: USDC, recipientAddress: null, signedDelegationJson: SIGNED_JSON },
+          tx,
+        )
+        expect(activated).toBe(false)
+        // The documented contract: by now the sweep HAS run on this client…
+        const mid = await tx.query<{ status: string }>(`SELECT status FROM agent_delegations WHERE id = $1`, [older])
+        expect(mid.rows[0].status).toBe('replaced')
+        throw abandon
+      }),
+    ).rejects.toBe(abandon)
+    // …and only the caller's ROLLBACK (the route's 409 path) restores it.
+    expect(await statusOf(older)).toBe('active')
+    expect(await statusOf(revoked)).toBe('revoked')
+  })
+})

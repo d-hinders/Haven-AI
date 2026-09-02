@@ -3,16 +3,19 @@
  *
  * WHAT WAS BROKEN. #2251 (PR #2324) stopped the card growing past its grid
  * track, and that exposed the next defect in the same header row. At 390 the
- * card's content box is 300px, and the header row divides it as:
+ * card's header row is 300px wide, and it divides as:
  *
- *   bot tile 36 + gap 12 + block 121.2 + gap 12 + "Last activity 1mo ago" 118.8
+ *   bot tile 36 + gap 12 + block 117 + gap 12 + "Last activity 1mo ago" 123
  *
- * The stamp is `ml-auto shrink-0`, so it takes 118.8px and will not yield, and
- * the `min-w-0 flex-1` block gets the remaining 121.2px. Inside the block the
- * MCP chip gets 62.5px — which ellipsises even a SHORT slug: `haven-research`
+ * The stamp is `ml-auto shrink-0`, so it takes 123px and will not yield, and
+ * the `min-w-0 flex-1` block gets the remaining 117px. Inside the block the
+ * MCP chip gets 34px — which ellipsises even a SHORT slug: `haven-research`
  * (measured 113px) renders as `haven…`. Every card on the page shows the same
  * stub, the opposite of what #1878 added the chip for (mapping a card to an
- * entry in your MCP config).
+ * entry in your MCP config). (The broken breadth has shifted as the page
+ * scaffold changed — 62.5px chip / block 121.2 / stamp 118.8 on #2324's base —
+ * but the defect class is unchanged: the stamp cannot yield and the chip
+ * truncates; the spec below measures against the current render.)
  *
  * THE DECISION. What `/agents` shows first on a narrow card is an
  * information-priority choice, and this is it: **the MCP wiring outranks the
@@ -44,7 +47,7 @@
  * different slugs are distinguishable.** The seed is `haven-research`, the same
  * value `scripts/screenshot.mjs:485` seeds for the `/agents` mobile capture,
  * which measures **113px** (the value this spec re-measures at runtime, so the
- * bar is not a literal tuned to one renderer). Below that — the 62.5px the
+ * bar is not a literal tuned to one renderer). Below that — the 34px the
  * broken layout gives — the chip is a `haven…` stub and two agents are
  * indistinguishable. Above it, the whole slug shows. The assertion compares the
  * chip's rendered width against its own `scrollWidth` (readable even while
@@ -62,7 +65,7 @@
  * WHICH ARM CATCHES WHAT — measured, not assumed:
  *
  *   @390   the PRIMARY arm goes red on the reverted layout. The stamp is on
- *          the line, the chip is 62.5px, and 62.5 < 113, so "the chip renders
+ *          the line, the chip is 34px, and 34 < 113, so "the chip renders
  *          whole" fails. The "stamp on its own line" guard fails too.
  *   @768   the CONTROL arm: the stamp is on the line (`sm:basis-auto`), the
  *          chip is whole, and the card fits its track. This is green on the
@@ -77,10 +80,10 @@
  *
  * MUTATION PROOF. Reverting the layout change (removing `flex-wrap` from the
  * row and `basis-full sm:basis-auto` from the stamp) drops the chip back to
- * 62.5px at 390, which is below the 113px natural width, so the primary
- * assertion goes red; the stamp returns to the line, so the "stamp on its own
- * line" guard goes red too. Both are checked by running the revert, not by
- * reading the diff.
+ * 34px at 390, which is below the 113px natural width, so the primary
+ * assertion goes red; the stamp returns to the line (stamp top 263px against
+ * a block bottom of 363px), so the "stamp on its own line" guard goes red too.
+ * Both are checked by running the revert, not by reading the diff.
  *
  * FIXTURE FIDELITY. `mcp_server_name` is selected as `a.mcp_server_name` by
  * `listAgentsForUserAllStatuses` (`infra/repositories/agents.ts:184`), typed
@@ -156,9 +159,11 @@ type Reading = {
 }
 
 /**
- * Anchor on `role="link"` + `aria-label` and on the value the chip renders —
+ * Anchor on the surviving card testid and on the value the chip renders —
  * never on a class string: the class strings are what this fix changes, so a
  * probe that read them would be measuring the diff instead of the layout.
+ * (`role="link"` on the card died with #2331's retire-legacy-Safe-surfaces
+ * restructure; `data-testid="agent-card"` is the stable anchor on `dev`.)
  *
  * The block and the stamp are located structurally (the header row's second and
  * third children), not by class, so the probe reads the same elements under the
@@ -171,7 +176,7 @@ async function readChip(page: Page, value: string): Promise<Reading> {
       (el) => el.children.length === 0 && (el.textContent ?? '').trim() === mcpName,
     ) as HTMLElement | undefined
     if (!chip) throw new Error(`no MCP chip rendering "${mcpName}"`)
-    const card = chip.closest('[role="link"][aria-label^="View "]') as HTMLElement
+    const card = chip.closest('[data-testid="agent-card"]') as HTMLElement | null
     if (!card) throw new Error('the MCP chip is not inside an /agents card')
 
     // The header row is the card's first child; its children are the bot tile,
@@ -269,14 +274,14 @@ test('/agents: the MCP chip is distinguishable at 390', async ({ page }) => {
   ).toBeLessThan(MOBILE)
 
   // Non-vacuity #2: the seed must genuinely stress the chip. Its natural width
-  // must exceed the 62.5px the broken layout gives, so that reverting the fix
+  // must exceed the 34px the broken layout gives, so that reverting the fix
   // makes the chip truncate. Stated against the rendered natural width rather
   // than a literal, so it is renderer-robust.
   expect(
     reading.natural,
     `@${MOBILE}px: the seeded slug "${SEED}" measures ${reading.natural}px — it must be wide enough that the ` +
-      `broken layout (62.5px) would truncate it, or nothing below is under test`,
-  ).toBeGreaterThan(62.5)
+      `broken layout (34px) would truncate it, or nothing below is under test`,
+  ).toBeGreaterThan(34)
 
   // The stamp must still be present — the fix moves it, it does not delete it.
   expect(
@@ -295,7 +300,7 @@ test('/agents: the MCP chip is distinguishable at 390', async ({ page }) => {
 
   // THE MEASURED MINIMUM: the chip renders at least the natural width of the
   // seeded slug, so the whole slug is visible and two agents with different
-  // slugs are distinguishable. On the reverted layout the chip is 62.5px, below
+  // slugs are distinguishable. On the reverted layout the chip is 34px, below
   // the 113px natural width, so this goes red.
   expect(
     reading.width,

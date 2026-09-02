@@ -37,6 +37,10 @@
  *   Since #2211 it does that with foreign-key-ordered `DELETE`s rather than
  *   `TRUNCATE`, because `TRUNCATE`'s cost is per-relation and therefore grew
  *   with the migration count; coverage is unchanged. See `resetDb` below.
+ *   Since #2354 the emptying runs under an explicit relation-lock budget
+ *   (`RESET_LOCK_WAIT_MS`) and fails NAMING the session that holds the lock,
+ *   and the cycle fallback truncates only the cycle's footprint instead of
+ *   every table. See `performReset` and *A warm reset under contention*.
  *
  * ## Call these from a HOOK, not from a test body (#2329)
  *
@@ -63,6 +67,48 @@
  * run ahead of it, which is why the lock's own deadline is deliberately
  * LARGER than `hookTimeout` — any number big enough to cover it is a number
  * at which the per-test timeout no longer detects a hung test.
+ *
+ * ## A warm reset under contention (#2354)
+ *
+ * A WARM `resetDb()` — migration run already memoised — never touches
+ * `MIGRATION_LOCK_KEY`: `ensureMigrated()` returns the resolved promise and
+ * the reset goes straight to the catalog read. So the advisory lock, which is
+ * the whole story on the cold path, explains nothing about a warm reset that
+ * misses its budget. Measured on the DELETE path (36 tables, 20 resets per
+ * worker, native Postgres 16): median ~90-115 ms at 1, 2, 4 and 8 concurrent
+ * workers — flat in workers, and the `DELETE`s themselves are ~5 ms of it. The
+ * floor is the CATALOG READ (`readSchemaShape`), which scales with the size of
+ * `pg_class` — a developer database that has accumulated hundreds of orphaned
+ * `test_w<N>` schemas scans tens of thousands of rows per reset — and not with
+ * the table count of one schema (10 vs 36 tables: 54 vs 59 ms). The one path
+ * that scales with BOTH relations (~8 ms per relation) and workers (~2x from 1
+ * to 8) is the `TRUNCATE` fallback, and under I/O saturation it reaches
+ * seconds; before #2354 it truncated every table whenever any cycle existed.
+ * (36 is what `readSchemaShape`'s own predicate counts on 2026-09-02 at 74
+ * migrations; #2211's 38 below was true on 2026-08-30, before migration 073
+ * dropped `x402_receipts` and `x402_resources` — same query, two dates.)
+ *
+ * What a warm reset can genuinely WAIT on is a relation lock held by another
+ * session on this worker's tables — a transaction a test left open, an
+ * orphaned vitest worker with the same `VITEST_WORKER_ID` (#2319 found eight
+ * orphans on one machine), or an autovacuum on the `TRUNCATE` path. That wait
+ * is never a healthy state, so it is bounded by `RESET_LOCK_WAIT_MS` — inside
+ * the 5000 ms an in-body call runs under — and the failure names the holder
+ * (pid, state, transaction age, query) instead of surfacing as an anonymous
+ * "Test timed out in 5000ms". Slowness WITHOUT a holder is the machine's, and
+ * the slow-call announcement now says which phase it is in so it reads as
+ * that. A third wait — a pooled connection under pool exhaustion — has its
+ * own bound (the pool's `connectionTimeoutMillis`) and its own named failure
+ * (`describePoolTimeout`), in whichever phase first needed the pool.
+ *
+ * All of it is pinned by `helpers/__tests__/db-harness-reset-contention.test.ts`,
+ * including the residue: a reset slowed with NO holder (a statement-level
+ * trigger sleeping through one `DELETE`) must announce the warm phase, name
+ * nobody, and complete — and the no-holder branch of the lock message must
+ * say "no session holds a lock" rather than fabricate one; and a reset run
+ * with every pooled connection checked out must fail naming pool exhaustion.
+ * Those are the fixtures that fail the day this limit is silently closed or
+ * the diagnostic starts lying.
  *
  * ## When Postgres is absent
  *
@@ -160,7 +206,7 @@ export const describeDb: typeof describe = dbAvailable
  * Distinct from the migration runner's cross-replica lane lock and from
  * `LEADER_LOCK_KEYS` (`platform/leader-lock.ts`).
  */
-const MIGRATION_LOCK_KEY = 811000061
+export const MIGRATION_LOCK_KEY = 811000061
 
 /**
  * How often a waiting worker retries the lock.
@@ -220,7 +266,54 @@ const LOCK_SLOW_WAIT_MS = 30 * 1000
  * whichever worker holds `MIGRATION_LOCK_KEY` — and that is exactly the case
  * worth a line.
  */
-const SLOW_HARNESS_CALL_MS = 2_000
+export const SLOW_HARNESS_CALL_MS = 2_000
+
+/**
+ * How long a WARM reset waits for a relation lock before failing with the
+ * holder named (#2354).
+ *
+ * Sized between `SLOW_HARNESS_CALL_MS` and vitest's 5000 ms `testTimeout`, and
+ * that ordering is load-bearing: the announcement fires first and says which
+ * phase is stuck, this deadline fires next and says WHO holds the lock, and
+ * both land before the anonymous per-test timeout an in-body call runs under
+ * (the harness's own suites reset mid-test, where the reset is the subject).
+ * `db-harness-reset-contention.test.ts` pins the ordering.
+ *
+ * Not a budget for slowness — `lock_timeout` counts only time spent waiting
+ * for a lock another session HOLDS, so a busy machine with no holder never
+ * trips it. A warm reset that waits this long on a relation lock is never a
+ * healthy run: other vitest workers live in other schemas, so the holder is a
+ * transaction this worker's own tests left open, an orphaned worker with the
+ * same `VITEST_WORKER_ID`, or an autovacuum on the `TRUNCATE` path (which
+ * cancels itself within `deadlock_timeout`, 1 s by default). Raising this
+ * number would only hide the holder.
+ */
+export const RESET_LOCK_WAIT_MS = 3_000
+
+/** The phase a harness call is in, read by the slow-call announcement. */
+type PhaseReporter = (phase: string) => void
+
+const PHASE_MIGRATION_HEAD = 'migration head'
+const PHASE_ACQUIRING_CONNECTION = 'acquiring connection'
+
+/** What `vitest.setup.ts` capped the per-worker pool at (#1222); 20 is `config.ts`'s default. */
+function poolMax(): number {
+  return Number(process.env.DB_POOL_MAX) || 20
+}
+
+/**
+ * pg-pool's connection-acquisition timeout (`connectionTimeoutMillis`,
+ * `config.dbPoolConnectionTimeout`). It carries no SQLSTATE — it never reached
+ * Postgres — so it is recognised by pg-pool's own message.
+ */
+function isPoolTimeout(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    typeof (err as { message?: unknown }).message === 'string' &&
+    (err as { message: string }).message.includes('timeout exceeded when trying to connect')
+  )
+}
 
 /**
  * Run `work`, announcing it as the cause WHILE it is still slow.
@@ -229,34 +322,61 @@ const SLOW_HARNESS_CALL_MS = 2_000
  * printed after the fact never runs, because the timeout kills the test first.
  * A fast call stays completely silent — the closing duration line is printed
  * only when the warning already fired, so the log gains nothing on a good run.
+ *
+ * `work` receives a phase reporter, and the announcement names the phase it
+ * finds (#2354): the cold explanation — the migration run and the advisory
+ * lock — was printed verbatim for a warm reset blocked on a table lock, which
+ * pointed the reader at the one thing a warm reset never waits on.
  */
-async function withSlowAnnouncement<T>(label: string, work: () => Promise<T>): Promise<T> {
+async function withSlowAnnouncement<T>(
+  label: string,
+  work: (phase: PhaseReporter) => Promise<T>,
+): Promise<T> {
   const startedAt = Date.now()
+  let phase = PHASE_MIGRATION_HEAD
   let warned = false
   const timer = setTimeout(() => {
     warned = true
+    const cause =
+      phase === PHASE_MIGRATION_HEAD
+        ? 'Both harness entry points await the same memoised migration run, which brings ' +
+          "this worker's schema to the migration head and serialises that run across " +
+          `vitest workers on advisory lock ${MIGRATION_LOCK_KEY}, so a cold call under CI ` +
+          'contention costs seconds.'
+        : phase === PHASE_ACQUIRING_CONNECTION
+          ? 'The migration run is already paid; this WARM call is waiting for a POOLED ' +
+            `CONNECTION — pool exhaustion: all DB_POOL_MAX=${poolMax()} of this worker's ` +
+            'connections are checked out, by a test that never released one. The pool ' +
+            'gives up after its connectionTimeoutMillis and the reset names that (#2354).'
+          : 'The migration run is already paid, so this is a WARM call: it never waits on ' +
+            `advisory lock ${MIGRATION_LOCK_KEY}. It waits on Postgres itself — a busy ` +
+            'machine, which is a cost of the machine and not of the test (#2354) — on a ' +
+            "session holding a lock on this worker's tables, which the reset reports by " +
+            `pid after ${RESET_LOCK_WAIT_MS} ms, or on a pooled connection when all ` +
+            `DB_POOL_MAX=${poolMax()} are checked out by a test that never released one, ` +
+            "which the reset names after the pool's connectionTimeoutMillis."
     console.warn(
       `db-harness: ${label} has been running ` +
-        `${Math.round((Date.now() - startedAt) / 1000)}s — the HARNESS SETUP is what is ` +
-        'slow here, not the test body. Both harness entry points await the same memoised ' +
-        "migration run, which brings this worker's schema to the migration head and " +
-        'serialises that run across vitest ' +
-        `workers on advisory lock ${MIGRATION_LOCK_KEY}, so a cold call under CI ` +
-        'contention costs seconds. If this call sits in an `it` body it is charged to ' +
-        "vitest's 5000 ms testTimeout and will surface as an anonymous " +
-        '"Test timed out in 5000ms" naming an innocent test; move it into ' +
-        "`beforeAll`/`beforeEach`, where vitest.config.ts's hookTimeout budgets it " +
+        `${Math.round((Date.now() - startedAt) / 1000)}s in phase "${phase}" — the ` +
+        `HARNESS is what is slow here, not the test body. ${cause} If this call sits ` +
+        "in an `it` body it is charged to vitest's 5000 ms testTimeout and will surface " +
+        'as an anonymous "Test timed out in 5000ms" naming an innocent test; move it ' +
+        "into `beforeAll`/`beforeEach`, where vitest.config.ts's hookTimeout budgets it " +
         '(#2329).',
     )
   }, SLOW_HARNESS_CALL_MS)
   // Never keep the process alive for a diagnostic.
   timer.unref?.()
   try {
-    return await work()
+    return await work((next) => {
+      phase = next
+    })
   } finally {
     clearTimeout(timer)
     if (warned) {
-      console.warn(`db-harness: ${label} finished after ${Date.now() - startedAt}ms.`)
+      console.warn(
+        `db-harness: ${label} finished after ${Date.now() - startedAt}ms (last phase "${phase}").`,
+      )
     }
   }
 }
@@ -275,7 +395,7 @@ export function initDbHarness(): Promise<void> {
   // module-level "am I nested" flag: a flag cannot tell a nested call from a
   // merely concurrent one, and would silence a genuinely separate slow call
   // (haven-reviewer, #2329).
-  return withSlowAnnouncement('initDbHarness()', ensureMigrated)
+  return withSlowAnnouncement('initDbHarness()', () => ensureMigrated())
 }
 
 function ensureMigrated(): Promise<void> {
@@ -357,6 +477,41 @@ export type FkEdge = { child: string; parent: string }
  * Kahn's algorithm over edges child → parent, sources first.
  */
 export function planDeleteOrder(tables: string[], edges: readonly FkEdge[]): string[] | null {
+  const { ordered, stuck } = topologicalSplit(tables, edges)
+  return stuck.length === 0 ? ordered : null
+}
+
+/**
+ * What `resetDb()` actually executes: every table Kahn's algorithm could
+ * order is emptied with a `DELETE` in that order, and only the tables it could
+ * NOT order — the cycle members and the tables they reference, which no
+ * `DELETE` order can reach — are `TRUNCATE ... CASCADE`d (#2354).
+ *
+ * Before #2354 a single cycle anywhere sent EVERY table down the `TRUNCATE`
+ * path — the per-relation cost #2211 removed, back in full, and the one reset
+ * shape that scales with both the relation count and the number of concurrent
+ * workers. Coverage is identical either way: `deleteOrder ∪ truncate` is
+ * always the complete table list, and `CASCADE` re-empties (already empty)
+ * referencing tables rather than refusing. The cost is now the cycle's
+ * footprint instead of the schema's.
+ */
+export function planEmptying(
+  tables: string[],
+  edges: readonly FkEdge[],
+): { deleteOrder: string[]; truncate: string[] } {
+  const { ordered, stuck } = topologicalSplit(tables, edges)
+  return { deleteOrder: ordered, truncate: stuck }
+}
+
+/**
+ * Kahn's algorithm over edges child → parent, sources first. `ordered` is the
+ * child-first prefix; `stuck` is every table that never reached in-degree 0,
+ * in the input order — non-empty exactly when the graph has a cycle.
+ */
+function topologicalSplit(
+  tables: string[],
+  edges: readonly FkEdge[],
+): { ordered: string[]; stuck: string[] } {
   const parents = new Map<string, Set<string>>(tables.map((t) => [t, new Set<string>()]))
   const inDegree = new Map<string, number>(tables.map((t) => [t, 0]))
   for (const { child, parent } of edges) {
@@ -377,7 +532,8 @@ export function planDeleteOrder(tables: string[], edges: readonly FkEdge[]): str
       if (remaining === 0) queue.push(parent)
     }
   }
-  return order.length === tables.length ? order : null
+  const placed = new Set(order)
+  return { ordered: order, stuck: tables.filter((t) => !placed.has(t)) }
 }
 
 /** Quote an identifier read back from the catalog. */
@@ -466,7 +622,12 @@ async function readSchemaShape(): Promise<SchemaShape> {
  * A foreign-key CYCLE has no valid delete order. That is not reachable in
  * today's schema, but a future migration could introduce one, so the
  * `TRUNCATE` path is kept as the fallback — chosen deterministically from
- * `planDeleteOrder` returning `null`, never by swallowing an error.
+ * the plan, never by swallowing an error — and since #2354 it covers only the
+ * tables the plan could not order (`planEmptying`), not the whole schema.
+ *
+ * The emptying runs in ONE transaction under `RESET_LOCK_WAIT_MS` (#2354): a
+ * warm reset that waits on a relation lock fails naming the holder, before
+ * the anonymous per-test timeout can. See *A warm reset under contention*.
  *
  * AWAITS the migration-head guarantee first, deliberately — the same memoised
  * run `initDbHarness()` exposes, reached through the private `ensureMigrated()`
@@ -491,27 +652,172 @@ export function resetDb(): Promise<void> {
   return withSlowAnnouncement('resetDb()', performReset)
 }
 
-async function performReset(): Promise<void> {
+async function performReset(report: PhaseReporter): Promise<void> {
+  let current = PHASE_MIGRATION_HEAD
+  const phase: PhaseReporter = (next) => {
+    current = next
+    report(next)
+  }
+  try {
+    await performResetPhases(phase)
+  } catch (err) {
+    // Pool exhaustion surfaces in whichever phase first needs a pooled
+    // connection — usually `catalog read`, since `readSchemaShape()` runs
+    // before the dedicated client is taken — and pg-pool's bare "timeout
+    // exceeded when trying to connect" says nothing about why. Name it, in
+    // the phase it happened, like the lock timeout is named (#2354).
+    if (isPoolTimeout(err)) throw new Error(describePoolTimeout(current, err as Error))
+    throw err
+  }
+}
+
+function describePoolTimeout(phaseLabel: string, cause: Error): string {
+  return (
+    `db-harness: resetDb() could not get a pooled connection (phase: ${phaseLabel}) — ` +
+    `pool exhaustion: all DB_POOL_MAX=${poolMax()} of this worker's connections are checked ` +
+    'out by a test that never released one (a `db.connect()` without `release()`, or a ' +
+    'transaction client kept past its test). The pool gave up after its ' +
+    'connectionTimeoutMillis (config.dbPoolConnectionTimeout). Find the leak; a rerun ' +
+    `only passes if the leaking test happens not to run first (#2354). Cause: ${cause.message}`
+  )
+}
+
+async function performResetPhases(phase: PhaseReporter): Promise<void> {
+  phase(PHASE_MIGRATION_HEAD)
   await ensureMigrated()
+  phase('catalog read')
   const { tables, fks, sequences } = await readSchemaShape()
   if (tables.length === 0) return
 
-  const order = planDeleteOrder(
+  const { deleteOrder, truncate } = planEmptying(
     tables,
     fks.map(([child, parent]) => ({ child, parent })),
   )
-  if (order === null) {
-    // No valid delete order exists. Fall back to the pre-#2211 shape, which
-    // does not need one.
-    await db.query(
-      `TRUNCATE ${tables.map(qualify).join(', ')} RESTART IDENTITY CASCADE`,
-    )
-    return
-  }
+  const label =
+    truncate.length === 0
+      ? `emptying (${deleteOrder.length} DELETEs)`
+      : `emptying (${deleteOrder.length} DELETEs, TRUNCATE fallback over ${truncate.join(', ')})`
+  phase(label)
 
   const statements = [
-    ...order.map((table) => `DELETE FROM ${qualify(table)};`),
+    ...deleteOrder.map((table) => `DELETE FROM ${qualify(table)};`),
+    // No valid delete order exists for these. The pre-#2211 shape, which does
+    // not need one — scoped to the cycle's footprint since #2354.
+    ...(truncate.length > 0
+      ? [`TRUNCATE ${truncate.map(qualify).join(', ')} RESTART IDENTITY CASCADE;`]
+      : []),
     ...sequences.map((sequence) => `ALTER SEQUENCE ${WORKER_SCHEMA}.${quote(sequence)} RESTART;`),
   ]
-  await db.query(statements.join('\n'))
+  await emptyUnderLockBudget(statements, label, phase)
+}
+
+/** SQLSTATE 55P03 `lock_not_available` — what `lock_timeout` raises. */
+function isLockTimeout(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '55P03'
+}
+
+/**
+ * Run the emptying statements in one transaction with `lock_timeout` set to
+ * `RESET_LOCK_WAIT_MS`, on a dedicated connection so the setting and the
+ * aborted transaction never leak into the pool. On a lock timeout, rethrow
+ * with the holders named (#2354).
+ *
+ * The connection is acquired BEFORE the lock budget can apply, and that wait
+ * is a different wait (#2354 item 1's third candidate): under pool exhaustion
+ * — every one of this worker's `DB_POOL_MAX` clients checked out by a test
+ * that never released — `db.connect()` blocks. It is bounded by the pool's
+ * own `connectionTimeoutMillis` (`config.dbPoolConnectionTimeout`), not by
+ * `RESET_LOCK_WAIT_MS`; the phase reporter says `acquiring connection` for
+ * exactly that window so the announcement cannot attribute it to the
+ * emptying, and `performReset` wraps the pool's bare timeout so it reads
+ * like the lock one (haven-reviewer + haven-doc-reviewer, #2354). Measured
+ * on the DELETE path at 1-8 workers, acquisition was a 0.1 ms median — it
+ * is named here so that when it is the wait, the log says so.
+ */
+async function emptyUnderLockBudget(
+  statements: string[],
+  phaseLabel: string,
+  phase: PhaseReporter,
+): Promise<void> {
+  phase(PHASE_ACQUIRING_CONNECTION)
+  const client = await db.connect()
+  phase(phaseLabel)
+  try {
+    await client.query(
+      [
+        `BEGIN;`,
+        `SET LOCAL lock_timeout = ${RESET_LOCK_WAIT_MS};`,
+        ...statements,
+        `COMMIT;`,
+      ].join('\n'),
+    )
+  } catch (err) {
+    // The failed statement leaves the transaction aborted; clear it before the
+    // connection goes back to the pool, whatever the error was.
+    await client.query('ROLLBACK').catch(() => undefined)
+    if (isLockTimeout(err)) throw new Error(await describeLockTimeout(phaseLabel))
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
+type LockHolder = {
+  pid: number
+  backend_type: string
+  application_name: string
+  state: string | null
+  xact_age_s: number | null
+  query: string
+}
+
+/**
+ * Every OTHER session holding a granted lock on a relation in the worker
+ * schema, read after the reset's own transaction rolled back (so the reset
+ * itself is not in the list). Read from the pool, not from the client that
+ * just timed out.
+ *
+ * Exported for one reason: the no-holder branch has to be PINNED, not
+ * described. When nobody holds a lock — the holder released between the
+ * timeout and this read, or the timeout came from somewhere the harness did
+ * not foresee — the message must say so rather than invent a session, and
+ * `db-harness-reset-contention.test.ts` asserts that directly. Directly,
+ * because the natural route (a holder that lets go in the microseconds
+ * between the `lock_timeout` firing and this read) is not reliably
+ * producible; reading the branch is the only practical pin (haven-reviewer).
+ */
+export async function describeLockTimeout(phaseLabel: string): Promise<string> {
+  const { rows } = await db.query<LockHolder>(
+    `SELECT DISTINCT a.pid, a.backend_type, a.application_name, a.state,
+            extract(epoch FROM (now() - a.xact_start))::int AS xact_age_s,
+            left(a.query, 160) AS query
+       FROM pg_locks l
+       JOIN pg_class c ON c.oid = l.relation
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       JOIN pg_stat_activity a ON a.pid = l.pid
+      WHERE l.granted AND n.nspname = $1 AND l.pid <> pg_backend_pid()
+      ORDER BY a.pid`,
+    [WORKER_SCHEMA],
+  )
+  const holders =
+    rows.length === 0
+      ? 'no session holds a lock on this schema any more — the holder released between ' +
+        'the timeout and this read'
+      : rows
+          .map(
+            (h) =>
+              `pid ${h.pid} (${h.backend_type}` +
+              `${h.application_name ? `, ${h.application_name}` : ''}` +
+              `, ${h.state ?? 'no state'}, xact ${h.xact_age_s ?? '?'}s, ` +
+              `${JSON.stringify(h.query)})`,
+          )
+          .join('; ')
+  return (
+    `db-harness: resetDb() gave up after ${RESET_LOCK_WAIT_MS} ms waiting for a relation ` +
+    `lock in ${WORKER_SCHEMA} (phase: ${phaseLabel}). Held by: ${holders}. A warm reset ` +
+    `never waits on migration lock ${MIGRATION_LOCK_KEY} — only on a session holding a lock ` +
+    "on this worker's tables: a transaction a test left open, an orphaned vitest worker " +
+    'with the same VITEST_WORKER_ID, or an autovacuum on the TRUNCATE path. Raising the ' +
+    'budget would only hide the holder (#2354).'
+  )
 }

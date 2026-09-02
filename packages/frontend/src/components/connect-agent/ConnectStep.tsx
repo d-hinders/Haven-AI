@@ -3,7 +3,6 @@
 import type { AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
 import { ConnectStepShell, type ConnectShellPhase } from './ConnectStepShell'
 import { DelegationApprovalStep } from './DelegationApprovalStep'
-import RetiredRailNotice from '../RetiredRailNotice'
 import { FinalizingLocalSetup, SetupDoneState, SetupStatusState, TerminalSetupState } from './SetupStates'
 import { WaitingForConnector } from './WaitingForConnector'
 
@@ -91,7 +90,6 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         />
       )}
 
-      {connectView?.kind === 'retired_rail' && <RetiredRailNotice />}
 
       {connectView?.kind === 'active' && (
         <SetupDoneState

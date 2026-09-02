@@ -540,11 +540,18 @@ export async function mockHavenApi(page: Page) {
  * carrying budget rows is union-legal on the wire and emitted by nothing
  * (#2224).
  *
- * Use it only where the retired rail IS the subject, and say why at the call
- * site. Anything rail-independent stays on the default. Its caller today is
- * `agent-panel-states.visual.spec.ts`'s retirement-boundary capture (#2258);
- * `wallet-button-collapsed-states.visual.spec.ts` left it for the live rail
- * (#2284), so a spec reaching for it is making a deliberate legacy claim.
+ * ⚠️ **NO CALLERS since #2413, and do not add one without reading this.** Its
+ * last caller was `agent-panel-states.visual.spec.ts`'s retirement-boundary
+ * capture (#2258), deleted with the UI it asserted on. This helper stubs
+ * `/auth/me` and `/agents` returning a legacy account — a response the API can
+ * no longer produce, because six list queries filter to `delegator_hybrid`
+ * (`infra/repositories/{user-safes,agents,dashboard}.ts`). A spec built on it
+ * would therefore assert against a state that cannot occur in production,
+ * which is the same defect the screenshot fixture had before #2413 fixed it.
+ *
+ * Kept rather than deleted only to bound this change: `legacySafe` below still
+ * has three consumers (`fixture-shape-parity.test.ts`, `DashboardClient.test.tsx`),
+ * and unpicking them is a separate slice. Deleting both is the right end state.
  */
 export async function optDownToLegacyRail(page: Page) {
   await page.route('**/api/**', async (route) => {

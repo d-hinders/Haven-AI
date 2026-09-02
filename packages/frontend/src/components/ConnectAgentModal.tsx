@@ -1,12 +1,10 @@
 'use client'
 
 import { useAgentConnectionSetup } from '@/hooks/useAgentConnectionSetup'
-import { useRetiredRailOwnerAccess } from '@/hooks/useRetiredRailOwnerAccess'
 import { ConnectStep } from './connect-agent/ConnectStep'
 import { DetailsStep } from './connect-agent/DetailsStep'
 import { PolicyStep } from './connect-agent/PolicyStep'
 import { ReviewStep } from './connect-agent/ReviewStep'
-import RetiredRailNotice from './RetiredRailNotice'
 import { Modal } from './ui/Modal'
 import { StepProgress } from './ui/StepProgress'
 
@@ -52,8 +50,6 @@ export default function ConnectAgentModal({
     onSetupUpdated,
     starterAllowance,
   })
-  const selectedSafe = flow.selectableSafes.find((safe) => safe.id === flow.selectedSafeId)
-  const retiredRail = useRetiredRailOwnerAccess(selectedSafe)
 
   if (!open) return null
 
@@ -62,7 +58,7 @@ export default function ConnectAgentModal({
       open
       onClose={flow.handleClose}
       title="Connect agent"
-      subtitle={flow.isRetiredRail ? 'Agent connection unavailable' : flow.headerSubtitleText}
+      subtitle={flow.headerSubtitleText}
       headerAccessory={
         // #1418: ONE status voice. On steps 1-3 the wizard band is the only
         // status signal. On step 4 the shell ticker (Waiting — Connected —
@@ -71,7 +67,7 @@ export default function ConnectAgentModal({
         // the same dot/line language made the user decode which meant what,
         // on the screen whose whole job is calm. The ticker also carries the
         // remaining journey, so "step 4 of 4" loses no information.
-        !flow.isRetiredRail && flow.step !== 'connect' ? (
+        flow.step !== 'connect' ? (
           <StepProgress totalSteps={flow.setupStepCount} currentStep={Math.max(flow.currentStepIndex, 0)} />
         ) : undefined
       }
@@ -94,16 +90,14 @@ export default function ConnectAgentModal({
        * Step 4 stays OUTSIDE this wrapper and keeps its own shell/rhythm —
        * changing it is explicitly out of scope for #1411.
        */}
-      {flow.isRetiredRail ? (
-        <RetiredRailNotice ownerAccess={retiredRail.ownerAccess} />
-      ) : flow.step !== 'connect' && (
+      {flow.step !== 'connect' && (
         <div key={flow.step} className="v2-animate-step-rise flex flex-col gap-5">
           {flow.step === 'details' && <DetailsStep flow={flow} />}
           {flow.step === 'policy' && <PolicyStep flow={flow} />}
           {flow.step === 'review' && <ReviewStep flow={flow} />}
         </div>
       )}
-      {!flow.isRetiredRail && flow.step === 'connect' && <ConnectStep flow={flow} />}
+      {flow.step === 'connect' && <ConnectStep flow={flow} />}
     </Modal>
   )
 }

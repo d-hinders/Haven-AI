@@ -82,7 +82,6 @@ vi.mock('@/hooks/useEscapeToClose', () => ({
 }))
 
 import {
-  isDelegationRailAccount,
   railBudgetRules,
   resolveConnectStepView,
   useAgentConnectionSetup,
@@ -122,50 +121,23 @@ function connectedSetupStatus(overrides: Record<string, unknown> = {}) {
   }
 }
 
-describe('isDelegationRailAccount (#1069/#1070)', () => {
-  it('is true for a delegator_hybrid selected wallet', () => {
-    expect(isDelegationRailAccount({ account_type: 'delegator_hybrid' }, null)).toBe(true)
-  })
-
-  it('treats an explicitly selected legacy/unknown wallet as authoritative', () => {
-    expect(isDelegationRailAccount({}, { account_type: 'delegator_hybrid' })).toBe(false)
-    expect(isDelegationRailAccount(null, { account_type: 'delegator_hybrid' })).toBe(true)
-  })
-
-  it('a legacy account_type on the selected wallet wins over a delegation active wallet', () => {
-    expect(isDelegationRailAccount({ account_type: 'safe' }, { account_type: 'delegator_hybrid' })).toBe(false)
-  })
-
-  it('is false for legacy/absent account types', () => {
-    expect(isDelegationRailAccount(null, null)).toBe(false)
-    expect(isDelegationRailAccount({}, {})).toBe(false)
-    expect(isDelegationRailAccount({ account_type: null }, { account_type: null })).toBe(false)
-  })
-})
-
 describe('railBudgetRules (#1073)', () => {
-  it('delegation setup takes exactly ONE budget', () => {
-    expect(railBudgetRules(true, 0).budgetSlotsFull).toBe(false)
-    expect(railBudgetRules(true, 1).budgetSlotsFull).toBe(true)
+  // #2413 dropped this helper's rail parameter: no legacy account reaches the
+  // connect modal, so the "legacy never fills its slots" half had no reachable
+  // input and its two cases went with it.
+  it('setup takes exactly ONE budget', () => {
+    expect(railBudgetRules(0).budgetSlotsFull).toBe(false)
+    expect(railBudgetRules(1).budgetSlotsFull).toBe(true)
   })
 
-  it('the legacy rail never fills its budget slots', () => {
-    expect(railBudgetRules(false, 3).budgetSlotsFull).toBe(false)
-  })
-
-  it('the delegation rail does not offer a One-time (0) reset period', () => {
-    const { resetPeriodOptions } = railBudgetRules(true, 0)
+  it('does not offer a One-time (0) reset period', () => {
+    const { resetPeriodOptions } = railBudgetRules(0)
     expect(resetPeriodOptions.some((period) => period.value === 0)).toBe(false)
     expect(resetPeriodOptions.length).toBeGreaterThan(0)
   })
-
-  it('the retired legacy rail also exposes no new budget reset choices', () => {
-    const { resetPeriodOptions } = railBudgetRules(false, 0)
-    expect(resetPeriodOptions.some((period) => period.value === 0)).toBe(false)
-  })
 })
 
-describe('resolveConnectStepView (#1069/#1070 rail branch)', () => {
+describe('resolveConnectStepView (#2413: no rail branch left)', () => {
   const readyStatuses = ['connected_local', 'awaiting_wallet_approval'] as const
 
   it.each(readyStatuses)(
@@ -174,34 +146,22 @@ describe('resolveConnectStepView (#1069/#1070 rail branch)', () => {
       const view = resolveConnectStepView({
         visibleStatus: status,
         installStatus: CONFIGURED_INSTALL,
-        isDelegationAccount: true,
         agentId: 'agent-1',
       })
       expect(view).toEqual({ kind: 'delegation_approval', agentId: 'agent-1' })
     },
   )
 
-  it.each(readyStatuses)('a LEGACY account is sent to the retired-rail notice on %s', (status) => {
-    const view = resolveConnectStepView({
-      visibleStatus: status,
-      installStatus: CONFIGURED_INSTALL,
-      isDelegationAccount: false,
-      agentId: 'agent-1',
-    })
-    expect(view).toEqual({ kind: 'retired_rail' })
-  })
-
   it('a delegation account without agent_id yet keeps finalizing — never routed away (#1073)', () => {
     const view = resolveConnectStepView({
       visibleStatus: 'connected_local',
       installStatus: CONFIGURED_INSTALL,
-      isDelegationAccount: true,
       agentId: null,
     })
     expect(view).toEqual({ kind: 'finalizing_local' })
   })
 
-  it('an install error still reaches the approval step, on the right rail', () => {
+  it('an install error still reaches the approval step', () => {
     const erroredInstall = {
       ...CONFIGURED_INSTALL,
       local_mcp_configured: false,
@@ -212,25 +172,15 @@ describe('resolveConnectStepView (#1069/#1070 rail branch)', () => {
       resolveConnectStepView({
         visibleStatus: 'connected_local',
         installStatus: erroredInstall,
-        isDelegationAccount: true,
         agentId: 'agent-1',
       }),
     ).toEqual({ kind: 'delegation_approval', agentId: 'agent-1' })
-    expect(
-      resolveConnectStepView({
-        visibleStatus: 'connected_local',
-        installStatus: erroredInstall,
-        isDelegationAccount: false,
-        agentId: 'agent-1',
-      }),
-    ).toEqual({ kind: 'retired_rail' })
   })
 
   it('connected_local without a configured runtime or error stays finalizing', () => {
     const view = resolveConnectStepView({
       visibleStatus: 'connected_local',
       installStatus: { ...CONFIGURED_INSTALL, local_mcp_configured: false, local_mcp_acknowledged: false },
-      isDelegationAccount: false,
       agentId: 'agent-1',
     })
     expect(view).toEqual({ kind: 'finalizing_local' })
@@ -239,12 +189,11 @@ describe('resolveConnectStepView (#1069/#1070 rail branch)', () => {
   it('maps the simple statuses one-to-one', () => {
     const base = {
       installStatus: CONFIGURED_INSTALL,
-      isDelegationAccount: false,
       agentId: 'agent-1',
     }
     expect(resolveConnectStepView({ ...base, visibleStatus: 'awaiting_connection' })).toEqual({ kind: 'waiting_for_connector' })
-    expect(resolveConnectStepView({ ...base, visibleStatus: 'approval_in_progress' })).toEqual({ kind: 'retired_rail' })
-    expect(resolveConnectStepView({ ...base, visibleStatus: 'proposed' })).toEqual({ kind: 'retired_rail' })
+    // `approval_in_progress` and `proposed` were the legacy wallet-approval
+    // states; #2413 removed their mapping with the rail that produced them.
     expect(resolveConnectStepView({ ...base, visibleStatus: 'active' })).toEqual({ kind: 'active' })
     expect(resolveConnectStepView({ ...base, visibleStatus: 'expired' })).toEqual({ kind: 'expired' })
     expect(resolveConnectStepView({ ...base, visibleStatus: 'cancelled' })).toEqual({ kind: 'cancelled' })
@@ -294,32 +243,23 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
     )
   }
 
-  it('a delegator_hybrid wallet drives the delegation approval view (#1070)', async () => {
+  // #2413 removed `isDelegationAccount` from the flow: every account the API
+  // returns is on the delegation rail, so the flag had one value. What this
+  // case pins is the outcome it was a proxy for — setup reaches the in-modal
+  // budget approval — which is still falsifiable.
+  it('drives the delegation approval view (#1070)', async () => {
     mockUseAuth.mockReturnValue({
       user: { safes: [{ ...SAFE, account_type: 'delegator_hybrid' }] },
       activeSafe: { ...SAFE, account_type: 'delegator_hybrid' },
     })
     const { result } = renderFlow()
 
-    expect(result.current.isDelegationAccount).toBe(true)
     await act(async () => {
       await result.current.handleCreateSetup()
     })
 
     expect(result.current.step).toBe('connect')
     expect(result.current.connectView).toEqual({ kind: 'delegation_approval', agentId: 'agent-1' })
-  })
-
-  it('a legacy wallet exposes the retired-rail view', async () => {
-    const { result } = renderFlow()
-
-    expect(result.current.isDelegationAccount).toBe(false)
-    await act(async () => {
-      await result.current.handleCreateSetup()
-    })
-
-    expect(result.current.step).toBe('details')
-    expect(result.current.connectView).toEqual({ kind: 'retired_rail' })
   })
 
   it('flags a connected-but-wrong-chain wallet instead of treating it as absent (#1070)', () => {

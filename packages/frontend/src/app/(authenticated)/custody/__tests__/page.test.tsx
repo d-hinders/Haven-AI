@@ -45,7 +45,7 @@ import CustodyPage from '../page'
 // Not from '../page': Next refuses arbitrary named exports from a page
 // module, so these live in `lib/custody-rail.ts` (#2106 — `next build`
 // caught it; `tsc --noEmit` did not).
-import { havenCannotLines, railOf } from '@/lib/custody-rail'
+import { havenCannotLines } from '@/lib/custody-rail'
 
 const CHAIN_ID = 84532
 const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
@@ -109,6 +109,37 @@ beforeEach(() => {
     budgetsLoading: false,
     budgetsError: false,
     reloadBudgets: vi.fn(),
+  })
+})
+
+// #2413 collapsed `custody-rail.ts`: no legacy account reaches this page, so
+// `railOf` and the rail-keyed claim table are gone. The three describes that
+// lived here — the legacy SafeControlCard control, `railOf`'s two-way split,
+// and the rail-correct wording matrix — went with their subject. What survives
+// is the claim that matters and is still falsifiable: the lines are the
+// delegation rail's, unconditionally, with no Safe wording reachable.
+describe('"What Haven cannot do" after the rail collapse (#2413)', () => {
+  it('states the delegation-rail claims and takes no argument to branch on', () => {
+    const lines = havenCannotLines()
+    expect(lines).toHaveLength(4)
+    expect(lines.join(' ')).toContain('a new delegation you sign')
+    expect(lines.join(' ')).toContain('stop any agent’s budget on-chain')
+  })
+
+  it('cannot state Safe-rail wording — there is no rail input left to state it from', () => {
+    const lines = havenCannotLines().join(' ')
+    expect(lines).not.toContain('Safe transaction')
+    expect(lines).not.toContain('allowance')
+    expect(lines).not.toContain('legacy Safe')
+    // The prefixes only existed to disambiguate a mixed-rail list.
+    expect(lines).not.toContain('On your Haven account:')
+    expect(lines).not.toContain('On your legacy Safe:')
+  })
+
+  it('keeps both rail-independent claims', () => {
+    const lines = havenCannotLines().join(' ')
+    expect(lines).toContain('Move your funds')
+    expect(lines).toContain('Hold your keys')
   })
 })
 
@@ -258,109 +289,5 @@ describe('/custody — an expired delegation is not live spend control (#2106)',
     const text = container.textContent ?? ''
     expect(text).toContain('Signed budget delegation')
     expect(text).not.toContain('expired')
-  })
-})
-
-describe('/custody — legacy Safe rail is unchanged (#2106 control)', () => {
-  beforeEach(() => {
-    mockUseUserSafes.mockReturnValue({ safes: [safe(null)], loading: false })
-  })
-
-  it('still renders the owners/threshold proof', () => {
-    const { container } = render(<CustodyPage />)
-    const text = container.textContent ?? ''
-    expect(text).toContain('Owners (control this Safe — Haven is not one)')
-    expect(text).toContain('Threshold: 2 of 2')
-  })
-
-  it('keeps legacy account reads while retiring the agent spending surface', () => {
-    render(<CustodyPage />)
-    expect(screen.getByText('Haven no longer sends payments from this account.')).toBeTruthy()
-    expect(screen.queryByText(/AllowanceModule/)).toBeNull()
-    expect(screen.queryByText(/on-chain agent allowances/)).toBeNull()
-  })
-
-  it('still offers the Safe{Wallet} deep link', () => {
-    mockUseRetiredRailOwnerAccess.mockReturnValue({
-      ...mockUseSafeDetails(),
-      ownerAccess: 'wallet',
-    })
-    const { container } = render(<CustodyPage />)
-    const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '')
-    expect(hrefs).toContain(
-      `https://app.safe.global/home?safe=basesep:${safe(null).safe_address}`,
-    )
-  })
-
-  it('does not offer Safe{Wallet} to an unknown or passkey-only owner', () => {
-    for (const ownerAccess of ['unknown', 'passkey-only'] as const) {
-      mockUseRetiredRailOwnerAccess.mockReturnValue({
-        ...mockUseSafeDetails(),
-        ownerAccess,
-      })
-      const { container, unmount } = render(<CustodyPage />)
-      const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '')
-      expect(hrefs.some((h) => h.includes('app.safe.global'))).toBe(false)
-      unmount()
-    }
-  })
-
-  it('does not present the retired rail as an active spending control', () => {
-    const { container } = render(<CustodyPage />)
-    expect(container.textContent ?? '').toContain('Legacy agent spending is retired in Haven')
-  })
-})
-
-describe('railOf (#1069 rail marker)', () => {
-  it('reads delegator_hybrid as the delegation rail', () => {
-    expect(railOf({ account_type: 'delegator_hybrid' })).toBe('delegation')
-  })
-
-  it('reads null and the legacy marker as the Safe rail — no third state', () => {
-    expect(railOf({ account_type: null })).toBe('safe')
-    expect(railOf({ account_type: 'safe' })).toBe('safe')
-    expect(railOf({ account_type: undefined })).toBe('safe')
-  })
-})
-
-describe('"What Haven cannot do" is rail-correct (#2106)', () => {
-  const SAFE_TX_CLAIM = 'without a Safe transaction you sign'
-  const SAFE_APP_CLAIM = 'any Safe-compatible app'
-
-  it('never tells a delegation-rail user their authority is a Safe transaction', () => {
-    const lines = havenCannotLines([{ account_type: 'delegator_hybrid' }]).join(' ')
-    expect(lines).not.toContain(SAFE_TX_CLAIM)
-    expect(lines).not.toContain(SAFE_APP_CLAIM)
-    expect(lines).toContain('without a new delegation you sign')
-  })
-
-  it('keeps the Safe-rail wording for a Safe-rail user', () => {
-    const lines = havenCannotLines([{ account_type: null }]).join(' ')
-    expect(lines).toContain(SAFE_TX_CLAIM)
-    expect(lines).toContain('supported Safe owner')
-    expect(lines).not.toContain(SAFE_APP_CLAIM)
-  })
-
-  it('keeps the two rail-independent claims on both rails', () => {
-    for (const accountType of ['delegator_hybrid', null]) {
-      const lines = havenCannotLines([{ account_type: accountType }]).join(' ')
-      expect(lines).toContain('Move your funds')
-      expect(lines).toContain('Hold your keys')
-    }
-  })
-
-  it('labels both variants when the user holds accounts on both rails', () => {
-    const lines = havenCannotLines([
-      { account_type: 'delegator_hybrid' },
-      { account_type: null },
-    ])
-    expect(lines.some((l) => l.startsWith('On your Haven account: '))).toBe(true)
-    expect(lines.some((l) => l.startsWith('On your legacy Safe: '))).toBe(true)
-  })
-
-  it('falls to the delegation rail with no accounts — the only rail #1984 leaves open', () => {
-    const lines = havenCannotLines([]).join(' ')
-    expect(lines).toContain('without a new delegation you sign')
-    expect(lines).not.toContain(SAFE_TX_CLAIM)
   })
 })

@@ -92,9 +92,10 @@ export function useSafeOperationGate(args: {
   const isHybridAccount = useMemo(() => {
     const safeAddress = args.safeAddress?.toLowerCase()
     if (!safeAddress || args.chainId === undefined) return false
+    // #2413: every listed account is on the delegation rail, so matching the
+    // address and chain is the whole test.
     return (user?.safes ?? []).some(
       (safe) =>
-        safe.account_type === 'delegator_hybrid' &&
         safe.chain_id === args.chainId &&
         safe.safe_address.toLowerCase() === safeAddress,
     )

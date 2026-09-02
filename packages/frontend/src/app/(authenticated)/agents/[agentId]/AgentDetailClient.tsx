@@ -38,7 +38,6 @@ import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import { RemoveAgentDialog } from '@/components/agent-panel/RemoveAgentDialog'
 import { ReplaceSigningKeyModal } from '@/components/agent-panel/ReplaceSigningKeyModal'
 import { useAgentPassport } from '@/hooks/useAgentPassport'
-import { useRetiredRailOwnerAccess } from '@/hooks/useRetiredRailOwnerAccess'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,7 +45,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
-import RetiredRailNotice from '@/components/RetiredRailNotice'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -339,7 +337,6 @@ export default function AgentDetailClient({ agentId }: Props) {
   const openEditAgent = () => {
     setEditOpen(true)
   }
-  const isDelegationAgent = agent?.account_type === 'delegator_hybrid'
   const openUpdateBudget = () => {
     document
       .getElementById(DELEGATION_BUDGET_CARD_ID)
@@ -359,15 +356,6 @@ export default function AgentDetailClient({ agentId }: Props) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [replaceKeyOpen, setReplaceKeyOpen] = useState(false)
 
-  const retiredRail = useRetiredRailOwnerAccess(
-    agent
-      ? {
-          safe_address: safe?.safe_address ?? agent.safe_address ?? '',
-          chain_id: chainId,
-          account_type: agent.account_type,
-        }
-      : null,
-  )
 
   // #1701/#1699: only an anchored attestation is retired and reissued. Pending
   // or failed issuance will read the new delegate if it anchors after re-key.
@@ -509,20 +497,16 @@ export default function AgentDetailClient({ agentId }: Props) {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                   <DropdownMenuItem onSelect={openEditAgent}>
-                    {isDelegationAgent ? 'Edit agent' : 'Rename agent'}
+                    Edit agent
                   </DropdownMenuItem>
-                  {isDelegationAgent ? (
-                    <>
-                      <DropdownMenuItem onSelect={openUpdateBudget}>Update budget</DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={() => setCredentialsOpen(true)}>
-                        Payment credentials
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => setReplaceKeyOpen(true)}>
-                        Replace signing key
-                      </DropdownMenuItem>
-                    </>
-                  ) : null}
+                  <DropdownMenuItem onSelect={openUpdateBudget}>Update budget</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setCredentialsOpen(true)}>
+                    Payment credentials
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setReplaceKeyOpen(true)}>
+                    Replace signing key
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
@@ -532,9 +516,7 @@ export default function AgentDetailClient({ agentId }: Props) {
 
       <Card hover={false} className="p-5 md:p-6">
         <p className="max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
-          {currentAgent.description || (isDelegationAgent
-            ? 'This agent can make payments within the rules you set.'
-            : 'This is a historical agent record from a retired Safe account.')}
+          {currentAgent.description || 'This agent can make payments within the rules you set.'}
         </p>
         <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div>
@@ -561,8 +543,7 @@ export default function AgentDetailClient({ agentId }: Props) {
         </dl>
       </Card>
 
-      {currentAgent.account_type === 'delegator_hybrid' ? (
-        <>
+      <>
           <div id={DELEGATION_BUDGET_CARD_ID} className="scroll-mt-24">
             <DelegationBudgetCard
               agentId={agentId}
@@ -584,31 +565,7 @@ export default function AgentDetailClient({ agentId }: Props) {
               />
             </Card>
           ) : null}
-        </>
-      ) : null}
-      {currentAgent.account_type !== 'delegator_hybrid' ? (
-        <div className="mt-6">
-          <RetiredRailNotice ownerAccess={retiredRail.ownerAccess} />
-          {isArchived ? (
-            <div className="mt-3 flex justify-end">
-              <Button
-                onClick={() => void handleRestore()}
-                disabled={pendingAction !== null}
-                variant="ghost"
-                size="sm"
-              >
-                {pendingAction === 'restore' ? 'Restoring…' : 'Restore to list'}
-              </Button>
-            </div>
-          ) : (
-            <div className="mt-3 flex justify-end">
-              <Button variant="danger" size="sm" onClick={() => setRemoveOpen(true)}>
-                Unlink agent
-              </Button>
-            </div>
-          )}
-        </div>
-      ) : null}
+      </>
 
       {agentsError ? (
         <div
@@ -622,7 +579,7 @@ export default function AgentDetailClient({ agentId }: Props) {
         </div>
       ) : null}
 
-      {isPaused && isDelegationAgent ? (
+      {isPaused ? (
         <div className="mt-4">
           {/* #2230: title and body come from `lib/agent-pause-copy.ts`, shared
               with `AgentCard`'s banner one click away. This page's wording is
@@ -731,12 +688,9 @@ export default function AgentDetailClient({ agentId }: Props) {
       <AgentPassportCard
         agentId={agentId}
         agentRevoked={isRevoked}
-        canIssue={isDelegationAgent}
       />
 
       <div className="mt-6 space-y-6">
-        {isDelegationAgent ? (
-          <>
           <AgentRulesSummary
             title="Agent budget"
             description="What this agent can spend, where the money comes from, and how you stay in control."
@@ -806,7 +760,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                       {pendingAction === 'resume' ? 'Resuming…' : 'Resume agent'}
                     </Button>
                   ) : null}
-                  {!isArchived && isDelegationAgent ? (
+                  {!isArchived ? (
                     <Button
                       onClick={() => setRemoveOpen(true)}
                       disabled={pendingAction !== null}
@@ -838,8 +792,6 @@ export default function AgentDetailClient({ agentId }: Props) {
               action={!isRevoked ? <Button size="sm" onClick={openUpdateBudget}>Add budget</Button> : undefined}
             />
           ) : null}
-          </>
-        ) : null}
 
           <div id={AGENT_ACTIVITY_SECTION_ID} className="scroll-mt-24">
             <div className="mb-4">
@@ -909,7 +861,6 @@ export default function AgentDetailClient({ agentId }: Props) {
         agentId={agentId}
         agentName={currentAgent.name}
         chainId={chainId}
-        isDelegationAgent={isDelegationAgent}
         currentDelegateAddress={currentAgent.delegate_address}
         recentPayments={activity.filter(isPaymentActivityItem)}
         hasAnchoredPassport={passport?.status === 'anchored' && passport.attestation_uid !== null}

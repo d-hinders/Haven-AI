@@ -1211,8 +1211,8 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
-        title="Manual payment review"
-        description="Manual sends lead with the money: amount first, then the wallet-to-recipient path and how you approve the send."
+        title="Manual send"
+        description="Manual sends lead with the money: amount first, then the recipient. One approval, no review step — this mirrors the live Send modal, which is the only manual send Haven has."
       >
         <Card hover={false} className="max-w-xl p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1222,11 +1222,12 @@ export default function DesignSystemPage() {
                 125.00 USDC
               </p>
             </div>
-            <StatusBadge>Ready to send</StatusBadge>
           </div>
-          <div className="mt-5 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
-            <TransactionMovement from="Operating wallet" to="Acme Services" />
-            <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+          <p className="mt-3 text-sm text-[var(--v2-ink-muted)]">
+            Send from this account with one approval. No network fee for you.
+          </p>
+          <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+            <dl className="grid gap-3 sm:grid-cols-2">
               <div>
                 <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
                 <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Operating wallet</dd>
@@ -1234,24 +1235,16 @@ export default function DesignSystemPage() {
               <div>
                 <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Recipient</dt>
                 <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Acme Services</dd>
-                <dd className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">0x7a58...91c2</dd>
               </div>
               <div>
                 <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
                 <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Base</dd>
               </div>
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Approve with</dt>
-                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Device approval</dd>
-              </div>
             </dl>
           </div>
-          <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
-            Network fees are paid by Haven (ETH).
-          </p>
-          <div className="mt-5 flex gap-3">
-            <Button variant="ghost" className="flex-1">Back</Button>
-            <Button className="flex-1">Approve and send</Button>
+          <div className="mt-5 flex justify-end gap-3">
+            <Button variant="ghost">Cancel</Button>
+            <Button>Send</Button>
           </div>
         </Card>
       </Section>

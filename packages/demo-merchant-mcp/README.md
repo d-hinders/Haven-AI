@@ -142,15 +142,20 @@ caught #2373 in a single QA run — and the refusal names the rule rather than
 returning a bare 400.
 
 **Building a payment fixture by hand?** Copy a working pattern instead of
-inventing one. After decoding the challenge as `pr`, the four in-repo test
-helpers all echo it with
+inventing one. After decoding the challenge as `pr`, the in-repo test helpers
+all echo it with
 `...(pr.extensions ? { extensions: pr.extensions } : {})`: `signedHeader` in
 `src/x402.test.ts`, `src/http.test.ts` and `src/http-session-restart.test.ts`,
-and `erc7710Header` in `src/erc7710.test.ts`. The rule's own tests (drop,
-overwrite, version-mismatch dodge, append) are
-`describe('extensions echo rule (#2361)')` in `src/x402.test.ts`. Haven's real
-clients echo through the SDK's `x402V2PaymentEnvelope`, which the edge signer
-also uses.
+and `erc7710Header` in `src/erc7710.test.ts`. The rule's own tests are
+`describe('extensions echo rule (#2361)')` in `src/x402.test.ts`, one per
+branch of `assertExtensionsEchoed`: the version cross-check (with a dropped
+echo, and with a perfect one), an absent or non-object echo, a dropped key
+(top-level and nested), `{}`, an overwritten value, an append, and a challenge
+that advertises no extensions. The three refusal strings in the table above,
+the re-sent `PAYMENT-REQUIRED` challenge and the `X-PAYMENT` alias are pinned
+at the HTTP boundary by `describe('extensions echo refusals over HTTP (#2403)')`
+in `src/http.test.ts`. Haven's real clients echo through the SDK's
+`x402V2PaymentEnvelope`, which the edge signer also uses.
 
 ## Hosted URLs
 

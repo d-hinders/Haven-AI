@@ -16,7 +16,7 @@ last-verified: "2026-09-01" # #2102: five places where this doc contradicted its
 > [architecture/08-local-vs-hosted-mcp.md](../architecture/08-local-vs-hosted-mcp.md);
 > to deploy the hosted server, see [hosted-mcp.md](hosted-mcp.md).
 
-Migrating from the local `npx @haven_ai/mcp` stdio server to hosted, keyless
+Migrating from the local `npx @haven_ai/mcp@alpha` stdio server to hosted, keyless
 MCP plus local signing.
 
 TL;DR: point your agent runtime at the hosted MCP URL with the Haven API key as
@@ -29,7 +29,7 @@ relays; the local runtime or `@haven_ai/signer` signs.
 
 ```text
 Agent runtime
-  -> local npx @haven_ai/mcp
+  -> local npx @haven_ai/mcp@alpha
   -> reads api_key + delegate_key from local credential file
   -> signs locally
   -> sends API identity + signed payloads to Haven
@@ -191,13 +191,13 @@ Hosted MCP does not sign. The agent must sign locally, either with its own
 runtime secret handling or with `@haven_ai/signer`.
 
 ```sh
-npx @haven_ai/signer --credentials /path/to/haven-agent.json --ack
+npx @haven_ai/signer@alpha --credentials /path/to/haven-agent.json --ack
 ```
 
 After acknowledgement, run it normally beside the agent runtime:
 
 ```sh
-npx @haven_ai/signer --credentials /path/to/haven-agent.json
+npx @haven_ai/signer@alpha --credentials /path/to/haven-agent.json
 ```
 
 The signer exposes local stdio MCP tools:
@@ -307,7 +307,7 @@ Polling will not help: there is no pending state to poll.
 
 **Local signer is not available**
 
-Start `npx @haven_ai/signer --credentials /path/to/haven-agent.json` in the
+Start `npx @haven_ai/signer@alpha --credentials /path/to/haven-agent.json` in the
 same agent environment, or configure the agent runtime to sign locally from its
 own secret store. Do not send the delegate key to hosted MCP.
 

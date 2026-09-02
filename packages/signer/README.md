@@ -28,15 +28,15 @@ Rerunning it is also the documented fix for a signer that has fallen behind the
 backend's expected-context version. To run the signer directly:
 
 ```sh
-HAVEN_DELEGATE_KEY=0x... npx @haven_ai/signer
+HAVEN_DELEGATE_KEY=0x... npx @haven_ai/signer@alpha
 # or
-npx @haven_ai/signer --credentials /path/to/haven-agent.json
+npx @haven_ai/signer@alpha --credentials /path/to/haven-agent.json
 ```
 
 On first launch, the signer prints the delegate address, any wallet/network
 metadata found in the credential file, and the sign-only tool list. It refuses
 to start until acknowledged with either `HAVEN_SIGNER_ACK=<hash>` or
-`npx @haven_ai/signer --credentials /path/to/haven-agent.json --ack`.
+`npx @haven_ai/signer@alpha --credentials /path/to/haven-agent.json --ack`.
 
 It exposes four stdio MCP tools, all sign-only:
 

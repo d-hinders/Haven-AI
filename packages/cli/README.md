@@ -7,7 +7,7 @@ web app, not instead of it.
 ## Install
 
 ```bash
-npm i -g @haven_ai/cli   # or run ad hoc: npx @haven_ai/cli <command>
+npm i -g @haven_ai/cli@alpha   # or run ad hoc: npx @haven_ai/cli@alpha <command>
 haven --help
 ```
 

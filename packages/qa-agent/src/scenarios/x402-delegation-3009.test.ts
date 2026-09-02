@@ -11,7 +11,6 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { readFileSync } from 'node:fs'
 import { Wallet } from 'ethers'
 import type { ScenarioContext } from './types.js'
 
@@ -374,23 +373,16 @@ describe('delivery is a different question from dust (#2444)', () => {
     // The old pass wording, which this shape used to produce. The failure text
     // deliberately says "not sub-floor dust", so match the pass phrasing.
     expect(r.detail).not.toMatch(/left by design/)
-  })
 
-  it('does not assert a settlement failure the balance read cannot prove', () => {
     // #2445's lesson, applied here: the harness reads BASE_SEPOLIA_RPC while
     // the backend writes through RPC_URL_BASE_SEPOLIA, so a lagging node
     // produces a reading identical to an unsettled merchant leg. The message
     // must offer both, or triage goes at the bridge for a propagation delay.
-    // Guarding the generating code, not prose: this pins that the second
-    // possibility is named at all, not how the sentence reads.
-    const src = readFileSync(
-      new URL('./x402-delegation-3009.ts', import.meta.url),
-      'utf8',
-    )
-    const message = src.slice(src.indexOf('if (verdict.undelivered)'))
-    expect(message).toMatch(/has not caught up/)
+    // Asserted on the string this run actually produced, not on the source
+    // that produced it: a literal match against a real value.
+    expect(r.detail).toMatch(/has not caught up/)
     // The bare assertion, with nothing offered beside it, is what #2445 removed.
-    expect(message).not.toMatch(/— the merchant leg has not settled, so/)
+    expect(r.detail).not.toMatch(/— the merchant leg has not settled, so/)
   })
 
   it('PASSES when the late merchant leg lands inside the delivery wait', async () => {

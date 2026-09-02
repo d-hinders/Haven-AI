@@ -155,7 +155,7 @@ The returned \`expires_at\` is the signing window; if a tool returns
 merchant leg for you.
 
 **Direct transfer / non-MCP paywall:** \`mcp__haven__haven_pay\` with
-recipient, amount, and token for a plain transfer. For an arbitrary,
+\`to\`, \`amount\`, and \`token\` for a plain transfer. For an arbitrary,
 non-MCP x402 paywall: \`mcp__haven__haven_quote_x402\` to get a quote, then
 \`mcp__haven__haven_pay_x402_quote\` — follow the result's guidance fields
 first and sign in the local Haven signer. On THIS path Haven does not talk to

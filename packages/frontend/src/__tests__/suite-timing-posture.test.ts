@@ -3,15 +3,17 @@
  *
  * ## The known limit this pins
  *
- * `DelegationSendModal`, `InfoModal`, `UnmanagedDelegateCard` and `Modal` can
- * time out on a CPU-contended machine and pass alone. Measured, not assumed:
+ * `DelegationSendModal`, `InfoModal` and `Modal` can time out on a
+ * CPU-contended machine and pass alone. (#2319 measured a fourth,
+ * `UnmanagedDelegateCard`; #2331 has since retired it with the rest of the
+ * legacy Safe surfaces, so three carry the pin.) Measured, not assumed:
  * each of those files' first test renders a `ui/Modal` in a freshly isolated
  * module graph, which costs 250–450 ms idle (the later tests in the same file
  * cost ~40 ms), and that cost scales linearly with how oversubscribed the
  * machine is. Around an 11x slowdown the first test crosses vitest's 5000 ms
  * `testTimeout`; an unloaded full run never gets near it. So the failure is
  * proportional to load, not a fixed wall inside the tests — there is nothing
- * in those four files to make faster, and no fake-timer or `act()` change
+ * in those files to make faster, and no fake-timer or `act()` change
  * removes a cost that is the render itself.
  *
  * The decision is therefore to ACCEPT the limit and make it honest rather than
@@ -22,9 +24,9 @@
  *    suite's hung-test detector; raising it until a contended run passes makes
  *    every file's timeout stop detecting anything, which is why #2329 and
  *    #2354 rejected the same move on the backend.
- * 2. None of the four suites carries a per-test timeout override, in either
+ * 2. None of the pinned suites carries a per-test timeout override, in either
  *    vitest spelling (`it(name, fn, 30_000)` / `it(name, { timeout }, fn)`).
- *    Bumping just the four is the same fix at a smaller radius: the four are
+ *    Bumping just those is the same fix at a smaller radius: they are
  *    only the FIRST files to cross the line, not the only ones that can.
  * 3. The `afterEach` diagnostic in `setup.ts` says what the machine was doing
  *    when a test was slow or timed out, so a reader gets the distinguishing
@@ -32,7 +34,7 @@
  *    explicit reading, so it needs no loaded machine to prove.
  *
  * Each pin was mutation-proved: `testTimeout: 30_000` added to the config,
- * a `{ timeout: 30_000 }` added to one of the four — and, after review, an
+ * a `{ timeout: 30_000 }` added to one of them — and, after review, an
  * `it.each(...)(…, 30_000)`, a positional timeout through a `const`, a body
  * passed by reference with a timeout, and a `vi.setConfig({ testTimeout })`
  * each added to `Modal.test.tsx` — and the
@@ -53,11 +55,13 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const FRONTEND_ROOT = path.resolve(HERE, '../..')
 
-/** The four suites #2319 observed, relative to `packages/frontend`. */
+/**
+ * The suites #2319 observed that still exist, relative to `packages/frontend`.
+ * `UnmanagedDelegateCard.test.tsx` was the fourth; #2331 deleted it.
+ */
 export const LOAD_SENSITIVE_SUITES = [
   'src/components/__tests__/DelegationSendModal.test.tsx',
   'src/components/__tests__/InfoModal.test.tsx',
-  'src/components/agent-panel/__tests__/UnmanagedDelegateCard.test.tsx',
   'src/components/ui/__tests__/Modal.test.tsx',
 ] as const
 
@@ -284,7 +288,7 @@ describe('the posture itself, pinned (#2319)', () => {
     expect(found, 'raising the budget is the rejected fix — see the file header').toEqual([])
   })
 
-  it('none of the four load-sensitive suites carries a per-test timeout override', () => {
+  it('none of the load-sensitive suites carries a per-test timeout override', () => {
     const findings = LOAD_SENSITIVE_SUITES.flatMap((rel) => {
       const source = readFileSync(path.join(FRONTEND_ROOT, rel), 'utf8')
       return perTestTimeoutOverrides(source, rel).map((line) => `${rel}:${line}`)
@@ -292,7 +296,7 @@ describe('the posture itself, pinned (#2319)', () => {
     expect(findings).toEqual([])
   })
 
-  it('the four suites still exist at the paths this file pins', () => {
+  it('the pinned suites still exist at the paths this file pins', () => {
     // A renamed file would make the pin above pass on nothing.
     for (const rel of LOAD_SENSITIVE_SUITES) {
       expect(() => readFileSync(path.join(FRONTEND_ROOT, rel))).not.toThrow()

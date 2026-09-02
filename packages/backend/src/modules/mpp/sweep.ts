@@ -13,11 +13,11 @@
  */
 import { config } from '../../config.js'
 import {
-  claimPreparedSweep,
+  claimPreparedSweepForBoundAgent,
   expirePreparedSweep,
   findSweepById,
   findSweepByNonce,
-  insertPreparedSweep,
+  insertPreparedSweepForBoundAgent,
   markSweepFailed,
   markSweepSubmitted,
   releaseSweepClaim,
@@ -89,6 +89,17 @@ interface DelegateSweepRow {
  * it. The delegate never needs ETH and the hosted server never holds the key.
  */
 export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResult> {
+  // Agent auth normally rejects this state. Keep the money path fail-closed
+  // as a second boundary because an account can be unlinked between auth and
+  // handler execution, and never construct a transfer to a mutable fallback
+  // wallet address.
+  if (agent.has_bound_safe === false) {
+    return {
+      statusCode: 422,
+      body: { error: 'Agent is no longer linked to a Haven wallet; recovery is unavailable.' },
+    }
+  }
+
   if (!isSweepableChain(agent.chain_id)) {
     return {
       statusCode: 422,
@@ -159,7 +170,7 @@ export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResul
     valueAtomic: balance,
   })
 
-  await insertPreparedSweep({
+  const inserted = await insertPreparedSweepForBoundAgent({
     agentId: agent.id,
     userId: agent.user_id,
     chainId: authorization.chainId,
@@ -171,6 +182,12 @@ export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResul
     validBefore: authorization.validBefore,
     nonce: authorization.nonce.toLowerCase(),
   })
+  if (!inserted) {
+    return {
+      statusCode: 422,
+      body: { error: 'Agent is no longer linked to a Haven wallet; recovery is unavailable.' },
+    }
+  }
 
   const expectedAuth = await signSweepExpectedContext(authorization)
 
@@ -309,8 +326,19 @@ export async function submitSweep(
   // reverts on the spent EIP-3009 nonce, and if its failure write lands first
   // it records a successful recovery as 'failed' and breaks replay. The loser
   // of this compare-and-swap re-reads and replays instead of relaying.
-  const claimed = await claimPreparedSweep(row.id)
-  if (!claimed) {
+  const claim = await claimPreparedSweepForBoundAgent(
+    row.id,
+    agent.id,
+    agent.user_id,
+    agent.safe_address,
+  )
+  if (claim === 'not_bound') {
+    return {
+      statusCode: 409,
+      body: { error: 'Agent is no longer linked to the prepared sweep destination.' },
+    }
+  }
+  if (claim === 'already_claimed') {
     const current = await findSweepById(row.id)
     if (current?.status === 'submitted' && current.tx_hash) {
       return {

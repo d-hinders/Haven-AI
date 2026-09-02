@@ -1,5 +1,7 @@
 'use client'
 
+import type { RetiredRailOwnerAccess } from '@/lib/retired-rail-owner-access'
+
 /**
  * Inert notice shown where a legacy Safe account's spend actions used to be
  * (#1989, epic #1440).
@@ -30,8 +32,6 @@
  * the account and nothing is at risk — and it offers no action, because there
  * is no action here to offer.
  */
-export type RetiredRailOwnerAccess = 'wallet' | 'passkey-only' | 'unknown'
-
 export default function RetiredRailNotice({
   ownerAccess = 'unknown',
   className = '',
@@ -48,12 +48,14 @@ export default function RetiredRailNotice({
       </p>
       <p className="mt-2 text-sm text-[var(--v2-ink-2)] leading-relaxed">
         This is an older Safe account. Its balances, agents and full transaction history stay
-        available to read here, but Haven cannot send from it and agents cannot spend from it.
+        available to read here. Haven no longer supports or mediates agent payments from it; any
+        older on-chain permissions are outside Haven and may require separate action by the Safe owner.
       </p>
       {ownerAccess === 'wallet' ? (
         <p className="mt-2 text-sm text-[var(--v2-ink-2)] leading-relaxed">
-          Your funds are unaffected. This Safe has a wallet owner, so you can move them at any time
-          from Safe&apos;s own interface with that wallet — independently of Haven.
+          Your funds are unaffected. This Safe has a wallet owner, so you may be able to move them
+          from Safe&apos;s own interface with that wallet. Additional Safe owner approvals may be
+          required; this is independent of Haven.
         </p>
       ) : ownerAccess === 'passkey-only' ? (
         <p className="mt-2 text-sm text-[var(--v2-ink-2)] leading-relaxed">

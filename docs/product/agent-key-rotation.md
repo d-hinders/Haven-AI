@@ -12,7 +12,8 @@ covers:
   - packages/connect/src/args.ts
   - packages/connect/src/storage.ts
   - packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx
-last-verified: "2026-08-25" # #1868: abandon-and-restart is now a recovery, not a write-off — the step-2 callout and the doctor section's "no spend authority" paragraph both updated: a fresh re-key inherits the abandoned attempt's frozen remainder and boundary, unless a new budget was granted in between (then it starts clean, deliberately). The rest of the walkthrough was re-read against the diff and stands. Prior: Promotion review: corrected the dashboard walkthrough's stale boundary warning to match #1849 — an expired remainder is dropped and, while the recurring grant remains active, the full current-period budget is issued. Clarified #1699 applies revoke-and-reissue only to an anchored attestation while standing remains unchanged, and #1868 recovery depends on the stage where the flow stopped. Prior: #1849: "What carries over" gains the boundary-crossing edge — a re-key started in one budget period and finished in the next drops the stale carry and hands you the full budget for the period you are actually in. Prior: #1702: written against epic #1694 as merged — #1698 (backend stages), #1699 (passport re-anchor), #1700 (connect --rekey), #1701's shipped half (dashboard).
+  - 'packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx'
+last-verified: "2026-09-01" # #1868: abandon-and-restart is now a recovery, not a write-off — the step-2 callout and the doctor section's "no spend authority" paragraph both updated: a fresh re-key inherits the abandoned attempt's frozen remainder and boundary, unless a new budget was granted in between (then it starts clean, deliberately). The rest of the walkthrough was re-read against the diff and stands. Prior: Promotion review: corrected the dashboard walkthrough's stale boundary warning to match #1849 — an expired remainder is dropped and, while the recurring grant remains active, the full current-period budget is issued. Clarified #1699 applies revoke-and-reissue only to an anchored attestation while standing remains unchanged, and #1868 recovery depends on the stage where the flow stopped. Prior: #1849: "What carries over" gains the boundary-crossing edge — a re-key started in one budget period and finished in the next drops the stale carry and hands you the full budget for the period you are actually in. Prior: #1702: written against epic #1694 as merged — #1698 (backend stages), #1699 (passport re-anchor), #1700 (connect --rekey), #1701's shipped half (dashboard). Prior: #2258: the page-level agent detail gate is now covered here; legacy Safe records are readable-only in Haven and have no payment-credential, pause/resume, re-key, or revoke controls.
 ---
 
 # Replacing an agent's signing key
@@ -217,11 +218,11 @@ originally granted.
 
 - **Delegation-rail accounts only.** Agents on the legacy Safe AllowanceModule rail
   cannot be re-keyed: their authority is per-token allowances rather than a signed
-  delegation, so there is nothing to revoke and re-issue. Re-onboarding is the path
-  instead. **Replace signing key** stays reachable on those agents and explains this
-  when you open it — deliberately, rather than being greyed out: if your key is lost
-  you need to be told what to do instead, and a disabled menu item cannot tell you
-  anything.
+  delegation, so there is nothing to revoke and re-issue. Their records remain
+  readable in Haven, but Haven does not offer payment-credential, pause/resume,
+  re-key, or revoke controls for them. Owners manage any remaining Safe permission
+  outside Haven where they have access; use the live delegation flow for a
+  replacement agent.
 - **A key is never moved between machines.** There is no "restore my key here". The
   new keypair is generated on the target machine, and any design that transported one
   would break the non-custody the whole system rests on.

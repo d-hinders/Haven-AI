@@ -90,7 +90,7 @@ export async function createPasskey(opts: {
     })
 
     if (!isAttestationCredential(credential)) {
-      throw new Error('WebAuthn credential creation returned an unexpected response.')
+      throw new Error('Secure passkey creation returned an unexpected response.')
     }
 
     const attestationObject = toUint8Array(credential.response.attestationObject)

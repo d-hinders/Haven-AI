@@ -24,7 +24,6 @@ import {
   verifySetupProof,
 } from '../modules/agents/index.js'
 import { normalizeAgentAllowances } from '../modules/agents/index.js'
-import { getTokenAllowance, getTokensForDelegate } from '../rails/allowance-module.js'
 import { getChain } from '../domain/chains.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import {
@@ -105,16 +104,6 @@ interface InstallStatusBody {
   environment_label?: string
 }
 
-interface WalletApprovalBody {
-  result?: 'confirmed' | 'proposed'
-  tx_hash?: string
-  safe_tx_hash?: string
-  chain_id?: number
-  safe_address?: string
-  allowance_module_address?: string
-  delegate_address?: string
-  confirmation_status?: 'confirmed' | 'receipt_timeout'
-}
 
 /**
  * The PRODUCTION hosted MCP. Served as a default ONLY when this backend IS
@@ -470,10 +459,10 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
   // shared one.
   //
   // Deliberately cheap: this is polled, so it reads the setup row's OWN status
-  // — no RPC/on-chain reconciliation (contrast `maybeActivateFromLiveAuthority`
-  // on the dashboard GET below). The wallet-approval and budget-approval
-  // routes are what verify authority and flip the DB status to 'active'; this
-  // endpoint only ever reports what they already wrote.
+  // and issues no RPC. Since #2259 the dashboard GET does the same — the
+  // legacy on-chain reconciliation it used to contrast with is gone with the
+  // Safe rail. `POST /:setupId/budget-approval` is what verifies authority and
+  // flips the DB status to 'active'; this endpoint only reports what it wrote.
   app.get<{ Params: { setupId: string } }>(
     '/:setupId/connector-status',
     async (request, reply) => {
@@ -503,111 +492,20 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       const setup = await loadSetupForUser(request.params.setupId, sub)
       if (!setup) return reply.code(404).send({ error: 'Setup not found' })
       const allowances = await loadSetupAllowances(setup.id)
-      const reconciled = await maybeActivateFromLiveAuthority(setup, allowances)
-      return buildUserSetupStatus(reconciled, allowances)
-    },
-  )
-
-  app.post<{ Params: { setupId: string }; Body: WalletApprovalBody }>(
-    '/:setupId/wallet-approval',
-    { preHandler: authMiddleware },
-    async (request, reply) => {
-      if (
-        containsForbiddenPrivateKeyField(request.body) ||
-        containsForbiddenInstallStatusField(request.body)
-      ) {
-        return reply.code(400).send({ error: 'Credential material is not accepted by Haven' })
-      }
-
-      const { sub } = request.user as { sub: string }
-      const setup = await loadSetupForUser(request.params.setupId, sub)
-      if (!setup) return reply.code(404).send({ error: 'Setup not found' })
-
-      const allowances = await loadSetupAllowances(setup.id)
-      const validation = validateWalletApprovalBody(setup, allowances, request.body)
-      if (!validation.ok) {
-        return reply.code(validation.statusCode).send({ error: validation.error })
-      }
-
-      if (setup.status === 'active') {
-        return buildUserSetupStatus(setup, allowances)
-      }
-
-      if (request.body.result === 'proposed') {
-        const live = await tryVerifySetupAuthority(setup, allowances)
-        if (live.ok) {
-          const active = await persistWalletApprovalState(setup, {
-            status: 'active',
-            approvalStatus: 'confirmed',
-            txHash: null,
-            safeTxHash: normalizeHash(request.body.safe_tx_hash),
-            failureReason: null,
-            activateAgent: true,
-          })
-          if (!active) {
-            return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
-          }
-          return buildUserSetupStatus(active, allowances)
-        }
-
-        const proposed = await persistWalletApprovalState(setup, {
-          status: 'proposed',
-          approvalStatus: 'proposed',
-          txHash: null,
-          safeTxHash: normalizeHash(request.body.safe_tx_hash),
-          failureReason: null,
-          activateAgent: false,
-        })
-        if (!proposed) {
-          return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
-        }
-        return buildUserSetupStatus(proposed, allowances)
-      }
-
-      const verification = await tryVerifySetupAuthority(setup, allowances)
-      if (verification.ok) {
-        const active = await persistWalletApprovalState(setup, {
-          status: 'active',
-          approvalStatus: 'confirmed',
-          txHash: normalizeHash(request.body.tx_hash),
-          safeTxHash: normalizeHash(request.body.safe_tx_hash),
-          failureReason: null,
-          activateAgent: true,
-        })
-        if (!active) {
-          return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
-        }
-        return buildUserSetupStatus(active, allowances)
-      }
-
-      if (
-        request.body.confirmation_status === 'receipt_timeout' ||
-        isTransientSetupAuthorityVerification(verification.error)
-      ) {
-        const inProgress = await persistWalletApprovalState(setup, {
-          status: 'approval_in_progress',
-          approvalStatus: 'submitted',
-          txHash: normalizeHash(request.body.tx_hash),
-          safeTxHash: normalizeHash(request.body.safe_tx_hash),
-          failureReason: verification.error,
-          activateAgent: false,
-        })
-        if (!inProgress) {
-          return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
-        }
-        return reply.code(202).send(buildUserSetupStatus(inProgress, allowances))
-      }
-
-      return reply.code(409).send({ error: verification.error })
+      // #2259: this read used to reconcile a legacy setup to `active` from
+      // live AllowanceModule state — a WRITE hidden in a GET, and the last
+      // path by which a retired-rail agent could still be activated. It is
+      // gone with the rail (epic #1440); the read is now purely a read.
+      return buildUserSetupStatus(setup, allowances)
     },
   )
 
   // ── POST /:setupId/budget-approval — the DELEGATION rail's approval ──
   //
-  // The legacy rail proves authority by reading the Safe's AllowanceModule
-  // on-chain (`tryVerifySetupAuthority`). A delegation has nothing to read
-  // until it is redeemed — its enforcement is the caveat enforcers at payment
-  // time — so the analogue is the signed, activated delegation itself: a row
+  // The retired Safe rail proved authority by reading the AllowanceModule
+  // on-chain; #2259 deleted that half with the rail. A delegation has nothing
+  // to read until it is redeemed — its enforcement is the caveat enforcers at
+  // payment time — so the analogue is the signed, activated delegation: a row
   // only reaches `status='active'` after POST /agents/:id/delegations/:hash/
   // activate validated the OWNER's signature and deployed the account.
   //
@@ -854,86 +752,11 @@ async function loadSetupAllowances(setupId: string): Promise<AllowanceRow[]> {
   return setups.listSetupAllowances(setupId)
 }
 
-function validateWalletApprovalBody(
-  setup: SetupRow,
-  allowances: AllowanceRow[],
-  body: WalletApprovalBody | undefined,
-): { ok: true } | { ok: false; statusCode: 400 | 409 | 410; error: string } {
-  if (!body || (body.result !== 'confirmed' && body.result !== 'proposed')) {
-    return { ok: false, statusCode: 400, error: 'Approval result must be confirmed or proposed' }
-  }
-  if (setup.status === 'cancelled' || setup.status === 'expired' || setup.status === 'failed') {
-    return { ok: false, statusCode: 409, error: 'Setup cannot be approved' }
-  }
-  if (!setups.WALLET_APPROVAL_STATES.has(setup.status)) {
-    const expired = setup.status === 'awaiting_connection' && isExpired(setup.setup_token_expires_at)
-    return {
-      ok: false,
-      statusCode: expired ? 410 : 409,
-      error: expired ? 'Setup token expired' : 'Local connection is required before wallet approval',
-    }
-  }
-  if (!setup.agent_id || !setup.delegate_address) {
-    return { ok: false, statusCode: 409, error: 'Public signing address is required before wallet approval' }
-  }
-  if (allowances.length === 0) {
-    return { ok: false, statusCode: 409, error: 'Agent budget is required before wallet approval' }
-  }
-  if (body.confirmation_status && !['confirmed', 'receipt_timeout'].includes(body.confirmation_status)) {
-    return { ok: false, statusCode: 400, error: 'Invalid confirmation status' }
-  }
-  if (!Number.isInteger(body.chain_id) || body.chain_id !== setup.safe_chain_id) {
-    return { ok: false, statusCode: 400, error: 'Wallet network does not match this setup' }
-  }
-  if (!isValidAddress(body.safe_address) || body.safe_address.toLowerCase() !== setup.safe_address.toLowerCase()) {
-    return { ok: false, statusCode: 400, error: 'Haven wallet does not match this setup' }
-  }
-  if (
-    !isValidAddress(body.delegate_address) ||
-    body.delegate_address.toLowerCase() !== setup.delegate_address.toLowerCase()
-  ) {
-    return { ok: false, statusCode: 400, error: 'Public signing address does not match this setup' }
-  }
-  let allowanceModuleAddress = ''
-  try {
-    allowanceModuleAddress = getChain(setup.safe_chain_id).contracts.allowanceModule
-  } catch {
-    return { ok: false, statusCode: 400, error: 'Unsupported wallet network' }
-  }
-  if (
-    !isValidAddress(body.allowance_module_address) ||
-    body.allowance_module_address.toLowerCase() !== allowanceModuleAddress.toLowerCase()
-  ) {
-    return { ok: false, statusCode: 400, error: 'Wallet approval module does not match this setup' }
-  }
-  if (!isValidHexHash(body.safe_tx_hash)) {
-    return { ok: false, statusCode: 400, error: 'Valid safe_tx_hash is required' }
-  }
-  if (body.result === 'confirmed' && !isValidHexHash(body.tx_hash)) {
-    return { ok: false, statusCode: 400, error: 'Valid tx_hash is required' }
-  }
-  if (
-    setup.safe_tx_hash &&
-    body.safe_tx_hash &&
-    setup.safe_tx_hash.toLowerCase() !== body.safe_tx_hash.toLowerCase()
-  ) {
-    return { ok: false, statusCode: 409, error: 'Wallet approval is already tied to a different Safe transaction' }
-  }
-  if (
-    setup.tx_hash &&
-    body.tx_hash &&
-    setup.tx_hash.toLowerCase() !== body.tx_hash.toLowerCase()
-  ) {
-    return { ok: false, statusCode: 409, error: 'Wallet approval is already tied to a different transaction' }
-  }
-  return { ok: true }
-}
-
 /**
- * The rail-agnostic preconditions the legacy `validateWalletApprovalBody`
- * checks before it starts on its Safe-shaped body fields. The delegation rail
- * has no body to validate, so it needs exactly this subset — kept separate
- * rather than branching inside the legacy validator, which stays untouched.
+ * The rail-agnostic preconditions a setup must satisfy before its budget can
+ * approve it. Originally the subset of the legacy `validateWalletApprovalBody`
+ * that was not Safe-shaped, kept separate rather than branching inside it;
+ * #2259 deleted that validator with the rail, and this is what survives.
  */
 function validateBudgetApprovalPreconditions(
   setup: SetupRow,
@@ -996,84 +819,6 @@ async function verifyDelegationSetupAuthority(
     appLogSafeError(err)
     return { ok: false, error: 'Haven could not confirm the agent budget yet' }
   }
-}
-
-async function maybeActivateFromLiveAuthority(
-  setup: SetupRow,
-  allowances: AllowanceRow[],
-): Promise<SetupRow> {
-  if (!['approval_in_progress', 'proposed'].includes(setup.status)) {
-    return setup
-  }
-  const verification = await tryVerifySetupAuthority(setup, allowances)
-  if (!verification.ok) return setup
-  return (await persistWalletApprovalState(setup, {
-    status: 'active',
-    approvalStatus: 'confirmed',
-    txHash: setup.tx_hash,
-    safeTxHash: setup.safe_tx_hash,
-    failureReason: null,
-    activateAgent: true,
-  })) ?? setup
-}
-
-async function tryVerifySetupAuthority(
-  setup: SetupRow,
-  allowances: AllowanceRow[],
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    if (!setup.delegate_address) {
-      return { ok: false, error: 'Public signing address is missing' }
-    }
-    if (allowances.length === 0) {
-      return { ok: false, error: 'Agent budget is missing' }
-    }
-
-    const expectedTokens = new Set(allowances.map((allowance) => allowance.token_address.toLowerCase()))
-    const actualTokens = (await getTokensForDelegate(
-      setup.safe_chain_id,
-      setup.safe_address,
-      setup.delegate_address,
-    )).map((token) => token.toLowerCase())
-    const actualTokenSet = new Set(actualTokens)
-    for (const expected of expectedTokens) {
-      if (!actualTokenSet.has(expected)) {
-        return { ok: false, error: 'On-chain agent budget is not active yet' }
-      }
-    }
-    for (const actual of actualTokenSet) {
-      if (!expectedTokens.has(actual)) {
-        return { ok: false, error: 'On-chain agent budget contains an unexpected token' }
-      }
-    }
-
-    for (const allowance of allowances) {
-      const info = await getTokenAllowance(
-        setup.safe_chain_id,
-        setup.safe_address,
-        setup.delegate_address,
-        allowance.token_address,
-      )
-      const expectedAmount = BigInt(allowance.allowance_amount)
-      if (info.amount !== expectedAmount) {
-        return { ok: false, error: `${allowance.token_symbol} budget does not match this setup` }
-      }
-      if (info.resetTimeMin !== allowance.reset_period_min) {
-        return { ok: false, error: `${allowance.token_symbol} reset period does not match this setup` }
-      }
-    }
-    return { ok: true }
-  } catch (err) {
-    appLogSafeError(err)
-    return { ok: false, error: 'Haven could not verify the on-chain agent rules yet' }
-  }
-}
-
-function isTransientSetupAuthorityVerification(error: string): boolean {
-  return (
-    error === 'On-chain agent budget is not active yet' ||
-    error === 'Haven could not verify the on-chain agent rules yet'
-  )
 }
 
 async function persistWalletApprovalState(
@@ -1422,9 +1167,6 @@ function stringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function normalizeHash(value: string | null | undefined): string | null {
-  return value ? value.toLowerCase() : null
-}
 
 function isValidApiKeyPrefix(value: unknown): value is string {
   return typeof value === 'string' && /^sk_agent_[0-9a-f]{3}$/.test(value)

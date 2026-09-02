@@ -242,9 +242,9 @@ export const MIN_CONTENT_ELEMENTS = 6
  *   chain still read   872 CSS px    886 chars   150 elements   → 1856px PNG
  *
  * 40 CSS px at `deviceScaleFactor: 2` is the 80 device px that was reported.
- * The missing content is the three `AllowanceBar` rows: `useOnChainAllowances`
- * had not answered, so every `AgentCard` was showing `AllowanceBarSkeleton`
- * ("USDC loading…") instead of its budget. 886/150 is 29x and 25x above the
+ * The missing content is the three budget rows: budget data had not answered,
+ * so every `AgentCard` was showing `AllowanceBarSkeleton` ("USDC loading…")
+ * instead of its budget. 886/150 is 29x and 25x above the
  * floors, so nothing above this line can see it — and #1971's chain-read guard
  * cannot either, because the reads *had* been issued, just not answered yet.
  *
@@ -280,7 +280,7 @@ export const MIN_CONTENT_ELEMENTS = 6
  * permanently `aria-busy="true"`, correctly. `BUSY_TOLERANT_CAPTURES` below
  * declares exactly that, `captureFullPage` derives it from the page's own URL
  * so no caller can forget it, and a declaration that stops being true FAILS the
- * run — the same self-expiring shape as #2197's `expectedSilentRoutes`.
+ * run — an exemption cannot silently become permanent.
  *
  * ── Refuse, do not retry ────────────────────────────────────────────────────
  *
@@ -303,9 +303,9 @@ export const CONTENT_BUSY_ALLOWED = false
  * loading states AS CONTENT — its skeleton showcase is permanently busy,
  * correctly, and always will be.
  *
- * Deliberately the same narrow shape as #2197's `expectedSilentRoutes`, for the
- * same reason — an exemption list is one edit away from being the way the guard
- * gets waved through:
+ * Deliberately this is a narrow per-route shape, for the same reason — an
+ * exemption list is one edit away from being the way the guard gets waved
+ * through:
  *
  *  - it is per ROUTE, never a global flag and never per run;
  *  - each entry carries a written `reason`, so the exemption is anchored to an
@@ -316,9 +316,7 @@ export const CONTENT_BUSY_ALLOWED = false
  *    skeleton this stops claiming it does. Review of #2204 caught the first
  *    draft reporting that to stdout and the manifest only, which expires
  *    nothing in a repo whose own playbook says the exit code does not survive a
- *    pipe. Its sibling `CHAIN_SILENT_CAPTURES` fails the run on the
- *    mirror-image staleness — a declared-silent route that DID read — so the
- *    two now cost the same to leave rotting.
+ *    pipe.
  *
  * It lives HERE, beside the guard, rather than in `screenshot.mjs` — and that
  * was a CI catch, not a preference. `captureFullPage` has two consumers, the

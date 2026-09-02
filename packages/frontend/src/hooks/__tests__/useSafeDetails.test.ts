@@ -71,4 +71,19 @@ describe('useSafeDetails', () => {
     })
     expect(result.current.details).toEqual(baseDetails)
   })
+
+  it('clears prior details while a new chain read is pending or fails', async () => {
+    mockApiGet.mockResolvedValueOnce(SAFE_DETAILS).mockRejectedValueOnce(new Error('read failed'))
+
+    const { result, rerender } = renderHook(
+      ({ chainId }) => useSafeDetails(SAFE_ADDRESS, { chainId }),
+      { initialProps: { chainId: 8453 } },
+    )
+
+    await waitFor(() => expect(result.current.details).toEqual(SAFE_DETAILS))
+    rerender({ chainId: 100 })
+
+    await waitFor(() => expect(result.current.error).toBe('read failed'))
+    expect(result.current.details).toBeNull()
+  })
 })

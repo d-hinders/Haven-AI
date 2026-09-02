@@ -121,8 +121,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Archive a revoked agent (soft removal — history is kept).
-         * @description Replaces agent deletion (#1401). Requires status=revoked — archiving is a filing action and never the thing that stops spending. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.
+         * Archive an agent (soft removal — history is kept).
+         * @description Replaces agent deletion (#1401). Delegation agents require status=revoked and no pending or active budget delegations because archiving is a filing action and never the thing that stops spending. Linked legacy Safe records may be archived at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. An agent whose Safe was already unlinked is archivable when no live delegation remains. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.
          */
         post: operations["archiveAgent"];
         delete?: never;
@@ -142,7 +142,7 @@ export type paths = {
         put?: never;
         /**
          * Return an archived agent to the primary list.
-         * @description Clears archived_at and nothing else — the agent remains revoked; un-archiving restores no authority of any kind. Idempotent on a non-archived agent.
+         * @description Clears archived_at and nothing else — the agent keeps the status it had when archived. For delegation agents, the archive contract requires revoked status and no live budgets; legacy Safe records can return with their prior active, paused, pending_approval, or revoked status. Un-archiving restores no authority of any kind. Idempotent on a non-archived agent.
          */
         post: operations["unarchiveAgent"];
         delete?: never;
@@ -609,7 +609,7 @@ export type paths = {
         post?: never;
         /**
          * Unlink a Safe from the Haven account.
-         * @description Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one.
+         * @description Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key.
          */
         delete: operations["unlinkUserSafe"];
         options?: never;
@@ -1591,26 +1591,6 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/agent-connection-setups/{setupId}/wallet-approval": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Record wallet approval evidence for Connect Agent 2.
-         * @description Records user wallet approval or a Safe multisig proposal for a locally connected setup. Confirmed approvals activate the pending agent only after Haven verifies the live on-chain allowance state for the exact Haven wallet, public signing address, token budgets, and reset periods. Proposed approvals remain non-active until that on-chain authority is live.
-         */
-        post: operations["recordAgentConnectionWalletApproval"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/agent-connection-setups/{setupId}/budget-approval": {
         parameters: {
             query?: never;
@@ -1622,7 +1602,7 @@ export type paths = {
         put?: never;
         /**
          * Complete a delegation-rail Connect Agent 2 setup.
-         * @description The delegation rail's counterpart to wallet-approval. Activates the pending agent only after Haven confirms that every budget this setup promised exists as an active, owner-signed budget on the agent — the caller asserts nothing, so the request body is empty and the call is safe to retry. Rejected with 409 on a Safe / AllowanceModule wallet, which approves with a wallet transaction instead.
+         * @description Activates the pending agent only after Haven confirms that every budget this setup promised exists as an active, owner-signed budget on the agent — the caller asserts nothing, so the request body is empty and the call is safe to retry. Rejected with 409 on a retired Safe / AllowanceModule account, which has no approval path in Haven since #2259 deleted the wallet-approval route.
          */
         post: operations["recordAgentConnectionBudgetApproval"];
         delete?: never;
@@ -2641,24 +2621,6 @@ export type components = {
             };
             failure_reason?: string | null;
         };
-        RecordAgentConnectionWalletApprovalRequest: {
-            /** @enum {string} */
-            result: "confirmed" | "proposed";
-            tx_hash?: string;
-            safe_tx_hash: string;
-            chain_id: number;
-            /** @example 0x1111111111111111111111111111111111111111 */
-            safe_address: string;
-            /** @example 0x1111111111111111111111111111111111111111 */
-            allowance_module_address: string;
-            /** @example 0x1111111111111111111111111111111111111111 */
-            delegate_address: string;
-            /**
-             * @description Use receipt_timeout only when the wallet transaction was submitted but the local receipt wait timed out.
-             * @enum {string}
-             */
-            confirmation_status?: "confirmed" | "receipt_timeout";
-        };
         UpdateConnectorInstallStatusRequest: {
             setup_token?: string;
             runtime?: string;
@@ -2751,6 +2713,8 @@ export type components = {
             usdc: string;
             usdc_atomic: string;
             usdc_address: string | null;
+            /** @description Minimum USDC balance eligible for gasless delegate recovery in human token units. */
+            sweep_min_usdc: string;
         };
         CreateAgentResponse: components["schemas"]["Agent"] & {
             api_key: string;
@@ -6926,6 +6890,21 @@ export interface operations {
                     };
                 };
             };
+            /** @description The Safe remains linked while a delegation, recovery, or re-key is in progress. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
         };
     };
     setDefaultUserSafe: {
@@ -10874,116 +10853,6 @@ export interface operations {
             };
             /** @description Error response */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    recordAgentConnectionWalletApproval: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                setupId: components["parameters"]["SetupId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RecordAgentConnectionWalletApprovalRequest"];
-            };
-        };
-        responses: {
-            /** @description Wallet approval was recorded and the setup status was returned. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentConnectionSetupStatus"];
-                };
-            };
-            /** @description Confirmation evidence was recorded, but on-chain authority is not verified yet. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentConnectionSetupStatus"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            410: {
                 headers: {
                     [name: string]: unknown;
                 };

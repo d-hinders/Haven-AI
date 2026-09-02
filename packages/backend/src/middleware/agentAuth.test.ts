@@ -15,6 +15,8 @@ vi.mock('../db.js', () => ({
 function buildApp() {
   const app = Fastify({ logger: false })
   app.get('/payment-tool', { preHandler: agentAuthMiddleware }, async () => ({ ok: true }))
+  app.post('/machine-payments/sweep/prepare', { preHandler: agentAuthMiddleware }, async () => ({ ok: true }))
+  app.post('/machine-payments/sweep/submit', { preHandler: agentAuthMiddleware }, async () => ({ ok: true }))
   return app
 }
 
@@ -66,19 +68,17 @@ describe('agentAuthMiddleware', () => {
     await app.close()
   })
 
-  it('an ARCHIVED agent\'s key is rejected — pinned, not an emergent property (#1401)', async () => {
-    // Archive requires status='revoked' and the allow-list only admits
-    // active/paused, so this holds by construction today. The test exists so
-    // a future status refactor cannot silently let archived agents
-    // authenticate: the row below is exactly what an archived agent looks
-    // like, and it must 401.
+  it('an ARCHIVED active agent\'s key is rejected — status alone cannot reopen it (#1401)', async () => {
+    // Legacy records may be archived while still marked active or paused.
+    // Archive is a filing action, not a lifecycle transition, so auth must
+    // check archived_at independently of the positive status allow-list.
     const app = buildApp()
     mockQuery.mockImplementation(async () => ({
       rows: [{
         id: 'agent-1', user_id: 'user-1', name: 'A',
         delegate_address: '0x1111111111111111111111111111111111111111',
         safe_address: '0x2222222222222222222222222222222222222222',
-        chain_id: 100, status: 'revoked', archived_at: '2026-08-14T12:00:00.000Z',
+        chain_id: 100, status: 'active', archived_at: '2026-08-14T12:00:00.000Z',
       }],
     }))
     const response = await app.inject({
@@ -87,6 +87,44 @@ describe('agentAuthMiddleware', () => {
       headers: { authorization: 'Bearer sk_agent_x' },
     })
     expect(response.statusCode).toBe(401)
+    await app.close()
+  })
+
+  it('allows an ARCHIVED agent key only for exact sweep recovery routes', async () => {
+    const app = buildApp()
+    mockQuery.mockResolvedValue({
+      rows: [{
+        id: 'agent-1', user_id: 'user-1', name: 'A',
+        delegate_address: '0x1111111111111111111111111111111111111111',
+        safe_address: '0x2222222222222222222222222222222222222222',
+        chain_id: 100, status: 'revoked', archived_at: '2026-08-14T12:00:00.000Z',
+      }],
+    })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/sweep/prepare',
+      headers: { authorization: 'Bearer sk_agent_archived' },
+    })
+    expect(response.statusCode).toBe(200)
+    await app.close()
+  })
+
+  it('allows an ARCHIVED pending-approval agent to recover on exact sweep routes', async () => {
+    const app = buildApp()
+    mockQuery.mockResolvedValue({
+      rows: [{
+        id: 'agent-1', user_id: 'user-1', name: 'A',
+        delegate_address: '0x1111111111111111111111111111111111111111',
+        safe_address: '0x2222222222222222222222222222222222222222',
+        chain_id: 100, status: 'pending_approval', archived_at: '2026-08-14T12:00:00.000Z',
+      }],
+    })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/sweep/prepare',
+      headers: { authorization: 'Bearer sk_agent_archived_pending' },
+    })
+    expect(response.statusCode).toBe(200)
     await app.close()
   })
 
@@ -108,6 +146,27 @@ describe('agentAuthMiddleware', () => {
       })
       expect(response.statusCode, status).toBe(401)
       expect(response.json().error).toBe('Invalid or revoked API key')
+      await app.close()
+    }
+  })
+
+  it('allows paused, pending, and revoked keys only for sweep recovery routes', async () => {
+    for (const status of ['paused', 'pending_approval', 'revoked']) {
+      const app = buildApp()
+      mockQuery.mockImplementation(async () => ({
+        rows: [{
+          id: 'agent-1', user_id: 'user-1', name: 'A',
+          delegate_address: '0x1111111111111111111111111111111111111111',
+          safe_address: '0x2222222222222222222222222222222222222222',
+          chain_id: 100, status,
+        }],
+      }))
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/sweep/prepare',
+        headers: { authorization: `Bearer sk_agent_${status}` },
+      })
+      expect(response.statusCode, status).toBe(200)
       await app.close()
     }
   })
@@ -155,6 +214,34 @@ describe('agentAuthMiddleware', () => {
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({ ok: true })
 
+    await app.close()
+  })
+
+  it('rejects an agent whose Safe binding was removed even if the user mirror has another address', async () => {
+    const app = buildApp()
+    mockQuery.mockImplementation(async () => ({
+      rows: [{
+        id: 'agent-unlinked',
+        user_id: 'user-1',
+        name: 'Historical Agent',
+        delegate_address: '0x1111111111111111111111111111111111111111',
+        // This is the mutable users.safe_address fallback, not the agent's
+        // original destination. The explicit binding flag must win.
+        safe_address: '0x3333333333333333333333333333333333333333',
+        chain_id: 8453,
+        status: 'active',
+        has_bound_safe: false,
+      }],
+    }))
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/payment-tool',
+      headers: { authorization: 'Bearer sk_agent_unlinked' },
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(response.json().error).toBe('Agent is no longer linked to a Haven wallet')
     await app.close()
   })
 })

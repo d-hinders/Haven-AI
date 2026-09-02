@@ -231,10 +231,11 @@ Haven backend
 > had declared gone), and #2055 dropped the `approval_requests` table itself
 > under the recorded #2021 owner decision.
 > Since #1130 a valid key on a `pending_approval` agent gets a NAMED
-> `403 agent_pending_approval` with the required action, instead of the
-> false `401 Invalid or revoked API key` — the authentication gate stays a
-> positive allow-list (revoked and unknown statuses still 401), the refusal
-> just stopped lying about its cause.
+> `403 agent_pending_approval` with the required action on normal agent API
+> requests, instead of the false `401 Invalid or revoked API key` — the
+> authentication gate stays a positive allow-list (revoked and unknown statuses
+> still 401). The exact sweep-recovery routes are a narrow exception for
+> recovering stranded delegate balances; they grant no spending authority.
 > Since #988 the agents/user-safes data access lives in
 > `infra/repositories/` with tenant scoping as REQUIRED function parameters —
 > the `WHERE user_id = $1` authorization that used to hide in inline route
@@ -345,8 +346,10 @@ Preserve these facts as non-negotiable implementation invariants:
 - Budget, recipient and expiry limits are enforced on-chain by the caveat enforcers, not only by Haven.
 - Agent-initiated transactions, including the EIP-3009 x402 merchant leg, are signed by an agent private key held by the agent or user, not by Haven.
 - Haven may relay execution, but authority comes from the user or agent signature and the controls applicable to that leg, never from Haven authentication or database policy alone.
-- Users can enumerate and revoke every authority on their account, and recover control of the account itself, without Haven — the demonstrated exit story ([`docs/exit/README.md`](../exit/README.md)).
-- Users can revoke or modify agent authority independently of Haven.
+- On the live delegation rail, users can enumerate and revoke every delegation
+  on their account, and recover control of the account itself, without Haven —
+  the demonstrated exit story ([`docs/exit/README.md`](../exit/README.md)).
+- Users can revoke or modify live delegation authority independently of Haven.
 - Haven cannot block users from transacting with their account outside Haven.
 
 **Delegation-rail x402 signing is local-signer-only (owner decision, 2026-08-06, #1138).** The hosted/edge keyless path never signs an account UserOp: on this rail the agent's signature is produced by the local signer holding the delegate key, exactly as invariant "signed by an agent private key held by the agent or user, not by Haven" requires. Haven's role is limited to *declaring* what is to be signed — an expected context it signs with a dedicated binding key — which the signer verifies before signing and can refuse. Because the account validates EIP-712 typed data rather than the bare ERC-4337 hash, that declaration commits to the typed data's digest (expected context v2); the signer re-derives the digest from the payload it actually signs and refuses any mismatch, so Haven cannot substitute a different operation behind a correctly-signed declaration. The refusal extends to declarations the signer does not *understand*: an expected-context version outside the set that signer supports is rejected before any content check (#1143, `SUPPORTED_X402_EXPECTED_VERSIONS`), so a newer backend cannot obtain a signature by declaring a context whose rules the signer cannot evaluate — the same property, applied to the version field itself. Since #1155 the signer also *advertises* that supported set at its MCP `initialize` handshake, so an agent can spot the skew before it quotes. That advertisement is metadata — version numbers, no key material and no authority — and it is advisory by decision: it adds no refusal to the payment path, and the signing-time refusal above remains the control. This is a boundary, not a staging decision: teaching the hosted signer to sign account UserOps would put Haven in the signing path and is out of scope by construction.
@@ -671,9 +674,30 @@ Implementation rule:
 
 **The dashboard's signing surfaces are rail-honest (#1079).** The signer layer types the two authorities apart: a Safe transaction can only be signed by a `SafeCapableSigner` (EOA or Safe passkey), never by a Hybrid account's passkey — the compiler enforces the exclusion at every remaining Safe-shaped call site, and Safe-only controls are hidden on delegation accounts rather than dead-ending at a signer they cannot use. #1989 has since deleted most legacy Safe surfaces outright; the type-level exclusion remains for the owner-signed remnant (`/safe/exec`-backed account management). This is a UI/type-layer hardening only; the on-chain authority model above is unchanged.
 
-**Where a setup flow marks an agent approved, Haven verifies the authority rather than accepting the client's word for it.** Both connect-setup approval routes work this way (`routes/agent-connection-setups.ts`): the delegation rail's `budget-approval` reads the agent's own active, owner-signed delegations, and the residual legacy `wallet-approval` reads the live AllowanceModule state on-chain (a verification read for retired-rail accounts only — the rail it approves can no longer spend, #1986). No amount, recipient, or hash a caller supplies can influence the latter's outcome, and it refuses when the signed budget's amount or period differs from the one the user reviewed. Be exact about the mechanism, because an earlier telling of this line ("takes an empty request body") described a shape the route has not had since #1076: `WalletApprovalBody` does carry `chain_id`, `safe_address`, `allowance_module_address`, `delegate_address`, `tx_hash`, `safe_tx_hash`, `result` and `confirmation_status`. What makes the claim true is not their absence but their treatment — every identifying field is **equality-checked against the stored setup row** and a mismatch is a refusal rather than an input (`validateWalletApprovalBody`), while the authority decision itself (`tryVerifySetupAuthority`) reads the on-chain AllowanceModule state addressed **entirely from stored columns** and touches the request body nowhere. The hashes are recorded for audit; `confirmation_status` only chooses which non-active state a *failed* verification persists. A caller cannot name the Safe, the delegate, or the module it is checked against. A pinned recipient is accepted where the reviewed budget was unpinned, because that is strictly narrower authority than the user approved (#1073). (#985 moved this route's SQL into `infra/repositories/agent-connection-setups.ts`; the verification itself — reading live AllowanceModule state, and reading the agent's own active owner-signed delegations — still runs in the route and is unchanged. The approval write is now one locked, guarded function, so the checks and the write it protects cannot be run apart.) Since #1074 a delegation-rail setup also refuses more than one allowance at CREATE — a multi-allowance setup could never satisfy this verification (only the first budget is ever granted), and a clean 400 with the remedy beats a permanently unapprovable setup; fail-closed either way.
+**Where a setup flow marks an agent approved, Haven verifies the authority rather than accepting the client's word for it.** **Since #2259 there is ONE such route** (`routes/agent-connection-setups.ts`): the delegation rail's `budget-approval`, which reads the agent's own active, owner-signed delegations. The legacy `wallet-approval` route — which read live AllowanceModule state on-chain — is **deleted**, together with `validateWalletApprovalBody`, `tryVerifySetupAuthority` and the last two AllowanceModule contract readers. No amount, recipient, or hash a caller supplies can influence the surviving route's outcome, and it refuses when the signed budget's amount or period differs from the one the user reviewed. Be exact about the mechanism, because the shape of the deleted route is now
+only history: `WalletApprovalBody` carried `chain_id`, `safe_address`,
+`allowance_module_address`, `delegate_address`, `tx_hash`, `safe_tx_hash`,
+`result` and `confirmation_status`, and what made the non-custody claim true was
+never their absence but their treatment — every identifying field was
+equality-checked against the stored setup row, and the authority decision read
+on-chain state addressed entirely from stored columns. That property is
+preserved by the surviving route, which takes no body at all. (#985 moved this
+route's SQL into `infra/repositories/agent-connection-setups.ts`; the
+delegation verification still runs in the route. The approval write remains one
+locked, guarded function, so the checks and the write cannot be run apart.) Since #1074 a delegation-rail setup also refuses more than one allowance at CREATE — a multi-allowance setup could never satisfy this verification (only the first budget is ever granted), and a clean 400 with the remedy beats a permanently unapprovable setup; fail-closed either way.
 
 **Connection setup never hands out another environment's hosted MCP endpoint (#1129).** The production hosted MCP URL is served as a built-in default only when the backend's own resolved public URL is the production host; any other deployment must set `HAVEN_HOSTED_MCP_URL` explicitly, or `/resolve` and `/register` refuse with an explicit configuration error naming the variable — raised before any state is written, so a misconfigured environment can neither consume the client's one-shot setup token nor leave a registration half-created, and an agent's credentials are never pointed at a different environment's backend. Fail-closed, same as the authority checks above.
+
+**#2259 removed the last Haven path that could activate a retired-rail agent.**
+This is a deliberate capability removal, not dead-code cleanup: `POST
+/agent-connection-setups` has no rail gate, so a surviving legacy Safe account
+could still create a setup and reach `active` — via the `wallet-approval` route,
+and quietly via the dashboard status `GET`, which reconciled from live
+AllowanceModule state and wrote through `persistWalletApprovalState(...,
+activateAgent: true)`. Both are gone. Narrowing only: nothing gains authority,
+and no on-chain state changes. It does **not** revoke a historical
+AllowanceModule permission — if one remains on-chain, the Safe owner must revoke
+it externally, exactly as before.
 
 ### Keep Agent Spend Authority Narrow
 
@@ -755,7 +779,9 @@ The codebase should make it easy to prove:
 - Agent keys are not stored by Haven.
 - All executable transfers require external signatures.
 - On-chain caveat enforcers constrain every delegation redemption; external signatures and exact authenticated context constrain the EIP-3009 x402 merchant leg.
-- Users can revoke permissions outside Haven.
+- Users can revoke live delegation permissions outside Haven; retired legacy Safe
+  permissions remain outside Haven's control and may require an identified Safe
+  owner to manage.
 
 Add comments, docs, tests, and PR notes around these points when touching payment, agent authority, relaying, account setup, SDK, or demo payment flows.
 
@@ -826,7 +852,7 @@ Before merging any payment-related, agent-authority, account, SDK, x402/MPP, or 
 - [ ] Haven database policy is not the only spend control.
 - [ ] A user signature establishes or modifies agent authority — an owner-signed delegation.
 - [ ] Users can revoke agent authority on-chain.
-- [ ] Users can enumerate and revoke authority on their account without Haven (the exit story).
+- [ ] On the live delegation rail, users can enumerate and revoke every delegation on their account without Haven (the exit story).
 - [ ] Haven cannot block or freeze user funds.
 - [ ] Haven cannot expand an agent's budget without an owner signature.
 - [ ] Haven cannot change recipient, amount, token, route, or timing after signature.

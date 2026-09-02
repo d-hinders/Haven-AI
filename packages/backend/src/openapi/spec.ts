@@ -985,9 +985,9 @@ export const openapiSpec = {
       post: {
         tags: ['Agents'],
         operationId: 'archiveAgent',
-        summary: 'Archive a revoked agent (soft removal — history is kept).',
+        summary: 'Archive an agent (soft removal — history is kept).',
         description:
-          'Replaces agent deletion (#1401). Requires status=revoked — archiving is a filing action and never the thing that stops spending. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.',
+          'Replaces agent deletion (#1401). Delegation agents require status=revoked and no pending or active budget delegations because archiving is a filing action and never the thing that stops spending. Linked legacy Safe records may be archived at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. An agent whose Safe was already unlinked is archivable when no live delegation remains. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -1022,7 +1022,7 @@ export const openapiSpec = {
         operationId: 'unarchiveAgent',
         summary: 'Return an archived agent to the primary list.',
         description:
-          'Clears archived_at and nothing else — the agent remains revoked; un-archiving restores no authority of any kind. Idempotent on a non-archived agent.',
+          'Clears archived_at and nothing else — the agent keeps the status it had when archived. For delegation agents, the archive contract requires revoked status and no live budgets; legacy Safe records can return with their prior active, paused, pending_approval, or revoked status. Un-archiving restores no authority of any kind. Idempotent on a non-archived agent.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -2144,7 +2144,7 @@ export const openapiSpec = {
         operationId: 'unlinkUserSafe',
         summary: 'Unlink a Safe from the Haven account.',
         description:
-          'Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one.',
+          'Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
         responses: {
@@ -2155,6 +2155,10 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
+          '409': {
+            ...errorResponse,
+            description: 'The Safe remains linked while a delegation, recovery, or re-key is in progress.',
+          },
         },
       },
     },
@@ -4031,55 +4035,13 @@ export const openapiSpec = {
         },
       },
     },
-    '/agent-connection-setups/{setupId}/wallet-approval': {
-      post: {
-        tags: ['Connect Agent 2'],
-        operationId: 'recordAgentConnectionWalletApproval',
-        summary: 'Record wallet approval evidence for Connect Agent 2.',
-        description:
-          'Records user wallet approval or a Safe multisig proposal for a locally connected setup. Confirmed approvals activate the pending agent only after Haven verifies the live on-chain allowance state for the exact Haven wallet, public signing address, token budgets, and reset periods. Proposed approvals remain non-active until that on-chain authority is live.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ $ref: '#/components/parameters/SetupId' }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: { $ref: '#/components/schemas/RecordAgentConnectionWalletApprovalRequest' },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'Wallet approval was recorded and the setup status was returned.',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/AgentConnectionSetupStatus' },
-              },
-            },
-          },
-          '202': {
-            description: 'Confirmation evidence was recorded, but on-chain authority is not verified yet.',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/AgentConnectionSetupStatus' },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-          '409': errorResponse,
-          '410': errorResponse,
-        },
-      },
-    },
     '/agent-connection-setups/{setupId}/budget-approval': {
       post: {
         tags: ['Connect Agent 2'],
         operationId: 'recordAgentConnectionBudgetApproval',
         summary: 'Complete a delegation-rail Connect Agent 2 setup.',
         description:
-          'The delegation rail\'s counterpart to wallet-approval. Activates the pending agent only after Haven confirms that every budget this setup promised exists as an active, owner-signed budget on the agent — the caller asserts nothing, so the request body is empty and the call is safe to retry. Rejected with 409 on a Safe / AllowanceModule wallet, which approves with a wallet transaction instead.',
+          'Activates the pending agent only after Haven confirms that every budget this setup promised exists as an active, owner-signed budget on the agent — the caller asserts nothing, so the request body is empty and the call is safe to retry. Rejected with 409 on a retired Safe / AllowanceModule account, which has no approval path in Haven since #2259 deleted the wallet-approval route.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/SetupId' }],
         responses: {
@@ -6059,32 +6021,6 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
-      RecordAgentConnectionWalletApprovalRequest: {
-        type: 'object',
-        required: [
-          'result',
-          'safe_tx_hash',
-          'chain_id',
-          'safe_address',
-          'allowance_module_address',
-          'delegate_address',
-        ],
-        properties: {
-          result: { type: 'string', enum: ['confirmed', 'proposed'] },
-          tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
-          safe_tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
-          chain_id: { type: 'integer' },
-          safe_address: address,
-          allowance_module_address: address,
-          delegate_address: address,
-          confirmation_status: {
-            type: 'string',
-            enum: ['confirmed', 'receipt_timeout'],
-            description: 'Use receipt_timeout only when the wallet transaction was submitted but the local receipt wait timed out.',
-          },
-        },
-        additionalProperties: false,
-      },
       UpdateConnectorInstallStatusRequest: {
         type: 'object',
         properties: {
@@ -6237,13 +6173,13 @@ export const openapiSpec = {
       },
       /**
        * #1445: lifted out of the inline `/agents/{id}/delegate-balance`
-       * response so consumers can name it. An inline schema generates an
-       * anonymous type, which is why the frontend hand-wrote this one instead
-       * of importing it — identical shape, no behaviour change.
+       * response so consumers can name it. The frontend imports the generated
+       * `ApiSchema<'DelegateBalance'>` type from this component; keep this
+       * schema as the load-bearing source for the response shape.
        */
       DelegateBalance: {
         type: 'object',
-        required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address'],
+        required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address', 'sweep_min_usdc'],
         properties: {
           delegate_address: { type: 'string' },
           safe_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -6253,6 +6189,10 @@ export const openapiSpec = {
           usdc: { type: 'string' },
           usdc_atomic: { type: 'string' },
           usdc_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          sweep_min_usdc: {
+            type: 'string',
+            description: 'Minimum USDC balance eligible for gasless delegate recovery in human token units.',
+          },
         },
       },
       CreateAgentResponse: {

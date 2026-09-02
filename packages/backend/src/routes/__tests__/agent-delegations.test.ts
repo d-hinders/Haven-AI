@@ -632,10 +632,22 @@ describe('delegation lifecycle API (#828)', () => {
         payload: { signature: '0x' + 'ab'.repeat(65) },
       })
       expect(res.json()).toMatchObject({ activated: true })
-      const replaced = mockQuery.mock.calls.find((c) => /SET status = 'replaced'/.test(String(c[0])))
-      expect(replaced).toBeDefined()
-      const activated = mockQuery.mock.calls.find((c) => /SET\s+status = 'active'/.test(String(c[0])))!
-      expect(String(activated[1][0])).toContain('signature')
+      const sqls = mockQuery.mock.calls.map((c) => String(c[0]))
+      const sweepIdx = sqls.findIndex((q) => /SET status = 'replaced'/.test(q))
+      const activateIdx = sqls.findIndex((q) => /UPDATE agent_delegations/.test(q) && /SET status = 'active'/.test(q))
+      expect(sweepIdx).toBeGreaterThan(sqls.indexOf('BEGIN'))
+      expect(activateIdx).toBeLessThan(sqls.indexOf('COMMIT'))
+      // #2411 ORDER pin: the sweep retires the slot's other active grants
+      // BEFORE the pending row flips active. #2331 inverted this and the
+      // sweep retired the row it had just activated — invisible to a
+      // stateless mock, which is why the real-DB test in
+      // infra/repositories/__tests__/delegation-budgets.test.ts owns the
+      // invariant; this pin is the cheap early warning.
+      expect(sweepIdx).toBeLessThan(activateIdx)
+      // …and the sweep excludes the pending row BY ID, so it is correct in
+      // either order.
+      expect(mockQuery.mock.calls[sweepIdx][1]).toContain('row-1')
+      expect(String(mockQuery.mock.calls[activateIdx][1][0])).toContain('signature')
     })
 
     it('rejects a malformed signature and a non-pending row', async () => {

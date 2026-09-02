@@ -166,6 +166,87 @@ export async function activatePendingDelegation(
 }
 
 /**
+ * Retire every OTHER active grant in the (agent, token, recipient) slot the
+ * new grant is about to occupy (#2411). The on-chain kill of the old grant is
+ * the revoke flow; this only stops Haven selecting it for payments.
+ *
+ * `AND id <> $4` is the load-bearing clause. #2331 reordered the activation
+ * transaction so this sweep ran AFTER `activatePendingDelegation`, and the
+ * sweep — then inlined in the route without an exclusion — flipped the row it
+ * had just activated: every activation committed with ZERO active rows in
+ * the slot and the first payment 403ed (qa-failure #2411, reproduced on real
+ * Postgres). Excluding the row being activated by id makes the sweep correct
+ * in EITHER order, so a future reorder cannot reintroduce the defect; the
+ * order is restored as well, in `activatePendingDelegationInSlot`, because
+ * both halves are cheap and the real-DB test proves each one separately.
+ *
+ * `recipient_address IS NOT DISTINCT FROM $3`: an open grant (NULL recipient)
+ * and a recipient-pinned grant are different slots — a pinned grant never
+ * retires the open one and vice versa (#829's selection order relies on both
+ * coexisting). Returns the retired ids so a caller can report honestly.
+ */
+export const REPLACE_OTHER_ACTIVE_DELEGATIONS_IN_SLOT_SQL = `UPDATE agent_delegations
+       SET status = 'replaced', updated_at = NOW()
+       WHERE agent_id = $1
+         AND token_address = $2
+         AND recipient_address IS NOT DISTINCT FROM $3
+         AND status = 'active'
+         AND id <> $4
+       RETURNING id`
+
+export async function replaceOtherActiveDelegationsInSlot(
+  agentId: string,
+  tokenAddress: string,
+  recipientAddress: string | null,
+  exceptDelegationId: string,
+  executor: Executor = pool,
+): Promise<string[]> {
+  const result = await executor.query<{ id: string }>(
+    REPLACE_OTHER_ACTIVE_DELEGATIONS_IN_SLOT_SQL,
+    [agentId, tokenAddress, recipientAddress, exceptDelegationId],
+  )
+  return result.rows.map((row) => row.id)
+}
+
+export interface ActivateDelegationInSlotInput {
+  agentId: string
+  /** The `agent_delegations.id` of the PENDING row being activated. */
+  delegationId: string
+  tokenAddress: string
+  recipientAddress: string | null
+  signedDelegationJson: string
+}
+
+/**
+ * The activation sequence as ONE repository call (#2411): retire the slot's
+ * other active grants FIRST, then flip exactly the pending row to active.
+ * Owning the order here — rather than as two calls a route makes in whatever
+ * order it happens to be edited into — is what lets the real-DB test in
+ * `__tests__/delegation-budgets.test.ts` pin it: the test runs this function
+ * and asserts the slot ends with exactly one active row, the new one.
+ *
+ * Returns `false` when the row is no longer pending (a concurrent revoke or a
+ * repeated activate). MUST run on the caller's transaction client: the sweep
+ * has already run by then, and only the caller's ROLLBACK undoes it — the
+ * route (#1053 finding 4) rolls back and answers 409. It does not open its
+ * own transaction because the route also locks the agent row and flips the
+ * agent to active inside the same one.
+ */
+export async function activatePendingDelegationInSlot(
+  input: ActivateDelegationInSlotInput,
+  executor: Executor,
+): Promise<boolean> {
+  await replaceOtherActiveDelegationsInSlot(
+    input.agentId,
+    input.tokenAddress,
+    input.recipientAddress,
+    input.delegationId,
+    executor,
+  )
+  return activatePendingDelegation(input.delegationId, input.signedDelegationJson, executor)
+}
+
+/**
  * #1400: ONE statement marks exactly the submitted batch revoked. Scoped by
  * agent_id so a stray hash from another agent flips nothing, and predicated
  * on status so an already-revoked row is not churned. Returns the hashes

@@ -251,15 +251,18 @@ describe('allowance_amount on /agents is the human-decimal projection in BOTH ha
       // `/delegations` body is the #2106 impossible state — the projection is
       // what fills the array — so it fails here instead of skipping the
       // value check. An agent with NO allowances and no delegation is fine.
-      if (agent.allowances.length === 0 && (!res || res.delegations.length === 0)) continue
+      // An unkeyed id falls through to `null`; read it as an empty body so the
+      // length assertion below is what names the mismatch, not a null access.
+      const delegations = res?.delegations ?? []
+      if (agent.allowances.length === 0 && delegations.length === 0) continue
       expect(
-        [agent.id, res?.delegations.length ?? 0],
+        [agent.id, delegations.length],
         `${agent.id} carries allowances but no keyed /agents/:id/delegations body to re-parse against`,
       ).toEqual([agent.id, agent.allowances.length])
       agent.allowances.forEach((row, i) => {
         const [int = '', frac = ''] = row.allowance_amount.split('.')
         const reconstructed = (BigInt(int) * 10n ** 6n + BigInt(frac.padEnd(6, '0'))).toString()
-        expect([agent.id, reconstructed]).toEqual([agent.id, res.delegations[i]!.budget_atomic])
+        expect([agent.id, reconstructed]).toEqual([agent.id, delegations[i]!.budget_atomic])
         checked += 1
       })
     }

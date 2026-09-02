@@ -200,8 +200,6 @@ function intentRow(overrides: Record<string, unknown> = {}) {
     confirmed_at: null,
     expires_at: '2099-01-01T00:00:00.000Z',
     execution_rail: null,
-    session_permission_id: null,
-    session_user_op: null,
     payment_rail: null,
     source: 'direct',
     ...overrides,

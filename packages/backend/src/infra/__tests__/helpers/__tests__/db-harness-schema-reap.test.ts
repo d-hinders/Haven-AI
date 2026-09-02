@@ -221,3 +221,28 @@ it('retains at least a full pool of worker ids', () => {
   // A ceiling below the machine's parallelism would reap ids a run is using.
   expect(retainedWorkerIdCeiling()).toBeGreaterThanOrEqual(16)
 })
+
+it('raises the ceiling above an overridden vitest maxWorkers', () => {
+  // haven-reviewer's should-fix: a run started with `--maxWorkers=64` assigns
+  // ids far above any CPU-derived ceiling. If the ceiling ignored the
+  // override, that run would never CLAIM the ids its own workers go on to
+  // use, and a concurrent sibling — ceiling also CPU-derived — would find
+  // those live schemas above its ceiling and unlocked, and drop them.
+  expect(retainedWorkerIdCeiling(64)).toBeGreaterThanOrEqual(128)
+  expect(retainedWorkerIdCeiling(64)).toBeGreaterThan(retainedWorkerIdCeiling())
+})
+
+it('never LOWERS the ceiling for a small or malformed maxWorkers', () => {
+  // The override is a floor to raise to, never a cap to shrink to: a run
+  // pinned to one worker still shares the database with runs that are not.
+  const base = retainedWorkerIdCeiling()
+  for (const configured of [1, 0, -4, Number.NaN, Number.POSITIVE_INFINITY]) {
+    expect({ configured, ceiling: retainedWorkerIdCeiling(configured) }).toEqual({
+      configured,
+      ceiling: base,
+    })
+  }
+  // vitest also accepts a percentage string; anything non-numeric is ignored
+  // rather than guessed at.
+  expect(retainedWorkerIdCeiling(Number('50%'))).toBe(base)
+})

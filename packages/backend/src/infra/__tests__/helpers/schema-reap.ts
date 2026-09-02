@@ -47,9 +47,10 @@
  *    digits, never interpolated from catalog text, so nothing outside that
  *    shape is reachable;
  * 2. its worker id is ABOVE {@link retainedWorkerIdCeiling} — the ids a run on
- *    this machine could plausibly assign. This is what keeps the reap from
- *    destroying the warm-reuse the harness depends on: the ids in active
- *    rotation are never candidates, only the debris above them;
+ *    this machine could plausibly assign, derived from the CPU count AND from
+ *    vitest's own resolved `maxWorkers` when a run overrode it. This is what
+ *    keeps the reap from destroying the warm-reuse the harness depends on: the
+ *    ids in active rotation are never candidates, only the debris above them;
  * 3. `pg_try_advisory_lock(SCHEMA_OWNER_LOCK_NAMESPACE, id)` SUCCEEDS — no
  *    live run holds that id. {@link claimRetainedWorkerIds} is the other half:
  *    a run holds the locks for its own ids for its whole duration, so a
@@ -114,17 +115,41 @@ export const REAP_BUDGET_MS = 5_000
  * The highest worker id this machine's runs may reuse, and therefore the
  * highest id the reap will never touch.
  *
- * vitest assigns `VITEST_WORKER_ID` from 1 upward, bounded by the pool size it
- * derives from the CPU count. Doubling that, with a floor, buys a wide margin
- * for a pool sized differently than assumed — and the cost of being generous
- * is only that a few more already-migrated schemas stay warm, which is the
- * state this whole module is trying to reach anyway. Being generous errs
- * toward keeping a schema; the failure mode this must not have is dropping a
- * live one.
+ * vitest assigns `VITEST_WORKER_ID` from 1 upward, bounded by its pool size,
+ * which it derives from the CPU count unless told otherwise. Doubling that,
+ * with a floor, buys a wide margin — and the cost of being generous is only
+ * that a few more already-migrated schemas stay warm, which is the state this
+ * whole module is trying to reach anyway. Being generous errs toward KEEPING a
+ * schema; the failure this must not have is dropping a live one.
+ *
+ * `configuredMaxWorkers` is vitest's OWN resolved `maxWorkers` when the run
+ * overrode it (`--maxWorkers=64`, `poolOptions`, `VITEST_MAX_THREADS`), passed
+ * in by `vitest.global-setup.ts` from the context vitest hands it. Deriving
+ * the ceiling from the CPU count ALONE was a real hole, found by
+ * haven-reviewer on this change: a run started with `--maxWorkers=64` computes
+ * a CPU-sized ceiling, so it never claims the high ids its own workers go on
+ * to use, and a concurrent sibling run — whose ceiling is also CPU-sized —
+ * then sees those live schemas above its ceiling and unlocked, and drops them.
+ * Taking the larger of the two inputs closes it, because the number that
+ * matters is the one vitest will actually assign from.
+ *
+ * The residue, stated rather than papered over: the override is only visible
+ * when vitest resolves it into the config it passes to global setup. A pool
+ * that assigned ids beyond `2 x maxWorkers` would still outrun this, which is
+ * why rule 3 — the advisory lock — is not optional underneath it.
  */
-export function retainedWorkerIdCeiling(): number {
+export function retainedWorkerIdCeiling(configuredMaxWorkers?: number): number {
   const parallelism = os.availableParallelism?.() ?? os.cpus().length ?? 4
-  return Math.max(parallelism, 8) * 2
+  // vitest also accepts a percentage string ("50%"); anything not a finite
+  // positive number is ignored rather than guessed at, leaving the CPU-derived
+  // floor — which is the safe direction only because it is a MAXIMUM below.
+  const configured =
+    typeof configuredMaxWorkers === 'number' &&
+    Number.isFinite(configuredMaxWorkers) &&
+    configuredMaxWorkers > 0
+      ? configuredMaxWorkers
+      : 0
+  return Math.max(Math.max(parallelism, 8), configured) * 2
 }
 
 /**

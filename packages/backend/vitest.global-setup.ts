@@ -91,13 +91,23 @@ let schemaOwner: import('pg').Client | null = null
  * performance cleanup, and a run that refused to start because it could not
  * tidy up would be a far worse defect than the ~20 ms per reset it saves.
  */
-async function claimAndReapWorkerSchemas(url: string): Promise<void> {
+async function claimAndReapWorkerSchemas(
+  url: string,
+  configuredMaxWorkers?: number,
+): Promise<void> {
   try {
     const { default: pg } = await import('pg')
     const client = new pg.Client({ connectionString: url, connectionTimeoutMillis: 3_000 })
     await client.connect()
     schemaOwner = client
-    const ceiling = retainedWorkerIdCeiling()
+    const ceiling = retainedWorkerIdCeiling(configuredMaxWorkers)
+    // A transient failure part-way through the claim loop leaves this run with
+    // a SUBSET of 0..ceiling claimed, and the outer catch swallows it
+    // (haven-reviewer nit). Deliberate, and the failure direction is the safe
+    // one: an unclaimed id is only reapable by a concurrent run whose ceiling
+    // is higher than ours, and the worst outcome is a schema dropped that
+    // would have stayed warm — a cold migration run, not lost data. Failing
+    // the run instead would trade that for a refused test suite.
     await claimRetainedWorkerIds(client, ceiling)
 
     // A SEPARATE, short-lived connection for the reap, and the separation is
@@ -133,7 +143,17 @@ async function claimAndReapWorkerSchemas(url: string): Promise<void> {
   }
 }
 
-export async function setup(): Promise<void> {
+/**
+ * vitest hands global setup its project, whose `config.maxWorkers` is set ONLY
+ * when the run overrode it (`--maxWorkers=N`, `poolOptions`, the env vars) —
+ * it is `undefined` on a default run. That is exactly the signal the retention
+ * ceiling needs, and typed structurally rather than against vitest's
+ * `GlobalSetupContext` so this file does not depend on the shape of an
+ * experimental public API.
+ */
+type GlobalSetupProject = { config?: { maxWorkers?: number | string } }
+
+export async function setup(project?: GlobalSetupProject): Promise<void> {
   const url = resolveTestDatabaseUrl()
   const { ci, acknowledged } = readDbModeInputs()
   const mode = decideDbMode({ available: await probeDatabase(url), ci, acknowledged })
@@ -147,7 +167,10 @@ export async function setup(): Promise<void> {
   // AFTER the verdict and BEFORE any worker starts (#2418): the reap needs a
   // reachable database, and its safety rests on no worker having claimed a
   // schema yet.
-  if (mode === 'run') await claimAndReapWorkerSchemas(url)
+  if (mode === 'run') {
+    const configured = Number(project?.config?.maxWorkers)
+    await claimAndReapWorkerSchemas(url, Number.isFinite(configured) ? configured : undefined)
+  }
 }
 
 export async function teardown(): Promise<void> {

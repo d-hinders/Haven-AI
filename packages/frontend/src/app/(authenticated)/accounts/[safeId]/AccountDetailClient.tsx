@@ -14,6 +14,7 @@ import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
 import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useUserSafes } from '@/hooks/useUserSafes'
+import { ApiRequestError } from '@/lib/api'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import DelegationSendModal from '@/components/DelegationSendModal'
 import AccountSignersCard from '@/components/AccountSignersCard'
@@ -246,6 +247,9 @@ export default function AccountDetailClient() {
   const [renameOpen, setRenameOpen] = useState(false)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [removing, setRemoving] = useState(false)
+  const [removeError, setRemoveError] = useState<{ message: string; retryable: boolean } | null>(
+    null,
+  )
   const [sendOpen, setSendOpen] = useState(false)
   const [receiveOpen, setReceiveOpen] = useState(false)
 
@@ -266,15 +270,59 @@ export default function AccountDetailClient() {
     setRenameOpen(false)
   }
 
+  // The unlink is REFUSED, not merely failed, while an agent on this account
+  // still holds spending authority or a recovery is mid-flight — the backend
+  // answers 409 and keeps the account intact. Without a catch the rejection
+  // became an unhandled promise rejection: the button stopped spinning and
+  // nothing else happened, so the refusal read as a broken button.
+  //
+  // Deliberately NOT `err.message`, matching `RemoveAgentDialog`: `api.ts`
+  // throws the backend's raw error string, and this is a destructive-flow
+  // dialog. The 409's three causes share one remedy the user can act on, so
+  // the copy names that instead of restating the server's sentence.
+  //
+  // Two words in it are load-bearing, both from the design review:
+  //  - "a budget", not "an active budget" — `HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL`
+  //    matches `status IN ('pending', 'active')`, so a grant that was never
+  //    activated blocks the unlink too.
+  //  - "recovering funds", not "a recovery" — this page already renders a
+  //    "Backup & recovery" card (`AccountSignersCard`), which is signer
+  //    replacement and has nothing to do with the sweep this refusal means.
+  //    The phrasing follows the sweep screen's own vocabulary instead.
   const handleRemoveConfirmed = async () => {
     if (!safe) return
     setRemoving(true)
+    setRemoveError(null)
     try {
       await removeSafe(safe.id)
       router.push('/accounts')
+    } catch (err) {
+      setRemoveError(
+        err instanceof ApiRequestError && err.status === 409
+          ? {
+              message:
+                'An agent on this account still has a budget, or is part-way through recovering funds or replacing its signing key. Finish or stop that from the Agents page, then remove the account.',
+              // The remedy is OUTSIDE this dialog and `Modal`'s backdrop blocks
+              // the page behind it, so pressing the primary action again can
+              // only reproduce the identical refusal. `RemoveAgentDialog` draws
+              // the same line: its `filing_failed` (retryable here) relabels to
+              // "Finish removal", while `too_many` (go act elsewhere) keeps the
+              // original label rather than inviting a useless second press.
+              retryable: false,
+            }
+          : {
+              message: 'The account could not be removed. Check your connection and try again.',
+              retryable: true,
+            },
+      )
     } finally {
       setRemoving(false)
     }
+  }
+
+  const closeRemoveDialog = () => {
+    setRemoveOpen(false)
+    setRemoveError(null)
   }
 
   // While auth context is still hydrating `user.safes`, avoid flashing
@@ -791,11 +839,23 @@ export default function AccountDetailClient() {
       )}
       <ConfirmDialog
         open={removeOpen}
-        onCancel={() => setRemoveOpen(false)}
+        onCancel={closeRemoveDialog}
         onConfirm={handleRemoveConfirmed}
-        title={`Delete ${safe.name}?`}
-        body="This only removes the account from Haven. Funds on-chain are unaffected. Removing it may permanently remove this read-only record from Haven."
-        confirmLabel="Delete account"
+        title={`Remove ${safe.name}?`}
+        body={(
+          <>
+            <p>
+              This only removes the account from Haven. Funds on-chain are unaffected. Removing it
+              may permanently remove this read-only record from Haven.
+            </p>
+            {removeError && (
+              <p className="mt-3 text-xs text-[var(--v2-danger)]" role="alert">
+                {removeError.message}
+              </p>
+            )}
+          </>
+        )}
+        confirmLabel={removeError?.retryable ? 'Try again' : 'Remove account'}
         loading={removing}
       />
     </div>

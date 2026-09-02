@@ -66,11 +66,17 @@ Check whether a green run has actually **covered** the money-path files now on
 matcher rather than approximating it:
 
 ```sh
-# The newest green qa-dev run on `dev`, and the commit it ran at.
+# The newest green qa-dev runs and the commits they ran at. This is a local
+# APPROXIMATION of the gate's selector (#2404): the gate admits a run only if
+# its event is deployment_status/schedule/workflow_dispatch, its commit is an
+# ancestor of `dev`'s tip, and its `money-flow` JOB concluded success — so
+# take the newest row whose event is one of those three and whose SHA is on
+# `dev`. There is deliberately no `--branch` filter: a post-deploy run has no
+# branch label, and the gate does not use one either.
 # `gh` is unavailable in the remote Claude Code environment — use the Actions UI
-# or the GitHub MCP (list workflow runs for qa-dev.yml, branch dev) there.
-gh run list --workflow=qa-dev.yml --branch=dev --status=success --limit=1 \
-  --json headSha,createdAt
+# or the GitHub MCP (list workflow runs for qa-dev.yml) there.
+gh run list --workflow=qa-dev.yml --status=success --limit=10 \
+  --json headSha,createdAt,event,headBranch
 
 # Money-path files changed since that commit. Any output means the gate blocks.
 git diff --name-only <that-sha>..origin/dev | node --input-type=module -e '
@@ -93,8 +99,10 @@ checker, because an empty result is what tells you to skip the run.
 
 If the output is non-empty, dispatch **Actions → "QA — money-flow (dev)" → Run
 workflow** on `dev` before you run the bump. It must be dispatched on `dev`:
-`greenRunQueryArgs` looks the green run up with `--branch dev`, so a run on any
-other ref does not satisfy the gate.
+the gate admits a `workflow_dispatch` run only when its branch label is `dev`
+AND its commit is an ancestor of the promotion head (#2404 — `selectGreenRun`
+in `scripts/ci/qa-freshness.mjs`), so a run on any other ref does not satisfy
+the gate.
 
 ## Choose The Version
 

@@ -121,8 +121,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Archive a revoked agent (soft removal — history is kept).
-         * @description Replaces agent deletion (#1401). Requires status=revoked — archiving is a filing action and never the thing that stops spending. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.
+         * Archive an agent (soft removal — history is kept).
+         * @description Replaces agent deletion (#1401). Delegation agents require status=revoked and no pending or active budget delegations because archiving is a filing action and never the thing that stops spending. Linked legacy Safe records may be archived at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. An agent whose Safe was already unlinked is archivable when no live delegation remains. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.
          */
         post: operations["archiveAgent"];
         delete?: never;
@@ -142,7 +142,7 @@ export type paths = {
         put?: never;
         /**
          * Return an archived agent to the primary list.
-         * @description Clears archived_at and nothing else — the agent remains revoked; un-archiving restores no authority of any kind. Idempotent on a non-archived agent.
+         * @description Clears archived_at and nothing else — the agent keeps the status it had when archived. For delegation agents, the archive contract requires revoked status and no live budgets; legacy Safe records can return with their prior active, paused, pending_approval, or revoked status. Un-archiving restores no authority of any kind. Idempotent on a non-archived agent.
          */
         post: operations["unarchiveAgent"];
         delete?: never;
@@ -609,7 +609,7 @@ export type paths = {
         post?: never;
         /**
          * Unlink a Safe from the Haven account.
-         * @description Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one.
+         * @description Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key.
          */
         delete: operations["unlinkUserSafe"];
         options?: never;
@@ -2751,6 +2751,8 @@ export type components = {
             usdc: string;
             usdc_atomic: string;
             usdc_address: string | null;
+            /** @description Minimum USDC balance eligible for gasless delegate recovery in human token units. */
+            sweep_min_usdc: string;
         };
         CreateAgentResponse: components["schemas"]["Agent"] & {
             api_key: string;
@@ -3479,6 +3481,7 @@ export type components = {
         };
         DashboardAgentAllowance: {
             tokenSymbol: string;
+            /** @description HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent's active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals). Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token's decimals first (#2295). */
             allowanceAmount: string;
             resetPeriodMin: number;
         };
@@ -3922,9 +3925,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Agent"];
                 };
             };
             /** @description Error response */
@@ -6914,6 +6915,21 @@ export interface operations {
             };
             /** @description Error response */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The Safe remains linked while a delegation, recovery, or re-key is in progress. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

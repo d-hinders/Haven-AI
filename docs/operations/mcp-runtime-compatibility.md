@@ -20,6 +20,11 @@ last-verified: "2026-09-02" # #2395: re-verified, NOT edited — § "Signer / ho
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Recent re-verification (#2258):** Connect's `pending_approval` wording
+> describes zero spending authority, with the exact sweep-recovery exception
+> documented as stranded-balance recovery only. This does not change the local
+> runtime's capabilities, consent hash, or version-skew contract.
+>
 > **Two sections sit outside that scope**, each for its own reason:
 >
 > - [Where the Node floor is enforced](#where-the-node-floor-is-enforced) applies

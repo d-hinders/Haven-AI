@@ -72,7 +72,8 @@ does not require funded wallets, relayer gas, or live credentials.
 
 - [ ] Dev/testnet only; no production credentials, RPCs, or real funds.
 - [ ] Correct frontend, backend, hosted MCP, and merchant targets confirmed.
-- [ ] Safe test-token balance and remaining allowance recorded.
+- [ ] Haven wallet test-token balance and remaining live delegation budget recorded;
+      legacy Safe authority is marked n/a.
 - [ ] Relayer has testnet gas.
 - [ ] Delegate balance recorded when testing x402/recovery.
 - [ ] Required local/CI secret names are present without printing values.
@@ -111,7 +112,7 @@ npm run qa:dev -w packages/qa-agent
 | Setup prompt | Default flow shows one prompt/command and no private key or API key | pass / fail / skip | |
 | Local credentials | Connector creates API and signing credentials locally; backend receives public signing address/proof and API-key hash/prefix | pass / fail / skip | Sanitized paths/registration evidence |
 | Runtime wiring | Hosted MCP and local signer entries load, with correct restart/readiness behavior | pass / fail / skip | Runtime/config evidence |
-| Budget approval | Correct Haven wallet/network/rules shown; the in-modal budget signature executes and activates the agent. There is no multi-approval waiting state to look for — `multi-approval` exists in no frontend or backend source, and every account onboarded since #1984 is a delegation-rail account whose grant is one signature | pass / fail / skip | Approval state/transaction |
+| Delegation budget signature | Correct Haven wallet/network/rules shown; the signed delegation budget executes or the device-signature step is recorded | pass / fail / skip | Signature state/transaction; legacy retired rail = n/a |
 | Agent readiness | `haven_get_agent` shows expected readiness and live remaining budget | pass / fail / skip | Readiness/allowance values |
 | Named action | Record exact amount/action and expected terminal or approval state | pass / fail / skip | Action/payment ID/status |
 | Manual fallback | If tested, one-time warning, explicit acknowledgement, trusted-runtime transfer, and close/reload loss behavior are correct | pass / fail / skip | |
@@ -135,7 +136,8 @@ For a manual live merchant also record:
   address.
 - Whether merchant settlement occurred.
 - Receipt/status evidence and public explorer links.
-- Before/after Safe and delegate balances and remaining allowance when relevant.
+- Before/after Haven wallet and delegate balances and remaining live delegation
+  budget when relevant; legacy Safe authority and AllowanceModule reads are n/a.
 
 UI transaction-detail verification is a separate check. The Playwright
 transaction-detail spec uses mocked API data and does not prove a live payment
@@ -156,7 +158,8 @@ Mark cleanup items `n/a` when the run mode created no live state.
 
 - [ ] Stranded delegate funds were swept or explicitly recorded with owner and
   follow-up.
-- [ ] Post-run Safe/delegate balances and remaining allowance were captured.
+- [ ] Post-run Haven wallet/delegate balances and remaining live delegation
+      budget were captured; legacy Safe authority is marked n/a.
 - [ ] Seed/reset requirements for the next run were recorded.
 - [ ] Secret review passed; no secrets remain in committed text or artifacts.
 

@@ -47,18 +47,93 @@
 // covered the money-path code being promoted; for a money-path hotfix, a human
 // accepted the risk on the record."
 //
-// KNOWN LIMIT on the dev path, stated rather than papered over: the run's
-// `headSha` is the branch tip when the run was TRIGGERED, not necessarily the
-// SHA deployed to dev. For the `repository_dispatch: dev-deployed` trigger they
-// coincide; for the nightly cron a lagging or failed dev deploy makes the run's
-// headSha overstate what was exercised.
+// ## Which runs count as evidence (#2404)
 //
-// Read that as one live case and one theoretical one (#2268): `dev-deployed`
-// has never fired — 0 of 156 qa-dev.yml runs, 2026-06-30 to 2026-08-31 — so the
-// cron's overstatement is in practice the only case, and the reassuring half of
-// the contrast buys nothing today. Nothing SENDS the dispatch; the receiver is
-// fine. Evidence, the operator fix and the alarm that now reports the trigger's
-// silence are in docs/operations/agent-qa.md § "Post-deploy trigger".
+// The query used to be `gh run list --workflow qa-dev.yml --branch dev
+// --status success --limit 1`. "On dev" was the right INTENT — a green run on
+// any other branch exercised different code — but `--branch` is the wrong
+// PREDICATE for it, and #2273 made that visible. #2273 rebuilt the post-deploy
+// trigger on GitHub's `deployment_status` event: Railway's GitHub integration
+// creates a real Deployment for every dev backend deploy (`railway-app[bot]`,
+// environment `Haven AI / dev`), and the run it fires checks out and tests
+// EXACTLY the deployed commit — for this event GitHub documents GITHUB_SHA as
+// "commit to be deployed", the coverage this gate was designed around. But
+// Railway creates those Deployments against a BARE SHA (`ref == sha` on every
+// one read from the Deployments API on 2026-09-02), and for that case GitHub
+// documents GITHUB_REF as "empty if commit" — so the run carries no
+// `headBranch`, and a `--branch dev` filter ("use the name of the branch of
+// the push", per the REST docs) excludes the best evidence the workflow
+// produces. The gate would have gone on keying off the nightly cron and manual
+// dispatches while claiming to prove coverage of the deployed code.
+//
+// So the query no longer filters on branch. It fetches a window of green runs
+// and `selectGreenRun` — pure, tested — admits a run only when ALL of:
+//
+//   1. its event is `deployment_status`, `schedule` or `workflow_dispatch`.
+//      Anything else is refused — `repository_dispatch` in particular, which
+//      #2273 removed from the workflow because it was the one route a curl
+//      could use to fabricate a post-deploy-looking run (#2271);
+//   2. for `schedule` and `workflow_dispatch` — the events that DO carry a
+//      branch — `headBranch` is still `dev`, exactly as before. Nothing
+//      widened on those legs;
+//   3. its `headSha` is an ANCESTOR of the promotion head (`git merge-base
+//      --is-ancestor`). This is what "on dev" was trying to say, stated
+//      directly: the run's commit is in the history being promoted. It is
+//      strictly stronger than the branch label, it holds for a run that has
+//      no branch label at all, and it is checked for EVERY event — a
+//      `workflow_dispatch` on a feature branch, or a `deployment_status` for a
+//      Deployment of something that never reached dev, both fail here;
+//   4. its `money-flow` JOB concluded `success`, read from the jobs API. A
+//      run's own conclusion is NOT enough: #2273's workflow gates the
+//      money-flow job behind a cheap `gate` job that skips the harness for
+//      `in_progress` and duplicated `success` statuses, and a run whose jobs
+//      are {gate: success, money-flow: skipped} has run-level conclusion
+//      `success` (measured on three ci.yml runs on 2026-09-02: jobs
+//      `skipped=7,success=7` -> `success`). `--status success` alone would
+//      therefore hand this gate a "green" run at the deployed SHA in which no
+//      harness ran, and the promotion would ride on it. Unreadable jobs refuse
+//      the run — fail closed, never "assume it ran".
+//
+// Deliberately NOT a rule: the Deployment's creator (#2271 asked for
+// `railway-app[bot]`). `gh run list` rows do not carry it — it lives on the
+// Deployment, which #2273's `gate` job already checks BEFORE the money-flow
+// job is allowed to run, and which `guard-freshness.mjs` reads from the
+// Deployments API for its own question. For THIS gate, rules 3 and 4 together
+// are the stronger statement: the commit is in the promoted history AND the
+// harness actually ran green there. A Deployment a human creates by hand
+// through the API at a dev commit either never reaches the harness (#2273's
+// gate refuses the creator) or, if it did, produced exactly the evidence a
+// `workflow_dispatch` at that commit would — which this gate has always
+// accepted. Re-checking a bot login here would be a second copy of #2273's
+// check with nothing new behind it.
+//
+// Newest admitted run wins. Among admitted runs at the SAME commit, event
+// provenance breaks the tie: `deployment_status` over `schedule` over
+// `workflow_dispatch`, because the first is the only one whose `headSha` is
+// the deployed commit by construction. That preference is deliberately a
+// TIE-BREAK and not an override: a manual dispatch on dev is legitimate
+// coverage (agent-qa.md says so, and re-dispatching after a fix lands is the
+// documented way a red qa-failure gets cleared), and a gate that preferred an
+// older post-deploy run over a newer manual one would refuse exactly that
+// route and make `qa-override` the standing way through — the #2164 lesson,
+// one gate over.
+//
+// KNOWN LIMIT on the dev path, stated rather than papered over: for a
+// `schedule` or `workflow_dispatch` run the `headSha` is the branch tip when
+// the run was TRIGGERED, not necessarily the SHA deployed to dev, so a lagging
+// or failed dev deploy makes it overstate what was exercised. A
+// `deployment_status` run does NOT have this limit — its `headSha` IS the
+// deployed commit — which is why admitting it matters.
+//
+// UNVERIFIED LEG, named so nobody quotes it as measured: as of 2026-09-02 no
+// `deployment_status` run exists in this repository on any workflow (#2273 is
+// not merged, and the event only runs the default branch's workflow file).
+// "No `headBranch`" is therefore what the GitHub docs and Railway's bare-SHA
+// Deployments PREDICT, not what a run has shown. Rules 1-4 hold whichever way
+// that measurement goes: a `deployment_status` run that turns out to carry
+// `headBranch: dev` is admitted by the same path, and the gate's answer does
+// not depend on the field either way. Evidence, the dedupe and the provenance
+// rule are in docs/operations/agent-qa.md § "Post-deploy trigger".
 //
 // ## What it still does NOT cover — by design, do not "fix" these
 //
@@ -496,9 +571,38 @@ export function completenessWarningFromJobs(jobs) {
 }
 
 /**
+ * The events whose runs may count as coverage evidence, in PROVENANCE order
+ * (best first). Used both to admit a run and to break ties between admitted
+ * runs at the same commit — see `selectGreenRun`.
+ */
+export const EVIDENCE_EVENTS = ['deployment_status', 'schedule', 'workflow_dispatch']
+
+/**
+ * The events that carry a branch label GitHub fills in. For these the run
+ * must still be on `dev` by label, exactly as before #2404; a
+ * `deployment_status` run is expected to carry no label at all (Railway
+ * deploys a bare SHA) and is admitted on ancestry alone.
+ */
+export const BRANCH_LABELLED_EVENTS = ['schedule', 'workflow_dispatch']
+
+/** The qa-dev.yml job that actually moves money. Pinned to the workflow by name. */
+export const MONEY_FLOW_JOB = 'money-flow'
+
+/**
+ * How many green runs the query fetches before the selector gives up. A
+ * busy day dispatches qa-dev.yml a dozen times; #2273's gate-skipped
+ * deployment_status runs add two or three `success`-conclusion rows per
+ * deploy that rule 4 refuses. 30 comfortably spans a day of both.
+ */
+export const GREEN_RUN_WINDOW = 30
+
+/**
  * The exact `gh run list` query the gate trusts (#1047 wiring test): always
- * dev's runs — a hotfix has no valid evidence of its own — always this
- * workflow, only successes, newest one.
+ * this workflow, only successes, newest first, a bounded window — and NO
+ * branch filter (#2404). "On dev" is decided by `selectGreenRun` on the run's
+ * SHA, because a `deployment_status` run has no branch for `--branch` to
+ * match. `event` and `headBranch` are in the projection because the selector
+ * fails closed without them: a row with no `event` is refused, never assumed.
  */
 export function greenRunQueryArgs(repo) {
   return [
@@ -508,15 +612,126 @@ export function greenRunQueryArgs(repo) {
     repo,
     '--workflow',
     'qa-dev.yml',
-    '--branch',
-    'dev',
     '--status',
     'success',
     '--limit',
-    '1',
+    String(GREEN_RUN_WINDOW),
     '--json',
-    'createdAt,headSha,databaseId',
+    'createdAt,headSha,databaseId,event,headBranch',
   ]
+}
+
+/**
+ * The conclusion of the money-flow job in a run's job list, or null when the
+ * job is absent or the list is unreadable. Null is refused by the selector.
+ */
+export function moneyFlowJobConclusion(jobs) {
+  if (!Array.isArray(jobs)) return null
+  const job = jobs.find((j) => j?.name === MONEY_FLOW_JOB)
+  return typeof job?.conclusion === 'string' ? job.conclusion : null
+}
+
+/**
+ * Pick the run the gate anchors to, from a window of `--status success`
+ * rows, newest first (#2404). Pure: ancestry and the jobs API come in as
+ * thunks so every refusal is unit-testable.
+ *
+ * Returns `{ run, jobs, refused }` — `run` is the admitted row or null,
+ * `jobs` its job list (so the caller's completeness warning does not fetch
+ * it twice), and `refused` names every row that was passed over and why, so
+ * the job log says which candidates existed rather than only "no run".
+ *
+ * Every rule fails CLOSED: a missing field, an ancestry check that errored
+ * (null, distinct from false), or an unreadable job list refuses the row. The
+ * selector may only ever answer "provably a green money-flow run on a commit
+ * in the promoted history".
+ *
+ * @param {Array<object>} rows  `gh run list --json createdAt,headSha,databaseId,event,headBranch`
+ * @param {object} io
+ * @param {(sha: string) => boolean|null} io.isAncestorOfHead  true / false / null (could not tell)
+ * @param {(databaseId: number|string) => Array<object>|null} io.jobsFor  the run's jobs, or null
+ */
+export function selectGreenRun(rows, { isAncestorOfHead, jobsFor }) {
+  const refused = []
+  const refuse = (row, reason) => {
+    refused.push({ databaseId: row?.databaseId ?? null, event: row?.event ?? null, headSha: row?.headSha ?? null, reason })
+  }
+
+  const stamp = (row) => {
+    const t = Date.parse(row?.createdAt ?? '')
+    return Number.isNaN(t) ? -Infinity : t
+  }
+  const rank = (row) => EVIDENCE_EVENTS.indexOf(row?.event)
+
+  // Apply rules 1-4 to one row; the admitted row's jobs come back with it.
+  const admit = (row) => {
+    // 1. Event allow-list. `repository_dispatch` lands here on purpose.
+    if (!EVIDENCE_EVENTS.includes(row?.event)) {
+      refuse(row, `event '${row?.event ?? 'missing'}' is not coverage evidence`)
+      return null
+    }
+    // 2. Branch-labelled events must still be on dev by label — unchanged
+    //    from the pre-#2404 rule for those events. Checked before ancestry
+    //    because it is free and ancestry is a git call.
+    if (BRANCH_LABELLED_EVENTS.includes(row.event) && row.headBranch !== 'dev') {
+      refuse(row, `${row.event} run is on '${row.headBranch ?? ''}', not dev`)
+      return null
+    }
+    // 3. The commit must be in the promoted history — for every event.
+    if (typeof row.headSha !== 'string' || row.headSha === '') {
+      refuse(row, 'no headSha')
+      return null
+    }
+    const ancestor = isAncestorOfHead(row.headSha)
+    if (ancestor !== true) {
+      refuse(row, ancestor === false ? `${row.headSha} is not an ancestor of the promotion head` : `could not establish whether ${row.headSha} is in the promoted history`)
+      return null
+    }
+    // 4. The money-flow job must have run and passed. A run whose gate
+    //    skipped the harness has run-level conclusion `success`.
+    let jobs = null
+    try {
+      jobs = jobsFor(row.databaseId)
+    } catch {
+      jobs = null
+    }
+    const conclusion = moneyFlowJobConclusion(jobs)
+    if (conclusion !== 'success') {
+      refuse(row, conclusion === null ? `could not read the '${MONEY_FLOW_JOB}' job` : `'${MONEY_FLOW_JOB}' job concluded '${conclusion}', not success`)
+      return null
+    }
+    return { run: row, jobs }
+  }
+
+  // Newest first. WHICH COMMIT anchors the diff is decided by the newest
+  // ADMITTED row alone — rows that fail a rule are recorded and skipped, and
+  // never influence the ordering. (A first version ranked commits by the
+  // newest row AT each SHA, refused rows included, so a refused
+  // repository_dispatch at an old commit could drag that commit ahead of a
+  // newer one with real evidence — review finding; the failure direction was
+  // safe, a spurious block, but it contradicted this comment's own promise.)
+  const ordered = [...(Array.isArray(rows) ? rows : [])].sort((a, b) => stamp(b) - stamp(a))
+  for (let i = 0; i < ordered.length; i += 1) {
+    const first = admit(ordered[i])
+    if (!first) continue
+    // Tie-break, and ONLY a tie-break: among OTHER admissible rows at the
+    // SAME commit, better provenance wins — deployment_status over schedule
+    // over workflow_dispatch — because the first is the only event whose
+    // headSha is the deployed commit by construction. A manual re-dispatch at
+    // a commit Railway also deployed then anchors to the post-deploy run.
+    // This never changes which commit: candidates must share `first`'s SHA,
+    // and each must itself pass every rule before it can replace `first`.
+    let best = first
+    for (let j = i + 1; j < ordered.length; j += 1) {
+      const row = ordered[j]
+      if (row?.headSha !== first.run.headSha) continue
+      if (!(rank(row) !== -1 && rank(row) < rank(best.run))) continue
+      const better = admit(row)
+      if (better) best = better
+    }
+    return { ...best, refused }
+  }
+  return { run: null, jobs: null, refused }
 }
 
 /**
@@ -541,10 +756,53 @@ function gh(args) {
   return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).trim()
 }
 
-function latestGreenRunFor(repo) {
+function greenRunWindowFor(repo) {
   const out = gh(greenRunQueryArgs(repo))
-  const rows = JSON.parse(out || '[]')
-  return rows.length ? rows[0] : null
+  return JSON.parse(out || '[]')
+}
+
+/**
+ * The run's jobs with their names, conclusions and step conclusions — one
+ * call serves both the money-flow-job rule and the #1044 completeness
+ * warning. Returns null when the API cannot answer; the selector refuses on
+ * null.
+ */
+function jobsForRun(repo, databaseId) {
+  try {
+    // One page of up to 100 jobs. qa-dev.yml has two (`gate`, `money-flow`);
+    // if it ever grows past 100 the money-flow job could fall off this page,
+    // at which point `moneyFlowJobConclusion` returns null and the run is
+    // REFUSED — the safe direction, and loud enough to notice.
+    const out = gh([
+      'api',
+      `repos/${repo}/actions/runs/${databaseId}/jobs`,
+      '-F',
+      'per_page=100',
+      '--jq',
+      '{jobs: [.jobs[] | {name, conclusion, steps: [.steps[] | {name, conclusion}]}]}',
+    ])
+    const parsed = JSON.parse(out || '{}')
+    return Array.isArray(parsed.jobs) ? parsed.jobs : null
+  } catch (err) {
+    console.error(`qa-freshness: could not read jobs for run ${databaseId}: ${err.message}`)
+    return null
+  }
+}
+
+/**
+ * `git merge-base --is-ancestor <sha> <head>`: exit 0 is true, exit 1 is
+ * false, anything else (unknown object, shallow clone) is null — which the
+ * selector treats as "refuse", never as either answer.
+ */
+function isAncestorOf(sha, head) {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', sha, head], { cwd: ROOT, stdio: 'ignore' })
+    return true
+  } catch (err) {
+    if (err?.status === 1) return false
+    console.error(`qa-freshness: could not test ancestry of ${sha}: ${err.message}`)
+    return null
+  }
 }
 
 /**
@@ -609,23 +867,22 @@ function main() {
 
   const globs = loadMoneyPathGlobs()
 
-  // Always dev's runs — the decision lives in greenRunQueryArgs, pinned by test.
+  // Which run counts is decided by selectGreenRun on the run's SHA and jobs,
+  // pinned by test (#2404); the query itself is pinned by greenRunQueryArgs.
   let latestGreenRun = null
   try {
-    latestGreenRun = latestGreenRunFor(repo)
-    if (latestGreenRun?.databaseId) {
-      try {
-        const jobsOut = gh([
-          'api',
-          `repos/${repo}/actions/runs/${latestGreenRun.databaseId}/jobs`,
-          '--jq',
-          '{jobs: [.jobs[] | {steps: [.steps[] | {name, conclusion}]}]}',
-        ])
-        const warning = completenessWarningFromJobs(JSON.parse(jobsOut || '{}').jobs)
-        if (warning) console.log(`::warning::${warning}`)
-      } catch {
-        // Advisory only — a jobs-API hiccup must not fail the gate.
-      }
+    const { run, jobs, refused } = selectGreenRun(greenRunWindowFor(repo), {
+      isAncestorOfHead: (sha) => isAncestorOf(sha, headSha),
+      jobsFor: (databaseId) => jobsForRun(repo, databaseId),
+    })
+    for (const r of refused) {
+      console.log(`qa-freshness: passed over run ${r.databaseId ?? '?'} (${r.event ?? '?'} at ${r.headSha ?? '?'}): ${r.reason}`)
+    }
+    latestGreenRun = run
+    if (run) {
+      console.log(`qa-freshness: anchoring to run ${run.databaseId} (${run.event} at ${run.headSha}, ${run.createdAt})`)
+      const warning = completenessWarningFromJobs(jobs)
+      if (warning) console.log(`::warning::${warning}`)
     }
   } catch (err) {
     console.error(`::error::qa-freshness: could not query workflow runs: ${err.message}`)

@@ -7,21 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const {
   mockUseAuth,
   mockUseAgents,
-  mockUseOnChainAllowances,
-  mockUsePublicClient,
-  mockUseSafeDetails,
-  mockUseActiveSigner,
 } = vi.hoisted(() => ({
   mockUseAuth: vi.fn(),
   mockUseAgents: vi.fn(),
-  mockUseOnChainAllowances: vi.fn(),
-  mockUsePublicClient: vi.fn(),
-  mockUseSafeDetails: vi.fn(),
-  mockUseActiveSigner: vi.fn(),
-}))
-
-vi.mock('wagmi', () => ({
-  usePublicClient: () => mockUsePublicClient(),
 }))
 
 vi.mock('@/context/AuthContext', () => ({
@@ -32,48 +20,7 @@ vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => mockUseAgents(),
 }))
 
-vi.mock('@/hooks/useOnChainAllowances', () => ({
-  useOnChainAllowances: (...args: unknown[]) => mockUseOnChainAllowances(...args),
-}))
-
-vi.mock('@/hooks/useSafeDetails', () => ({
-  useSafeDetails: (...args: unknown[]) => mockUseSafeDetails(...args),
-}))
-
-vi.mock('@/lib/signer', () => ({
-  useActiveSigner: () => mockUseActiveSigner(),
-  isSafeCapableSigner: (s: { type?: string } | null) => s !== null && s.type !== 'delegator_passkey',
-}))
-
-// #1980: `handleRevokeUnmanaged` is proven down to the Safe transaction it
-// signs and executes, so the mock seam sits BELOW the tx builder — the real
-// `revokeDelegateOnChain` and `buildAgentRevokeTx` run, and the assertions
-// read the calldata that would have gone on-chain.
-const {
-  mockGetSafeNonce,
-  mockSignSafeTx,
-  mockExecuteSafeTx,
-  mockProposeSafeTx,
-  mockGetSafeTxHash,
-} = vi.hoisted(() => ({
-  mockGetSafeNonce: vi.fn(),
-  mockSignSafeTx: vi.fn(),
-  mockExecuteSafeTx: vi.fn(),
-  mockProposeSafeTx: vi.fn(),
-  mockGetSafeTxHash: vi.fn(),
-}))
-
-vi.mock('@/lib/safe-tx', () => ({
-  getSafeNonce: (...args: unknown[]) => mockGetSafeNonce(...args),
-  signSafeTx: (...args: unknown[]) => mockSignSafeTx(...args),
-  executeSafeTx: (...args: unknown[]) => mockExecuteSafeTx(...args),
-  proposeSafeTx: (...args: unknown[]) => mockProposeSafeTx(...args),
-  getSafeTxHash: (...args: unknown[]) => mockGetSafeTxHash(...args),
-}))
-
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
-import { allowanceModuleFor } from '@/lib/allowance-module'
-import { encodeFunctionData } from 'viem'
 import type { Agent } from '@/hooks/useAgents'
 
 const SAFE = {
@@ -82,8 +29,6 @@ const SAFE = {
   safe_address: '0x1111111111111111111111111111111111111111',
   chain_id: 100,
 }
-
-const NEW_DELEGATE = '0x9999999999999999999999999999999999999999'
 
 function baseAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -117,16 +62,6 @@ describe('useAgentPanelState', () => {
       unarchiveAgent: vi.fn(),
       refetch: vi.fn().mockResolvedValue([]),
     })
-    mockUseSafeDetails.mockReturnValue({ details: null })
-    mockUsePublicClient.mockReturnValue({})
-    mockUseActiveSigner.mockReturnValue(null)
-    mockUseOnChainAllowances.mockReturnValue({
-      data: new Map(),
-      chainTimeSec: null,
-      loading: false,
-      onChainDelegates: [],
-      refetch: vi.fn(),
-    })
   })
 
   afterEach(() => {
@@ -152,190 +87,6 @@ describe('useAgentPanelState', () => {
           baseAgent({ safe_id: null as unknown as string, safe_address: SAFE.safe_address, safe_chain_id: 8453 }),
         ),
       ).toBe(false)
-    })
-  })
-
-  describe('unmanaged-delegate classification', () => {
-    beforeEach(() => {
-      mockUseOnChainAllowances.mockReturnValue({
-        data: new Map([
-          [NEW_DELEGATE.toLowerCase(), {
-            allowances: [{
-              token: '0xddAfbb505ad214D7b80b1f830fcCc89B60fb7A83',
-              amount: 1_000_000n,
-              spent: 0n,
-              resetTimeMin: 1440,
-              lastResetMin: 0,
-              nonce: 0,
-            }],
-          }],
-        ]),
-        chainTimeSec: 1_700_000_000,
-        loading: false,
-        onChainDelegates: [NEW_DELEGATE],
-        refetch: vi.fn(),
-      })
-    })
-
-    it('classifies an on-chain-only delegate as unmanaged', () => {
-      const { result, unmount } = renderHook(() => useAgentPanelState())
-      expect(result.current.unmanagedDelegates).toHaveLength(1)
-      expect(result.current.unmanagedDelegates[0].address).toBe(NEW_DELEGATE)
-      expect(result.current.isPendingHavenSetup(NEW_DELEGATE)).toBe(false)
-      unmount()
-    })
-
-    it('handleSetupUpdated suppresses the fresh delegate and marks it as a Haven setup', async () => {
-      const { result, unmount } = renderHook(() => useAgentPanelState())
-
-      act(() => {
-        result.current.handleSetupUpdated({ delegateAddress: NEW_DELEGATE })
-      })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1)
-      })
-
-      expect(result.current.unmanagedDelegates).toHaveLength(0)
-      expect(result.current.finalizingAgent).toBe(true)
-      expect(result.current.isPendingHavenSetup(NEW_DELEGATE)).toBe(true)
-      // Unmount cancels the in-flight poll.
-      unmount()
-    })
-
-    it('the suppression expires after 30s, leaving the pending-Haven-setup label', async () => {
-      const { result, unmount } = renderHook(() => useAgentPanelState())
-
-      act(() => {
-        result.current.handleSetupUpdated({ delegateAddress: NEW_DELEGATE })
-      })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(31_000)
-      })
-
-      expect(result.current.finalizingAgent).toBe(false)
-      expect(result.current.finalizeTimedOut).toBe(true)
-      expect(result.current.unmanagedDelegates).toHaveLength(1)
-      expect(result.current.isPendingHavenSetup(NEW_DELEGATE)).toBe(true)
-      unmount()
-    })
-  })
-
-  describe('handleRevokeUnmanaged (#1980)', () => {
-    /**
-     * The exact calldata `removeDelegate(delegate, true)` encodes to,
-     * derived here from an ABI written INTO the test rather than imported
-     * from the module under test — so a wrong function, argument order, or
-     * a silently changed builder cannot re-derive its own expectation.
-     */
-    const EXPECTED_REVOKE_DATA = encodeFunctionData({
-      abi: [
-        {
-          type: 'function',
-          name: 'removeDelegate',
-          stateMutability: 'nonpayable',
-          inputs: [
-            { name: 'delegate', type: 'address' },
-            { name: 'removeAllowances', type: 'bool' },
-          ],
-          outputs: [],
-        },
-      ] as const,
-      functionName: 'removeDelegate',
-      args: [NEW_DELEGATE, true],
-    })
-
-    const onChainRefetch = vi.fn()
-
-    beforeEach(() => {
-      mockUseActiveSigner.mockReturnValue({ type: 'eoa', address: '0x' + 'aa'.repeat(20) })
-      mockUseSafeDetails.mockReturnValue({ details: { threshold: 1 } })
-      mockGetSafeNonce.mockResolvedValue(7n)
-      mockSignSafeTx.mockResolvedValue('0xsignature')
-      mockExecuteSafeTx.mockResolvedValue(undefined)
-      mockProposeSafeTx.mockResolvedValue(undefined)
-      onChainRefetch.mockClear()
-      mockExecuteSafeTx.mockClear()
-      mockProposeSafeTx.mockClear()
-      mockUseOnChainAllowances.mockReturnValue({
-        data: new Map(),
-        chainTimeSec: null,
-        loading: false,
-        onChainDelegates: [NEW_DELEGATE],
-        refetch: onChainRefetch,
-      })
-    })
-
-    it('executes the AllowanceModule teardown for the delegate address — the request body, not a call count', async () => {
-      const { result, unmount } = renderHook(() => useAgentPanelState())
-
-      await act(async () => {
-        await result.current.handleRevokeUnmanaged(NEW_DELEGATE)
-      })
-
-      expect(mockExecuteSafeTx).toHaveBeenCalledTimes(1)
-      const safeTx = mockExecuteSafeTx.mock.calls[0][3] as {
-        to: string
-        data: string
-        value: bigint
-        operation: number
-        nonce: bigint
-      }
-      expect(safeTx.to).toBe(allowanceModuleFor(SAFE.chain_id))
-      expect(safeTx.data).toBe(EXPECTED_REVOKE_DATA)
-      expect(safeTx.value).toBe(0n)
-      expect(safeTx.operation).toBe(0)
-      expect(safeTx.nonce).toBe(7n)
-      // The card disappears via refetch, not via optimistic state.
-      expect(onChainRefetch).toHaveBeenCalledTimes(1)
-      expect(result.current.toastMessage).toBeNull()
-      unmount()
-    })
-
-    it('proposes instead of executing when the account needs more approvals', async () => {
-      mockUseSafeDetails.mockReturnValue({ details: { threshold: 2 } })
-      mockGetSafeTxHash.mockReturnValue('0xhash')
-      const { result, unmount } = renderHook(() => useAgentPanelState())
-
-      await act(async () => {
-        await result.current.handleRevokeUnmanaged(NEW_DELEGATE)
-      })
-
-      expect(mockExecuteSafeTx).not.toHaveBeenCalled()
-      expect(mockProposeSafeTx).toHaveBeenCalledTimes(1)
-      const safeTx = mockProposeSafeTx.mock.calls[0][1] as { data: string }
-      expect(safeTx.data).toBe(EXPECTED_REVOKE_DATA)
-      unmount()
-    })
-
-    it('with no Safe-capable signer, nothing executes and the user is told why', async () => {
-      mockUseActiveSigner.mockReturnValue(null)
-      const { result, unmount } = renderHook(() => useAgentPanelState())
-
-      await act(async () => {
-        await result.current.handleRevokeUnmanaged(NEW_DELEGATE)
-      })
-
-      expect(mockExecuteSafeTx).not.toHaveBeenCalled()
-      expect(mockProposeSafeTx).not.toHaveBeenCalled()
-      expect(result.current.toastMessage).toBe(
-        'Connect a wallet that controls this Haven account to revoke this delegate.',
-      )
-      unmount()
-    })
-
-    it('a failed teardown surfaces the error and leaves no stuck busy state', async () => {
-      mockExecuteSafeTx.mockRejectedValue(new Error('execution reverted'))
-      const { result, unmount } = renderHook(() => useAgentPanelState())
-
-      await act(async () => {
-        await result.current.handleRevokeUnmanaged(NEW_DELEGATE)
-      })
-
-      expect(result.current.toastMessage).toBe('execution reverted')
-      expect(result.current.busyAgentId).toBeNull()
-      expect(result.current.busyAction).toBeNull()
-      expect(onChainRefetch).not.toHaveBeenCalled()
-      unmount()
     })
   })
 

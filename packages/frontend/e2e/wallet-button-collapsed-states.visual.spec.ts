@@ -56,9 +56,10 @@
  * point answers 410 for the rest, #1986). `useActiveSigner` resolves a
  * `delegator_passkey` for a hydrated set only when `passkeys.length > 0`
  * (`lib/signer.ts`), so an EOA-owned `delegator_hybrid` with ZERO enrolled
- * passkeys — `POST /accounts/hybrid { owner_address }`, the #829 canary's own
- * shape, and reachable from passkey onboarding via `add_owner` then
- * `remove_passkey` — falls through both passkey branches with the owner
+ * passkeys — provisionable as `POST /accounts/hybrid { owner_address }`, the
+ * same account shape the #829 live proof signed with (an EOA owner and empty
+ * passkey/threshold arrays), and reachable from passkey onboarding via
+ * `add_owner` then `remove_passkey` — falls through both passkey branches with the owner
  * wallet connected and lands here. The label is then `useSafeOperationGate`'s:
  * the named owner connected renders the truncated address (#2068); any other
  * wallet renders "Wrong wallet" in the danger tone (#2073). So the fixture

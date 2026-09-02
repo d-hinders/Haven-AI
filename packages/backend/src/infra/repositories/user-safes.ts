@@ -52,9 +52,39 @@ export interface SafeWithAccountTypeRow {
 
 // ── Reads ────────────────────────────────────────────────────────────────────
 
+/**
+ * #2413: the dashboard stops rendering retired-rail accounts.
+ *
+ * Epic #1440's owner decision of 2026-09-02 is that retirement is DELETION,
+ * not accommodation — no effort goes into a legacy-Safe experience, because
+ * the population is zero (the census found 15 Base-mainnet Safes worth ~$0.12
+ * total). Rather than keep ~25 files branching on `account_type` to render
+ * those accounts nicely, the three account-list queries stop returning them
+ * and every branch behind them becomes unreachable and deletable.
+ *
+ * `= 'delegator_hybrid'` is an equality test, not a `<> 'safe'` one, and that
+ * is deliberate: it excludes any future value as well as `'safe'`. It does NOT
+ * exclude NULL, because there is no NULL to exclude — `041_hybrid_accounts.ts`
+ * added the column `NOT NULL DEFAULT 'safe'` under
+ * `CHECK (account_type IN ('safe','delegator_hybrid'))`, so pre-existing rows
+ * were backfilled to `'safe'` and the column's domain has exactly two values.
+ * (An earlier draft of this comment claimed legacy rows "carry NULL" and a
+ * test asserted it; the insert failed the not-null constraint in CI, which is
+ * where the claim was corrected.)
+ *
+ * Deliberately a FILTER, not a migration. The rows stay, so this is reversible
+ * by deleting one clause — the same reason `rails/execution-rail.ts` was kept.
+ * Deleting the rows outright is a separate, still-open decision on the epic,
+ * blocked on `payment_intents`' RESTRICT foreign key.
+ *
+ * This does NOT weaken tenant scoping: every query keeps `user_id = $1`, and
+ * this clause only ever narrows further.
+ */
+const DELEGATION_RAIL_ONLY = `AND account_type = 'delegator_hybrid'`
+
 export const LIST_SAFES_FOR_USER_SQL = `SELECT id, safe_address, chain_id, name, is_default, created_at
        FROM user_safes
-       WHERE user_id = $1
+       WHERE user_id = $1 ${DELEGATION_RAIL_ONLY}
        ORDER BY created_at ASC`
 
 /**
@@ -67,7 +97,7 @@ export const LIST_SAFES_FOR_USER_SQL = `SELECT id, safe_address, chain_id, name,
  */
 export const LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL = `SELECT id, safe_address, chain_id, name, account_type
      FROM user_safes
-     WHERE user_id = $1
+     WHERE user_id = $1 ${DELEGATION_RAIL_ONLY}
      ORDER BY created_at ASC`
 
 export const FIND_OWNED_SAFE_ADDRESS_SQL = `SELECT id, safe_address FROM user_safes WHERE id = $1 AND user_id = $2`
@@ -407,7 +437,7 @@ export const LIST_SESSION_SAFES_FOR_USER_SQL = `SELECT us.id, us.safe_address, u
               COUNT(hap.id)::int AS passkey_count
        FROM user_safes us
        LEFT JOIN hybrid_account_passkeys hap ON hap.user_safe_id = us.id
-       WHERE us.user_id = $1
+       WHERE us.user_id = $1 AND us.account_type = 'delegator_hybrid'
        GROUP BY us.id
        ORDER BY us.created_at ASC`
 

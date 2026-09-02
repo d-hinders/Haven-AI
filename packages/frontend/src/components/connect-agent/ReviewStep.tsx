@@ -24,7 +24,7 @@ export function ReviewStep({ flow }: { flow: AgentConnectionSetupFlow }) {
     <>
       <AgentRulesSummary
         title="Confirm agent budget"
-        description={`Haven creates a pending setup; the agent creates its key locally and Haven receives only the public signing address. Nothing can spend until you approve the budget${flow.isDelegationAccount ? '' : ' with your wallet'} — the signature is the authority.`}
+        description={`Haven creates a pending setup; the agent creates its key locally and Haven receives only the public signing address. Nothing can spend until you approve the budget — the signature is the authority.`}
         density="compact"
         items={[
           { label: 'Agent name', value: flow.name, helper: flow.description.trim() || undefined },

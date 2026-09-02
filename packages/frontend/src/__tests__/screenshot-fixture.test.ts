@@ -117,10 +117,10 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(pinned.delegations[0].status).toBe('active')
       expect(pinned.delegations[0].recipient_address).toMatch(/^0x/)
 
-      // The open-recipient budget sits on `agent-retired`, not `agent-ops`:
-      // `agent-ops` is `account_type: 'safe'` (the legacy Safe rail, #2202)
-      // and a legacy agent cannot hold a delegation at all. A fixture that
-      // gave it one would photograph a combination the product cannot produce.
+      // The open-recipient budget sits on `agent-retired`. #2413 removed the
+      // legacy `agent-ops` fixture entirely — the API cannot return a
+      // legacy-rail agent any more, so a fixture serving one would photograph
+      // a screen production cannot produce.
       const open = fx('/agents/agent-retired/delegations') as {
         delegations: { recipient_address: string | null }[]
       }
@@ -134,22 +134,13 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // single default — `CLEAR_DEFAULT_SAFES_FOR_USER_SQL` runs before
       // `SET_SAFE_DEFAULT_SQL` (`infra/repositories/user-safes.ts:160-163`) —
       // so a second `is_default: true` is a state no write path leaves behind.
-      const safes = (FIXTURE_USER as unknown as { safes: { is_default: boolean }[] }).safes
-      expect(safes.length).toBeGreaterThan(1) // non-vacuity: one safe cannot disagree
+      // #2413 removed the second (legacy) account, so the non-vacuity guard
+      // this had — "one safe cannot disagree" — is gone with it. What remains
+      // falsifiable is that the fixture never seeds a second default, which is
+      // what `CLEAR_DEFAULT_SAFES_FOR_USER_SQL` guarantees in production.
+      const safes = (FIXTURE_USER as unknown as { safes: { is_default: boolean; account_type: string }[] }).safes
       expect(safes.filter((s) => s.is_default)).toHaveLength(1)
-    })
-
-    it('never gives a legacy-rail agent a delegation', () => {
-      const legacy = FIXTURE_AGENTS.find((a) => a.id === 'agent-ops')
-      // #2202: `'safe'`, not `null`. `user_safes.account_type` is
-      // `NOT NULL DEFAULT 'safe'` under
-      // `CHECK (account_type IN ('safe','delegator_hybrid'))`
-      // (`041_hybrid_accounts.ts:29`, `:38`), so the legacy rail IS `'safe'` —
-      // `null` was a value the column could never hold, and it only looked
-      // right because `railOf` reads anything-but-`delegator_hybrid` as legacy
-      // (`lib/custody-rail.ts:37-38`).
-      expect(legacy?.account_type).toBe('safe')
-      expect(fx('/agents/agent-ops/delegations')).toEqual({ delegations: [] })
+      expect(safes.every((s) => s.account_type === 'delegator_hybrid')).toBe(true)
     })
 
     it('projects `allowances` from the delegation for every delegation-rail agent', () => {
@@ -458,45 +449,6 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           expect([id, balanceFor(id)]).not.toEqual([id, null])
         }
         expect(FIXTURE_EMPTY_FALLBACK).not.toHaveProperty('usdc_atomic')
-      })
-
-      it('keys /safe/:address/details for every LEGACY-rail account it serves (#2202)', () => {
-        // The same fallback mechanism as the #2194 gap above, on the endpoint
-        // this issue's second account newly reaches. `SafeControlCard` reads
-        // its owners and threshold from here, and `/custody` renders that card
-        // for every non-`delegator_hybrid` account — so an unkeyed answer is
-        // not "no data", it is 200 with `owners`/`threshold` missing, which the
-        // card renders as **"Threshold: of 0"**: an owner-less Safe, which no
-        // deployed Safe can be.
-        //
-        // Keyed off the rail rather than off a hardcoded address, so a THIRD
-        // legacy account added later fails here instead of photographing the
-        // empty fallback the way this one did before it was caught.
-        const legacySafes = (
-          FIXTURE_USER as unknown as { safes: { safe_address: string; account_type: string }[] }
-        ).safes.filter((s) => s.account_type !== 'delegator_hybrid')
-        expect(legacySafes.length).toBeGreaterThan(0) // non-vacuity
-        for (const safe of legacySafes) {
-          const details = fixtureFor(`/safe/${safe.safe_address}/details`) as {
-            owners?: string[]
-            threshold?: number
-          } | null
-          expect([safe.safe_address, details]).not.toEqual([safe.safe_address, null])
-          expect(details!.owners!.length).toBeGreaterThan(0)
-          // A Safe cannot require more approvals than it has owners, and a
-          // zero threshold is the shape the fallback produced.
-          expect(details!.threshold).toBeGreaterThan(0)
-          expect(details!.threshold).toBeLessThanOrEqual(details!.owners!.length)
-        }
-        // WHY the gap was silent rather than loud, stated exactly — and it is
-        // worse than "the fields are missing", which is what this assertion
-        // first claimed before it was run. The fallback carries `owners: []`,
-        // a real array of the right type, so `owners.length` is 0 instead of
-        // throwing; and `threshold` is absent, so it renders as a blank. That
-        // is the combination that produced "Threshold: of 0" — a well-formed
-        // answer describing a Safe nobody controls.
-        expect(FIXTURE_EMPTY_FALLBACK).toHaveProperty('owners', [])
-        expect(FIXTURE_EMPTY_FALLBACK).not.toHaveProperty('threshold')
       })
 
       it('answers 422 for exactly the agents the route would refuse', () => {

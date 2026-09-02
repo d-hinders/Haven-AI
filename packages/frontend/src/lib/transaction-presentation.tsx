@@ -57,7 +57,7 @@ export function transactionMovement(
   if (isDelegateSweep(tx)) {
     return (
       <TransactionMovement
-        from={`${tx.agentName ?? 'Agent'} delegate`}
+        from={tx.agentName ?? 'Agent'}
         to={tx.safeName}
       />
     )

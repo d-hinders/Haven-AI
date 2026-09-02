@@ -29,9 +29,11 @@ import { describeDb, initDbHarness, resetDb, WORKER_SCHEMA } from '../db-harness
  * Every table the DATABASE says lives in this worker's schema, with its row
  * count — in ONE round trip.
  *
- * The obvious shape (a `COUNT(*)` query per table) is 38 round trips and
- * counting, which under the ordinary parallel load of a full backend run is
- * enough to push this test past vitest's 5 s default on its own. That would
+ * The obvious shape (a `COUNT(*)` query per table) is one round trip per
+ * table — 38 when this was written, 36 since migration 073 dropped two, and
+ * moving with every migration — which under the ordinary parallel load of a
+ * full backend run is enough to push this test past vitest's 5 s default on
+ * its own. That would
  * make the file a flake of exactly the kind #2211 exists to remove, and
  * "raise the timeout" is the answer this issue rejects — so the census is one
  * `UNION ALL` built from the catalog instead.
@@ -185,13 +187,16 @@ describeDb('resetDb leaves the worker schema genuinely clean (#2211)', () => {
   })
 
   it('still cleans a schema whose foreign keys form a cycle (the TRUNCATE fallback)', async () => {
-    // `planDeleteOrder` returns null here, so resetDb takes the pre-#2211
-    // TRUNCATE path. Created and dropped inside this test: left behind, the
-    // cycle would put EVERY later reset in the run on the fallback path.
-    // Same self-healing drop, and here it matters more: a cycle left behind
-    // puts EVERY later reset in the worker on the TRUNCATE fallback — correct,
-    // but slow enough to time the rest of the file out. That happened once
-    // during #2211, from a test killed by an unrelated timeout.
+    // `planEmptying` cannot order these two, so resetDb takes the pre-#2211
+    // TRUNCATE path for them — and since #2354 ONLY for them: every other
+    // table is still emptied by DELETE, and the census below proves both
+    // halves at once. Before #2354 this test truncated the whole schema, the
+    // one reset shape that scales with both relations and concurrent workers,
+    // and it was the test that timed out under load (#2354's reproduction).
+    // Created and dropped inside this test: left behind, the cycle would put
+    // every later reset in the worker on the fallback path — correct, but
+    // that happened once during #2211, from a test killed by an unrelated
+    // timeout, hence the self-healing drop.
     await db.query(
       `DROP TABLE IF EXISTS ${WORKER_SCHEMA}.cycle_b, ${WORKER_SCHEMA}.cycle_a`,
     )

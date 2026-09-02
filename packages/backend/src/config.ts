@@ -125,10 +125,12 @@ export const config = {
   logLevel: optionalEnv('LOG_LEVEL', 'info'),
 
   // #2422 (epic #2420): the npm dist-tag in the connector setup command the
-  // dashboard hands out. Dev Railway sets `dev` so a developer testing against
-  // the dev backend installs the dev package set; PRODUCTION LEAVES IT UNSET
-  // and gets `alpha`, byte-for-byte as before. Setting it is an OPERATOR
-  // action, never an agent's. See parseConnectorChannel above for why an
+  // dashboard hands out. The dev Railway service is INTENDED to be set to
+  // `dev`, so a developer testing against the dev backend installs the dev
+  // package set — but that is an OPERATOR action, never an agent's, and it has
+  // NOT been performed: until it is, dev resolves to `alpha` like everywhere
+  // else. PRODUCTION LEAVES IT UNSET permanently and gets `alpha`,
+  // byte-for-byte as before. See parseConnectorChannel above for why an
   // invalid value refuses the boot instead of falling back.
   connectorChannel: parseConnectorChannel(process.env.HAVEN_CONNECTOR_CHANNEL),
 

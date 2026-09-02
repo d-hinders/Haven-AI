@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
+// #2392: the spec's own schema decides whether the overview matches what the
+// dashboard's generated wire types promise — see the #1090 block below.
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 
 const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -50,6 +53,15 @@ vi.mock('../../infra/fiat-values.js', () => ({
 vi.mock('../../modules/transactions/index.js', () => transactionMocks)
 
 import dashboardRoutes from '../dashboard.js'
+
+// The spec promises `format: uuid` for `DashboardAgentPreview.id` / `safeId`
+// and the columns are UUID PRIMARY KEYs; `ajv-formats` is wired, so a fixture
+// id like 'agent-1' fails the round trip for a FIXTURE reason (#2328/#2392).
+// The #1090 block below asserts the shape and uses these; the older tests
+// above it keep their short ids because they never hand the payload to the spec.
+const SAFE_UUID = 'b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16'
+const AGENT_UUID = '4f9a1c2e-7b3d-4a10-9c55-2f8e6d0b1a34'
+const DELEGATION_UUID = '9c2b7e11-5d4f-4a8c-b3e6-1f0a2d7c8e94'
 
 const SAFE = {
   id: 'safe-1',
@@ -263,14 +275,16 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
       if (sql.includes('AS has_first_agent_payment')) return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
       if (sql.includes('FROM user_safes') && sql.includes('ORDER BY created_at ASC')) return Promise.resolve({ rows: [SAFE] })
       if (sql.includes('FROM agents a')) {
-        return Promise.resolve({ rows: [{ ...AGENT, account_type: 'delegator_hybrid' }] })
+        return Promise.resolve({
+          rows: [{ ...AGENT, id: AGENT_UUID, safe_id: SAFE_UUID, account_type: 'delegator_hybrid' }],
+        })
       }
       if (sql.includes('FROM agent_allowances')) {
         // The frozen onboarding mirror — must NOT be what the dashboard shows.
         return Promise.resolve({ rows: [{ agent_id: AGENT.id, token_symbol: 'USDC', allowance_amount: '10.00', reset_period_min: 1440 }] })
       }
       if (sql.includes('FROM agent_delegations')) {
-        return Promise.resolve({ rows: [{ id: 'd-1', agent_id: AGENT.id, chain_id: 84532, token_address: SEPOLIA_USDC, budget_atomic: '1000000', period_seconds: 86_400 }] })
+        return Promise.resolve({ rows: [{ id: DELEGATION_UUID, agent_id: AGENT_UUID, chain_id: 84532, token_address: SEPOLIA_USDC, budget_atomic: '1000000', period_seconds: 86_400 }] })
       }
       if (sql.includes('FROM user_daily_portfolio_snapshots')) return Promise.resolve({ rows: [] })
       if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) return Promise.resolve({ rows: [] })
@@ -283,7 +297,18 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
       headers: { authorization: `Bearer ${token}` },
     })
     expect(response.statusCode).toBe(200)
-    const agent = response.json().agents.find((a: { id: string }) => a.id === AGENT.id)
+    const body = response.json()
+    const agent = body.agents.find((a: { id: string }) => a.id === AGENT_UUID)
+    // Two pins, deliberately both (#2392). The literal is the ONLY thing that
+    // pins the human-decimal DIGITS: `DashboardAgentAllowance.allowanceAmount`
+    // is a bare `string` in openapi/spec.ts, and even the named
+    // `allowanceHumanAmount` pattern admits a bare integer, so a route that
+    // started emitting the atomic `budget_atomic` ('1000000') one nesting
+    // below would pass every schema check and fail only here. The round trip
+    // pins what the literal cannot: the field SET, the types, the enum and
+    // the uuid formats of the whole overview envelope, against the same
+    // schema the dashboard's generated wire types are built from.
+    expectMatchesSpec('GET', '/dashboard/overview', body)
     expect(agent.allowances).toEqual([
       { tokenSymbol: 'USDC', allowanceAmount: '1.00', resetPeriodMin: 1440 },
     ])

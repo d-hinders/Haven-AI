@@ -997,7 +997,7 @@ exploratory.
 
 > You are running exploratory QA against Haven's **dev** environment (testnet / Base
 > Sepolia, capped QA delegate — never prod). Using the already-connected Haven MCP
-> (or connect with `npx <connector_package> --setup <QA setup token> --api <dev backend URL>`, where `<connector_package>` is the `connector_package`/`connector_command` value the dev backend's own setup response returns — NOT necessarily `@alpha` since #2422; the token and URL are owner-provisioned, see "QA identity, funding & secrets" below):
+> (or connect with `npx -y <connector_package> --setup <QA setup token> --api <dev backend URL>`, where `<connector_package>` is the `connector_package` value the dev backend's own setup response returns (the same package is named inside its `connector_command`, which is the whole `npx -y … --setup … --api …` string — do not paste that in here) — NOT necessarily `@alpha` since #2422; the token and URL are owner-provisioned, see "QA identity, funding & secrets" below):
 > 1. `haven_get_agent` + `haven_get_allowances` — confirm the dev QA agent and note the live remaining budget.
 > 2. Pay the demo-merchant x402 call **within** budget (`haven_pay_x402`) → expect settlement + a receipt.
 > 3. Use direct `haven_pay` for an amount **over** the remaining budget → expect it to be

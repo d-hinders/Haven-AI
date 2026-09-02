@@ -10,7 +10,7 @@ Run an exploratory QA pass as the agent, using **this session's own model** (no 
 
 1. If a Haven MCP is **already connected to the QA agent on dev**, use it — confirm with `claude mcp list` (both `haven` and `haven-signer` connected). Skip to Phase 2.
 2. Otherwise connect the QA setup with the connector **the dev backend itself hands out**, pointed at the **dev backend**:
-   `npx <connector_package> --setup <QA setup token> --api <dev backend URL>`
+   `npx -y <connector_package> --setup <QA setup token> --api <dev backend URL>`
    where `<connector_package>` is the `connector_package` value on that backend's own setup response (it is also the package named inside its `connector_command`). Since #2422 the dev backend's channel is set by `HAVEN_CONNECTOR_CHANNEL` and is **not necessarily `@alpha`** — pinning the alpha tag by hand against a `@dev` backend installs a signer that skews against it, which is the `x402_expected_context_version` refusal epic #2420 exists to make testable.
    (The QA setup token + dev backend URL are owner-provisioned — see `docs/operations/agent-qa.md` "QA identity, funding & secrets". If you don't have them, stop and ask; do not invent credentials.)
 3. If the signer fails to connect or you need a clean slate, run `/haven-reset` first, then retry step 2.

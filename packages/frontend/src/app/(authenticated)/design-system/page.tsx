@@ -1347,6 +1347,10 @@ export default function DesignSystemPage() {
 
           <Card hover={false} className="overflow-hidden">
             <Card.Header title="Recent agent activity" />
+            {/* TODO(#2448): both "x402 payment" titles below are the pre-#2357
+                wording; the shipped row title is "Agent payment". Changing them
+                moves the blocking /design-system pixel baseline, so it is a
+                separate PR with its own baseline dispatch. */}
             <TransactionActivityRow
               direction="out"
               title="x402 payment"
@@ -1432,7 +1436,10 @@ export default function DesignSystemPage() {
                     the column it stands in for. The INITIATOR genuinely is
                     dropped between the two stages. For two of the three demo
                     rows that costs nothing visible, because the title already
-                    says it ("x402 payment BY RESEARCH ASSISTANT"); for the
+                    says it ("x402 payment BY RESEARCH ASSISTANT" — TODO(#2448):
+                    that is the pre-#2357 title, now "Agent payment by …"; the
+                    point this paragraph makes still holds, the quote is stale);
+                    for the
                     first row it is a real loss — a human-initiated payment's
                     initiator ("You") rests on the cell, and nothing else on
                     the row says so. That is an acceptable trade here (the
@@ -1479,6 +1486,8 @@ export default function DesignSystemPage() {
                   failed: false,
                 },
                 {
+                  // TODO(#2448): pre-#2357 row title; the shipped string is
+                  // 'Agent payment by Research assistant'. Blocked-baseline fix.
                   title: 'x402 payment by Research assistant',
                   from: 'Operating wallet',
                   to: 'API provider',
@@ -2024,6 +2033,9 @@ export default function DesignSystemPage() {
         onClose={() => setComingSoonOpen(false)}
       />
 
+      {/* TODO(#2448): "x402 payment" is the pre-#2357 row title and no longer
+          shipped copy — the row now reads "Agent payment". Fixing it here moves
+          a blocked visual baseline, so it is tracked separately. */}
       <SidePanel
         open={panelOpen}
         onClose={() => setPanelOpen(false)}

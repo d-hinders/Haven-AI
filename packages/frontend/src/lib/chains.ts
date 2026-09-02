@@ -37,7 +37,6 @@ export interface FrontendChainConfig {
     safeProxyFactory: Address
     safeSingletonL2: Address
     fallbackHandler: Address
-    allowanceModule: Address
     multiSendCallOnly: Address
   }
   passkey: {

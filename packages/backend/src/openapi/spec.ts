@@ -36,7 +36,7 @@ const tokenSymbol = {
  * Both shapes are named schemas below so the split is readable from the spec
  * alone. The shapes themselves are DELIBERATELY unchanged — the human-decimal
  * projection is the historical `allowances` element shape that `GET /agents`,
- * `GET /agents/{id}`, `PATCH /agents/{id}`, `GET /dashboard` and the CLI have
+ * `GET /agents/{id}`, `PUT /agents/{id}`, `GET /dashboard/overview` and the CLI have
  * always returned, so unifying it is a breaking wire change and a versioning
  * decision, not a cleanup (recorded on #2295).
  *
@@ -6146,7 +6146,7 @@ export const openapiSpec = {
       AgentAllowance: {
         type: 'object',
         description:
-          'One element of an agent\'s derived budget view (GET /agents, GET /agents/{id}, PATCH /agents/{id}). ' +
+          'One element of an agent\'s derived budget view (GET /agents, GET /agents/{id}, PUT /agents/{id}; POST /agents carries it as a literal empty array). ' +
           'Projected from the agent\'s ACTIVE delegations, never from stored allowance rows (#1090/#2020). ' +
           'Its `allowance_amount` is HUMAN-DECIMAL — the opposite shape to the identically named field on ' +
           'AgentConnectionAllowance, which is atomic (#2295).',

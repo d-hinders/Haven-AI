@@ -3479,6 +3479,7 @@ export type components = {
         };
         DashboardAgentAllowance: {
             tokenSymbol: string;
+            /** @description HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent's active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals). Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token's decimals first (#2295). */
             allowanceAmount: string;
             resetPeriodMin: number;
         };
@@ -3922,9 +3923,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Agent"];
                 };
             };
             /** @description Error response */

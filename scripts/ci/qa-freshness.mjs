@@ -131,11 +131,14 @@ const SEMVER = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?
 
 /**
  * The `export const <NAME>_VERSION` constants `release-bump.mjs` writes into a
- * file this gate reasons about. Today that is exactly one: its
+ * file this gate reasons about. Today that is exactly two: its
  * SOURCE_VERSION_CONSTANTS list writes SIGNER_VERSION into
- * packages/signer/src/server.ts, and the other four (MCP_VERSION,
- * HOSTED_SERVER_VERSION, CONNECTOR_VERSION, CLI_VERSION) land in packages that
- * are not on the money-path perimeter.
+ * packages/signer/src/server.ts and HOSTED_SERVER_VERSION into
+ * packages/mcp-server/src/server.ts — the second joined when #2300 put
+ * packages/mcp-server/src/** on the perimeter, which is exactly the
+ * intersection this comment says to re-derive. The other three (MCP_VERSION in
+ * packages/mcp/src/server.ts, CONNECTOR_VERSION in packages/connect/,
+ * CLI_VERSION in packages/cli/) land in packages that are on no glob.
  *
  * Named literally rather than matched as `[A-Z0-9_]*_VERSION`, because a
  * generic pattern would be wider than the writer it claims to be derived from —
@@ -144,7 +147,7 @@ const SEMVER = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?
  * That is the intended friction: re-derive by intersecting release-bump.mjs's
  * SOURCE_VERSION_CONSTANTS with the `globs` in .github/money-path-globs.json.
  */
-const RELEASE_BUMP_VERSION_CONSTANTS = ['SIGNER_VERSION']
+const RELEASE_BUMP_VERSION_CONSTANTS = ['SIGNER_VERSION', 'HOSTED_SERVER_VERSION']
 
 /**
  * The ONLY line shapes a release bump writes into a money-path file, each

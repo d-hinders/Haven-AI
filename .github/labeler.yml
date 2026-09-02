@@ -81,6 +81,7 @@
           - "packages/backend/src/routes/safe-exec.ts"
           - "packages/backend/src/routes/x402.ts"
           - "packages/core/src/machine-payment-lifecycle.ts"
+          - "packages/mcp-server/src/**"
           - "packages/frontend/src/hooks/useAgentRekey.ts"
           - "packages/frontend/src/lib/signer.ts"
           - "packages/sdk/src/signer.ts"

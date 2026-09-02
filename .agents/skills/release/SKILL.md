@@ -71,8 +71,9 @@ matcher rather than approximating it:
 # its event is deployment_status/schedule/workflow_dispatch, its commit is an
 # ancestor of `dev`'s tip, and its `money-flow` JOB concluded success — so
 # take the newest row whose event is one of those three and whose SHA is on
-# `dev`. There is deliberately no `--branch` filter: a post-deploy run has no
-# branch label, and the gate does not use one either.
+# `dev`. There is deliberately no `--branch` filter: the gate does not use one
+# (a post-deploy run does report `headBranch=dev` — measured, #2427 — but a
+# branch name says nothing about which commit the harness exercised).
 # `gh` is unavailable in the remote Claude Code environment — use the Actions UI
 # or the GitHub MCP (list workflow runs for qa-dev.yml) there.
 gh run list --workflow=qa-dev.yml --status=success --limit=10 \

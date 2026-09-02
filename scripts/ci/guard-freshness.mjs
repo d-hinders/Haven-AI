@@ -214,12 +214,17 @@ export const SCHEDULED_GUARDS = [
     // trigger healthy on the strength of the two signals that are not it. That
     // is precisely how this went unnoticed for two months.
     countedEvents: ['deployment_status'],
-    // No branch scoping, on purpose. Railway creates its Deployments against a
-    // bare commit SHA (`ref` == `sha` on every one observed), and for that case
-    // GitHub documents GITHUB_REF as EMPTY — so a `deployment_status` run has no
-    // head branch to match. The `provenance` check below is the replacement,
-    // and a stronger one: it binds the run to a deployment of that exact SHA to
-    // the dev environment, which is what "on dev" was trying to say.
+    // No branch scoping, on purpose. #2273 wrote this predicting that a
+    // `deployment_status` run would have no head branch to match (Railway
+    // creates its Deployments against a bare commit SHA, `ref` == `sha` on
+    // every one observed, and GitHub documents GITHUB_REF as EMPTY for that
+    // case). Measured otherwise on 2026-09-02 (#2427): all three runs on
+    // deployment 6218620498 report `headBranch: dev`. The scoping stays off
+    // for the reason that holds either way: a branch name says nothing about
+    // which commit was deployed. The `provenance` check below is the
+    // replacement, and a stronger one: it binds the run to a deployment of
+    // that exact SHA to the dev environment, which is what "on dev" was
+    // trying to say.
     countedBranches: null,
     // #2271. Counting `deployment_status` alone would still let a human create
     // a Deployment by hand (`gh api -X POST .../deployments`) and mute this

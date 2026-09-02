@@ -2693,7 +2693,7 @@ export type components = {
                 reset_period_min: number;
             } | null;
         };
-        /** @description One element of an agent's derived budget view (GET /agents, GET /agents/{id}, PATCH /agents/{id}). Projected from the agent's ACTIVE delegations, never from stored allowance rows (#1090/#2020). Its `allowance_amount` is HUMAN-DECIMAL — the opposite shape to the identically named field on AgentConnectionAllowance, which is atomic (#2295). */
+        /** @description One element of an agent's derived budget view (GET /agents, GET /agents/{id}, PUT /agents/{id}; POST /agents carries it as a literal empty array). Projected from the agent's ACTIVE delegations, never from stored allowance rows (#1090/#2020). Its `allowance_amount` is HUMAN-DECIMAL — the opposite shape to the identically named field on AgentConnectionAllowance, which is atomic (#2295). */
         AgentAllowance: {
             /** Format: uuid */
             id: string;

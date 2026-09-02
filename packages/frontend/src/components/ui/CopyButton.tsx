@@ -57,7 +57,7 @@ export function CopyButton({
       type="button"
       onClick={handleCopy}
       aria-label={copied ? `${sentenceCase(label)} copied` : `Copy ${label}`}
-      className={`inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 ${className}`.trim()}
+      className={`inline-flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 ${className}`.trim()}
     >
       {copied ? (
         <Icon icon={Check} className="h-3 w-3 text-[var(--v2-success)]" />

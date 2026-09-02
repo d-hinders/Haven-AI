@@ -3,15 +3,15 @@
 import type { AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
 import { ConnectStepShell, type ConnectShellPhase } from './ConnectStepShell'
 import { DelegationApprovalStep } from './DelegationApprovalStep'
-import { LocalConnectionReady } from './LocalConnectionReady'
+import RetiredRailNotice from '../RetiredRailNotice'
 import { FinalizingLocalSetup, SetupDoneState, SetupStatusState, TerminalSetupState } from './SetupStates'
 import { WaitingForConnector } from './WaitingForConnector'
 
 /**
  * Step 4: everything after the setup prompt exists. Which body renders is
  * decided by the flow hook (`resolveConnectStepView`) — including the
- * #1069/#1070 rail branch between the delegation budget grant and the legacy
- * Safe wallet approval.
+ * #1069/#1070 rail branch between the delegation budget grant and the retired
+ * Safe rail refusal.
  */
 /** #1377 C: map the resolved sub-state onto the shell's progress ticker. */
 function shellPhase(kind: string | undefined): ConnectShellPhase {
@@ -20,9 +20,6 @@ function shellPhase(kind: string | undefined): ConnectShellPhase {
       return 'waiting'
     case 'finalizing_local':
     case 'delegation_approval':
-    case 'legacy_approval':
-    case 'approval_in_progress':
-    case 'proposed':
       return 'connected'
     case 'active':
       return 'approved'
@@ -94,48 +91,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         />
       )}
 
-      {connectView?.kind === 'legacy_approval' && (
-        <LocalConnectionReady
-          status={setupStatus}
-          fallbackSetup={setup}
-          walletName={flow.approvalWalletLabel}
-          chainId={flow.approvalChainId}
-          safeDetailsLoading={flow.safeDetailsLoading}
-          safeThreshold={flow.safeThreshold}
-          safeOwnerCount={flow.safeOwnerCount}
-          operationGate={flow.operationGate}
-          publicClientReady={flow.publicClientReady}
-          signerReady={flow.signerReady}
-          approving={flow.approving}
-          approvalError={flow.approvalError}
-          onApprove={flow.handleApproveAgentRules}
-          onCancel={flow.handleCancelSetup}
-          isWrongChain={flow.isWrongChain}
-          approvalChainName={flow.approvalChainName}
-          onSwitchChain={flow.switchToApprovalChain}
-          isSwitchingChain={flow.isSwitchingChain}
-        />
-      )}
-
-      {connectView?.kind === 'approval_in_progress' && (
-        <SetupStatusState
-          title="Approval in progress"
-          body="Haven is waiting for wallet approval. The agent cannot spend from the Haven wallet until approval is complete."
-          tone="warning"
-          primaryLabel="Done"
-          onPrimary={flow.handleClose}
-        />
-      )}
-
-      {connectView?.kind === 'proposed' && (
-        <SetupStatusState
-          title="Waiting for more approvals"
-          body="The agent budget was proposed for wallet approval. Spending is not active until the remaining approvals are complete."
-          tone="warning"
-          primaryLabel="Done"
-          onPrimary={flow.handleClose}
-        />
-      )}
+      {connectView?.kind === 'retired_rail' && <RetiredRailNotice />}
 
       {connectView?.kind === 'active' && (
         <SetupDoneState

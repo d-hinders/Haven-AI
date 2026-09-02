@@ -15,6 +15,7 @@ import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
+  activateRekeyDelegation,
   abandonRekey,
   adoptAbandonedCarry,
   completeRekey,
@@ -426,6 +427,22 @@ describeDb('agent_rekeys ledger (#1698)', () => {
     await markIssued(rekey.id, seeded.agentId)
     return rekey
   }
+
+  it('activates a re-key delegation only while it is still pending', async () => {
+    const seeded = await seedAgent()
+    const rekey = await open(seeded)
+    const replacement = await seedRekeyDelegation(seeded, rekey.id, 'carry')
+
+    expect(await activateRekeyDelegation(replacement.id, '{"signed":true}')).toBe(true)
+    expect(await activateRekeyDelegation(replacement.id, '{"signed":false}')).toBe(false)
+
+    const row = await db.query<{ status: string; delegation_json: string }>(
+      `SELECT status, delegation_json FROM agent_delegations WHERE id = $1`,
+      [replacement.id],
+    )
+    expect(row.rows[0].status).toBe('active')
+    expect(JSON.parse(row.rows[0].delegation_json).signed).toBe(true)
+  })
 
   it('MUTATION TARGET — a carry and its steady partner do NOT retire each other', async () => {
     // They share a (token, recipient) slot by construction. Dropping the

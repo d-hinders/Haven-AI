@@ -43,6 +43,7 @@ export function useSafeDetails(
     try {
       setLoading(true)
       setError(null)
+      setDetails(null)
       const chainQuery = chainId === undefined ? '' : `?chain_id=${encodeURIComponent(String(chainId))}`
       const data = await api.get<SafeDetails>(`/safe/${safeAddress}/details${chainQuery}`)
       if (generationRef.current === generation) {
@@ -50,6 +51,7 @@ export function useSafeDetails(
       }
     } catch (err) {
       if (generationRef.current === generation) {
+        setDetails(null)
         setError(err instanceof Error ? err.message : 'Failed to load Safe details')
       }
     } finally {
@@ -70,10 +72,15 @@ export function useSafeDetails(
 
     if (!enabled) {
       generationRef.current += 1
+      setDetails(null)
+      setError(null)
       setLoading(false)
       return
     }
 
+    setDetails(null)
+    setError(null)
+    setLoading(true)
     fetchDetails()
     return () => {
       generationRef.current += 1

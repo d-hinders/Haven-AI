@@ -6,6 +6,7 @@
  */
 
 import pool from '../../db.js'
+import type { Executor } from '../transaction.js'
 
 export interface ActiveDelegationRow {
   id: string
@@ -139,6 +140,29 @@ export async function listNonRevokedDelegationsForAgent(
     [agentId],
   )
   return result.rows
+}
+
+/**
+ * Activate exactly the pending grant that the caller just authenticated.
+ * The conditional update is intentionally kept in the repository so the
+ * lifecycle route cannot add another inline write while preserving the
+ * transaction executor supplied by its dedicated client.
+ */
+export const ACTIVATE_PENDING_DELEGATION_SQL = `UPDATE agent_delegations
+       SET status = 'active', delegation_json = $1, updated_at = NOW()
+       WHERE id = $2 AND status = 'pending'
+       RETURNING id`
+
+export async function activatePendingDelegation(
+  delegationId: string,
+  signedDelegationJson: string,
+  executor: Executor = pool,
+): Promise<boolean> {
+  const result = await executor.query<{ id: string }>(ACTIVATE_PENDING_DELEGATION_SQL, [
+    signedDelegationJson,
+    delegationId,
+  ])
+  return result.rows.length === 1
 }
 
 /**

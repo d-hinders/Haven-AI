@@ -2,13 +2,15 @@
 
 import { ChevronRight, CircleAlert, Clock, LoaderCircle, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { useAuth } from '@/context/AuthContext'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
+import { useRetiredRailOwnerAccess } from '@/hooks/useRetiredRailOwnerAccess'
 import ConnectAgentModal from './ConnectAgentModal'
 import EditAgentModal from './EditAgentModal'
 import { AgentCard } from './agent-panel/AgentCard'
 import { MCP_NOT_RECORDED_NOTE, hasUnrecordedMcpServerName } from './agent-panel/McpServerName'
 import { BotIcon } from './agent-panel/agent-display'
-import { UnmanagedDelegateCard } from './agent-panel/UnmanagedDelegateCard'
+import RetiredRailNotice from './RetiredRailNotice'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { Skeleton } from './ui/Skeleton'
@@ -21,18 +23,25 @@ import { Skeleton } from './ui/Skeleton'
  * `./agent-panel/`.
  */
 export default function AgentPanel() {
+  const removedAgentsPanelId = 'removed-agent-list'
   const panel = useAgentPanelState()
+  const { activeSafe } = useAuth()
+  const retiredRail = useRetiredRailOwnerAccess(activeSafe)
   const {
     safeAddress,
     chainId,
     agents,
     loading,
+    error: agentsError,
     visibleAgents,
     removedAgents,
-    unmanagedDelegates,
+    isDelegationAccount,
     finalizingAgent,
     finalizeTimedOut,
+    refetchAgents,
   } = panel
+
+  const canCreateAgent = isDelegationAccount
 
   if (!safeAddress) {
     return (
@@ -70,19 +79,40 @@ export default function AgentPanel() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            onClick={() => panel.setConnectAgentOpen(true)}
-            size="sm"
-          >
-            <Icon icon={Plus} className="h-3.5 w-3.5" />
-            Connect agent
-          </Button>
+          {canCreateAgent ? (
+            <Button onClick={() => panel.setConnectAgentOpen(true)} size="sm">
+              <Icon icon={Plus} className="h-3.5 w-3.5" />
+              Connect agent
+            </Button>
+          ) : null}
         </div>
       </div>
 
+      {!canCreateAgent ? (
+        <RetiredRailNotice ownerAccess={retiredRail.ownerAccess} className="mb-4" />
+      ) : null}
+
+      {agentsError && agents.length > 0 ? (
+        <div
+          role="alert"
+          className="mb-4 rounded-lg border border-warning/30 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]"
+        >
+          Agent data could not refresh. Showing the last loaded records.
+          <Button className="ml-2" size="sm" variant="ghost" onClick={() => void refetchAgents()}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
+
       {/* Agents view */}
       {loading && agents.length === 0 && (
-        <div className="space-y-3">
+        <div
+          className="space-y-3"
+          role="status"
+          aria-busy="true"
+          aria-live="polite"
+          aria-label="Loading agents"
+        >
           {[0, 1].map((i) => (
             <div
               key={i}
@@ -107,16 +137,18 @@ export default function AgentPanel() {
           but this only renders when the list is empty (first agent); for
           subsequent agents the existing list stays visible and the new one just
           appends. */}
-      {!loading && agents.length === 0 && unmanagedDelegates.length === 0 && finalizingAgent && (
-        <EmptyState
-          tone="neutral"
-          icon={
-            /* Heavier stroke: matches the original spinner's 3px ring weight. */
-            <Icon icon={LoaderCircle} className="h-5 w-5 animate-spin" strokeWidth={3} />
-          }
-          title="Finalizing your agent…"
-          body="Haven is confirming the new rules on-chain. Your agent will appear here in a moment — no need to refresh."
-        />
+      {!loading && agents.length === 0 && finalizingAgent && (
+        <div role="status" aria-busy="true" aria-live="polite" aria-label="Finalizing agent setup">
+          <EmptyState
+            tone="neutral"
+            icon={
+              /* Heavier stroke: matches the original spinner's 3px ring weight. */
+              <Icon icon={LoaderCircle} className="h-5 w-5 animate-spin" strokeWidth={3} />
+            }
+            title="Finalizing your agent…"
+            body="Haven is confirming the new rules on-chain. Your agent will appear here in a moment — no need to refresh."
+          />
+        </div>
       )}
 
       {/* Timeout fallback — the poll exhausted its window without the agent
@@ -124,7 +156,7 @@ export default function AgentPanel() {
           user it may still be confirming and let them re-check. */}
       {!loading &&
         agents.length === 0 &&
-        unmanagedDelegates.length === 0 &&
+        !agentsError &&
         !finalizingAgent &&
         finalizeTimedOut && (
           <EmptyState
@@ -147,25 +179,35 @@ export default function AgentPanel() {
       {/* Empty state */}
       {!loading &&
         agents.length === 0 &&
-        unmanagedDelegates.length === 0 &&
+        !agentsError &&
         !finalizingAgent &&
         !finalizeTimedOut && (
         <EmptyState
           icon={<BotIcon size={20} />}
           title="No agents yet"
-          body="Set agent rules, then add your Haven credential to your agent so it can make payments within those rules."
+          body={canCreateAgent
+            ? 'Set agent rules, then add your Haven credential to your agent so it can make payments within those rules.'
+            : 'This older Safe account has no new agent connections in Haven. Existing agent records remain available to read.'}
           action={
             <div className="flex flex-wrap items-center justify-center gap-2">
-              <Button onClick={() => panel.setConnectAgentOpen(true)}>
-                Connect agent
-              </Button>
+              {canCreateAgent ? <Button onClick={() => panel.setConnectAgentOpen(true)}>Connect agent</Button> : null}
             </div>
           }
         />
       )}
 
+      {!loading && agents.length === 0 && agentsError ? (
+        <EmptyState
+          tone="warning"
+          icon={<Icon icon={CircleAlert} className="h-5 w-5" />}
+          title="Agents could not load"
+          body="Haven could not load your connected agents right now. Try again before assuming there are none."
+          action={<Button onClick={() => void refetchAgents()}>Try again</Button>}
+        />
+      ) : null}
+
       {/* Agent list */}
-      {(agents.length > 0 || unmanagedDelegates.length > 0) && (
+      {agents.length > 0 && (
         <div className="space-y-4">
           {/*
             #2043: the `not recorded` explanation, ONCE, as visible text, and
@@ -195,25 +237,17 @@ export default function AgentPanel() {
           {visibleAgents.length > 0 && (
             <div className="grid items-start gap-4 lg:grid-cols-2">
               {visibleAgents.map((agent) => {
-                const delegateKey = agent.delegate_address?.toLowerCase() ?? ''
                 const usesActiveSafe = panel.agentUsesActiveSafe(agent)
-                const chainData = delegateKey && usesActiveSafe
-                  ? panel.onChainData.get(delegateKey)?.allowances ?? null
-                  : null
                 const agentChainId = agent.safe_chain_id ?? chainId
 
                 return (
                   <AgentCard
                     key={agent.id}
                     agent={agent}
-                    onChainAllowances={chainData}
-                    onChainLoading={usesActiveSafe ? panel.onChainLoading : false}
-                    chainTimeSec={panel.chainTimeSec}
                     onViewDetails={panel.handleViewDetails}
                     onEdit={panel.handleEdit}
                     onPause={panel.handlePause}
                     onResume={panel.handleResume}
-                    onRevoke={panel.handleRevoke}
                     onRevokeCredential={panel.revokeAgentCredential}
                     onArchive={panel.handleArchive}
                     onRestore={panel.handleRestore}
@@ -231,8 +265,11 @@ export default function AgentPanel() {
           {removedAgents.length > 0 && (
             <div className="pt-1">
               <button
+                type="button"
                 onClick={() => panel.setShowRemovedAgents((prev) => !prev)}
-                className="inline-flex items-center gap-2 text-xs text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
+                aria-expanded={panel.showRemovedAgents}
+                aria-controls={removedAgentsPanelId}
+                className="inline-flex min-h-11 items-center gap-2 rounded-md px-1 text-xs text-[var(--v2-ink-2)] transition-colors hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]"
               >
                 <Icon
                   icon={ChevronRight}
@@ -244,44 +281,31 @@ export default function AgentPanel() {
             </div>
           )}
 
-          {panel.showRemovedAgents && (
-            <div className="grid items-start gap-4 lg:grid-cols-2">
-              {removedAgents.map((agent) => (
-                <AgentCard
-                  key={agent.id}
-                  agent={agent}
-                  onChainAllowances={null}
-                  onChainLoading={false}
-                  chainTimeSec={panel.chainTimeSec}
-                  onViewDetails={panel.handleViewDetails}
-                  onEdit={panel.handleEdit}
-                  onPause={panel.handlePause}
-                  onResume={panel.handleResume}
-                  onRevoke={panel.handleRevoke}
-                  onRevokeCredential={panel.revokeAgentCredential}
-                  onArchive={panel.handleArchive}
-                  onRestore={panel.handleRestore}
-                  busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
-                  canUseWalletActions={panel.agentUsesActiveSafe(agent)}
-                  chainId={agent.safe_chain_id ?? chainId}
-                />
-              ))}
-            </div>
-          )}
+          <div
+            id={removedAgentsPanelId}
+            hidden={!panel.showRemovedAgents}
+            role="group"
+            aria-label="Removed agents"
+            className="grid items-start gap-4 lg:grid-cols-2"
+          >
+            {removedAgents.map((agent) => (
+              <AgentCard
+                key={agent.id}
+                agent={agent}
+                onViewDetails={panel.handleViewDetails}
+                onEdit={panel.handleEdit}
+                onPause={panel.handlePause}
+                onResume={panel.handleResume}
+                onRevokeCredential={panel.revokeAgentCredential}
+                onArchive={panel.handleArchive}
+                onRestore={panel.handleRestore}
+                busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
+                canUseWalletActions={panel.agentUsesActiveSafe(agent)}
+                chainId={agent.safe_chain_id ?? chainId}
+              />
+            ))}
+          </div>
 
-          {/* Unmanaged network delegates */}
-          {unmanagedDelegates.map((d) => (
-            <UnmanagedDelegateCard
-              key={d.address}
-              delegate={d.address}
-              allowances={d.allowances}
-              chainTimeSec={panel.chainTimeSec}
-              chainId={chainId}
-              pendingHavenSetup={panel.isPendingHavenSetup(d.address)}
-              onRevoke={() => panel.handleRevokeUnmanaged(d.address)}
-              revoking={panel.busyAgentId === d.address && panel.busyAction === 'revoke'}
-            />
-          ))}
         </div>
       )}
 
@@ -300,12 +324,6 @@ export default function AgentPanel() {
           open={!!panel.editAgent}
           onClose={() => panel.setEditAgent(null)}
           agent={panel.editAgent}
-          safeAddress={safeAddress}
-          chainId={chainId}
-          safeDetails={panel.safeDetails}
-          existingOnChainAllowances={
-            panel.onChainData.get(panel.editAgent.delegate_address?.toLowerCase() ?? '')?.allowances ?? null
-          }
           onUpdated={panel.handleAgentEdited}
         />
       )}

@@ -167,11 +167,13 @@ check all three:
   replaced it with GitHub's own `deployment_status` event, fired when the
   Railway integration marks the `Haven AI / dev` deployment `success`, gated
   and de-duplicated in the workflow (evidence: agent-qa.md § *Post-deploy
-  trigger (`deployment_status`)*). It is built and **not yet observed firing**;
-  and because a Railway deployment has no branch, this gate's `--branch dev`
-  query will not see those runs until #2404. So today a busy day's merges still
-  outrun the cron and this gate blocks the promotion PR correctly but late,
-  which is where the pressure to reach for `qa-override` comes from. The
+  trigger (`deployment_status`)*). It is built and **not yet observed firing**.
+  A Railway deployment has no branch, so #2404 (PR #2409) changed this gate to
+  select the green run by SHA ancestry and by the `money-flow` job's
+  conclusion instead of `--branch dev`; until the first post-deploy run is
+  observed, a busy day's merges still outrun the cron and this gate blocks the
+  promotion PR correctly but late, which is where the pressure to reach for
+  `qa-override` comes from. The
   trigger's silence is reported by `guard-freshness.yml`, which since #2273
   counts only runs whose SHA Railway actually deployed — a manual dispatch
   cannot clear it (#2271).

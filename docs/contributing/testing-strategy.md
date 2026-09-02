@@ -430,7 +430,7 @@ never below a run that overrode `--maxWorkers`; the ids in active rotation
 stay warm); and no live run holds its advisory lock. The
 application schema matches none of it and is never a candidate.
 
-Two things this got wrong first, both worth knowing before touching it:
+Three things this got wrong first, all worth knowing before touching it:
 
 - **Reaping from `initDbHarness()` is unsafe**, which is what #2418 originally
   proposed. vitest runs each test *file* in its own fork, so a worker-held lock

@@ -58,7 +58,7 @@
  * (`lib/signer.ts`), so an EOA-owned `delegator_hybrid` with ZERO enrolled
  * passkeys — provisionable as `POST /accounts/hybrid { owner_address }`, the
  * same account shape the #829 live proof signed with (an EOA owner and empty
- * passkey/threshold arrays), and reachable from passkey onboarding via
+ * passkey key-id/x/y arrays), and reachable from passkey onboarding via
  * `add_owner` then `remove_passkey` — falls through both passkey branches with the owner
  * wallet connected and lands here. The label is then `useSafeOperationGate`'s:
  * the named owner connected renders the truncated address (#2068); any other

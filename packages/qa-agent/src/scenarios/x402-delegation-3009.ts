@@ -92,7 +92,12 @@
  *     sitting on the delegate. It is not dust at any floor — it is the whole
  *     transaction. Polled to `TIMING.deliveryWaitMs`, because the facilitator
  *     settles asynchronously and outside Haven's view; still there at the
- *     deadline is a failure.
+ *     deadline is a failure. The failure text names TWO possible causes, not
+ *     one: this harness reads a different node from the one the backend writes
+ *     through (#2445), so a node still catching up gives a reading identical to
+ *     an unsettled merchant leg. Both fail the scenario — neither shows the
+ *     payment delivered before the next scenario measures the same EOA — but
+ *     asserting only the first sends triage at the bridge.
  *   - **`caused >= DUST_FLOOR_ATOMIC` → stranding**, the pre-existing check.
  *
  * `classifyDelegateResidual` is exported so both thresholds can be pinned
@@ -122,25 +127,28 @@ const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 const DUST_FLOOR_ATOMIC = 10_000n // 0.01 USDC, 6 decimals
 
 /**
+ * Waits and poll interval for this scenario's two polled reads.
+ *
  * The evidence row is written when the settlement proof is attached, which
  * happens after the merchant responds — so it is polled, not raced.
  *
  * Mutable purely as a TEST SEAM: the no-evidence-row cases are the ones worth
  * covering, and against real values every one of them would sit out the full
  * wait. Production never writes to this.
- */
-/**
- * `deliveryWaitMs` is a BOUND, not a measurement (#2444).
  *
- * It could not be derived from real facilitator settlement latency: Base
- * Sepolia is rate-limited (#2449) and `qa-dev` moves testnet funds, so no live
- * run was available to measure against. It is instead bracketed by two
- * constants already in this harness — it equals this file's `evidenceWaitMs`,
- * and sits under the neighbouring `-grace-resume` scenario's `MONEY_WAIT_MS`
- * (30s) budget for observing the very same on-chain delivery.
+ * `deliveryWaitMs` (#2444) is a BOUND, not a measurement. It could not be
+ * derived from real facilitator settlement latency: Base Sepolia is
+ * rate-limited (#2449) and `qa-dev` moves testnet funds, so no live run was
+ * available to measure against. It is instead bracketed by constants already
+ * in this harness — it equals this file's own `evidenceWaitMs`, and sits in
+ * the suite's band of non-mining waits, which `x402-erc7710-fresh-agent`
+ * enumerates as it sets its own: `-sweep`'s 20s strand wait, `-grace-resume`'s
+ * 30s money proof, its own 30s deploy-visibility wait (#2445). That band is
+ * independent corroboration — it was written after this constant was chosen,
+ * by a change that had not seen it.
  *
  * Know which way it fails. Too SHORT and this fix becomes a new flake source:
- * a perfectly good payment reported as "still in flight". Too long and it adds
+ * a perfectly good payment reported as still in flight. Too long and it adds
  * dead time to a scenario that otherwise completes in seconds. It therefore
  * needs eyes on the first live run it meets — which is what #2444's
  * `operator-verify` checklist exists to collect.
@@ -394,10 +402,20 @@ export const x402Delegation3009: Scenario = {
     }
 
     if (verdict.undelivered) {
+      // Say only what this read supports (#2444, on the pattern #2445 set).
+      // The harness reads BASE_SEPOLIA_RPC while the backend writes through
+      // RPC_URL_BASE_SEPOLIA — two different nodes — so "the merchant leg has
+      // not settled" is a conclusion this balance cannot reach on its own. A
+      // node that has not caught up produces the identical reading. Both
+      // possibilities still fail the scenario, because both mean this run
+      // cannot show the payment delivered before the next scenario measures
+      // the same EOA; naming only the first would send triage at the bridge.
       return fail(
         `delegate EOA still holds ${fmt(verdict.caused)} USDC of this payment's own ${fmt(funded)} USDC ` +
-          `after ${TIMING.deliveryWaitMs / 1000}s — the merchant leg has not settled, so the payment is ` +
-          `still in flight. This is not sub-floor dust: it is the whole transaction, and passing here ` +
+          `after ${TIMING.deliveryWaitMs / 1000}s of polling ${BASE_SEPOLIA_RPC} — either the merchant ` +
+          `leg has not settled, or this node has not caught up with it (the harness reads a different ` +
+          `node from the one the backend writes through). Either way the payment is not observably ` +
+          `delivered, and this is not sub-floor dust: it is the whole transaction, and passing here ` +
           `lets the late leg land inside the next scenario's measurement window (#2444)`,
       )
     }

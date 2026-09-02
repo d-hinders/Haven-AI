@@ -33,8 +33,9 @@
  *
  * Each pin was mutation-proved: `testTimeout: 30_000` added to the config,
  * a `{ timeout: 30_000 }` added to one of the four — and, after review, an
- * `it.each(...)(…, 30_000)`, a positional timeout through a `const`, and a
- * `vi.setConfig({ testTimeout })` each added to `Modal.test.tsx` — and the
+ * `it.each(...)(…, 30_000)`, a positional timeout through a `const`, a body
+ * passed by reference with a timeout, and a `vi.setConfig({ testTimeout })`
+ * each added to `Modal.test.tsx` — and the
  * diagnostic made to return `null`: each turns exactly one assertion red.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -72,11 +73,14 @@ export const LOAD_SENSITIVE_SUITES = [
  * - a runtime `vi.setConfig({ testTimeout })`, which raises the budget for the
  *   rest of the file without touching an `it` or `vitest.config.ts`.
  *
- * The first two `it.each` / variable shapes were false negatives in the first
- * version of this detector (haven-reviewer, #2319): it recognised only a bare
- * callee and a numeric-literal third argument, and `it.each` is both already
- * used in this codebase and literally the shape of #2319's misattributed
- * cause. Returns the line of each finding so a failure names a location.
+ * Three shapes were false negatives in earlier drafts (haven-reviewer, #2319,
+ * each constructed against a copy and reproduced): the first draft recognised
+ * only a bare callee and a numeric-literal third argument, missing `it.each`
+ * and a timeout through a `const` — and `it.each` is both already used in
+ * this codebase and literally the shape of #2319's misattributed cause; the
+ * second draft accepted only an inline function as the body, missing a body
+ * passed by reference. Returns the line of each finding so a failure names a
+ * location.
  */
 export function perTestTimeoutOverrides(source: string, fileName = 'fixture.tsx'): number[] {
   const sourceFile = ts.createSourceFile(
@@ -104,11 +108,13 @@ export function perTestTimeoutOverrides(source: string, fileName = 'fixture.tsx'
 
   const declaresTimeout = (node: ts.CallExpression): boolean => {
     const [, second, third] = node.arguments
-    // `it(name, fn, <anything>)`: the third argument is the timeout only when
-    // the second is the test body — in `it(name, { retry }, fn)` the third
-    // argument IS the body, and that spelling is covered by the branch below.
-    const secondIsBody =
-      !!second && (ts.isArrowFunction(second) || ts.isFunctionExpression(second))
+    // `it(name, <body>, <anything>)`: a third argument is the timeout whenever
+    // the second is the test body — inline, or passed BY REFERENCE
+    // (`it(name, testBody, 30_000)`, the shape the second draft missed). The
+    // one spelling where the third argument is not a timeout is
+    // `it(name, { retry }, fn)`, where the second is an options object; that
+    // is the branch below, so "not an object literal" is the whole predicate.
+    const secondIsBody = !!second && !ts.isObjectLiteralExpression(second)
     if (secondIsBody && third) return true
     if (second && ts.isObjectLiteralExpression(second)) {
       return second.properties.some(
@@ -243,12 +249,14 @@ describe('the per-test timeout detector, against fixtures', () => {
       it.each([1])('each %s', () => {}, 30_000)
       it('via a const', () => {}, MUTATION_TIMEOUT)
       vi.setConfig({ testTimeout: 30_000 })
+      const testBody = () => {}
+      it('body by reference', testBody, 30_000)
       test.each([1])('each without timeout %s', () => {})
       vi.setConfig({ hookTimeout: 30_000 })
     `
     // The last two are deliberately NOT findings: `.each` without a third
     // argument, and a setConfig that leaves testTimeout alone.
-    expect(perTestTimeoutOverrides(source)).toEqual([3, 4, 5, 8, 9, 10])
+    expect(perTestTimeoutOverrides(source)).toEqual([3, 4, 5, 8, 9, 10, 12])
   })
 
   it('reports nothing for a file with no overrides', () => {
@@ -293,13 +301,17 @@ describe('the posture itself, pinned (#2319)', () => {
 })
 
 describe("the hook's clock is real time even after a test installed fake timers", () => {
-  // The seven fake-timer files in this suite all restore real timers from a
-  // file-level or describe-level `afterEach`, like this one. What is being
-  // pinned is that `setup.ts`'s `afterEach` — registered first, so run LAST
-  // under vitest's default `sequence.hooks: 'stack'` — takes its reading after
-  // that cleanup, on a `performance.now()` that moves again. Mutation-proved:
-  // removing this `vi.useRealTimers()` leaves the clock frozen at the install
-  // and the assertion below reads a duration of ~0.
+  // The seven fake-timer files in this suite restore real timers from either
+  // a `describe`-nested `afterEach`, like this one, or a file-root one
+  // (`OnboardingClient.test.tsx`). What is being pinned is that `setup.ts`'s
+  // `afterEach` — registered first, so run LAST under vitest's default
+  // `sequence.hooks: 'stack'` — takes its reading after that cleanup, on a
+  // `performance.now()` that moves again. This fixture exercises the nested
+  // shape only; the file-root shape was probed separately by haven-reviewer
+  // on #2319 (round one) and found to order the same way. Mutation-proved
+  // twice, independently: removing this `vi.useRealTimers()` leaves the clock
+  // frozen at the install and the assertion below reads a NEGATIVE duration
+  // (-2665 ms by the author, -19174 ms by the reviewer).
   afterEach(() => {
     vi.useRealTimers()
   })

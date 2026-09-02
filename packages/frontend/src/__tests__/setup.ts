@@ -112,7 +112,8 @@ beforeEach(() => {
 // per worker is enough. The message itself is a pure function, unit-tested in
 // `suite-timing-posture.test.ts`; this hook only supplies the live reading.
 // Cost per test: two `performance.now()` reads, one `os.loadavg()` and one
-// `os.availableParallelism()` call — measured at ~0.02 ms together, against
+// `os.availableParallelism()` call — measured at 0.012 ms together (100 000
+// iterations of exactly that sequence under `node -e`, warmed), against
 // tests that start at ~40 ms.
 let testStartedAt = 0
 

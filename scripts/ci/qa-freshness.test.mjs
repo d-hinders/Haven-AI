@@ -356,6 +356,43 @@ describe('isVersionOnlyDiff (#2164)', () => {
     assert.equal(isVersionOnlyDiff(packageJsonBump), true)
   })
 
+  test('a real HOSTED_SERVER_VERSION bump is version-only (#2300)', () => {
+    // #2300 put packages/mcp-server/src/** on the perimeter, and release-bump
+    // writes HOSTED_SERVER_VERSION into packages/mcp-server/src/server.ts on
+    // every cut — the identical #2164 shape, one package over. Without this
+    // constant in the allowlist every release promotion would refuse by
+    // construction again and qa-override would become the route. Mutation:
+    // drop HOSTED_SERVER_VERSION from RELEASE_BUMP_VERSION_CONSTANTS and this
+    // fails while the "unowned constant" case below stays green — the two
+    // together pin that the allowlist is exactly the intersection of
+    // release-bump's SOURCE_VERSION_CONSTANTS with the runtime globs.
+    const hostedServerVersionBump = `diff --git a/packages/mcp-server/src/server.ts b/packages/mcp-server/src/server.ts
+--- a/packages/mcp-server/src/server.ts
++++ b/packages/mcp-server/src/server.ts
+@@ -13 +13 @@
+-export const HOSTED_SERVER_VERSION = '0.1.34-alpha.0'
++export const HOSTED_SERVER_VERSION = '0.1.35-alpha.0'
+`
+    assert.equal(isVersionOnlyDiff(hostedServerVersionBump), true)
+  })
+
+  test('the constants release-bump writes into non-perimeter packages are NOT excused (#2300)', () => {
+    // MCP_VERSION (packages/mcp/), CONNECTOR_VERSION (packages/connect/) and
+    // CLI_VERSION (packages/cli/) are real release-bump constants, but their
+    // files sit on no runtime glob, so the gate never sees them and the
+    // allowlist must not grow to "everything release-bump writes". Guards the
+    // widening that the #2300 addition makes tempting.
+    for (const name of ['MCP_VERSION', 'CONNECTOR_VERSION', 'CLI_VERSION']) {
+      const bump = `--- a/x.ts
++++ b/x.ts
+@@ -1 +1 @@
+-export const ${name} = '0.1.34-alpha.0'
++export const ${name} = '0.1.35-alpha.0'
+`
+      assert.equal(isVersionOnlyDiff(bump), false, `${name} must not be excused`)
+    }
+  })
+
   test('THE CASE A PATH EXCLUSION GETS WRONG: a behavioural line in the same commit as a bump still counts', () => {
     // This is the whole reason the rule is content-based. Excusing
     // packages/signer/** by path would wave this through.

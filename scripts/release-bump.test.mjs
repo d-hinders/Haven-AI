@@ -14,6 +14,11 @@ import {
   manifestTableViolations,
   rewriteManifestTable,
 } from './release-manifest-doc.mjs'
+import {
+  formatSnapshotVersion,
+  isSnapshotVersion,
+  snapshotModeViolation,
+} from './release-snapshot-version.mjs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -277,6 +282,50 @@ async function manualFallbackBlock() {
   return readme.slice(start, end)
 }
 
+/**
+ * The PROD-channel build step of `publish.yml`, and ONLY it (#2421).
+ *
+ * The three `#1791` guards below compare the emergency manual fallback in
+ * `scripts/README.md` against "what publish.yml builds". That used to be the
+ * whole file, because the file had one build step. Since #2421 it has two —
+ * the prod step, and the dev-channel snapshot step, which builds `cli`
+ * explicitly because `release-bump.mjs` wipes its dist and never rebuilds it.
+ * A whole-file scan therefore reads `['cli', 'sdk', 'signer', 'mcp',
+ * 'connect', 'cli']` and fails against a `scripts/README.md` that is not
+ * wrong: the manual fallback is the break-glass substitute for the PROD
+ * publish path, so the prod step is the only thing it can meaningfully
+ * mirror.
+ *
+ * Narrowing a guard is how guards die, so the narrowing is pinned: this
+ * asserts the step it selected really carries the prod `if:` condition. If
+ * someone renames the step, drops the condition, or points the dev step at
+ * this name, the helper fails loudly rather than silently returning the wrong
+ * step's build list — or an empty one, which would make every assertion below
+ * vacuously true.
+ */
+function prodBuildStep(workflow) {
+  return workflowStep(workflow, 'Build published packages in dependency order', 'prod')
+}
+
+/** The dev-channel snapshot step, selected and pinned the same way. */
+function devSnapshotStep(workflow) {
+  return workflowStep(workflow, 'Bump the throwaway tree to a snapshot version and build', 'dev')
+}
+
+function workflowStep(workflow, name, channel) {
+  const start = workflow.indexOf(`- name: ${name}`)
+  assert.notEqual(start, -1, `publish.yml no longer has a step named "${name}"`)
+  const rest = workflow.slice(start)
+  const next = rest.indexOf('\n      - name:')
+  const step = next === -1 ? rest : rest.slice(0, next)
+  assert.match(
+    step,
+    new RegExp(`if: steps\\.channel\\.outputs\\.channel == '${channel}'`),
+    `the step "${name}" is no longer the ${channel}-channel one — rescope this guard rather than deleting the assertion`,
+  )
+  return step
+}
+
 test('the manual fallback publishes every published package, and only those (#1791)', async () => {
   const block = await manualFallbackBlock()
   const expected = await publishedPackageDirs()
@@ -321,8 +370,15 @@ test('the manual fallback builds in the order publish.yml builds in (#1791)', as
     [...text.matchAll(/npm run build -w packages\/(\S+)/g)].map((m) => m[1])
 
   const documented = order(block)
-  const actual = order(workflow)
+  // Scoped to the PROD step since #2421 — see prodBuildStep() for why, and for
+  // what stops the scoping from quietly selecting nothing.
+  const actual = order(prodBuildStep(workflow))
   assert.ok(actual.length > 0, 'publish.yml no longer builds packages with `npm run build -w`')
+  assert.equal(
+    actual.length,
+    (await publishedPackageDirs()).length,
+    'the prod build step no longer builds every published package — the scoping above may have selected the wrong step',
+  )
   assert.deepEqual(
     documented,
     actual,
@@ -603,5 +659,158 @@ test('the REAL manifest table agrees with the REAL source constants (#1790)', as
     manifestTableViolations(doc, sources),
     [],
     'the Supported Runtime Manifest table has drifted from the version constants it mirrors',
+  )
+})
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Dev-channel snapshots (#2421, epic #2420)
+ *
+ * `.github/workflows/publish.yml` publishes a snapshot of every published
+ * package on each package-touching push to `dev`, under the `dev` dist-tag.
+ * The version shape and the mode check live in release-snapshot-version.mjs
+ * because two consumers must agree about them: the workflow PRODUCES the
+ * version, this script VALIDATES it.
+ *
+ * The invariant these cases exist for: a snapshot must never be able to land
+ * on `alpha` or `latest`, and the `main` path must never publish a
+ * 0.0.0-dev.* version. publish.yml holds the first two enforcement points;
+ * this file holds the third, and it is the one that matters when a HUMAN is
+ * at the keyboard — a snapshot version committed to a release branch would
+ * ride the dev → main promotion straight onto the production channel.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const SNAP = '0.0.0-dev.202609021905.abc1234'
+
+test('the snapshot version has the documented shape (#2421)', () => {
+  assert.equal(
+    formatSnapshotVersion({ timestamp: '202609021905', sha: 'abc1234' }),
+    SNAP,
+  )
+  assert.ok(isSnapshotVersion(SNAP))
+  // Longer short-shas are legal — `git rev-parse --short` lengthens as a
+  // repository grows, and a version that stops validating on a busy Tuesday
+  // is a guard that fails for the wrong reason.
+  assert.ok(isSnapshotVersion(formatSnapshotVersion({ timestamp: '202609021905', sha: 'abc1234def90' })))
+  // An uppercase sha is normalised rather than refused.
+  assert.equal(formatSnapshotVersion({ timestamp: '202609021905', sha: 'ABC1234' }), SNAP)
+})
+
+test('a malformed timestamp or sha is refused, not silently normalised (#2421)', () => {
+  assert.throws(() => formatSnapshotVersion({ timestamp: '2026090219', sha: 'abc1234' }), /12 digits/)
+  assert.throws(() => formatSnapshotVersion({ timestamp: '202609021905', sha: 'abcd' }), /7-40 hex/)
+  assert.throws(() => formatSnapshotVersion({ timestamp: '202609021905', sha: 'zzzzzzz' }), /7-40 hex/)
+})
+
+test('an all-digit short sha with a leading zero is refused — semver rejects it (#2421)', () => {
+  // Not a hypothetical and not cosmetic: semver forbids a leading zero in a
+  // NUMERIC prerelease identifier, so `0.0.0-dev.<ts>.0123456` is not a valid
+  // version at all. Verified against the workspace semver: it returns null for
+  // that string and a version for `…​.1234567`. Roughly 1 commit in 4300
+  // (1/16 × (10/16)^7). Refused here, where the message can say what to do,
+  // rather than 90 seconds later inside the bump with "not a valid semver
+  // string".
+  assert.throws(() => formatSnapshotVersion({ timestamp: '202609021905', sha: '0123456' }), /leading zero/)
+  // All digits WITHOUT a leading zero is a legal numeric identifier and must
+  // still be accepted — refusing it too would be the over-broad guard.
+  assert.equal(
+    formatSnapshotVersion({ timestamp: '202609021905', sha: '1234567' }),
+    '0.0.0-dev.202609021905.1234567',
+  )
+})
+
+test('MUTATION PROOF: the mode check refuses a snapshot version WITHOUT --snapshot (#2421)', () => {
+  // The direction that protects production. A 0.0.0-dev.* version reaching a
+  // release branch is not caught by anything else in the repository: the
+  // lockfile guard, the manifest-table check and the bundle verifier are all
+  // happy with it, and publish.yml would then see it on the `main` ref.
+  const violation = snapshotModeViolation(SNAP, { snapshot: false })
+  assert.match(String(violation), /alpha\/latest|alpha or latest/)
+  // And it is the SNAPSHOT-ness that trips it, not the string's novelty:
+  // ordinary release versions pass the same call unchanged.
+  for (const ok of ['0.1.29-alpha.0', '0.2.0', '1.0.0-beta.3']) {
+    assert.equal(snapshotModeViolation(ok, { snapshot: false }), null, ok)
+  }
+})
+
+test('MUTATION PROOF: the mode check refuses a real version WITH --snapshot (#2421)', () => {
+  // The other direction, which protects the dev channel rather than prod: a
+  // snapshot run that somehow carried a real version would publish that real
+  // version out of an unreviewed `dev` commit.
+  assert.match(String(snapshotModeViolation('0.1.29-alpha.0', { snapshot: true })), /--snapshot requires/)
+  // A version that merely LOOKS snapshot-ish is not good enough either — the
+  // prefix is not the shape.
+  assert.match(String(snapshotModeViolation('0.0.0-dev.abc', { snapshot: true })), /--snapshot requires/)
+  assert.equal(snapshotModeViolation(SNAP, { snapshot: true }), null)
+})
+
+test('the bump wires the mode check in BEFORE it writes anything (#2421)', async () => {
+  // A check that runs after the first write leaves a half-bumped tree behind
+  // on refusal, and — worse for the invariant — proves nothing about a run
+  // that was going to fail anyway. Assert on the ORDER in the source, because
+  // no unit test of a pure function can see it.
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+  const check = source.indexOf('snapshotModeViolation(')
+  const firstWrite = source.indexOf('await updatePackageVersion(')
+  assert.ok(check !== -1, 'release-bump.mjs no longer calls snapshotModeViolation')
+  assert.ok(firstWrite !== -1, 'could not find the first package.json write')
+  assert.ok(
+    check < firstWrite,
+    'release-bump.mjs checks snapshot mode AFTER it starts writing — a refusal would leave a half-bumped tree',
+  )
+  // The flag is read from argv, not inferred from the version. Inferring it
+  // would make the check tautological: every 0.0.0-dev.* version would define
+  // itself as an intentional snapshot.
+  assert.match(source, /process\.argv\.includes\('--snapshot'\)/)
+})
+
+test('the snapshot sign-off does not print the release checklist (#2421)', async () => {
+  // The release sign-off tells the operator to write a CASP shard, run the
+  // coupling gate and open a PR from a release branch. In a snapshot run there
+  // is no branch and no commit — the CI tree is discarded — so printing it
+  // would be an instruction nobody can follow, in the logs of a job that has
+  // already done everything asked of it.
+  const block = await doneBlock()
+  const snapshotBranch = block.slice(block.indexOf('if (snapshot) {'), block.indexOf('log(`\\n  Released:'))
+  assert.ok(snapshotBranch.length > 100, 'the sign-off no longer has a snapshot branch')
+  const printed = emitted(snapshotBranch)
+  for (const forbidden of ['casp-changelog', 'release branch', 'docs:coupling']) {
+    assert.ok(!printed.includes(forbidden), `the snapshot sign-off must not mention "${forbidden}"`)
+  }
+  // It must still say the thing that is true and non-obvious.
+  assert.match(printed, /THROWAWAY/)
+})
+
+test('the dev-channel snapshot BUILDS every package it publishes (#2421)', async () => {
+  // The defect this exists for, found by hand during #2421 and nearly shipped:
+  // `release-bump.mjs` wipes ALL five dists (`wipeAllDists()` iterates
+  // `PACKAGES`) but deliberately does not rebuild `cli` — its builds exist to
+  // verify the connect bundle, and `cli` inlines nothing that check reads.
+  // On the PROD channel that is harmless, because publish.yml's own build step
+  // rebuilds every published package from a clean checkout. On the DEV channel
+  // the bump IS the build, so `@haven_ai/cli` would have been published with an
+  // empty `dist` — its `files` ships `dist` and its `main` points into it, so
+  // the tarball would install and then fail to run.
+  //
+  // Nothing else in the repository can see this: the wipe list and the build
+  // list live in different files, and both are individually correct.
+  const expected = await publishedPackageDirs()
+  const workflow = await readFile(join(ROOT, '.github', 'workflows', 'publish.yml'), 'utf8')
+  const bump = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+
+  const builtByBump = [...bump.matchAll(/'build', '-w', 'packages\/([\w-]+)'/g)].map((m) => m[1])
+  // connect is built by invoking tsup in its directory rather than through the
+  // workspace script — see the build-order comment in release-bump.mjs.
+  if (/join\(ROOT, 'packages', 'connect'\)/.test(bump)) builtByBump.push('connect')
+
+  const builtByStep = [...devSnapshotStep(workflow).matchAll(/npm run build -w packages\/(\S+)/g)]
+    .map((m) => m[1])
+
+  const built = new Set([...builtByBump, ...builtByStep])
+  assert.deepEqual(
+    expected.filter((pkg) => !built.has(pkg)),
+    [],
+    'the dev-channel snapshot publishes a package it never builds. release-bump.mjs wipes every ' +
+      'dist; anything it does not rebuild must be built explicitly in the snapshot step, or the ' +
+      'published tarball ships an empty dist.',
   )
 })

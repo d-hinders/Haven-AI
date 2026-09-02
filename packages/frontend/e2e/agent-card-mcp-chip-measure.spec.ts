@@ -103,6 +103,12 @@ import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession, testAgent
 /** The mobile width #2325 is about, plus a below-`lg` tablet as the control. */
 const MOBILE = 390
 const TABLET = 768
+/**
+ * A width inside the band between the two, where the CHOICE of `sm` as the
+ * breakpoint is what is under test rather than the wrap itself. See the third
+ * arm below for why this band needs its own case.
+ */
+const BAND = 500
 
 /**
  * The seed, chosen to match `scripts/screenshot.mjs:485` so the spec and the
@@ -110,6 +116,15 @@ const TABLET = 768
  * the natural width the chip must reach to render the whole slug.
  */
 const SEED = 'haven-research'
+
+/**
+ * A LONG but legal slug — 34 characters, inside the 64-char limit and matching
+ * the same `/^haven(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/` the backend enforces. It
+ * measures 258px natural, against `SEED`'s 113px, and it is what makes the
+ * `sm` breakpoint a measured choice rather than a convenient default (third
+ * arm below).
+ */
+const LONG_SEED = 'haven-nightly-reconciliation-eu-01'
 
 function agentSeed(id: string, over: Record<string, unknown> = {}) {
   return {
@@ -237,7 +252,7 @@ async function settled<T>(read: () => Promise<T>): Promise<T> {
   return value
 }
 
-async function openAgents(page: Page) {
+async function openAgents(page: Page, agents: { name: string }[] = AGENTS) {
   await mockHavenApi(page)
   // Registered AFTER `mockHavenApi`, so it wins — Playwright consults the most
   // recently added handler first. Nothing in the shared fixture is edited and
@@ -248,12 +263,17 @@ async function openAgents(page: Page) {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ agents: AGENTS }),
+      body: JSON.stringify({ agents }),
     })
   })
   await seedAuthenticatedSession(page)
   await page.goto('/agents')
-  await page.getByRole('heading', { name: 'Research agent', exact: true }).waitFor({ timeout: 60_000 })
+  // Wait on the FIRST SEEDED agent's own heading, not a literal: the third arm
+  // below seeds its own single-agent list, and a hard-coded 'Research agent'
+  // would hang for 60s waiting on a card that list never renders.
+  await page
+    .getByRole('heading', { name: agents[0].name, exact: true })
+    .waitFor({ timeout: 60_000 })
 }
 
 /** Below `lg` the nav drawer overlays the grid (#1749); the helper is a no-op at 768. */
@@ -358,5 +378,71 @@ test('/agents: the stamp stays on the line at 768 (control)', async ({ page }) =
   expect(
     reading.cardWidth,
     `@${TABLET}px: the card renders ${reading.cardWidth}px in a ${reading.trackWidth}px track`,
+  ).toBeLessThanOrEqual(reading.trackWidth + 0.5)
+})
+
+/**
+ * WHY `sm` (640) AND NOT THE WIDTH THE SHORT SEED NEEDS — the third arm.
+ *
+ * `basis-full` wraps unconditionally below `sm`, so between roughly 466 and
+ * 639 a card whose slug is SHORT gets a line it did not need: the review pass
+ * on this change measured that band and asked whether the breakpoint should
+ * simply move down to it. It should not, and the reason is a measurement
+ * rather than a preference. Sweeping the UNWRAPPED (reverted) layout:
+ *
+ *   `haven-research`, natural 113px      whole from 466 up
+ *   `LONG_SEED`,      natural 258px      38.5 @390, 148.5 @500, 208.5 @560,
+ *                                        whole only from 639 up
+ *
+ * So 640 is not a convenient default — it is the width at which the unwrapped
+ * header stops truncating a long slug too. Moving the breakpoint down to 466
+ * to spare the short seed its extra line would hand the 466-639 band straight
+ * back to the defect this issue is about, for exactly the agents whose names
+ * are hardest to tell apart. The cost the band really carries is one line of
+ * vertical space on a card whose slug happened to be short; the benefit is
+ * that no slug is truncated anywhere below `sm`. Trading a line of whitespace
+ * for a legible identifier is the information-priority decision this whole
+ * change is, applied a second time.
+ *
+ * This arm pins that reasoning where a future breakpoint change has to meet
+ * it: at 500, inside the band, the long slug renders whole BECAUSE the stamp
+ * wrapped. On the reverted layout it is 148.5 of 258 and this goes red.
+ */
+test('/agents: a long slug is whole at 500, inside the band `sm` covers', async ({ page }) => {
+  test.slow()
+  await openAgents(page, [agentSeed('long', { name: 'Nightly EU', mcp_server_name: LONG_SEED })])
+  await atWidth(page, BAND)
+  const reading = await settled(() => readChip(page, LONG_SEED))
+
+  // Non-vacuity: the long seed must genuinely overflow what the UNWRAPPED
+  // header would give it at this width (measured: 148.5px), or this arm proves
+  // nothing about the breakpoint.
+  expect(
+    reading.natural,
+    `@${BAND}px: "${LONG_SEED}" measures ${reading.natural}px — it must exceed the 148.5px the unwrapped ` +
+      `layout gives at this width, or the band is not under test`,
+  ).toBeGreaterThan(148.5)
+
+  // The mechanism: at 500 we are below `sm`, so the stamp is still on its own
+  // line. This is what buys the block the width the assertion below needs.
+  expect(
+    reading.stampTop,
+    `@${BAND}px: the stamp's top is ${reading.stampTop}px against the block's bottom at ${reading.blockBottom}px ` +
+      `— at ${BAND}px (< sm) it should still be below the block`,
+  ).toBeGreaterThanOrEqual(reading.blockBottom - 2)
+
+  // The payoff: the whole slug renders. Reverting the layout drops this to
+  // 148.5px of 258px and the assertion goes red.
+  expect(
+    reading.width,
+    `@${BAND}px: the "${LONG_SEED}" chip renders ${reading.width}px of its ${reading.natural}px natural width ` +
+      `— moving the breakpoint below ${BAND}px would return this band to the #2325 defect`,
+  ).toBeGreaterThanOrEqual(reading.natural - 1)
+  expect(reading.truncated, `@${BAND}px: the long slug is ellipsised`).toBe(false)
+
+  // And the card still fits its track — the #2251 guard holds in the band too.
+  expect(
+    reading.cardWidth,
+    `@${BAND}px: the card renders ${reading.cardWidth}px in a ${reading.trackWidth}px track`,
   ).toBeLessThanOrEqual(reading.trackWidth + 0.5)
 })

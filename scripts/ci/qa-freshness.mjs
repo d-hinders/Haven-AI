@@ -57,14 +57,21 @@
 // creates a real Deployment for every dev backend deploy (`railway-app[bot]`,
 // environment `Haven AI / dev`), and the run it fires checks out and tests
 // EXACTLY the deployed commit — for this event GitHub documents GITHUB_SHA as
-// "commit to be deployed", the coverage this gate was designed around. But
+// "commit to be deployed", the coverage this gate was designed around.
 // Railway creates those Deployments against a BARE SHA (`ref == sha` on every
 // one read from the Deployments API on 2026-09-02), and for that case GitHub
-// documents GITHUB_REF as "empty if commit" — so the run carries no
-// `headBranch`, and a `--branch dev` filter ("use the name of the branch of
-// the push", per the REST docs) excludes the best evidence the workflow
-// produces. The gate would have gone on keying off the nightly cron and manual
-// dispatches while claiming to prove coverage of the deployed code.
+// documents GITHUB_REF as "empty if commit" — so #2404 was written predicting
+// the run would carry no `headBranch` and that a `--branch dev` filter would
+// exclude the best evidence the workflow produces. MEASURED FALSE on
+// 2026-09-02 (#2427): the three `deployment_status` runs on deployment
+// 6218620498 (`5d4e849c`) — 33609807445, 33609836970, 33609965305 — all
+// report `headBranch: dev`. The filter stays gone for the reason that was
+// always the real one: a branch name says nothing about which commit the
+// harness exercised, and on that very deployment `--branch dev --status
+// success --limit 1` would have returned 33609836970 — a run whose `gate` job
+// skipped the harness (money-flow: skipped, run-level `success`) — while
+// 33609965305, the run that actually exercised the deployed commit, sat
+// behind it. Rules 3 and 4 below are the predicate "on dev" was reaching for.
 //
 // So the query no longer filters on branch. It fetches a window of green runs
 // and `selectGreenRun` — pure, tested — admits a run only when ALL of:
@@ -73,14 +80,17 @@
 //      Anything else is refused — `repository_dispatch` in particular, which
 //      #2273 removed from the workflow because it was the one route a curl
 //      could use to fabricate a post-deploy-looking run (#2271);
-//   2. for `schedule` and `workflow_dispatch` — the events that DO carry a
-//      branch — `headBranch` is still `dev`, exactly as before. Nothing
-//      widened on those legs;
+//   2. for `schedule` and `workflow_dispatch` — the two branch-TRIGGERED
+//      events — `headBranch` is still `dev`, exactly as before. Nothing
+//      widened on those legs. `deployment_status` is deliberately not on this
+//      list even though its runs report `headBranch: dev` (measured, #2427):
+//      the field says which branch the deploy was cut from, not which commit
+//      the harness exercised, so rules 3 and 4 answer for it;
 //   3. its `headSha` is an ANCESTOR of the promotion head (`git merge-base
 //      --is-ancestor`). This is what "on dev" was trying to say, stated
 //      directly: the run's commit is in the history being promoted. It is
-//      strictly stronger than the branch label, it holds for a run that has
-//      no branch label at all, and it is checked for EVERY event — a
+//      strictly stronger than the branch label, it does not depend on the
+//      label at all, and it is checked for EVERY event — a
 //      `workflow_dispatch` on a feature branch, or a `deployment_status` for a
 //      Deployment of something that never reached dev, both fail here;
 //   4. its `money-flow` JOB concluded `success`, read from the jobs API. A
@@ -125,15 +135,15 @@
 // `deployment_status` run does NOT have this limit — its `headSha` IS the
 // deployed commit — which is why admitting it matters.
 //
-// UNVERIFIED LEG, named so nobody quotes it as measured: as of 2026-09-02 no
-// `deployment_status` run exists in this repository on any workflow (#2273 is
-// not merged, and the event only runs the default branch's workflow file).
-// "No `headBranch`" is therefore what the GitHub docs and Railway's bare-SHA
-// Deployments PREDICT, not what a run has shown. Rules 1-4 hold whichever way
-// that measurement goes: a `deployment_status` run that turns out to carry
-// `headBranch: dev` is admitted by the same path, and the gate's answer does
-// not depend on the field either way. Evidence, the dedupe and the provenance
-// rule are in docs/operations/agent-qa.md § "Post-deploy trigger".
+// MEASURED LEG (#2427), replacing the "unverified leg" #2404 named here so
+// nobody would quote a prediction as a measurement: as of 2026-09-02 08:40Z
+// three `deployment_status` runs exist (deployment 6218620498, `5d4e849c`)
+// and every one reports `headBranch: dev` — the "empty if commit" prediction
+// did not hold on this repository. Rules 1-4 never depended on it: a
+// `deployment_status` run is admitted by ancestry and job conclusion whether
+// the field is `dev`, empty or absent, and the test suite keeps all three
+// shapes. Evidence, the dedupe and the provenance rule are in
+// docs/operations/agent-qa.md § "Post-deploy trigger".
 //
 // ## What it still does NOT cover — by design, do not "fix" these
 //
@@ -600,8 +610,10 @@ export const GREEN_RUN_WINDOW = 30
  * The exact `gh run list` query the gate trusts (#1047 wiring test): always
  * this workflow, only successes, newest first, a bounded window — and NO
  * branch filter (#2404). "On dev" is decided by `selectGreenRun` on the run's
- * SHA, because a `deployment_status` run has no branch for `--branch` to
- * match. `event` and `headBranch` are in the projection because the selector
+ * SHA, because a branch name says nothing about which commit the harness
+ * exercised — a `deployment_status` run does report `headBranch: dev`
+ * (measured, #2427) and the selector ignores it for that event.
+ * `event` and `headBranch` are in the projection because the selector
  * fails closed without them: a row with no `event` is refused, never assumed.
  */
 export function greenRunQueryArgs(repo) {

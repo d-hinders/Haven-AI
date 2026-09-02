@@ -53,11 +53,14 @@ Do not continue unless all three checks are clean.
 
    ```bash
    npx -y <connector_package> --setup <token> --api <url>
-   (Use the package the target backend's own setup response names — its `connector_package`,
-   which is also the package named inside its `connector_command`. Since #2422 that dist-tag is
-   set per deployment by `HAVEN_CONNECTOR_CHANNEL` and is `@alpha` only in production; pinning
-   `@alpha` by hand against a `@dev` backend installs a signer that skews against it.)
    ```
+
+   Use the package the target backend's own setup response names — its
+   `connector_package`, which is also the package named inside its
+   `connector_command`. Since #2422 that dist-tag is set per deployment by
+   `HAVEN_CONNECTOR_CHANNEL` and is `@alpha` only in production; pinning
+   `@alpha` by hand against a `@dev` backend installs a signer that skews
+   against it.
 
 3. Verify the new `~/.haven/agents/<id>/signer.json` contains `x402_binding_signer`. If missing, report the likely deployed backend configuration fault; do not patch it manually.
 4. Confirm `haven-signer` is connected and the signer tools are available.

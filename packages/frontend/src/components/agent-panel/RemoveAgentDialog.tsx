@@ -44,33 +44,16 @@ export function RemoveAgentDialog({
   onArchive: () => Promise<void>
   onClose: () => void
 }) {
-  const isDelegation = agent.account_type === 'delegator_hybrid'
-  const { revokeAll, ready, busy } = useDelegationBudget(agent.id, chainId, {
-    enabled: isDelegation,
-  })
-  const { balance, hasRecoverableUsdc } = useDelegateBalance(isDelegation ? agent.id : null)
+  const { revokeAll, ready, busy } = useDelegationBudget(agent.id, chainId)
+  const { balance, hasRecoverableUsdc } = useDelegateBalance(agent.id)
   const [phase, setPhase] = useState<'confirm' | 'working' | 'filing_failed' | 'too_many'>('confirm')
   const [error, setError] = useState<string | null>(null)
 
-  const needsSignature = isDelegation && agent.status !== 'revoked'
+  const needsSignature = agent.status !== 'revoked'
 
   async function handleRemove() {
     setError(null)
     setPhase('working')
-
-    // Legacy records have no Haven authority left to revoke. Unlinking only
-    // archives the readable record; it must never enter the live delegation
-    // shutdown sequence or imply that Haven changed the old Safe permission.
-    if (!isDelegation) {
-      try {
-        await onArchive()
-        onClose()
-      } catch {
-        setPhase('filing_failed')
-        setError(null)
-      }
-      return
-    }
 
     // Step 1 — the one that can fail without consequence: budgets die first.
     if (needsSignature) {
@@ -122,11 +105,10 @@ export function RemoveAgentDialog({
       open
       onCancel={onClose}
       onConfirm={handleRemove}
-      title={isDelegation ? `Remove ${agent.name}?` : `Unlink ${agent.name}?`}
+      title={`Remove ${agent.name}?`}
       body={
         <div className="space-y-3">
-          {isDelegation ? (
-            <>
+          <>
               <p>Removing this agent does three things, in one step:</p>
               <ul className="list-disc space-y-1 pl-5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
                 <li>
@@ -145,18 +127,8 @@ export function RemoveAgentDialog({
                   to the list later, but restoring never brings back its ability to spend.
                 </li>
               </ul>
-            </>
-          ) : (
-            <>
-              <p>Unlinking removes this historical agent record from Haven.</p>
-              <ul className="list-disc space-y-1 pl-5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                <li>Its old Safe permission is not changed by Haven.</li>
-                <li>Its payment history remains readable under Removed.</li>
-                <li>Unlinking does not restore or revoke any on-chain authority.</li>
-              </ul>
-            </>
-          )}
-          {isDelegation && hasRecoverableUsdc && balance && (
+          </>
+          {hasRecoverableUsdc && balance && (
             <ApprovalRequiredBanner
               title="This agent's wallet still holds funds"
               tone="warning"
@@ -182,15 +154,14 @@ export function RemoveAgentDialog({
           )}
           {phase === 'filing_failed' && (
             <InlineAlert>
-              {isDelegation
-                ? 'The agent can no longer spend, but it could not be moved to Removed. Choose Finish removal to retry.'
-                : 'The historical agent record could not be moved to Removed. Choose Finish unlinking to retry.'}
+              The agent can no longer spend, but it could not be moved to Removed. Choose
+              Finish removal to retry.
             </InlineAlert>
           )}
           {/* #1437: the backend refuses an oversized batch by naming the
               remedy; repeating "the budget could not be stopped" would leave
               the user pressing the same button forever. */}
-          {isDelegation && phase === 'too_many' && (
+          {phase === 'too_many' && (
             <InlineAlert>
               This agent holds too many budgets to stop in one signature. Stop them individually
               on the{' '}
@@ -206,9 +177,7 @@ export function RemoveAgentDialog({
         </div>
       }
       confirmLabel={
-        phase === 'filing_failed'
-          ? isDelegation ? 'Finish removal' : 'Finish unlinking'
-          : isDelegation ? 'Remove agent' : 'Unlink agent'
+        phase === 'filing_failed' ? 'Finish removal' : 'Remove agent'
       }
       tone="danger"
       loading={phase === 'working' || busy}

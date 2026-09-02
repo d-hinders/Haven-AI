@@ -16,7 +16,6 @@ export function useAgentPanelState() {
   const { activeSafe } = useAuth()
   const safeAddress = activeSafe?.safe_address ?? null
   const chainId = activeSafe?.chain_id ?? DEFAULT_CHAIN_ID
-  const isDelegationAccount = activeSafe?.account_type === 'delegator_hybrid'
   const {
     agents,
     loading,
@@ -39,20 +38,19 @@ export function useAgentPanelState() {
   const [showRemovedAgents, setShowRemovedAgents] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
-  // First-agent hand-off from onboarding. A legacy account must not reopen a
-  // create flow from a stale URL parameter.
+  // First-agent hand-off from onboarding. #2413 dropped the rail guard that
+  // stopped a legacy account reopening the create flow from a stale URL
+  // parameter — no legacy account renders this panel any more.
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
     if (params.get('setup') !== 'first') return
-    if (isDelegationAccount) {
-      setFirstAgentSetup(true)
-      setConnectAgentOpen(true)
-    }
+    setFirstAgentSetup(true)
+    setConnectAgentOpen(true)
     params.delete('setup')
     const query = params.toString()
     window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`)
-  }, [isDelegationAccount])
+  }, [])
 
   const newAgentPollRef = useRef<{ cancelled: boolean } | null>(null)
   const lastPollDelegateRef = useRef<string | null>(null)
@@ -144,7 +142,6 @@ export function useAgentPanelState() {
   }, [agentUsesActiveSafe, editAgent])
 
   async function handlePause(agent: Agent) {
-    if (agent.account_type !== 'delegator_hybrid') return
     setBusyAgentId(agent.id)
     setBusyAction('pause')
     try {
@@ -159,7 +156,6 @@ export function useAgentPanelState() {
   }
 
   async function handleResume(agent: Agent) {
-    if (agent.account_type !== 'delegator_hybrid') return
     setBusyAgentId(agent.id)
     setBusyAction('resume')
     try {
@@ -214,7 +210,6 @@ export function useAgentPanelState() {
     safeAddress,
     chainId,
     activeSafeId: activeSafe?.id,
-    isDelegationAccount,
     agents,
     loading,
     error,

@@ -100,11 +100,6 @@ describe('AgentCard stranded-funds notice (#2195)', () => {
     expect(screen.queryByText(STRANDED_FUNDS_TITLE)).toBeNull()
   })
 
-  it('does not advertise recovery for a legacy Safe agent', () => {
-    renderCard(agentFixture({ account_type: 'safe', has_stranded_funds: true } as Partial<Agent>))
-    expect(screen.queryByText(STRANDED_FUNDS_TITLE)).toBeNull()
-    expect(screen.queryByText(/View agent to recover these funds/)).toBeNull()
-  })
 })
 
 /**
@@ -272,28 +267,13 @@ describe('AgentCard action-row matrix (#1402)', () => {
     expect(container.querySelector('.allowance-fill')).toBeNull()
   })
 
-  it('active legacy agent: Rename and Unlink are shown, but no authority actions', () => {
-    renderCard(agentFixture({ account_type: 'safe' as Agent['account_type'] }))
-    expect(screen.getByRole('button', { name: 'Rename Research agent' })).toBeTruthy()
-    const unlink = screen.getByRole('button', { name: 'Unlink Research agent' })
-    expect(unlink).toBeTruthy()
-    expect(unlink.className).toContain('min-h-11')
-    expect(unlink.className).toContain('min-w-11')
-    expect(screen.queryByRole('button', { name: 'Revoke Research agent' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Remove Research agent' })).toBeNull()
-  })
-
-  it('paused legacy agent stays readable without live pause messaging or resume', () => {
-    renderCard(agentFixture({ account_type: 'safe' as Agent['account_type'], status: 'paused' }))
-    expect(screen.getByText('paused')).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Paused in Haven' })).toBeNull()
-    expect(screen.queryByRole('button', { name: /resume/i })).toBeNull()
-  })
-
-  it('revoked-not-archived agent: delegation Remove, legacy Unlink, no Restore', () => {
-    renderCard(agentFixture({ status: 'revoked', account_type: 'safe' as Agent['account_type'] }))
+  // #2413 collapsed the Remove/Unlink fork: no legacy agent is listed, so
+  // "Unlink" had no record left to name.
+  it('revoked-not-archived agent: Remove, no Restore', () => {
+    renderCard(agentFixture({ status: 'revoked' }))
     expect(screen.getByText('Network access already revoked')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Unlink Research agent' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remove Research agent' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Unlink/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /Restore/ })).toBeNull()
   })
 

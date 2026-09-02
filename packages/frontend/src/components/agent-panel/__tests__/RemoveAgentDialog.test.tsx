@@ -166,18 +166,6 @@ describe('RemoveAgentDialog', () => {
     expect(onRevokeCredential).not.toHaveBeenCalled()
   })
 
-  it('a legacy (non-delegation) active agent unlinks without any signing machinery', async () => {
-    const { onClose } = renderDialog(
-      agentFixture({ status: 'active', account_type: 'safe' as Agent['account_type'] }),
-    )
-    expect(screen.getByRole('heading', { name: 'Unlink Research agent?' })).toBeInTheDocument()
-    expect(screen.getByText(/old Safe permission is not changed by Haven/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Unlink agent' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Unlink agent' }))
-    await waitFor(() => expect(onClose).toHaveBeenCalled())
-    expect(mockRevokeAll).not.toHaveBeenCalled()
-  })
-
   it('no reachable signer disables Remove and says why — for agents that need a signature', () => {
     mockBudgetState.ready = false
     renderDialog(agentFixture())

@@ -5,11 +5,9 @@ import { Icon } from '@/components/ui/Icon'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
-import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { useBalances } from '@/hooks/useBalances'
 import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
 import { usePortfolio } from '@/hooks/usePortfolio'
-import { useRetiredRailOwnerAccess } from '@/hooks/useRetiredRailOwnerAccess'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
 import { useAgents, type Agent } from '@/hooks/useAgents'
@@ -19,7 +17,6 @@ import TransactionsTable from '@/components/transactions/TransactionsTable'
 import DelegationSendModal from '@/components/DelegationSendModal'
 import AccountSignersCard from '@/components/AccountSignersCard'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
-import RetiredRailNotice from '@/components/RetiredRailNotice'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -56,11 +53,6 @@ function formatFiatValue(value: number, currency: 'USD' | 'EUR'): string {
   }).format(value)
 }
 
-function approvalSummary(threshold?: number, ownerCount?: number): string {
-  if (!threshold || !ownerCount) return 'Loading approval details'
-  const approverLabel = ownerCount === 1 ? 'approver' : 'approvers'
-  return `${threshold} of ${ownerCount} ${approverLabel} required`
-}
 
 function formatResetPeriod(minutes: number): string {
   if (minutes === 1440) return 'per day'
@@ -85,69 +77,9 @@ function agentBudgetSummary(agent: Agent, chainId: number | null): string {
 }
 
 function agentAccessSummary(agent: Agent, chainId: number | null): string {
-  if (agent.account_type !== 'delegator_hybrid') {
-    return `Legacy Safe agent · ${formatAgentLastActivity(agent.mcp_last_seen_at)}`
-  }
   return `${agentBudgetSummary(agent, chainId)} · ${formatAgentLastActivity(agent.mcp_last_seen_at)}`
 }
 
-type ApproverType = 'passkey' | 'wallet' | 'unknown'
-
-const APPROVER_TYPE_LABEL: Record<ApproverType, string> = {
-  passkey: 'Passkey',
-  wallet: 'Wallet',
-  unknown: 'Unknown',
-}
-
-/**
- * Shown as VISIBLE text under the list whenever any owner is 'unknown', not as
- * a tooltip. Two reasons, and the second is the load-bearing one:
- *
- * 1. `design-review.md:108` — tooltips "do not hide essential instructions".
- *    Without this sentence, `Unknown` is an unexplained gap on a list a user
- *    may be auditing to decide whether they still control the account.
- * 2. `Tooltip` cannot carry it. Its bubble is `whitespace-nowrap` with no
- *    max-width (`Tooltip.tsx:96`), so a sentence renders as one unwrapped bar
- *    far wider than a 390px viewport; and its `onFocus`/`onBlur` never fire,
- *    because the wrapper is a plain `<span>` and `StatusBadge` is a
- *    non-focusable `<span>` too, so the copy would be unreachable by touch
- *    AND by keyboard. Every other `Tooltip` caller passes a short address or
- *    name, which is why neither limit has bitten before. Both are shared-
- *    primitive debt filed separately rather than fixed under a badge issue.
- */
-const UNKNOWN_APPROVER_NOTE =
-  'Unknown means Haven holds no record identifying that approver — it could be a passkey enrolled outside Haven, a rotated one, or a wallet. The label reports what Haven knows, not what the approver is.'
-
-/**
- * #2017: classify one on-chain Safe owner for the Approvers badge, from
- * POSITIVE evidence only.
- *
- * The predicate this replaced was `passkeyAddresses.has(owner) ? 'Passkey' :
- * 'Wallet'`, which reasons from ABSENCE. `passkeyAddresses` is Haven's current
- * live record of enrolled passkeys for THIS Safe on THIS chain — it is not
- * ground truth about the on-chain owner set. An owner is missing from it when
- * enrolment was revoked or rotated, when the passkey list is stale or still
- * loading, or when the owner was added outside Haven. `POST /safe/exec`
- * deliberately authorises a backup passkey Haven holds no binding row for
- * against the Safe's live owner list, so "no passkey row" means the fast-path
- * binding is absent, not that the owner is a wallet.
- *
- * The only positive evidence Haven has for 'wallet' is the user's OWN
- * `wallet_address` — the owner directory (`useOwnerDirectory`) carries aliases
- * and account membership, not an owner TYPE, so it cannot supply one.
- * Everything else is 'unknown', and the badge then says so rather than
- * guessing. This mirrors `retiredRailOwnerAccess` below, so the file has one
- * rule about owner identity instead of two.
- */
-function classifyApprover(
-  normalizedOwner: string,
-  passkeyAddresses: ReadonlySet<string>,
-  knownWalletOwner: string | null | undefined,
-): ApproverType {
-  if (passkeyAddresses.has(normalizedOwner)) return 'passkey'
-  if (knownWalletOwner && normalizedOwner === knownWalletOwner) return 'wallet'
-  return 'unknown'
-}
 
 export default function AccountDetailClient() {
   const params = useParams()
@@ -155,7 +87,6 @@ export default function AccountDetailClient() {
   const safeId = params.safeId as string
 
   const { user, activeSafe, setActiveSafe, loading: authLoading, passkeys = [] } = useAuth()
-  const { getOwnerAlias } = useOwnerDirectory()
   const { renameSafe, removeSafe, setDefault, loading: safesLoading } = useUserSafes()
   const { toast } = useToast()
   const { currency } = usePreferences()
@@ -182,34 +113,14 @@ export default function AccountDetailClient() {
       account.name,
     )
   }
-  const passkeyAddresses = new Set(
-    passkeys
-      .filter(
-        (passkey) =>
-          passkey.chain_id === chainId &&
-          (!safeAddress || passkey.safe_address?.toLowerCase() === safeAddress.toLowerCase()),
-      )
-      .map((passkey) => passkey.signer_address.toLowerCase()),
-  )
-  const knownWalletOwner = user?.wallet_address?.toLowerCase()
 
   // Build linked-agent list
   const safeAgents = agents.filter((a) => a.safe_id === safeId)
 
-  const {
-    details,
-    loading: detailsLoading,
-    error: detailsError,
-    refetch: refetchDetails,
-    ownerAccess: retiredRailOwnerAccess,
-  } = useRetiredRailOwnerAccess(safe)
 
-  // A retired account may still be read in Haven, but Receive is an
-  // instruction to send funds into that account. Only a positively identified
-  // wallet owner has a known path to move those funds out again; passkey-only
-  // and unresolved owner states must not invite an irreversible deposit.
-  const canReceive =
-    safe?.account_type === 'delegator_hybrid' || retiredRailOwnerAccess === 'wallet'
+  // #2413: the deposit gate was about retired accounts, which no longer
+  // render. Every account reachable here is a live delegation account whose
+  // owner can move funds out, so Receive is unconditional again.
 
   const {
     totalUsd,
@@ -239,12 +150,6 @@ export default function AccountDetailClient() {
   const chain = getChainConfig(chainId)
   const formattedTotal = formatFiatValue(totalFiat, currency)
   const balanceUnavailable = Boolean(portfolioError || balancesError)
-  const approvalMethodCount = details?.owners.length ?? 0
-  const approvalCopy = details
-    ? approvalSummary(details.threshold, approvalMethodCount)
-    : detailsError
-      ? 'Approval details could not be verified'
-      : 'Approval details unavailable'
   const [renameOpen, setRenameOpen] = useState(false)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [removing, setRemoving] = useState(false)
@@ -350,9 +255,7 @@ export default function AccountDetailClient() {
       <PageHeader
         title={safe.name}
         subtitle={
-          safe.account_type === 'delegator_hybrid'
-            ? 'Control the funds, agent access, and recent activity for this Haven wallet.'
-            : 'Review balances, readable agent records, and recent activity for this Haven wallet.'
+          'Control the funds, agent access, and recent activity for this Haven wallet.'
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -368,16 +271,12 @@ export default function AccountDetailClient() {
                     rail. Delegation accounts keep the sponsored owner-send.
                     Hidden rather than disabled, per #1079 — a legacy account
                     stays fully readable and simply offers no spend action. */}
-                {safe.account_type === 'delegator_hybrid' ? (
-                  <Button onClick={() => setSendOpen(true)}>
-                    Send
-                  </Button>
-                ) : null}
-                {canReceive ? (
-                  <Button variant="ghost" onClick={() => setReceiveOpen(true)}>
-                    Receive
-                  </Button>
-                ) : null}
+                <Button onClick={() => setSendOpen(true)}>
+                  Send
+                </Button>
+                <Button variant="ghost" onClick={() => setReceiveOpen(true)}>
+                  Receive
+                </Button>
               </>
             )}
             {/*
@@ -416,10 +315,6 @@ export default function AccountDetailClient() {
           </div>
         }
       />
-
-      {safe.account_type !== 'delegator_hybrid' ? (
-        <RetiredRailNotice ownerAccess={retiredRailOwnerAccess} />
-      ) : null}
 
       <Card hover={false} elevation="raised" className="overflow-hidden">
         <Card.Header padding="none" className="px-5 py-5 sm:px-6">
@@ -476,13 +371,9 @@ export default function AccountDetailClient() {
           ) : breakdown.length === 0 ? (
             <EmptyState
               title="No token balances yet"
-              body={
-                canReceive
-                  ? 'Receive funds to see tokens in this Haven wallet.'
-                  : 'Token balances remain readable here.'
-              }
+              body="Receive funds to see tokens in this Haven wallet."
               className="py-8"
-              action={safeAddress && canReceive ? <Button size="sm" onClick={() => setReceiveOpen(true)}>Receive funds</Button> : null}
+              action={safeAddress ? <Button size="sm" onClick={() => setReceiveOpen(true)}>Receive funds</Button> : null}
             />
           ) : (
             <>
@@ -529,9 +420,7 @@ export default function AccountDetailClient() {
             </Button>
           </div>
           <p className="mt-1 max-w-2xl pb-5 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            {safe.account_type === 'delegator_hybrid'
-              ? 'Agents can request payments from this Haven wallet when their status and agent budget allow it.'
-              : 'Existing legacy Safe agents remain readable here; new agent connections and authority controls are retired.'}
+            Agents can request payments from this Haven wallet when their status and agent budget allow it.
           </p>
         </div>
 
@@ -578,9 +467,7 @@ export default function AccountDetailClient() {
             <EmptyState
               title="Agent access could not load"
               body={
-                safe.account_type === 'delegator_hybrid'
-                  ? 'Haven could not verify which agents can request payments from this wallet.'
-                  : 'Haven could not load the readable agent records for this account.'
+                'Haven could not verify which agents can request payments from this wallet.'
               }
               className="py-8"
               action={<Button variant="ghost" size="sm" onClick={() => refetchAgents()}>Try again</Button>}
@@ -610,17 +497,11 @@ export default function AccountDetailClient() {
             <EmptyState
               title="No agents connected"
               body={
-                safe.account_type === 'delegator_hybrid'
-                  ? 'Connect an agent when you want it to request payments from this Haven wallet.'
-                  : 'Agent connections are retired for this older Safe account. Existing agents remain readable here.'
+                'Connect an agent when you want it to request payments from this Haven wallet.'
               }
               className="py-8"
               action={
-                safe.account_type === 'delegator_hybrid' ? (
-                  <Button href="/agents" size="sm">Connect agent</Button>
-                ) : (
-                  <Button href="/agents" variant="ghost" size="sm">View agents</Button>
-                )
+                <Button href="/agents" size="sm">Connect agent</Button>
               }
             />
           </div>
@@ -629,13 +510,11 @@ export default function AccountDetailClient() {
 
       {/* #1089: backup & recovery is an account capability, not an agent one —
           it works from the moment the account exists, with no agent required. */}
-      {safe.account_type === 'delegator_hybrid' ? (
-        <AccountSignersCard
-          safeAddress={safe.safe_address}
-          chainId={chainId}
-          userEmail={user?.email ?? ''}
-        />
-      ) : null}
+      <AccountSignersCard
+        safeAddress={safe.safe_address}
+        chainId={chainId}
+        userEmail={user?.email ?? ''}
+      />
 
       {/* Account info */}
       <Card hover={false} className="p-5 sm:p-6">
@@ -645,7 +524,12 @@ export default function AccountDetailClient() {
           </h2>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+        {/* #2413: single-column now. This was `sm:grid-cols-2` for the Address
+            / Required-approvals pair; with the approvals block deleted, the
+            two-column rule left the lone remaining child in column 1 and a
+            dead half-card to its right at `sm:` and above. Caught by the
+            rendered design pass, on a route the screenshot set did not cover. */}
+        <div className="grid grid-cols-1 gap-6">
           {/* Address */}
           <div>
             <p className="text-xs text-[var(--v2-ink-3)] mb-1">Haven wallet address</p>
@@ -663,97 +547,12 @@ export default function AccountDetailClient() {
               {safeAddress && <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', safeAddress)} label="Open wallet address externally" />}
             </div>
           </div>
-
-          {/* Threshold */}
-          <div>
-            <p className="text-xs text-[var(--v2-ink-3)] mb-1">Required approvals</p>
-            {detailsLoading ? (
-              <div role="status" aria-busy="true" aria-label="Loading approval details">
-                <Skeleton className="h-5 w-24" />
-              </div>
-            ) : details ? (
-              <span className="text-sm text-[var(--v2-ink)]">
-                {approvalCopy}
-              </span>
-            ) : detailsError ? (
-              <span className="inline-flex flex-col items-start gap-2 text-sm text-[var(--v2-ink-2)]">
-                {approvalCopy}
-                <Button
-                  type="button"
-                  variant="tertiary"
-                  size="sm"
-                  onClick={refetchDetails}
-                >
-                  Try again
-                </Button>
-              </span>
-            ) : (
-              <span className="text-sm text-[var(--v2-ink-3)]">—</span>
-            )}
-          </div>
+          {/* #2413: "Required approvals" and "Approvers" lived here. Both were
+              fed by the Safe-details read that this slice deletes, and both
+              were already inert for a delegation account — the hook behind
+              them was gated to the retired rail. Delegation signers are shown
+              by AccountSignersCard above, which is the live control. */}
         </div>
-
-        {/* Approvers */}
-        {details && details.owners.length > 0 && (
-          <div className="mt-6 pt-5 border-t border-[var(--v2-border)]">
-            <p className="text-xs text-[var(--v2-ink-3)] mb-3">Approvers</p>
-            <div className="space-y-2">
-              {details.owners.map((owner) => {
-                const normalizedOwner = owner.toLowerCase()
-                const isYou =
-                  user?.wallet_address?.toLowerCase() === normalizedOwner || passkeyAddresses.has(normalizedOwner)
-                // #2017: positive evidence only — see `classifyApprover`.
-                const approverType = classifyApprover(
-                  normalizedOwner,
-                  passkeyAddresses,
-                  knownWalletOwner,
-                )
-                const ownerAlias = getOwnerAlias(owner)
-                return (
-                  <div
-                    key={owner}
-                    className="flex flex-wrap items-center gap-3 py-1.5"
-                  >
-                    {ownerAlias ? (
-                      <span className="text-sm font-medium text-[var(--v2-ink)]">
-                        {ownerAlias}
-                      </span>
-                    ) : (
-                      <Tooltip label={owner} mono>
-                        <span className="text-sm font-mono text-[var(--v2-ink)]">
-                          {truncate(owner)}
-                        </span>
-                      </Tooltip>
-                    )}
-                    {ownerAlias && (
-                      <Tooltip label={owner} mono>
-                        <span className="text-xs font-mono text-[var(--v2-ink-3)]">
-                          {truncate(owner)}
-                        </span>
-                      </Tooltip>
-                    )}
-                    <CopyButton value={owner} label="address" />
-                    <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', owner)} label="Open approver externally" />
-                    <StatusBadge>{APPROVER_TYPE_LABEL[approverType]}</StatusBadge>
-                    {isYou && (
-                      <StatusBadge tone="brand">You</StatusBadge>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-            {details.owners.some(
-              (owner) =>
-                classifyApprover(owner.toLowerCase(), passkeyAddresses, knownWalletOwner) ===
-                'unknown',
-            ) && (
-              <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                {UNKNOWN_APPROVER_NOTE}
-              </p>
-            )}
-          </div>
-        )}
-
       </Card>
 
       {/* Full transaction history */}
@@ -814,7 +613,7 @@ export default function AccountDetailClient() {
         backing a wagmi wallet-client subscription) don't run in the
         background on every account page view.
       */}
-      {sendOpen && safeAddress && safe.account_type === 'delegator_hybrid' && (
+      {sendOpen && safeAddress && (
         <DelegationSendModal
           open
           onClose={() => setSendOpen(false)}
@@ -823,13 +622,11 @@ export default function AccountDetailClient() {
           onSent={handleSendSuccess}
         />
       )}
-      {canReceive ? (
-        <ReceiveFundsModal
-          open={receiveOpen}
-          safe={safe}
-          onClose={() => setReceiveOpen(false)}
-        />
-      ) : null}
+      <ReceiveFundsModal
+        open={receiveOpen}
+        safe={safe}
+        onClose={() => setReceiveOpen(false)}
+      />
       {renameOpen && (
         <RenameModal
           safe={safe}

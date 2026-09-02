@@ -441,13 +441,33 @@ describeDb('agents archive (#1401, real DB)', () => {
     expect(agent.rows[0].archived_at).not.toBeNull()
   })
 
-  it('list/by-id reads expose archived_at (no agent disappears)', async () => {
+  // #2413 narrowed this case rather than deleting it, and the narrowing is the
+  // point. This block seeds a LEGACY account ('Legacy account', 'safe'), and
+  // both reads now filter to `delegator_hybrid` — so "no agent disappears" is
+  // no longer true of a legacy agent THROUGH THOSE READS. What #1401 actually
+  // guarantees is unchanged and is what this now asserts directly: archiving
+  // sets `archived_at` on the row and deletes nothing. The row is still there;
+  // Haven simply no longer surfaces it.
+  it('archiving a legacy agent stamps the row and deletes nothing (#1401)', async () => {
     const { userId, agentId } = await seedAgent('revoked')
     await archiveAgent(agentId, userId)
-    const listed = await listAgentsForUserAllStatuses(userId)
-    expect(listed).toHaveLength(1)
-    expect(listed[0].archived_at).not.toBeNull()
-    const single = await findAgentForUserAllStatuses(userId, agentId)
-    expect(single?.archived_at).not.toBeNull()
+
+    const row = await db.query<{ archived_at: string | null }>(
+      `SELECT archived_at FROM agents WHERE id = $1`,
+      [agentId],
+    )
+    expect(row.rows).toHaveLength(1)
+    expect(row.rows[0].archived_at).not.toBeNull()
+
+    // …and #2413's filter is why the ordinary reads no longer show it.
+    //
+    // NOTE the argument order: `findAgentForUserAllStatuses(agentId, userId)`.
+    // The case this replaces called it `(userId, agentId)` — swapped — so it
+    // always got null back and its `expect(single?.archived_at).not.toBeNull()`
+    // passed on `undefined`, never on data. That assertion was unfalsifiable
+    // on `dev` before this change; it is called correctly here, which is what
+    // makes the null below evidence of the filter rather than of the bug.
+    expect(await listAgentsForUserAllStatuses(userId)).toEqual([])
+    expect(await findAgentForUserAllStatuses(agentId, userId)).toBeNull()
   })
 })

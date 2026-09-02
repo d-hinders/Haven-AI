@@ -7,7 +7,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import {
   mockHavenApi,
-  optDownToLegacyRail,
   seedAuthenticatedSession,
   testAgent,
 } from './fixtures/haven-api'
@@ -97,15 +96,4 @@ test.describe('agent panel empty states and card banners', () => {
     })
   }
 
-  test('legacy agent panel keeps the account readable and shows the retirement boundary', async ({ page }) => {
-    await optDownToLegacyRail(page)
-    await seedAgents(page, [agentState({ account_type: 'safe' })])
-    await page.goto('/agents')
-    await settle(page)
-
-    await expect(page.getByText(/older Safe account/i)).toBeVisible()
-    await expect(page.getByText(testAgent.name)).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Connect agent' })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: `Revoke ${testAgent.name}` })).toHaveCount(0)
-  })
 })

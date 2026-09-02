@@ -37,7 +37,6 @@ export interface CoreChainConfig {
     safeProxyFactory: string
     safeSingletonL2: string
     fallbackHandler: string
-    allowanceModule: string
     multiSendCallOnly: string
   }
   passkey: {
@@ -63,7 +62,6 @@ const GNOSIS: CoreChainConfig = {
     safeProxyFactory: '0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2',
     safeSingletonL2: '0x3E5c63644E683549055b9Be8653de26E0B4CD36E',
     fallbackHandler: '0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4',
-    allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
     multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
   },
   passkey: {
@@ -92,8 +90,6 @@ const BASE: CoreChainConfig = {
     safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
     safeSingletonL2: '0xfb1bffC9d739B8D520DaF37dF666da4C687191EA',
     fallbackHandler: '0x017062a1dE2FE6b99BE3d9d37841FeD19F573804',
-    // These are at the same CREATE2 addresses on Base
-    allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
     multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
   },
   passkey: {
@@ -109,9 +105,7 @@ const BASE: CoreChainConfig = {
 // ── Base Sepolia (84532) — testnet for dev / QA ───────────────────
 //
 // All addresses verified deployed on Base Sepolia via eth_getCode across three
-// RPCs. The only delta from Base mainnet is the AllowanceModule: v0.1.0's
-// 0xCFbF… address is NOT deployed on Base Sepolia, so this uses the v0.1.1
-// deployment (0xAA46…). v0.1.1's ABI is identical to v0.1.0's.
+// RPCs.
 
 const BASE_SEPOLIA: CoreChainConfig = {
   chainId: 84532,
@@ -124,9 +118,6 @@ const BASE_SEPOLIA: CoreChainConfig = {
     safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
     safeSingletonL2: '0xfb1bffC9d739B8D520DaF37dF666da4C687191EA',
     fallbackHandler: '0x017062a1dE2FE6b99BE3d9d37841FeD19F573804',
-    // AllowanceModule v0.1.1 (identical ABI to v0.1.0; v0.1.0's address is not
-    // on Base Sepolia). Verified via eth_getCode.
-    allowanceModule: '0xAA46724893dedD72658219405185Fb0Fc91e091C',
     multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
   },
   passkey: {

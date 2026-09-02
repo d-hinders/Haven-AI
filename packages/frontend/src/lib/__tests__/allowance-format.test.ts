@@ -127,17 +127,33 @@ describe('formatAllowanceForToken', () => {
 
 /**
  * #2295. `allowance_amount` carries two incompatible wire shapes under one
- * field name, and they are NOT distinguishable at runtime — `'250'` is 250
- * USDC as a human amount and 0.00025 USDC as an atomic one. So this helper
- * does not sniff; the caller states the shape, and the OpenAPI schema
- * (`allowanceHumanAmount` vs `allowanceAtomicAmount`) is what tells it which.
+ * field name, and a VALUE does not carry its own shape — `'0'` is the same
+ * zero budget in both, and for anything else the shape is a fact about which
+ * emitter produced it. So this helper does not sniff; the caller states the
+ * shape, and the OpenAPI schema (`allowanceHumanAmount` vs
+ * `allowanceAtomicAmount`) is what tells it which.
+ *
+ * #2408 tightened `allowanceHumanAmount` to `^(0|[0-9]+\.[0-9]{2,6})$`, the
+ * set `formatTokenValue` can actually emit, so the CONTRACT now rejects an
+ * atomic value in a human field. That does not change the rule above, and the
+ * distinction is the point: the schema can catch a backend emitter that drifts
+ * to atomic units, but a client helper still must not infer the shape from the
+ * text, because it would be trusting a server-side invariant it cannot see.
+ * This docstring used to illustrate the ambiguity with `'250'` ("250 USDC as a
+ * human amount and 0.00025 USDC as an atomic one"); that example is false
+ * against the tightened pattern, while the conclusion it supported stands.
  */
 describe('humanAmountToAtomic (#2295)', () => {
   it('scales whole and fractional token units by the decimals', () => {
     expect(humanAmountToAtomic('5.00', 6)).toBe(5_000_000n)
     expect(humanAmountToAtomic('250.000000', 6)).toBe(250_000_000n)
-    // A bare integer is a legal human amount — this is the value that no
-    // runtime sniff could ever get right, and the reason for the parameter.
+    // This helper accepts a bare integer as INPUT, and must keep doing so:
+    // callers hand it hand-entered and legacy values, not only freshly
+    // projected ones. Note what that is NOT a claim about — since #2408 a bare
+    // `'250'` is no longer a legal `allowanceHumanAmount` on the WIRE (the
+    // pattern rejects it; `formatTokenValue` would have emitted `'250.00'`).
+    // Function tolerance and wire legality are different questions, and this
+    // assertion is about the first one.
     expect(humanAmountToAtomic('250', 6)).toBe(250_000_000n)
     expect(humanAmountToAtomic('0.000001', 6)).toBe(1n)
     expect(humanAmountToAtomic('1', 18)).toBe(10n ** 18n)

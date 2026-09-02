@@ -471,14 +471,15 @@ describe('machine payment routes', () => {
           token_address: SEPOLIA_USDC,
           // 1.234567 USDC (6 decimals, packages/core/src/chains.ts). Chosen
           // dot-bearing on purpose: its human projection carries a fraction,
-          // which the ATOMIC pattern `^[0-9]+$` rejects — while an atomic
-          // string such as '1234567' still matches the CURRENT human pattern
-          // `^[0-9]+(\.[0-9]+)?$`, because a bare integer is legal there.
-          // #2408 proposes tightening the pattern to formatTokenValue's
-          // produced set `^(0|[0-9]+\.[0-9]{2,6})$` (the emitter can never
-          // output another bare integer than '0'), which WOULD reject it;
-          // until that lands, the identity assertion below — not the schema —
-          // is the discriminator.
+          // which the ATOMIC pattern `^[0-9]+$` rejects. It used to be a
+          // one-way separation — an atomic string such as '1234567' still
+          // matched the then-current human pattern `^[0-9]+(\.[0-9]+)?$`,
+          // because a bare integer was legal there, so the identity assertion
+          // below was the ONLY discriminator. #2408 tightened the pattern to
+          // formatTokenValue's produced set `^(0|[0-9]+\.[0-9]{2,6})$` (the
+          // emitter can never output a bare integer other than '0'), so the
+          // schema now rejects '1234567' under the human key too and the
+          // separation runs both ways.
           budget_atomic: '1234567',
           period_seconds: 86_400,
         }]),
@@ -503,14 +504,20 @@ describe('machine payment routes', () => {
       // route declares ($ref AllowanceSummary, 200).
       expectMatchesSpec('GET', '/machine-payments/allowances', summary)
 
-      // (2) The human-shape identity the schema alone cannot pin. The two
-      // keyed amounts are one number in two shapes — human-decimal
+      // (2) The human-shape identity the schema alone STILL cannot pin. The
+      // two keyed amounts are one number in two shapes — human-decimal
       // `configured_amount` next to atomic `onchain.amount`, a factor
-      // `10 ** decimals` apart (#2295) — and the human pattern's bare-integer
-      // tolerance means an atomic string under the human key still validates.
-      // The identity below IS the discriminator, stated in the canonical
-      // producer's terms: configured_amount must be exactly what
-      // delegation-budget-view.ts projects from the atomic sibling.
+      // `10 ** decimals` apart (#2295).
+      //
+      // Since #2408 this is a SECOND, INDEPENDENT guard rather than the sole
+      // discriminator: the round trip above now rejects an atomic string under
+      // the human key on its own. What it cannot reject is a value of the
+      // right SHAPE and the wrong NUMBER — '2.00' here would satisfy the
+      // pattern and be wrong by a factor of 1.6. So the identity below pins
+      // the arithmetic, stated in the canonical producer's terms:
+      // configured_amount must be exactly what delegation-budget-view.ts
+      // projects from the atomic sibling. Keep both; they fail on different
+      // bugs.
       expect(item.configured_amount).toBe(formatTokenValue(item.onchain.amount, 6))
       expect(item.configured_amount).toBe('1.234567')
 

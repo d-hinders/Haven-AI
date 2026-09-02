@@ -173,8 +173,10 @@ describe('agent routes', () => {
     const body = response.json()
     // The populated allowances array is the point of the pin: this route
     // carries the HUMAN-DECIMAL projection (#2295), so '1.00' and not
-    // '1000000'. The literal guards the digits; the round trip below guards
-    // every other field against the contract.
+    // '1000000'. The literal guards the DIGITS; the round trip below guards
+    // every other field against the contract — and since #2408 it also
+    // rejects the atomic SHAPE on its own, so the two are belt-and-braces
+    // rather than the literal carrying this alone.
     expect(body.allowances).toEqual([{
       id: DELEGATION_UUID,
       agent_id: AGENT_UUID,

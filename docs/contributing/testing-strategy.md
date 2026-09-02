@@ -424,8 +424,9 @@ and a large backlog drains over the next few runs rather than in one stall
 A schema is dropped only when all three hold: its name matches
 `^test_w\d+$` (the `DROP` is rebuilt from the captured digits, never from
 catalog text); its worker id is **above** the retention ceiling
-(`retainedWorkerIdCeiling()` — twice this machine's parallelism, so the ids in
-active rotation stay warm); and no live run holds its advisory lock. The
+(`retainedWorkerIdCeiling()` — `max(parallelism, 8) x 2`, so twice this
+machine's parallelism but never below 16, and the ids in active rotation stay
+warm); and no live run holds its advisory lock. The
 application schema matches none of it and is never a candidate.
 
 Two things this got wrong first, both worth knowing before touching it:

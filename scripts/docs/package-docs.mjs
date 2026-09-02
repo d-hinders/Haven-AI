@@ -104,8 +104,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #2243: first real verification pass since #2088 seeded this date. Every
     // claim in the body re-read against `packages/signer/src/**` and rewritten
     // where it had drifted: the tool table (two tools -> the four in
-    // `SignerToolName`), `haven_x402_authorize` (a deprecated alias for
-    // `haven_pay_x402_quote`, `mcp-server/src/tools.ts:81`), the
+    // `SignerToolName`), the hosted tool name the README used for the x402
+    // quote (at the time a never-registered alias for `haven_pay_x402_quote`
+    // in `mcp-server/src/tools.ts`; #2394 has since deleted the alias, so
+    // only the real name exists — #2395), the
     // `{ payment_id }`-only preferred call (#1263/#1355), the retired
     // `funds Safe -> delegate EOA` leg (#1440/#1986), the entirely absent
     // erc7710 scheme and its local caveat verification (#1455/#1476/#2041),
@@ -151,7 +153,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/connect/src/**'],
-    'last-verified': '2026-08-28',
+    'last-verified': '2026-09-01',
   },
   {
     doc: 'packages/cli/README.md',
@@ -190,7 +192,29 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/demo-merchant-mcp/src/**'],
-    'last-verified': '2026-08-11',
+    // #2403: the § "Extensions echo" fixture paragraph re-verified and EDITED.
+    // It enumerated the echo-rule tests as a fixed list of four; #2401 made it
+    // five and #2403 adds more, so the sentence now names the BRANCHES pinned
+    // and points at the two describe blocks instead of carrying a count that
+    // goes stale on the next added test. The three refusal strings and the
+    // 402 shape the section quotes are now pinned by tests at the HTTP
+    // boundary (src/http.test.ts), so the section's claims are test-backed
+    // rather than capture-backed. Scope: that paragraph only; the rest of the
+    // section was re-read against assertExtensionsEchoed and is accurate.
+    // Same-day as #2383, so the date below does not move.
+    // #2383: re-verified and EDITED (new § "Extensions echo" plus one bullet
+    // under "What It Demonstrates"). #2361/#2364 made the merchant advertise a
+    // `haven-demo` extensions object in every 402 and refuse any payment that
+    // fails the x402 v2 echo rule (version cross-check first, then subset
+    // containment: append allowed, delete/overwrite refused) — and this README
+    // said nothing about it, so a fixture author learned the rule from the
+    // refusal. The section is written from `assertExtensionsEchoed` and
+    // `DEMO_MERCHANT_EXTENSIONS` in src/x402.ts, and the three refusal strings
+    // it quotes were captured from the running merchant, not transcribed from
+    // the issue. Nothing else in the README re-verified in this pass (the
+    // Products table, hosted URLs and Run sections were read only far enough
+    // to place the section).
+    'last-verified': '2026-09-02',
   },
 ]
 

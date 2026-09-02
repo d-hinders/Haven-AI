@@ -246,10 +246,14 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
      (`haven-reviewer: passed | skipped because ___`, and on `area:frontend` the same for
      `haven-design-reviewer`) — an unfilled line blocks the merge gate below;
    - merge readiness: CI, local checks, review status, risk, why safe, residual risk, and merge order.
-7. Include `Closes #<issue>` — **except in operator-verify mode**, where the issue
-   must outlive the merge. There, reference it without the keyword (`Refs #<issue>`)
-   and say in the body why. `Closes` is a GitHub keyword, not prose: on merge it
-   closes the issue whatever the body says elsewhere, so three separate written
+7. Include the closing keyword — **bare**, never inside backticks or a code span,
+   in the body, the pull-request title and the commit messages alike. GitHub does
+   not parse a keyword a code span has swallowed, so a backticked one reads as
+   correct and closes nothing (#2382). **Except in operator-verify mode**, where
+   the issue must outlive the merge: there, reference it without the keyword
+   (`Refs #<issue>`) and say in the body why. `Closes` is a GitHub keyword, not
+   prose: on merge it closes the issue whatever the body says elsewhere, so three
+   separate written
    promises that the issue stays open lose to one keyword — which is what happened
    to [#2268](https://github.com/d-hinders/Haven-AI/issues/2268) on the merge of
    PR #2272 ([#2276](https://github.com/d-hinders/Haven-AI/issues/2276)). This is
@@ -271,7 +275,10 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    **To write ABOUT the keyword without emitting it, use a form GitHub does not
    parse.** A code fence or a blockquote is not one — a fenced keyword in a commit
    message is exactly how #2268 was closed a second time, and the guard treats
-   fenced text in the body the same way, on the safe side of an unverified case.
+   fenced text in the body the same way — a deliberate over-fire now, not a hedge
+   against an unverified case: GitHub's body parse DOES respect Markdown
+   rendering, measured under #2382, which is why a backticked keyword in a body
+   closes nothing and the pull-request template's placeholders are bare.
    The forms that work: `Refs #<n>`,
    a non-numeric placeholder (`Closes #<n>`, as this line does), the issue number
    with no keyword in front of it, or the keyword and the number in separate
@@ -346,6 +353,17 @@ you need the reasoning. Never edit one without the other — CI will not let you
   actually lives here since #987 — the `domain/machine-payment-lifecycle.ts` line
   above guards the backend re-export shim, not the code — #1905);
 - `middleware/agentAuth.ts`;
+- `packages/mcp-server/src/**` (the hosted MCP tool surface — #2300. `tools.ts`
+  decides *whether* a funding userop is relayed and *in what order*, and four
+  money defects lived in it with no money-path label by the file half: #2282's
+  funding-before-merchant-context relay, #2312's silently stripped `tx_hash`,
+  #2348's stripped `idempotencyKey` that made a retry a second spend, and
+  #2051's merchant-steerable cap bypass. Runtime `globs`, not control: the
+  hosted MCP deploys from `dev` and the money-flow harness drives it through
+  `QA_HOSTED_MCP_URL`, so a green run really does cover it — the argument the
+  frontend decision surfaces could not make. Scoped to `src/**` on a measured
+  3-of-113-commits delta for the package's README/Dockerfile/config files —
+  the command and window are in the JSON note);
 - `db/migrations/`;
 - the safeguard's own control surface — `scripts/release-bump.mjs`,
   `scripts/ci/qa-freshness.mjs`, `scripts/ci/money-path.test.mjs`,

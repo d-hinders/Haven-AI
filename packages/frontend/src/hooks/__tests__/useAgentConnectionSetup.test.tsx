@@ -127,8 +127,8 @@ describe('isDelegationRailAccount (#1069/#1070)', () => {
     expect(isDelegationRailAccount({ account_type: 'delegator_hybrid' }, null)).toBe(true)
   })
 
-  it('falls back to the active wallet when the selected wallet has no account_type', () => {
-    expect(isDelegationRailAccount({}, { account_type: 'delegator_hybrid' })).toBe(true)
+  it('treats an explicitly selected legacy/unknown wallet as authoritative', () => {
+    expect(isDelegationRailAccount({}, { account_type: 'delegator_hybrid' })).toBe(false)
     expect(isDelegationRailAccount(null, { account_type: 'delegator_hybrid' })).toBe(true)
   })
 
@@ -159,9 +159,9 @@ describe('railBudgetRules (#1073)', () => {
     expect(resetPeriodOptions.length).toBeGreaterThan(0)
   })
 
-  it('the legacy rail keeps the full reset-period list including One-time', () => {
+  it('the retired legacy rail also exposes no new budget reset choices', () => {
     const { resetPeriodOptions } = railBudgetRules(false, 0)
-    expect(resetPeriodOptions.some((period) => period.value === 0)).toBe(true)
+    expect(resetPeriodOptions.some((period) => period.value === 0)).toBe(false)
   })
 })
 
@@ -181,14 +181,14 @@ describe('resolveConnectStepView (#1069/#1070 rail branch)', () => {
     },
   )
 
-  it.each(readyStatuses)('a LEGACY account gets the Safe wallet approval on %s', (status) => {
+  it.each(readyStatuses)('a LEGACY account is sent to the retired-rail notice on %s', (status) => {
     const view = resolveConnectStepView({
       visibleStatus: status,
       installStatus: CONFIGURED_INSTALL,
       isDelegationAccount: false,
       agentId: 'agent-1',
     })
-    expect(view).toEqual({ kind: 'legacy_approval' })
+    expect(view).toEqual({ kind: 'retired_rail' })
   })
 
   it('a delegation account without agent_id yet keeps finalizing — never routed away (#1073)', () => {
@@ -223,7 +223,7 @@ describe('resolveConnectStepView (#1069/#1070 rail branch)', () => {
         isDelegationAccount: false,
         agentId: 'agent-1',
       }),
-    ).toEqual({ kind: 'legacy_approval' })
+    ).toEqual({ kind: 'retired_rail' })
   })
 
   it('connected_local without a configured runtime or error stays finalizing', () => {
@@ -243,8 +243,8 @@ describe('resolveConnectStepView (#1069/#1070 rail branch)', () => {
       agentId: 'agent-1',
     }
     expect(resolveConnectStepView({ ...base, visibleStatus: 'awaiting_connection' })).toEqual({ kind: 'waiting_for_connector' })
-    expect(resolveConnectStepView({ ...base, visibleStatus: 'approval_in_progress' })).toEqual({ kind: 'approval_in_progress' })
-    expect(resolveConnectStepView({ ...base, visibleStatus: 'proposed' })).toEqual({ kind: 'proposed' })
+    expect(resolveConnectStepView({ ...base, visibleStatus: 'approval_in_progress' })).toEqual({ kind: 'retired_rail' })
+    expect(resolveConnectStepView({ ...base, visibleStatus: 'proposed' })).toEqual({ kind: 'retired_rail' })
     expect(resolveConnectStepView({ ...base, visibleStatus: 'active' })).toEqual({ kind: 'active' })
     expect(resolveConnectStepView({ ...base, visibleStatus: 'expired' })).toEqual({ kind: 'expired' })
     expect(resolveConnectStepView({ ...base, visibleStatus: 'cancelled' })).toEqual({ kind: 'cancelled' })
@@ -310,7 +310,7 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
     expect(result.current.connectView).toEqual({ kind: 'delegation_approval', agentId: 'agent-1' })
   })
 
-  it('a legacy wallet keeps the Safe wallet-approval view', async () => {
+  it('a legacy wallet exposes the retired-rail view', async () => {
     const { result } = renderFlow()
 
     expect(result.current.isDelegationAccount).toBe(false)
@@ -318,8 +318,8 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
       await result.current.handleCreateSetup()
     })
 
-    expect(result.current.step).toBe('connect')
-    expect(result.current.connectView).toEqual({ kind: 'legacy_approval' })
+    expect(result.current.step).toBe('details')
+    expect(result.current.connectView).toEqual({ kind: 'retired_rail' })
   })
 
   it('flags a connected-but-wrong-chain wallet instead of treating it as absent (#1070)', () => {

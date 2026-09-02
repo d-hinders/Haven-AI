@@ -234,14 +234,14 @@ type Reading = {
 }
 
 /**
- * Anchor on `role="link"` + `aria-label`, never on a class string: the class
- * strings are what this fix changes, so a probe that read them would be
- * measuring the diff instead of the layout.
+ * Anchor on the explicit card marker, never on a class string or the title
+ * link: the class strings and link geometry are what this fix changes, so a
+ * probe that read either would be measuring the diff instead of the layout.
  */
 async function readCards(page: Page): Promise<Reading[]> {
   return page.evaluate(() => {
     const cards = Array.from(
-      document.querySelectorAll('[role="link"][aria-label^="View "]'),
+      document.querySelectorAll('[data-testid="agent-card"]'),
     ) as HTMLElement[]
     if (cards.length === 0) throw new Error('no /agents cards rendered')
     const grid = cards[0].parentElement as HTMLElement
@@ -287,7 +287,7 @@ async function readCards(page: Page): Promise<Reading[]> {
     grid.style.width = previousGridWidth
 
     return cards.map((card, i) => ({
-      label: card.getAttribute('aria-label') ?? '',
+      label: card.querySelector('h3')?.textContent?.trim() ?? '',
       cardWidth: +card.getBoundingClientRect().width.toFixed(1),
       trackWidth,
       shrunkWidth: shrunk[i],
@@ -320,7 +320,7 @@ async function readChip(page: Page, value: string): Promise<ChipReading> {
       (el) => el.children.length === 0 && (el.textContent ?? '').trim() === mcpName,
     ) as HTMLElement | undefined
     if (!chip) throw new Error(`no MCP chip rendering "${mcpName}"`)
-    const card = chip.closest('[role="link"][aria-label^="View "]') as HTMLElement
+    const card = chip.closest('[data-testid="agent-card"]') as HTMLElement
     if (!card) throw new Error('the MCP chip is not inside an /agents card')
     // The chrome on either side of the chip, measured rather than assumed —
     // and deliberately measured as OFFSETS, which is the part this fix cannot

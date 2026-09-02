@@ -15,7 +15,7 @@ import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useBalances } from '@/hooks/useBalances'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
-import { RESET_PERIODS } from '@/lib/allowance-module'
+import { RESET_PERIODS } from '@/lib/budget-period'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { timeAgo } from '@/lib/format'
 import {
@@ -105,6 +105,7 @@ function ConnectedAgentsSection({
   agents,
   hasAnyAgents,
   hasAccounts,
+  canConnectAgents,
   loading,
   unavailable,
   onRetry,
@@ -113,6 +114,7 @@ function ConnectedAgentsSection({
   agents: DashboardAgentPreview[]
   hasAnyAgents: boolean
   hasAccounts: boolean
+  canConnectAgents: boolean
   loading: boolean
   unavailable: boolean
   onRetry: () => void
@@ -159,6 +161,8 @@ function ConnectedAgentsSection({
             body={
               !hasAccounts
                 ? 'Create a Haven account before connecting agents.'
+                : !canConnectAgents
+                ? 'Agent connections are retired for older Safe accounts. Existing agents remain readable.'
                 : hasAnyAgents
                 ? 'Reconnect or create an agent to bring automated spending back online.'
                 : 'Create your first agent to give it payment credentials and spend limits.'
@@ -167,9 +171,11 @@ function ConnectedAgentsSection({
               <div className="flex items-center justify-center gap-3">
                 {hasAccounts ? (
                   <>
-                    <Button onClick={onConnectAgent} size="sm">
-                      Connect agent
-                    </Button>
+                    {canConnectAgents ? (
+                      <Button onClick={onConnectAgent} size="sm">
+                        Connect agent
+                      </Button>
+                    ) : null}
                     <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
                       Go to Agents
                     </Link>
@@ -719,6 +725,14 @@ export default function DashboardClient() {
     () => activeSafe ?? safes.find((safe) => safe.is_default) ?? safes[0] ?? null,
     [activeSafe, safes],
   )
+  const hasDelegationAccounts = safes.some((safe) => safe.account_type === 'delegator_hybrid')
+  const agentSafe = useMemo(
+    () =>
+      activeSafe?.account_type === 'delegator_hybrid'
+        ? activeSafe
+        : safes.find((safe) => safe.account_type === 'delegator_hybrid') ?? null,
+    [activeSafe, safes],
+  )
 
   // Owner-initiated send from the DASHBOARD is gone (#1989, epic #1440). It was
   // a legacy-Safe transaction signed through `SendModal`, and that rail is
@@ -852,6 +866,7 @@ export default function DashboardClient() {
   // (b) they've just finished all three steps and haven't dismissed the celebration.
   const showOnboardingGuide =
     setupProgressReady &&
+    hasDelegationAccounts &&
     completeDismissalReady &&
     !requiresOtherDevice &&
     (allOnboardingComplete ? !completeDismissed : !inProgressDismissed)
@@ -865,6 +880,7 @@ export default function DashboardClient() {
   }
 
   function openConnectAgent() {
+    if (!hasDelegationAccounts) return
     setConnectAgentOpen(true)
   }
 
@@ -984,6 +1000,7 @@ export default function DashboardClient() {
         agents={overview?.agents ?? []}
         hasAnyAgents={agents.length > 0}
         hasAccounts={safes.length > 0}
+        canConnectAgents={hasDelegationAccounts}
         loading={overviewInitialLoading}
         unavailable={overviewUnavailable}
         onRetry={refetchOverview}
@@ -1021,6 +1038,7 @@ export default function DashboardClient() {
             hasFunds={hasFunds}
             hasAgents={hasAgents}
             hasFirstAgentPayment={hasFirstAgentPayment}
+            canConnectAgents={hasDelegationAccounts}
             onReceiveFunds={openReceiveForDefaultSafe}
             onAddAgent={openConnectAgent}
             onShowAgentUsage={() => setAgentUsageOpen(true)}
@@ -1080,7 +1098,7 @@ export default function DashboardClient() {
         onClose={() => {
           setConnectAgentOpen(false)
         }}
-        safeId={defaultSafe?.id ?? null}
+        safeId={agentSafe?.id ?? null}
         onSetupUpdated={() => {
           refreshDashboardData()
         }}

@@ -122,10 +122,85 @@ export async function lockOwnedNonRevokedDelegationAgent(
   agentId: string,
   userId: string,
   db: Executor,
+): Promise<{ delegate_address: string } | null> {
+  const result = await db.query<{ id: string; delegate_address: string | null }>(
+    `SELECT id, delegate_address FROM agents
+     WHERE id = $1 AND user_id = $2 AND status <> 'revoked'
+       AND EXISTS (
+         SELECT 1 FROM user_safes us
+         WHERE us.id = agents.safe_id AND us.account_type = 'delegator_hybrid'
+       )
+     FOR UPDATE`,
+    [agentId, userId],
+  )
+  const row = result.rows[0]
+  if (!row?.delegate_address) return null
+
+  // This must be a separate statement after the agent-row lock. In READ
+  // COMMITTED, a subquery in the locking SELECT can retain the statement
+  // snapshot it took before waiting for a concurrent re-key opener; the
+  // post-lock read gets a fresh snapshot and sees the committed re-key.
+  const inFlightRekey = await db.query<{ in_flight: boolean }>(HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL, [agentId])
+  if (inFlightRekey.rows[0]?.in_flight === true) return null
+  return { delegate_address: row.delegate_address }
+}
+
+export const HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL = `SELECT EXISTS (
+         SELECT 1 FROM agent_rekeys
+         WHERE agent_id = $1
+           AND stage IN ('preflight', 'revoked', 'metered', 'issued')
+       ) AS in_flight`
+
+/**
+ * Lock the agent row before opening a re-key. This deliberately does not
+ * check `agent_rekeys`: the INSERT's partial unique index remains the race
+ * guard for two simultaneous opens, while this row lock serializes opening
+ * against a new-grant transaction that uses the same agent lock.
+ */
+export const LOCK_OWNED_AGENT_FOR_REKEY_OPENING_SQL = `SELECT id, delegate_address FROM agents
+     WHERE id = $1 AND user_id = $2 AND status <> 'revoked'
+       AND delegate_address IS NOT NULL
+       AND EXISTS (
+         SELECT 1 FROM user_safes us
+         WHERE us.id = agents.safe_id AND us.account_type = 'delegator_hybrid'
+       )
+     FOR UPDATE`
+
+export async function lockOwnedAgentForRekeyOpening(
+  agentId: string,
+  userId: string,
+  db: Executor,
+): Promise<{ delegate_address: string } | null> {
+  const result = await db.query<{ id: string; delegate_address: string | null }>(
+    LOCK_OWNED_AGENT_FOR_REKEY_OPENING_SQL,
+    [agentId, userId],
+  )
+  const row = result.rows[0]
+  return row?.delegate_address ? { delegate_address: row.delegate_address } : null
+}
+
+/**
+ * Locks a delegation agent for a re-key replacement grant. It is deliberately
+ * separate from the normal grant lock: normal grants are refused while a
+ * re-key is in flight, while the re-key's own replacement grants must pass.
+ */
+export async function lockOwnedAgentForRekeyDelegation(
+  agentId: string,
+  userId: string,
+  db: Executor,
 ): Promise<boolean> {
   const result = await db.query(
     `SELECT id FROM agents
      WHERE id = $1 AND user_id = $2 AND status <> 'revoked'
+       AND EXISTS (
+         SELECT 1 FROM user_safes us
+         WHERE us.id = agents.safe_id AND us.account_type = 'delegator_hybrid'
+       )
+       AND EXISTS (
+         SELECT 1 FROM agent_rekeys ar
+         WHERE ar.agent_id = agents.id
+           AND ar.stage IN ('preflight', 'revoked', 'metered', 'issued')
+       )
      FOR UPDATE`,
     [agentId, userId],
   )
@@ -502,14 +577,17 @@ export async function updateAgentProfile(
 
 /**
  * #1401: archive replaces deletion. The row and every dependent audit row
- * stay; the agent just leaves the primary list. Requires `revoked` — archiving
- * is a filing action and must never be what stops spending. Idempotent
+ * stay; the agent just leaves the primary list. Live delegation agents require
+ * `revoked` — archiving is a filing action and must never be what stops
+ * spending. Legacy AllowanceModule records may be unlinked at any status
+ * because Haven no longer owns their authority. Idempotent
  * without timestamp churn: re-archiving keeps the ORIGINAL archived_at
  * (COALESCE keeps the first value; the WHERE still matches so the call
  * reports success).
  */
 /**
- * #1436: archiving requires BOTH a revoked credential and dead budgets.
+ * #1436: live delegation archiving requires BOTH a revoked credential and dead
+ * budgets.
  *
  * `status = 'revoked'` alone was not enough. Revoking an agent only flips this
  * table's status — it never touches `agent_delegations` — so revoke+archive
@@ -521,14 +599,35 @@ export async function updateAgentProfile(
  * spend, so the database is where that promise belongs.
  *
  * Legacy AllowanceModule agents have no rows here, so the NOT EXISTS passes
- * for them — their authority is torn down by the on-chain revoke path instead.
+ * for them. Their Haven-side record may be unlinked at any status because
+ * archiving it does not change the old Safe permission; after account unlink
+ * the missing Safe row is still archivable when no live delegation remains.
+ * The live delegation rail remains revoke-first, and the live-delegation
+ * exclusion is what prevents an unlinked delegation agent from being filed
+ * while it still holds spend authority.
  * Crash-window orphans (#1423: disabled on-chain, still `active` here) DO
  * block archiving, correctly: revoke-all heals them, and that is the same
  * remedy this refusal names.
  */
 export const ARCHIVE_AGENT_SQL = `UPDATE agents
        SET archived_at = COALESCE(archived_at, NOW()), updated_at = NOW()
-       WHERE id = $1 AND user_id = $2 AND status = 'revoked'
+       WHERE id = $1 AND user_id = $2
+         AND (
+           status = 'revoked'
+           OR EXISTS (
+               SELECT 1 FROM user_safes us
+               WHERE us.id = agents.safe_id
+                 AND us.account_type IS DISTINCT FROM 'delegator_hybrid'
+             )
+           OR (
+             agents.safe_id IS NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM agent_delegations ad_unlinked
+               WHERE ad_unlinked.agent_id = agents.id
+                 AND ad_unlinked.status IN ('pending', 'active')
+             )
+           )
+         )
          AND NOT EXISTS (
            SELECT 1 FROM agent_delegations ad
            WHERE ad.agent_id = agents.id AND ad.status IN ('pending', 'active')
@@ -549,7 +648,7 @@ export async function agentHasLiveDelegations(
   return result.rows[0]?.live === true
 }
 
-/** Returns null when nothing matched (missing, foreign, not revoked, or still holding live delegations). */
+/** Returns null when nothing matched (missing, foreign, ineligible, or still holding live delegations). */
 export async function archiveAgent(
   agentId: string,
   userId: string,
@@ -564,7 +663,8 @@ export async function archiveAgent(
 
 /**
  * Clears archived_at and nothing else — the agent returns to the primary
- * list still `revoked`. Un-archiving restores no authority of any kind.
+ * list with the same status it had before archiving. Un-archiving restores no
+ * authority of any kind.
  */
 export const UNARCHIVE_AGENT_SQL = `UPDATE agents
        SET archived_at = NULL, updated_at = NOW()
@@ -658,10 +758,11 @@ export async function resumeAgent(
  */
 export const AGENT_BY_API_KEY_SQL = `
   SELECT a.id, a.user_id, a.name, a.delegate_address,
-         a.status,
+         a.status, a.archived_at,
          COALESCE(us.safe_address, u.safe_address) as safe_address,
          COALESCE(us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
-         us.execution_rail, us.account_type
+         us.execution_rail, us.account_type,
+         (us.id IS NOT NULL) AS has_bound_safe
   FROM agents a
   JOIN users u ON a.user_id = u.id
   LEFT JOIN user_safes us ON a.safe_id = us.id
@@ -675,8 +776,10 @@ export interface AgentAuthRow {
   safe_address: string | null
   chain_id: number
   status: string
+  archived_at: string | null
   execution_rail: string | null
   account_type: string | null
+  has_bound_safe: boolean
 }
 
 /**

@@ -794,7 +794,7 @@ observation:
 
 ```bash
 gh run list --workflow qa-dev.yml --event deployment_status --limit 10 \
-  --json databaseId,displayTitle,conclusion,headSha,createdAt
+  --json databaseId,displayTitle,conclusion,headBranch,headSha,createdAt
 ```
 
 #### Status: built, not yet observed (#2268 / #2273 operator-verify)

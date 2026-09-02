@@ -120,10 +120,6 @@ interface PaymentIntentRow {
   expires_at: string
   /** Execution rail pinned at authorize time; null = legacy AllowanceModule (#745). */
   execution_rail?: string | null
-  /** Smart Sessions permissionId pinned at authorize time. */
-  session_permission_id?: string | null
-  /** Serialized prepared UserOperation for session-rail intents. */
-  session_user_op?: unknown
   /** Which delegation authorized a delegation-rail intent (#829). */
   delegation_hash?: string | null
   /** Serialized prepared redemption UserOperation for delegation intents. */
@@ -271,6 +267,9 @@ async function replayIntentBody(
         amount: pi.amount_raw,
         payment_token: ZERO_ADDRESS,
         payment: '0',
+        // Always 0 today — every live writer passes a literal 0 (#2263). Kept
+        // for wire compatibility with the `executeAllowanceTransfer` argument
+        // shape this block mirrors; reshaping it is its own change.
         nonce: pi.allowance_nonce,
       },
       instructions:
@@ -447,7 +446,12 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         amountRaw: amountRaw.toString(),
         amountHuman: amount,
         delegateAddress: agent.delegate_address,
-        allowanceNonce: 0, // AllowanceModule-only concept; unused on this rail
+        // AllowanceModule-only concept; unused on this rail. #2263 decided to
+        // KEEP the column rather than drop it with the rest of the inert Safe
+        // schema: it is still published as `sign_data.components.nonce` below,
+        // so removing it is a money-path wire change, separable from migration
+        // 075's purely inert drops.
+        allowanceNonce: 0,
         signHash: authorization.prepared.userOpHash,
         executionRail: 'delegation',
         delegationHash: authorization.delegationHash,

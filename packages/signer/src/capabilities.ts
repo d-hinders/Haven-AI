@@ -14,10 +14,14 @@ import {
  *
  * **The check is necessarily agent-mediated.** The signer and the hosted Haven
  * MCP are two separate servers connected to the same client; neither can
- * introspect the other, and the signer never calls the Haven API. Only the
- * agent sees both handshakes, so what ships here is the *information* plus the
- * prompt to compare it — never a server-side gate. A mismatch is advisory: the
- * enforcement point remains the #1143 signing-time guard, which is unchanged.
+ * introspect the other. The signer's single Haven call (#1263, the read-only
+ * `GET /x402/:payment_id/sign-context` in `sign-context.ts`) does not help
+ * here: it fetches one payment's signing bytes, not the hosted server's
+ * handshake, and it happens at signing time — after the quote this module
+ * exists to get ahead of. So only the agent sees both handshakes, and what
+ * ships here is the *information* plus the prompt to compare it — never a
+ * server-side gate. A mismatch is advisory: the enforcement point remains the
+ * #1143 signing-time guard, which is unchanged.
  *
  * Everything below is DERIVED from the two constants in `core.ts` that the
  * signing path actually enforces. A second hand-maintained literal is the one

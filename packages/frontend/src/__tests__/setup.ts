@@ -2,6 +2,8 @@
 import '@testing-library/jest-dom'
 import type { RenderOptions } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import os from 'node:os'
+import { describeSlowTest, lastSlowTestReading } from './slow-test-diagnostic'
 
 vi.mock('@testing-library/react', async () => {
   const actual = await vi.importActual<typeof import('@testing-library/react')>(
@@ -101,4 +103,35 @@ globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserv
 beforeEach(() => {
   localStorageMock.clear()
   vi.clearAllMocks()
+})
+
+// #2319: name the machine when a test is slow or times out. `afterEach` runs
+// after a timed-out test too (the runner calls the hook after `failTask`), so
+// the diagnostic reaches the log next to the bare `Test timed out` line it
+// explains. Tests within a file run sequentially, so one module-level clock
+// per worker is enough. The message itself is a pure function, unit-tested in
+// `suite-timing-posture.test.ts`; this hook only supplies the live reading.
+// Cost per test: two `performance.now()` reads, one `os.loadavg()` and one
+// `os.availableParallelism()` call — measured at 0.012 ms together (100 000
+// iterations of exactly that sequence under `node -e`, warmed), against
+// tests that start at ~40 ms.
+let testStartedAt = 0
+
+beforeEach(() => {
+  testStartedAt = performance.now()
+})
+
+afterEach((ctx) => {
+  const errors = ctx.task.result?.errors ?? []
+  const reading = {
+    name: `${ctx.task.file?.name ?? '?'} > ${ctx.task.name}`,
+    durationMs: performance.now() - testStartedAt,
+    timeoutMs: ctx.task.timeout ?? 5000,
+    timedOut: errors.some((e) => /timed out/i.test(e.message ?? '')),
+    loadAverage1m: os.loadavg()[0],
+    cores: os.availableParallelism(),
+  }
+  lastSlowTestReading.current = reading
+  const message = describeSlowTest(reading)
+  if (message) console.warn(message)
 })

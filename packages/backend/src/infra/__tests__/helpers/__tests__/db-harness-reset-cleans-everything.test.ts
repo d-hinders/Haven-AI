@@ -66,17 +66,21 @@ async function tableCensus(): Promise<Array<{ table: string; rows: number }>> {
  *
  * Two shapes, and the second is the one that makes the control SHARP:
  *
- * - `users` → `agents` → `agent_allowances` is a foreign-key chain, so it
- *   exercises the delete ORDER, not just the coverage.
+ * - `users` → `agents` → `agent_tool_invocations` is a foreign-key chain, so
+ *   it exercises the delete ORDER, not just the coverage. It was
+ *   `agent_allowances` until #2263's migration 075 dropped that table with
+ *   the rest of the inert Safe-rail schema; `agent_tool_invocations` is a
+ *   live `ON DELETE CASCADE` child of `agents` with the identical shape, so
+ *   the control keeps exactly the property it was chosen for.
  * - `rate_limit_counters` is deliberately a table that **no cascade can
  *   reach** — it has no foreign key at all, so nothing empties it as a side
  *   effect of emptying something else. Without it, dropping a table from the
  *   reset's coverage is invisible here: `ON DELETE CASCADE` cleans up the
  *   dropped child anyway, and the census still passes. (Measured — mutation
- *   M1 of #2211 removed `agent_allowances` from the reset's table list and
+ *   M1 of #2211 removed the FK-chain child from the reset's table list and
  *   survived the first version of this file for exactly that reason.)
  */
-const SEEDED_TABLES = ['users', 'agents', 'agent_allowances', 'rate_limit_counters'] as const
+const SEEDED_TABLES = ['users', 'agents', 'agent_tool_invocations', 'rate_limit_counters'] as const
 
 async function seed(): Promise<void> {
   const user = await db.query<{ id: string }>(
@@ -88,9 +92,9 @@ async function seed(): Promise<void> {
     [user.rows[0].id],
   )
   await db.query(
-    `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount)
-     VALUES ($1, '0x0000000000000000000000000000000000000001', 'USDC', '1')`,
-    [agent.rows[0].id],
+    `INSERT INTO agent_tool_invocations (agent_id, user_id, tool_name, result_status)
+     VALUES ($1, $2, 'reset_census', 'ok')`,
+    [agent.rows[0].id, user.rows[0].id],
   )
   await db.query(
     `INSERT INTO rate_limit_counters (key, count, expires_at)

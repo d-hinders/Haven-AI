@@ -75,7 +75,17 @@ export function AgentCard({
       className={`${entityCardClassName({ muted: isRevoked })} min-w-0`}
     >
       {/* Header */}
-      <div className="flex items-start gap-3 mb-4">
+      {/* #2325: `flex-wrap` here, plus the stamp's `basis-full sm:basis-auto`
+          below, is the information-priority decision for a narrow card. Below
+          `sm` the "Last activity" stamp drops to its own line under the
+          name/account/MCP block, so the block gets the row's full width and the
+          MCP chip inside it is distinguishable at 390. At `sm` and up the stamp
+          is `basis-auto` and stays on the line, so the tablet/desktop layout is
+          unchanged. `flex-wrap` alone does nothing (the block's flex-basis is
+          0%, so it never pushes the stamp to a second line); the `basis-full`
+          is what forces the wrap. Proven by rendered geometry in
+          `e2e/agent-card-mcp-chip-measure.spec.ts`. */}
+      <div className="flex flex-wrap items-start gap-3 mb-4">
           <div
             className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
               isActive
@@ -165,7 +175,43 @@ export function AgentCard({
             )}
           </div>
           <p
-            className="ml-auto shrink-0 pt-0.5 text-right text-xs text-[var(--v2-ink-3)]"
+            /* #2325: the information-priority half of the narrow-card fix.
+               `basis-full` makes this stamp a full-width flex item, so on the
+               now-wrapping header row it is forced onto its own line below the
+               name/account/MCP block at every width below `sm`. `sm:basis-auto`
+               restores the on-the-line layout at `sm` and up, where the card is
+               wide enough that the stamp and the block share the row.
+
+               WHY `sm` AND NOT A NARROWER BREAKPOINT. Below `sm` the wrap is
+               unconditional, so between ~466 and 639 a card with a SHORT slug
+               takes a line it did not strictly need. That band is measured,
+               not overlooked, and 640 is where it should stay: on the
+               unwrapped layout a 34-character slug (natural 258px) is still
+               cut to 148.5px at 500 and 208.5px at 560, and only renders whole
+               from 639 up. Moving the breakpoint down to spare the short slug
+               its extra line would hand that band back to the #2325 defect for
+               exactly the names hardest to tell apart. One line of whitespace
+               for a legible identifier is the same trade as the wrap itself.
+               Pinned by the 500px arm in the spec below.
+
+               ALIGNMENT ON THE WRAPPED LINE. `text-left sm:text-right`: on
+               its own line the stamp is LEFT-aligned, flowing directly under
+               the description in normal reading order, and it goes back to
+               right-aligned at `sm` where it shares the row. The rendered
+               review pass raised this: right-flush, the stamp was the one
+               right-jutting line under an otherwise left-aligned stack, so the
+               eye crossed the whole card for a fragment of secondary text —
+               more visual pull than the element this change deliberately
+               demotes should carry. Left-aligned it reads as a continuation of
+               the block instead of a flagged line.
+
+               `ml-auto` and `shrink-0` stay. On the wrapped line `ml-auto` is
+               a no-op (the block above is `flex-1` and fills the line) and it
+               still does the right-alignment work at `sm` and up; `shrink-0`
+               keeps the "Last activity 1mo ago" text from wrapping. The
+               `title` tooltip and the text are untouched — only the line it
+               sits on, and its alignment on that line, change. */
+            className="ml-auto shrink-0 basis-full pt-0.5 text-left text-xs text-[var(--v2-ink-3)] sm:basis-auto sm:text-right"
             title={formatAgentLastActivityTitle(agent.mcp_last_seen_at)}
           >
             {formatAgentLastActivity(agent.mcp_last_seen_at)}

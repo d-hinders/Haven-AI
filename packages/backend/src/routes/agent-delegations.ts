@@ -41,6 +41,7 @@ import {
   loadOwnedDelegationAgent,
   insertPendingDelegationForOwnedNonRevokedAgent,
   lockOwnedNonRevokedDelegationAgent,
+  HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL,
 } from '../infra/repositories/agents.js'
 import type { HybridOwnerConfig } from '../rails/hybrid-provisioning.js'
 import {
@@ -88,6 +89,53 @@ const MAX_REVOKE_ALL_BATCH = 25
 // on the reconciliation reads. Sits well above the batch cap so healed
 // orphans can never push a legitimately-sized batch into this refusal.
 const RECONCILE_READ_CEILING = 100
+
+export const REVOKED_AGENT_REFUSAL = 'Revoked agents cannot receive new budget delegations'
+export const NOT_DELEGATION_RAIL_REFUSAL = 'Agent account is not on the delegation rail'
+export const NO_DELEGATE_KEY_REFUSAL = 'Agent has no delegate key or treasury account'
+export const IN_FLIGHT_REKEY_REFUSAL =
+  'A key rotation is in flight for this agent — finish or abandon the re-key before granting a new budget'
+export const UNAVAILABLE_AGENT_REFUSAL =
+  'Agent cannot receive a budget while its account or re-key is unavailable'
+/** #2331's rotated-delegate-key refusal; #2415 kept the wording byte-identical. */
+export const ROTATED_DELEGATE_KEY_REFUSAL = 'Delegation was built for a previous delegate key'
+
+/**
+ * Name the reason a pending-grant insert was refused (#2416).
+ *
+ * `insertPendingDelegationForOwnedNonRevokedAgent` collapses FOUR distinct
+ * refusals into one boolean — revoked agent, account off the delegation rail,
+ * no delegate key, and (since #2331) an in-flight re-key. `build` reported all
+ * four as "Revoked agents cannot receive new budget delegations", so an owner
+ * who abandoned a re-key part-way was told their perfectly healthy `active`
+ * agent was revoked.
+ *
+ * This is PURELY diagnostic and runs only on the refusal path: the grant
+ * transaction has already concluded and the request is already refused. Note
+ * what that concluding is — `insertPendingDelegationForOwnedNonRevokedAgent`
+ * returns `false` from inside `withTransaction`'s callback, which is a NORMAL
+ * return, so the transaction COMMITs (an empty commit — the lock found no row
+ * and nothing was written). It is not a rollback; the refusal is carried by
+ * the boolean, not by an aborted transaction. Either way nothing was stored,
+ * and this re-read only decides which 409 body the owner sees. It can never
+ * turn a refusal into a grant — the set of refused requests is exactly what
+ * it was.
+ *
+ * The branch order mirrors `lockOwnedNonRevokedDelegationAgent`'s own SQL
+ * (status, then account_type, then delegate_address, then the re-key probe), so
+ * when more than one reason holds the message names the same one the lock
+ * stopped on.
+ */
+async function describeBuildRefusal(agentId: string, userId: string): Promise<string> {
+  const agent = await loadOwnedDelegationAgent(agentId, userId)
+  if (!agent) return UNAVAILABLE_AGENT_REFUSAL
+  if (agent.status === 'revoked') return REVOKED_AGENT_REFUSAL
+  if (agent.account_type !== 'delegator_hybrid') return NOT_DELEGATION_RAIL_REFUSAL
+  if (!agent.delegate_address) return NO_DELEGATE_KEY_REFUSAL
+  const rekey = await pool.query<{ in_flight: boolean }>(HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL, [agentId])
+  if (rekey.rows[0]?.in_flight === true) return IN_FLIGHT_REKEY_REFUSAL
+  return UNAVAILABLE_AGENT_REFUSAL
+}
 
 export default async function agentDelegationRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
@@ -226,13 +274,13 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
     if (agent.status === 'revoked') {
-      return reply.code(409).send({ error: 'Revoked agents cannot receive new budget delegations' })
+      return reply.code(409).send({ error: REVOKED_AGENT_REFUSAL })
     }
     if (agent.account_type !== 'delegator_hybrid') {
-      return reply.code(409).send({ error: 'Agent account is not on the delegation rail' })
+      return reply.code(409).send({ error: NOT_DELEGATION_RAIL_REFUSAL })
     }
     if (!agent.delegate_address || !agent.treasury_address) {
-      return reply.code(409).send({ error: 'Agent has no delegate key or treasury account' })
+      return reply.code(409).send({ error: NO_DELEGATE_KEY_REFUSAL })
     }
     if (!DELEGATION_RAIL_CHAIN_IDS.has(agent.chain_id)) {
       return reply.code(409).send({ error: `Delegation rail not enabled on chain ${agent.chain_id}` })
@@ -309,7 +357,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       expiresAt: expiry,
     })
     if (!inserted) {
-      return reply.code(409).send({ error: 'Revoked agents cannot receive new budget delegations' })
+      // Same 409, same refused request set — only the reason reporting changes (#2416).
+      return reply.code(409).send({ error: await describeBuildRefusal(request.params.id, sub) })
     }
     return reply.code(201).send({
       delegation_hash: hash,
@@ -328,7 +377,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const agent = await loadOwnedDelegationAgent(request.params.id, sub)
       if (!agent) return reply.code(404).send({ error: 'Agent not found' })
       if (agent.status === 'revoked') {
-        return reply.code(409).send({ error: 'Revoked agents cannot receive new budget delegations' })
+        return reply.code(409).send({ error: REVOKED_AGENT_REFUSAL })
       }
       const { signature } = request.body ?? {}
       // EOA signatures are 65 bytes (130 hex); a passkey account's delegation
@@ -398,6 +447,32 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       }
 
       const signed = { ...JSON.parse(pending.delegation_json), signature }
+
+      // ── Derive the delegate's account address BEFORE the transaction (#2415) ──
+      // #2331 put the "built for a previous delegate key" guard INSIDE the open
+      // transaction, where `computeHybridAccountAddress` costs one RPC
+      // (`rails/hybrid-provisioning.ts`) while the agent row lock and a pooled
+      // connection are both held. A slow or hanging RPC then blocked every
+      // other writer that lock serializes: Safe unlink, re-key open, re-key
+      // completion, and sibling activations for the same agent.
+      //
+      // The guard's guarantee survives without the network call, split in two.
+      // Derive here from `agent.delegate_address` — the pre-lock read — and
+      // under the lock assert the locked row still carries that exact key.
+      // Together those say the derived address IS the current delegate's
+      // account at commit time, which is what the guard needs; a re-key that
+      // committed in between changes the key and is refused exactly as before.
+      // Deliberately NOT a stored column: the delegate address computed at
+      // `build` time is by construction the `delegate` field already inside
+      // `delegation_json`, so comparing the two proves nothing about rotation.
+      if (!agent.delegate_address) {
+        return reply.code(409).send({ error: UNAVAILABLE_AGENT_REFUSAL })
+      }
+      const preLockDelegateKey = agent.delegate_address
+      const expectedDelegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
+        ownerAddress: preLockDelegateKey as Address,
+      })
+
       // Activate the new grant and mark any previously ACTIVE grant for the
       // same (token, recipient) slot as replaced — the on-chain kill of the
       // old one is the revoke flow (compose for immediate replacement).
@@ -415,17 +490,25 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         const lockedAgent = await lockOwnedNonRevokedDelegationAgent(request.params.id, sub, client)
         if (!lockedAgent) {
           await client.query('ROLLBACK')
-          return reply.code(409).send({ error: 'Agent cannot receive a budget while its account or re-key is unavailable' })
+          return reply.code(409).send({ error: UNAVAILABLE_AGENT_REFUSAL })
         }
-        const currentDelegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
-          ownerAddress: lockedAgent.delegate_address as Address,
-        })
+        // #2415: this is what the lock now buys, in one refusal because it is
+        // one question — "is this delegation for the delegate key that is
+        // current at COMMIT time?" — answered by two halves that must both
+        // hold. The address was derived above from `preLockDelegateKey`, so
+        // the locked row still carrying that key is what makes the derivation
+        // current (a re-key that committed in between fails here); and the
+        // stored delegation's own `delegate` must be that derived account.
+        // Same refusal and wording as #2331's, with no RPC held across the
+        // lock. Kept as one `if` so the transaction gains no second ROLLBACK
+        // call site (`lint:deps` counts inline SQL per file, shrink-only).
         if (
+          lockedAgent.delegate_address.toLowerCase() !== preLockDelegateKey.toLowerCase() ||
           typeof signed.delegate !== 'string' ||
-          signed.delegate.toLowerCase() !== currentDelegateAccountAddress.toLowerCase()
+          signed.delegate.toLowerCase() !== expectedDelegateAccountAddress.toLowerCase()
         ) {
           await client.query('ROLLBACK')
-          return reply.code(409).send({ error: 'Delegation was built for a previous delegate key' })
+          return reply.code(409).send({ error: ROTATED_DELEGATE_KEY_REFUSAL })
         }
         // Sweep the slot's OTHER active grants, then flip the pending row —
         // one repository call that owns the order and excludes the new row by

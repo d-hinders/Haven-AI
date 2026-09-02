@@ -510,7 +510,6 @@ const activityPayment = {
     safe_name: { type: ['string', 'null'] },
     explorer_url: { type: ['string', 'null'], description: 'Null exactly when tx_hash is null.' },
     execution_rail: { type: ['string', 'null'], description: 'Which on-chain mechanism moved the money (#799).' },
-    session_permission_id: { type: ['string', 'null'] },
     delegation_hash: { type: ['string', 'null'], description: 'Which delegation authorized a delegation-rail payment (#829).' },
     confirmed_at: { type: ['string', 'null'] },
     created_at: { type: 'string' },

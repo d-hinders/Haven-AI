@@ -30,7 +30,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-01" # #2361: re-verified, EDITED — the v2 payment envelope now echoes the challenge's `resource`/`extensions` verbatim (spec MUST for extensions; live-bisected as a strict facilitator's rejection cause, #2360): the #1064 erc7710-header paragraph gains the echo paragraph, with the erc7710 source being the #1355 stored challenge at settle. The same pass fixed three #2341-stale claims that still said the paid retry sends BOTH header names unconditionally (the Challenge And Header Semantics sentence, the erc7710 quote-flow diagram, the Differences table row) — erc7710 sends PAYMENT-SIGNATURE alone since #2341. Scope: those five spots; the rest of the body NOT re-verified in this pass. Prior: #2274: the retired-rail gate paragraph in "Settlement-scheme reality and the EIP-3009 bridge" corrected — it named token resolution as still preceding the rail 410, which #2274 moved below the gate on this route and on POST /payments together. Scope: that paragraph only; the surrounding scheme-selection and 3009-mode prose was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: #2291: corrected the #2290 paragraph in "Resuming An Authorized Payment", which named haven_sign_x402 -> haven_x402_sign_header as the working remedy — a sequence the one-shot's spent binding cannot serve. Scope: that paragraph. The rest of the section, and the decomposed/recommended flows elsewhere in this doc, were re-read against the corrected contract and are accurate as written. Prior: chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-09-02" # #2265: FIVE sites, and two of the issue's five findings were ALREADY FIXED on dev and are deliberately untouched — the "Standard SDK / Local MCP Flow" heading now reads "Historical … retired AllowanceModule rail" (its own banner treatment, the choice the issue asked to be stated), and the opening two-leg is already below the ⚠️ banner with the live scheme-split above it. What was still live: the Guided Catalog Purchase Preflight bullet 6, in a section carrying NO banner, described a two-rail split whose legacy half was false on every clause ("the resulting funding intent queues for wallet-owner approval") — a legacy account cannot reach that preflight (410, #1986), `approval_requests` is dropped (#2055), and nothing constructs a queued payment on any rail; it was the last live doc text saying a Haven payment can queue. Rewritten to the one live behaviour with the removed claim recorded rather than silently deleted. Three type-vs-reachability notes added: #1306's `allowance` block and #1310's post-purchase summary both declare a `'legacy'`/`'allowance_module'` arm that is unreachable (`GET /machine-payments/allowances` 410s for a retired-rail account since #2020; the summary additionally requires a settled x402 payment such an account cannot have). Deliberately NOT annotated: `GET /machine-payments/agent`'s additive `execution_rail: 'legacy' | 'delegation'` — that route is UNGATED (verified in `routes/machine-payments.ts`), so `'legacy'` is genuinely reachable there and the doc is correct. The Differences-table "Payment authority" row lost "on-chain allowance" for the delegation redemption it actually describes, and one "(AllowanceModule or the active delegation's caveat enforcers)" parenthetical lost its retired half. Scope: those five sites only. NOT re-verified: the challenge/header semantics, the hosted flows, resume, the erc7710 sections, or this doc's `covers:` files. Prior: #2361: re-verified, EDITED — the v2 payment envelope now echoes the challenge's `resource`/`extensions` verbatim (spec MUST for extensions; live-bisected as a strict facilitator's rejection cause, #2360): the #1064 erc7710-header paragraph gains the echo paragraph, with the erc7710 source being the #1355 stored challenge at settle. The same pass fixed three #2341-stale claims that still said the paid retry sends BOTH header names unconditionally (the Challenge And Header Semantics sentence, the erc7710 quote-flow diagram, the Differences table row) — erc7710 sends PAYMENT-SIGNATURE alone since #2341. Scope: those five spots; the rest of the body NOT re-verified in this pass. Prior: #2274: the retired-rail gate paragraph in "Settlement-scheme reality and the EIP-3009 bridge" corrected — it named token resolution as still preceding the rail 410, which #2274 moved below the gate on this route and on POST /payments together. Scope: that paragraph only; the surrounding scheme-selection and 3009-mode prose was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: #2291: corrected the #2290 paragraph in "Resuming An Authorized Payment", which named haven_sign_x402 -> haven_x402_sign_header as the working remedy — a sequence the one-shot's spent binding cannot serve. Scope: that paragraph. The rest of the section, and the decomposed/recommended flows elsewhere in this doc, were re-read against the corrected contract and are accurate as written. Prior: chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -646,7 +646,10 @@ Sequence:
    #1306) — no new derivation logic. The response carries an `allowance`
    block: `{ rail: 'legacy' | 'delegation', sufficient: boolean | null,
    remaining_atomic?: string, source: 'allowance_module' | 'active_delegations'
-   }`. A failed read degrades to `sufficient: null` plus a warning
+   }`. The union is the declared TYPE; its `'legacy'` / `'allowance_module'`
+   arm is **unreachable in practice** — since #2020,
+   `GET /machine-payments/allowances` answers HTTP 410 for a retired-rail
+   account, so no caller receives those values from this read (#2265). A failed read degrades to `sufficient: null` plus a warning
    (`ALLOWANCE_CHECK_UNAVAILABLE`) — it never fails the preflight, since the
    on-chain policy remains the actual gate either way; this holds on BOTH
    rails, including the delegation rail's no-approval-queue branch below
@@ -665,14 +668,21 @@ Sequence:
    chain and is the configured full budget, not a confirmed figure; the
    on-chain policy (the budget caveat enforcer) remains the actual gate at
    redemption regardless.
-6. Rail behavior differs deliberately: on the **legacy** rail, an
-   insufficient allowance does NOT refuse here — the flow proceeds exactly
-   like `haven_pay_mcp_tool`, and the resulting funding intent queues for
-   wallet-owner approval (`pending_approval`). On the **delegation** rail,
-   there is no approval queue (#1090) — an over-budget quote REFUSES right
-   here, before any funding intent is created
-   (`DELEGATION_BUDGET_EXCEEDED`, `next_action: fund_safe_or_raise_allowance`),
-   rather than letting a later on-chain redemption revert.
+6. An over-budget quote REFUSES right here, before any funding intent is
+   created (`DELEGATION_BUDGET_EXCEEDED`,
+   `next_action: fund_safe_or_raise_allowance`), rather than letting a later
+   on-chain redemption revert. There is no approval queue to fall back to
+   (#1090).
+
+   > **This bullet described a two-rail split until #2265, and the legacy half
+   > was false on every clause.** It read: "on the **legacy** rail, an
+   > insufficient allowance does NOT refuse here … the resulting funding intent
+   > queues for wallet-owner approval (`pending_approval`)." A legacy account
+   > cannot reach this preflight at all — `POST /x402` answers HTTP 410 (#1986)
+   > — `approval_requests` was dropped outright by #2055, and no code path
+   > constructs a queued payment on any rail. This section carries no
+   > retirement banner, so it was the last live doc text telling a reader a
+   > Haven payment can queue.
 7. `createX402Intent` runs identically to `haven_pay_mcp_tool`, persisting
    the same `mcpCallContext` (#1307) for settle-leg rehydration by
    `payment_id`.
@@ -714,11 +724,17 @@ the same fixture. Shape:
   reset_period?: number, source: 'allowance_module' | 'active_delegations' }
 ```
 
+As in #1306's block above, the `'legacy'` / `'allowance_module'` arm is the
+declared type rather than a reachable value: this summary reads through
+`GET /machine-payments/allowances`, which 410s for a retired-rail account
+(#2020), and it only fires for a settled x402 payment, which a retired-rail
+account cannot have (#1986). Doubly unreachable (#2265).
+
 Deliberately the SAME rail-labeled spelling as #1306's `allowance` block,
 minus the preflight-only `sufficient` field — post-purchase reporting answers
 "what is left", not "was this purchase covered". This is read-only reporting,
-never a spend authority claim: the on-chain policy (AllowanceModule or the
-active delegation's caveat enforcers) remains the actual gate regardless of
+never a spend authority claim: the on-chain policy (the active delegation's
+caveat enforcers) remains the actual gate regardless of
 whether this summary can be produced. A failed read (payment-status lookup,
 agent lookup, or the allowance/budget lookup itself) NEVER converts a
 succeeded settlement into a failure — `getPostPurchaseAllowanceSummary`
@@ -979,7 +995,7 @@ print — which is exactly why the API-side mapping exists.
 | Amount units | Human decimal string | Atomic amount from x402 option |
 | Agent action after funding | None for direct confirmed payment | Retry original merchant/resource request |
 | Header sent to merchant | None | EIP-3009: `PAYMENT-SIGNATURE` **and** `X-PAYMENT`, same value (#2289); erc7710: `PAYMENT-SIGNATURE` alone (#2341) |
-| Payment authority | Delegate signature + on-chain allowance | Same for funding leg; EIP-3009 signature for merchant leg |
+| Payment authority | Agent signature over the account's typed data, redeeming the owner-signed budget delegation; the caveat enforcers are the gate | Same for the funding leg; EIP-3009 signature for the merchant leg |
 | Restart recovery | Fetch payment status | Rehydrate stored x402 context by payment id (`getResumeState`); resume when status answers `retry_original_x402_request` (#2145) — see [Resuming An Authorized Payment](#resuming-an-authorized-payment) |
 
 The `payment_intents` INSERTs are the SAME

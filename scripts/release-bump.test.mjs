@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { writeFileSync, readFileSync, rmSync, mkdirSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -720,8 +720,9 @@ test('an all-digit short sha with a leading zero is refused — semver rejects i
   // Not a hypothetical and not cosmetic: semver forbids a leading zero in a
   // NUMERIC prerelease identifier, so `0.0.0-dev.<ts>.0123456` is not a valid
   // version at all. Verified against the workspace semver: it returns null for
-  // that string and a version for `…​.1234567`. Roughly 1 commit in 4300
-  // (1/16 × (10/16)^7). Refused here, where the message can say what to do,
+  // that string and a version for `…​.1234567`. Roughly 1 commit in 268 —
+  // first character '0' (1/16), remaining six all digits ((10/16)^6). Refused
+  // here, where the message can say what to do,
   // rather than 90 seconds later inside the bump with "not a valid semver
   // string".
   assert.throws(() => formatSnapshotVersion({ timestamp: '202609021905', sha: '0123456' }), /leading zero/)
@@ -887,6 +888,14 @@ function stepRunScript(workflow, name) {
   }
   assert.notEqual(runIdx, -1, `the step "${name}" has no block-scalar \`run: |\``)
 
+  // KNOWN LIMIT: the loop below ends the block at the first line indented no
+  // further than `run:`. A line inside the script that happens to look like
+  // `- name:` at that indent would truncate the body EARLY and silently —
+  // returning a short script rather than throwing, which is the one failure
+  // mode this design set out to avoid. No such line exists in publish.yml
+  // today and the shell there is indented well past it. If you add one, this
+  // reads less than it should; the tests that EXECUTE the extracted script
+  // would fail on the truncation, which is the backstop.
   const runIndent = lines[runIdx].match(/^\s*/)[0].length
   const body = []
   for (let i = runIdx + 1; i < lines.length; i++) {
@@ -1049,17 +1058,113 @@ test('the guard is called before every publish, and outside the failure isolatio
   // `npm publish` gets (#1159): a package failing to publish is an incident, a
   // triple that should be impossible is a defect in this file, and continuing
   // the loop would publish four more of them.
-  // The WHOLE line, not the text before the call. An earlier draft of this
-  // assertion read only the 40 characters preceding it, and a mutation
-  // appending `|| true` — the cheapest possible way to neuter the guard —
-  // passed. A check that cannot fail is worse than no check, so this one was
-  // re-mutated until it could.
-  const callLine = step.split('\n').find((l) => l.includes('assert_publish_allowed "$channel"'))
-  assert.ok(callLine, 'could not isolate the assert_publish_allowed call line')
-  assert.doesNotMatch(
-    callLine,
-    /\bif\b|\|\||&&/,
-    'assert_publish_allowed is being called conditionally — a violation must abort the job, ' +
-      'not skip one package and publish the other four',
+  // WHAT THIS TEST DOES NOT PROVE, stated because it previously pretended to.
+  //
+  // An earlier version asserted here that the call is UNCONDITIONAL, by
+  // checking the call line for `if` / `||` / `&&`. Review defeated it twice
+  // over: wrapping the call in a `case "$channel" in dev) : ;; *) …` skips the
+  // guard for the dev channel while `indexOf` still finds the call and the
+  // line contains none of those tokens; and appending `&` makes it
+  // fire-and-forget, so `set -e` never sees the failure. Both mutations
+  // published five packages while this file reported zero failures.
+  //
+  // A regex over source text can only answer "does this string appear". The
+  // question that matters is "is the guard reached on every path", which is
+  // behavioural — so it is answered by executing the loop, in the test below.
+  // Do not re-add a textual unconditionality check here; widening the pattern
+  // is what produced two false green results.
+})
+
+/**
+ * Run the REAL publish loop, with `npm` stubbed, and report what it published.
+ *
+ * This is the behavioural answer to "is the guard reached on every path" —
+ * the question two successive TEXTUAL assertions got wrong (see the note in
+ * the structural test above). It builds a throwaway tree with five
+ * package.json files at the version under test, puts a recording `npm` stub
+ * on PATH whose `view` always exits non-zero (nothing is on the registry, so
+ * the loop always proceeds to the publish it is being tested on), executes
+ * the step's own shell, and returns every publish that actually happened.
+ *
+ * A guard that is skipped, backgrounded, or deleted shows up here as
+ * PUBLISHES THAT SHOULD NOT EXIST, whatever the source text looks like.
+ */
+function runPublishLoop(workflow, { channel, version, tag }) {
+  const dir = join(tmpdir(), `haven-2421-loop-${randomUUID()}`)
+  mkdirSync(join(dir, 'bin'), { recursive: true })
+  for (const p of ['sdk', 'signer', 'mcp', 'connect', 'cli']) {
+    mkdirSync(join(dir, 'packages', p), { recursive: true })
+    writeFileSync(
+      join(dir, 'packages', p, 'package.json'),
+      JSON.stringify({ name: `@haven_ai/${p}`, version }),
+    )
+  }
+  const log = join(dir, 'npm.log')
+  writeFileSync(log, '')
+  writeFileSync(
+    join(dir, 'bin', 'npm'),
+    `#!/bin/sh\necho "$@" >> "${log}"\ncase "$1" in\n  view) exit 1 ;;\n  *) exit 0 ;;\nesac\n`,
   )
+  spawnSync('chmod', ['+x', join(dir, 'bin', 'npm')])
+  const summary = join(dir, 'summary.md')
+  writeFileSync(summary, '')
+
+  const file = join(dir, 'step.sh')
+  writeFileSync(file, stepRunScript(workflow, 'Publish packages whose version is not yet on npm'))
+
+  const env = {
+    ...process.env,
+    PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
+    HAVEN_PUBLISH_CHANNEL: channel,
+    GITHUB_STEP_SUMMARY: summary,
+  }
+  if (tag) env.HAVEN_PUBLISH_TAG = tag
+  else delete env.HAVEN_PUBLISH_TAG
+
+  const r = spawnSync('bash', [file], { cwd: dir, encoding: 'utf8', env })
+  const published = readFileSync(log, 'utf8')
+    .split('\n')
+    .filter((l) => l.startsWith('publish'))
+  rmSync(dir, { recursive: true, force: true })
+  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, published }
+}
+
+test('GUARD 2/3 (behavioural): a forbidden combination PUBLISHES NOTHING (#2421)', async () => {
+  // The invariant, proven by execution rather than by reading. Each row is a
+  // real way the wrong artifact could reach the wrong channel; every one must
+  // end with a failed job and an EMPTY publish list.
+  const workflow = await publishWorkflow()
+
+  for (const [label, args] of [
+    ['prod channel sees a snapshot version', { channel: 'prod', version: SNAPSHOT_V, tag: null }],
+    ['dev channel forced to the alpha tag', { channel: 'dev', version: SNAPSHOT_V, tag: 'alpha' }],
+    ['dev channel forced to latest', { channel: 'dev', version: SNAPSHOT_V, tag: 'latest' }],
+    ['dev channel sees a real version', { channel: 'dev', version: REAL_V, tag: 'dev' }],
+    ['an unknown channel', { channel: 'staging', version: REAL_V, tag: null }],
+  ]) {
+    const { code, published } = runPublishLoop(workflow, args)
+    assert.notEqual(code, 0, `${label}: the job must FAIL, got exit ${code}`)
+    assert.deepEqual(
+      published,
+      [],
+      `${label}: the guard was bypassed — ${published.length} package(s) were published. ` +
+        'This is the failure a textual "is the call unconditional" assertion cannot see.',
+    )
+  }
+})
+
+test('GUARD 2/3 (behavioural): the permitted combinations still publish all five (#2421)', async () => {
+  // The control half, and it is not a formality: a guard that refuses
+  // everything protects nothing, and this suite would still be green.
+  const workflow = await publishWorkflow()
+
+  for (const [label, args] of [
+    ['prod publishes a real prerelease', { channel: 'prod', version: REAL_V, tag: null }],
+    ['prod publishes a stable release', { channel: 'prod', version: '0.2.0', tag: null }],
+    ['dev publishes a snapshot', { channel: 'dev', version: SNAPSHOT_V, tag: 'dev' }],
+  ]) {
+    const { code, published, out } = runPublishLoop(workflow, args)
+    assert.equal(code, 0, `${label}: the job must SUCCEED, got exit ${code}: ${out}`)
+    assert.equal(published.length, 5, `${label}: expected 5 publishes, got ${published.length}`)
+  }
 })

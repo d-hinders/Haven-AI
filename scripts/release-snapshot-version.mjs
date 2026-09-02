@@ -62,8 +62,13 @@ export function formatSnapshotVersion({ timestamp, sha }) {
   // Semver forbids a leading zero in a NUMERIC prerelease identifier, so an
   // all-digit short sha beginning with 0 (e.g. `0123456`) would produce a
   // version semver rejects — and `release-bump.mjs` would die on it after the
-  // build, which is a confusing place to learn this. Roughly 1 commit in 4300
-  // (1/16 × (10/16)^7). Fail here instead, with the fix: re-run the workflow
+  // build, which is a confusing place to learn this. Roughly 1 commit in 268:
+  // the first character must be '0' (1/16) and the remaining SIX must all be
+  // digits ((10/16)^6) — 7 hex characters, one of which is already pinned. An
+  // earlier draft of this comment said "1 in 4300 (1/16 × (10/16)^7)", which
+  // was wrong twice over: the exponent counted a character the leading zero
+  // had already consumed, and the stated result did not follow from the
+  // stated formula either. Fail here instead, with the fix: re-run the workflow
   // on a later commit. Deliberately NOT worked around by lengthening or
   // rewriting the sha — the version must name the commit it was built from,
   // and #2420 fixes the shape.

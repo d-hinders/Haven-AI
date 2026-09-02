@@ -48,7 +48,30 @@
 // so deleting the `on:` block goes red at pull-request time instead of leaving
 // a permanently-fresh run history behind it.
 //
-// `evaluate()` is pure; every `gh` call lives in the CLI wrapper at the bottom.
+// ## What #2273 repointed, and the third arm it added
+//
+// The sender never existed and could not be built where the docs said (#2268:
+// Railway's webhooks cannot carry an Authorization header and its only service
+// hook is PRE-deploy). #2273 replaced the trigger with GitHub's own
+// `deployment_status` event — Railway creates real Deployments — and this
+// entry now watches THAT. Repointed, never deleted: a registry entry naming a
+// trigger that no longer exists guards nothing, and the whole file exists
+// because "guards nothing" looks like "green".
+//
+// The third arm is `provenance` (#2271). The old entry counted
+// `repository_dispatch` runs on `dev`, and a manual
+// `gh api .../dispatches` produced one structurally identical to a real
+// post-deploy run — the diagnostic dispatch sent while investigating #2268 read
+// as "✓ last success 0.0d ago" for four days with no hook configured. A
+// `deployment_status` run has something a curl cannot fake: the Deployments API
+// records WHO created the deployment of that SHA, and only Railway's GitHub App
+// installation can write `railway-app[bot]`. So a run counts only when a
+// Railway-created deployment of the run's exact `headSha` exists for the dev
+// environment. A `workflow_dispatch`, a `schedule`, or a Deployment a human
+// creates through the API with their own token all fail that lookup.
+//
+// `evaluate()` and `selectQualifyingRuns()` are pure; every `gh` call lives in
+// the CLI wrapper at the bottom.
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
@@ -58,6 +81,20 @@ import { fileURLToPath } from 'node:url'
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 export const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * The Railway-side facts the post-deploy trigger keys on (#2273). Both strings
+ * are OUTSIDE this repository's control: the environment name is whatever the
+ * Railway project calls it, and the creator is the Railway GitHub App's login.
+ * `.github/workflows/qa-dev.yml`'s gate job carries the same two literals, and
+ * `guard-freshness.test.mjs` pins that file to these constants — so the
+ * workflow's filter and this guard's provenance check cannot drift apart. If
+ * Railway renames the environment, the gate skips every run, no run qualifies
+ * here, and the `stale` finding fires within `maxAgeDays` — which is the alarm
+ * doing its job, not a false positive to silence.
+ */
+export const RAILWAY_DEV_ENVIRONMENT = 'Haven AI / dev'
+export const RAILWAY_DEPLOY_CREATOR = 'railway-app[bot]'
 
 /**
  * The one issue this reporter owns. Upserted, and CLOSED when everything is healthy.
@@ -91,6 +128,11 @@ export const ISSUE_TITLE = '🩺 A CI guard has stopped proving its guarantee'
  *   check asks "did it run lately"; this asks "can it still run at all", which
  *   the run history can never answer, because a deleted trigger leaves its old
  *   successes in the API forever.
+ * - `provenance` — `{ environment, creator }`: when set, a run counts only if
+ *   the Deployments API holds a deployment of the run's exact `headSha` to that
+ *   environment created by that login (#2271/#2273). The index is read once per
+ *   evaluation and injected into `selectQualifyingRuns`; a missing index fails
+ *   CLOSED (nothing qualifies), because "could not check" is not "checked".
  * - `restart` — what a human actually does about it. Not every guard is
  *   restarted with `gh workflow run`.
  */
@@ -128,53 +170,67 @@ export const SCHEDULED_GUARDS = [
       '60-day inactivity disablement of scheduled workflows.',
   },
   {
-    // #2268. This one is NOT a schedule. It is a trigger whose sender lives
-    // outside the repository, which is a strictly worse version of the same
-    // defect: `qa-dev.yml` declares three triggers, two of them fire, and the
-    // third — `repository_dispatch: [dev-deployed]`, POSTed by the Railway/Vercel
-    // dev deploy — had fired ZERO times in the repository's entire history
-    // (156 qa-dev runs, 2026-06-30 → 2026-08-31; and zero repository_dispatch
-    // runs across every workflow). Nothing looked wrong, because a trigger that
-    // never fires looks exactly like one that fires and finds nothing.
+    // #2268 → #2273. This one is NOT a schedule. It is a trigger whose sender
+    // lives outside the repository, which is a strictly worse version of the
+    // same defect: `qa-dev.yml` declared three triggers, two of them fired, and
+    // the third — `repository_dispatch: [dev-deployed]`, meant to be POSTed by
+    // the Railway dev deploy — had fired ZERO times in the repository's entire
+    // history (156 qa-dev runs, 2026-06-30 → 2026-08-31; and zero
+    // repository_dispatch runs across every workflow). Nothing looked wrong,
+    // because a trigger that never fires looks exactly like one that fires and
+    // finds nothing.
     //
-    // The receiving half is healthy — a manual
-    // `gh api repos/:owner/:repo/dispatches -f event_type=dev-deployed` started
-    // run 33370275124 three seconds later, on `dev`. So the failure is entirely
-    // at the sender, in a deploy-provider dashboard this repository cannot see.
-    // That is exactly why it needs watching from here: the repo owns the
-    // consequence (a stale `qa-freshness` blocking a dev → main promotion) while
-    // owning none of the machinery.
+    // #2268's operator findings closed the old route for good: Railway cannot
+    // send an authenticated dispatch from anywhere (URL-only webhooks, a
+    // pre-deploy-only service hook). #2273 rebuilt the trigger on GitHub's own
+    // `deployment_status` event, which Railway's GitHub integration DOES emit —
+    // 28 of the newest 100 Deployments on 2026-09-02 were `railway-app[bot]` →
+    // `Haven AI / dev`, each reaching `state: success`. This entry watches that.
     workflow: 'qa-dev.yml',
-    label: 'Post-deploy money-flow QA — the `dev-deployed` trigger (#2268)',
+    label: 'Post-deploy money-flow QA — the `deployment_status` trigger (#2273, was #2268)',
     // Four days, not three. Dev deploys are bursty and stop entirely over a
     // quiet weekend, and a reporter that speaks every Monday morning is one
     // people learn to close unread.
     maxAgeDays: 4,
     cadence: 'every dev deploy',
-    // ONLY `repository_dispatch`. This is the load-bearing line in the whole
+    // ONLY `deployment_status`. This is the load-bearing line in the whole
     // entry, and it is deliberately narrower than the other guard's: the nightly
     // `schedule` and the manual `workflow_dispatch` on this same workflow are
     // both alive and green, so counting them would report the post-deploy
     // trigger healthy on the strength of the two signals that are not it. That
     // is precisely how this went unnoticed for two months.
-    countedEvents: ['repository_dispatch'],
-    // A repository_dispatch always runs from the default branch, observed as
-    // `dev` on run 33370275124 — not assumed.
-    countedBranches: ['dev'],
-    requiredTrigger: /^\s*repository_dispatch:\s*\n\s*types:\s*\[\s*dev-deployed\s*\]/m,
+    countedEvents: ['deployment_status'],
+    // No branch scoping, on purpose. Railway creates its Deployments against a
+    // bare commit SHA (`ref` == `sha` on every one observed), and for that case
+    // GitHub documents GITHUB_REF as EMPTY — so a `deployment_status` run has no
+    // head branch to match. The `provenance` check below is the replacement,
+    // and a stronger one: it binds the run to a deployment of that exact SHA to
+    // the dev environment, which is what "on dev" was trying to say.
+    countedBranches: null,
+    // #2271. Counting `deployment_status` alone would still let a human create
+    // a Deployment by hand (`gh api -X POST .../deployments`) and mute this
+    // guard. That deployment's creator would be the human, not the Railway app.
+    provenance: { environment: RAILWAY_DEV_ENVIRONMENT, creator: RAILWAY_DEPLOY_CREATOR },
+    requiredTrigger: /^\s*deployment_status:\s*$/m,
     why:
       'It is the only trigger that runs the money-flow harness against what the dev deploy ' +
-      'ACTUALLY shipped, at the moment it ships. Without it, freshness rests on the nightly ' +
+      'ACTUALLY shipped, at the SHA it shipped. Without it, freshness rests on the nightly ' +
       'cron alone, a busy day on dev outruns it, and qa-freshness then blocks the dev → main ' +
       'promotion — correctly, but at the worst moment, where the pressure is to reach for the ' +
       'qa-override label instead.',
     restart:
-      'The sender is OUTSIDE this repository, so `gh workflow run` will not fix it (and a ' +
-      '`workflow_dispatch` run deliberately does not clear this finding). An operator has to ' +
-      'add or repair the post-deploy hook in the Railway dev backend / Vercel dev project — ' +
-      'see docs/operations/agent-qa.md → "Post-deploy trigger (webhook setup)". Confirm the ' +
-      'fix with `gh api repos/d-hinders/Haven-AI/dispatches -f event_type=dev-deployed`, which ' +
-      'must start a `qa-dev.yml` run within seconds.',
+      'There is no command that restarts this: a `workflow_dispatch` run, a `repository_dispatch`, ' +
+      'and a Deployment created by hand all deliberately do NOT clear this finding (#2271). ' +
+      'Check, in order: (1) Railway still creates GitHub Deployments for the dev backend — ' +
+      '`gh api -X GET repos/d-hinders/Haven-AI/deployments -f environment=\'Haven AI / dev\' -F per_page=5` ' +
+      'must list recent `railway-app[bot]` deployments; if it does not, the Railway GitHub ' +
+      'integration for the `Haven AI` project is what broke. (2) The environment is still ' +
+      'named exactly `Haven AI / dev` (`RAILWAY_DEV_ENVIRONMENT` here and in qa-dev.yml\'s gate ' +
+      'job) — a rename on the Railway side skips every run. (3) `gh run list --workflow qa-dev.yml ' +
+      '--event deployment_status --limit 10` shows runs arriving: none at all means the trigger ' +
+      'is not firing (default-branch workflow file, event disabled); runs that are all `skipped` ' +
+      'mean the gate job is refusing them — read its log line. See ' +
+      'docs/operations/agent-qa.md → "Post-deploy trigger (deployment_status)".',
   },
 ]
 
@@ -185,13 +241,28 @@ export const SCHEDULED_GUARDS = [
  * buried in an IO helper — it is the difference between a watchdog and a
  * watchdog that a PR run can silence.
  */
-export function selectQualifyingRuns(runs, guard) {
+export function selectQualifyingRuns(runs, guard, deploymentCreatorsBySha) {
   const events = guard.countedEvents
   const branches = guard.countedBranches
+  const provenance = guard.provenance
   return (Array.isArray(runs) ? runs : []).filter((r) => {
     if (r?.status !== 'completed') return false
+    // A skipped run is not the guard having run. On qa-dev.yml every
+    // in_progress / duplicate deployment status starts a run the gate job
+    // skips in seconds (#2273); counting those as "it ran" would turn a
+    // trigger whose gate refuses everything into `never-succeeded` instead of
+    // the more honest `never-run`, and would date `lastRunAt` off runs that
+    // did nothing.
+    if (r?.conclusion === 'skipped') return false
     if (events && !events.includes(r?.event)) return false
     if (branches && !branches.includes(r?.headBranch)) return false
+    if (provenance) {
+      // Fail closed: no index, or a SHA the index has never seen, is "cannot
+      // prove Railway deployed this", which is the same answer as "did not".
+      const sha = typeof r?.headSha === 'string' ? r.headSha : ''
+      const creator = deploymentCreatorsBySha?.[sha]
+      if (!sha || creator !== provenance.creator) return false
+    }
     return true
   })
 }
@@ -342,6 +413,37 @@ export function renderSummary({ healthy, findings }, observations = {}, guards =
 
 const gh = (args) => execFileSync('gh', args, { encoding: 'utf8' })
 
+/**
+ * `{ [fullSha]: creatorLogin }` for the newest 100 Deployments to one
+ * environment (#2273). One API call per evaluation. 100 is deep enough: a
+ * qualifying run has to be inside `maxAgeDays` anyway, and the dev environment
+ * saw 28 deployments in the 100 newest across ALL environments on 2026-09-02.
+ * The Deployments API filters on the FULL sha only — a short sha returns
+ * nothing (measured) — so the index is keyed on what `gh run list` reports as
+ * `headSha`, which is full. Throws on API failure so the caller's catch turns it
+ * into `unobserved`, a finding, rather than an empty index that reads as
+ * "nothing Railway deployed".
+ */
+function readDeploymentIndex({ environment, creator }) {
+  // `GITHUB_REPOSITORY` is set inside Actions; the `{owner}/{repo}` placeholders
+  // are gh's own resolution from the git remote when run by hand.
+  const repo = process.env.GITHUB_REPOSITORY || '{owner}/{repo}'
+  const deployments = JSON.parse(gh([
+    'api', '-X', 'GET', `repos/${repo}/deployments`,
+    '-f', `environment=${environment}`,
+    '-F', 'per_page=100',
+  ]))
+  const index = {}
+  for (const d of Array.isArray(deployments) ? deployments : []) {
+    if (typeof d?.sha !== 'string' || typeof d?.creator?.login !== 'string') continue
+    // "A Railway-created deployment of this SHA exists" — so once the expected
+    // creator is recorded for a SHA it sticks, whatever else deployed the same
+    // commit before or after it.
+    if (index[d.sha] !== creator) index[d.sha] = d.creator.login
+  }
+  return index
+}
+
 function observe(guard) {
   const workflowPath = path.join(ROOT, '.github', 'workflows', guard.workflow)
   const fileExists = existsSync(workflowPath)
@@ -364,10 +466,10 @@ function observe(guard) {
         '--workflow', guard.workflow,
         '--event', event,
         '--limit', '50',
-        '--json', 'conclusion,status,event,headBranch,createdAt,updatedAt',
+        '--json', 'conclusion,status,event,headBranch,headSha,createdAt,updatedAt',
       ])))
     }
-    const qualifying = selectQualifyingRuns(runs, guard)
+    const qualifying = selectQualifyingRuns(runs, guard, guard.provenance ? readDeploymentIndex(guard.provenance) : undefined)
     const success = qualifying.filter((r) => r.conclusion === 'success')
     return {
       fileExists: true,

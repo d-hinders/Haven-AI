@@ -34,8 +34,10 @@ jobs:
   # money-moving harness inline on every promotion PR (which would burn testnet
   # funds per-attempt and need the QA_* secrets in this PR-triggered workflow),
   # require that a GREEN `qa-dev.yml` run already COVERS the money-path code
-  # being promoted — produced by the nightly schedule or the post-deploy
-  # repository_dispatch. The harness itself stays out of the hot path.
+  # being promoted — produced by the nightly schedule, a manual dispatch, or
+  # (once #2404 lets this gate see them) the post-deploy `deployment_status`
+  # run that #2273 fires from the Railway deploy. The harness itself stays out
+  # of the hot path.
   #
   # The logic lives in scripts/ci/qa-freshness.mjs, not inline here, because
   # this is what replaced the in-session money-path approval pause (#1024) and

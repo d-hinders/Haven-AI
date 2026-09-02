@@ -3,7 +3,7 @@
  * the frontend allowance differential loop.
  *
  * Side-effect-free port of the on-chain reset arithmetic the AllowanceModule
- * applies inside `executeAllowanceTransfer`. The frontend's
+ * applies inside the contract's payment transfer path. The frontend's
  * `computeEffectiveAllowance` (in `../allowance-math`) is differential-tested
  * against this model.
  *

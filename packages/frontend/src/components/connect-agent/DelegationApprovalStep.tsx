@@ -18,7 +18,7 @@ import { WarningCallout } from './SetupNotices'
  * Step 4 on the DELEGATION rail (#1073).
  *
  * Same step, same position in the stepper, same summary-then-approve shape as
- * the legacy `LocalConnectionReady` — only the instrument differs: a passkey
+ * the retired legacy Safe approval step — only the instrument differs: a passkey
  * or owner signature over the budget instead of a Safe transaction. The user
  * approves where the rules are shown, and never leaves the modal to do it.
  *

@@ -248,9 +248,12 @@ Avoid:
 - “Haven generated/gave you the private key”
 
 In advanced setup, recovery, and x402 copy, disclose that the private signing key
-controls any funds already held in the agent wallet. Pausing or revoking Safe
-funding does not recover that balance; present sweep or recovery as a separate
-action where relevant.
+controls any funds already held in the agent wallet. For legacy Safe accounts,
+Haven no longer offers agent funding or revocation controls. If the owner is a
+known wallet, they can manage remaining permissions through Safe's own interface;
+for a passkey-only or unknown owner, do not promise that self-serve path. Removing
+a funding permission does not recover an agent-wallet balance, so present sweep or
+recovery as a separate action where relevant.
 
 ## Copy examples
 

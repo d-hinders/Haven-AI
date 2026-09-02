@@ -42,7 +42,7 @@ document for the remaining exploratory checklist.
 |---|---|
 | Base Sepolia money-flow invariants: settle, over-budget refusal (direct and x402), x402 settle, funded-but-undelivered crash/resume recovery, sweep recovery | `packages/qa-agent`; local `npm run qa:dev -w packages/qa-agent` or Actions `qa-dev.yml` |
 | Unmocked login/dashboard smoke against a Vercel preview + dev backend | `packages/frontend/e2e/live`; local `test:e2e:live` or Actions `qa-live.yml` |
-| Connect-agent modal: create setup → prompt → connected-local → approval screen, no secrets leaked | `e2e/connect-agent.spec.ts` |
+| Connect-agent modal for delegation accounts: create setup → prompt → connected-local → budget-approval screen, no secrets leaked | `e2e/connect-agent.spec.ts` |
 | Hosted-MCP agent/allowance/CTA states | `e2e/hosted-mcp.spec.ts` |
 | Mobile-viewport layout overflow on the primary authenticated routes | `e2e/navigation.mobile.spec.ts` (Pixel 5 emulation, gates every PR since #1770) |
 | Dialog/overlay layout overflow **at a mobile viewport** | `e2e/receive-modal.mobile.spec.ts` (Pixel 5, #1797). The three desktop callers of `measureDialogOverflow` run only at 1280px, where a dialog is least likely to overflow |
@@ -85,10 +85,10 @@ deliberately, not an unreachable one.
    dashboard cannot show this failure (it fires before Haven is contacted), so
    the connector's output is the only evidence — the waiting screen's recovery
    block now says so.
-3. **Run the connector** in that environment (`npx @haven_ai/connect@alpha …` or
+3. **Run the connector for a delegation account** in that environment (`npx @haven_ai/connect@alpha …` or
    the pasted prompt). Expect: credentials written under `~/.haven/agents/<id>/`,
    hosted MCP + `haven-signer` entries written to that runtime's config, and the
-   dashboard advancing to the approval screen. For Hermes, verify its
+   dashboard advancing to the delegation budget-approval screen. For Hermes, verify its
    `config.yaml` references `MCP_HAVEN_API_KEY` while the matching owner-only
    `.env` holds the value; do not copy secrets into the run report.
 4. **Approve, then activate MCP wiring** — approval, not activation, unlocks
@@ -102,7 +102,7 @@ deliberately, not an unreachable one.
    `haven_get_allowances` show identity, readiness, the Haven wallet, and the
    configured budget/live remaining. Do not sign, fund, or create a payment to
    verify setup.
-6. **Confirm a basic action** — approve the budget on-chain (wallet/passkey), then
+6. **Confirm a basic action** — approve the delegation budget in the modal, then
    have the agent do a small allowed action (e.g. a direct `haven_pay` within budget
    or an x402 call). Expect it to settle. An over-budget payment is **refused before
    it becomes signable**, by a different mechanism per path — see the #420 edge-case

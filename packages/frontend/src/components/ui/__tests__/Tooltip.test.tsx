@@ -146,8 +146,8 @@ describe('Tooltip reachability (#2038)', () => {
     const user = userEvent.setup({ delay: null })
     const openDetails = vi.fn()
     render(
-      // `AgentCard`'s real shape: the whole card is one composite link, and
-      // `McpServerName` renders inside it.
+      // A composite-card consumer can still embed `McpServerName`; this test
+      // keeps the tooltip from becoming an extra keyboard target there.
       <div role="link" tabIndex={0} onClick={openDetails} aria-label="View Research agent">
         <Tooltip label={LONG_LABEL}>
           <span data-testid="child">not recorded</span>

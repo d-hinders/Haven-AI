@@ -637,11 +637,11 @@ async function expectRowControls(row: Locator, expected: readonly string[], labe
  * baseline was a faithful photograph OF the bug. So the guard has to be
  * evaluated where the wrap happens, which is here, in the Linux run.
  *
- * Lines are read as height / line-height rather than by inspecting text: these
- * controls have no vertical padding, so a wrapped label is exactly 2x its
- * line-box and the ratio is unambiguous. Buttons only — the archived branch
- * deliberately pairs its control with a SENTENCE that is expected to reflow,
- * and pinning that would be the actual layout bug.
+ * Lines are read from the text range rather than inferred from button height:
+ * these controls expose an invisible 44px tap target while keeping their
+ * compact painted box. Buttons only — the archived branch deliberately pairs
+ * its control with a SENTENCE that is expected to reflow, and pinning that
+ * would be the actual layout bug.
  *
  * The seven non-archived branches satisfied it before #1909 too, which their
  * pre-fix baselines prove independently: a wrapped control would have made
@@ -657,13 +657,16 @@ async function expectRowControls(row: Locator, expected: readonly string[], labe
 async function expectRowControlsUnwrapped(row: Locator, label: string) {
   const lines = await row.getByRole('button').evaluateAll((els) =>
     els.map((el) => {
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      const textRects = Array.from(range.getClientRects())
       const box = el.getBoundingClientRect()
       const lineHeight = parseFloat(getComputedStyle(el).lineHeight)
       return {
         name: el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '',
         height: Math.round(box.height * 100) / 100,
         lineHeight,
-        lines: Math.round(box.height / lineHeight),
+        lines: Math.max(1, textRects.length),
       }
     }),
   )
@@ -671,7 +674,7 @@ async function expectRowControlsUnwrapped(row: Locator, label: string) {
     expect(
       control.lines,
       `${label}: "${control.name}" wrapped onto ${control.lines} lines ` +
-        `(${control.height}px against a ${control.lineHeight}px line box). An action ` +
+        `(${control.height}px button box; ${control.lineHeight}px line box). An action ` +
         `label is an atomic phrase; give it \`whitespace-nowrap\` or shorten it. ` +
         `Note this can be GREEN on macOS and RED here — that asymmetry is #1909.`,
     ).toBe(1)
@@ -742,18 +745,9 @@ test.describe('driven focus-state visual regression', () => {
   // in any state, resting included. #1831 said so; this closes the focus half
   // only, and the resting half is filed separately.
   //
-  // #2264: TWO here, not three. `Revoke` is a legacy-rail control —
-  // `canUseWalletActions && !isDelegationAgent` (`AgentCard.tsx`), because a
-  // Safe revoke is an AllowanceModule teardown and on a delegation agent the
-  // whole shutdown is Remove (#1402). It rendered against the shared fixture
-  // only because that fixture had no `account_type` and `railOf` read it as
-  // legacy; with the live-rail default it does not exist, and this loop failed
-  // on `toHaveCount(1)`. It moves to `seededControls` below with an explicit
-  // opt-DOWN, which is the honest place for a capture of a retired-rail screen.
-  //
-  // `Edit` and `Pause` stay: both are rail-independent. Their BASELINES move,
-  // because what is captured is the ROW — and the third control beside them is
-  // now `Remove`, which is what a live-rail user sees.
+  // #2258: `Revoke` was a legacy Safe control and is deleted with the retired
+  // agent-management surface. `Edit` and `Pause` stay for live delegation
+  // agents; their baselines capture the row with the live `Remove` control.
   const rowControls = [
     { slug: 'edit', label: 'Edit', tone: 'brand' },
     { slug: 'pause', label: 'Pause', tone: 'brand' },
@@ -778,11 +772,12 @@ test.describe('driven focus-state visual regression', () => {
       await expectFocusedAndIndicated(page, target, `AgentCard action row · ${control.label}`)
 
       // The ROW, not the control: these rings are `ring-2` with no offset on a
-      // 16px-tall inline link, so ~2px of every ring falls outside the
-      // control's own box. A control-sized capture would clip the indicator it
-      // exists to photograph. The row also holds the neighbouring controls, so
-      // a ring bleeding into its neighbour is visible here and would not be in
-      // a tighter crop.
+      // compact text action, so ~2px of every ring falls outside the control's
+      // own box. The transparent 44px tap-target pseudo-element changes hit
+      // testing without painting pixels, so a control-sized capture would
+      // still clip the indicator it exists to photograph. The row also holds
+      // the neighbouring controls, so a ring bleeding into its neighbour is
+      // visible here and would not be in a tighter crop.
       await expect(actionRow).toHaveScreenshot(
         `focus-agentcard-actions-${control.slug}-desktop.png`,
         SNAPSHOT_OPTIONS,
@@ -857,28 +852,6 @@ test.describe('driven focus-state visual regression', () => {
       rowControls: ['Edit Delegation agent', 'Pause Delegation agent', 'Remove Delegation agent'],
       tone: 'danger',
       label: 'Remove (delegation)',
-    },
-    {
-      slug: 'revoke',
-      // #2264: the opt-DOWN. `Revoke` is the LEGACY rail's shutdown control and
-      // renders for no other kind of account, so its capture has to name the
-      // rail it belongs to instead of inheriting one. Same id and name as the
-      // shared agent, so the only difference from the pre-#2264 baseline is the
-      // rail marker the fixture used to omit.
-      //
-      // `allowances: []` travels with it: `GET /agents` returns the derived
-      // projection for a `delegator_hybrid` agent and `[]` for every other, and
-      // the `agent_allowances` read surface is retired (#1440/#2020), so a
-      // legacy agent carrying budget rows is emitted by nothing (#2224).
-      agent: agentState({ account_type: 'safe', allowances: [] }),
-      control: `Revoke ${testAgent.name}`,
-      rowControls: [
-        `Edit ${testAgent.name}`,
-        `Pause ${testAgent.name}`,
-        `Revoke ${testAgent.name}`,
-      ],
-      tone: 'danger',
-      label: 'Revoke (legacy)',
     },
     {
       slug: 'remove-revoked',
@@ -1004,7 +977,8 @@ test.describe('driven focus-state visual regression', () => {
     await expectRowControlsUnwrapped(actionRow, 'AgentCard action row · Restore to list @ 390px')
 
     const overflow = await actionRow.evaluate((rowEl) => {
-      const card = rowEl.closest('[role="link"]') as HTMLElement
+      const card = rowEl.parentElement as HTMLElement
+      if (!card) throw new Error('the archived action row has no AgentCard parent')
       return {
         row: rowEl.scrollWidth - rowEl.clientWidth,
         card: card.scrollWidth - card.clientWidth,

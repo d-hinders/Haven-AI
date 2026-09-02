@@ -21,24 +21,24 @@ const {
   mockUseUserSafes,
   mockUseAgents,
   mockUseSafeDetails,
-  mockUseOnChainAllowances,
   mockUseDelegationCustodyProof,
+  mockUseRetiredRailOwnerAccess,
 } = vi.hoisted(() => ({
   mockUseUserSafes: vi.fn(),
   mockUseAgents: vi.fn(),
   mockUseSafeDetails: vi.fn(),
-  mockUseOnChainAllowances: vi.fn(),
   mockUseDelegationCustodyProof: vi.fn(),
+  mockUseRetiredRailOwnerAccess: vi.fn(),
 }))
 
 vi.mock('@/hooks/useUserSafes', () => ({ useUserSafes: () => mockUseUserSafes() }))
 vi.mock('@/hooks/useAgents', () => ({ useAgents: () => mockUseAgents() }))
 vi.mock('@/hooks/useSafeDetails', () => ({ useSafeDetails: () => mockUseSafeDetails() }))
-vi.mock('@/hooks/useOnChainAllowances', () => ({
-  useOnChainAllowances: () => mockUseOnChainAllowances(),
-}))
 vi.mock('@/hooks/useDelegationCustodyProof', () => ({
   useDelegationCustodyProof: () => mockUseDelegationCustodyProof(),
+}))
+vi.mock('@/hooks/useRetiredRailOwnerAccess', () => ({
+  useRetiredRailOwnerAccess: (...args: unknown[]) => mockUseRetiredRailOwnerAccess(...args),
 }))
 
 import CustodyPage from '../page'
@@ -84,28 +84,18 @@ const ACTIVE_BUDGET = {
 }
 
 /** The two sentences #2106 exists to stop reaching a delegation-rail user. */
-const ALLOWANCE_MODULE_COPY = 'AllowanceModule not enabled'
-const NO_ALLOWANCES_COPY = 'No on-chain agent allowances on this Safe.'
-
 beforeEach(() => {
   vi.clearAllMocks()
   mockUseAgents.mockReturnValue({ agents: [AGENT] })
-  // Defaults describe the LEGACY reads. The delegation branch must not touch
-  // them, and leaving them populated is deliberate: if the branch leaked, the
-  // AllowanceModule copy would render and the absence assertions would fail.
   mockUseSafeDetails.mockReturnValue({
     details: { address: safe(null).safe_address, owners: [DELEGATE, MERCHANT], threshold: 2, nonce: 3 },
     loading: false,
     error: null,
     refetch: vi.fn(),
   })
-  mockUseOnChainAllowances.mockReturnValue({
-    data: new Map(),
-    chainTimeSec: 1_760_000_000,
-    loading: false,
-    moduleEnabled: false,
-    onChainDelegates: [],
-    refetch: vi.fn(),
+  mockUseRetiredRailOwnerAccess.mockReturnValue({
+    ...mockUseSafeDetails(),
+    ownerAccess: 'unknown',
   })
   mockUseDelegationCustodyProof.mockReturnValue({
     signers: {
@@ -129,12 +119,12 @@ describe('/custody — delegation rail (#2106)', () => {
 
   it('does NOT render the AllowanceModule copy', () => {
     render(<CustodyPage />)
-    expect(screen.queryByText(ALLOWANCE_MODULE_COPY)).toBeNull()
+    expect(screen.queryByText(/AllowanceModule/)).toBeNull()
   })
 
   it('does NOT render the "no on-chain agent allowances" copy', () => {
     render(<CustodyPage />)
-    expect(screen.queryByText(NO_ALLOWANCES_COPY)).toBeNull()
+    expect(screen.queryByText(/on-chain agent allowances/)).toBeNull()
   })
 
   it('renders the signed budget delegation as the spend control', () => {
@@ -283,21 +273,41 @@ describe('/custody — legacy Safe rail is unchanged (#2106 control)', () => {
     expect(text).toContain('Threshold: 2 of 2')
   })
 
-  it('still renders the AllowanceModule reads it always did', () => {
+  it('keeps legacy account reads while retiring the agent spending surface', () => {
     render(<CustodyPage />)
-    expect(screen.getByText(ALLOWANCE_MODULE_COPY)).toBeTruthy()
-    expect(screen.getByText(NO_ALLOWANCES_COPY)).toBeTruthy()
+    expect(screen.getByText('Haven no longer sends payments from this account.')).toBeTruthy()
+    expect(screen.queryByText(/AllowanceModule/)).toBeNull()
+    expect(screen.queryByText(/on-chain agent allowances/)).toBeNull()
   })
 
   it('still offers the Safe{Wallet} deep link', () => {
+    mockUseRetiredRailOwnerAccess.mockReturnValue({
+      ...mockUseSafeDetails(),
+      ownerAccess: 'wallet',
+    })
     const { container } = render(<CustodyPage />)
     const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '')
-    expect(hrefs.some((h) => h.includes('app.safe.global'))).toBe(true)
+    expect(hrefs).toContain(
+      `https://app.safe.global/home?safe=basesep:${safe(null).safe_address}`,
+    )
   })
 
-  it('still marks the recipient as advisory, which is true on this rail', () => {
+  it('does not offer Safe{Wallet} to an unknown or passkey-only owner', () => {
+    for (const ownerAccess of ['unknown', 'passkey-only'] as const) {
+      mockUseRetiredRailOwnerAccess.mockReturnValue({
+        ...mockUseSafeDetails(),
+        ownerAccess,
+      })
+      const { container, unmount } = render(<CustodyPage />)
+      const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '')
+      expect(hrefs.some((h) => h.includes('app.safe.global'))).toBe(false)
+      unmount()
+    }
+  })
+
+  it('does not present the retired rail as an active spending control', () => {
     const { container } = render(<CustodyPage />)
-    expect(container.textContent ?? '').toContain('ⓘ not on-chain')
+    expect(container.textContent ?? '').toContain('Legacy agent spending is retired in Haven')
   })
 })
 
@@ -327,7 +337,8 @@ describe('"What Haven cannot do" is rail-correct (#2106)', () => {
   it('keeps the Safe-rail wording for a Safe-rail user', () => {
     const lines = havenCannotLines([{ account_type: null }]).join(' ')
     expect(lines).toContain(SAFE_TX_CLAIM)
-    expect(lines).toContain(SAFE_APP_CLAIM)
+    expect(lines).toContain('supported Safe owner')
+    expect(lines).not.toContain(SAFE_APP_CLAIM)
   })
 
   it('keeps the two rail-independent claims on both rails', () => {

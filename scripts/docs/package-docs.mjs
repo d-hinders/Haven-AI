@@ -153,7 +153,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/connect/src/**'],
-    'last-verified': '2026-08-28',
+    'last-verified': '2026-09-01',
   },
   {
     doc: 'packages/cli/README.md',

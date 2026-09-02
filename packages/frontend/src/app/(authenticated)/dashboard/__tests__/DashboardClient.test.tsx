@@ -107,6 +107,7 @@ const SAFE = {
   chain_id: 8453,
   is_default: true,
   created_at: '2026-05-12T00:00:00Z',
+  account_type: 'delegator_hybrid' as const,
 }
 
 function mockBaseState() {
@@ -205,6 +206,28 @@ describe('DashboardClient', () => {
     expect(screen.getByText('Active accounts')).toBeInTheDocument()
   })
 
+  it('keeps a legacy-only dashboard readable without a Connect agent CTA', () => {
+    const legacySafe = { ...SAFE, account_type: 'safe' as const }
+    mockUseAuth.mockReturnValue({
+      user: {
+        id: 'user-1',
+        name: 'Ada',
+        email: 'ada@example.com',
+        wallet_address: '0x5555555555555555555555555555555555555555',
+        safes: [legacySafe],
+      },
+      activeSafe: legacySafe,
+    })
+    mockUseAgents.mockReturnValue({ agents: [], loading: false, refetch: vi.fn() })
+
+    render(<DashboardClient />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument()
+    expect(screen.getByText(/agent connections are retired/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Connect agent' })).toBeNull()
+    expect(screen.queryByText('Onboarding guide')).toBeNull()
+  })
+
   /**
    * #1989 (epic #1440): the dashboard's two legacy-Safe spend/approval
    * affordances are GONE — the hero's Send button (it opened `SendModal`, which
@@ -223,6 +246,17 @@ describe('DashboardClient', () => {
    * put either affordance back and it goes red here.
    */
   it('offers neither a Send affordance nor an approvals route, even for a funded legacy Safe with pending approvals', () => {
+    const legacySafe = { ...SAFE, account_type: 'safe' as const }
+    mockUseAuth.mockReturnValue({
+      user: {
+        id: 'user-1',
+        name: 'Ada',
+        email: 'ada@example.com',
+        wallet_address: '0x5555555555555555555555555555555555555555',
+        safes: [legacySafe],
+      },
+      activeSafe: legacySafe,
+    })
     mockUseDashboardOverview.mockReturnValue({
       data: {
         totals: { usd: 1234.56, eur: 1100 },
@@ -521,9 +555,9 @@ describe('DashboardClient', () => {
             name: 'Ada',
             email: 'ada@example.com',
             wallet_address: null,
-            safes: [SAFE],
+            safes: [{ ...SAFE, account_type: 'safe' as const }],
           },
-          activeSafe: SAFE,
+          activeSafe: { ...SAFE, account_type: 'safe' as const },
           passkeys: [
             {
               id: 'passkey-1',
@@ -611,8 +645,8 @@ describe('DashboardClient', () => {
     })
 
     it('does not show the nudge for a funded account that is not on the delegation rail', () => {
-      // mockBaseState() default SAFE has no account_type (legacy rail) and a
-      // non-zero balance.
+      // mockBaseState() defaults to the live delegation rail; legacy cases
+      // supply an explicit `account_type: 'safe'` fixture.
       render(<DashboardClient />)
 
       expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()

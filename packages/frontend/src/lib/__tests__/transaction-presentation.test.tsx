@@ -48,7 +48,7 @@ describe('transaction presentation', () => {
 
     render(transactionMovement(sweep))
 
-    expect(screen.getByText('Research assistant delegate')).toBeInTheDocument()
+    expect(screen.getByText('Research assistant')).toBeInTheDocument()
     expect(screen.getByText('Main Haven wallet')).toBeInTheDocument()
   })
 

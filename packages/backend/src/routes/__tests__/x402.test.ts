@@ -6,7 +6,6 @@ import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
 const { mockQuery, allowanceMocks, fiatMocks, evidenceMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   allowanceMocks: {
-    getTokenAllowance: vi.fn(),
     getTokenBalance: vi.fn(),
   },
   fiatMocks: {
@@ -323,7 +322,6 @@ describe('x402 routes', () => {
   })
 
   it('creates a funding intent to the delegate and records merchant metadata', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
 
     primeDb(
       AUTH,
@@ -378,7 +376,6 @@ describe('x402 routes', () => {
   })
 
   it('persists mcpCallContext into the legacy-rail intent metadata (#1307 write path)', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
 
     primeDb(
       AUTH,
@@ -423,7 +420,6 @@ describe('x402 routes', () => {
     // zero delegate balance, totalCoverage == remaining, so amount == remaining
     // sits exactly on the inclusive edge — it must execute, not 422 (insufficient)
     // or 202 (queue). A `>=` slip in decideCoverage would break precisely here.
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.getTokenBalance.mockResolvedValueOnce(0n)
 
     primeDb(AUTH, ...POLICY_ROUTES, insertIntent({ id: PAYMENT_ID, expires_at: new Date('2026-05-10T20:00:00.000Z'), amount_raw: '20000' }))
@@ -450,7 +446,6 @@ describe('x402 routes', () => {
   })
 
   it('records one-shot x402 signatures without marking the payment submitted before execution', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.02, eur: 0.02 })
     evidenceMocks.tryRecordMachinePaymentEvidenceBaseById.mockResolvedValueOnce(undefined)
 
@@ -498,7 +493,6 @@ describe('x402 routes', () => {
   // the invariant is now strictly stronger — the delegate is never funded at
   // all, for any amount, on this rail.
   it('funds the delegate with EXACTLY the challenge amount (#716 invariant)', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.02, eur: 0.02 })
     evidenceMocks.tryRecordMachinePaymentEvidenceBaseById.mockResolvedValueOnce(undefined)
 
@@ -537,7 +531,6 @@ describe('x402 routes', () => {
   })
 
   it('rejects an idempotency replay whose amount differs from the stored intent (#716 guard)', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
 
     primeDb(
       AUTH,
@@ -571,7 +564,6 @@ describe('x402 routes', () => {
   })
 
   it('does not overwrite one-shot x402 terminal state after execution failures', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
 
     primeDb(
       AUTH,
@@ -608,7 +600,6 @@ describe('x402 routes', () => {
   })
 
   it('does not record x402 evidence when a one-shot confirmation loses a terminal-state race', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.02, eur: 0.02 })
 
     primeDb(
@@ -770,14 +761,12 @@ describe('x402 routes', () => {
 
     expect(blankResponse.statusCode).toBe(400)
     expect(blankResponse.json().error).toBe('Amount (atomic units) is required')
-    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     // Every rejected request only ever reached auth — none of the malformed
     // amounts triggered any further query.
     expect(sqlCalls().every((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)
   })
 
   it('returns an existing pending signature intent for duplicate idempotency keys', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
 
     primeDb(
       AUTH,
@@ -808,7 +797,6 @@ describe('x402 routes', () => {
   })
 
   it('refreshes an expired duplicate pending x402 intent for the same idempotency key', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
 
     primeDb(
       AUTH,
@@ -857,7 +845,6 @@ describe('x402 routes', () => {
 
   it('refreshes stale sign data when a duplicate pending intent has an old allowance nonce', async () => {
     const refreshedHash = `0x${'22'.repeat(32)}`
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 8 })
 
     primeDb(
       AUTH,
@@ -895,7 +882,6 @@ describe('x402 routes', () => {
   })
 
   it('reloads rail-scoped existing x402 intents after insert idempotency conflicts', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
 
     primeDb(
       AUTH,
@@ -928,7 +914,6 @@ describe('x402 routes', () => {
   })
 
   it('queues over-allowance x402 payments once with rail metadata', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     // Delegate already holds enough to satisfy the shortfall after the
     // top-up, so the pre-flight insufficient-funds check passes and we
     // fall through into the existing over-budget approval-queue path.
@@ -973,7 +958,6 @@ describe('x402 routes', () => {
     // the agent in a dead-end "signed but won't settle" state. The new
     // pre-flight fails fast with a structured error the agent can act on
     // (next_action=fund_safe_or_raise_allowance).
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.getTokenBalance.mockResolvedValueOnce(0n)
 
     primeDb(AUTH, ...POLICY_ROUTES)
@@ -1012,7 +996,6 @@ describe('x402 routes', () => {
     // Boundary case: cover = amount - 1. The check must reject (strict >),
     // not silently round to "close enough", or merchant settlement would
     // revert downstream.
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.getTokenBalance.mockResolvedValueOnce(9_999n)
 
     primeDb(AUTH, ...POLICY_ROUTES)
@@ -1044,7 +1027,6 @@ describe('x402 routes', () => {
     // settle the merchant payment, even a zero remaining allowance must NOT
     // fire the insufficient-funds short-circuit on its own. The over-budget
     // approval-queue path (or the happy-path sign step) is what should run.
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.getTokenBalance.mockResolvedValueOnce(50_000n)
 
     primeDb(
@@ -1080,7 +1062,6 @@ describe('x402 routes', () => {
     // Make sure a transient RPC failure on the balance read surfaces as a
     // distinct 502 from the allowance-read failure — agents and dashboards
     // distinguishing the two read paths can pick the right retry strategy.
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.getTokenBalance.mockRejectedValueOnce(new Error('rpc timeout'))
 
     primeDb(AUTH, ...POLICY_ROUTES)
@@ -1136,7 +1117,6 @@ describe('x402 routes', () => {
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
     // Confirms the short-circuit happened BEFORE any allowance read.
-    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
   })
 
   it('returns executed approvals as ready for the original x402 retry', async () => {
@@ -1167,11 +1147,9 @@ describe('x402 routes', () => {
     // surfaced through this entry point either.
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
-    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
   })
 
   it('returns the existing approval when an over-allowance insert hits an idempotency conflict', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     // Delegate balance covers the shortfall so the pre-flight check passes
     // and we exercise the over-budget idempotency-conflict path.
     allowanceMocks.getTokenBalance.mockResolvedValueOnce(20_000n)

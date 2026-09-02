@@ -1219,7 +1219,7 @@ export default function DesignSystemPage() {
             <p className="text-sm text-[var(--v2-ink-muted)]">
               Send from this account with one approval. No network fee for you.
             </p>
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <label className="sr-only" htmlFor="ds-send-amount">
                 Amount
               </label>
@@ -1234,7 +1234,7 @@ export default function DesignSystemPage() {
               <label className="sr-only" htmlFor="ds-send-token">
                 Token
               </label>
-              <Select id="ds-send-token" defaultValue="usdc" className="w-28">
+              <Select id="ds-send-token" defaultValue="usdc" className="sm:w-28 sm:shrink-0">
                 <option value="usdc">USDC</option>
                 <option value="eth">ETH</option>
               </Select>

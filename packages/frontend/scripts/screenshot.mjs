@@ -1875,6 +1875,117 @@ function sweepRecoveryScenario(description, response, marker, { delayMs = 0 } = 
 // dashboard surfaces. The screenshot registry below only drives API-backed
 // and browser-visible states that remain supported.
 
+
+/**
+ * #2422 — the connector-repair hint, in both of its branches.
+ *
+ * `connectorPackage` present is the normal case (the backend hands out the
+ * channel it is configured for, `@alpha` in production). Absent is the
+ * rolling-deploy skew where a NEW frontend polls an OLD backend that predates
+ * the `connector_package` field — the branch that renders a command the user
+ * has to reconstruct, and the one the design review asked to see rendered.
+ */
+function connectorRepairHintScenarios() {
+  const build = (connectorPackage) => ({
+    description:
+      connectorPackage
+        ? 'Connect agent modal, approve screen, runtime_config_unreadable repair hint WITH the server-provided connector spec (#2422)'
+        : 'Connect agent modal, approve screen, runtime_config_unreadable repair hint with NO connector spec — rolling-deploy skew (#2422)',
+    api(apiPath, method) {
+      if (apiPath === '/agent-connection-setups' && method === 'POST') {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          status: 'connected_local',
+          setup_token: CONNECT_SETUP_TOKEN,
+          expires_at: '2099-01-01T00:00:00.000Z',
+          connector_command: CONNECT_COMMAND,
+          ...(connectorPackage ? { connector_package: connectorPackage } : {}),
+          setup_prompt: 'Please connect this workspace to Haven.',
+        }
+      }
+      if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          agent_id: 'agent-fixture-1',
+          status: 'connected_local',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          agent: { name: 'Research agent', description: 'Pays for research APIs' },
+          haven_wallet: {
+            id: FIXTURE_SAFE.id,
+            name: FIXTURE_SAFE.name,
+            address: FIXTURE_SAFE.safe_address,
+            chain_id: FIXTURE_SAFE.chain_id,
+            network: 'Base Sepolia',
+          },
+          agent_budget: [
+            {
+              id: 'budget-1',
+              token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+              token_symbol: 'USDC',
+              allowance_amount: '25000000',
+              reset_period_min: 1440,
+            },
+          ],
+          delegate_address: '0x3333333333333333333333333333333333333333',
+          // The ONE field that selects the sentence under review. Everything
+          // else mirrors `connect-agent-approve` so the diff between the two
+          // captures is the hint and nothing else.
+          ...(connectorPackage ? { connector_package: connectorPackage } : {}),
+          install_status: {
+            runtime: 'cursor',
+            runtime_mcp_mode: 'local_stdio',
+            local_mcp_configured: true,
+            local_mcp_acknowledged: true,
+            credential_files_written: true,
+            skill_installed: true,
+            restart_required: true,
+            error_code: 'runtime_config_unreadable',
+          },
+          approval: { status: 'not_started', safe_tx_hash: null, tx_hash: null },
+        }
+      }
+      if (apiPath === '/agents/agent-fixture-1/account-signers') {
+        return {
+          account_address: FIXTURE_SAFE.safe_address,
+          chain_id: FIXTURE_SAFE.chain_id,
+          owner_address: null,
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      await dialog.getByLabel('Agent name').fill('Research agent')
+      await dialog.getByRole('button', { name: 'Set agent budget' }).click()
+      await dialog.getByPlaceholder('Amount').fill('25')
+      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
+      await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
+
+      await dialog.getByRole('button', { name: 'Approve budget' }).waitFor({ timeout: 30_000 })
+
+      // The hint lives in the COLLAPSED-by-default verification disclosure, so
+      // open it: a capture of the resting state would show none of it and
+      // would be evidence that cannot show the defect.
+      await dialog.getByText(/Local connection verified/).click()
+      await dialog.getByText('Public address').waitFor({ timeout: 10_000 })
+      // Fail the run rather than shoot the wrong state: without this the
+      // capture silently falls back to a generic runtime-status sentence.
+      await dialog.getByText(/could not be read/).waitFor({ timeout: 10_000 })
+      await shoot(dialog, 'repair-hint')
+    },
+  })
+
+  return {
+    'connect-agent-repair-hint': build('@haven_ai/connect@alpha'),
+    'connect-agent-repair-hint-no-spec': build(null),
+  }
+}
+
 export const SCENARIOS = {
   /**
    * #2043: the agent list with NOTHING unrecorded — the note's absent half.
@@ -2696,6 +2807,14 @@ export const SCENARIOS = {
       await shoot(dialog, 'approve-verification-open')
     },
   },
+  // #2422: the repair hint's TWO branches, which nothing else captures.
+  // `connect-agent-approve` pins a healthy install_status, so the
+  // `runtime_config_unreadable` sentence in ConnectionVerificationFooter's
+  // "Runtime setup" row has never had rendered evidence. Built as a factory
+  // over one variable — whether the backend sent `connector_package` — because
+  // the whole point of the change is that those two renders must differ, and a
+  // reviewer has to see both side by side.
+  ...connectorRepairHintScenarios(),
   'retired-rail-account': {
     description:
       'Account detail for a LEGACY Safe account after the rail retirement (#1989) — RetiredRailNotice present, no Send action',

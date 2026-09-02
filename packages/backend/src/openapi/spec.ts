@@ -5929,6 +5929,16 @@ export const openapiSpec = {
            * REQUIRED, not optional, and deliberately so: the backend always
            * emits it, and making it optional would push a fallback literal
            * back into the client — the exact restatement this field removes.
+           *
+           * The generated type is therefore non-nullable `string`, while the
+           * frontend still handles its ABSENCE (`setup-copy.ts`'s optional
+           * `connectorPackage`). That mismatch is intentional and is not a
+           * type to loosen: the contract says every backend that speaks this
+           * spec sends the field, and the defensive branch exists only for the
+           * minutes of a rolling deploy in which a NEW frontend polls an OLD
+           * backend that predates it. Loosening the type would license a
+           * permanent client-side fallback; deleting the branch would render
+           * `undefined` into a command during that window.
            */
           connector_package: { type: 'string', pattern: '^@haven_ai/connect@[a-z][a-z0-9-]{0,31}$' },
           setup_prompt: { type: 'string' },

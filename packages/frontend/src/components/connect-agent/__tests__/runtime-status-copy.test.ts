@@ -137,13 +137,26 @@ describe('runtimeStatusHelper takes the connector spec from the server (#2422)',
   it('invents no package spec when the server sent none', () => {
     // Rolling-deploy skew against a backend that predates connector_package.
     // A guessed channel is worse than an unspelled command: the user runs the
-    // wrong connector and it looks like it worked.
+    // wrong connector and it LOOKS like it worked.
     const helper = runtimeStatusHelper(installWith('runtime_config_unreadable'))
 
     expect(helper).not.toContain('@haven_ai/connect')
-    expect(helper).not.toContain('npx')
-    // The actionable part still survives.
-    expect(helper).toContain('--doctor --repair --runtime cursor')
+    expect(helper).not.toMatch(/@(alpha|dev|latest|beta|next)\b/)
     expect(helper).toContain('Fix the file')
+  })
+
+  it('still gives a RUNNABLE instruction when the server sent none', () => {
+    // #2422 design review, finding 1: bare flags are not an instruction — the
+    // user has nothing to attach them to. The fallback must name a command,
+    // and the only one guaranteed correct for their machine is the invocation
+    // they already ran, with the setup flag swapped out.
+    const helper = runtimeStatusHelper(installWith('runtime_config_unreadable'))
+
+    expect(helper).toContain('re-run the same `npx` connector command you used for setup')
+    expect(helper).toContain('in place of its `--setup` flag')
+    expect(helper).toContain('--doctor --repair --runtime cursor')
+    // It must still warn against re-running setup UNCHANGED (#1719: the token
+    // is spent and a fresh connection mints a second agent).
+    expect(helper).toMatch(/unchanged/)
   })
 })

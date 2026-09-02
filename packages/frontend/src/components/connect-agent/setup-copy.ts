@@ -96,10 +96,18 @@ export function runtimeStatusHelper(
   // connector never reported one.
   if (install.error_code === 'runtime_config_unreadable') {
     const repairArgs = `--doctor --repair --runtime ${install.runtime ?? '<your agent client>'}`
-    const repair = connectorPackage
-      ? `run \`npx ${connectorPackage} ${repairArgs}\``
-      : `run the Haven connector with \`${repairArgs}\``
-    return `The agent client config on that machine could not be read, so Haven left it untouched. Fix the file the connector named, then ${repair} there — not the setup command, which this agent no longer needs.`
+    const lead =
+      'The agent client config on that machine could not be read, so Haven left it untouched. Fix the file the connector named, then '
+    // The spec the server handed out: spell the whole command.
+    if (connectorPackage) {
+      return `${lead}run \`npx ${connectorPackage} ${repairArgs}\` there — not the setup command, which this agent no longer needs.`
+    }
+    // #2422 design review: rolling-deploy skew. Bare FLAGS are not an
+    // instruction — the user has nothing to attach them to — and inventing a
+    // channel is worse still, because a plausible-but-wrong connector runs and
+    // LOOKS like it worked. The third option delegates to the one invocation
+    // that is guaranteed correct for their machine: the one they already ran.
+    return `${lead}re-run the same \`npx\` connector command you used for setup, with \`${repairArgs}\` in place of its \`--setup\` flag — not the setup command unchanged, which this agent no longer needs.`
   }
   if (install.error_code === 'runtime_config_write_failed') return 'Haven could not update the agent client config on that machine. Check the connector output, then run the setup command again.'
   if (install.error_code === 'claude_code_config_failed') return 'Claude Code did not accept the Haven tools entry. Run the setup command inside Claude Code again.'

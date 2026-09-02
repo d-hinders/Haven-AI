@@ -16,9 +16,8 @@ export const testRecipientAddress = '0x2222222222222222222222222222222222222222'
  *
  * The default is now the live rail and a legacy spec opts DOWN explicitly, the
  * same inversion `scripts/screenshot.mjs` was corrected to across #2205/#2227/
- * #2233. `legacySafe` below is the sanctioned opt-down shape; the
- * `optDownToLegacyRail` page helper #2264 built on it served exactly one
- * spec and was retired with #2284 when that spec moved to the live rail.
+ * #2233. `legacySafe` below is the sanctioned opt-down shape, and
+ * `optDownToLegacyRail` the page helper built on it.
  *
  * The value is `'safe'` / `'delegator_hybrid'` and never `null` or absent:
  * migration `041_hybrid_accounts.ts` declares the column `VARCHAR(32) NOT NULL
@@ -518,6 +517,65 @@ export async function mockHavenApi(page: Page) {
     }
 
     await fulfillUnmockedRoute(route, method, path)
+  })
+}
+
+/**
+ * Opt this page DOWN to the retired AllowanceModule rail (#2264).
+ *
+ * Register it AFTER `mockHavenApi` — Playwright matches the most recently
+ * registered handler first, and this one defers to the shared fixture for every
+ * route it does not answer, via `route.fallback()`. Same layering as
+ * `focus-visible.visual.spec.ts`'s `seedAgents`, for the same reason: the
+ * shared fixture is read by a dozen specs, so a legacy account must not arrive
+ * there.
+ *
+ * BOTH sides move together. `account_type` is not an `agents` column — it is
+ * selected as `us.account_type` off the joined `user_safes` row — so a legacy
+ * account with a `delegator_hybrid` agent pointing at it is a row no query can
+ * produce (#2202). The agent's `allowances` empties for a related reason:
+ * `GET /agents` returns the derived delegation projection for a
+ * `delegator_hybrid` agent and `[]` for every other, and the `agent_allowances`
+ * read surface it used to mirror is retired (#1440/#2020), so a legacy agent
+ * carrying budget rows is union-legal on the wire and emitted by nothing
+ * (#2224).
+ *
+ * Use it only where the retired rail IS the subject, and say why at the call
+ * site. Anything rail-independent stays on the default. Its caller today is
+ * `agent-panel-states.visual.spec.ts`'s retirement-boundary capture (#2258);
+ * `wallet-button-collapsed-states.visual.spec.ts` left it for the live rail
+ * (#2284), so a spec reaching for it is making a deliberate legacy claim.
+ */
+export async function optDownToLegacyRail(page: Page) {
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() !== 'GET') return route.fallback()
+
+    if (path === '/auth/me') {
+      await fulfillJson(route, { ...testUser, safes: [legacySafe] })
+      return
+    }
+    if (path === '/agents') {
+      await fulfillJson(route, {
+        agents: [{ ...testAgent, account_type: 'safe', allowances: [] }],
+      })
+      return
+    }
+    // The dashboard's own copy of the same projection, and it empties for the
+    // same reason: `routes/dashboard.ts` fills `allowancesByAgent` from the
+    // derived delegation view only for a `delegator_hybrid` account and hands
+    // every other agent `[]`. Left on the shared fixture, an opted-down page
+    // would serve a 250 USDC budget row for an account the backend would
+    // answer with none — the very shape this helper exists to keep out.
+    if (path === '/dashboard/overview') {
+      await fulfillJson(route, {
+        ...dashboardOverview,
+        agents: dashboardOverview.agents.map((agent) => ({ ...agent, allowances: [] })),
+      })
+      return
+    }
+    await route.fallback()
   })
 }
 

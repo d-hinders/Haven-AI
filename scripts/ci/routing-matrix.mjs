@@ -268,6 +268,18 @@ export const ROUTING_MATRIX = [
     why: 'Its self-test. Widening the exemption regex without running the gate is the failure this prevents.',
   },
   {
+    files: ['scripts/ci/visual-baseline-inventory.mjs'],
+    expect: ['code', 'frontend'],
+    kind: CONTRACT,
+    why: "The visual gate's honesty instrument (#2318). It reads packages/frontend's committed baselines, and the job that prints it beside the pixel tick is gated on the frontend surface — so a pull request touching only this file has to route to frontend_checks or the guard never runs on the change weakening it.",
+  },
+  {
+    files: ['scripts/ci/visual-baseline-inventory.test.mjs'],
+    expect: ['code', 'frontend'],
+    kind: CONTRACT,
+    why: 'Its self-test. The inventory refuses an empty baseline tree; a test that stops checking that refusal lets the pixel gate pass having compared nothing.',
+  },
+  {
     files: ['scripts/network-map-pins.test.mjs'],
     expect: ['code', 'backend', 'sdk', 'signer', 'connect', 'mcp', 'mcp_server'],
     kind: CONTRACT,

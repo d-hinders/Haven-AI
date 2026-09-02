@@ -118,9 +118,20 @@ export interface X402ExpectedPayment {
    * signing path allowed for this intent.
    */
   typedDataHash?: string
-  /** Resource URL that was funded by hosted haven_x402_authorize. */
+  /**
+   * Resource URL of the x402 payment Haven prepared. On the hosted surface
+   * that is `haven_pay_x402_quote` — `buildX402SigningContext` in
+   * `mcp-server/src/tools.ts` relays `intent.resourceUrl` here, and
+   * `haven_resume_x402_payment` re-emits the same context. Checked against
+   * the merchant header's resource in `assertX402MatchesExpected`.
+   */
   resourceUrl: string
-  /** Merchant recipient that was funded by hosted haven_x402_authorize. */
+  /**
+   * Merchant recipient of that same prepared payment (`intent.merchantTo`,
+   * same source). Checked against the header's `payTo` in
+   * `assertX402MatchesExpected` and, for an erc7710 settlement child,
+   * against the child's payee caveat in `verifySettlementChild`.
+   */
   merchantTo: string
   /** Atomic amount funded for the merchant header. */
   amount: string

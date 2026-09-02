@@ -1,5 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   OPERATOR_VERIFY_LABEL,
   allClosingRefs,
@@ -189,11 +191,13 @@ test('REGRESSION (#2327): naming the mode is not asserting a state, in either di
 test('there is NO escape from the keyword — a fence or a quote does not help', () => {
   // Measured for the surfaces that matter most: `7f7102ff` wrote the keyword
   // inside a code span in a COMMIT MESSAGE — which nothing renders as Markdown —
-  // purely descriptively, and #2268 closed. Whether GitHub's body parse respects
-  // Markdown rendering is not established (see the source's escape-hatch note);
-  // the guard assumes it does not, because a guard that stayed quiet over a fence
-  // would be GREEN on bytes GitHub acts on, which is the false-GREEN direction of
-  // the defect it guards. Over-firing costs a reworded sentence.
+  // purely descriptively, and #2268 closed. GitHub's BODY parse is now known to
+  // behave the other way (a code span there parses as nothing — #2382, measured
+  // on PR #2364; see the source's escape-hatch note), and this guard still reads
+  // a fenced body keyword as live ON PURPOSE: it reads all three surfaces
+  // together, and a guard that stayed quiet over a fence would be GREEN on bytes
+  // GitHub acts on in the other two, which is the false-GREEN direction of the
+  // defect it guards. Over-firing costs a reworded sentence.
   for (const quoted of [
     '```\nCloses #2268\n```',
     '> Closes #2268',
@@ -652,4 +656,63 @@ test('#2346: the carve-out drops ONLY the commit source — a promotion body sti
   })
   assert.equal(violations.length, 1)
   assert.equal(violations[0].issue, 2268)
+})
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The pull-request template's own placeholders (#2382).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TEMPLATE_PATH = fileURLToPath(
+  new URL('../../.github/pull_request_template.md', import.meta.url),
+)
+
+test('the Issue Link checklist items write the keyword BARE', () => {
+  // The placeholders used to be backticked. GitHub does not parse a closing
+  // keyword inside a code span in a pull-request BODY, so an author who ticked
+  // the box and replaced the placeholder in place — the natural way to fill a
+  // template — shipped a body that looked right and closed nothing. Measured on
+  // PR #2364: body backticked, `closingIssuesReferences` empty on the merged
+  // pull request, and #2361 closed by hand 109 seconds after the merge.
+  //
+  // Scoped to the CHECKLIST ITEMS on purpose. The section's prose and its hidden
+  // comment write ABOUT the keyword and must keep an unparsed form, so a blanket
+  // assertion over the whole file would forbid the very thing that file needs.
+  const template = readFileSync(TEMPLATE_PATH, 'utf8')
+  const section = template.split('## Issue Link')[1]?.split('\n## ')[0]
+  assert.ok(section, 'the template still has an "Issue Link" section')
+
+  const items = section.split('\n').filter((line) => /^- \[[ x]\] /.test(line))
+  assert.equal(items.length, 2, `expected the Closes and Refs items, got ${items.length}`)
+  for (const item of items) {
+    assert.match(
+      item,
+      /^- \[[ x]\] (?:Closes|Refs) #NNN\b/,
+      `the keyword must be bare — no backticks, no code span — in: ${item}`,
+    )
+    // And the placeholder must SURVIVE rendering. Taking the keyword out of its
+    // code span exposed the token to GitHub-flavoured Markdown, which strips
+    // `<n>` as an unrecognised inline HTML tag — an unfilled line rendered as
+    // "Closes #", placeholder and all. Measured against `gh api /markdown` in
+    // mode `gfm`. `NNN` has nothing for GFM to misparse; anything in angle
+    // brackets does, so the token must not contain them.
+    assert.doesNotMatch(
+      item,
+      /#\s*<[^>]*>/,
+      `an angle-bracket placeholder is stripped by GFM once the keyword is bare: ${item}`,
+    )
+  }
+})
+
+test('the template as shipped closes nothing, and closes the issue once filled in', () => {
+  // Both halves matter. An UNFILLED template is pasted into every pull request
+  // body in the repository, so its placeholder must stay inert; and the point of
+  // the change is that filling it in place now actually parses.
+  const template = readFileSync(TEMPLATE_PATH, 'utf8')
+  assert.deepEqual(parseClosingRefs(template), [], 'an unfilled template must name no issue')
+  assert.deepEqual(
+    parseClosingRefs(template.replace('- [ ] Closes #NNN', '- [x] Closes #2382')),
+    [2382],
+    'filling the placeholder in place must produce a real closing reference',
+  )
 })

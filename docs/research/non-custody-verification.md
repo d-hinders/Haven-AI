@@ -6,13 +6,15 @@ covers:
   - packages/backend/src/infra/relayer.ts
   - packages/backend/src/rails/execution-rail.ts
   - packages/backend/src/__tests__/non-custody.invariants.test.ts
-  - packages/frontend/src/lib/revoke-agent.ts
-last-verified: "2026-08-26" # #1993: the #2044 addendum said the three retained spies were "not vacuous" because all three were live exports of `rails/allowance-module.ts`; re-measured, two of them (`computeEffectiveAllowance`, `getLatestBlockTimeSec`) are no longer exported at all, so those spies had gone unfalsifiable a second time. Addendum added recording the removal, the mechanism that makes such decay silent, and the epic-#1440 closing guard that extends #2049's extractor. Scope: the Row 5 spy/structural-proof paragraphs only; the invariants table, Part 2/Phasing and the #2004 paragraph were NOT re-verified in this pass. Prior: #2049: the #2044 addendum called the structural import check the carrier of the deleted spies' capability without stating what it can PARSE — it read named single-quoted clauses only, and eight other import shapes would have left it green. Addendum added recording the AST rewrite, the per-shape mutation evidence and the four blind spots that remain. Scope: the Row 5 structural-proof paragraphs only; the invariants table, Part 2/Phasing and the #2004 paragraph were NOT re-verified in this pass. Prior: #2044: the #1987 addendum said the `not.toHaveBeenCalled()` spies were true by construction; measured, that holds for the three names #1987 DELETED (unfalsifiable — removed) and not for the three the module still exports, which are reachable through the route's transitive import graph and are now mutation-proven red by name. Addendum added. Scope: the Row 5 spy paragraph only; the invariants table, Part 2/Phasing and the #2004 paragraph were NOT re-verified in this pass. Prior: #2004: the Row 5 addendum described the enforcer-correctness gap as OPEN and assigned to #2004 — it is now closed by `non-custody-onchain-enforcer.contract.test.ts`, which probes the deployed enforcers on Base Sepolia; the paragraph is repointed to name both suites, and the narrower `redeemDelegations`-composition gap that genuinely remains is stated in its place. The `covers:` list does not name either contract suite, so the coupling gate could not have caught this. Scope: the Row 5 gap paragraph only; the invariants table and Part 2/Phasing were NOT re-verified in this pass. Prior: #1988: the "control surface already exposed" bullet cited `/user/safes/:id/approvers` in the present tense; that route is deleted with the Safe rail, so the example is repointed. ⚠️ My first repoint invented `GET /user/safes/:safeId`, which does not exist — `routes/user-safes.ts` registers `GET /` and nothing per-id — and `haven-reviewer` caught it: a doc pass fixing a false claim introduced a different one, which is the failure mode the pass exists to prevent. Corrected to the routes that actually serve, and the owner list is now attributed to `/safe/:addr/details`, which is where the approver route read it from anyway. Scope: that bullet. Prior: #1987: the Row 5 addendum named `decideCoverage` as a live symbol the delegation branch merely "never calls" — it is now DELETED, and the spy-based proof it describes went vacuous by construction, so the addendum records the replacement structural assertion and its positive control. Also #1987: re-read after the AllowanceModule EXECUTION half was deleted — the `allowance-module.ts:232` mechanism claim and the References line both named code that no longer exists; both corrected in place with the live delegation-rail equivalent named. The invariants table itself was NOT re-verified in this pass and is left as #1986 wrote it. Prior: #1986: the invariants table rows 4 and 5 re-read against the AllowanceModule retirement — row 5's mechanism ("queued for approval") is legacy-rail-only and gone, and Red Line #4 is now only PARTIALLY proven on the live rail; addendum added naming the gap (#2004, Depends-on into #1991). Rows 1-3 and 6+ unaffected. Part 2/Phasing left alone — its "design proposal" framing is pre-existing drift, not this diff's. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+  - packages/frontend/src/app/(authenticated)/custody/page.tsx
+  - packages/frontend/src/components/RetiredRailNotice.tsx
+  - packages/frontend/src/hooks/useRetiredRailOwnerAccess.ts
+last-verified: "2026-08-31" # #2258: Re-read the legacy Safe retirement, live delegation boundary, and covered claims for this implementation. Prior: #1993: the #2044 addendum said the three retained spies were "not vacuous" because all three were live exports of `rails/allowance-module.ts`; re-measured, two of them (`computeEffectiveAllowance`, `getLatestBlockTimeSec`) are no longer exported at all, so those spies had gone unfalsifiable a second time. Addendum added recording the removal, the mechanism that makes such decay silent, and the epic-#1440 closing guard that extends #2049's extractor. Scope: the Row 5 spy/structural-proof paragraphs only; the invariants table, Part 2/Phasing and the #2004 paragraph were NOT re-verified in this pass. Prior: #2049: the #2044 addendum called the structural import check the carrier of the deleted spies' capability without stating what it can PARSE — it read named single-quoted clauses only, and eight other import shapes would have left it green. Addendum added recording the AST rewrite, the per-shape mutation evidence and the four blind spots that remain. Scope: the Row 5 structural-proof paragraphs only; the invariants table, Part 2/Phasing and the #2004 paragraph were NOT re-verified in this pass. Prior: #2044: the #1987 addendum said the `not.toHaveBeenCalled()` spies were true by construction; measured, that holds for the three names #1987 DELETED (unfalsifiable — removed) and not for the three the module still exports, which are reachable through the route's transitive import graph and are now mutation-proven red by name. Addendum added. Scope: the Row 5 spy paragraph only; the invariants table, Part 2/Phasing and the #2004 paragraph were NOT re-verified in this pass. Prior: #2004: the Row 5 addendum described the enforcer-correctness gap as OPEN and assigned to #2004 — it is now closed by `non-custody-onchain-enforcer.contract.test.ts`, which probes the deployed enforcers on Base Sepolia; the paragraph is repointed to name both suites, and the narrower `redeemDelegations`-composition gap that genuinely remains is stated in its place. The `covers:` list does not name either contract suite, so the coupling gate could not have caught this. Scope: the Row 5 gap paragraph only; the invariants table and Part 2/Phasing were NOT re-verified in this pass. Prior: #1988: the "control surface already exposed" bullet cited `/user/safes/:id/approvers` in the present tense; that route is deleted with the Safe rail, so the example is repointed. ⚠️ My first repoint invented `GET /user/safes/:safeId`, which does not exist — `routes/user-safes.ts` registers `GET /` and nothing per-id — and `haven-reviewer` caught it: a doc pass fixing a false claim introduced a different one, which is the failure mode the pass exists to prevent. Corrected to the routes that actually serve, and the owner list is now attributed to `/safe/:addr/details`, which is where the approver route read it from anyway. Scope: that bullet. Prior: #1987: the Row 5 addendum named `decideCoverage` as a live symbol the delegation branch merely "never calls" — it is now DELETED, and the spy-based proof it describes went vacuous by construction, so the addendum records the replacement structural assertion and its positive control. Also #1987: re-read after the AllowanceModule EXECUTION half was deleted — the `allowance-module.ts:232` mechanism claim and the References line both named code that no longer exists; both corrected in place with the live delegation-rail equivalent named. The invariants table itself was NOT re-verified in this pass and is left as #1986 wrote it. Prior: #1986: the invariants table rows 4 and 5 re-read against the AllowanceModule retirement — row 5's mechanism ("queued for approval") is legacy-rail-only and gone, and Red Line #4 is now only PARTIALLY proven on the live rail; addendum added naming the gap (#2004, Depends-on into #1991). Rows 1-3 and 6+ unaffected. Part 2/Phasing left alone — its "design proposal" framing is pre-existing drift, not this diff's. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Design — make non-custody provable (CI invariants + "verify your control")
 
-> Status: **design proposal.** Forward-looking; no implementation yet. Turns the
+> Status: **design proposal for Part 1.** The CI-invariant design remains forward-looking; Part 2 below records the implemented user-facing rail split. Turns the
 > [CASP/MiCA guardrails](../regulatory/casp-risk-guardrails.md) from prose into
 > (a) automated checks that *prove* the perimeter on every PR and (b) a user-
 > facing surface that *shows* it. No new authority, no fund movement, no
@@ -167,7 +169,9 @@ forwards a rejection verbatim with nothing written.
 > live exports of `rails/allowance-module.js`. A later retirement slice shrank
 > that module to shared chain infrastructure plus the legacy wallet-approval
 > read (`getProvider`, `getRelayerWallet`, `getTokenAllowance`,
-> `getTokenBalance`, `getTokensForDelegate`), and **two of the three —
+> `getTokenBalance`, `getTokensForDelegate` — #2259 has since deleted the last
+> two with the route that called them, leaving only the three shared reads),
+> and **two of the three —
 > `computeEffectiveAllowance` and `getLatestBlockTimeSec` — stopped being
 > exports**. `vi.mock` replaces the module wholesale, so nothing failed: the
 > factory silently re-invented them and the suite went on asserting nobody
@@ -281,65 +285,50 @@ pinned the specific mechanisms:
 | 9 | The bundler credential has one auditable choke point | `SESSION_RAIL_BUNDLER_URL` read only in `execution-rail.ts` |
 | 10 | The paymaster sponsors gas, never value | Wired as a sponsorship client only; no token-paymaster surface |
 
-## Part 2 — "Verify your control" (dashboard)
+## Part 2 — "Verify your control" (implemented, with the legacy rail superseded by #2258)
 
-A surface (a tab, or a section on the account/settings page) that shows the user,
-per Safe, that **they** control it — composed almost entirely from endpoints that
-already exist.
+The original dashboard proposal below is now a current implementation with two
+rail-correct branches. On a live delegation account, the account page shows the
+account signer set and signed budget delegations, including their period,
+recipient and expiry. Those are the owner-signed terms enforced by the
+delegation rail; they are not Safe owners or AllowanceModule allowances.
 
-What it shows:
+Legacy Safe accounts remain readable in Haven: balances, activity, transaction
+history, agent identity and unlink/archive state continue to render, and identity
+editing only updates the historical name and description. The legacy branch has no agent create,
+budget, payment-credential, or Haven-mediated authority-revocation action. It
+shows the Safe owner/threshold read and a retirement notice. Haven offers the
+Safe interface link only when the read positively identifies the connected wallet
+as an owner; passkey-only and unknown-owner states receive no self-serve Safe
+promise. Any remaining legacy AllowanceModule permission is outside Haven.
 
-- **Owners & threshold** (`/safe/:addr/details`) — "These keys control this Safe.
-  Haven is not an owner and cannot sign for it."
-- **Enabled modules** — the AllowanceModule, labelled as the on-chain spend
-  control. (Small addition: surface module list if `/safe/:addr/details` doesn't
-  already.)
-- **Per-agent on-chain allowances** — delegate, token, amount, spent, reset —
-  read from chain, each marked **🔒 on-chain enforced**.
-- **Honest scope labels** — amount/token/reset/delegate = 🔒 on-chain;
-  recipient = **ⓘ not constrained on-chain today** (the `to` in
-  `executeAllowanceTransfer` is arbitrary). Truthful, and the right home for the
-  optional recipient-pinning enhancement later.
-- **"What Haven cannot do"** — a short, plain-language panel derived from the
-  Hard Invariants (cannot move funds unilaterally, holds no keys, cannot expand
-  allowances without your signature, cannot block you).
-
-Actions (all user-authority, already supported):
-
-- **Revoke agent on-chain** — the existing user-signed revoke flow
-  ([`revoke-agent.ts`](../../packages/frontend/src/lib/revoke-agent.ts)),
-  surfaced here as the circuit breaker.
-- **Open in Safe\{Wallet\}** — a deep link to the user's Safe in the official
-  Safe UI, proving "Haven is replaceable infrastructure" (Red Line #10) in one
-  click.
-
-**Value:** turns the guardrails into a *trust feature* a prospect or auditor can
-see, and matches the doc's Product Copy Rules ("you can revoke agent access
-through your Safe"). New backend work is minimal — mostly composition + a deep
-link + honest labels.
+The live delegation exit remains the owner-signed `disableDelegation` path in
+[`docs/exit/README.md`](../exit/README.md). This implementation does not
+change that path, add authority, or move funds.
 
 ## What this is NOT
 
 - Not new authority, not a new signer, not fund movement.
-- Not recipient/expiry on-chain enforcement — that's a separate *optional*
-  enhancement (a Safe Guard / session-key) with real UX cost; this proposal only
-  *labels* the current boundary honestly.
+- Not a proposal to add recipient/expiry enforcement — the live delegation
+  rail already enforces both through its audited caveat enforcers. The retired
+  Safe rail is outside Haven's current agent-payment perimeter.
 - Not a legal opinion — engineering evidence that supports the existing position.
 
 ## Phasing
 
 - **P0 — CI invariants (Part 1).** Pure value, no UX, no risk. Lands the
   evidence the guardrails ask for and protects it forever.
-- **P1 — "Verify your control" view (Part 2).** Composition over existing
-  endpoints + the Safe\{Wallet\} deep link + honest labels.
+- **P1 — "Verify your control" view (Part 2).** Implemented with rail-correct
+  signer, budget, legacy-read, and owner-access states in #2258.
 - **P2 — (optional) verifiable receipts** — overlaps the bookkeeping audit trail
   ([#462](https://github.com/d-hinders/Haven-AI/issues/462)); a signed
   per-payment proof bundle the user verifies independently.
 
 ## Open questions
 
-1. Does `/safe/:addr/details` already return enabled modules, or is that the one
-   small backend addition for Part 2?
+1. **Resolved for Part 2.** `/safe/:addr/details` already returns the owner list
+   and threshold used by the implemented custody view. Part 2 does not display
+   enabled modules; no additional backend work is needed for this surface.
 2. Retire the legacy plaintext `agents.api_key` column entirely (invariant #2)
    as part of P0, or track separately?
 3. CI checklist gate: PR-template checkbox vs a Danger-style automated check on

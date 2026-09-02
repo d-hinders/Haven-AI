@@ -28,6 +28,8 @@ merchant-of-record product. Funds do not flow through Haven.
 - Tiny test prices for repeatable agent-payment demos.
 - In-process duplicate/nonce handling and payment verification before tool
   handlers run.
+- The x402 v2 extensions echo, advertised in every challenge and enforced on
+  every payment (see [Extensions echo](#extensions-echo-x402-v2-enforced)).
 - Swedish invoice text and JSON output after a settled purchase.
 
 ## Products
@@ -79,6 +81,81 @@ Default payment requirements keep the EIP-3009 option first because existing
 Haven SDK clients select the first matching Base USDC `exact` option and do not
 yet inspect `extra.assetTransferMethod`. ERC-7710-aware clients should select
 the option tagged with `assetTransferMethod: "erc7710"` explicitly.
+
+## Extensions echo (x402 v2, enforced)
+
+Every 402 challenge this merchant issues carries an `extensions` object, and
+every payment must echo it. Since #2361 the challenge advertises exactly this
+(`DEMO_MERCHANT_EXTENSIONS` in `src/x402.ts`):
+
+```json
+"extensions": {
+  "haven-demo": {
+    "version": "1",
+    "echoRule": "x402 v2: clients must echo this extensions object in PaymentPayload"
+  }
+}
+```
+
+The rule (`assertExtensionsEchoed` in `src/x402.ts`) is the first thing
+`verifyAndSettle` does after decoding the payment header — **before** scheme
+dispatch, so it applies identically to `eip3009` and `erc7710` payments and
+runs before any signature recovery, delegation simulation, RPC call or
+settlement work. In order:
+
+1. **`x402Version` must equal the challenge's (`2`).** Checked first, on every
+   payload, and independently of the echo: a mismatch is refused even when the
+   extensions are echoed perfectly, and a payload that declares
+   `x402Version: 1` cannot use that to skip the echo rule. This merchant only
+   issues v2 challenges and has no v1 verification path.
+2. **`extensions` must be present and be an object** (not absent, `null`, a
+   string or an array).
+3. **Every advertised key must be present with a deep-equal value.** The
+   check is subset containment, not byte equality: you may **append** keys —
+   at the top level (`"clientNote": {...}`) or inside `haven-demo` — which is
+   the spec's "may append additional info". **Deleting** any advertised key
+   (including a nested one such as `echoRule`), sending `{}`, or **changing**
+   any advertised value is refused.
+
+A refused payment gets **HTTP 402** with the same challenge again — re-sent in
+the `PAYMENT-REQUIRED` header and as the JSON body — with the body's `error`
+replaced by the reason. There is no `PAYMENT-RESPONSE` and nothing is settled.
+The exact strings, captured from the running merchant:
+
+| Payload | `error` in the 402 body |
+|---|---|
+| `x402Version` is not `2` (with or without an echo) | `Payment x402Version 1 does not match the challenge's 2` |
+| `extensions` absent or not an object | `Payment must echo the challenge's extensions object (x402 v2 extensions echo rule)` |
+| an advertised key dropped (top-level or nested), `extensions: {}`, or a value changed | `Payment extensions must include the challenge's extensions unmodified (x402 v2: append-only, never delete or overwrite)` |
+
+The same enforcement applies whether the payment arrives as `PAYMENT-SIGNATURE`
+or the `X-PAYMENT` alias.
+
+**Why this merchant is strict where real merchants may be lenient.** The x402
+v2 spec makes the echo a client MUST, but live merchants differ: CoinGecko's
+facilitator rejects a payment that drops it with a bare 400 (#2360), while
+others settle the echo-less shape. This merchant is the counterparty the QA
+harness settles against on Base Sepolia, so if it were lenient, CI would go
+green for a Haven client that stopped echoing and the first strict mainnet
+facilitator would find the regression instead. The net is deliberate — it
+caught #2373 in a single QA run — and the refusal names the rule rather than
+returning a bare 400.
+
+**Building a payment fixture by hand?** Copy a working pattern instead of
+inventing one. After decoding the challenge as `pr`, the in-repo test helpers
+all echo it with
+`...(pr.extensions ? { extensions: pr.extensions } : {})`: `signedHeader` in
+`src/x402.test.ts`, `src/http.test.ts` and `src/http-session-restart.test.ts`,
+and `erc7710Header` in `src/erc7710.test.ts`. The rule's own tests are
+`describe('extensions echo rule (#2361)')` in `src/x402.test.ts`, one per
+branch of `assertExtensionsEchoed`: the version cross-check (with a dropped
+echo, and with a perfect one), an absent or non-object echo, a dropped key
+(top-level and nested), `{}`, an overwritten value, an append, and a challenge
+that advertises no extensions. The three refusal strings in the table above,
+the re-sent `PAYMENT-REQUIRED` challenge and the `X-PAYMENT` alias are pinned
+at the HTTP boundary by `describe('extensions echo refusals over HTTP (#2403)')`
+in `src/http.test.ts`. Haven's real clients echo through the SDK's
+`x402V2PaymentEnvelope`, which the edge signer also uses.
 
 ## Hosted URLs
 

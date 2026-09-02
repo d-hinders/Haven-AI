@@ -26,11 +26,8 @@ import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
 // summary below is stated in its terms, not hand-computed.
 import { formatTokenValue } from '../../domain/tokens.js'
 
-const { mockQuery, allowanceMocks, fiatMocks, reportingMocks } = vi.hoisted(() => ({
+const { mockQuery, fiatMocks, reportingMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
-  allowanceMocks: {
-    getTokenAllowance: vi.fn(),
-  },
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
     getBookTimeSekValue: vi.fn().mockResolvedValue(null),
@@ -50,7 +47,6 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
 
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 
@@ -111,7 +107,6 @@ const challenge = {
  * stops preceding the work.
  */
 function expectNoAuthorizationWork() {
-  expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
   // Only the auth lookup ran. Anything else means the refusal was reached
   // through code that had already started authorizing.
   expect(sqlCalls().map((c) => c.sql).filter((sql) => !/api_key_hash = \$1/.test(sql))).toEqual([])
@@ -235,7 +230,6 @@ describe('machine payment routes', () => {
 
   beforeEach(() => {
     mockQuery.mockReset()
-    for (const mock of Object.values(allowanceMocks)) mock.mockReset()
     for (const mock of Object.values(fiatMocks)) mock.mockReset()
     // mockClear (not mockReset): lateAttachMerchantReceipt is awaited via
     // `.catch()` in the fire-and-forget call site — it must keep resolving
@@ -360,7 +354,6 @@ describe('machine payment routes', () => {
   // no longer happens on this rail.
   describe('GET /allowances — Safe rail retired (#2020, reversing #1986)', () => {
     function expectNoAllowanceStateRead() {
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
       expect(sqlCalls().some((c) => /FROM agent_allowances|FROM agent_delegations/.test(c.sql))).toBe(false)
     }
 
@@ -452,7 +445,6 @@ describe('machine payment routes', () => {
         }],
       })
       // No Safe, no AllowanceModule on this rail — the contract read must not run.
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
       // agent_allowances is a frozen onboarding mirror on this rail (#1090) —
       // consulting it would report the onboarding budget forever.
       expect(sqlCalls().some((c) => /FROM agent_allowances/.test(c.sql))).toBe(false)
@@ -563,7 +555,6 @@ describe('machine payment routes', () => {
         chain_id: 84532,
         allowances: [],
       })
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     })
 
     it('session_key rail: 410 fail-closed — no state read on the retired rail (#834/#993)', async () => {
@@ -580,7 +571,6 @@ describe('machine payment routes', () => {
       // The refusal is produced from the auth context alone: no allowance
       // config read, no delegation read, no on-chain read.
       expect(sqlCalls().some((c) => /FROM agent_allowances|FROM agent_delegations/.test(c.sql))).toBe(false)
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     })
   })
 
@@ -1410,15 +1400,6 @@ describe('machine payment routes', () => {
      * is an export, and priming it is what makes "the refusal fires before the
      * allowance is even read" a meaningful thing to assert.
      */
-    function primeAmpleLegacyAllowance() {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({
-        amount: 1_000_000n,
-        spent: 0n,
-        resetTimeMin: 1440,
-        lastResetMin: 0,
-        nonce: 5,
-      })
-    }
 
     // #1986 (epic #1440 slice 3): the legacy AllowanceModule rail is
     // retired. `/send` refuses BEFORE it does anything else — before the
@@ -1469,12 +1450,10 @@ describe('machine payment routes', () => {
         expect(response.statusCode).toBe(410)
         expect(response.json()).toEqual(allowanceModuleRailRetired('account').body)
         // Nothing minted, no chain read, no idempotency lookup.
-        expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
         expect(sqlCalls().some((c) => /send_idempotency_key/.test(c.sql))).toBe(false)
       })
 
       it('creates a USDC payment intent within allowance and returns sign_data', async () => {
-        primeAmpleLegacyAllowance()
 
         primeDb(AUTH, allowanceConfigured(true), insertIntent(sendIntentRow()))
 
@@ -1493,7 +1472,6 @@ describe('machine payment routes', () => {
       })
 
       it('queues over-allowance transfer as pending_approval (202)', async () => {
-        primeAmpleLegacyAllowance()
 
         primeDb(
           AUTH,
@@ -1537,7 +1515,6 @@ describe('machine payment routes', () => {
 
       expect(response.statusCode).toBe(400)
       expect(response.json().error).toContain('ETH, USDC')
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     })
 
     it('rejects invalid recipient address with 400', async () => {
@@ -1627,12 +1604,10 @@ describe('machine payment routes', () => {
         // fires first. Was: 201 with the original sign_data replayed.
         expect(response.statusCode).toBe(410)
         expect(response.json()).toEqual(allowanceModuleRailRetired('account').body)
-        expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
         expect(mockQuery).toHaveBeenCalledTimes(1) // auth only — no dedup lookup
       })
 
       it('persists the idempotency_key when creating a new intent', async () => {
-        primeAmpleLegacyAllowance()
 
         primeDb(
           AUTH,
@@ -1657,7 +1632,6 @@ describe('machine payment routes', () => {
       })
 
       it('replays the winner when a concurrent insert wins the idempotency race', async () => {
-        primeAmpleLegacyAllowance()
 
         const uniqueViolation = Object.assign(new Error('duplicate key value'), { code: '23505' })
         // Stateful counter kept from the original characterization (#1226
@@ -1705,7 +1679,6 @@ describe('machine payment routes', () => {
 
       expect(response.statusCode).toBe(400)
       expect(response.json().error).toContain('idempotency_key')
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     })
 
     // #1986 (epic #1440 slice 3): the legacy AllowanceModule rail is

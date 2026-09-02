@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-08-31" # #2293: the sweep setting in `.env.dev.example` remains deliberately `SWEEP_MIN_USDC=0`, while the production default is now `0.01` so ordinary micropayment balances are recoverable; the dev value keeps the 0.0005-USDC QA stranding sweepable. The template and the operator boundary below were re-read against the current config and QA scenario. Prior: #2268 (follow-up): the qa-freshness paragraph called the dead `dev-deployed` trigger "a deploy-provider configuration matter and not a repo one" and pointed at "the operator fix" in `agent-qa.md`. The same-day correction to that doc establishes there is no such fix — Railway offers no supported place for the authenticated call — so this sentence contradicted the doc it cited. Corrected to say no operator fix is available today and that #2273 (`deployment_status`) is the replacement, still unbuilt. Scope: ONLY that sentence was re-read and edited; branch mapping, service URLs, secrets handling and the rest of this doc were not re-verified in this pass. Prior: #2268: the § "Branch -> deploy mapping" qa-freshness paragraph gains the reason promotions block LATE — `qa-dev.yml`'s `repository_dispatch` (`dev-deployed`) trigger has never fired (0 of 156 runs, 2026-06-30 -> 2026-08-31, counted against the Actions API), so freshness rests on the nightly cron alone and a busy day on `dev` outruns it. That paragraph was re-read end to end against `dev-gate.yml` and `scripts/ci/qa-freshness.mjs` on this branch and is otherwise accurate; the #1047 `haven_api_url` validation it describes is unchanged (this PR's `qa-dev.yml` diff is comment-only). Scope: that paragraph ONLY. NOT re-verified: the env/secret tables, the seeding sections, the scenario list, or the x402 scheme-dispatch note. Prior: chain-reset(#2159): compacted prior verification notes into git history. Re-verified the Base-Sepolia-only MERCHANT_REPORT_GRACE_MIN_OVERRIDE operator control: only a backend serving HAVEN_DEPLOY_CHAIN_IDS=84532 may set it, startup rejects every other deployment, and production retains the 15-minute default.
+last-verified: "2026-09-02" # #2427: the freshness paragraph under the qa-freshness bullet corrected — it said a Railway deployment has no branch and that the trigger was not yet observed; measured on deployment 6218620498 (`5d4e849c`, 2026-09-02) the `deployment_status` runs report `headBranch = dev` and the trigger fired (#2273 closed on it). The paragraph now gives the real reason for the SHA-ancestry selector. Scope: that paragraph and its lead sentence only; nothing else in this doc was re-verified in this pass. Prior: #2273: the freshness paragraph under the qa-freshness bullet re-read and rewritten — the post-deploy trigger is rebuilt on `deployment_status`, built but not yet observed, and this gate cannot see its runs until #2404; the guard now refuses manual dispatches (#2271). Scope: that paragraph only. Prior: #2293: the sweep setting in `.env.dev.example` remains deliberately `SWEEP_MIN_USDC=0`, while the production default is now `0.01` so ordinary micropayment balances are recoverable; the dev value keeps the 0.0005-USDC QA stranding sweepable. The template and the operator boundary below were re-read against the current config and QA scenario. Prior: #2268 (follow-up): the qa-freshness paragraph called the dead `dev-deployed` trigger "a deploy-provider configuration matter and not a repo one" and pointed at "the operator fix" in `agent-qa.md`. The same-day correction to that doc establishes there is no such fix — Railway offers no supported place for the authenticated call — so this sentence contradicted the doc it cited. Corrected to say no operator fix is available today and that #2273 (`deployment_status`) is the replacement, still unbuilt. Scope: ONLY that sentence was re-read and edited; branch mapping, service URLs, secrets handling and the rest of this doc were not re-verified in this pass. Prior: #2268: the § "Branch -> deploy mapping" qa-freshness paragraph gains the reason promotions block LATE — `qa-dev.yml`'s `repository_dispatch` (`dev-deployed`) trigger has never fired (0 of 156 runs, 2026-06-30 -> 2026-08-31, counted against the Actions API), so freshness rests on the nightly cron alone and a busy day on `dev` outruns it. That paragraph was re-read end to end against `dev-gate.yml` and `scripts/ci/qa-freshness.mjs` on this branch and is otherwise accurate; the #1047 `haven_api_url` validation it describes is unchanged (this PR's `qa-dev.yml` diff is comment-only). Scope: that paragraph ONLY. NOT re-verified: the env/secret tables, the seeding sections, the scenario list, or the x402 scheme-dispatch note. Prior: chain-reset(#2159): compacted prior verification notes into git history. Re-verified the Base-Sepolia-only MERCHANT_REPORT_GRACE_MIN_OVERRIDE operator control: only a backend serving HAVEN_DEPLOY_CHAIN_IDS=84532 may set it, startup rejects every other deployment, and production retains the 15-minute default.
 ---
 
 # Dev environment
@@ -160,16 +160,27 @@ check all three:
   logged with the dispatching actor — the quiet arbitrary-endpoint path is
   gone, though Railway itself is multi-tenant; the full residual-risk
   statement lives in autonomous-pr-loop.md's safety model.
-  **What actually keeps that run fresh is the nightly cron, alone (#2268).**
-  `qa-dev.yml` also declares a `repository_dispatch` (`dev-deployed`) trigger
-  meant to fire on every dev deploy, and it has never fired once — nothing sends
-  the dispatch, and there is **no operator fix available today**: Railway offers
-  no supported place for the authenticated call the setup describes, so the
-  replacement route is #2273 (`deployment_status`), still unbuilt (evidence:
-  agent-qa.md § *Post-deploy trigger*). So on
-  a busy day the merges outrun the cron and this gate blocks the promotion PR
-  correctly but late, which is where the pressure to reach for `qa-override`
-  comes from. Its silence is now reported by `guard-freshness.yml`.
+  **What actually keeps that run fresh is the nightly cron, alone, until a
+  post-deploy run's `money-flow` job goes green at a promoted commit
+  (#2268 → #2273).** `qa-dev.yml`'s
+  old `repository_dispatch` (`dev-deployed`) trigger never fired once — nothing
+  sent it, and Railway offers no supported place to send it from — so #2273
+  replaced it with GitHub's own `deployment_status` event, fired when the
+  Railway integration marks the `Haven AI / dev` deployment `success`, gated
+  and de-duplicated in the workflow (evidence: agent-qa.md § *Post-deploy
+  trigger (`deployment_status`)*). It was first observed firing on 2026-09-02
+  (deployment 6218620498, `5d4e849c`; #2273 closed on it). #2404 (PR #2409)
+  changed this gate to select the green run by SHA ancestry and by the
+  `money-flow` job's conclusion instead of `--branch dev` — not because a
+  post-deploy run has no branch (all three runs on that deployment report
+  `headBranch = dev`, measured — #2427) but because a branch name says nothing
+  about which commit the harness exercised. Until a post-deploy run is green
+  at a promoted commit, a busy day's merges still outrun the cron and this
+  gate blocks the promotion PR correctly but late, which is where the pressure
+  to reach for `qa-override` comes from. The
+  trigger's silence is reported by `guard-freshness.yml`, which since #2273
+  counts only runs whose SHA Railway actually deployed — a manual dispatch
+  cannot clear it (#2271).
   A **money-path `hotfix/*`** blocks outright: the harness tests a *deployed* backend and a
   hotfix is deployed nowhere until it merges, so no automatic evidence about it
   can exist. Bypass in both cases: the `qa-override` label, with a comment

@@ -16,7 +16,6 @@ import { Wallet, getBytes } from 'ethers'
 const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   allowanceMocks: {
-    getTokenAllowance: vi.fn(),
     getProvider: vi.fn(),
     getRelayerWallet: vi.fn(),
   },
@@ -306,7 +305,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     // The account validates typed data, not the bare hash — ship it:
     expect(body.sign_data.typed_data.domain.name).toBe('HybridDeleGator')
     // Neither other rail is touched:
-    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     // The allowance guard never ran — no agent_allowances lookup (#835 fix):
     expect(mockQuery.mock.calls.some((c) => /agent_allowances/.test(String(c[0])))).toBe(false)
     // The intent pins the rail + which delegation authorized it:
@@ -409,7 +407,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   // fail-closes instead. `rails/allowance-module.ts` and this case are
   // scheduled for deletion in #1987.
   it('POST /payments stays on the legacy flow when the account is not migrated', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
 
     // No rail state → retired (fail-closed).
     primeDb(AUTH, railState(null), allowanceConfigured(true), insertIntent(intentRow()))

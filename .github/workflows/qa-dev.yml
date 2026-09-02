@@ -3,28 +3,63 @@ name: QA — money-flow (dev)
 # Deterministic money-flow harness against the shared dev backend using the QA_*
 # secrets. Testnet-only (Base Sepolia); never touches mainnet.
 #
-# Triggers (#578):
+# Triggers (#578, post-deploy half rebuilt by #2273):
 #   - workflow_dispatch: manual run / local-debug parity.
 #   - schedule: nightly, so a fresh green signal exists without anyone triggering it.
-#   - repository_dispatch (dev-deployed): MEANT to be fired by the Railway/Vercel dev
-#     deploy so QA runs against exactly what just shipped. Webhook setup is in
-#     docs/operations/agent-qa.md → "Automation & gating".
+#   - deployment_status: fired by GitHub itself when the Railway GitHub integration
+#     marks a Deployment of the dev backend `success`, so QA runs against exactly
+#     what just shipped, at the SHA that shipped (GITHUB_SHA is the deployed
+#     commit for this event — docs: "Commit to be deployed").
 #
-#     NOT CURRENTLY WIRED (#2268). This trigger had fired ZERO times across the
-#     repository's entire history — 156 qa-dev.yml runs, 2026-06-30 → 2026-08-31,
-#     and zero repository_dispatch runs on any workflow. The declaration below is
-#     correct and the receiving half works (a manual
-#     `gh api repos/:owner/:repo/dispatches -f event_type=dev-deployed` started run
-#     33370275124 three seconds later); nothing SENDS the dispatch. That is an
-#     operator action in the Railway/Vercel dashboard, not a change to this file —
-#     so the trigger stays declared, and its SILENCE is now watched by
-#     scripts/ci/guard-freshness.mjs, which files a `ci-health` issue when no
-#     dev-deployed dispatch has arrived in four days.
+#     This REPLACES the `repository_dispatch: [dev-deployed]` trigger that #2268
+#     found had never fired once (0 of 156 runs, 2026-06-30 → 2026-08-31). That
+#     design needed the deploy provider to run an authenticated curl AFTER the
+#     deploy, and the owner established on the Railway dashboard (#2268,
+#     2026-08-31 and 2026-09-01) that Railway offers no such thing: project
+#     webhooks are URL-only (no Authorization header), and the only service hook
+#     is a PRE-deploy step, which would have tested the previous deployment.
+#     Railway DOES create real GitHub Deployments though — `railway-app[bot]`,
+#     environment `Haven AI / dev`, statuses in_progress → success → inactive —
+#     measured with `gh api repos/d-hinders/Haven-AI/deployments` on 2026-09-02
+#     (28 of the newest 100 deployments; 2 more are `Haven AI / production`,
+#     which is why the environment filter below is not optional).
 #
-#     Do NOT "fix" this by adding a push trigger: this is a black-box harness
-#     against the DEPLOYED backend, so firing on push races the deploy and
-#     produces a green run whose headSha claims coverage the deployed code never
-#     had — a visible block converted into a false pass.
+#     Two properties of that event stream shape the `gate` job:
+#       1. EVERY dev deployment emits `success` TWICE (sometimes three times):
+#          once when it goes live, and again the moment the NEXT deployment
+#          starts building — Railway re-states "N is still the live one" — then
+#          `inactive` once N+1 is live (`inactive` never triggers a run). A naive
+#          trigger runs the money-moving harness twice per deploy, and with
+#          `cancel-in-progress: false` the duplicates QUEUE. The gate asks the
+#          Deployments API whether this deployment is still the NEWEST one for
+#          the environment and skips the harness when it is not.
+#       2. `in_progress` statuses trigger runs too. Those are skipped by the
+#          same gate in seconds, before `npm ci`, and never enter the money
+#          concurrency group (which is why concurrency moved from the workflow
+#          to the money-flow JOB — a skipped run must not hold the group).
+#
+#     Provenance (#2271). A `deployment_status` run carries GitHub-authored
+#     evidence a curl cannot forge: the deployment's creator is the Railway
+#     GitHub App (`railway-app[bot]`), which only Railway's installation token
+#     can produce. The gate refuses any other creator, the failure issue below
+#     records deployment id + creator + SHA next to the trigger, and
+#     scripts/ci/guard-freshness.mjs counts a run as "the post-deploy trigger
+#     fired" only when a Railway-created deployment of that run's exact SHA
+#     exists AND the money-flow JOB concluded success — a run the gate refused
+#     has run-level conclusion `success` with the job skipped, so the run-level
+#     field alone would count the two or three decoys every deploy leaves. So a
+#     manual `workflow_dispatch`, a Deployment a human creates by hand through
+#     the API, or a gate-skipped decoy can no longer mute the freshness alarm.
+#
+#     Do NOT "fix" any of this by adding a push trigger: this is a black-box
+#     harness against the DEPLOYED backend, so firing on push races the deploy
+#     and produces a green run whose headSha claims coverage the deployed code
+#     never had — a visible block converted into a false pass.
+#
+#     UNVERIFIED UNTIL OBSERVED: `deployment_status`, like `repository_dispatch`,
+#     only runs the DEFAULT branch's workflow file, so this trigger cannot be
+#     seen firing from a pull request. The first real run after merge is the
+#     evidence; until then #2268 / #2273 stay open in operator-verify mode.
 #
 # This run is the promotion signal that dev-gate.yml's freshness gate reads before
 # allowing dev → main. On failure it files (or comments on) a `qa-failure` issue.
@@ -38,22 +73,90 @@ on:
   schedule:
     # 03:17 UTC nightly. Odd minute to dodge the top-of-hour Actions scheduling surge.
     - cron: '17 3 * * *'
-  repository_dispatch:
-    types: [dev-deployed]
+  # No `types:` filter exists for this event — every status (in_progress,
+  # success, failure, error) starts a run; `inactive` does not. The `gate` job
+  # is the filter.
+  deployment_status:
 
-# The harness moves shared testnet funds on one QA delegate/allowance — never run two
-# at once, and let an in-flight money-moving run finish rather than cancelling it.
-concurrency:
-  group: qa-dev-money-flow
-  cancel-in-progress: false
+# Make the post-deploy runs legible in `gh run list` / the Actions UI: the
+# deployed SHA, the environment and the status that fired it. Manual and
+# scheduled runs keep the workflow name as their title.
+run-name: ${{ github.event_name == 'deployment_status' && format('post-deploy {0} → {1} ({2})', github.event.deployment.sha, github.event.deployment.environment, github.event.deployment_status.state) || 'QA — money-flow (dev)' }}
 
 permissions:
   contents: read
   issues: write
+  # The gate job reads the Deployments API to de-duplicate Railway's repeated
+  # `success` statuses (#2273). Read-only; the default token cannot create or
+  # update a deployment with it.
+  deployments: read
 
 jobs:
-  money-flow:
+  # Decides whether this run should move money at all. Cheap (no npm ci) and
+  # deliberately OUTSIDE the `qa-dev-money-flow` concurrency group, so a
+  # duplicate or in-progress status is dropped here in seconds rather than
+  # queued behind a live money-moving run (#2273).
+  gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - name: Decide whether this event should run the money-flow harness
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          DEPLOYMENT_ID: ${{ github.event.deployment.id }}
+          DEPLOYMENT_SHA: ${{ github.event.deployment.sha }}
+          DEPLOYMENT_ENV: ${{ github.event.deployment.environment }}
+          DEPLOYMENT_CREATOR: ${{ github.event.deployment.creator.login }}
+          STATUS_STATE: ${{ github.event.deployment_status.state }}
+          # Both constants are pinned to scripts/ci/guard-freshness.mjs by
+          # scripts/ci/guard-freshness.test.mjs, so the workflow's filter and the
+          # freshness guard's provenance check cannot drift apart silently. The
+          # environment string is Railway-side and not controlled by this repo:
+          # if Railway renames it, this gate skips every run and the freshness
+          # guard goes red within its 4-day budget — which is the alarm working.
+          RAILWAY_DEV_ENVIRONMENT: 'Haven AI / dev'
+          RAILWAY_DEPLOY_CREATOR: 'railway-app[bot]'
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "deployment_status" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$EVENT_NAME run — the harness runs unconditionally for this event."
+            exit 0
+          fi
+          skip() {
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::skipping money-flow: $1 (deployment $DEPLOYMENT_ID, sha $DEPLOYMENT_SHA, env '$DEPLOYMENT_ENV', creator '$DEPLOYMENT_CREATOR', state '$STATUS_STATE')"
+            exit 0
+          }
+          [ "$STATUS_STATE" = "success" ] || skip "status state is not success"
+          [ "$DEPLOYMENT_ENV" = "$RAILWAY_DEV_ENVIRONMENT" ] || skip "not the dev backend environment"
+          [ "$DEPLOYMENT_CREATOR" = "$RAILWAY_DEPLOY_CREATOR" ] || skip "deployment was not created by the Railway GitHub App"
+          # De-duplicate Railway's re-stated `success` (see the header): only the
+          # NEWEST deployment for the environment gets a run. When N's second
+          # `success` arrives, N+1 already exists (it is what caused the
+          # re-statement), so N is no longer newest and is dropped.
+          NEWEST=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/deployments" \
+            -f environment="$RAILWAY_DEV_ENVIRONMENT" -F per_page=1 --jq '.[0].id // empty')
+          [ -n "$NEWEST" ] || { echo "::error::could not read the newest deployment from the Deployments API"; exit 1; }
+          [ "$NEWEST" = "$DEPLOYMENT_ID" ] || skip "superseded — newest deployment for the environment is $NEWEST"
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::post-deploy run: Railway deployment $DEPLOYMENT_ID of $DEPLOYMENT_SHA to '$DEPLOYMENT_ENV' is live and newest."
+
+  money-flow:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    # The harness moves shared testnet funds on one QA delegate/allowance — never
+    # run two at once, and let an in-flight money-moving run finish rather than
+    # cancelling it. Job-level (not workflow-level) since #2273 so that a run the
+    # gate skips never occupies the group.
+    concurrency:
+      group: qa-dev-money-flow
+      cancel-in-progress: false
     steps:
       # #1047: the dispatch override points the harness — WITH the QA payment
       # secrets in env — at an arbitrary backend. Constrain it to Haven's own
@@ -158,10 +261,25 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOYMENT_ID: ${{ github.event.deployment.id }}
+          DEPLOYMENT_SHA: ${{ github.event.deployment.sha }}
+          DEPLOYMENT_ENV: ${{ github.event.deployment.environment }}
+          DEPLOYMENT_CREATOR: ${{ github.event.deployment.creator.login }}
         run: |
           set -euo pipefail
           RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          TRIGGER="${GITHUB_EVENT_NAME}"
+          # #2271: the trigger line must let a reader tell a real post-deploy run
+          # from a hand-started one. A deployment_status run names the Railway
+          # deployment (id, creator, deployed SHA) — GitHub-authored provenance a
+          # curl cannot produce; a workflow_dispatch names the actor who started it.
+          case "$GITHUB_EVENT_NAME" in
+            deployment_status)
+              TRIGGER="deployment_status — Railway deployment ${DEPLOYMENT_ID} of ${DEPLOYMENT_SHA} to '${DEPLOYMENT_ENV}', created by ${DEPLOYMENT_CREATOR}" ;;
+            workflow_dispatch)
+              TRIGGER="workflow_dispatch — started by ${GITHUB_ACTOR}" ;;
+            *)
+              TRIGGER="${GITHUB_EVENT_NAME}" ;;
+          esac
           # Ensure the label exists (labels.yml owns only the surface taxonomy).
           gh label create qa-failure --color b60205 \
             --description "Automated: a scheduled/post-deploy money-flow QA run failed" 2>/dev/null || true

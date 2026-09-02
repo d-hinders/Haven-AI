@@ -3,11 +3,8 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import paymentRoutes from '../payments.js'
 import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
 
-const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
+const { mockQuery, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
-  allowanceMocks: {
-    getTokenAllowance: vi.fn(),
-  },
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
     getBookTimeSekValue: vi.fn().mockResolvedValue(null),
@@ -20,7 +17,6 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
 // #1207: the delegation replay derives the account address; pin it so the
 // reconstructed typed data is assertable without a chain read.
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
@@ -194,7 +190,6 @@ describe('payment routes', () => {
 
   beforeEach(() => {
     mockQuery.mockReset()
-    for (const mock of Object.values(allowanceMocks)) mock.mockReset()
     for (const mock of Object.values(fiatMocks)) mock.mockReset()
     fiatMocks.getBookTimeSekValue.mockResolvedValue(null)
   })
@@ -745,7 +740,6 @@ describe('payment routes', () => {
       // minted, no chain work ran, and the replay lookup itself never ran.
       expect(findCall(/INSERT INTO payment_intents/)).toBeUndefined()
       expect(findCall(/send_idempotency_key = \$2/)).toBeUndefined()
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     })
 
     // #2055: was "replays a pending approval as 202 — a retry never opens a
@@ -782,7 +776,6 @@ describe('payment routes', () => {
     })
 
     it('lazy-expires a stale pending row and creates fresh — the key never dead-ends (#961 M2)', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
       primeDb(
         AUTH,
         intentKeyLookup([sendReplayRow({ expires_at: '2020-01-01T00:00:00.000Z' })]),
@@ -805,7 +798,6 @@ describe('payment routes', () => {
     })
 
     it('a fresh create persists the key on the intent row', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
       primeDb(
         AUTH,
         intentKeyLookup([]),
@@ -825,7 +817,6 @@ describe('payment routes', () => {
     })
 
     it('an idempotency-key race (23505) replays the winner instead of erroring', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
       let lookups = 0
       primeDb(
         AUTH,
@@ -919,7 +910,6 @@ describe('payment routes', () => {
     })
 
     it('a request without a key behaves exactly as before — no lookups, no key persisted', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
       primeDb(
         AUTH,
         [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
@@ -964,7 +954,6 @@ describe('payment routes', () => {
     ]
 
     it('queues for approval (202) when amount exceeds remaining allowance', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
 
       primeDb(...createRoutes)
 
@@ -985,7 +974,6 @@ describe('payment routes', () => {
     })
 
     it('executes (201) when amount is within remaining allowance', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
 
       primeDb(...createRoutes)
 
@@ -1004,7 +992,6 @@ describe('payment routes', () => {
     it('executes (201) at the exact allowance boundary (amount == remaining)', async () => {
       // Inclusive boundary: amount == remaining must execute, not queue. Guards
       // against a `>=` slip in the shared decideCoverage decision.
-      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
 
       primeDb(...createRoutes)
 

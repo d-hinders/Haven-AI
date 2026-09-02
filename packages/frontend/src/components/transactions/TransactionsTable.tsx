@@ -378,7 +378,7 @@ export default function TransactionsTable({
                         the truncation would otherwise be unrecoverable. */}
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <p
-                        className="truncate text-sm font-medium text-[var(--v2-ink)]"
+                        className="w-full break-words text-sm font-medium text-[var(--v2-ink)] md:min-w-0 md:flex-1 md:truncate"
                         title={transactionTitle(tx)}
                       >
                         {transactionTitle(tx)}

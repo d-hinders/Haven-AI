@@ -104,8 +104,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #2243: first real verification pass since #2088 seeded this date. Every
     // claim in the body re-read against `packages/signer/src/**` and rewritten
     // where it had drifted: the tool table (two tools -> the four in
-    // `SignerToolName`), `haven_x402_authorize` (a deprecated alias for
-    // `haven_pay_x402_quote`, `mcp-server/src/tools.ts:81`), the
+    // `SignerToolName`), the hosted tool name the README used for the x402
+    // quote (at the time a never-registered alias for `haven_pay_x402_quote`
+    // in `mcp-server/src/tools.ts`; #2394 has since deleted the alias, so
+    // only the real name exists — #2395), the
     // `{ payment_id }`-only preferred call (#1263/#1355), the retired
     // `funds Safe -> delegate EOA` leg (#1440/#1986), the entirely absent
     // erc7710 scheme and its local caveat verification (#1455/#1476/#2041),

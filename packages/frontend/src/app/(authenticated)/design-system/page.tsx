@@ -1351,13 +1351,9 @@ export default function DesignSystemPage() {
 
           <Card hover={false} className="overflow-hidden">
             <Card.Header title="Recent agent activity" />
-            {/* TODO(#2448): both "x402 payment" titles below are the pre-#2357
-                wording; the shipped row title is "Agent payment". Changing them
-                moves the blocking /design-system pixel baseline, so it is a
-                separate PR with its own baseline dispatch. */}
             <TransactionActivityRow
               direction="out"
-              title="x402 payment"
+              title="Agent payment"
               description={<MovementExample from="Research assistant" to="API provider" />}
               value="12.00"
               asset="USDC"
@@ -1366,7 +1362,7 @@ export default function DesignSystemPage() {
             />
             <TransactionActivityRow
               direction="out"
-              title="x402 payment"
+              title="Agent payment"
               description={<MovementExample from="Research assistant" to="Cloud vendor" />}
               value="320.00"
               asset="USDC"
@@ -1440,11 +1436,29 @@ export default function DesignSystemPage() {
                     the column it stands in for. The INITIATOR genuinely is
                     dropped between the two stages. For two of the three demo
                     rows that costs nothing visible, because the title already
-                    says it ("x402 payment BY RESEARCH ASSISTANT" — TODO(#2448):
-                    that is the pre-#2357 title, now "Agent payment by …"; the
-                    point this paragraph makes still holds, the quote is stale);
-                    for the
-                    first row it is a real loss — a human-initiated payment's
+                    says it ("AGENT PAYMENT BY RESEARCH ASSISTANT" and
+                    "FAILED PAYMENT BY RESEARCH ASSISTANT"). What carries the
+                    initiator there is the trailing `by <agent>` clause,
+                    which `transactionTitle` in
+                    `lib/transaction-presentation.tsx` appends to whatever
+                    `paymentSourceTitle` returns — so the argument never rested
+                    on the protocol name, and it survives #2357 taking the
+                    protocol out of the title (this quote previously named it;
+                    #2448 re-based it). The MEASUREMENTS above are unaffected
+                    for the same reason they were taken on the Failed row:
+                    that title is "Failed payment by Research assistant" and
+                    #2357 did not touch it.
+                    SCOPE: "the title already says it" holds in the `md`->`xl`
+                    band ONLY. BELOW `md` the Activity cell is `max-w-0` +
+                    `truncate` (see the `<td>` below), so the titles ellipsise
+                    to "Agent payme…" / "Failed payme…" and the `by <agent>`
+                    clause is cut off with them — measured on the 390px
+                    capture. The narrow layout therefore loses the initiator
+                    for ALL THREE rows, not just the first: there the column
+                    is dropped AND the title cannot stand in for it. Raised by
+                    `haven-design-reviewer` on #2448, against the rendered
+                    mobile capture rather than from the source.
+                    For the first row it is a real loss — a human-initiated payment's
                     initiator ("You") rests on the cell, and nothing else on
                     the row says so. That is an acceptable trade here (the
                     narrow layout drops the initiator outright) but it IS a
@@ -1490,9 +1504,7 @@ export default function DesignSystemPage() {
                   failed: false,
                 },
                 {
-                  // TODO(#2448): pre-#2357 row title; the shipped string is
-                  // 'Agent payment by Research assistant'. Blocked-baseline fix.
-                  title: 'x402 payment by Research assistant',
+                  title: 'Agent payment by Research assistant',
                   from: 'Operating wallet',
                   to: 'API provider',
                   initiator: 'Research assistant',
@@ -1545,7 +1557,11 @@ export default function DesignSystemPage() {
                   </td>
                   {/* `max-w-0` BELOW md ONLY. Unconditional, it squashed the
                       Activity column on DESKTOP too — the visual-regression
-                      gate caught "Recei…" / "x402 …" / "Faile…" at 1280px.
+                      gate caught all three Activity titles ellipsised at
+                      1280px ("Recei…" / "Faile…" and so on, quoting the demo
+                      titles AS THEY READ AT THE TIME; #2357 has since changed
+                      two of the three, and the incident is about the width,
+                      not about any particular string).
                       TransactionsTable survives it unconditionally because
                       every other column there carries an explicit `w-[…]`, so
                       the leftover flows to Activity; this showcase sizes its
@@ -2037,13 +2053,10 @@ export default function DesignSystemPage() {
         onClose={() => setComingSoonOpen(false)}
       />
 
-      {/* TODO(#2448): "x402 payment" is the pre-#2357 row title and no longer
-          shipped copy — the row now reads "Agent payment". Fixing it here moves
-          a blocked visual baseline, so it is tracked separately. */}
       <SidePanel
         open={panelOpen}
         onClose={() => setPanelOpen(false)}
-        title="x402 payment"
+        title="Agent payment"
         subtitle="Operating wallet · just now"
       >
         <p className="text-sm text-[var(--v2-ink-2)]">

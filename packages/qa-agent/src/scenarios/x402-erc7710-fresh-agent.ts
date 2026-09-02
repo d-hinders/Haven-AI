@@ -40,8 +40,32 @@ const CHAIN_ID = 84532
 const FUND_HUMAN = '0.006'
 const BUDGET_ATOMIC = '10000' // 0.01 USDC/day — the throwaway grant
 
-const SETTLE_WAIT_MS = 90_000
-const POLL_MS = 3_000
+/**
+ * Waits and poll interval, in one object.
+ *
+ * Mutable purely as a TEST SEAM — the same shape as `x402-delegation-3009`'s
+ * `TIMING` and `-sweep`'s `SWEEP_TIMING`. The cases worth covering here are
+ * the ones that never converge (no code, no balance movement), and against
+ * real values every one of them would sit out the full wait. Production never
+ * writes to this.
+ *
+ * `settleWaitMs` and `pollIntervalMs` are the previous `SETTLE_WAIT_MS` /
+ * `POLL_MS`, unchanged in value.
+ *
+ * Why `deployVisibleWaitMs` is 30 s, stated so the next reader does not have
+ * to guess: this wait is for PROPAGATION, not for mining. The backend already
+ * observed the deploy receipt at one confirmation before authorize returned
+ * 200, so all that is outstanding is a second node catching up — 30 s is ten
+ * polls at the 3 s interval, roughly 15 Base blocks at its 2 s block time.
+ * It is deliberately far below this file's own 90 s `settleWaitMs`, which
+ * waits on a strictly larger job (a merchant redemption being mined AND
+ * visible), and it sits in the same band as the suite's other non-mining
+ * waits — `-sweep`'s 20 s strand wait, `-grace-resume`'s 30 s money proof. A
+ * node still behind after 30 s should fail the leg rather than be waited out:
+ * every later assertion in this run reads the same node, so its answers would
+ * not be worth more than this one.
+ */
+export const TIMING = { deployVisibleWaitMs: 30_000, settleWaitMs: 90_000, pollIntervalMs: 3_000 }
 
 export const x402Erc7710FreshAgent: Scenario = {
   name: 'x402-erc7710-fresh-agent',
@@ -153,11 +177,34 @@ export const x402Erc7710FreshAgent: Scenario = {
     // Between authorize and settle: the account must have code NOW. This pins
     // WHERE the deploy happens — authorize, fail-closed before the intent row
     // (#1667) — not as a side effect of redemption, which would revert first.
-    const codeAfterAuthorize = await provider.getCode(identity.delegateAccountAddress)
+    //
+    // POLLED to a deadline, like every other on-chain assertion in this suite
+    // (#2445). The harness reads `BASE_SEPOLIA_RPC` while the backend writes
+    // through `RPC_URL_BASE_SEPOLIA` — two different nodes — against a deploy
+    // the backend confirmed at ONE confirmation, so a single unpolled read can
+    // land on a node that has not caught up yet.
+    let codeAfterAuthorize = '0x'
+    const codeDeadline = Date.now() + TIMING.deployVisibleWaitMs
+    for (;;) {
+      codeAfterAuthorize = await provider.getCode(identity.delegateAccountAddress)
+      if (codeAfterAuthorize !== '0x' || Date.now() >= codeDeadline) break
+      await new Promise((resolve) => setTimeout(resolve, TIMING.pollIntervalMs))
+    }
     if (codeAfterAuthorize === '0x') {
+      // Say only what is known. Authorize is fail-closed on the deploy —
+      // `ensureHybridDeployed` throws on an unconfirmed or reverted deploy and
+      // `modules/x402/delegation-authorize.ts` turns that into a 502 — so a
+      // 200 means the BACKEND's node saw the account deployed. "The deploy did
+      // not run" is therefore the one conclusion this read cannot support, and
+      // asserting it sent triage into #1667's code instead of at the read.
       return fail(
-        `authorize succeeded but ${identity.delegateAccountAddress} still has no code — ` +
-          'the #1667 deploy did not run, and redemption would revert InvalidEOASignature',
+        `authorize returned 200 — so the backend's node saw ${identity.delegateAccountAddress} ` +
+          `deployed (the deploy leg is fail-closed: an unconfirmed or reverted deploy 502s) — but ` +
+          `the harness's own node ${BASE_SEPOLIA_RPC} still reports no code after ` +
+          `${TIMING.deployVisibleWaitMs / 1000}s of polling. The harness deliberately reads a ` +
+          `SECOND node (the backend writes through RPC_URL_BASE_SEPOLIA), so the direct reading is ` +
+          `that this node has not caught up. Settlement is not attempted: against an account this ` +
+          `run cannot see code on, a redemption failure would be uninterpretable`,
       )
     }
 
@@ -190,7 +237,7 @@ export const x402Erc7710FreshAgent: Scenario = {
     if (!outcome.served) return fail('merchant response unparseable')
 
     // ── 6. Money proof: direct settlement, no funding leg ────────────────────
-    const deadline = Date.now() + SETTLE_WAIT_MS
+    const deadline = Date.now() + TIMING.settleWaitMs
     let treasuryAfter = treasuryBefore
     let merchantAfter = merchantBefore
     for (;;) {
@@ -199,7 +246,7 @@ export const x402Erc7710FreshAgent: Scenario = {
         usdc.balanceOf(merchant),
       ])) as [bigint, bigint]
       if (treasuryAfter !== treasuryBefore || Date.now() >= deadline) break
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS))
+      await new Promise((resolve) => setTimeout(resolve, TIMING.pollIntervalMs))
     }
     const fmt = (value: bigint) => ethers.formatUnits(value, 6)
     if (treasuryBefore - treasuryAfter !== amountAtomic) {

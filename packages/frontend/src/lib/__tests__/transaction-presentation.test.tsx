@@ -74,7 +74,7 @@ describe('transaction presentation', () => {
 
     expect(transactionInitiator(row)).toBe('Research assistant')
     expect(transactionInitiator(row)).not.toBe('You')
-    expect(transactionTitle(row)).toBe('x402 payment by Research assistant')
+    expect(transactionTitle(row)).toBe('Agent payment by Research assistant')
   })
 
   it('attributes an erc7710 x402 row to its agent — never "You"', () => {
@@ -88,7 +88,7 @@ describe('transaction presentation', () => {
 
     expect(transactionInitiator(row)).toBe('Research assistant')
     expect(transactionInitiator(row)).not.toBe('You')
-    expect(transactionTitle(row)).toBe('x402 payment by Research assistant')
+    expect(transactionTitle(row)).toBe('Agent payment by Research assistant')
   })
 
   it('renders "You" only for human-initiated rows', () => {

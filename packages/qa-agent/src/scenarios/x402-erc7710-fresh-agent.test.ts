@@ -5,8 +5,14 @@
  *
  *   - a fixture that is not actually fresh proves nothing and must FAIL
  *     loudly rather than green-wash the counterfactual path;
- *   - authorize succeeding while the account still has no code is the exact
- *     #1667 regression signal, caught BEFORE settle would revert on-chain;
+ *   - authorize succeeding while the account still has no code stops the leg
+ *     BEFORE settle — and after #2445 it is POLLED to a deadline, so the two
+ *     halves worth pinning are that a late-appearing code still passes and
+ *     that a never-appearing one still FAILS (a poll that always succeeds is
+ *     not a guard);
+ *   - the failure text must not re-assert the cause #2445 removed: authorize
+ *     returning 200 means the backend's node saw the deploy mined, so "the
+ *     deploy did not run" is exactly what this read cannot conclude;
  *   - the happy path requires the code flip to happen at authorize.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -63,7 +69,13 @@ vi.mock('ethers', async (importOriginal) => {
   }
 })
 
-const { x402Erc7710FreshAgent } = await import('./x402-erc7710-fresh-agent.js')
+const { x402Erc7710FreshAgent, TIMING } = await import('./x402-erc7710-fresh-agent.js')
+
+// Real waits are 30 s / 90 s. The cases that matter here are the ones that
+// never converge, so they would sit out both in full.
+TIMING.deployVisibleWaitMs = 60
+TIMING.settleWaitMs = 60
+TIMING.pollIntervalMs = 20
 
 const ctx = {
   cfg: {
@@ -191,18 +203,50 @@ describe('the counterfactual precondition', () => {
   })
 })
 
-describe('the #1667 regression signal', () => {
-  it('FAILS when authorize succeeds but the account still has NO code', async () => {
-    // The exact prod defect: nothing deployed the delegator, so redemption
-    // would revert InvalidEOASignature. Caught here, before settle.
-    mockGetCode.mockResolvedValueOnce('0x').mockResolvedValueOnce('0x')
+describe('the post-authorize code read (#2445)', () => {
+  it('STILL FAILS when the code never appears — the poll must be able to lose', async () => {
+    // The guard's whole value: a poll that always converges asserts nothing.
+    // Every read returns 0x, so the loop must exhaust its deadline and fail.
+    mockGetCode.mockResolvedValue('0x')
 
     const result = await x402Erc7710FreshAgent.run(ctx)
 
     expect(result.pass).toBe(false)
-    expect(result.detail).toMatch(/still has no code/)
-    expect(result.detail).toMatch(/InvalidEOASignature/)
+    expect(result.detail).toMatch(/still reports no code/)
+    // It polled rather than reading once: the counterfactual precondition read
+    // plus at least two attempts inside the deadline.
+    expect(mockGetCode.mock.calls.length).toBeGreaterThan(2)
     expect(mockSettle).not.toHaveBeenCalled()
+  })
+
+  it('PASSES when the code appears on a later poll — the read lag #2445 is about', async () => {
+    // Pre-#2445 this exact sequence failed the run and blamed the deploy.
+    mockGetCode
+      .mockResolvedValueOnce('0x') // counterfactual precondition
+      .mockResolvedValueOnce('0x') // first post-authorize read: node behind
+      .mockResolvedValue('0x60016001') // caught up
+
+    const result = await x402Erc7710FreshAgent.run(ctx)
+
+    expect(result.pass).toBe(true)
+    expect(mockSettle).toHaveBeenCalled()
+  })
+
+  it('does NOT blame the deploy — authorize returning 200 rules that cause out', async () => {
+    // `ensureHybridDeployed` throws on an unconfirmed or reverted deploy and
+    // `delegation-authorize.ts` turns that into a 502, so a 200 means the
+    // backend's node saw the account deployed. The old text asserted the
+    // opposite and sent triage into #1667's code.
+    mockGetCode.mockResolvedValue('0x')
+
+    const result = await x402Erc7710FreshAgent.run(ctx)
+
+    expect(result.detail).not.toMatch(/deploy did not run/)
+    expect(result.detail).not.toMatch(/InvalidEOASignature/)
+    // What it says instead: the backend's node saw it, ours has not caught up.
+    expect(result.detail).toMatch(/backend's node saw/)
+    expect(result.detail).toMatch(/has not caught up/)
+    expect(result.detail).toMatch(/RPC_URL_BASE_SEPOLIA/)
   })
 })
 

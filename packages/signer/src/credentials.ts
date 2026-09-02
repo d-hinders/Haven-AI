@@ -1,9 +1,20 @@
 import { readFile, stat } from 'node:fs/promises'
 
 /**
- * The edge signer only needs the delegate key — it signs, it does not call the
- * Haven API. Identity (the `api_key`) lives with the hosted MCP connection, not
- * here. So unlike `@haven_ai/mcp`, this loader requires *only* `delegate_key`.
+ * The edge signer's own credential requires *only* `delegate_key` — unlike
+ * `@haven_ai/mcp`, no `api_key` belongs in this file.
+ *
+ * That is a claim about this credential, not about the process, and the
+ * difference matters: the sentence that used to stand here ("it does not call
+ * the Haven API") was retired by #1263. The MCP server layer does make one
+ * authenticated call — a read-only `GET /x402/:payment_id/sign-context`, see
+ * `sign-context.ts` — and it reads the `api_url` / `api_key` for it from a
+ * SEPARATE `identity.json` in the same directory as the credential file
+ * resolved here. That is why `sourcePath` below is load-bearing rather than
+ * diagnostic, and why a key supplied through `HAVEN_DELEGATE_KEY` alone (no
+ * file, so no directory) leaves that path with no identity to load and the
+ * process making no network calls at all. The delegate key read here is never
+ * part of any request or response either way.
  */
 export interface SignerCredentials {
   delegateKey: string

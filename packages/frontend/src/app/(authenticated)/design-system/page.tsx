@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Select } from '@/components/ui/Select'
@@ -477,6 +478,17 @@ export default function DesignSystemPage() {
                 Copy feedback
               </Button>
             </div>
+            <div className="mt-4 space-y-1.5">
+              <Input invalid aria-describedby="sample-inline-alert" placeholder="https://your-service.example/pay" />
+              <InlineAlert id="sample-inline-alert">
+                Enter a valid https URL for your service.
+              </InlineAlert>
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              Use <code className="rounded bg-[var(--v2-surface)] px-1">InlineAlert</code> for a short
+              field- or dialog-level failure. It owns the alert role and danger text; the surrounding
+              field or content stack owns spacing. Use a dedicated panel or toast for larger failed states.
+            </p>
           </Card>
         </div>
 
@@ -1199,47 +1211,51 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
-        title="Manual payment review"
-        description="Manual sends lead with the money: amount first, then the wallet-to-recipient path and how you approve the send."
+        title="Manual send"
+        description="The only manual send Haven has is a single editable step — amount, token and recipient collected and submitted on one screen. There is no review step and no approval hold, so this showcase is a FORM, not a confirmation summary."
       >
         <Card hover={false} className="max-w-xl p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-medium text-[var(--v2-ink-3)]">You are sending</p>
-              <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
-                125.00 USDC
-              </p>
+          <div className="space-y-3">
+            <p className="text-sm text-[var(--v2-ink-muted)]">
+              Send from this account with one approval. No network fee for you.
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <label className="sr-only" htmlFor="ds-send-amount">
+                Amount
+              </label>
+              <Input
+                id="ds-send-amount"
+                className="v2-tabular"
+                placeholder="Amount"
+                defaultValue="125.00"
+                inputMode="decimal"
+                rightAction={<MaxButton onClick={() => toast.success('Amount set to balance')} />}
+              />
+              <label className="sr-only" htmlFor="ds-send-token">
+                Token
+              </label>
+              <Select id="ds-send-token" defaultValue="usdc" className="sm:w-28 sm:shrink-0">
+                <option value="usdc">USDC</option>
+                <option value="eth">ETH</option>
+              </Select>
             </div>
-            <StatusBadge>Ready to send</StatusBadge>
-          </div>
-          <div className="mt-5 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
-            <TransactionMovement from="Operating wallet" to="Acme Services" />
-            <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
-                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Operating wallet</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Recipient</dt>
-                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Acme Services</dd>
-                <dd className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">0x7a58...91c2</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
-                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Base</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Approve with</dt>
-                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Device approval</dd>
-              </div>
-            </dl>
-          </div>
-          <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
-            Network fees are paid by Haven (ETH).
-          </p>
-          <div className="mt-5 flex gap-3">
-            <Button variant="ghost" className="flex-1">Back</Button>
-            <Button className="flex-1">Approve and send</Button>
+            <label className="sr-only" htmlFor="ds-send-recipient">
+              Recipient address
+            </label>
+            <Input
+              id="ds-send-recipient"
+              className="font-mono"
+              placeholder="Recipient address (0x…)"
+              defaultValue="0x7a58f0d1c9b4e2a6837f5c1d0e9b4a2c6d8191c2"
+              rightAction={<PasteButton onPaste={() => toast.success('Address pasted')} />}
+            />
+            <p className="text-xs text-[var(--v2-ink-3)]">
+              Sending on Base from Operating wallet.
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="ghost">Cancel</Button>
+              <Button>Send</Button>
+            </div>
           </div>
         </Card>
       </Section>
@@ -1337,7 +1353,7 @@ export default function DesignSystemPage() {
             <Card.Header title="Recent agent activity" />
             <TransactionActivityRow
               direction="out"
-              title="x402 payment"
+              title="Agent payment"
               description={<MovementExample from="Research assistant" to="API provider" />}
               value="12.00"
               asset="USDC"
@@ -1346,7 +1362,7 @@ export default function DesignSystemPage() {
             />
             <TransactionActivityRow
               direction="out"
-              title="x402 payment"
+              title="Agent payment"
               description={<MovementExample from="Research assistant" to="Cloud vendor" />}
               value="320.00"
               asset="USDC"
@@ -1420,8 +1436,29 @@ export default function DesignSystemPage() {
                     the column it stands in for. The INITIATOR genuinely is
                     dropped between the two stages. For two of the three demo
                     rows that costs nothing visible, because the title already
-                    says it ("x402 payment BY RESEARCH ASSISTANT"); for the
-                    first row it is a real loss — a human-initiated payment's
+                    says it ("AGENT PAYMENT BY RESEARCH ASSISTANT" and
+                    "FAILED PAYMENT BY RESEARCH ASSISTANT"). What carries the
+                    initiator there is the trailing `by <agent>` clause,
+                    which `transactionTitle` in
+                    `lib/transaction-presentation.tsx` appends to whatever
+                    `paymentSourceTitle` returns — so the argument never rested
+                    on the protocol name, and it survives #2357 taking the
+                    protocol out of the title (this quote previously named it;
+                    #2448 re-based it). The MEASUREMENTS above are unaffected
+                    for the same reason they were taken on the Failed row:
+                    that title is "Failed payment by Research assistant" and
+                    #2357 did not touch it.
+                    SCOPE: "the title already says it" holds in the `md`->`xl`
+                    band ONLY. BELOW `md` the Activity cell is `max-w-0` +
+                    `truncate` (see the `<td>` below), so the titles ellipsise
+                    to "Agent payme…" / "Failed payme…" and the `by <agent>`
+                    clause is cut off with them — measured on the 390px
+                    capture. The narrow layout therefore loses the initiator
+                    for ALL THREE rows, not just the first: there the column
+                    is dropped AND the title cannot stand in for it. Raised by
+                    `haven-design-reviewer` on #2448, against the rendered
+                    mobile capture rather than from the source.
+                    For the first row it is a real loss — a human-initiated payment's
                     initiator ("You") rests on the cell, and nothing else on
                     the row says so. That is an acceptable trade here (the
                     narrow layout drops the initiator outright) but it IS a
@@ -1467,7 +1504,7 @@ export default function DesignSystemPage() {
                   failed: false,
                 },
                 {
-                  title: 'x402 payment by Research assistant',
+                  title: 'Agent payment by Research assistant',
                   from: 'Operating wallet',
                   to: 'API provider',
                   initiator: 'Research assistant',
@@ -1520,7 +1557,11 @@ export default function DesignSystemPage() {
                   </td>
                   {/* `max-w-0` BELOW md ONLY. Unconditional, it squashed the
                       Activity column on DESKTOP too — the visual-regression
-                      gate caught "Recei…" / "x402 …" / "Faile…" at 1280px.
+                      gate caught all three Activity titles ellipsised at
+                      1280px ("Recei…" / "Faile…" and so on, quoting the demo
+                      titles AS THEY READ AT THE TIME; #2357 has since changed
+                      two of the three, and the incident is about the width,
+                      not about any particular string).
                       TransactionsTable survives it unconditionally because
                       every other column there carries an explicit `w-[…]`, so
                       the leftover flows to Activity; this showcase sizes its
@@ -2015,7 +2056,7 @@ export default function DesignSystemPage() {
       <SidePanel
         open={panelOpen}
         onClose={() => setPanelOpen(false)}
-        title="x402 payment"
+        title="Agent payment"
         subtitle="Operating wallet · just now"
       >
         <p className="text-sm text-[var(--v2-ink-2)]">

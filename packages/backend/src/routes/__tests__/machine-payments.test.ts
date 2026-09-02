@@ -21,12 +21,13 @@ import { expectMatchesSpec } from '../../openapi/response-shape.js'
 // legacy-rail characterization below compares against this, never a
 // copy-pasted string.
 import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
+// #2328: the canonical HUMAN-shape producer (rails/delegation-budget-view.ts
+// projects every budget through it) — the identity pin on the allowances
+// summary below is stated in its terms, not hand-computed.
+import { formatTokenValue } from '../../domain/tokens.js'
 
-const { mockQuery, allowanceMocks, fiatMocks, reportingMocks } = vi.hoisted(() => ({
+const { mockQuery, fiatMocks, reportingMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
-  allowanceMocks: {
-    getTokenAllowance: vi.fn(),
-  },
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
     getBookTimeSekValue: vi.fn().mockResolvedValue(null),
@@ -46,7 +47,6 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
 
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 
@@ -107,7 +107,6 @@ const challenge = {
  * stops preceding the work.
  */
 function expectNoAuthorizationWork() {
-  expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
   // Only the auth lookup ran. Anything else means the refusal was reached
   // through code that had already started authorizing.
   expect(sqlCalls().map((c) => c.sql).filter((sql) => !/api_key_hash = \$1/.test(sql))).toEqual([])
@@ -231,7 +230,6 @@ describe('machine payment routes', () => {
 
   beforeEach(() => {
     mockQuery.mockReset()
-    for (const mock of Object.values(allowanceMocks)) mock.mockReset()
     for (const mock of Object.values(fiatMocks)) mock.mockReset()
     // mockClear (not mockReset): lateAttachMerchantReceipt is awaited via
     // `.catch()` in the fire-and-forget call site — it must keep resolving
@@ -356,7 +354,6 @@ describe('machine payment routes', () => {
   // no longer happens on this rail.
   describe('GET /allowances — Safe rail retired (#2020, reversing #1986)', () => {
     function expectNoAllowanceStateRead() {
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
       expect(sqlCalls().some((c) => /FROM agent_allowances|FROM agent_delegations/.test(c.sql))).toBe(false)
     }
 
@@ -448,10 +445,97 @@ describe('machine payment routes', () => {
         }],
       })
       // No Safe, no AllowanceModule on this rail — the contract read must not run.
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
       // agent_allowances is a frozen onboarding mirror on this rail (#1090) —
       // consulting it would report the onboarding budget forever.
       expect(sqlCalls().some((c) => /FROM agent_allowances/.test(c.sql))).toBe(false)
+    })
+
+    // #2328: the AllowanceSummary round trip. `GET /agents` and
+    // `GET /agents/{id}` have handed their real payloads to
+    // `expectMatchesSpec` since #1444; this route never did, so the #2295
+    // amount-schema split on it — `configured_amount` is
+    // `allowanceHumanAmount` (whole tokens) while its sibling
+    // `onchain.amount` is ATOMIC — was pinned only by what spec.test.ts says
+    // the spec SAYS. Nothing proved the route EMITS a payload the schema
+    // accepts, so handler and spec could drift apart unheard.
+    it('delegation rail: the summary round-trips against AllowanceSummary — the human/atomic split pinned (#2328)', async () => {
+      primeDb(
+        authAs(DELEGATION_AGENT),
+        delegationRows([{
+          // Real uuid, not the legacy test's 'd-1': the schema pins
+          // `format: 'uuid'` and ajv formats are wired (#1444) — a fixture
+          // id like that would fail the very assertion this test adds.
+          id: '44444444-4444-4444-4444-444444444444',
+          agent_id: AGENT.id,
+          chain_id: 84532,
+          token_address: SEPOLIA_USDC,
+          // 1.234567 USDC (6 decimals, packages/core/src/chains.ts). Chosen
+          // dot-bearing on purpose: its human projection carries a fraction,
+          // which the ATOMIC pattern `^[0-9]+$` rejects — while an atomic
+          // string such as '1234567' still matches the CURRENT human pattern
+          // `^[0-9]+(\.[0-9]+)?$`, because a bare integer is legal there.
+          // #2408 proposes tightening the pattern to formatTokenValue's
+          // produced set `^(0|[0-9]+\.[0-9]{2,6})$` (the emitter can never
+          // output another bare integer than '0'), which WOULD reject it;
+          // until that lands, the identity assertion below — not the schema —
+          // is the discriminator.
+          budget_atomic: '1234567',
+          period_seconds: 86_400,
+        }]),
+      )
+      // No delegation_json primed: the id→json lookup falls through to zero
+      // rows, so readRemainingBudget is never reached and `remaining` is the
+      // #1319/#1145 fallback (the full configured budget) — the path that
+      // emits `remaining_is_from_chain: false`.
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/allowances',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+
+      expect(response.statusCode).toBe(200)
+      const summary = response.json()
+      expect(summary.allowances).toHaveLength(1)
+      const item = summary.allowances[0]
+
+      // (1) The spec round trip: the real 200 payload against the schema the
+      // route declares ($ref AllowanceSummary, 200).
+      expectMatchesSpec('GET', '/machine-payments/allowances', summary)
+
+      // (2) The human-shape identity the schema alone cannot pin. The two
+      // keyed amounts are one number in two shapes — human-decimal
+      // `configured_amount` next to atomic `onchain.amount`, a factor
+      // `10 ** decimals` apart (#2295) — and the human pattern's bare-integer
+      // tolerance means an atomic string under the human key still validates.
+      // The identity below IS the discriminator, stated in the canonical
+      // producer's terms: configured_amount must be exactly what
+      // delegation-budget-view.ts projects from the atomic sibling.
+      expect(item.configured_amount).toBe(formatTokenValue(item.onchain.amount, 6))
+      expect(item.configured_amount).toBe('1.234567')
+
+      // What this round trip CANNOT see — the two limits recorded in
+      // docs/architecture/05-agent-api-openapi.md, stated rather than implied:
+      //
+      // (a) The helper injects `additionalProperties: false` only where the
+      //     schema states no preference, so an explicitly open or
+      //     allOf-composed schema stays open. AllowanceSummary, its item
+      //     shape and its `onchain` object all declare
+      //     `additionalProperties: false` themselves, and none is allOf-
+      //     composed — so nothing is left open here and nothing was injected;
+      //     the coverage below is exactly as strict as the schema text. If a
+      //     later edit opens or allOf-composes any of those objects, this
+      //     assertion quietly loses its undeclared-field strictness — that is
+      //     the spec's decision, not this test's to undo.
+      //
+      // (b) An OPTIONAL field a fixture omits is dropped from the JSON, so
+      //     its type rule never runs. `remaining_is_from_chain` is the only
+      //     optional field on this schema (delegation-rail-only, #1319); this
+      //     fixture PRODUCES it via the no-json fallback, so its boolean rule
+      //     does run — expectMatchesSpec alone would not have demanded its
+      //     presence. The empty-`allowances` sibling response cannot cover it:
+      //     an empty array emits no items at all.
+      expect(item.onchain.remaining_is_from_chain).toBe(false)
     })
 
     it('delegation rail: NO active budget returns an empty allowances array — derived readiness stays needs_approval', async () => {
@@ -471,7 +555,6 @@ describe('machine payment routes', () => {
         chain_id: 84532,
         allowances: [],
       })
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     })
 
     it('session_key rail: 410 fail-closed — no state read on the retired rail (#834/#993)', async () => {
@@ -488,7 +571,6 @@ describe('machine payment routes', () => {
       // The refusal is produced from the auth context alone: no allowance
       // config read, no delegation read, no on-chain read.
       expect(sqlCalls().some((c) => /FROM agent_allowances|FROM agent_delegations/.test(c.sql))).toBe(false)
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     })
   })
 
@@ -1318,15 +1400,6 @@ describe('machine payment routes', () => {
      * is an export, and priming it is what makes "the refusal fires before the
      * allowance is even read" a meaningful thing to assert.
      */
-    function primeAmpleLegacyAllowance() {
-      allowanceMocks.getTokenAllowance.mockResolvedValue({
-        amount: 1_000_000n,
-        spent: 0n,
-        resetTimeMin: 1440,
-        lastResetMin: 0,
-        nonce: 5,
-      })
-    }
 
     // #1986 (epic #1440 slice 3): the legacy AllowanceModule rail is
     // retired. `/send` refuses BEFORE it does anything else — before the
@@ -1377,12 +1450,10 @@ describe('machine payment routes', () => {
         expect(response.statusCode).toBe(410)
         expect(response.json()).toEqual(allowanceModuleRailRetired('account').body)
         // Nothing minted, no chain read, no idempotency lookup.
-        expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
         expect(sqlCalls().some((c) => /send_idempotency_key/.test(c.sql))).toBe(false)
       })
 
       it('creates a USDC payment intent within allowance and returns sign_data', async () => {
-        primeAmpleLegacyAllowance()
 
         primeDb(AUTH, allowanceConfigured(true), insertIntent(sendIntentRow()))
 
@@ -1401,7 +1472,6 @@ describe('machine payment routes', () => {
       })
 
       it('queues over-allowance transfer as pending_approval (202)', async () => {
-        primeAmpleLegacyAllowance()
 
         primeDb(
           AUTH,
@@ -1445,7 +1515,6 @@ describe('machine payment routes', () => {
 
       expect(response.statusCode).toBe(400)
       expect(response.json().error).toContain('ETH, USDC')
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     })
 
     it('rejects invalid recipient address with 400', async () => {
@@ -1535,12 +1604,10 @@ describe('machine payment routes', () => {
         // fires first. Was: 201 with the original sign_data replayed.
         expect(response.statusCode).toBe(410)
         expect(response.json()).toEqual(allowanceModuleRailRetired('account').body)
-        expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
         expect(mockQuery).toHaveBeenCalledTimes(1) // auth only — no dedup lookup
       })
 
       it('persists the idempotency_key when creating a new intent', async () => {
-        primeAmpleLegacyAllowance()
 
         primeDb(
           AUTH,
@@ -1565,7 +1632,6 @@ describe('machine payment routes', () => {
       })
 
       it('replays the winner when a concurrent insert wins the idempotency race', async () => {
-        primeAmpleLegacyAllowance()
 
         const uniqueViolation = Object.assign(new Error('duplicate key value'), { code: '23505' })
         // Stateful counter kept from the original characterization (#1226
@@ -1613,7 +1679,6 @@ describe('machine payment routes', () => {
 
       expect(response.statusCode).toBe(400)
       expect(response.json().error).toContain('idempotency_key')
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     })
 
     // #1986 (epic #1440 slice 3): the legacy AllowanceModule rail is

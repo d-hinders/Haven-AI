@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 // The app has TWO Haven-API mocks: the typed e2e fixture (drives e2e tests +
 // the #897 visual-regression baselines) and the screenshot script's populated
@@ -10,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs script
 import {
+  fixtureFor,
   FIXTURE_USER,
   FIXTURE_SAFE,
   FIXTURE_AGENTS,
@@ -125,6 +129,180 @@ describe('the shared fixtures default to the LIVE rail (#2264)', () => {
         (safe as { account_type?: string }).account_type,
         `every fixture account must name its rail explicitly; ${safe.id} does not`,
       ).toMatch(/^(safe|delegator_hybrid)$/)
+    }
+  })
+})
+
+/**
+ * `allowance_amount` on `/agents` is the HUMAN-DECIMAL projection — in BOTH
+ * harnesses (#2298).
+ *
+ * One field name carries two wire shapes (#2295). `GET /agents` sends the
+ * projection `rails/delegation-budget-view.ts` builds with
+ * `formatTokenValue(row.budget_atomic, decimals)`: `'0'` for a zero budget,
+ * otherwise `<integer>.<2–6 fraction digits>` — `'250.00'` for 250 USDC, never
+ * the atomic `'250000000'`. The connect-setup budget (`agent_budget[]` on
+ * `/agent-connection-setups/*`) is the OTHER shape: an atomic integer string,
+ * `allowanceAtomicAmount` in `openapi/spec.ts`.
+ *
+ * #2298 was filed because the e2e fixture shipped the atomic shape on the
+ * field `/agents` sends human — so a budget-amount baseline captured on the
+ * harness would have been green through the #2283 defect, rendering a value
+ * the live route never sends. #2264 corrected `testAgent.allowances`; the
+ * screenshot dataset was corrected under #2106. Neither correction had a pin,
+ * and the key-parity suite above compares KEYS, not values — an atomic string
+ * and a decimal one have identical keys. This block is the pin. It fails by
+ * name (harness, agent, row) if either dataset drifts back to the shape
+ * `/agents` cannot send.
+ *
+ * The pattern is the emitter's PRODUCED SET, stated once here rather than
+ * ported: `formatTokenValue` trims trailing zeroes to a two-digit minimum and
+ * caps at six, so `'250.000000'` is in the set (six digits) even though for a
+ * whole-token USDC budget the emitter itself writes `'250.00'` — the backend's
+ * `openapi/spec.test.ts` records that same digits-versus-shape caveat and pins
+ * the produced values `['250.00', '0.000001', '5.00', '0']`, which the first
+ * case below re-states so the pattern is proven able to say yes AND no.
+ */
+describe('allowance_amount on /agents is the human-decimal projection in BOTH harnesses (#2298)', () => {
+  /** What `formatTokenValue` can emit: `'0'`, or an integer, a point, 2–6 digits. */
+  const HUMAN_DECIMAL = /^(0|[0-9]+\.[0-9]{2,6})$/
+  /** What `allowanceAtomicAmount` admits: an integer string, nothing else. */
+  const ATOMIC = /^[0-9]+$/
+
+  type AllowanceRow = { id?: string; allowance_amount: string }
+  type OverviewAllowance = { allowanceAmount: string }
+
+  it('the human pattern admits what formatTokenValue produces and rejects every atomic budget', () => {
+    // Positive control first: the produced set `openapi/spec.test.ts` pins.
+    for (const produced of ['250.00', '0.000001', '5.00', '0']) {
+      expect([produced, HUMAN_DECIMAL.test(produced)]).toEqual([produced, true])
+    }
+    // The pattern must be able to say no, or every case below is vacuous:
+    // the three atomic literals the two harnesses carry today, plus the
+    // pre-#2264 value #2298 was filed against.
+    for (const atomic of ['250000000', '25000000', '10000000000000000000', '1']) {
+      expect([atomic, HUMAN_DECIMAL.test(atomic)]).toEqual([atomic, false])
+    }
+    // And a bare integer other than `'0'` is NOT a human amount (#2408): the
+    // emitter always writes a fraction, so `'250'` cannot come from it.
+    expect(HUMAN_DECIMAL.test('250')).toBe(false)
+    expect(ATOMIC.test('250.00')).toBe(false)
+  })
+
+  it('e2e: every allowance the shared fixture serves on GET /agents and /dashboard/overview is human-decimal', () => {
+    const rows = testAgent.allowances as AllowanceRow[]
+    expect(rows.length, 'testAgent must carry a budget row, or this pins nothing').toBeGreaterThan(0)
+    for (const row of rows) {
+      expect(
+        [`e2e/fixtures/haven-api.ts testAgent.allowances[${row.id}]`, row.allowance_amount],
+        'the e2e fixture ships a shape GET /agents does not send (#2298)',
+      ).toEqual([`e2e/fixtures/haven-api.ts testAgent.allowances[${row.id}]`, expect.stringMatching(HUMAN_DECIMAL)])
+    }
+    // Same projection, camelCase, on the dashboard route (`routes/dashboard.ts`).
+    const overview = dashboardOverview.agents.flatMap((a) => a.allowances as OverviewAllowance[])
+    expect(overview.length).toBeGreaterThan(0)
+    for (const { allowanceAmount } of overview) {
+      expect(['e2e dashboardOverview.agents[].allowances[]', allowanceAmount]).toEqual([
+        'e2e dashboardOverview.agents[].allowances[]',
+        expect.stringMatching(HUMAN_DECIMAL),
+      ])
+    }
+  })
+
+  it('screenshot: every allowance FIXTURE_AGENTS and FIXTURE_OVERVIEW carry is human-decimal', () => {
+    const agents = FIXTURE_AGENTS as { id: string; allowances: AllowanceRow[] }[]
+    const rows = agents.flatMap((a) => a.allowances.map((row) => [a.id, row] as const))
+    expect(rows.length, 'FIXTURE_AGENTS must carry a budget row, or this pins nothing').toBeGreaterThan(0)
+    for (const [agentId, row] of rows) {
+      expect(
+        [`scripts/screenshot.mjs FIXTURE_AGENTS[${agentId}].allowances[${row.id}]`, row.allowance_amount],
+        'the screenshot fixture ships a shape GET /agents does not send (#2298)',
+      ).toEqual([
+        `scripts/screenshot.mjs FIXTURE_AGENTS[${agentId}].allowances[${row.id}]`,
+        expect.stringMatching(HUMAN_DECIMAL),
+      ])
+    }
+    const overview = (FIXTURE_OVERVIEW.agents as { allowances: OverviewAllowance[] }[]).flatMap(
+      (a) => a.allowances,
+    )
+    expect(overview.length).toBeGreaterThan(0)
+    for (const { allowanceAmount } of overview) {
+      expect(['screenshot FIXTURE_OVERVIEW.agents[].allowances[]', allowanceAmount]).toEqual([
+        'screenshot FIXTURE_OVERVIEW.agents[].allowances[]',
+        expect.stringMatching(HUMAN_DECIMAL),
+      ])
+    }
+  })
+
+  it('screenshot: every projected allowance re-parses to the budget_atomic of the delegation it projects', () => {
+    // The projection IS `formatTokenValue(row.budget_atomic, 6)` for USDC, so
+    // the human string must scale back to the atomic budget the same harness
+    // serves on `/agents/:id/delegations` — the same re-parse the delegate-
+    // balance guard in `screenshot-fixture.test.ts` uses, applied to the row
+    // `/agents` renders. A right-shaped, wrong-valued amount fails here.
+    const agents = FIXTURE_AGENTS as { id: string; allowances: AllowanceRow[] }[]
+    let checked = 0
+    for (const agent of agents) {
+      const res = fixtureFor(`/agents/${agent.id}/delegations`) as {
+        delegations: { budget_atomic: string }[]
+      } | null
+      // Coverage boundary, made loud rather than silent (haven-reviewer's nit
+      // on this PR): an agent carrying `allowances` rows with no keyed
+      // `/delegations` body is the #2106 impossible state — the projection is
+      // what fills the array — so it fails here instead of skipping the
+      // value check. An agent with NO allowances and no delegation is fine.
+      // An unkeyed id falls through to `null`; read it as an empty body so the
+      // length assertion below is what names the mismatch, not a null access.
+      const delegations = res?.delegations ?? []
+      if (agent.allowances.length === 0 && delegations.length === 0) continue
+      expect(
+        [agent.id, delegations.length],
+        `${agent.id} carries allowances but no keyed /agents/:id/delegations body to re-parse against`,
+      ).toEqual([agent.id, agent.allowances.length])
+      agent.allowances.forEach((row, i) => {
+        const [int = '', frac = ''] = row.allowance_amount.split('.')
+        const reconstructed = (BigInt(int) * 10n ** 6n + BigInt(frac.padEnd(6, '0'))).toString()
+        expect([agent.id, reconstructed]).toEqual([agent.id, delegations[i]!.budget_atomic])
+        checked += 1
+      })
+    }
+    expect(checked, 'no delegation-backed allowance was checked — the fixture lost its budgets').toBeGreaterThan(0)
+  })
+
+  it('every allowance_amount literal in either harness file carries the shape of the key it sits under', () => {
+    // The exported objects above cannot see a scenario-local override —
+    // `catalog-budget-states` in `screenshot.mjs` answers `/agents` with its
+    // own `allowances` row, and a spec can seed one the same way. So the two
+    // files are read as text: each `allowance_amount: '…'` literal is
+    // classified by the NEAREST preceding `allowances: [` (the `/agents`
+    // projection — human) or `agent_budget: [` (the connect-setup request —
+    // atomic), and must carry that key's shape. A literal under neither key
+    // fails loudly rather than being skipped.
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+    const files = ['e2e/fixtures/haven-api.ts', 'scripts/screenshot.mjs'] as const
+    const shapeFor = { allowances: HUMAN_DECIMAL, agent_budget: ATOMIC } as const
+    for (const label of files) {
+      const source = readFileSync(path.join(root, label), 'utf8')
+      const keys = [...source.matchAll(/\b(allowances|agent_budget):\s*\[/g)].map((m) => ({
+        at: m.index ?? 0,
+        key: m[1] as keyof typeof shapeFor,
+      }))
+      const literals = [...source.matchAll(/allowance_amount:\s*'([^']*)'/g)]
+      const seen = { allowances: 0, agent_budget: 0 }
+      for (const m of literals) {
+        const at = m.index ?? 0
+        const line = source.slice(0, at).split('\n').length
+        const owner = keys.filter((k) => k.at < at).at(-1)
+        expect(owner, `${label}:${line} allowance_amount literal under neither allowances nor agent_budget`).toBeDefined()
+        seen[owner!.key] += 1
+        expect(
+          [`${label}:${line} (${owner!.key})`, m[1]],
+          `${label}:${line}: an \`${owner!.key}\` row must carry the ${owner!.key === 'allowances' ? 'HUMAN-DECIMAL' : 'ATOMIC'} shape (#2298)`,
+        ).toEqual([`${label}:${line} (${owner!.key})`, expect.stringMatching(shapeFor[owner!.key])])
+      }
+      // Non-vacuity: both files carry at least one literal of EACH kind today;
+      // a file that stops carrying one has changed what this scan covers.
+      expect([label, seen.allowances > 0, seen.agent_budget > 0]).toEqual([label, true, true])
     }
   })
 })

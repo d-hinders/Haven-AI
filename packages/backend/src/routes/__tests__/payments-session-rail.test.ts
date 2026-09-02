@@ -16,7 +16,6 @@ import { Wallet, getBytes } from 'ethers'
 const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   allowanceMocks: {
-    getTokenAllowance: vi.fn(),
     getProvider: vi.fn(),
     getRelayerWallet: vi.fn(),
   },
@@ -60,7 +59,6 @@ const PAYMENT_ID = '33333333-3333-3333-3333-333333333333'
 const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
 const RECIPIENT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a'
 const USER_OP_HASH = `0x${'cd'.repeat(32)}`
-const PERMISSION_ID = `0x${'ab'.repeat(32)}`
 const TX_HASH = `0x${'ef'.repeat(32)}`
 const DELEGATION_HASH = `0x${'12'.repeat(32)}`
 
@@ -101,8 +99,6 @@ function intentRow(overrides: Record<string, unknown> = {}) {
     confirmed_at: null,
     expires_at: '2099-01-01T00:00:00.000Z',
     execution_rail: null,
-    session_permission_id: null,
-    session_user_op: null,
     ...overrides,
   }
 }
@@ -116,12 +112,15 @@ function delegationIntentRow(overrides: Record<string, unknown> = {}) {
   })
 }
 
+// #2263 (migration 075): the row no longer carries `session_permission_id` or
+// `session_user_op` — both columns are dropped, having been NULL on every row
+// any live path could write since #834 deleted their only supplier. A fixture
+// that still set them would be describing a row shape the schema cannot
+// produce. `execution_rail` is what marks the intent, and it is what the
+// retirement seam refuses on.
 function sessionIntentRow(overrides: Record<string, unknown> = {}) {
   return intentRow({
     execution_rail: 'session_key',
-    session_permission_id: PERMISSION_ID,
-    // pg parses JSONB on read — simulate by parsing WITHOUT the bigint reviver.
-    session_user_op: JSON.parse(serializeUserOp(PREPARED_USER_OP)),
     ...overrides,
   })
 }
@@ -256,7 +255,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   it('POST /payments REFUSES a session-rail account — the rail is retired (#834)', async () => {
     // The retired-session gate fires BEFORE the token-config guard runs, so
     // only the rail-state read is ever consumed here.
-    primeDb(AUTH, railState({ execution_rail: 'session_key', session_permission_id: PERMISSION_ID }))
+    primeDb(AUTH, railState({ execution_rail: 'session_key' }))
 
     const response = await app.inject({
       method: 'POST',
@@ -290,7 +289,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     // → INSERT, with no allowance lookup queued in between.
     primeDb(
       AUTH,
-      railState({ execution_rail: 'delegation', session_permission_id: null }),
+      railState({ execution_rail: 'delegation' }),
       insertIntent(delegationIntentRow()),
     )
 
@@ -306,7 +305,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     // The account validates typed data, not the bare hash — ship it:
     expect(body.sign_data.typed_data.domain.name).toBe('HybridDeleGator')
     // Neither other rail is touched:
-    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     // The allowance guard never ran — no agent_allowances lookup (#835 fix):
     expect(mockQuery.mock.calls.some((c) => /agent_allowances/.test(String(c[0])))).toBe(false)
     // The intent pins the rail + which delegation authorized it:
@@ -317,7 +315,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
 
   it('POST /payments 403s when the agent has no active delegation for the recipient', async () => {
     delegationMocks.prepareDelegationPayment.mockResolvedValue(null)
-    primeDb(AUTH, railState({ execution_rail: 'delegation', session_permission_id: null }))
+    primeDb(AUTH, railState({ execution_rail: 'delegation' }))
 
     const response = await app.inject({
       method: 'POST', url: '/payments',
@@ -334,7 +332,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     delegationMocks.prepareDelegationPayment.mockRejectedValueOnce(
       new Error('ERC20PeriodTransferEnforcer:transfer-amount-exceeded at https://api.pimlico.io/v2?apikey=pim_SECRET'),
     )
-    primeDb(AUTH, railState({ execution_rail: 'delegation', session_permission_id: null }))
+    primeDb(AUTH, railState({ execution_rail: 'delegation' }))
 
     const response = await app.inject({
       method: 'POST', url: '/payments',
@@ -409,7 +407,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   // fail-closes instead. `rails/allowance-module.ts` and this case are
   // scheduled for deletion in #1987.
   it('POST /payments stays on the legacy flow when the account is not migrated', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
 
     // No rail state → retired (fail-closed).
     primeDb(AUTH, railState(null), allowanceConfigured(true), insertIntent(intentRow()))
@@ -426,10 +423,15 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
   })
 
-  it('a session intent with missing stored state is refused the same way (410, #834)', async () => {
+  // #2263: was "a session intent with missing stored state" — the override that
+  // made the state "missing" (`session_user_op: null`) is gone with the column,
+  // so post-075 there is no OTHER state for a session intent to be in. The
+  // claim that survives is the one that was always load-bearing: the refusal
+  // comes from the rail marking alone and reads no session state to reach it.
+  it('a session intent is refused on its rail marking alone (410, #834)', async () => {
     const signature = await sessionWallet.signMessage(getBytes(USER_OP_HASH))
 
-    primeDb(AUTH, intentById(sessionIntentRow({ session_user_op: null })))
+    primeDb(AUTH, intentById(sessionIntentRow()))
 
     const response = await app.inject({
       method: 'POST',

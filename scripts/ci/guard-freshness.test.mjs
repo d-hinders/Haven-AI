@@ -283,8 +283,11 @@ const qaRun = (over = {}) => ({
   conclusion: 'success',
   databaseId: 1,
   event: 'deployment_status',
-  // A Railway deployment is created against a bare SHA, so GITHUB_REF is empty
-  // and the run has no head branch. This is the real shape, not a simplification.
+  // A Railway deployment is created against a bare SHA, so GITHUB_REF is
+  // documented empty — the shape #2273 predicted. The real runs report
+  // `headBranch: 'dev'` (measured on deployment 6218620498, #2427); the guard
+  // never reads the field (`countedBranches: null`), so the fixture keeps the
+  // unlabelled shape as the harder case and nothing here depends on it.
   headBranch: null,
   headSha: DEPLOYED_SHA,
   updatedAt: agoDays(0.2),

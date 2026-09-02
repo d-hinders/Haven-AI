@@ -184,6 +184,12 @@ export async function activatePendingDelegation(
  * and a recipient-pinned grant are different slots — a pinned grant never
  * retires the open one and vice versa (#829's selection order relies on both
  * coexisting). Returns the retired ids so a caller can report honestly.
+ *
+ * The executor defaults to the pool per this directory's convention, but a
+ * sweep is only ever meaningful paired with an activation — call it through
+ * `activatePendingDelegationInSlot` on the caller's transaction client, not
+ * directly, or a failure after it leaves the slot with no active grant (the
+ * #1053 finding 4 outage) with nothing to roll back (haven-reviewer, #2411).
  */
 export const REPLACE_OTHER_ACTIVE_DELEGATIONS_IN_SLOT_SQL = `UPDATE agent_delegations
        SET status = 'replaced', updated_at = NOW()

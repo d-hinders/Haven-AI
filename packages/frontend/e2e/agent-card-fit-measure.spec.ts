@@ -37,7 +37,9 @@
  * funds, a description and the legacy rail all left the floor at 271.5px; only
  * the MCP chip moved it. The chain is:
  *
- *   header `flex items-start gap-3`
+ *   header `flex flex-wrap items-start gap-3`  (`flex-wrap` added by #2325,
+ *     which drops the last-activity stamp below the block under `sm`; it only
+ *     RELAXES this row's min-content requirement, so the floor below stands)
  *     └ `min-w-0 flex-1` block                     shrinks ✅
  *        └ MCP row `flex min-w-0 items-center`     shrinks ✅
  *           └ `McpServerName`'s `inline-flex min-w-0` wrapper   shrinks ✅

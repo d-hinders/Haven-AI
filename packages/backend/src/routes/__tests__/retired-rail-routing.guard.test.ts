@@ -108,16 +108,23 @@ const DELETED_RAIL_MODULES = [
  * as tombstones so a re-created symbol lands on a guard rather than on
  * nothing.
  *
- * Deliberately NOT listed: `getTokenAllowance`, `getTokenBalance`,
- * `getProvider`, `getRelayerWallet`, `getTokensForDelegate`. Those survive on
- * `rails/allowance-module.ts` and are LIVE — shared chain infrastructure plus
- * the legacy wallet-approval read behind `agent-connection-setups.ts`. Banning
- * them backend-wide would be a guard that fails on correct code, which teaches
- * people to edit the guard. Rule 3 keeps them off the payment ENTRY POINTS,
- * which is the claim that actually matters.
+ * `getTokenAllowance` and `getTokensForDelegate` JOINED this list in #2259,
+ * which deleted them with the legacy wallet-approval route that was their last
+ * caller. Until then they were deliberately excluded as LIVE, and banning a
+ * live symbol backend-wide is a guard that fails on correct code — which
+ * teaches people to edit the guard. That reasoning expired with the exports:
+ * a tombstone for a genuinely deleted symbol costs nothing and is the whole
+ * point of this list.
+ *
+ * Still deliberately NOT listed: `getTokenBalance`, `getProvider`,
+ * `getRelayerWallet`. Those survive on `rails/allowance-module.ts` and are
+ * LIVE shared chain infrastructure — the #946 bridge, sweep, and the
+ * delegate-balance monitor all read them.
  */
 const RETIRED_RAIL_SYMBOLS = [
   'executeAllowanceTransfer',
+  'getTokenAllowance',
+  'getTokensForDelegate',
   'generateTransferHash',
   'recoverSigner',
   'decideCoverage',
@@ -420,7 +427,11 @@ describe('safe-retirement (#1993): nothing routes to the retired AllowanceModule
     const facts = parseImportFacts(
       [
         `import { prepareDelegationPayment } from '../rails/delegation-authorization.js'`,
-        `import { getTokenAllowance } from '../rails/allowance-module.js'`, // live: reads-only survivor
+        // #2259 retired `getTokenAllowance`; `getTokenBalance` is a genuine
+        // surviving read (the #946 bridge, sweep, the delegate-balance monitor),
+        // so it keeps this control's point: rule 2 must not over-read a LIVE
+        // allowance-module import just because of the module it comes from.
+        `import { getTokenBalance } from '../rails/allowance-module.js'`,
         `import * as chains from '../domain/chains.js'`,
         `export { resolveExecutionRail } from '../rails/execution-rail.js'`,
         `await app.register(agentDelegationRoutes, { prefix: '/agents' })`,

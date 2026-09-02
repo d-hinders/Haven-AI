@@ -1928,11 +1928,29 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('legacy rail: insufficient allowance still proceeds — the resulting funding intent queues for approval, like haven_pay_mcp_tool', async () => {
+  // #2259 re-based this test rather than deleting it. Its OLD framing —
+  // "legacy rail: insufficient allowance still proceeds … queues for approval"
+  // — asserts something unreachable: the legacy rail answers 410 at every
+  // payment entry point since #1986, so `POST /x402` cannot return 202
+  // `pending_approval` for a fresh intent on any rail.
+  //
+  // What IS reachable, and what the branch under test exists for, is a STORED
+  // row from before the retirement echoed back by the backend. `isPendingApproval`
+  // (tools.ts) documents that retention decision under #2101 and it still
+  // holds: the branch is fail-CLOSED — it stops with the payment_id and NO
+  // signable payload rather than falling through to a merchant header for
+  // funding that never confirmed. Deleting it would trade a defined stop for
+  // an undefined fall-through on exactly those rows, which epic #1440
+  // deliberately does not delete (see its deferred row-deletion decision).
+  //
+  // So this test keeps the guided-catalog pass-through coverage — the only
+  // exercise it has — and drops the false claim about how the status arises.
+  it('passes a stored pending_approval intent through as a defined stop, with no signable payload', async () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
       'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('7500') },
+      // A pre-retirement row, echoed back — not a queue this rail could create.
       'POST /x402': { status: 202, body: { payment_id: 'over_1', status: 'pending_approval' } },
     })
 
@@ -1941,8 +1959,8 @@ describe('haven_prepare_catalog_purchase', () => {
     )
 
     expect(result.data.status).toBe('pending_approval')
+    // The fail-closed half: a status the agent can act on, and nothing to sign.
     expect(result.data.payload_hash).toBeNull()
-    // The intent WAS attempted — legacy over-allowance queues, it does not refuse here.
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
   })
 

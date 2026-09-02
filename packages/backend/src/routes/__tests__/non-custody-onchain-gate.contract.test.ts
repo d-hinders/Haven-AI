@@ -78,7 +78,7 @@ import {
  * `rails/allowance-module.js`. #1987 then deleted the rail's execution half,
  * and three of those six — `generateTransferHash`, `recoverSigner`,
  * `executeAllowanceTransfer` — stopped existing as exports of the real module.
- * `vi.mock(..., () => allowanceMocks)` replaces the module wholesale, so the
+ * `vi.mock(...)` replaces a module wholesale, so a factory naming a symbol the
  * factory simply invented three functions production does not have and the
  * suite asserted they were never called: **unfalsifiable, not merely quiet** —
  * no edit to production code could turn them red, because you cannot re-add a
@@ -127,14 +127,11 @@ import {
  * carries the red line.
  */
 
-const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() => ({
+const { mockQuery, fiatMocks, delegationMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   // Only names the real module still EXPORTS (#2044, re-measured #1993). A
   // factory entry for a deleted export is a spy nothing can ever call — see
-  // the header. `getTokenAllowance` is the ONE survivor.
-  allowanceMocks: {
-    getTokenAllowance: vi.fn(),
-  },
+  // the header. Since #2259 NONE of them survives as an export.
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
     getBookTimeSekValue: vi.fn().mockResolvedValue(null),
@@ -152,7 +149,6 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() 
 // `x402`, `x402-consolidation.characterization`, `payments-session-rail` and
 // `allowance-rail-retired` — tracked as #2048, not widened into this diff.)
 vi.mock('../../db.js', () => ({ default: { query: (...args: unknown[]) => mockQuery(...args) } }))
-vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 vi.mock('../../rails/delegation-authorization.js', () => delegationMocks)
 
@@ -202,30 +198,15 @@ function intentRow(overrides: Record<string, unknown> = {}) {
   }
 }
 
-/**
- * Every off-chain "how much is left" computation this suite must never see run
- * on the delegation rail — and every name here is one the real module still
- * exports, so each can be reached again by a future edit and each has been
- * mutation-proven to go red by name (#2044). `generateTransferHash` used to
- * occupy the third slot; it was deleted with the rail by #1987 and could never
- * fire again, so it is gone and `getLatestBlockTimeSec` — the block-time read
- * that fed the legacy arithmetic — takes its place.
- *
- * These are a supporting guard, not the red line's proof. The load-bearing
- * assertion is the structural import-binding check below.
- */
-function expectNoOffChainCoverageArithmetic() {
-  expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
-}
 
 /**
  * The retired rail's off-chain spend arithmetic — every "how much is left"
- * name that must never be reachable from the payment route again. Exactly ONE
- * of these — `getTokenAllowance` — is still a live export of
- * `rails/allowance-module.ts`, so it can be re-imported today; the other nine
- * were deleted with the rail (#1987, and two more since — see the header's
- * #1993 note) and are kept as tombstones so a re-created symbol lands on a
- * guard rather than on nothing.
+ * name that must never be reachable from the payment route again. Since #2259
+ * NONE of them is a live export of `rails/allowance-module.ts`: that slice
+ * deleted the last one, `getTokenAllowance`, with the connect-approval route
+ * that called it. The list is now entirely tombstones, which makes the
+ * structural import-binding check below STRONGER than when one entry was
+ * re-importable — a re-created symbol lands on a guard rather than on nothing.
  */
 const BANNED_ARITHMETIC = [
   'computeEffectiveAllowance',
@@ -318,13 +299,8 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
   afterAll(async () => { await app.close() })
   beforeEach(() => {
     mockQuery.mockReset()
-    for (const m of Object.values(allowanceMocks)) m.mockReset()
     for (const m of Object.values(fiatMocks)) m.mockReset()
     for (const m of Object.values(delegationMocks)) m.mockReset()
-    allowanceMocks.getTokenAllowance.mockResolvedValue({
-      token: '0x0000000000000000000000000000000000000000',
-      amount: 0n, spent: 0n, resetTimeMin: 0, lastResetMin: 0, nonce: 7,
-    })
   })
 
   // ── #1986 retirement: kept as one additional, strictly stronger case ─────
@@ -346,7 +322,6 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
 
       expect(res.statusCode).toBe(410)
       expect(res.json().error).toBe(allowanceModuleRailRetired('account').body.error)
-      expectNoOffChainCoverageArithmetic()
       // #2044: the `executeAllowanceTransfer` spy that stood here asserted on a
       // function #1987 deleted. That the retired rail cannot execute a transfer
       // is now carried by the structural import assertion below, which names
@@ -491,7 +466,6 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
     expect(res.statusCode).toBe(502)
     expect(res.json().error).toMatch(/on-chain policy/)
     expect(res.json().details).toContain('transfer-amount-exceeded')
-    expectNoOffChainCoverageArithmetic()
     expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
   })
 
@@ -507,7 +481,6 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
     })
 
     expect(res.statusCode).toBe(403)
-    expectNoOffChainCoverageArithmetic()
     expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
   })
 
@@ -538,6 +511,5 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
     expect(res.json().sign_data).toBeTruthy()
     // The chain's simulation was consulted — nothing else was:
     expect(delegationMocks.prepareDelegationPayment).toHaveBeenCalledOnce()
-    expectNoOffChainCoverageArithmetic()
   })
 })

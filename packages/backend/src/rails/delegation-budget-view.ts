@@ -26,10 +26,15 @@
  * here and that schema, and every consumer reading it, is wrong.
  *
  * Everything downstream of this function carries the human shape, on five
- * emitters: `GET /agents`, `GET /agents/{id}` and `PATCH /agents/{id}`
- * (`routes/agents.ts`), `GET /dashboard` (`routes/dashboard.ts`, as
- * `allowanceAmount`), and `GET /machine-payments/allowances`
- * (`modules/mpp/allowances.ts`, as `configured_amount`). Note the last one
+ * emitters — the five production call sites of this file, and no others
+ * (#2392 re-counted them; an earlier version of this list named a
+ * `PATCH /agents/{id}` that has never existed): `GET /agents`,
+ * `GET /agents/{id}` and `PUT /agents/{id}` (`routes/agents.ts`),
+ * `GET /dashboard/overview` (`routes/dashboard.ts`, as `allowanceAmount`), and
+ * `GET /machine-payments/allowances` (`modules/mpp/allowances.ts`, as
+ * `configured_amount`). `POST /agents` is NOT a caller: it answers with a
+ * literal `allowances: []` under the same `Agent` schema, so a change here
+ * cannot reach it and it is pinned to the spec on its own. Note the last one
  * reports the SAME budget twice — `configured_amount` human, `onchain.amount`
  * atomic from `budget_atomic` — so a consumer that mixes them up is off by
  * `10 ** decimals`.

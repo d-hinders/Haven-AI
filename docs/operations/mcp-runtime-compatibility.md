@@ -914,7 +914,8 @@ signing-time refusal is the guard there, as everywhere).
 **The `@alpha` in that remediation is the PRODUCTION channel, and since #2422 it
 is not universal (epic #2420).** The backend now derives the connector it hands
 out from `HAVEN_CONNECTOR_CHANNEL` (default `alpha`; the shared dev environment
-is being set to `dev`), so on a non-production deployment the correct rerun
+is intended to be set to `dev`, an owner step not performed at the time of
+writing), so on a non-production deployment the correct rerun
 names that backend's own channel — its setup response reports it in
 `connector_package`. The strings above are unchanged and still say `@alpha`,
 because they are baked into `packages/sdk` and `packages/signer` at build time
@@ -1083,7 +1084,8 @@ what each server's instructions say and why they differ in length.
   install at its 120s `startup_timeout_sec`, leaving corrupted `_npx` dirs).
   There is no silent npx fallback anymore. The install budget is 10 minutes
   with console heartbeats; on failure, address the cause (network, npm cache)
-  and rerun `npx @haven_ai/connect@alpha`.
+  and rerun the setup command your backend hands out (its `connector_package`;
+  `@alpha` in production — see the version-skew section above, #2422).
 - **Claude Code does not show Haven:** run `claude mcp get haven` and confirm
   it points at the wrapper path. If `add-json` is unavailable, the connector
   falls back to `claude mcp add --scope user -- <wrapper>`.

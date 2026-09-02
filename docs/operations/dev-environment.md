@@ -214,11 +214,17 @@ Isolation rules that are non-negotiable for a payments product:
   (`RELAYER_PRIVATE_KEY_<chainId>`, #640/#678) — a mechanism that *permits*
   isolating testnet from mainnet keys, though the deployed posture shares one
   key (see above).
-- **Connector channel** — `HAVEN_CONNECTOR_CHANNEL=dev` on the dev **backend**
-  so the dashboard's setup command reads
-  `npx -y @haven_ai/connect@dev …` instead of the production `@alpha` (#2422,
-  epic #2420). Production **leaves this unset**; unset means `alpha`, so the
-  production handout is untouched by the variable's existence. The value must
+- **Connector channel** — `HAVEN_CONNECTOR_CHANNEL` on the dev **backend**
+  selects the npm dist-tag the dashboard's setup command hands out (#2422, epic
+  #2420). **NOT SET YET, and this bullet is the configuration the slice enables,
+  not the deployed posture** — unlike its siblings above and below, which
+  describe what dev is actually running today. Until the owner sets it, the dev
+  backend hands out `@alpha` exactly as before; the setup response's
+  `connector_package` field is the authoritative answer for what a given backend
+  hands out at any moment, and should be read rather than assumed. Once set to
+  `dev`, the setup command reads `npx -y @haven_ai/connect@dev …` instead of the
+  production `@alpha`. Production **leaves this unset**; unset means `alpha`, so
+  the production handout is untouched by the variable's existence. The value must
   match `/^[a-z][a-z0-9-]{0,31}$/` — an invalid value makes the backend refuse
   to start, naming the variable, rather than falling back to `alpha`, because a
   silent fallback would hand out the production connector from dev and look

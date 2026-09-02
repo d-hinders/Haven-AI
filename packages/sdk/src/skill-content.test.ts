@@ -118,6 +118,21 @@ describe('generic skill content', () => {
     expect(complete).toMatch(/`payment_id`\s+and the signer's\s+`payment_header`\s+ONLY/)
   })
 
+  it('names the declared `to` field for haven_pay, not `recipient` (#2393)', () => {
+    // The hosted haven_pay schema (packages/mcp-server/src/tools.ts) declares
+    // `token`, `amount`, `to` and `idempotency_key`. `recipient` is
+    // haven_send's spelling. This skill told agents to send `recipient` to
+    // haven_pay, which the server refuses (`to` is required) — shipped
+    // guidance mis-naming a field on a money-path tool. Same defect class as
+    // #2353, pinned the same way: guard the specific shape that was wrong,
+    // not the field's mere presence (the word `recipient` is still correct
+    // elsewhere in the skill, e.g. the decline paragraph).
+    // The corrected sentence names the declared field:
+    expect(HAVEN_SKILL_MD).toMatch(/haven_pay` with\s*\n?`to`/)
+    // The old wrong shape (haven_pay with recipient) is gone:
+    expect(HAVEN_SKILL_MD).not.toMatch(/haven_pay` with\s*\n?recipient/)
+  })
+
   it('distinguishes stop-and-sweep from verify-then-sweep (#1300 mutation guard)', () => {
     expect(HAVEN_SKILL_MD).toContain('MERCHANT_UNRESPONSIVE_AFTER_FUNDING')
     expect(HAVEN_SKILL_MD).toContain('Stop-and-sweep')

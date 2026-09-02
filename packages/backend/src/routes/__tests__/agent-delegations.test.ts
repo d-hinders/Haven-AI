@@ -109,10 +109,27 @@ function mockDb(opts: {
   passkeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string; created_at?: Date | string | null }>
   waiverAt?: string | null
   list?: Array<Record<string, unknown>>
+  /**
+   * #2415: the delegate key the LOCKING `SELECT ... FOR UPDATE` sees, which is
+   * not always the one the pre-lock read saw — a re-key can commit in between.
+   * Opt-in: when unset, the locking read falls through to the ordinary agents
+   * branch exactly as before, so every other test is unchanged.
+   */
+  lockedDelegate?: string | null
 } = {}) {
   let agentReads = 0
   mockQuery.mockImplementation((sql: string) => {
     const s = String(sql)
+    // #2415: the LOCKING read, opt-in only. It must precede the generic agents
+    // branch — same table — but it answers ONLY when a test asked for a
+    // divergent locked key, because the build path's own lock read is one of
+    // the steps #2416's `agentSequence` counts, and hijacking it here would
+    // silently desynchronise that sequence.
+    if (opts.lockedDelegate !== undefined && /FROM agents(?:\s|$)/.test(s) && /FOR UPDATE/.test(s)) {
+      return Promise.resolve({
+        rows: [{ id: AGENT_ID, delegate_address: opts.lockedDelegate }],
+      })
+    }
     if (/FROM agent_rekeys/.test(s)) {
       return Promise.resolve({ rows: [{ in_flight: opts.inFlightRekey === true }] })
     }
@@ -753,6 +770,115 @@ describe('delegation lifecycle API (#828)', () => {
       // either order.
       expect(mockQuery.mock.calls[sweepIdx][1]).toContain('row-1')
       expect(String(mockQuery.mock.calls[activateIdx][1][0])).toContain('signature')
+    })
+
+    // ── #2415: the agent row lock must not span a network call ──────────
+    // #2331 derived the delegate's account address (one RPC) between BEGIN and
+    // COMMIT, so a slow RPC held the agent row lock and a pooled connection.
+    // These five pin the fix AND the guarantee it must not lose.
+    describe('#2415 lock scope: no RPC between BEGIN and COMMIT', () => {
+      /** Global invocation order, so query and derivation calls interleave truthfully. */
+      function timeline() {
+        const sqls = mockQuery.mock.calls.map((c) => String(c[0]))
+        const beginAt = mockQuery.mock.invocationCallOrder[sqls.indexOf('BEGIN')]
+        const endIdx = sqls.indexOf('COMMIT') === -1 ? sqls.indexOf('ROLLBACK') : sqls.indexOf('COMMIT')
+        const endAt = mockQuery.mock.invocationCallOrder[endIdx]
+        return { sqls, beginAt, endAt, derivations: mockCompute.mock.invocationCallOrder }
+      }
+
+      it('derives the delegate account BEFORE opening the transaction, never inside it', async () => {
+        mockDb({})
+        const res = await app.inject({
+          method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+          payload: { signature: '0x' + 'ab'.repeat(65) },
+        })
+        expect(res.statusCode).toBe(200)
+        const { sqls, beginAt, endAt, derivations } = timeline()
+        // The transaction really was opened and closed — otherwise "nothing
+        // ran inside it" would pass vacuously.
+        expect(sqls).toContain('BEGIN')
+        expect(sqls).toContain('COMMIT')
+        // The derivation happened exactly once, before BEGIN, and on the
+        // PRE-LOCK delegate key — the input is half of the guarantee, so it is
+        // asserted rather than left to the mock's argument-blind stub.
+        expect(derivations).toHaveLength(1)
+        expect(derivations[0]).toBeLessThan(beginAt)
+        expect(mockCompute).toHaveBeenCalledWith(84532, { ownerAddress: DELEGATE_KEY })
+        // Nothing derived while the lock was held. This is the assertion that
+        // goes red if the call is moved back under the lock.
+        expect(derivations.filter((at) => at > beginAt && at < endAt)).toEqual([])
+      })
+
+      it('still refuses a delegation built for a rotated delegate key, with the lock as the witness', async () => {
+        // The pre-lock read sees the old key; a re-key commits; the locking
+        // SELECT sees the new one. The activation must not commit.
+        mockDb({ lockedDelegate: '0x' + '77'.repeat(20) })
+        const res = await app.inject({
+          method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+          payload: { signature: '0x' + 'ab'.repeat(65) },
+        })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'Delegation was built for a previous delegate key' })
+        const sqls = mockQuery.mock.calls.map((c) => String(c[0]))
+        expect(sqls).toContain('ROLLBACK')
+        expect(sqls).not.toContain('COMMIT')
+        expect(sqls.some((q) => /SET status = 'active'/.test(q))).toBe(false)
+        expect(sqls.some((q) => /SET status = 'replaced'/.test(q))).toBe(false)
+      })
+
+      it('still refuses when the STORED delegation names a delegate the current key does not derive', async () => {
+        // The second half of the guard: the row's own `delegate` field is
+        // compared against the derivation, so a delegation JSON that never
+        // matched this agent is refused even with the key unrotated.
+        mockDb({
+          stored: {
+            id: 'row-1',
+            delegation_json: JSON.stringify({ delegate: '0x' + '99'.repeat(20), delegator: TREASURY, authority: `0x${'0'.repeat(64)}`, caveats: [], salt: '1' }),
+            status: 'pending',
+            token_address: USDC.toLowerCase(),
+            recipient_address: RECIPIENT.toLowerCase(),
+          },
+        })
+        const res = await app.inject({
+          method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+          payload: { signature: '0x' + 'ab'.repeat(65) },
+        })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'Delegation was built for a previous delegate key' })
+        expect(mockQuery.mock.calls.map((c) => String(c[0]))).not.toContain('COMMIT')
+      })
+
+      it('refuses an agent with no delegate key WITHOUT opening the transaction, same 409 and message', async () => {
+        // The derivation's input is `agent.delegate_address`, so this refusal
+        // moved ahead of BEGIN with it. Before #2415 it was reached inside the
+        // transaction, via lockOwnedNonRevokedDelegationAgent returning null
+        // for a row with no delegate key — same status, same message. Pinned
+        // because #2415 relocated it: nothing else in the file drives this
+        // route with a null delegate key.
+        mockDb({ agent: agentRow({ delegate_address: null }) })
+        const res = await app.inject({
+          method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+          payload: { signature: '0x' + 'ab'.repeat(65) },
+        })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'Agent cannot receive a budget while its account or re-key is unavailable' })
+        const sqls = mockQuery.mock.calls.map((c) => String(c[0]))
+        expect(sqls).not.toContain('BEGIN')
+        expect(mockCompute).not.toHaveBeenCalled()
+      })
+
+      it('CHARACTERIZATION: the happy path still flips the agent inside the same transaction (#1069)', async () => {
+        mockDb({ agent: agentRow({ status: 'pending_approval' }) })
+        const res = await app.inject({
+          method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+          payload: { signature: '0x' + 'ab'.repeat(65) },
+        })
+        expect(res.statusCode).toBe(200)
+        const sqls = mockQuery.mock.calls.map((c) => String(c[0]))
+        const flipIdx = sqls.findIndex((q) => /UPDATE agents/.test(q) && /status = 'pending_approval'/.test(q))
+        expect(flipIdx).toBeGreaterThan(sqls.indexOf('BEGIN'))
+        expect(flipIdx).toBeLessThan(sqls.indexOf('COMMIT'))
+      })
     })
 
     it('rejects a malformed signature and a non-pending row', async () => {

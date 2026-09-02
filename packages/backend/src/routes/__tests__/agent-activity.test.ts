@@ -72,12 +72,19 @@ describe('agent activity routes', () => {
     mockQuery.mockReset()
   })
 
-  it('exposes execution_rail + pinned session_permission_id on payments (#799 rollover observability)', async () => {
-    const PID = `0x${'ab'.repeat(32)}`
+  // #2263 (migration 075): was "exposes execution_rail + pinned
+  // session_permission_id on payments (#799 rollover observability)". The
+  // pinned `session_permission_id` half is gone — the column was dropped with
+  // the rest of the inert session/Safe-rail schema, having been NULL on every
+  // row any live code path could write since #834 deleted its only supplier.
+  // `execution_rail` is the half that still carries information (it is what
+  // routes an intent to its rail or its tombstone), so the observability
+  // claim narrows to it rather than disappearing.
+  it('exposes the pinned execution_rail on payments (#799 rollover observability)', async () => {
     mockQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT id FROM agents')) return { rows: [{ id: 'agent-1' }] }
       if (sql.includes('FROM payment_intents pi')) {
-        return { rows: [paymentRow({ execution_rail: 'session_key', session_permission_id: PID })] }
+        return { rows: [paymentRow({ execution_rail: 'session_key' })] }
       }
       if (sql.includes('FROM agent_tool_invocations')) return { rows: [] }
       throw new Error(`Unexpected query: ${sql}`)
@@ -94,14 +101,17 @@ describe('agent activity routes', () => {
     expect(payment).toMatchObject({
       type: 'payment',
       execution_rail: 'session_key',
-      session_permission_id: PID,
     })
-    // The SELECT actually fetches the columns (schema-smoke guards the shape):
+    expect(payment).not.toHaveProperty('session_permission_id')
+    // The SELECT actually fetches the column (schema-smoke guards the shape),
+    // and no longer fetches the dropped one — a stale `pi.session_permission_id`
+    // would be a hard SQL error against the post-075 schema, so this pins the
+    // query and the migration together.
     const paymentSql = String(
       mockQuery.mock.calls.find(([sql]) => String(sql).includes('FROM payment_intents pi'))?.[0],
     )
     expect(paymentSql).toContain('pi.execution_rail')
-    expect(paymentSql).toContain('pi.session_permission_id')
+    expect(paymentSql).not.toContain('session_permission_id')
   })
 
   // #2055: was "uses stored payment and approval Safe identity for a single

@@ -45,6 +45,9 @@ vi.mock('../../middleware/auth.js', () => ({
 const AGENT_UUID = '4f9a1c2e-7b3d-4a10-9c55-2f8e6d0b1a34'
 const SAFE_UUID = 'b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16'
 
+const DELEGATION_UUID = 'c3e5a8f1-9d24-4b70-8e13-6a4f2c8d5b09'
+const SEPOLIA_USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+
 const VALID_DELEGATE = '0x1111111111111111111111111111111111111111'
 const VALID_TOKEN = '0x3333333333333333333333333333333333333333'
 
@@ -109,6 +112,78 @@ describe('agent routes', () => {
     expect(mockQuery).toHaveBeenCalledTimes(1)
     // The populated shape is where drift would actually show.
     expectMatchesSpec('GET', '/agents/{id}', response.json())
+
+    await app.close()
+  })
+
+  // #2400: PUT /agents/{id} is the fifth real caller of
+  // rails/delegation-budget-view.ts and emits the same shape as
+  // GET /agents/{id}, but its spec entry was `{ type: 'object',
+  // additionalProperties: true }` — an open envelope, against which a round
+  // trip proves only "is an object". With the `$ref: Agent` this issue adds,
+  // the round trip pins the whole payload, allowances included.
+  it('PUT: the updated agent matches the Agent schema, with derived allowances', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+
+    mockQuery.mockImplementation(async (sql: string) => {
+      const s = String(sql)
+      if (/UPDATE agents/.test(s)) {
+        return {
+          rows: [{
+            id: AGENT_UUID,
+            name: 'Renamed Agent',
+            description: 'updated description',
+            delegate_address: VALID_DELEGATE,
+            safe_id: SAFE_UUID,
+            safe_address: '0x2222222222222222222222222222222222222222',
+            safe_name: 'Main wallet',
+            safe_chain_id: 84532,
+            account_type: 'delegator_hybrid',
+            api_key_prefix: 'sk_agent_abc',
+            status: 'active',
+            created_at: '2026-05-25T12:00:00.000Z',
+            mcp_server_name: 'haven',
+            mcp_last_seen_at: null,
+          }],
+        }
+      }
+      if (/FROM agent_delegations/.test(s)) {
+        return {
+          rows: [{
+            id: DELEGATION_UUID,
+            agent_id: AGENT_UUID,
+            chain_id: 84532,
+            token_address: SEPOLIA_USDC_ADDRESS,
+            budget_atomic: '1000000',
+            period_seconds: 86_400,
+          }],
+        }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: `/agents/${AGENT_UUID}`,
+      payload: { name: 'Renamed Agent', description: 'updated description' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    // The populated allowances array is the point of the pin: this route
+    // carries the HUMAN-DECIMAL projection (#2295), so '1.00' and not
+    // '1000000'. The literal guards the digits; the round trip below guards
+    // every other field against the contract.
+    expect(body.allowances).toEqual([{
+      id: DELEGATION_UUID,
+      agent_id: AGENT_UUID,
+      token_address: SEPOLIA_USDC_ADDRESS,
+      token_symbol: 'USDC',
+      allowance_amount: '1.00',
+      reset_period_min: 1440,
+    }])
+    expectMatchesSpec('PUT', '/agents/{id}', body)
 
     await app.close()
   })

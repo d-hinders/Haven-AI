@@ -927,8 +927,12 @@ export const openapiSpec = {
         },
         responses: {
           '200': {
+            // #2400: was `{ type: 'object', additionalProperties: true }`, an
+            // open envelope a round trip could only prove "is an object"
+            // against. The route returns `{ ...updated, allowances }` — the
+            // same shape as GET /agents/{id} — so it gets the same schema.
             description: 'The updated agent, with allowances.',
-            content: { 'application/json': { schema: { type: 'object', additionalProperties: true } } },
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Agent' } } },
           },
           '400': errorResponse,
           '401': errorResponse,
@@ -7160,7 +7164,15 @@ export const openapiSpec = {
         required: ['tokenSymbol', 'allowanceAmount', 'resetPeriodMin'],
         properties: {
           tokenSymbol: { type: 'string' },
-          allowanceAmount: { type: 'string' },
+          // #2400: was a bare `{ type: 'string' }`, while the identical value
+          // one route over is the named `allowanceHumanAmount` (#2295). Both
+          // come from the same `rails/delegation-budget-view.ts` projection, so
+          // a reader of the contract alone could not tell this one was HUMAN.
+          // Naming it does not DISCRIMINATE the shape — the pattern admits a
+          // bare integer by design, see the schema's own comment — so the hand
+          // literal in `dashboard.test.ts` stays. This is about #2295's "readable
+          // from the OpenAPI spec alone" holding for this emitter too.
+          allowanceAmount: allowanceHumanAmount,
           resetPeriodMin: { type: 'integer' },
         },
         additionalProperties: false,

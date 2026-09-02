@@ -32,6 +32,11 @@ import {
   unacknowledgedFailureMessage,
   type DbMode,
 } from './src/infra/__tests__/helpers/db-availability.js'
+import {
+  claimRetainedWorkerIds,
+  reapOrphanWorkerSchemas,
+  retainedWorkerIdCeiling,
+} from './src/infra/__tests__/helpers/schema-reap.js'
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), 'src')
 
@@ -66,6 +71,68 @@ async function countRealDbTestFiles(dir: string = SRC): Promise<number> {
 
 let verdict: { mode: DbMode; url: string } | null = null
 
+/**
+ * Holds this run's schema-ownership locks (#2418). Kept for the whole run and
+ * closed in `teardown()`; the locks are session-scoped, so an aborted run
+ * releases them by dying.
+ */
+let schemaOwner: import('pg').Client | null = null
+
+/**
+ * Claim this run's worker-schema ids and drop the ones no live run owns
+ * (#2418).
+ *
+ * Here rather than in `db-harness.ts` because this is the only process that
+ * spans the whole run — a per-worker fork does not, and reaping from one drops
+ * a sibling's schema between its files. The reasoning, the predicate and the
+ * before/after measurement live in `schema-reap.ts`.
+ *
+ * Entirely best-effort: every failure path warns and continues. This is a
+ * performance cleanup, and a run that refused to start because it could not
+ * tidy up would be a far worse defect than the ~20 ms per reset it saves.
+ */
+async function claimAndReapWorkerSchemas(url: string): Promise<void> {
+  try {
+    const { default: pg } = await import('pg')
+    const client = new pg.Client({ connectionString: url, connectionTimeoutMillis: 3_000 })
+    await client.connect()
+    schemaOwner = client
+    const ceiling = retainedWorkerIdCeiling()
+    await claimRetainedWorkerIds(client, ceiling)
+
+    // A SEPARATE, short-lived connection for the reap, and the separation is
+    // load-bearing rather than tidy: Postgres session advisory locks are
+    // re-entrant, so `pg_try_advisory_lock` run on `client` would happily
+    // re-acquire the very ids `client` just claimed and report them free. The
+    // reap's liveness rule would then be blind to this run's own ids, leaving
+    // the retention ceiling as their only protection — which is exactly the
+    // hole mutation m2 (ceiling check deleted) opened, and it emptied the
+    // whole database. On its own connection the two rules are genuinely
+    // independent, and either one alone still refuses.
+    const reapClient = new pg.Client({ connectionString: url, connectionTimeoutMillis: 3_000 })
+    await reapClient.connect()
+    let dropped: string[]
+    try {
+      dropped = await reapOrphanWorkerSchemas(reapClient, { retainCeiling: ceiling })
+    } finally {
+      await reapClient.end().catch(() => {})
+    }
+    if (dropped.length > 0) {
+      console.warn(
+        `db-harness: reaped ${dropped.length} orphaned test_w<N> schema(s) left behind by ` +
+          'killed vitest runs (#2418). Each one inflates pg_class, which is the floor of ' +
+          'every warm resetDb(). The backlog is drained a budget at a time, so a large one ' +
+          'shrinks over the next few runs.',
+      )
+    }
+  } catch (err) {
+    console.warn(
+      `db-harness: orphaned-schema reap skipped (#2418) — ${(err as Error).message}. ` +
+        'Performance cleanup only; this run is unaffected.',
+    )
+  }
+}
+
 export async function setup(): Promise<void> {
   const url = resolveTestDatabaseUrl()
   const { ci, acknowledged } = readDbModeInputs()
@@ -76,9 +143,19 @@ export async function setup(): Promise<void> {
   // narrowed run back into a proof, so there is no value in running it first.
   if (mode === 'fail-ci') throw new Error(ciFailureMessage(url))
   if (mode === 'fail-unacknowledged') throw new Error(unacknowledgedFailureMessage(url))
+
+  // AFTER the verdict and BEFORE any worker starts (#2418): the reap needs a
+  // reachable database, and its safety rests on no worker having claimed a
+  // schema yet.
+  if (mode === 'run') await claimAndReapWorkerSchemas(url)
 }
 
 export async function teardown(): Promise<void> {
+  // Releases this run's schema-ownership locks (#2418) — first, so they are
+  // gone even if the reporting below throws.
+  await schemaOwner?.end().catch(() => {})
+  schemaOwner = null
+
   if (!verdict) return
   const { mode, url } = verdict
 

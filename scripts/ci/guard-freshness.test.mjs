@@ -9,6 +9,7 @@ import {
   ISSUE_TITLE,
   RAILWAY_DEV_ENVIRONMENT,
   RAILWAY_DEPLOY_CREATOR,
+  MONEY_FLOW_JOB,
   evaluate,
   newestTimestamp,
   renderIssueBody,
@@ -261,15 +262,26 @@ test('every registered guard says how a human restarts it', () => {
 // ---------------------------------------------------------------------------
 
 const QA = SCHEDULED_GUARDS.find((g) => g.workflow === 'qa-dev.yml')
+const QA_DEV_YML_SOURCE = () => readFileSync(path.join(ROOT, '.github/workflows/qa-dev.yml'), 'utf8')
 
 const DEPLOYED_SHA = 'a'.repeat(40)
 const OTHER_SHA = 'b'.repeat(40)
 // What readDeploymentIndex() returns: full sha → creator login, for the dev env.
 const RAILWAY_INDEX = { [DEPLOYED_SHA]: RAILWAY_DEPLOY_CREATOR }
 
+// What `gh run view <id> --json jobs` reports for the two shapes that matter.
+// A run whose gate job REFUSED the harness has run-level conclusion `success`
+// — measured on ci.yml run 33604474457 (jobs skipped=12, success=2, run
+// `success`) — so the job list is the only place the difference is visible.
+const JOBS_HARNESS_RAN = { 1: [{ name: 'gate', conclusion: 'success' }, { name: MONEY_FLOW_JOB, conclusion: 'success' }] }
+const JOBS_HARNESS_FAILED = { 1: [{ name: 'gate', conclusion: 'success' }, { name: MONEY_FLOW_JOB, conclusion: 'failure' }] }
+const JOBS_GATE_REFUSED = { 1: [{ name: 'gate', conclusion: 'success' }, { name: MONEY_FLOW_JOB, conclusion: 'skipped' }] }
+const jobsFrom = (table) => (id) => table[id] ?? null
+
 const qaRun = (over = {}) => ({
   status: 'completed',
   conclusion: 'success',
+  databaseId: 1,
   event: 'deployment_status',
   // A Railway deployment is created against a bare SHA, so GITHUB_REF is empty
   // and the run has no head branch. This is the real shape, not a simplification.
@@ -279,8 +291,8 @@ const qaRun = (over = {}) => ({
   ...over,
 })
 
-const qaObs = (runs, index = RAILWAY_INDEX) => {
-  const qualifying = selectQualifyingRuns(runs, QA, index)
+const qaObs = (runs, index = RAILWAY_INDEX, jobsFor = jobsFrom(JOBS_HARNESS_RAN)) => {
+  const qualifying = selectQualifyingRuns(runs, QA, index, jobsFor)
   return {
     [QA.workflow]: {
       fileExists: true,
@@ -296,13 +308,17 @@ test('the post-deploy trigger is registered at all', () => {
   assert.deepEqual(QA.countedEvents, ['deployment_status'])
   assert.equal(QA.countedBranches, null)
   assert.deepEqual(QA.provenance, { environment: RAILWAY_DEV_ENVIRONMENT, creator: RAILWAY_DEPLOY_CREATOR })
+  // The job the run is judged by — shared with qa-freshness.mjs (#2404) so the
+  // two gates cannot disagree about which job moves money.
+  assert.equal(QA.requiredJob, MONEY_FLOW_JOB)
+  assert.match(QA_DEV_YML_SOURCE(), new RegExp(`^  ${MONEY_FLOW_JOB}:\\s*$`, 'm'))
 })
 
 test('POSITIVE CONTROL: a recent Railway-deployed run leaves the guard silent', () => {
   // Without this, a guard that fires on everything passes every test above.
   // An alarm nobody can turn off by fixing the thing is one that gets muted,
   // which is indistinguishable from having no alarm.
-  assert.equal(selectQualifyingRuns([qaRun()], QA, RAILWAY_INDEX).length, 1)
+  assert.equal(selectQualifyingRuns([qaRun()], QA, RAILWAY_INDEX, jobsFrom(JOBS_HARNESS_RAN)).length, 1)
   const result = evaluate({ guards: [QA], observations: qaObs([qaRun()]), now: NOW })
   assert.equal(result.healthy, true)
   assert.deepEqual(result.findings, [])
@@ -321,7 +337,7 @@ test('the NIGHTLY and the MANUAL dispatch do not vouch for the post-deploy trigg
     qaRun({ event: 'schedule', headBranch: 'dev', updatedAt: agoDays(0.05) }),
     qaRun({ event: 'workflow_dispatch', headBranch: 'dev', updatedAt: agoDays(0.05) }),
   ]
-  assert.deepEqual(selectQualifyingRuns(runs, QA, RAILWAY_INDEX), [])
+  assert.deepEqual(selectQualifyingRuns(runs, QA, RAILWAY_INDEX, jobsFrom(JOBS_HARNESS_RAN)), [])
 
   const result = evaluate({ guards: [QA], observations: qaObs(runs), now: NOW })
   assert.equal(result.healthy, false)
@@ -333,7 +349,7 @@ test('#2271: a repository_dispatch — the old curl-able route — does not coun
   // produces on any repo. qa-dev.yml no longer declares it, but the guard must
   // not depend on that: a re-added trigger must not re-open the hole.
   const runs = [qaRun({ event: 'repository_dispatch', headBranch: 'dev' })]
-  assert.deepEqual(selectQualifyingRuns(runs, QA, RAILWAY_INDEX), [])
+  assert.deepEqual(selectQualifyingRuns(runs, QA, RAILWAY_INDEX, jobsFrom(JOBS_HARNESS_RAN)), [])
 })
 
 test('#2271: a deployment_status run for a SHA Railway never deployed does not count', () => {
@@ -341,29 +357,67 @@ test('#2271: a deployment_status run for a SHA Railway never deployed does not c
   // resulting run is a genuine deployment_status event. What they cannot do is
   // make the Deployments API say `railway-app[bot]` created it.
   const humanIndex = { [OTHER_SHA]: 'some-human' }
-  assert.deepEqual(selectQualifyingRuns([qaRun({ headSha: OTHER_SHA })], QA, humanIndex), [])
+  const jobs = jobsFrom(JOBS_HARNESS_RAN)
+  assert.deepEqual(selectQualifyingRuns([qaRun({ headSha: OTHER_SHA })], QA, humanIndex, jobs), [])
   // …and a SHA the index has never seen at all.
-  assert.deepEqual(selectQualifyingRuns([qaRun({ headSha: OTHER_SHA })], QA, RAILWAY_INDEX), [])
+  assert.deepEqual(selectQualifyingRuns([qaRun({ headSha: OTHER_SHA })], QA, RAILWAY_INDEX, jobs), [])
 })
 
 test('#2271: a MISSING deployment index fails closed — nothing qualifies', () => {
   // "Could not look it up" must never read as "Railway deployed it". The IO
   // wrapper throws into `unobserved` on API failure; this covers the pure half.
-  assert.deepEqual(selectQualifyingRuns([qaRun()], QA, undefined), [])
-  assert.deepEqual(selectQualifyingRuns([qaRun()], QA, {}), [])
-  assert.deepEqual(selectQualifyingRuns([qaRun({ headSha: undefined })], QA, RAILWAY_INDEX), [])
+  const jobs = jobsFrom(JOBS_HARNESS_RAN)
+  assert.deepEqual(selectQualifyingRuns([qaRun()], QA, undefined, jobs), [])
+  assert.deepEqual(selectQualifyingRuns([qaRun()], QA, {}, jobs), [])
+  assert.deepEqual(selectQualifyingRuns([qaRun({ headSha: undefined })], QA, RAILWAY_INDEX, jobs), [])
 })
 
-test('a run the gate job SKIPPED is not the guard having run', () => {
-  // Every in_progress status and every re-stated `success` starts a run that
-  // qa-dev.yml's gate job skips in seconds. Those are not evidence the harness
-  // ran; counting them would date lastRunAt off nothing and turn a gate that
-  // refuses everything into `never-succeeded` instead of `never-run`.
-  const runs = [qaRun({ conclusion: 'skipped' })]
-  assert.deepEqual(selectQualifyingRuns(runs, QA, RAILWAY_INDEX), [])
-  const result = evaluate({ guards: [QA], observations: qaObs(runs), now: NOW })
+test('a run whose gate job REFUSED the harness is not the guard having run — and its run-level conclusion is `success`', () => {
+  // The shape that matters, and the one the first version of this test got
+  // wrong (replacement haven-reviewer finding on #2273, proven against ci.yml
+  // run 33604474457): when `gate` sets run=false and `money-flow` is skipped
+  // via its `if:`, GitHub reports the RUN as `success` — not `skipped`. Every
+  // in_progress status and every re-stated `success` produces exactly such a
+  // run, at a SHA that IS in the Railway index. Judged at run level it is a
+  // fresh green post-deploy run in which nothing ran; judged by the
+  // money-flow job it is nothing. Worse than noise: it can mask a real harness
+  // failure at the same SHA behind a later decoy.
+  const decoy = qaRun({ conclusion: 'success' })
+  assert.deepEqual(selectQualifyingRuns([decoy], QA, RAILWAY_INDEX, jobsFrom(JOBS_GATE_REFUSED)), [])
+  const result = evaluate({ guards: [QA], observations: qaObs([decoy], RAILWAY_INDEX, jobsFrom(JOBS_GATE_REFUSED)), now: NOW })
   assert.equal(result.healthy, false)
   assert.equal(result.findings[0].kind, 'never-run')
+})
+
+test('a decoy run at the same SHA does not mask a real harness FAILURE', () => {
+  // Deploy N: the harness ran and failed (run 1). Then deploy N+1 starts,
+  // Railway re-states N's `success`, and run 2 — same SHA, gate refused,
+  // run-level `success` — lands newer. The guard must report never-succeeded,
+  // not "fresh".
+  const failed = qaRun({ databaseId: 1, conclusion: 'failure', updatedAt: agoDays(0.3) })
+  const decoy = qaRun({ databaseId: 2, conclusion: 'success', updatedAt: agoDays(0.2) })
+  const jobs = jobsFrom({ 1: JOBS_HARNESS_FAILED[1], 2: JOBS_GATE_REFUSED[1] })
+  const qualifying = selectQualifyingRuns([decoy, failed], QA, RAILWAY_INDEX, jobs)
+  assert.equal(qualifying.length, 1)
+  assert.equal(qualifying[0].conclusion, 'failure')
+  const result = evaluate({ guards: [QA], observations: qaObs([decoy, failed], RAILWAY_INDEX, jobs), now: NOW })
+  assert.equal(result.healthy, false)
+  assert.equal(result.findings[0].kind, 'never-succeeded')
+})
+
+test('a run whose job list cannot be read is refused, never assumed green', () => {
+  const jobs = jobsFrom(JOBS_HARNESS_RAN)
+  assert.deepEqual(selectQualifyingRuns([qaRun()], QA, RAILWAY_INDEX, () => null), [])
+  assert.deepEqual(selectQualifyingRuns([qaRun()], QA, RAILWAY_INDEX, () => { throw new Error('rate limited') }), [])
+  assert.deepEqual(selectQualifyingRuns([qaRun()], QA, RAILWAY_INDEX, undefined), [])
+  // A job list without the money-flow job at all (renamed job) is refused too.
+  assert.deepEqual(selectQualifyingRuns([qaRun()], QA, RAILWAY_INDEX, () => [{ name: 'gate', conclusion: 'success' }]), [])
+  // Control: the same run with a readable, green job list counts.
+  assert.equal(selectQualifyingRuns([qaRun()], QA, RAILWAY_INDEX, jobs).length, 1)
+})
+
+test('a run-level `skipped` conclusion is still refused (belt to the job-level braces)', () => {
+  assert.deepEqual(selectQualifyingRuns([qaRun({ conclusion: 'skipped' })], QA, RAILWAY_INDEX, jobsFrom(JOBS_HARNESS_RAN)), [])
 })
 
 test('a trigger that has NEVER fired reads as never-run, not as fresh', () => {
@@ -380,7 +434,7 @@ test('a trigger that has NEVER fired reads as never-run, not as fresh', () => {
 })
 
 test('a post-deploy run that arrives but FAILS is not a working trigger either', () => {
-  const result = evaluate({ guards: [QA], observations: qaObs([qaRun({ conclusion: 'failure' })]), now: NOW })
+  const result = evaluate({ guards: [QA], observations: qaObs([qaRun({ conclusion: 'failure' })], RAILWAY_INDEX, jobsFrom(JOBS_HARNESS_FAILED)), now: NOW })
   assert.equal(result.healthy, false)
   assert.equal(result.findings[0].kind, 'never-succeeded')
 })

@@ -772,10 +772,19 @@ them is a string a caller supplies:
   post-deploy trigger fired" only when the Deployments API holds a deployment
   of that run's exact `headSha` to `Haven AI / dev` created by
   `railway-app[bot]` — which only Railway's GitHub App installation token can
-  write. A `workflow_dispatch` at the same SHA fails the event check; a
-  Deployment created by hand fails the creator check; an unreadable API fails
-  closed; a run the gate skipped never counts. All of it is mutation-proven in
-  `guard-freshness.test.mjs`.
+  write — **and** the run's `money-flow` **job** concluded `success` according
+  to the jobs API (`gh run view <id> --json jobs`, the same
+  `moneyFlowJobConclusion` the promotion gate uses since #2404). The job check
+  is not decoration: a run whose `gate` job refused the harness is reported by
+  GitHub with run-level conclusion **`success`** and the job `skipped`
+  (measured on `ci.yml` run 33604474457), and every deploy leaves two or three
+  such runs at a SHA that *is* in the Railway index. Judged at run level they
+  are fresh post-deploy greens in which nothing ran, and the newest of them
+  could mask a real harness failure at the same SHA. A `workflow_dispatch` at
+  the same SHA fails the event check; a Deployment created by hand fails the
+  creator check; an unreadable Deployments API or job list fails closed; a
+  gate-refused decoy fails the job check. All of it is mutation-proven in
+  `guard-freshness.test.mjs`, including the decoy-masks-a-failure case.
 
 **So the operator's confirmation command changes.** `gh workflow run
 qa-dev.yml` still proves the *harness* works and still feeds `qa-freshness`

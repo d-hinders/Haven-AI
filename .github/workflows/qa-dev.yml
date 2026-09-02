@@ -45,8 +45,11 @@ name: QA — money-flow (dev)
 #     records deployment id + creator + SHA next to the trigger, and
 #     scripts/ci/guard-freshness.mjs counts a run as "the post-deploy trigger
 #     fired" only when a Railway-created deployment of that run's exact SHA
-#     exists — so a manual `workflow_dispatch` (or a Deployment a human creates
-#     by hand through the API) can no longer mute the freshness alarm.
+#     exists AND the money-flow JOB concluded success — a run the gate refused
+#     has run-level conclusion `success` with the job skipped, so the run-level
+#     field alone would count the two or three decoys every deploy leaves. So a
+#     manual `workflow_dispatch`, a Deployment a human creates by hand through
+#     the API, or a gate-skipped decoy can no longer mute the freshness alarm.
 #
 #     Do NOT "fix" any of this by adding a push trigger: this is a black-box
 #     harness against the DEPLOYED backend, so firing on push races the deploy

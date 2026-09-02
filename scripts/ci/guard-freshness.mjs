@@ -77,6 +77,13 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+// Shared with the dev → main promotion gate (#2404): ONE definition of which
+// qa-dev.yml job moves money and how its conclusion is read off a run's job
+// list, so the two gates cannot disagree. qa-freshness.mjs guards its CLI
+// behind an argv check, so importing it runs nothing.
+import { MONEY_FLOW_JOB, moneyFlowJobConclusion } from './qa-freshness.mjs'
+
+export { MONEY_FLOW_JOB }
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -133,6 +140,13 @@ export const ISSUE_TITLE = '🩺 A CI guard has stopped proving its guarantee'
  *   environment created by that login (#2271/#2273). The index is read once per
  *   evaluation and injected into `selectQualifyingRuns`; a missing index fails
  *   CLOSED (nothing qualifies), because "could not check" is not "checked".
+ * - `requiredJob` — the job whose conclusion IS the run's verdict. A run whose
+ *   `gate` job refused the harness has run-level conclusion `success` (GitHub
+ *   reports a run with skipped jobs as success — measured on ci.yml run
+ *   33604474457, jobs skipped=12 success=2, run `success`), so on qa-dev.yml
+ *   the run-level field cannot tell "the harness passed" from "nothing ran".
+ *   The job list can. Read through `moneyFlowJobConclusion`, shared with
+ *   qa-freshness.mjs so both gates judge the same job. Unreadable → refused.
  * - `restart` — what a human actually does about it. Not every guard is
  *   restarted with `gh workflow run`.
  */
@@ -211,6 +225,14 @@ export const SCHEDULED_GUARDS = [
     // a Deployment by hand (`gh api -X POST .../deployments`) and mute this
     // guard. That deployment's creator would be the human, not the Railway app.
     provenance: { environment: RAILWAY_DEV_ENVIRONMENT, creator: RAILWAY_DEPLOY_CREATOR },
+    // Judge the run by the money-flow JOB. The gate job skips two or three runs
+    // per deploy (in_progress statuses, the re-stated `success`), and each of
+    // those is a run-level `success` at a SHA that IS in the Railway index —
+    // a decoy that would read as "fresh post-deploy green" while nothing ran,
+    // and could mask a real harness failure at the same SHA behind it
+    // (replacement haven-reviewer finding on #2273; #2404 hit the same shape
+    // in the promotion gate).
+    requiredJob: MONEY_FLOW_JOB,
     requiredTrigger: /^\s*deployment_status:\s*$/m,
     why:
       'It is the only trigger that runs the money-flow harness against what the dev deploy ' +
@@ -241,30 +263,44 @@ export const SCHEDULED_GUARDS = [
  * buried in an IO helper — it is the difference between a watchdog and a
  * watchdog that a PR run can silence.
  */
-export function selectQualifyingRuns(runs, guard, deploymentCreatorsBySha) {
+export function selectQualifyingRuns(runs, guard, deploymentCreatorsBySha, jobsFor) {
   const events = guard.countedEvents
   const branches = guard.countedBranches
   const provenance = guard.provenance
-  return (Array.isArray(runs) ? runs : []).filter((r) => {
-    if (r?.status !== 'completed') return false
-    // A skipped run is not the guard having run. On qa-dev.yml every
-    // in_progress / duplicate deployment status starts a run the gate job
-    // skips in seconds (#2273); counting those as "it ran" would turn a
-    // trigger whose gate refuses everything into `never-succeeded` instead of
-    // the more honest `never-run`, and would date `lastRunAt` off runs that
-    // did nothing.
-    if (r?.conclusion === 'skipped') return false
-    if (events && !events.includes(r?.event)) return false
-    if (branches && !branches.includes(r?.headBranch)) return false
+  const requiredJob = guard.requiredJob
+  const out = []
+  for (const r of Array.isArray(runs) ? runs : []) {
+    if (r?.status !== 'completed') continue
+    // Belt: a run-level `skipped` is never the guard having run. The braces
+    // are `requiredJob` below — on qa-dev.yml a gate-refused run is NOT
+    // reported as skipped but as `success` (see the registry comment).
+    if (r?.conclusion === 'skipped') continue
+    if (events && !events.includes(r?.event)) continue
+    if (branches && !branches.includes(r?.headBranch)) continue
     if (provenance) {
       // Fail closed: no index, or a SHA the index has never seen, is "cannot
       // prove Railway deployed this", which is the same answer as "did not".
       const sha = typeof r?.headSha === 'string' ? r.headSha : ''
       const creator = deploymentCreatorsBySha?.[sha]
-      if (!sha || creator !== provenance.creator) return false
+      if (!sha || creator !== provenance.creator) continue
     }
-    return true
-  })
+    if (requiredJob) {
+      // The run's verdict is the job's. Unreadable job list, no thunk, a
+      // thrown lookup, or a job list without the job: refused, never assumed.
+      let jobs = null
+      try {
+        jobs = typeof jobsFor === 'function' ? jobsFor(r?.databaseId) : null
+      } catch {
+        jobs = null
+      }
+      const conclusion = moneyFlowJobConclusion(jobs)
+      if (conclusion === null || conclusion === 'skipped') continue
+      out.push({ ...r, conclusion })
+      continue
+    }
+    out.push(r)
+  }
+  return out
 }
 
 /** Newest `updatedAt`/`createdAt` in a run list, or null. */
@@ -444,6 +480,25 @@ function readDeploymentIndex({ environment, creator }) {
   return index
 }
 
+/**
+ * How many runs' job lists one evaluation may fetch (one `gh run view` each).
+ * Only runs that already passed the event and provenance filters reach the
+ * reader, i.e. the two-to-four `deployment_status` rows a real deploy leaves
+ * behind; 12 spans several deploys, and a run past the budget is refused
+ * (null → not counted), which errs toward `stale`, never toward `fresh`.
+ */
+const JOB_LOOKUP_BUDGET = 12
+
+function boundedJobsReader(budget) {
+  let left = budget
+  return (databaseId) => {
+    if (left <= 0 || databaseId === undefined || databaseId === null) return null
+    left -= 1
+    const parsed = JSON.parse(gh(['run', 'view', String(databaseId), '--json', 'jobs']))
+    return Array.isArray(parsed?.jobs) ? parsed.jobs : null
+  }
+}
+
 function observe(guard) {
   const workflowPath = path.join(ROOT, '.github', 'workflows', guard.workflow)
   const fileExists = existsSync(workflowPath)
@@ -466,10 +521,18 @@ function observe(guard) {
         '--workflow', guard.workflow,
         '--event', event,
         '--limit', '50',
-        '--json', 'conclusion,status,event,headBranch,headSha,createdAt,updatedAt',
+        '--json', 'databaseId,conclusion,status,event,headBranch,headSha,createdAt,updatedAt',
       ])))
     }
-    const qualifying = selectQualifyingRuns(runs, guard, guard.provenance ? readDeploymentIndex(guard.provenance) : undefined)
+    const index = guard.provenance ? readDeploymentIndex(guard.provenance) : undefined
+    const qualifying = selectQualifyingRuns(
+      // Newest first, so the bounded job-list reader below spends its budget
+      // on the runs that can actually change the answer.
+      runs.slice().sort((a, b) => String(b?.updatedAt || b?.createdAt || '').localeCompare(String(a?.updatedAt || a?.createdAt || ''))),
+      guard,
+      index,
+      guard.requiredJob ? boundedJobsReader(JOB_LOOKUP_BUDGET) : undefined,
+    )
     const success = qualifying.filter((r) => r.conclusion === 'success')
     return {
       fileExists: true,

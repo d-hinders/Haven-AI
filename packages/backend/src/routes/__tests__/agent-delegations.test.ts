@@ -91,6 +91,17 @@ function agentRow(overrides: Record<string, unknown> = {}) {
 
 function mockDb(opts: {
   agent?: Record<string, unknown> | null
+  /**
+   * Successive `FROM agents` reads, in call order (#2416). The build path
+   * reads the agent up to three times: the route's pre-check, the lock inside
+   * `insertPendingDelegationForOwnedNonRevokedAgent`, and — only when that
+   * refuses — the refusal-reason re-read. `null` means "no row" (the shape a
+   * revoke or an account change committing mid-request produces). Falls back
+   * to `agent` once exhausted.
+   */
+  agentSequence?: Array<Record<string, unknown> | null>
+  /** `agent_rekeys` EXISTS probe — true = a re-key is in flight (#2331/#2416). */
+  inFlightRekey?: boolean
   activated?: boolean
   version?: number
   stored?: Record<string, unknown> | null
@@ -99,10 +110,17 @@ function mockDb(opts: {
   waiverAt?: string | null
   list?: Array<Record<string, unknown>>
 } = {}) {
+  let agentReads = 0
   mockQuery.mockImplementation((sql: string) => {
     const s = String(sql)
+    if (/FROM agent_rekeys/.test(s)) {
+      return Promise.resolve({ rows: [{ in_flight: opts.inFlightRekey === true }] })
+    }
     if (/FROM agents(?:\s|$)/.test(s)) {
-      return Promise.resolve({ rows: opts.agent === null ? [] : [opts.agent ?? agentRow()] })
+      const seq = opts.agentSequence
+      const row = seq && agentReads < seq.length ? seq[agentReads] : (opts.agent === null ? null : opts.agent ?? agentRow())
+      agentReads += 1
+      return Promise.resolve({ rows: row === null ? [] : [row] })
     }
     if (/UPDATE agent_delegations/.test(s) && /status = 'active'/.test(s)) {
       return Promise.resolve({ rows: opts.activated === false ? [] : [{ id: 'row-1' }] })
@@ -231,6 +249,93 @@ describe('delegation lifecycle API (#828)', () => {
         payload: { token_address: USDC, budget_atomic: '1', period_seconds: 86400 },
       })
       expect(res.statusCode).toBe(code)
+    })
+
+    /**
+     * #2416 — the refusal REASON reporting. `build` refused every
+     * `insertPendingDelegationForOwnedNonRevokedAgent` false with "Revoked
+     * agents cannot receive new budget delegations". #2331 widened that helper
+     * to four reasons, the loudest of which reaches a healthy `active` agent
+     * whose owner abandoned a re-key part-way.
+     *
+     * Characterization first (money.md §2): which requests are REFUSED must not
+     * move — only which sentence they carry.
+     */
+    describe('refusal reasons (#2416)', () => {
+      const payload = { token_address: USDC, budget_atomic: '5000000', period_seconds: 86400 }
+      const insertRan = () =>
+        mockQuery.mock.calls.some((c) => /INSERT INTO agent_delegations/.test(String(c[0])))
+
+      it('CHARACTERIZATION: an in-flight re-key is still refused 409, with nothing stored', async () => {
+        mockDb({ inFlightRekey: true })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(409)
+        expect(insertRan()).toBe(false)
+      })
+
+      it('CHARACTERIZATION: a healthy agent with NO re-key in flight is still granted 201', async () => {
+        mockDb({ inFlightRekey: false })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(201)
+      })
+
+      it('names the in-flight re-key and how to clear it — NOT "revoked"', async () => {
+        mockDb({ inFlightRekey: true })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(409)
+        const { error } = res.json() as { error: string }
+        expect(error).toBe(
+          'A key rotation is in flight for this agent — finish or abandon the re-key before granting a new budget',
+        )
+        // The whole point: a healthy `active` agent is never told it is revoked.
+        expect(error).not.toMatch(/revoked agent/i)
+      })
+
+      it('a revoke that commits mid-request keeps the existing revoked wording and status', async () => {
+        // Pre-check sees `active`; the lock and the reason re-read see the revoke.
+        mockDb({ agentSequence: [agentRow(), null, agentRow({ status: 'revoked' })] })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'Revoked agents cannot receive new budget delegations' })
+      })
+
+      it('an account that leaves the delegation rail mid-request reuses the rail wording', async () => {
+        mockDb({ agentSequence: [agentRow(), null, agentRow({ account_type: 'safe' })] })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'Agent account is not on the delegation rail' })
+      })
+
+      it('a delegate key cleared mid-request names the missing key', async () => {
+        mockDb({ agentSequence: [agentRow(), null, agentRow({ delegate_address: null })] })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'Agent has no delegate key or treasury account' })
+      })
+
+      it('when BOTH a revoke and a re-key hold, reports the one the lock stopped on', async () => {
+        // `lockOwnedNonRevokedDelegationAgent` filters `status <> 'revoked'` in
+        // SQL and only then probes `agent_rekeys`, so the revoke is what refused
+        // — the reason re-read must mirror that order, not the reverse.
+        mockDb({
+          agentSequence: [agentRow(), null, agentRow({ status: 'revoked' })],
+          inFlightRekey: true,
+        })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'Revoked agents cannot receive new budget delegations' })
+      })
+
+      it('falls back to the sibling activate wording when no reason still holds', async () => {
+        // The lock refused, but by the time the reason is re-read the agent looks
+        // healthy again — report the honest "unavailable", never "revoked".
+        mockDb({ agentSequence: [agentRow(), null, agentRow()] })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({
+          error: 'Agent cannot receive a budget while its account or re-key is unavailable',
+        })
+      })
     })
 
     it.each([

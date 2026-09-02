@@ -55,11 +55,14 @@ vi.mock('ethers', async (importOriginal) => {
   }
 })
 
-const { x402Delegation3009, TIMING } = await import('./x402-delegation-3009.js')
+const { x402Delegation3009, TIMING, classifyDelegateResidual } = await import(
+  './x402-delegation-3009.js'
+)
 
 // Real values here would make each no-evidence-row case sit out a 20s wait.
 TIMING.evidenceWaitMs = 60
 TIMING.pollIntervalMs = 20
+TIMING.deliveryWaitMs = 60
 
 /** A merchant response that succeeds — so only the evidence assertions can fail. */
 const okMerchantResponse = () => ({
@@ -103,11 +106,14 @@ function settled(rows: Record<string, unknown>[]) {
   mockListReceipts.mockResolvedValue({ ok: true, data: { receipts: rows } })
 }
 
-// Treasury before → treasury after → delegate residual. The treasury must fall,
-// or the budget was never metered.
-function balances(before = 1_000_000n, after = 999_000n, residual = 0n) {
+// Treasury before → delegate baseline → treasury after → delegate residual.
+// The treasury must fall, or the budget was never metered; the delegate
+// baseline is what the SHARED EOA already held before this payment (#2444),
+// so a neighbour's leftovers are not charged to this run.
+function balances(before = 1_000_000n, after = 999_000n, residual = 0n, delegateBaseline = 0n) {
   mockBalanceOf.mockReset()
   mockBalanceOf.mockResolvedValueOnce(before)
+  mockBalanceOf.mockResolvedValueOnce(delegateBaseline)
   mockBalanceOf.mockResolvedValueOnce(after)
   mockBalanceOf.mockResolvedValue(residual)
 }
@@ -267,16 +273,120 @@ describe('residuals', () => {
   it('passes with sub-floor dust, and says so', async () => {
     // A balance below the 0.01 USDC sweep floor remains visible rather than
     // silently tolerated until later stranded funds bring it to the threshold.
-    balances(1_000_000n, 999_000n, 5_000n) // 0.005 USDC — the amount live QA saw
+    // The 0.01 USDC funded here is deliberately LARGER than the 0.005 residue:
+    // residue smaller than the payment is genuine rounding dust, whereas
+    // residue that reaches the payment is the payment (see #2444 below).
+    balances(1_000_000n, 990_000n, 5_000n)
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(true)
     expect(r.detail).toMatch(/0\.005 USDC sub-floor dust/)
   })
 
   it('FAILS at or above the sweep floor — that is stranding, not dust', async () => {
-    balances(2_000_000n, 1_999_000n, 10_000n) // exactly 0.01 USDC left on the EOA
+    balances(2_000_000n, 1_000_000n, 10_000n) // exactly 0.01 USDC left on the EOA
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/stranding, not dust/)
+  })
+
+  it('does not charge a neighbour’s pre-existing balance to this payment', async () => {
+    // The delegate EOA is shared. 0.005 was already sitting there before this
+    // payment funded and settled, so the residual is someone else's and this
+    // scenario reports a clean run rather than inventing dust of its own.
+    balances(1_000_000n, 999_000n, 5_000n, 5_000n)
+    const r = await x402Delegation3009.run(ctx())
+    expect(r.pass).toBe(true)
+    expect(r.detail).toMatch(/0 residual/)
+  })
+})
+
+/**
+ * #2444 — the defect this scenario shipped with for four days.
+ *
+ * `buy_vpn/basic` costs 0.001 USDC and the sweep floor is 0.01, so a delegate
+ * still holding the ENTIRE undelivered payment sat below the floor, was logged
+ * as "sub-floor dust", and the scenario declared PASS with the money in flight.
+ * The late merchant leg then landed inside the measurement window of
+ * `x402-delegation-3009-grace-resume`, which runs next against the same EOA and
+ * the same merchant, and produced the failure text in run 33640693154.
+ *
+ * The end-to-end ordering only reproduces with two scenarios adjacent against a
+ * live testnet, which no unit test can stage. What a unit test CAN pin is the
+ * predicate that let it through: a residual equal to the scenario's own payment
+ * must never classify as dust, at any floor.
+ */
+describe('delivery is a different question from dust (#2444)', () => {
+  const FUNDED = 1_000n // 0.001 USDC — buy_vpn/basic, the live amount
+
+  it('does not classify the scenario’s own undelivered payment as dust', () => {
+    const v = classifyDelegateResidual({ residual: FUNDED, baseline: 0n, funded: FUNDED })
+    expect(v.undelivered).toBe(true)
+    expect(v.dust).toBe(false)
+    expect(v.caused).toBe(FUNDED)
+  })
+
+  it('holds even though the payment is far below the 0.01 USDC sweep floor', () => {
+    // This is the whole mechanism: the floor answers "is this negligible?" and
+    // says yes, correctly, about an amount that is the entire transaction.
+    const v = classifyDelegateResidual({ residual: FUNDED, baseline: 0n, funded: FUNDED })
+    expect(v.stranded).toBe(false) // under the floor — the old gate's only test
+    expect(v.undelivered).toBe(true) // and still not something to pass on
+  })
+
+  it('measures against the baseline, so a neighbour’s residue is not this payment', () => {
+    // 0.0005 already there, this payment's 0.001 delivered: caused is 0.
+    const v = classifyDelegateResidual({ residual: 500n, baseline: 500n, funded: FUNDED })
+    expect(v.undelivered).toBe(false)
+    expect(v.dust).toBe(false)
+    expect(v.caused).toBe(0n)
+  })
+
+  it('clamps at zero when the shared EOA got CLEANER during the window', () => {
+    // A neighbour's older balance was swept or delivered. Negative "caused"
+    // would otherwise underflow the comparisons into nonsense.
+    const v = classifyDelegateResidual({ residual: 0n, baseline: 5_000n, funded: FUNDED })
+    expect(v.caused).toBe(0n)
+    expect(v.undelivered).toBe(false)
+    expect(v.stranded).toBe(false)
+  })
+
+  it('still calls genuine sub-payment residue dust', () => {
+    const v = classifyDelegateResidual({ residual: 400n, baseline: 0n, funded: FUNDED })
+    expect(v.dust).toBe(true)
+    expect(v.undelivered).toBe(false)
+  })
+
+  it('never reports undelivered when nothing was funded', () => {
+    // Guards the degenerate divide: a zero treasury delta is already a hard
+    // failure upstream, and must not additionally read as "held back 0 USDC".
+    const v = classifyDelegateResidual({ residual: 0n, baseline: 0n, funded: 0n })
+    expect(v.undelivered).toBe(false)
+  })
+
+  it('FAILS the scenario end to end when the payment never leaves the delegate', async () => {
+    // The live shape: 0.001 funded, 0.001 still on the delegate at the deadline.
+    // Before #2444 this run reported PASS with "0.001 USDC sub-floor dust".
+    balances(1_000_000n, 999_000n, 1_000n)
+    const r = await x402Delegation3009.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/still in flight/)
+    // The old pass wording, which this shape used to produce. The failure text
+    // deliberately says "not sub-floor dust", so match the pass phrasing.
+    expect(r.detail).not.toMatch(/left by design/)
+  })
+
+  it('PASSES when the late merchant leg lands inside the delivery wait', async () => {
+    // The wait is a poll, not a fixed sleep: the facilitator settles outside
+    // Haven's view, so a leg that lands a second later is a pass, not a race.
+    mockBalanceOf.mockReset()
+    mockBalanceOf
+      .mockResolvedValueOnce(1_000_000n) // treasury before
+      .mockResolvedValueOnce(0n) // delegate baseline
+      .mockResolvedValueOnce(999_000n) // treasury after
+      .mockResolvedValueOnce(1_000n) // still undelivered
+      .mockResolvedValue(0n) // then it lands
+    const r = await x402Delegation3009.run(ctx())
+    expect(r.pass).toBe(true)
+    expect(r.detail).toMatch(/0 residual/)
   })
 })

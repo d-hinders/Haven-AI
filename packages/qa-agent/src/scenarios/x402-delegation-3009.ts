@@ -71,6 +71,34 @@
  * them to the recovery threshold. This reports the residual either way rather
  * than asserting a bare zero.
  *
+ * ## Dust is not the same question as delivery (#2444)
+ *
+ * The sweep floor answers *"is what is left negligible?"* It does not answer
+ * *"has this scenario's own payment been delivered?"* — and for a long time this
+ * scenario asked only the first. `buy_vpn/basic` costs 0.001 USDC, which is
+ * below the 0.01 USDC floor, so a delegate still holding **the entire, wholly
+ * undelivered payment** read as "sub-floor dust" and the scenario declared PASS
+ * with the money still in flight. That is a false green about its own invariant,
+ * and it also poisoned the neighbour: `x402-delegation-3009-grace-resume` runs
+ * next against the *same* delegate EOA, and the late merchant leg landed inside
+ * its measurement window (run 33640693154 — "merchant received 0.002 USDC;
+ * expected 0.001").
+ *
+ * So the residual is measured against **two** thresholds, and against a
+ * `delegateBefore` baseline so a previous run's leftovers are not attributed
+ * here:
+ *
+ *   - **`caused >= funded` → undelivered.** The scenario's own payment is still
+ *     sitting on the delegate. It is not dust at any floor — it is the whole
+ *     transaction. Polled to `TIMING.deliveryWaitMs`, because the facilitator
+ *     settles asynchronously and outside Haven's view; still there at the
+ *     deadline is a failure.
+ *   - **`caused >= DUST_FLOOR_ATOMIC` → stranding**, the pre-existing check.
+ *
+ * `classifyDelegateResidual` is exported so both thresholds can be pinned
+ * without a live testnet run: the ordering defect reproduces only when the two
+ * scenarios run adjacent against real money, which no unit test can stage.
+ *
  * ## What this scenario does NOT cover
  *
  * The verify-without-settle → sweep half of the bridge. That is
@@ -101,7 +129,64 @@ const DUST_FLOOR_ATOMIC = 10_000n // 0.01 USDC, 6 decimals
  * covering, and against real values every one of them would sit out the full
  * wait. Production never writes to this.
  */
-export const TIMING = { evidenceWaitMs: 20_000, pollIntervalMs: 2_000 }
+/**
+ * `deliveryWaitMs` is a BOUND, not a measurement (#2444).
+ *
+ * It could not be derived from real facilitator settlement latency: Base
+ * Sepolia is rate-limited (#2449) and `qa-dev` moves testnet funds, so no live
+ * run was available to measure against. It is instead bracketed by two
+ * constants already in this harness — it equals this file's `evidenceWaitMs`,
+ * and sits under the neighbouring `-grace-resume` scenario's `MONEY_WAIT_MS`
+ * (30s) budget for observing the very same on-chain delivery.
+ *
+ * Know which way it fails. Too SHORT and this fix becomes a new flake source:
+ * a perfectly good payment reported as "still in flight". Too long and it adds
+ * dead time to a scenario that otherwise completes in seconds. It therefore
+ * needs eyes on the first live run it meets — which is what #2444's
+ * `operator-verify` checklist exists to collect.
+ */
+export const TIMING = { evidenceWaitMs: 20_000, pollIntervalMs: 2_000, deliveryWaitMs: 20_000 }
+
+/**
+ * How the delegate's post-settlement balance should be read (#2444).
+ *
+ * Pure and exported on purpose. The defect this encodes — a payment equal to
+ * the scenario's own amount being waved through as sub-floor dust — only
+ * reproduces end to end when this scenario and its `-grace-resume` neighbour
+ * run adjacent against a live testnet. A unit test cannot stage that, but it
+ * can pin the predicate that let it happen.
+ *
+ * `caused` is measured against the pre-payment baseline, so residue a previous
+ * run stranded on the shared delegate EOA is not charged to this payment. A
+ * baseline that *fell* (a neighbour's older balance was swept or delivered
+ * during the window) clamps to zero rather than going negative.
+ *
+ * `funded` is the treasury delta — the amount the caveat-enforced redemption
+ * actually moved — not `amount_human` from the evidence row, so the threshold
+ * is the money that moved rather than the money Haven recorded.
+ */
+export interface ResidualVerdict {
+  /** Delegate balance attributable to THIS payment. */
+  caused: bigint
+  /** This scenario's own payment has not left the delegate. Never dust. */
+  undelivered: boolean
+  /** At or above the sweep floor — stranding, whoever caused it. */
+  stranded: boolean
+  /** Below the floor and not this payment: rounding residue, reported not failed. */
+  dust: boolean
+}
+
+export function classifyDelegateResidual(args: {
+  residual: bigint
+  baseline: bigint
+  funded: bigint
+}): ResidualVerdict {
+  const raw = args.residual - args.baseline
+  const caused = raw > 0n ? raw : 0n
+  const undelivered = args.funded > 0n && caused >= args.funded
+  const stranded = caused >= DUST_FLOOR_ATOMIC
+  return { caused, undelivered, stranded, dust: caused > 0n && !undelivered && !stranded }
+}
 
 interface McpToolResult {
   isError?: boolean
@@ -198,7 +283,13 @@ export const x402Delegation3009: Scenario = {
     if (!treasury) {
       return fail('could not read the agent\'s account address from GET /machine-payments/agent')
     }
-    const treasuryBefore = (await usdc.balanceOf(treasury)) as bigint
+    // The delegate EOA is SHARED with the neighbouring scenarios, so anything
+    // already on it belongs to an earlier payment. Without this baseline the
+    // residual check below charges someone else's leftovers to this run (#2444).
+    // Read as a pair, like every other paired balance read in these scenarios.
+    const [treasuryBefore, delegateBefore] = (await Promise.all([
+      usdc.balanceOf(treasury), usdc.balanceOf(delegateAddress),
+    ])) as [bigint, bigint]
 
     // buy_vpn basic (0.001 USDC) — the settling product.
     // storage_50gb is the merchant's verify-without-settle product and belongs
@@ -288,15 +379,38 @@ export const x402Delegation3009: Scenario = {
     }
 
     // ── Residuals: exact-amount funding should leave nothing behind. ────────
-    const residual = (await usdc.balanceOf(delegateAddress)) as bigint
-    if (residual >= DUST_FLOOR_ATOMIC) {
+    // The merchant's 200 says the facilitator ACCEPTED the header; it does not
+    // say the transfer has landed, and Haven never observes the merchant-side
+    // settlement tx. So an undelivered leg is polled out rather than being
+    // waved through as dust — see the header comment (#2444).
+    const funded = treasuryBefore - treasuryAfter
+    let residual = (await usdc.balanceOf(delegateAddress)) as bigint
+    let verdict = classifyDelegateResidual({ residual, baseline: delegateBefore, funded })
+    const deliveryDeadline = Date.now() + TIMING.deliveryWaitMs
+    while (verdict.undelivered && Date.now() < deliveryDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, TIMING.pollIntervalMs))
+      residual = (await usdc.balanceOf(delegateAddress)) as bigint
+      verdict = classifyDelegateResidual({ residual, baseline: delegateBefore, funded })
+    }
+
+    if (verdict.undelivered) {
       return fail(
-        `delegate EOA still holds ${fmt(residual)} USDC after settlement — at or above the ` +
+        `delegate EOA still holds ${fmt(verdict.caused)} USDC of this payment's own ${fmt(funded)} USDC ` +
+          `after ${TIMING.deliveryWaitMs / 1000}s — the merchant leg has not settled, so the payment is ` +
+          `still in flight. This is not sub-floor dust: it is the whole transaction, and passing here ` +
+          `lets the late leg land inside the next scenario's measurement window (#2444)`,
+      )
+    }
+    if (verdict.stranded) {
+      return fail(
+        `delegate EOA still holds ${fmt(verdict.caused)} USDC after settlement — at or above the ` +
           `${fmt(DUST_FLOOR_ATOMIC)} USDC sweep floor, so this is stranding, not dust`,
       )
     }
 
-    const dust = residual > 0n ? `, ${fmt(residual)} USDC sub-floor dust left by design` : ', 0 residual'
+    const dust = verdict.dust
+      ? `, ${fmt(verdict.caused)} USDC sub-floor dust left by design`
+      : ', 0 residual'
     return pass(
       `delegation-rail agent paid an EIP-3009 merchant via the funding bridge ` +
         // `tx_hash` is the FUNDING redemption's hash, always. Haven never records

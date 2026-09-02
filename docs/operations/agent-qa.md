@@ -24,6 +24,17 @@ last-verified: "2026-09-02" # #2427: the "no branch label" premise that #2404 an
 # #2159: same-day verification adds the funded-but-undelivered EIP-3009
 # crash/resume scenario, its Base-Sepolia-only grace override, and the
 # corrected 0.027-USDC preflight floor.
+# #2444: the two `x402-delegation-3009` / `-grace-resume` rows in the
+# money-flow scenario table, and the § *Seeding the delegation-rail identity*
+# paragraph describing what the three EIP-3009 legs assert, were re-read
+# against the scenarios on this branch and corrected: the first scenario's
+# residual gate is no longer the sweep floor alone, and the second no longer
+# requires the delegate to be restored to its exact starting balance. The
+# § *Seeding the delegation-rail identity* change is an ADDED paragraph — the
+# existing paragraph there is unmodified — and it states the bound on the
+# drain subtraction that haven-reviewer established on this diff. Scope: the
+# two table rows and that added paragraph only; nothing else in this doc was
+# re-verified here.
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -262,8 +273,8 @@ The deterministic harness runs fourteen scenarios in order:
 | `over-budget-refused` | An over-budget payment is refused **before it becomes signable**, by the on-chain caveat enforcer — HTTP 502 with no intent row. Renamed from `over-budget-queue` by #2016: that leg asserted `pending_approval`, and the approval queue was legacy-rail-only and no longer exists anywhere (#1986/#1989). A bare 502 is NOT accepted as proof — the amount is derived from a **live** enforcer read (a fallback reading or an exhausted budget fails the leg rather than passing it), a within-budget request against the same account must still be offered, and the ABI-encoded revert reason must decode to a **named caveat enforcer** |
 | `x402-over-budget-rejected` | The same refusal on the x402 **EIP-3009 funding leg**, with the same three discriminators. Re-based by #2016, which found it **passing for the wrong reason**: driven against the retired legacy identity it was satisfied by the rail-retirement 410, and would have passed with over-budget enforcement deleted outright. Its erc7710 sibling below closes what used to be flagged here as a known gap (#2082) |
 | `x402-erc7710-over-budget-rejected` | The same refusal on the **preferred** scheme (#2082). Until then the case did not exist to assert: erc7710 authorize returned 201 `pending_signature` WITH `sign_data` for ANY amount, so the #420 invariant's own words ("refused before it becomes signable") were FALSE on the path most payments take — measured live against dev 2026-08-25 and handed to #1993 rather than asserted around. The fail-fast pre-check refuses **HTTP 403 `delegation_budget_exceeded`** with no settlement child, no intent row and no relayer-paid delegate deploy. The discriminators are different from its 3009 sibling's, because the vacuous pass this shape invites is a different one: a bare 403 is ALSO what a MISSING delegation returns, so the leg requires the `error_code` AND requires the refusal's `remaining_atomic` to equal the live budget it derived the over-budget amount from, with a within-budget erc7710 authorize offered first as the control (and its `signature_scheme` checked, so a dispatch regression onto the funding leg cannot pass as this one). **What it does not claim:** that the CHAIN refuses the redemption — the caveat stack was always the gate and #2082 did not touch it; proving the redemption-side revert still needs a merchant that attempts one, and no leg does. Needs `QA_DELEGATION_AGENT_API_KEY`; **skips** without it |
-| `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and no residual may sit at or above the 0.01 USDC sweep floor. **Skips** without `QA_DELEGATION_*` |
-| `x402-delegation-3009-grace-resume` | Reproduces the #2145 crash shape against dev: the raw API authorizes and signs the EIP-3009 funding leg, then deliberately **does not** retry the merchant. After the Base-Sepolia-only `MERCHANT_REPORT_GRACE_MIN_OVERRIDE=0`, it requires `GET /machine-payments/:id/status` to answer `funded_but_unsettled` / `retry_original_x402_request`, then calls `resumeX402Payment()` through that real gate. The resumed purchase must debit the treasury and credit the merchant by the same amount, restoring the delegate to its starting balance; a failed post-funding path attempts a gasless sweep before reporting. The override is refused outside `HAVEN_DEPLOY_CHAIN_IDS=84532`; production remains 15 minutes. **Skips** without `QA_DELEGATION_*` |
+| `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and the delegate must not still be holding this payment's own amount. Two thresholds, because they answer different questions (#2444): residue at or above the 0.01 USDC sweep floor is stranding, and residue reaching the amount just funded is the payment itself, undelivered — which the floor alone waved through, since `buy_vpn/basic` costs 0.001 USDC. The undelivered case is polled for 20s first, because the facilitator settles outside Haven's view. **Skips** without `QA_DELEGATION_*` |
+| `x402-delegation-3009-grace-resume` | Reproduces the #2145 crash shape against dev: the raw API authorizes and signs the EIP-3009 funding leg, then deliberately **does not** retry the merchant. After the Base-Sepolia-only `MERCHANT_REPORT_GRACE_MIN_OVERRIDE=0`, it requires `GET /machine-payments/:id/status` to answer `funded_but_unsettled` / `retry_original_x402_request`, then calls `resumeX402Payment()` through that real gate. The resumed purchase must debit the treasury and credit the merchant by the same amount — counting only the merchant credit this scenario CAUSED, with any drain off the delegate's pre-existing balance subtracted out (#2444), since the delegate EOA and the merchant are shared with the scenario above — and must leave no unsettled funding of its own on the delegate; a failed post-funding path attempts a gasless sweep before reporting. The override is refused outside `HAVEN_DEPLOY_CHAIN_IDS=84532`; production remains 15 minutes. **Skips** without `QA_DELEGATION_*` |
 | `delegation-lifecycle` | Authority can be TAKEN AWAY: on a **throwaway per-run identity** (funded ~0.006 USDC from the standing delegation identity, then abandoned) — grant → activate (relayer-deploys) → within-budget payment settles → replace leaves **exactly one** active row (the #1053-finding-4 transactional-activate regression) → owner-signed revoke → the same payment shape is refused **403 "no active budget delegation"**, never a 502 (a 502 would mean authority was still offered to the chain). Ephemeral keys, all signing client-side |
 | `x402-erc7710-settle` | The delegation rail's PRIMARY x402 path: authorize (payTo = merchant) builds a narrowed child delegation, the delegate signs it, `POST /x402/:id/settle` wraps the header, and the MERCHANT redeems `[child, budget]` on-chain — treasury pays the merchant **directly**, budget metered by the settlement itself (treasury −amount exactly), **delegate EOA untouched** (no funding leg — the #713 stranded-funds class structurally absent). Needs `MERCHANT_X402_ERC7710=1` + `MERCHANT_ERC7710_DELEGATION_MANAGER` on the dev merchant; skips (→ run FAILS under #1066) with that exact remedy when the merchant is 3009-only |
 | `x402-erc7710-fresh-agent` | The COLD START (#1674, regression net for #1667): a per-run throwaway identity whose delegate hybrid account is asserted counterfactual on-chain (`getCode` = `0x` before any payment), then the agent's FIRST-EVER payment runs the erc7710 settlement — asserting authorize deployed the account (code exists between authorize and settle, pinning WHERE the deploy happens), the merchant redemption settles treasury→merchant exactly, and the delegate EOA is untouched. Funded per run from the standing identity; same env needs as `x402-erc7710-settle` |
@@ -356,6 +367,26 @@ merchant recorded separately from that funding address, and the treasury balance
 actually falling. A merchant round-trip alone would pass just as happily over
 erc7710, leaving the bridge uncovered — and the address checks alone would pass
 for a funding hop that never metered the budget.
+
+It also requires the payment to have been **delivered**, which is not the same
+question as whether the leftovers are negligible (#2444). Both scenarios read
+the delegate EOA against a baseline captured before they spend, so a neighbour's
+residue is never charged to them, and `-grace-resume` subtracts drain off that
+baseline from the merchant credit it claims.
+
+Be precise about what the subtraction does and does not guarantee. On a clean
+window the baseline is zero, the drain is zero, and both assertions are the
+strict ones they always were. But it nets a delegate DECREASE against a merchant
+EXCESS without proving the two are the same transfer, which no balance read can:
+if the resumed payment silently failed to reach the merchant while an equal
+amount independently drained off the delegate and landed at the merchant in the
+same window, the proof would read as settled. Every payment on this identity is
+the same 0.001 USDC, so that coincidence is more plausible here than it would be
+with varied amounts. The subtraction is therefore capped at ONE neighbour leg —
+a larger, unexplained drain fails the proof instead of being absorbed — and the
+one adjacency it exists for is closed at its source by the delivery check above.
+**Re-read that bound before adding a third scenario to this shared delegate
+identity.**
 
 `x402-delegation-3009-sweep` covers the other half, and needs two more settings
 on the dev stack: `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` on the

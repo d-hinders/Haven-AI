@@ -192,7 +192,19 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/demo-merchant-mcp/src/**'],
-    'last-verified': '2026-08-11',
+    // #2383: re-verified and EDITED (new § "Extensions echo" plus one bullet
+    // under "What It Demonstrates"). #2361/#2364 made the merchant advertise a
+    // `haven-demo` extensions object in every 402 and refuse any payment that
+    // fails the x402 v2 echo rule (version cross-check first, then subset
+    // containment: append allowed, delete/overwrite refused) — and this README
+    // said nothing about it, so a fixture author learned the rule from the
+    // refusal. The section is written from `assertExtensionsEchoed` and
+    // `DEMO_MERCHANT_EXTENSIONS` in src/x402.ts, and the three refusal strings
+    // it quotes were captured from the running merchant, not transcribed from
+    // the issue. Nothing else in the README re-verified in this pass (the
+    // Products table, hosted URLs and Run sections were read only far enough
+    // to place the section).
+    'last-verified': '2026-09-02',
   },
 ]
 

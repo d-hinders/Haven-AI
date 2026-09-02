@@ -62,7 +62,7 @@ covers:
   - .github/workflows/publish.yml
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-01" # #2246: § Product Copy Rules — the "Known compliance gap" paragraph is DELETED, because the gap it disclosed is fixed in the same change. Its two avoid-listed phrases ("Haven signs and settles the payment.", "Haven gave you the private key.") were live in `packages/frontend/src/components/UsingYourAgentInfo.tsx`, a file this doc `covers:` by exact path; both are gone and both are now literals in the frontend copy lint, so the rule is enforced rather than disclosed. Scope: that paragraph only — the Use/Avoid lists themselves are unchanged, and nothing else in this document was re-verified. Full analysis in docs/regulatory/casp-changelog/2026-09-01-2246.md. Prior: #2274: the #2245 "Current state" note under Core Design Principle corrected — it listed token resolution among the rail-INDEPENDENT checks still preceding the x402 rail 410, which #2274 moved below the gate on that route and on POST /payments together. Scope: that blockquote only; the rest of Core Design Principle was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
+last-verified: "2026-09-02" # #2300: § *What `covers:` must span* gains the measured-floor paragraph — the #1899 pin now asserts 31 of 47 globs after `packages/mcp-server/src/**` joined the money-path list, and this document already covered that path, so no `covers:` change was needed (floor, not ceiling, running the direction money.md § 2 predicted). Scope: that section only; nothing else in this document was re-verified. Full analysis in docs/regulatory/casp-changelog/2026-09-02-2300.md. Prior: #2246: § Product Copy Rules — the "Known compliance gap" paragraph is DELETED, because the gap it disclosed is fixed in the same change. Its two avoid-listed phrases ("Haven signs and settles the payment.", "Haven gave you the private key.") were live in `packages/frontend/src/components/UsingYourAgentInfo.tsx`, a file this doc `covers:` by exact path; both are gone and both are now literals in the frontend copy lint, so the rule is enforced rather than disclosed. Scope: that paragraph only — the Use/Avoid lists themselves are unchanged, and nothing else in this document was re-verified. Full analysis in docs/regulatory/casp-changelog/2026-09-01-2246.md. Prior: #2274: the #2245 "Current state" note under Core Design Principle corrected — it listed token resolution among the rail-INDEPENDENT checks still preceding the x402 rail 410, which #2274 moved below the gate on that route and on POST /payments together. Scope: that blockquote only; the rest of Core Design Principle was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -944,6 +944,25 @@ alone cannot say which. That is the point: requote it with its denominator or
 not at all. The `EXEMPT` map's own comments in
 `scripts/ci/money-path.test.mjs` carry the same two bare counts and drift the
 same way.
+
+**The floor is measured, and the number moves (#2300).** As of #2300 the pin
+asserts **31 of the 47 globs**: the 33 runtime `globs` minus the two `EXEMPT`
+entries above, and none of the 14 `controlGlobs`. The addition that moved it
+was `packages/mcp-server/src/**` — the hosted MCP tool surface, whose
+`tools.ts` decides whether a funding userop is relayed and in what order
+(#2282), and which shipped four money defects (#2051, #2282, #2312, #2348) with
+no money-path label by the file half. This document had covered
+`packages/mcp-server/src/**` since before the money-path list did, so the pin
+was satisfied on the day the entry landed with no `covers:` change — the
+*floor, not a ceiling* reading above, running in the direction
+[`money.md`](../contributing/ship-playbooks/money.md) § 2 predicted: "the wider
+list is a useful place to look when adding to the narrower one". The entry was
+scoped to `src/**` rather than the whole package partly for this reason —
+`packages/mcp-server/**` would have forced this list to widen to a `Dockerfile`
+and a `README.md` to keep the pin green, which is the "over-inclusion costs
+little" trade-off inverted: a perimeter shard on a Dockerfile edit answers no
+authority question. Requote the floor with its denominator; a bare "30 of 46"
+is already stale.
 
 Two consequences worth stating outright:
 

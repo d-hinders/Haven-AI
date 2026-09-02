@@ -1212,39 +1212,50 @@ export default function DesignSystemPage() {
 
       <Section
         title="Manual send"
-        description="Manual sends lead with the money: amount first, then the recipient. One approval, no review step — this mirrors the live Send modal, which is the only manual send Haven has."
+        description="The only manual send Haven has is a single editable step — amount, token and recipient collected and submitted on one screen. There is no review step and no approval hold, so this showcase is a FORM, not a confirmation summary."
       >
         <Card hover={false} className="max-w-xl p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-medium text-[var(--v2-ink-3)]">You are sending</p>
-              <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
-                125.00 USDC
-              </p>
+          <div className="space-y-3">
+            <p className="text-sm text-[var(--v2-ink-muted)]">
+              Send from this account with one approval. No network fee for you.
+            </p>
+            <div className="flex gap-2">
+              <label className="sr-only" htmlFor="ds-send-amount">
+                Amount
+              </label>
+              <Input
+                id="ds-send-amount"
+                className="v2-tabular"
+                placeholder="Amount"
+                defaultValue="125.00"
+                inputMode="decimal"
+                rightAction={<MaxButton onClick={() => toast.success('Amount set to balance')} />}
+              />
+              <label className="sr-only" htmlFor="ds-send-token">
+                Token
+              </label>
+              <Select id="ds-send-token" defaultValue="usdc" className="w-28">
+                <option value="usdc">USDC</option>
+                <option value="eth">ETH</option>
+              </Select>
             </div>
-          </div>
-          <p className="mt-3 text-sm text-[var(--v2-ink-muted)]">
-            Send from this account with one approval. No network fee for you.
-          </p>
-          <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
-            <dl className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
-                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Operating wallet</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Recipient</dt>
-                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Acme Services</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
-                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Base</dd>
-              </div>
-            </dl>
-          </div>
-          <div className="mt-5 flex justify-end gap-3">
-            <Button variant="ghost">Cancel</Button>
-            <Button>Send</Button>
+            <label className="sr-only" htmlFor="ds-send-recipient">
+              Recipient address
+            </label>
+            <Input
+              id="ds-send-recipient"
+              className="font-mono"
+              placeholder="Recipient address (0x…)"
+              defaultValue="0x7a58f0d1c9b4e2a6837f5c1d0e9b4a2c6d8191c2"
+              rightAction={<PasteButton onPaste={() => toast.success('Address pasted')} />}
+            />
+            <p className="text-xs text-[var(--v2-ink-3)]">
+              Sending on Base from Operating wallet.
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="ghost">Cancel</Button>
+              <Button>Send</Button>
+            </div>
           </div>
         </Card>
       </Section>

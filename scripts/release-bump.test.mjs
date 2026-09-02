@@ -895,7 +895,12 @@ function stepRunScript(workflow, name) {
   // mode this design set out to avoid. No such line exists in publish.yml
   // today and the shell there is indented well past it. If you add one, this
   // reads less than it should; the tests that EXECUTE the extracted script
-  // would fail on the truncation, which is the backstop.
+  // would fail on the truncation, which is the backstop — with one gap worth
+  // knowing: a truncation confined to the COSMETIC TAIL (the step-summary
+  // table and the final exit-status block, after the publish loop has already
+  // run) could still leave the executed guards behaving correctly and so
+  // escape those tests. The guards themselves are upstream of that point, so
+  // the invariant stays covered; the reporting would not be.
   const runIndent = lines[runIdx].match(/^\s*/)[0].length
   const body = []
   for (let i = runIdx + 1; i < lines.length; i++) {
@@ -1142,13 +1147,26 @@ test('GUARD 2/3 (behavioural): a forbidden combination PUBLISHES NOTHING (#2421)
     ['dev channel sees a real version', { channel: 'dev', version: REAL_V, tag: 'dev' }],
     ['an unknown channel', { channel: 'staging', version: REAL_V, tag: null }],
   ]) {
-    const { code, published } = runPublishLoop(workflow, args)
+    const { code, out, published } = runPublishLoop(workflow, args)
     assert.notEqual(code, 0, `${label}: the job must FAIL, got exit ${code}`)
     assert.deepEqual(
       published,
       [],
       `${label}: the guard was bypassed — ${published.length} package(s) were published. ` +
         'This is the failure a textual "is the call unconditional" assertion cannot see.',
+    )
+    // Prove the GUARD refused, not merely that something failed. Without this,
+    // a mutation making the script die before it ever reaches the guard — a
+    // typo, a missing variable, an early `exit 1` — satisfies both assertions
+    // above while proving nothing about the invariant. The "permitted
+    // combinations" test below happens to close that hole today, but only as a
+    // side effect of existing; coverage that depends on another test's
+    // existence is not coverage.
+    assert.match(
+      out,
+      /GUARD:/,
+      `${label}: the job failed, but not with a GUARD refusal — it may have died before ` +
+        'reaching the guard, which would make the assertions above vacuous.',
     )
   }
 })

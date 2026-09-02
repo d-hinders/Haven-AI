@@ -72,7 +72,7 @@ export function formatSnapshotVersion({ timestamp, sha }) {
   // on a later commit. Deliberately NOT worked around by lengthening or
   // rewriting the sha — the version must name the commit it was built from,
   // and #2420 fixes the shape.
-  if (/^0\d*$/.test(short) && /^\d+$/.test(short)) {
+  if (/^0\d*$/.test(short)) {
     throw new Error(
       `short sha "${short}" is all digits with a leading zero, which semver rejects as a ` +
         'numeric prerelease identifier. Nothing is wrong with the commit; re-run this ' +

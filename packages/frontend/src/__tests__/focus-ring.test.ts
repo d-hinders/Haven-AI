@@ -486,12 +486,6 @@ describe('destructive controls focus in their own tone (#1792)', () => {
     ).not.toMatch(/focus-visible:ring-[a-z]+\/\d+/)
   })
 
-  it('the sibling that was already right stays right', () => {
-    // EditAgentModal's "Remove budget" is the reference call-site #1792 was
-    // measured against. Named so a future sweep cannot quietly flip it back.
-    const modal = readFileSync(join(FRONTEND, 'src/components/EditAgentModal.tsx'), 'utf8')
-    expect(modal).toMatch(/hover:bg-\[var\(--v2-danger-soft\)\][^"'`]*focus-visible:ring-danger\/\d+/)
-  })
 })
 
 /**

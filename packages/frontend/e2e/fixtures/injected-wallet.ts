@@ -7,8 +7,7 @@
  * The rule this repo works to (`docs/contributing/ship-playbooks/frontend.md`
  * §4, and #1930's `chain_id: 999` refusal) is that a fixture must not reach a
  * state the PRODUCT cannot. This one answers an EXTERNAL SYSTEM — a wallet
- * extension — exactly as `mockHavenApi` answers the backend and
- * `makeAllowanceChainFixture` answers a JSON-RPC node. Every line between the
+ * extension — exactly as `mockHavenApi` answers the backend. Every line between the
  * provider and the pixel is production code: wagmi's own `injected()` connector
  * reads `window.ethereum`, `reconnect()` authorises it, RainbowKit's
  * `ConnectButtonRenderer` derives `account`/`chain` from `useAccount()`, and

@@ -100,7 +100,8 @@ const BAND_STEM =
  * the string — which is what makes its measure a fair reading of how much room
  * the row actually gave the name.
  */
-const UNBOUNDED_NAME = 'European entity nightly data-feed reconciliation and reporting agent'
+const UNBOUNDED_NAME =
+  'European entity nightly data-feed reconciliation and reporting agent for weekly operations'
 
 /**
  * A truncated name must fill essentially the whole row. 0.95 rather than 1.0
@@ -138,8 +139,8 @@ type Reading = {
 }
 
 /**
- * Anchor on the card's `aria-label` and the `h3` inside it — never on a class
- * string, since the class strings are what this fix changes.
+ * Anchor on the rendered agent name heading and measure its visible link —
+ * never on a class string, since the class strings are what this fix changes.
  *
  * The row is the `h3`'s parent on both the pre-fix and post-fix trees (the fix
  * adds classes, it does not restructure), so this probe reads the same element
@@ -149,11 +150,12 @@ type Reading = {
 async function readCard(page: Page, agentName: string): Promise<Reading> {
   return page.evaluate(
     ([label, minPill]) => {
-      const card = document.querySelector(`[role="link"][aria-label="View ${label}"]`)
-      if (!card) throw new Error(`no /agents card labelled "View ${label}"`)
-      const h3 = card.querySelector('h3')
-      if (!h3) throw new Error(`the card labelled "View ${label}" renders no name`)
-      const row = h3.parentElement as HTMLElement
+      const heading = Array.from(document.querySelectorAll('h3')).find(
+        (heading) => heading.textContent?.trim() === label,
+      )
+      if (!heading) throw new Error(`no /agents heading named "${label}"`)
+      const title = (heading.querySelector('a') as HTMLElement | null) ?? heading
+      const row = heading.parentElement as HTMLElement
 
       // Three conditions, each ruling out one half of the `sr-only` mutation
       // that survived two patches on #2238: `getClientRects()` for
@@ -169,12 +171,12 @@ async function readCard(page: Page, agentName: string): Promise<Reading> {
       )
 
       return {
-        text: (h3.textContent ?? '').trim(),
-        measure: +h3.getBoundingClientRect().width.toFixed(1),
-        natural: h3.scrollWidth,
+        text: (title.textContent ?? '').trim(),
+        measure: +title.getBoundingClientRect().width.toFixed(1),
+        natural: title.scrollWidth,
         rowInner: +row.clientWidth.toFixed(1),
         rowHeight: +row.getBoundingClientRect().height.toFixed(1),
-        truncated: h3.scrollWidth > h3.clientWidth + 1,
+        truncated: title.scrollWidth > title.clientWidth + 1,
         pills: pills.map((el) => (el.textContent ?? '').trim()),
         pillWidths: pills.map((el) => +el.getBoundingClientRect().width.toFixed(1)),
       }
@@ -255,9 +257,11 @@ async function atWidth(page: Page, width: number) {
 async function bandNameFor(page: Page, currentName: string, rowInner: number, slack = 4): Promise<string> {
   return page.evaluate(
     ([label, stem, limit]) => {
-      const card = document.querySelector(`[role="link"][aria-label="View ${label}"]`)!
-      const h3 = card.querySelector('h3')!
-      const cs = getComputedStyle(h3)
+      const heading = Array.from(document.querySelectorAll('h3')).find(
+        (heading) => heading.textContent?.trim() === label,
+      )!
+      const title = (heading.querySelector('a') as HTMLElement | null) ?? heading
+      const cs = getComputedStyle(title)
       const ctx = document.createElement('canvas').getContext('2d')!
       ctx.font = `${cs.fontStyle} ${cs.fontVariant} ${cs.fontWeight} ${cs.fontSize} / ${cs.lineHeight} ${cs.fontFamily}`
       const width = (t: string) => ctx.measureText(t).width

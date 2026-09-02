@@ -17,7 +17,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import type { AgentAllowance } from '@/hooks/useAgents'
-import type { AllowanceInfo } from '@/lib/allowance-module'
+import type { AllowanceInfo } from '@/lib/allowance-math'
 import { AllowanceBar, ConfiguredAllowanceRow, GRANTED_BUDGET_CAPTION } from '../AllowanceBar'
 
 const CHAIN_ID = 84532

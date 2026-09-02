@@ -6,6 +6,7 @@ covers:
   - packages/connect/**
   - packages/signer/**
   - packages/frontend/src/components/ConnectAgentModal.tsx
+  - packages/frontend/src/hooks/useAgentConnectionSetup.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
@@ -46,7 +47,11 @@ is not a key.
 
 ## Current connection flow
 
-Staged Connect Agent pairing is the only current dashboard flow:
+Staged Connect Agent pairing is the only current dashboard flow, and it is
+available only for delegation accounts. Legacy Safe records are read-only:
+`ConnectAgentModal` shows the retired-rail notice and does not create a setup,
+request a signature, or reopen the old connection flow. Existing legacy Safe
+permissions require action by the Safe owner outside Haven.
 
 1. The user chooses the Haven wallet, agent rules, and agent budget.
 2. Haven creates a pending setup and returns a setup token and connector
@@ -59,21 +64,20 @@ Staged Connect Agent pairing is the only current dashboard flow:
    the dashboard shows so several agents in one harness can be told apart;
    #1878). No private key or plaintext API key is registered.
 5. The user approves, in the modal, with one signature — and that signature is
-   the authority. On the legacy rail it is a wallet approval — but note the
-   parallel with the next sentence does not hold: since #1986 that
-   AllowanceModule permission no longer unlocks spend on any payment path, so
-   for an existing legacy Safe this step is vestigial. `tryVerifySetupAuthority`
-   is still live code, so a user really can walk through it and land nowhere.
-   On the delegation rail it is the budget delegation itself, granted at the same step
-   of the same flow; the agent cannot spend until that budget is active, and
-   its limits are carried by the caveat enforcers at redemption rather than by
-   a module permission.
+   the authority. On the delegation rail it is the budget delegation itself,
+   granted at the same step of the same flow; the agent cannot spend until that
+   budget is active, and its limits are carried by the caveat enforcers at
+   redemption rather than by a module permission. Legacy rails never reach this
+   step in the current dashboard.
 6. Later hosted requests use the locally stored API key as Bearer identity;
    the local signer retains the delegate key as authority.
 
 Manual fallback is limited to the explicit, warning-gated surfaces that support
-it. Setup links and snippets may contain hosted identity configuration, but
-never a delegate key.
+it. Normal setup links and snippets may contain hosted identity configuration,
+but never a delegate key. A separate manual-recovery fallback may display a
+one-time delegate private key only after the user explicitly chooses that
+warning-gated recovery path; it is not part of hosted setup or routine
+connection snippets.
 
 ## Direct payment
 
@@ -246,7 +250,8 @@ The edge signer exposes four local, no-network tools:
 - Declined or insufficient requests expose no signable hash — nothing is queued.
 - x402 authorization is bound to amount, merchant, resource, asset, and network.
 - Sweep authorization is bound to the registered delegate and Haven wallet.
-- Users can pause or revoke in Haven and revoke Safe permissions outside Haven.
+- Live delegation agents can be paused or revoked in Haven; legacy Safe
+  permissions require action by the Safe owner outside Haven.
 
 ## Related docs
 

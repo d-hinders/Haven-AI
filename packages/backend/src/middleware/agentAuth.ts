@@ -23,9 +23,13 @@ export interface AgentContext {
   safe_address: string
   chain_id: number
   status: string
+  /** Present for API-key lookups; older in-process fixtures may omit it. */
+  archived_at?: string | null
   /** The account's execution rail (#821): 'delegation' routes to the new rail. */
   execution_rail?: string | null
   account_type?: string | null
+  /** False when the agent's Safe row was removed; recovery must fail closed. */
+  has_bound_safe?: boolean
 }
 
 // Extend Fastify request
@@ -73,6 +77,12 @@ export function registerAgentLastSeenHook(app: FastifyInstance, db?: QueryableLi
   })
 }
 
+/** Recovery is the one agent-key operation that remains valid after pause/revoke. */
+function isSweepRecoveryRequest(request: FastifyRequest): boolean {
+  const path = request.url.split('?', 1)[0]
+  return path.endsWith('/sweep/prepare') || path.endsWith('/sweep/submit')
+}
+
 // ── Middleware ─────────────────────────────────────────────────────
 
 /**
@@ -117,12 +127,14 @@ export async function agentAuthMiddleware(
     return reply.code(401).send({ error: 'Invalid or revoked API key' })
   }
 
+  const sweepRecoveryRequest = isSweepRecoveryRequest(request)
+
   // #1130: pending_approval is the NORMAL starting state for every connect-
   // modal agent (the key is issued at /register; activation happens at the
   // first budget grant) — a valid key must not read as "invalid or revoked".
   // Named branch BEFORE the allow-list rejection, mirroring `paused` below;
   // it never authenticates the request.
-  if (row.status === 'pending_approval') {
+  if (row.status === 'pending_approval' && !sweepRecoveryRequest) {
     return reply.code(403).send({
       error: 'agent_pending_approval',
       detail:
@@ -131,15 +143,32 @@ export async function agentAuthMiddleware(
     })
   }
 
-  // Positive allow-list: only 'active' and 'paused' agents are recognised;
-  // everything else (including 'revoked' and any future status strings) is
-  // rejected. Using an explicit allow-list prevents unknown future statuses
-  // from silently authenticating as active agents.
-  if (row.status === 'revoked' || (row.status !== 'active' && row.status !== 'paused')) {
+  // Archived records stay readable in the dashboard, and the exact sweep
+  // recovery routes remain available while the original Safe binding exists.
+  // No normal API operation passes this branch: archiving cannot silently
+  // restore spending authority, but removal can honestly promise that a
+  // stranded balance remains recoverable later.
+  if (row.archived_at && !sweepRecoveryRequest) {
     return reply.code(401).send({ error: 'Invalid or revoked API key' })
   }
 
-  if (row.status === 'paused') {
+  // Positive allow-list: active and paused agents are recognised for normal
+  // agent requests; revoked agents are recognised only by the exact sweep
+  // recovery routes above. Everything else (including future status strings)
+  // is rejected, so an unknown status cannot silently authenticate as active.
+  if (row.status === 'revoked' && !sweepRecoveryRequest) {
+    return reply.code(401).send({ error: 'Invalid or revoked API key' })
+  }
+  if (
+    row.status !== 'active' &&
+    row.status !== 'paused' &&
+    row.status !== 'pending_approval' &&
+    row.status !== 'revoked'
+  ) {
+    return reply.code(401).send({ error: 'Invalid or revoked API key' })
+  }
+
+  if (row.status === 'paused' && !sweepRecoveryRequest) {
     return reply.code(403).send({
       error: 'agent_paused',
       detail:
@@ -149,6 +178,15 @@ export async function agentAuthMiddleware(
 
   if (!row.delegate_address) {
     return reply.code(403).send({ error: 'Agent has no delegate address configured' })
+  }
+
+  // `safe_address` intentionally falls back to the user's legacy mirror for
+  // older agent endpoints. That fallback is unsafe for recovery after an
+  // account unlink: the mirror may now point at a different wallet. Keep the
+  // agent authenticated only when its original Safe binding still exists;
+  // callers can reconnect or rebind through the supported account flow.
+  if (row.has_bound_safe === false) {
+    return reply.code(403).send({ error: 'Agent is no longer linked to a Haven wallet' })
   }
 
   if (!row.safe_address) {
@@ -163,7 +201,12 @@ export async function agentAuthMiddleware(
     safe_address: row.safe_address,
     chain_id: row.chain_id,
     status: row.status,
+    archived_at: row.archived_at ?? null,
     execution_rail: row.execution_rail ?? null,
     account_type: row.account_type ?? null,
+    // Characterization fakes from before this field existed omit it; the
+    // real query always returns a boolean. Treat an omitted value as bound so
+    // those fakes keep exercising the legacy auth branches.
+    has_bound_safe: row.has_bound_safe ?? true,
   }
 }

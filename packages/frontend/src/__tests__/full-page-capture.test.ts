@@ -624,9 +624,9 @@ const AGENTS_PARTIAL: ContentProbe = {
  * The #2204 pair, MEASURED on `#main-content` at 1280 against the shared
  * fixture on a pre-warmed server — not constructed.
  *
- * `AGENTS_CHAIN_PENDING` is the capture that was reported as 1856px in 1 of 4
- * otherwise identical runs: `useOnChainAllowances` has not answered, so all
- * three `AgentCard`s show `AllowanceBarSkeleton` instead of a budget. It is 40
+ * `AGENTS_BUDGET_PENDING` is the capture that was reported as 1856px in 1 of 4
+ * otherwise identical runs: budget data has not answered, so all three
+ * `AgentCard`s show `AllowanceBarSkeleton` instead of a budget. It is 40
  * CSS px shorter than `AGENTS_RESOLVED` (872 vs 912), which at
  * `deviceScaleFactor: 2` is exactly the 80 device px in the report.
  *
@@ -634,7 +634,7 @@ const AGENTS_PARTIAL: ContentProbe = {
  * above the #2036 floors. Nothing measuring quantity can tell these two apart,
  * which is why the discriminator has to be the app's own busy flag.
  */
-const AGENTS_CHAIN_PENDING: ContentProbe = {
+const AGENTS_BUDGET_PENDING: ContentProbe = {
   found: true,
   docScrollHeight: 872,
   viewportHeight: 800,
@@ -817,7 +817,7 @@ describe('judgeContentSettled', () => {
   // ── #2204: the partially-painted capture that photographs as a healthy one ──
 
   it('refuses /agents caught with its chain-fed budgets still loading', () => {
-    const verdict = judgeContentSettled(AGENTS_CHAIN_PENDING)
+    const verdict = judgeContentSettled(AGENTS_BUDGET_PENDING)
 
     expect(verdict.settled).toBe(false)
     expect(verdict.reason).toBe('partially-loaded')
@@ -831,13 +831,13 @@ describe('judgeContentSettled', () => {
     // The reason this guard exists at all, asserted rather than argued. If
     // either of these ever fails, the #2036 floor could have caught #2204 and
     // this whole mechanism is redundant.
-    expect(AGENTS_CHAIN_PENDING.contentChars!).toBeGreaterThan(MIN_CONTENT_CHARS * 20)
-    expect(AGENTS_CHAIN_PENDING.contentElements!).toBeGreaterThan(MIN_CONTENT_ELEMENTS * 20)
-    expect(judgeContentSettled({ ...AGENTS_CHAIN_PENDING, contentBusy: 0 }).settled).toBe(true)
+    expect(AGENTS_BUDGET_PENDING.contentChars!).toBeGreaterThan(MIN_CONTENT_CHARS * 20)
+    expect(AGENTS_BUDGET_PENDING.contentElements!).toBeGreaterThan(MIN_CONTENT_ELEMENTS * 20)
+    expect(judgeContentSettled({ ...AGENTS_BUDGET_PENDING, contentBusy: 0 }).settled).toBe(true)
 
     // And the difference it hides is the reported one: 912 - 872 = 40 CSS px,
     // 80 device px at deviceScaleFactor 2 — 1936px against 1856px.
-    expect(AGENTS_RESOLVED.docScrollHeight - AGENTS_CHAIN_PENDING.docScrollHeight).toBe(40)
+    expect(AGENTS_RESOLVED.docScrollHeight - AGENTS_BUDGET_PENDING.docScrollHeight).toBe(40)
   })
 
   it('says YES to the same route once its budgets resolved — the positive control', () => {
@@ -868,7 +868,7 @@ describe('judgeContentSettled', () => {
     // `/design-system` renders loading states AS CONTENT; its skeleton showcase
     // is permanently aria-busy and correctly so. `busyToleranceFor` below is
     // what decides that in the live path.
-    const verdict = judgeContentSettled(AGENTS_CHAIN_PENDING, { allowBusy: true })
+    const verdict = judgeContentSettled(AGENTS_BUDGET_PENDING, { allowBusy: true })
 
     expect(verdict.settled).toBe(true)
     // The count still survives, so the run can report the declaration as STALE
@@ -957,7 +957,7 @@ describe('resolveContentSettled', () => {
     // whole capture after the wait expires — that would turn a genuine
     // slow-paint regression into a green run whose PNG came from attempt two,
     // with nothing in `.screenshots/` saying so.
-    const page = fakeContentPage([AGENTS_CHAIN_PENDING, AGENTS_CHAIN_PENDING, AGENTS_RESOLVED])
+    const page = fakeContentPage([AGENTS_BUDGET_PENDING, AGENTS_BUDGET_PENDING, AGENTS_RESOLVED])
 
     const result = await resolveContentSettled(page, { timeoutMs: 5_000, pollMs: 1 })
 
@@ -972,7 +972,7 @@ describe('resolveContentSettled', () => {
     // The falsifiability case: this is exactly the state a live run produces
     // under `SCREENSHOT_CHAIN_STALL_MS`, and exactly the state that used to be
     // written to disk as `agents-desktop.png` at 1856px with `RESULT ok`.
-    const page = fakeContentPage([AGENTS_CHAIN_PENDING])
+    const page = fakeContentPage([AGENTS_BUDGET_PENDING])
 
     const error = await resolveContentSettled(page, {
       timeoutMs: 20,
@@ -994,7 +994,7 @@ describe('resolveContentSettled', () => {
   })
 
   it('captures the same state when the caller declares it busy-tolerant', async () => {
-    const page = fakeContentPage([AGENTS_CHAIN_PENDING])
+    const page = fakeContentPage([AGENTS_BUDGET_PENDING])
 
     const result = await resolveContentSettled(page, {
       timeoutMs: 20,
@@ -1011,7 +1011,7 @@ describe('resolveContentSettled', () => {
     // review (#1996) and that #2036 pinned with this same shape: a healthy
     // neighbour must not excuse a bad capture, and a bad one must not condemn
     // the sweep.
-    const sweep = [AGENTS_RESOLVED, AGENTS_CHAIN_PENDING, DASHBOARD_RENDERED]
+    const sweep = [AGENTS_RESOLVED, AGENTS_BUDGET_PENDING, DASHBOARD_RENDERED]
     const verdicts = await Promise.all(
       sweep.map((probe) =>
         resolveContentSettled(fakeContentPage([probe]), { timeoutMs: 20, pollMs: 1 }).then(

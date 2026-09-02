@@ -266,9 +266,9 @@ means undeclared fields accumulate silently, and consumers generating clients
 from the spec never learn the fields exist.
 
 `DelegateBalance` was also lifted out of the inline
-`/agents/{id}/delegate-balance` response into a named component. An inline
-schema generates an anonymous type, which is precisely why the frontend
-hand-wrote a copy instead of importing one.
+`/agents/{id}/delegate-balance` response into a named component. The frontend
+now imports the generated `ApiSchema<'DelegateBalance'>` type, so the OpenAPI
+component is the load-bearing source for that response shape.
 
 **The same thing happened again with re-key, and the gate caught it (#1701).**
 The six #1698 routes were documented in the same PR that added them, but their
@@ -373,7 +373,8 @@ The enforcement clause above named the **legacy AllowanceModule rail** until
 #2105 corrected it. That rail is **RETIRED** (#1440): closed to new
 accounts (#1984), HTTP 410 on every payment and x402 entry point (#1986), and its
 machinery deleted (#1987/#1988/#1989). Existing Safe accounts stay READABLE but
-cannot spend. The Smart Sessions
+cannot spend through Haven's retired payment/API paths; any residual AllowanceModule
+permission remains outside Haven until the Safe owner revokes it externally. The Smart Sessions
 session rail is retired too (#834) — `session_key` accounts get HTTP 410 from
 `POST /payments`. On the **delegation rail** — the only rail that can pay
 (`account_type='delegator_hybrid'`, epic #821) the `API key = identity` and

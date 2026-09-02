@@ -9,6 +9,7 @@ import {
   FIND_DELEGATE_AGENT_FOR_USER_SQL,
   FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
   FIND_USER_SAFE_ID_FOR_USER_SQL,
+  HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL,
   LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL,
   UPDATE_AGENT_PROFILE_SQL,
   agentExistsForUser,
@@ -24,6 +25,7 @@ import {
   listAgentsForUserAllStatuses,
   loadOwnedDelegationAgent,
   insertPendingDelegationForOwnedNonRevokedAgent,
+  lockOwnedNonRevokedDelegationAgent,
   pauseAgent,
   resumeAgent,
   revokeAgent,
@@ -68,10 +70,23 @@ describeDb('delegation lifecycle owner read (#2025)', () => {
       `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
       [`grant-eligibility-${Date.now()}@test.example`],
     )
+    const safe = await db.query<{ id: string }>(
+      `INSERT INTO user_safes (user_id, safe_address, name, is_default, account_type)
+       VALUES ($1, '0x1111111111111111111111111111111111111111', 'Delegation account', true, 'delegator_hybrid')
+       RETURNING id`,
+      [user.rows[0].id],
+    )
     const [revoked, active] = await Promise.all(['revoked', 'active'].map(async (status) => {
       const result = await db.query<{ id: string }>(
-        `INSERT INTO agents (user_id, name, status) VALUES ($1, $2, $3) RETURNING id`,
-        [user.rows[0].id, `${status} grant`, status],
+        `INSERT INTO agents (user_id, safe_id, name, status, delegate_address)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [
+          user.rows[0].id,
+          safe.rows[0].id,
+          `${status} grant`,
+          status,
+          `0x${(status === 'revoked' ? '1' : '2').repeat(40)}`,
+        ],
       )
       return result.rows[0].id
     }))
@@ -100,6 +115,27 @@ function tenantExecutor(row: Record<string, unknown>): Executor & { query: Retur
   )
   return { query } as unknown as Executor & { query: typeof query }
 }
+
+describe('agent/re-key admission serialization', () => {
+  it('re-checks the re-key state after the agent row lock gets a fresh snapshot', async () => {
+    let call = 0
+    const query = vi.fn(async () => {
+      call += 1
+      if (call === 1) {
+        return {
+          rows: [{ id: 'agent-1', delegate_address: '0x1111111111111111111111111111111111111111' }],
+          rowCount: 1,
+        }
+      }
+      return { rows: [{ in_flight: true }], rowCount: 1 }
+    })
+    const db = { query } as unknown as Executor
+
+    expect(await lockOwnedNonRevokedDelegationAgent('agent-1', OWNER, db)).toBeNull()
+    expect(query).toHaveBeenNthCalledWith(1, expect.stringContaining('FOR UPDATE'), ['agent-1', OWNER])
+    expect(query).toHaveBeenNthCalledWith(2, HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL, ['agent-1'])
+  })
+})
 
 describe('the #1069 status-scoping asymmetry, pinned in SQL and in names', () => {
   it('list and single reads carry NO status filter — pending_approval agents are surfaced', () => {
@@ -247,15 +283,60 @@ describeDb('agents archive (#1401, real DB)', () => {
     return { userId: user.rows[0].id, agentId: agent.rows[0].id }
   }
 
-  it('archives only revoked agents; active/paused/pending_approval refuse', async () => {
+  async function seedLegacyAgent(status: string): Promise<{ userId: string; agentId: string }> {
+    const user = await db.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`archive-legacy-u${++seq}-${Date.now()}@test.example`],
+    )
+    const safe = await db.query<{ id: string }>(
+      `INSERT INTO user_safes (user_id, safe_address, name, is_default, account_type)
+       VALUES ($1, $2, 'Legacy account', true, 'safe') RETURNING id`,
+      [user.rows[0].id, `0x${(++seq).toString(16).padStart(40, '0')}`],
+    )
+    const agent = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, safe_id, name, status) VALUES ($1, $2, 'Legacy archive test', $3) RETURNING id`,
+      [user.rows[0].id, safe.rows[0].id, status],
+    )
+    return { userId: user.rows[0].id, agentId: agent.rows[0].id }
+  }
+
+  it('refuses live-delegation agents regardless of status; archives revoked records without live authority', async () => {
     for (const status of ['active', 'paused', 'pending_approval']) {
       const { userId, agentId } = await seedAgent(status)
+      await seedDelegation(agentId, 'active')
       expect(await archiveAgent(agentId, userId)).toBeNull()
     }
     const { userId, agentId } = await seedAgent('revoked')
     const archived = await archiveAgent(agentId, userId)
     expect(archived).not.toBeNull()
     expect(archived!.archived_at).toBeInstanceOf(Date)
+  })
+
+  it.each(['active', 'paused', 'pending_approval'])('archives a legacy Safe record while it is %s (#2258)', async (status) => {
+    const { userId, agentId } = await seedLegacyAgent(status)
+    const archived = await archiveAgent(agentId, userId)
+    expect(archived).not.toBeNull()
+    const row = await db.query<{ status: string; archived_at: Date | null }>(
+      `SELECT status, archived_at FROM agents WHERE id = $1`,
+      [agentId],
+    )
+    expect(row.rows[0].status).toBe(status)
+    expect(row.rows[0].archived_at).not.toBeNull()
+  })
+
+  it('archives a legacy record after its Safe was unlinked, without requiring revocation (#2258)', async () => {
+    const { userId, agentId } = await seedLegacyAgent('active')
+    await db.query(`UPDATE agents SET safe_id = NULL WHERE id = $1`, [agentId])
+
+    const archived = await archiveAgent(agentId, userId)
+
+    expect(archived).not.toBeNull()
+    const row = await db.query<{ status: string; archived_at: Date | null }>(
+      `SELECT status, archived_at FROM agents WHERE id = $1`,
+      [agentId],
+    )
+    expect(row.rows[0]).toMatchObject({ status: 'active' })
+    expect(row.rows[0].archived_at).not.toBeNull()
   })
 
   // #1436: revoking flips only agents.status — it never touches

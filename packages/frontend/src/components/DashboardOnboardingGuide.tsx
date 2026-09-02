@@ -20,6 +20,7 @@ interface Props {
   hasFunds: boolean
   hasAgents: boolean
   hasFirstAgentPayment: boolean
+  canConnectAgents?: boolean
   onReceiveFunds: () => void
   onAddAgent: () => void
   onShowAgentUsage: () => void
@@ -35,6 +36,7 @@ export default function DashboardOnboardingGuide({
   hasFunds,
   hasAgents,
   hasFirstAgentPayment,
+  canConnectAgents = true,
   onReceiveFunds,
   onAddAgent,
   onShowAgentUsage,
@@ -43,6 +45,8 @@ export default function DashboardOnboardingGuide({
   inProgressDismissed,
   completeDismissed,
 }: Props) {
+  if (!canConnectAgents) return null
+
   const allComplete = hasFunds && hasAgents && hasFirstAgentPayment
 
   // Setup-complete banner — celebrate, then get out of the way.

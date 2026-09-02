@@ -841,7 +841,7 @@ export default function AccountDetailClient() {
         open={removeOpen}
         onCancel={closeRemoveDialog}
         onConfirm={handleRemoveConfirmed}
-        title={`Delete ${safe.name}?`}
+        title={`Remove ${safe.name}?`}
         body={(
           <>
             <p>
@@ -855,7 +855,7 @@ export default function AccountDetailClient() {
             )}
           </>
         )}
-        confirmLabel={removeError?.retryable ? 'Try again' : 'Delete account'}
+        confirmLabel={removeError?.retryable ? 'Try again' : 'Remove account'}
         loading={removing}
       />
     </div>

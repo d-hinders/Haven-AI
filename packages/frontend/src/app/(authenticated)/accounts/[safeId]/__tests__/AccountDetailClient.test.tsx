@@ -76,8 +76,9 @@ vi.mock('@/components/ReceiveFundsModal', () => ({
 vi.mock('@/components/ConfirmDialog', () => ({
   // Renders only while open, so every case that never opens it sees exactly
   // what the previous `() => null` stub gave them.
-  default: ({ open, body, confirmLabel, cancelLabel = 'Cancel', onConfirm, onCancel }: {
+  default: ({ open, title, body, confirmLabel, cancelLabel = 'Cancel', onConfirm, onCancel }: {
     open: boolean
+    title: string
     body: ReactNode
     confirmLabel: string
     cancelLabel?: string
@@ -86,6 +87,7 @@ vi.mock('@/components/ConfirmDialog', () => ({
   }) =>
     open ? (
       <div data-testid="confirm-dialog">
+        <h2>{title}</h2>
         {body}
         <button onClick={() => void onConfirm()}>{confirmLabel}</button>
         {/* The real ConfirmDialog routes backdrop-click and Escape through this
@@ -724,7 +726,8 @@ describe('AccountDetailClient', () => {
 
     fireEvent.click(screen.getByLabelText('Account options'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Delete account' }))
+    expect(screen.getByRole('heading', { name: 'Remove Main account?' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
 
     const refusal = await screen.findByRole('alert')
     expect(refusal).toHaveTextContent(/still has a budget/i)
@@ -742,7 +745,7 @@ describe('AccountDetailClient', () => {
     // The remedy is on another page and the modal backdrop blocks it, so the
     // primary action must NOT invite a second press that can only re-refuse.
     // Same line RemoveAgentDialog draws between `filing_failed` and `too_many`.
-    expect(screen.getByRole('button', { name: 'Delete account' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove account' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
   })
 
@@ -762,7 +765,7 @@ describe('AccountDetailClient', () => {
     }
 
     openDialog()
-    fireEvent.click(screen.getByRole('button', { name: 'Delete account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
     expect(await screen.findByRole('alert')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
@@ -781,7 +784,7 @@ describe('AccountDetailClient', () => {
 
     fireEvent.click(screen.getByLabelText('Account options'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Delete account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
 
     const refusal = await screen.findByRole('alert')
     expect(refusal).toHaveTextContent(/could not be removed/i)
@@ -802,7 +805,7 @@ describe('AccountDetailClient', () => {
 
     fireEvent.click(screen.getByLabelText('Account options'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Delete account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
 
     await waitFor(() => expect(mockRouterPush).toHaveBeenCalledWith('/accounts'))
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()

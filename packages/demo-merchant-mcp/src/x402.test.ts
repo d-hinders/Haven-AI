@@ -506,6 +506,85 @@ describe('x402 payment verification and settlement', () => {
       expect(settled.txHash).toBe(TX_HASH)
       expect(submit).toHaveBeenCalledTimes(1)
     })
+
+    // #2403: the branches below were documented in the README (#2383) from
+    // code inspection and a live capture, and pinned by nothing. Each one is
+    // mutation-proven against the specific guard it covers; the mutation that
+    // reds it by name is recorded on the PR.
+    it.each([
+      ['an array', [DEMO_MERCHANT_EXTENSIONS]],
+      ['a string', 'haven-demo'],
+      ['null', null],
+    ])('rejects an echo that is %s rather than an object', async (_shape, echoed) => {
+      const { processor, submit } = makeProcessor()
+      const pr = paymentRequired()
+      const payload = decodePaymentSignatureHeader(await signedHeader(pr)) as PaymentPayload
+      ;(payload as { extensions?: unknown }).extensions = echoed
+
+      await expect(processor.verifyAndSettle(settleInput(pr, encodePaymentSignatureHeader(payload))))
+        .rejects.toThrow('must echo the challenge\'s extensions')
+      expect(submit).not.toHaveBeenCalled()
+    })
+
+    it('rejects an echo that DROPS the advertised top-level key', async () => {
+      const { processor, submit } = makeProcessor()
+      const pr = paymentRequired()
+      const payload = decodePaymentSignatureHeader(await signedHeader(pr)) as PaymentPayload
+      // An object, so the presence guard passes; the advertised `haven-demo`
+      // key is gone, so containment is what has to refuse it.
+      ;(payload as { extensions?: Record<string, unknown> }).extensions = { clientNote: { sdk: 'haven' } }
+
+      await expect(processor.verifyAndSettle(settleInput(pr, encodePaymentSignatureHeader(payload))))
+        .rejects.toThrow('append-only, never delete or overwrite')
+      expect(submit).not.toHaveBeenCalled()
+    })
+
+    it('rejects an echo that DROPS a nested advertised key (echoRule)', async () => {
+      const { processor, submit } = makeProcessor()
+      const pr = paymentRequired()
+      const payload = decodePaymentSignatureHeader(await signedHeader(pr)) as PaymentPayload
+      // The top-level key is present and `version` is unchanged; only the
+      // nested `echoRule` is missing, so this reaches the recursive branch of
+      // objectContainsSubset and nothing shallower can refuse it.
+      ;(payload as { extensions?: Record<string, unknown> }).extensions = {
+        'haven-demo': { version: DEMO_MERCHANT_EXTENSIONS['haven-demo'].version },
+      }
+
+      await expect(processor.verifyAndSettle(settleInput(pr, encodePaymentSignatureHeader(payload))))
+        .rejects.toThrow('append-only, never delete or overwrite')
+      expect(submit).not.toHaveBeenCalled()
+    })
+
+    it('rejects an EMPTY extensions object — {} is an object, not an echo', async () => {
+      const { processor, submit } = makeProcessor()
+      const pr = paymentRequired()
+      const payload = decodePaymentSignatureHeader(await signedHeader(pr)) as PaymentPayload
+      ;(payload as { extensions?: Record<string, unknown> }).extensions = {}
+
+      await expect(processor.verifyAndSettle(settleInput(pr, encodePaymentSignatureHeader(payload))))
+        .rejects.toThrow('append-only, never delete or overwrite')
+      expect(submit).not.toHaveBeenCalled()
+    })
+
+    it('accepts a payment without an echo when the challenge advertised no extensions', async () => {
+      // The rule is keyed on what the CHALLENGE advertised. This merchant
+      // always advertises, so the branch is defensive — but it is the
+      // difference between "echo what you were given" and "always send
+      // extensions", and the spec MUST is the former.
+      const { processor, submit } = makeProcessor()
+      const pr = paymentRequired()
+      delete (pr as { extensions?: unknown }).extensions
+      // The helper echoes only what the challenge carries, so this payload has
+      // no `extensions` at all.
+      const payload = decodePaymentSignatureHeader(await signedHeader(pr)) as PaymentPayload
+      expect((payload as { extensions?: unknown }).extensions).toBeUndefined()
+
+      const settled = await processor.verifyAndSettle(
+        settleInput(pr, encodePaymentSignatureHeader(payload)),
+      )
+      expect(settled.txHash).toBe(TX_HASH)
+      expect(submit).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('rejects a bad signature', async () => {

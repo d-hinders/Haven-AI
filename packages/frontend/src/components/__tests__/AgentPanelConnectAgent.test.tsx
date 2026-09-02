@@ -5,10 +5,6 @@ const {
   SAFE,
   mockUseAuth,
   mockUseAgents,
-  mockUseSafeDetails,
-  mockUseOnChainAllowances,
-  mockUsePublicClient,
-  mockUseActiveSigner,
 } = vi.hoisted(() => ({
   SAFE: {
     id: 'safe-1',
@@ -17,17 +13,10 @@ const {
     chain_id: 100,
     is_default: true,
     created_at: '2026-01-01T00:00:00.000Z',
+    account_type: 'delegator_hybrid',
   },
   mockUseAuth: vi.fn(),
   mockUseAgents: vi.fn(),
-  mockUseSafeDetails: vi.fn(),
-  mockUseOnChainAllowances: vi.fn(),
-  mockUsePublicClient: vi.fn(),
-  mockUseActiveSigner: vi.fn(),
-}))
-
-vi.mock('wagmi', () => ({
-  usePublicClient: (args: unknown) => mockUsePublicClient(args),
 }))
 
 vi.mock('@/context/AuthContext', () => ({
@@ -36,20 +25,6 @@ vi.mock('@/context/AuthContext', () => ({
 
 vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => mockUseAgents(),
-}))
-
-vi.mock('@/hooks/useSafeDetails', () => ({
-  useSafeDetails: (safeAddress: string | null) => mockUseSafeDetails(safeAddress),
-}))
-
-vi.mock('@/hooks/useOnChainAllowances', () => ({
-  useOnChainAllowances: (...args: unknown[]) => mockUseOnChainAllowances(...args),
-}))
-
-vi.mock('@/lib/signer', () => ({
-  useActiveSigner: (args: unknown) => mockUseActiveSigner(args),
-  // Real predicate shape (#1079): narrows away the delegator_passkey variant.
-  isSafeCapableSigner: (s: { type?: string } | null) => s !== null && s.type !== 'delegator_passkey',
 }))
 
 vi.mock('@/components/ConnectAgentModal', () => ({
@@ -77,15 +52,6 @@ describe('AgentPanel Connect Agent entry', () => {
       unarchiveAgent: vi.fn(),
       refetch: vi.fn(),
     })
-    mockUseSafeDetails.mockReturnValue({ details: null, loading: false, error: null })
-    mockUseOnChainAllowances.mockReturnValue({
-      data: new Map(),
-      loading: false,
-      onChainDelegates: [],
-      refetch: vi.fn(),
-    })
-    mockUsePublicClient.mockReturnValue({})
-    mockUseActiveSigner.mockReturnValue(null)
   })
 
   it('opens ConnectAgentModal when the Connect agent button is clicked', () => {

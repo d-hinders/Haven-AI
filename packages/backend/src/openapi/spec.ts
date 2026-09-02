@@ -927,8 +927,12 @@ export const openapiSpec = {
         },
         responses: {
           '200': {
+            // #2400: was `{ type: 'object', additionalProperties: true }`, an
+            // open envelope a round trip could only prove "is an object"
+            // against. The route returns `{ ...updated, allowances }` — the
+            // same shape as GET /agents/{id} — so it gets the same schema.
             description: 'The updated agent, with allowances.',
-            content: { 'application/json': { schema: { type: 'object', additionalProperties: true } } },
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Agent' } } },
           },
           '400': errorResponse,
           '401': errorResponse,
@@ -981,9 +985,9 @@ export const openapiSpec = {
       post: {
         tags: ['Agents'],
         operationId: 'archiveAgent',
-        summary: 'Archive a revoked agent (soft removal — history is kept).',
+        summary: 'Archive an agent (soft removal — history is kept).',
         description:
-          'Replaces agent deletion (#1401). Requires status=revoked — archiving is a filing action and never the thing that stops spending. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.',
+          'Replaces agent deletion (#1401). Delegation agents require status=revoked and no pending or active budget delegations because archiving is a filing action and never the thing that stops spending. Linked legacy Safe records may be archived at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. An agent whose Safe was already unlinked is archivable when no live delegation remains. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -1018,7 +1022,7 @@ export const openapiSpec = {
         operationId: 'unarchiveAgent',
         summary: 'Return an archived agent to the primary list.',
         description:
-          'Clears archived_at and nothing else — the agent remains revoked; un-archiving restores no authority of any kind. Idempotent on a non-archived agent.',
+          'Clears archived_at and nothing else — the agent keeps the status it had when archived. For delegation agents, the archive contract requires revoked status and no live budgets; legacy Safe records can return with their prior active, paused, pending_approval, or revoked status. Un-archiving restores no authority of any kind. Idempotent on a non-archived agent.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -2140,7 +2144,7 @@ export const openapiSpec = {
         operationId: 'unlinkUserSafe',
         summary: 'Unlink a Safe from the Haven account.',
         description:
-          'Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one.',
+          'Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
         responses: {
@@ -2151,6 +2155,10 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
+          '409': {
+            ...errorResponse,
+            description: 'The Safe remains linked while a delegation, recovery, or re-key is in progress.',
+          },
         },
       },
     },
@@ -6233,13 +6241,13 @@ export const openapiSpec = {
       },
       /**
        * #1445: lifted out of the inline `/agents/{id}/delegate-balance`
-       * response so consumers can name it. An inline schema generates an
-       * anonymous type, which is why the frontend hand-wrote this one instead
-       * of importing it — identical shape, no behaviour change.
+       * response so consumers can name it. The frontend imports the generated
+       * `ApiSchema<'DelegateBalance'>` type from this component; keep this
+       * schema as the load-bearing source for the response shape.
        */
       DelegateBalance: {
         type: 'object',
-        required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address'],
+        required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address', 'sweep_min_usdc'],
         properties: {
           delegate_address: { type: 'string' },
           safe_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -6249,6 +6257,10 @@ export const openapiSpec = {
           usdc: { type: 'string' },
           usdc_atomic: { type: 'string' },
           usdc_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          sweep_min_usdc: {
+            type: 'string',
+            description: 'Minimum USDC balance eligible for gasless delegate recovery in human token units.',
+          },
         },
       },
       CreateAgentResponse: {
@@ -7160,7 +7172,15 @@ export const openapiSpec = {
         required: ['tokenSymbol', 'allowanceAmount', 'resetPeriodMin'],
         properties: {
           tokenSymbol: { type: 'string' },
-          allowanceAmount: { type: 'string' },
+          // #2400: was a bare `{ type: 'string' }`, while the identical value
+          // one route over is the named `allowanceHumanAmount` (#2295). Both
+          // come from the same `rails/delegation-budget-view.ts` projection, so
+          // a reader of the contract alone could not tell this one was HUMAN.
+          // Naming it does not DISCRIMINATE the shape — the pattern admits a
+          // bare integer by design, see the schema's own comment — so the hand
+          // literal in `dashboard.test.ts` stays. This is about #2295's "readable
+          // from the OpenAPI spec alone" holding for this emitter too.
+          allowanceAmount: allowanceHumanAmount,
           resetPeriodMin: { type: 'integer' },
         },
         additionalProperties: false,

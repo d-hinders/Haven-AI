@@ -1,5 +1,13 @@
-import { RESET_PERIODS } from './allowance-module'
 import { formatAllowanceForToken } from './allowance-format'
+
+// Keep the historical one-time value for rendering old records. New
+// delegation setup flows filter it out because delegation budgets refill.
+export const RESET_PERIODS = [
+  { label: 'One-time', value: 0 },
+  { label: 'Daily', value: 1440 },
+  { label: 'Weekly', value: 10080 },
+  { label: 'Monthly', value: 43200 },
+] as const
 
 /**
  * Human phrasing for an allowance/budget reset period, shared by the
@@ -27,7 +35,7 @@ export function budgetPeriodLabel(mins: number): string {
  * number.
  *
  * Scope of the absorption, precisely: the two screens a user sees back to back
- * in this flow (`LocalConnectionReady`, `SetupDoneState`). Four call sites
+ * in this flow (`DelegationApprovalStep`, `SetupDoneState`). Four call sites
  * hand-assemble `amount + symbol + period`; the other two —
  * `useAgentConnectionSetup`'s manual-credential PROMPT builder and
  * `DelegationApprovalStep` — are not migrated, because they need only the

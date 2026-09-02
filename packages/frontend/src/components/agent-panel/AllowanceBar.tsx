@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { type AgentAllowance } from '@/hooks/useAgents'
-import { computeEffectiveAllowance, type AllowanceInfo } from '@/lib/allowance-module'
+import { computeEffectiveAllowance, type AllowanceInfo } from '@/lib/allowance-math'
 import { formatAllowanceAmount } from '@/lib/allowance-format'
 import { budgetPeriodLabel } from '@/lib/budget-period'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
@@ -125,8 +125,7 @@ export function AllowanceBar({
 }
 
 /**
- * The placeholder shown while `useOnChainAllowances` is still reading the
- * chain for this token.
+ * The placeholder for a token budget while its data is still loading.
  *
  * `aria-busy="true"` is not decoration (#2204). Two readers need it and
  * neither had it:
@@ -196,13 +195,10 @@ export function AllowanceBarSkeleton({ symbol }: { symbol: string }) {
  *
  * ── Why the "fallback" framing in the old header was wrong too ───────────────
  *
- * It said "shown when on-chain data is unavailable". On the delegation rail —
- * the base for new accounts — this is the ORDINARY rendering, on the active
- * account as much as off it: `useOnChainAllowances` reads the Safe
- * AllowanceModule's delegate registry, a delegation-rail agent is not in it, so
- * `onChainData.get(delegate)` is undefined and `AgentCard`'s
- * `showConfiguredFallback` branch runs every time. `AllowanceBar` above is the
- * legacy rail's meter, not the primary and not the general case.
+ * The configured budget row is the ordinary delegation-rail rendering. The
+ * proportional `AllowanceBar` above remains a pure legacy-data renderer for
+ * historical math coverage, but the dashboard no longer reads it from a Safe
+ * AllowanceModule.
  *
  * **Deliberately renders no bar (#1846).** `AgentAllowance` carries
  * `allowance_amount` and `reset_period_min` and nothing else — there is no

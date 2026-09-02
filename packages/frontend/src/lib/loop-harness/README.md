@@ -7,12 +7,11 @@ what the contract would enforce.
 
 ## Why this exists
 
-`computeEffectiveAllowance` (now in `../allowance-math`) drives what the
-`AllowanceBar` shows for an agent's remaining budget. It re-implements the
-contract's reset logic off-chain. Because it's a *display* helper (not an
-execution decision), a divergence here is a UI-accuracy bug, not a fund-safety
-bug — but it was worse than the backend's in one way: it keyed off the **user's
-device clock**, which can be skewed by minutes, hours, or days.
+`computeEffectiveAllowance` (now in `../allowance-math`) drives the historical
+allowance-meter rendering. It re-implements the contract's reset logic
+off-chain. Because it is a *display* helper (not an execution decision), a
+divergence here is a UI-accuracy bug, not a fund-safety bug. The dashboard's
+live delegation budget display uses signed delegation terms instead.
 
 ## How the loop works
 
@@ -44,11 +43,10 @@ bugs regardless; any other new divergence is a candidate to triage by hand.
 
 - **F-1 / F-2 — reset prediction keyed off the user's device clock.**
   *Status: RESOLVED.* `computeEffectiveAllowance` read `Date.now()` internally,
-  so near a reset boundary a skewed device clock made the dashboard show a
+  so near a reset boundary a skewed device clock made the historical dashboard show a
   phantom "reset pending — full allowance" (or hide a real reset). Fix: the
-  function now takes an explicit `nowSec` chain timestamp; `useOnChainAllowances`
-  captures the latest `block.timestamp` alongside the allowances and threads it
-  down to `AllowanceBar`.
+  function now takes an explicit `nowSec` chain timestamp; callers provide the
+  same chain-time basis as the allowance snapshot.
 
 - **F-3 — `nextResetTime` wrong for multi-period-idle allowances.**
   *Status: RESOLVED.* The old code hardcoded the next reset at

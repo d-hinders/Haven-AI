@@ -21,11 +21,10 @@
  * - `/design-system` renders `Address` and `WalletIdentityBlock` triggers as
  *   bare text in ordinary containers — standalone, so a tap must open them.
  *   These are the triggers that were mouse-only before this change.
- * - `/agents` renders `McpServerName` inside `AgentCard`, which is a card-wide
- *   composite `role="link"` with its own `onClick`. A tap there navigates, and
- *   a toggle would fire alongside it and leave a bubble over the next page.
- *   So the primitive must NOT take that tap — asserted here as a real
- *   behaviour, not left as an intention in a comment.
+ * - `/agents` renders `McpServerName` inside `AgentCard`, alongside the
+ *   actual agent-name link. The recorded server name is now a standalone
+ *   elaboration trigger, so its tap should open the tooltip without affecting
+ *   card navigation.
  *
  * ## The composite-card trigger changed in #2043
  *
@@ -97,7 +96,7 @@ test.describe('Tooltip on touch (#2038)', () => {
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })
 
-  test('a tap inside a composite card link is left to the card, not stolen', async ({ page }) => {
+  test('a tap on the recorded server name opens its tooltip', async ({ page }) => {
     // Registered after `mockHavenApi`, so this handler wins for `/agents`.
     await page.route('**/api/agents', async (route) => {
       await route.fulfill({
@@ -109,55 +108,22 @@ test.describe('Tooltip on touch (#2038)', () => {
       })
     })
 
-    // WARM THE DESTINATION FIRST, then come back and do the real thing.
-    //
-    // The tap navigates to `/agents/[agentId]`, and a cold `next dev` compile
-    // of that route costs 30-60s — more than this test's whole budget. That is
-    // an environment fact, not a claim about the primitive, and paying it
-    // inside the measured window is what made this test fail 2 runs in 3 and
-    // then again on a fresh server. Compiling it up front takes the compile
-    // out of the assertion's way without weakening anything the test claims:
-    // the tap, the navigation and the bubble check below are unchanged.
-    await page.goto(`/agents/${testAgent.id}`)
     await page.goto('/agents')
     await dismissMobileSidebar(page)
 
     const trigger = page.getByText(CARD_SERVER_NAME).first()
     await expect(trigger).toBeVisible()
 
-    // The rule is observable before the tap, which matters: "no tooltip
-    // appeared" alone would also be true of a page that simply navigated away
-    // first. The wrapper carrying no `tabindex` is the ancestry rule itself,
-    // and it is what goes red if the primitive were simplified to always take
-    // the tap.
+    // The standalone wrapper's tab stop is the reachability contract, not a
+    // class-string assertion.
     const wrapper = trigger.locator('xpath=ancestor::span[1]')
     await expect(wrapper).toHaveCount(1)
-    await expect(wrapper).not.toHaveAttribute('tabindex', '0')
+    await expect(wrapper).toHaveAttribute('tabindex', '0')
 
-    // The card owns this tap: it navigates. The tooltip must not open on the
-    // way out, or a user arrives at the detail page with a bubble over it and
-    // no way to have asked for it. (The navigation itself is `AgentCard`'s
-    // own claim and is covered by `hosted-mcp.spec.ts`; asserting it here
-    // would only add a route compile to this test's critical path.)
     await trigger.tap()
+    await expect(page.locator('[role="tooltip"]')).toHaveText(CARD_PAIR_LABEL)
 
-    // Let the navigation ARRIVE before asserting, rather than racing it.
-    //
-    // Not a convenience: a locator assertion issued mid-navigation resolves to
-    // `undefined` and burns its whole timeout "waiting for navigation to
-    // finish", which is a flake keyed to how long the destination route takes
-    // to compile — observed failing 2 runs in 3 on a cold `/agents/[agentId]`.
-    // Arriving first is also the STRONGER claim, and the one the test is
-    // actually about: `Tooltip` portals its bubble to `document.body` and this
-    // is a client-side route change, so a bubble opened by the tap would
-    // SURVIVE the navigation and hang over the destination. That is the
-    // failure this test exists to catch, and it is only observable once the
-    // destination is there.
-    await page.waitForURL(/\/agents\/[^/]+$/, { timeout: 30_000 })
-
-    // Scoped to THIS label rather than to `[role="tooltip"]` at large: the
-    // emulated pointer lands wherever the next page puts it, so a bare role
-    // count can be reddened by a tooltip belonging to the destination screen.
-    await expect(page.locator('[role="tooltip"]', { hasText: CARD_PAIR_LABEL })).toHaveCount(0)
+    await trigger.tap()
+    await expect(page.locator('[role="tooltip"]')).toHaveCount(0)
   })
 })

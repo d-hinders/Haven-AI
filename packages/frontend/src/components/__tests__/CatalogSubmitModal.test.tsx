@@ -121,6 +121,7 @@ describe('CatalogSubmitModal (#1715)', () => {
     // Empty submit.
     fireEvent.click(screen.getByRole('button', { name: 'Submit for verification' }))
     expect(screen.getByText('Enter the https URL of the payable endpoint.')).toBeDefined()
+    expect(screen.getByRole('alert')).toHaveAttribute('id', 'catalog-resource-url-error')
     expect(mockSubmitCatalog).not.toHaveBeenCalled()
 
     // Embedded credentials.

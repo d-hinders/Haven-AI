@@ -13,13 +13,16 @@ const {
   isRetiredAllowanceIntent,
 } = await import('../execution-rail.js')
 
-const PERMISSION_ID = ('0x' + 'ab'.repeat(32)) as `0x${string}`
 const CHAIN = 84532 // Base Sepolia — the only session-rail chain today
 
 describe('resolveExecutionRail — retirement decided in the seam (#993)', () => {
+  // #2263: `sessionPermissionId` is no longer part of `ExecutionRailState` —
+  // #993 had already stopped the seam consulting it, and migration 075 dropped
+  // the column it came from. The cases below keep their names because the
+  // claim is unchanged: the marking alone decides, whatever else is or is not
+  // known about the account.
   const full = {
     safeExecutionRail: 'session_key',
-    sessionPermissionId: PERMISSION_ID,
     chainId: CHAIN,
   }
 
@@ -30,8 +33,6 @@ describe('resolveExecutionRail — retirement decided in the seam (#993)', () =>
   // marking alone decides.
   it.each([
     ['full session state', full],
-    ['no agent session', { ...full, sessionPermissionId: null }],
-    ['malformed permissionId', { ...full, sessionPermissionId: '0x1234' }],
     ['Base mainnet', { ...full, chainId: 8453 }],
     ['Gnosis', { ...full, chainId: 100 }],
   ])('a session-marked account is retired regardless of %s', (_label, state) => {

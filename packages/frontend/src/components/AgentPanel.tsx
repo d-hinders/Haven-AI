@@ -4,13 +4,11 @@ import { ChevronRight, CircleAlert, Clock, LoaderCircle, Plus } from 'lucide-rea
 import { Icon } from '@/components/ui/Icon'
 import { useAuth } from '@/context/AuthContext'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
-import { useRetiredRailOwnerAccess } from '@/hooks/useRetiredRailOwnerAccess'
 import ConnectAgentModal from './ConnectAgentModal'
 import EditAgentModal from './EditAgentModal'
 import { AgentCard } from './agent-panel/AgentCard'
 import { MCP_NOT_RECORDED_NOTE, hasUnrecordedMcpServerName } from './agent-panel/McpServerName'
 import { BotIcon } from './agent-panel/agent-display'
-import RetiredRailNotice from './RetiredRailNotice'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { Skeleton } from './ui/Skeleton'
@@ -25,8 +23,6 @@ import { Skeleton } from './ui/Skeleton'
 export default function AgentPanel() {
   const removedAgentsPanelId = 'removed-agent-list'
   const panel = useAgentPanelState()
-  const { activeSafe } = useAuth()
-  const retiredRail = useRetiredRailOwnerAccess(activeSafe)
   const {
     safeAddress,
     chainId,
@@ -35,13 +31,11 @@ export default function AgentPanel() {
     error: agentsError,
     visibleAgents,
     removedAgents,
-    isDelegationAccount,
     finalizingAgent,
     finalizeTimedOut,
     refetchAgents,
   } = panel
 
-  const canCreateAgent = isDelegationAccount
 
   if (!safeAddress) {
     return (
@@ -79,18 +73,12 @@ export default function AgentPanel() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {canCreateAgent ? (
-            <Button onClick={() => panel.setConnectAgentOpen(true)} size="sm">
-              <Icon icon={Plus} className="h-3.5 w-3.5" />
-              Connect agent
-            </Button>
-          ) : null}
+          <Button onClick={() => panel.setConnectAgentOpen(true)} size="sm">
+            <Icon icon={Plus} className="h-3.5 w-3.5" />
+            Connect agent
+          </Button>
         </div>
       </div>
-
-      {!canCreateAgent ? (
-        <RetiredRailNotice ownerAccess={retiredRail.ownerAccess} className="mb-4" />
-      ) : null}
 
       {agentsError && agents.length > 0 ? (
         <div
@@ -185,12 +173,10 @@ export default function AgentPanel() {
         <EmptyState
           icon={<BotIcon size={20} />}
           title="No agents yet"
-          body={canCreateAgent
-            ? 'Set agent rules, then add your Haven credential to your agent so it can make payments within those rules.'
-            : 'This older Safe account has no new agent connections in Haven. Existing agent records remain available to read.'}
+          body="Set agent rules, then add your Haven credential to your agent so it can make payments within those rules."
           action={
             <div className="flex flex-wrap items-center justify-center gap-2">
-              {canCreateAgent ? <Button onClick={() => panel.setConnectAgentOpen(true)}>Connect agent</Button> : null}
+              <Button onClick={() => panel.setConnectAgentOpen(true)}>Connect agent</Button>
             </div>
           }
         />

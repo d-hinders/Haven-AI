@@ -183,7 +183,13 @@ budgets, "revoke first" for a live credential) rather than one generic 409.
 Legacy AllowanceModule records are different: Haven may unlink the readable
 record at any status because archiving changes no old Safe permission. Owners
 manage that remaining permission outside Haven where they have access. This is
-record archival/unlinking, not an on-chain Safe permission change. Conversely,
+record archival/unlinking, not an on-chain Safe permission change. **Since
+#2413 the dashboard does not render those records at all** — the account and
+agent list queries filter to `account_type = 'delegator_hybrid'` — so the
+unlink path above is reached only for a live delegation account. The legacy
+rows are untouched and still readable to a direct query; what changed is that
+no Haven surface displays them, and no on-chain Safe permission is affected
+either way. Conversely,
 the unlink route refuses with `409` while a delegation agent has a pending or
 active delegation, or while a recovery sweep is prepared/submitting, so an
 in-flight live operation cannot lose its Safe binding. The guard only ever
@@ -218,7 +224,12 @@ they remain outside Haven and require the Safe owner to manage or revoke them
 through the Safe's own owner-capable interface when that owner has a usable
 wallet path. A legacy Safe owned only by a Haven passkey, or whose owner access
 is unknown, receives no Haven promise of a self-serve Safe exit; this exception
-does not weaken the independent delegation-rail claim above.
+does not weaken the independent delegation-rail claim above. #2413 makes the
+exception starker and it is stated rather than softened: Haven no longer
+displays those accounts, so it no longer offers even the read surface or the
+`Safe{Wallet}` deep link it used to. Nothing about the on-chain position
+changed — the owner's route out was always Safe's own interface, and still
+is — but Haven has stopped pointing at it.
 
 Design (minimum viable, in order of preference):
 

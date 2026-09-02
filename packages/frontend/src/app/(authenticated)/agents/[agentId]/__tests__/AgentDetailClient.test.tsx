@@ -634,12 +634,6 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.queryByRole('button', { name: /Add a backup/ })).not.toBeInTheDocument()
   })
 
-  it('hides the backup & recovery pointer on a legacy agent', () => {
-    mockAgentWith({ account_type: 'safe' })
-    render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.queryByRole('link', { name: /Backup & recovery/ })).not.toBeInTheDocument()
-  })
-
   it('reads the delegate balance for REVOKED agents too — the recovery banner must reach them (#1403)', () => {
     // The old gate skipped the read for revoked agents ("the endpoint 404s
     // anyway") — false since #1403, and exactly backwards: the sequence that
@@ -739,17 +733,6 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.queryByRole('button', { name: 'Restore to list' })).not.toBeInTheDocument()
   })
 
-  it('hides all authority controls on an operational LEGACY agent (#2258)', () => {
-    mockAgentWith({ account_type: undefined })
-    render(<AgentDetailClient agentId="agent-1" />)
-    fireEvent.click(screen.getByRole('button', { name: 'Agent options' }))
-    expect(screen.queryByRole('button', { name: 'Remove agent' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: 'Update budget' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: 'Payment credentials' })).not.toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: 'Rename agent' })).toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: 'Update budget' })).not.toBeInTheDocument()
-  })
-
   /**
    * #2230: this banner's sentence is the one BOTH surfaces render.
    *
@@ -767,19 +750,6 @@ describe('AgentDetailClient last-activity metadata', () => {
     render(<AgentDetailClient agentId="agent-1" />)
     expect(screen.getByRole('heading', { name: AGENT_PAUSED_TITLE })).toBeInTheDocument()
     expect(screen.getByText(AGENT_PAUSED_BODY)).toBeInTheDocument()
-  })
-
-  it('does not present a live pause or resume message for a paused legacy record (#2258)', () => {
-    mockAgentWith({ account_type: undefined, status: 'paused' })
-    render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.queryByRole('heading', { name: AGENT_PAUSED_TITLE })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument()
-  })
-
-  it('offers Unlink on an active legacy record without an authority action (#2258)', () => {
-    mockAgentWith({ account_type: undefined, status: 'active' })
-    render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.getByRole('button', { name: 'Unlink agent' })).toBeInTheDocument()
   })
 
   it('an archived agent gets Restore to list and no Remove (#1402)', () => {

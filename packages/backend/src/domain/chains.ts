@@ -46,7 +46,6 @@ export interface ChainConfig {
     safeProxyFactory: string
     safeSingletonL2: string
     fallbackHandler: string
-    allowanceModule: string
     multiSendCallOnly: string
   }
   passkey: {

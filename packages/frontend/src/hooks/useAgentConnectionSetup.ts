@@ -65,22 +65,6 @@ export interface UseAgentConnectionSetupOptions {
 
 // ── Rail awareness (#1069 / #1070) ─────────────────────────────────
 
-/**
- * #1069: the wallet-approval step is the LEGACY rail's mechanism. A
- * delegation-rail account (Hybrid DeleGator, possibly passkey-only) has no
- * AllowanceModule and may have no connectable EOA — its approval is the
- * budget grant. The connect flow branches the final step on this.
- *
- * Extracted pure so the rail gate is directly unit-testable.
- */
-export function isDelegationRailAccount(
-  selectedSafe: Pick<UserSafe, 'account_type'> | null | undefined,
-  activeSafe: Pick<UserSafe, 'account_type'> | null | undefined,
-): boolean {
-  // An explicitly selected account wins, including an explicit legacy/null
-  // account type. Only an absent selection falls back to the active account.
-  return (selectedSafe ? selectedSafe.account_type : activeSafe?.account_type) === 'delegator_hybrid'
-}
 
 /**
  * #1073: on the delegation rail each budget is its own signature, so setup
@@ -92,11 +76,11 @@ export function isDelegationRailAccount(
  * A delegation budget also refills on a real period boundary; "One-time" (0)
  * has no delegation equivalent, so it is not offered on this rail.
  */
-export function railBudgetRules(isDelegationAccount: boolean, allowanceCount: number): {
+export function railBudgetRules(allowanceCount: number): {
   budgetSlotsFull: boolean
   resetPeriodOptions: ReadonlyArray<(typeof RESET_PERIODS)[number]>
 } {
-  const budgetSlotsFull = isDelegationAccount && allowanceCount >= 1
+  const budgetSlotsFull = allowanceCount >= 1
   const resetPeriodOptions = RESET_PERIODS.filter((period) => period.value > 0)
   return { budgetSlotsFull, resetPeriodOptions }
 }
@@ -105,7 +89,6 @@ export type ConnectStepView =
   | { kind: 'waiting_for_connector' }
   | { kind: 'finalizing_local' }
   | { kind: 'delegation_approval'; agentId: string }
-  | { kind: 'retired_rail' }
   | { kind: 'active' }
   | { kind: 'expired' }
   | { kind: 'cancelled' }
@@ -114,20 +97,21 @@ export type ConnectStepView =
   | null
 
 /**
- * Which body the connect step renders for the current setup status — including
- * the #1069/#1070 rail branch: when the setup is ready for approval, a
- * delegation account approves the budget in-modal, while the legacy Safe rail
- * is refused before a signable step.
+ * Which body the connect step renders for the current setup status.
+ *
+ * #2413 removed the #1069/#1070 rail branch. It refused the legacy Safe rail
+ * before a signable step; no legacy account reaches the connect modal now,
+ * because the account list filters the retired rail out, so `retired_rail` had
+ * no reachable input and `approval_in_progress` / `proposed` — both legacy
+ * wallet-approval states — could not be produced either.
  */
 export function resolveConnectStepView({
   visibleStatus,
   installStatus,
-  isDelegationAccount,
   agentId,
 }: {
   visibleStatus: string | undefined
   installStatus: AgentConnectionSetupStatusResponse['install_status'] | undefined
-  isDelegationAccount: boolean
   agentId: string | null | undefined
 }): ConnectStepView {
   if (!visibleStatus) return null
@@ -141,17 +125,11 @@ export function resolveConnectStepView({
     (visibleStatus === 'connected_local' && (runtimeConfigured || installErrored)) ||
     visibleStatus === 'awaiting_wallet_approval'
   if (approvalReady) {
-    if (isDelegationAccount) {
-      // agent_id lands with the register step; polling is a beat behind at
-      // most. Never route the user away for it.
-      return agentId ? { kind: 'delegation_approval', agentId } : { kind: 'finalizing_local' }
-    }
-    return { kind: 'retired_rail' }
+    // agent_id lands with the register step; polling is a beat behind at most.
+    // Never route the user away for it.
+    return agentId ? { kind: 'delegation_approval', agentId } : { kind: 'finalizing_local' }
   }
   switch (visibleStatus) {
-    case 'approval_in_progress':
-    case 'proposed':
-      return { kind: 'retired_rail' }
     case 'active':
       return { kind: 'active' }
     case 'expired':
@@ -346,8 +324,6 @@ export function useAgentConnectionSetup({
   const safeId = selectedSafe?.id ?? propSafeId ?? null
   const chainId = selectedSafe?.chain_id ?? activeSafe?.chain_id ?? DEFAULT_CHAIN_ID
   // #1069: branch the final step on the account's rail — see
-  // isDelegationRailAccount.
-  const isDelegationAccount = isDelegationRailAccount(selectedSafe, activeSafe)
   const walletName = selectedSafe?.name ?? activeSafe?.name ?? 'Selected Haven wallet'
   const walletNetworkName = getChainConfig(chainId).name
   const statusQuery = useAgentConnectionSetupStatus(setup?.setup_id ?? null, {
@@ -484,7 +460,7 @@ export function useAgentConnectionSetup({
   const hasMultipleSafes = userSafes.length > 1
   const setupSteps: SetupStep[] = ['details', 'policy', 'review', 'connect']
   const currentStepIndex = setupSteps.indexOf(step)
-  const { resetPeriodOptions } = railBudgetRules(isDelegationAccount, allowances.length)
+  const { resetPeriodOptions } = railBudgetRules(allowances.length)
   const addAmountValidation =
     addAmount && budgetToken
       ? validateMoneyInput(addAmount, budgetToken.decimals, { tokenSymbol: budgetToken.symbol })
@@ -497,10 +473,6 @@ export function useAgentConnectionSetup({
   const walletUnavailable = !safeId
 
   async function handleCreateSetup() {
-    if (!isDelegationAccount) {
-      setCreateError('Agent connections are unavailable for this Haven account.')
-      return
-    }
     if (!safeId) {
       setCreateError('Choose or create a Haven wallet before creating this setup.')
       return
@@ -694,8 +666,6 @@ export function useAgentConnectionSetup({
     createError,
     handleCreateSetup,
     // Rail awareness (#1069/#1070)
-    isDelegationAccount,
-    isRetiredRail: Boolean(safeAddress) && !isDelegationAccount,
     // Connect step
     setup,
     setupStatus,
@@ -706,7 +676,6 @@ export function useAgentConnectionSetup({
     connectView: resolveConnectStepView({
       visibleStatus,
       installStatus: setupStatus?.install_status,
-      isDelegationAccount,
       agentId: setupStatus?.agent_id ?? null,
     }),
     copied,

@@ -55,7 +55,6 @@ export function AgentCard({
   const isRevoked = agent.status === 'revoked'
   const isArchived = Boolean(agent.archived_at)
   const isOperational = !isRevoked && !isArchived
-  const isDelegationAgent = agent.account_type === 'delegator_hybrid'
   const isBusy = busyAction !== null
 
   async function handleConfirmPause() {
@@ -206,7 +205,7 @@ export function AgentCard({
           in place" where the detail page said "Existing wallet rules" — the
           detail page's wording was TAKEN rather than a third one written, for
           the usage / register / accuracy reasons recorded in that module. */}
-      {isPaused && isDelegationAgent && (
+      {isPaused && (
         <div className="mb-3">
           <ApprovalRequiredBanner title={AGENT_PAUSED_TITLE} tone="neutral" density="compact">
             {AGENT_PAUSED_BODY}
@@ -214,7 +213,7 @@ export function AgentCard({
         </div>
       )}
 
-      {agent.has_stranded_funds && isDelegationAgent && (
+      {agent.has_stranded_funds && (
         <div className="mb-3">
           <ApprovalRequiredBanner title={STRANDED_FUNDS_TITLE} tone="warning" density="compact">
             {/* #2195: title and cause clause are the SHARED ones — this card and
@@ -242,7 +241,7 @@ export function AgentCard({
         </div>
       )}
 
-      {isOperational && isDelegationAgent && (
+      {isOperational && (
         <div className="mb-3">
           <div className="space-y-2">
             <p className="text-xs font-medium text-[var(--v2-ink-3)]">Agent budget</p>
@@ -292,10 +291,10 @@ export function AgentCard({
               <button
                 onClick={() => onEdit(agent)}
                 disabled={isBusy}
-                aria-label={`${isDelegationAgent ? 'Edit' : 'Rename'} ${agent.name}`}
+                aria-label={`Edit ${agent.name}`}
                 className={ACTION_BUTTON_CLASS}
               >
-                {isDelegationAgent ? 'Edit' : 'Rename'}
+                Edit
               </button>
             ) : (
               <button
@@ -307,10 +306,8 @@ export function AgentCard({
                 Details
               </button>
             )}
-            {isDelegationAgent ? (
-              <>
-                <span className="text-[var(--v2-border-strong)]">|</span>
-                {isActive ? (
+            <span className="text-[var(--v2-border-strong)]">|</span>
+            {isActive ? (
                   <button
                     onClick={() => setPauseModalOpen(true)}
                     disabled={isBusy}
@@ -326,16 +323,13 @@ export function AgentCard({
                     aria-label={`Resume ${agent.name}`}
                     className={ACTION_BUTTON_CLASS}
                   >
-                    {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
-                  </button>
-                )}
-              </>
-            ) : null}
+                {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
+              </button>
+            )}
             {/* #1402: Remove stops the live delegation and archives its
-                credential. Unlink archives a legacy record only; it never
-                changes the old Safe permission. */}
-            {isDelegationAgent ? (
-              <>
+                credential. #2413 dropped the legacy "Unlink" variant with the
+                records it named. */}
+            <>
                 <span className="text-[var(--v2-border-strong)]">|</span>
                 <button
                   onClick={() => setRemoveModalOpen(true)}
@@ -345,20 +339,7 @@ export function AgentCard({
                 >
                   Remove
                 </button>
-              </>
-            ) : (
-              <>
-                <span className="text-[var(--v2-border-strong)]">|</span>
-                <button
-                  onClick={() => setRemoveModalOpen(true)}
-                  disabled={isBusy}
-                  aria-label={`Unlink ${agent.name}`}
-                  className={DANGER_ACTION_BUTTON_CLASS}
-                >
-                  Unlink
-                </button>
-              </>
-            )}
+            </>
           </>
         )}
         {isRevoked && !isArchived && (
@@ -370,12 +351,10 @@ export function AgentCard({
             <button
               onClick={() => setRemoveModalOpen(true)}
               disabled={isBusy}
-              aria-label={`${isDelegationAgent ? 'Remove' : 'Unlink'} ${agent.name}`}
+              aria-label={`Remove ${agent.name}`}
               className={DANGER_ACTION_BUTTON_CLASS}
             >
-              {busyAction === 'archive'
-                ? isDelegationAgent ? 'Removing...' : 'Unlinking...'
-                : isDelegationAgent ? 'Remove' : 'Unlink'}
+              {busyAction === 'archive' ? 'Removing...' : 'Remove'}
             </button>
           </>
         )}

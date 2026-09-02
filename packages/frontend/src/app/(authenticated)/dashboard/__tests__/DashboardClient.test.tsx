@@ -206,28 +206,6 @@ describe('DashboardClient', () => {
     expect(screen.getByText('Active accounts')).toBeInTheDocument()
   })
 
-  it('keeps a legacy-only dashboard readable without a Connect agent CTA', () => {
-    const legacySafe = { ...SAFE, account_type: 'safe' as const }
-    mockUseAuth.mockReturnValue({
-      user: {
-        id: 'user-1',
-        name: 'Ada',
-        email: 'ada@example.com',
-        wallet_address: '0x5555555555555555555555555555555555555555',
-        safes: [legacySafe],
-      },
-      activeSafe: legacySafe,
-    })
-    mockUseAgents.mockReturnValue({ agents: [], loading: false, refetch: vi.fn() })
-
-    render(<DashboardClient />)
-
-    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument()
-    expect(screen.getByText(/agent connections are retired/i)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Connect agent' })).toBeNull()
-    expect(screen.queryByText('Onboarding guide')).toBeNull()
-  })
-
   /**
    * #1989 (epic #1440): the dashboard's two legacy-Safe spend/approval
    * affordances are GONE — the hero's Send button (it opened `SendModal`, which

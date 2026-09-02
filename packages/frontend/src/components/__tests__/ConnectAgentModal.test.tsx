@@ -51,22 +51,6 @@ beforeEach(() => {
 })
 
 describe('ConnectAgentModal', () => {
-  it('refuses the retired legacy Safe rail before showing a signable step', () => {
-    mockUseAgentConnectionSetup.mockReturnValue(
-      flow({
-        isRetiredRail: true,
-        headerSubtitleText: 'Agent connection unavailable',
-      }),
-    )
-
-    render(<ConnectAgentModal open onClose={vi.fn()} safeAddress="0x111" safeId="safe-1" />)
-
-    expect(screen.getByText('Haven no longer sends payments from this account.')).toBeInTheDocument()
-    expect(screen.getByText(/older Safe account/)).toBeInTheDocument()
-    expect(screen.queryByText('Connect step')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Approve|Sign|Create setup/i })).not.toBeInTheDocument()
-  })
-
   it('keeps the normal details step for a delegation account', () => {
     render(<ConnectAgentModal open onClose={vi.fn()} safeAddress="0x111" safeId="safe-1" />)
 

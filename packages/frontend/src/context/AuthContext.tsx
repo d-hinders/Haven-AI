@@ -27,7 +27,11 @@ export interface UserSafe {
   name: string
   is_default: boolean
   created_at: string
-  /** 'delegator_hybrid' on the delegation rail; null/legacy = Safe rail (#1069). */
+  /**
+   * Always 'delegator_hybrid' since #2413: the account-list queries filter the
+   * retired Safe rail out, so no other value reaches the client. Kept on the
+   * type because the column still holds legacy values in the database.
+   */
   account_type?: string | null
   /**
    * #1205: server-computed by `needsBackupSignerRecommendation` — true when a
@@ -145,9 +149,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // account's set so useActiveSigner can see it. Per-safe failures are
     // skipped silently, same as the loop above: the gate simply stays at
     // no_signer for that account until the next refresh.
-    const hybridSafes = (u.safes ?? []).filter((s) => s.account_type === 'delegator_hybrid')
+    // #2413: every account the API returns is on the delegation rail, so the
+    // filter that used to sit here selected all of them.
     await Promise.all(
-      hybridSafes.map(async (safe) => {
+      (u.safes ?? []).map(async (safe) => {
         try {
           const signers = await api.get<HybridAccountSigners>(
             `/accounts/hybrid/${safe.safe_address}/signers?chain_id=${safe.chain_id}`,

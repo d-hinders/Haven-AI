@@ -46,6 +46,10 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
 - Payment and authority copy follows `copy-guidelines.md`. It says whether a
   user-held or agent-held key signs, distinguishes API identity from payment
   authority, and never implies an API key or Haven backend can spend.
+- A retired-rail notice is intentionally read-only: it may explain that legacy
+  Safe permissions are outside Haven, but it must promise Safe's interface only
+  when a known wallet owner is established. Passkey-only and unknown-owner
+  states must not receive a generic recovery CTA.
 - Payment execution, agent authority, credentials, Safe setup, relaying, SDK
   payment APIs, x402/MPP, merchant, fiat/card, swap, yield, treasury,
   reporting/accounting, tax, and advice surfaces also pass

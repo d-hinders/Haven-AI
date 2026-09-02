@@ -46,16 +46,12 @@ export function signerNameFor(hosted: string): string {
  * ### Why it cannot stay in a tooltip
  *
  * It used to be a 169-character `Tooltip` label on the `not recorded` span.
- * #2038 made `Tooltip` reachable by keyboard and touch, but only where the
- * trigger is nobody else's control, and this call site is **structurally
- * excluded** rather than merely missed: `AgentCard` wraps the whole card in a
- * composite `role="link"` with its own `tabIndex` and `onClick`
- * (`AgentCard.tsx:121-126`), which `Tooltip`'s `INTERACTIVE_ANCESTOR` check
- * matches (`Tooltip.tsx:101, 191-194`). A tab stop on the trigger would nest a
- * control inside a control; a tap would fire alongside the card's navigation
- * and strand a bubble over the destination. Both are worse than the defect, so
- * the primitive correctly refuses the job and no change to it can rescue this
- * copy. `Tooltip`'s own header says so.
+ * #2038 made `Tooltip` reachable by keyboard and touch where the trigger is
+ * nobody else's control. The old null-name tooltip was not a good fit: its
+ * explanation was essential copy, not elaboration, and belongs visibly above
+ * the agent list. The recorded-name branch below is different: it elaborates
+ * a value already on screen and remains reachable beside its sibling
+ * `CopyButton`.
  *
  * The copy is **essential**, not elaboration: it exists to stop a user
  * concluding their agent is broken, and it explains an ABSENCE — there is no

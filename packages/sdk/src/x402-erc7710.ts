@@ -209,6 +209,18 @@ export class X402Erc7710 {
 
     const raw = await this.post<RawX402AuthorizeResponse>('/x402', {
       url: options.resourceUrl ?? paymentRequired.resource?.url,
+      // #2373: the full 402 challenge, persisted verbatim by the backend
+      // (#1355) so the settle handoff can echo its resource/extensions into
+      // the X-PAYMENT envelope (#2361). This scheme decomposes the challenge
+      // into the fields below for AUTHORITY; the stored copy exists for the
+      // echo, which cannot be reconstructed from the decomposition — omitting
+      // it is how every erc7710 payment failed a merchant that enforces the
+      // spec's extensions-echo MUST. Same ≤64KB guard and omission behaviour
+      // as the 3009 path (client.ts): an oversized challenge omits the field
+      // rather than failing the payment, and the settle echo then omits too.
+      ...(new TextEncoder().encode(JSON.stringify(paymentRequired)).length <= 65536
+        ? { paymentRequired }
+        : {}),
       // payTo = the MERCHANT is what selects direct settlement server-side.
       // The explicit settlementScheme must AGREE with that shape (#1360) —
       // disagreement is a 400 by design, so that a stale delegate address

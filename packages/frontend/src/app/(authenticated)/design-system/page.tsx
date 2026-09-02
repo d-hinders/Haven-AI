@@ -1607,7 +1607,7 @@ export default function DesignSystemPage() {
           footer={
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs text-[var(--v2-ink-3)]">
-                Pause the agent or revoke its budget if you need to stop access.
+                Pause the agent or remove its budget if you need to stop access.
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button variant="ghost" size="sm">

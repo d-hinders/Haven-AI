@@ -16,7 +16,8 @@ export const testRecipientAddress = '0x2222222222222222222222222222222222222222'
  *
  * The default is now the live rail and a legacy spec opts DOWN explicitly, the
  * same inversion `scripts/screenshot.mjs` was corrected to across #2205/#2227/
- * #2233. `legacySafe` below is the sanctioned opt-down.
+ * #2233. `legacySafe` below is the sanctioned opt-down shape, and
+ * `optDownToLegacyRail` the page helper built on it.
  *
  * The value is `'safe'` / `'delegator_hybrid'` and never `null` or absent:
  * migration `041_hybrid_accounts.ts` declares the column `VARCHAR(32) NOT NULL
@@ -540,7 +541,10 @@ export async function mockHavenApi(page: Page) {
  * (#2224).
  *
  * Use it only where the retired rail IS the subject, and say why at the call
- * site. Anything rail-independent stays on the default.
+ * site. Anything rail-independent stays on the default. Its caller today is
+ * `agent-panel-states.visual.spec.ts`'s retirement-boundary capture (#2258);
+ * `wallet-button-collapsed-states.visual.spec.ts` left it for the live rail
+ * (#2284), so a spec reaching for it is making a deliberate legacy claim.
  */
 export async function optDownToLegacyRail(page: Page) {
   await page.route('**/api/**', async (route) => {
@@ -572,6 +576,65 @@ export async function optDownToLegacyRail(page: Page) {
       return
     }
     await route.fallback()
+  })
+}
+
+/**
+ * Serve the shared account's signer set as OWNER-ONLY: one EOA owner, zero
+ * enrolled passkeys (#2284, the #2068 shape).
+ *
+ * This is a LIVE-RAIL configuration, not a fixture invention — the rule
+ * `injected-wallet.ts` states (a fixture must not reach a state the product
+ * cannot) is met on three counts:
+ *
+ *  1. `POST /accounts/hybrid { owner_address }` with no `passkeys` provisions
+ *     exactly this account (`routes/hybrid-accounts.ts` requires at least one
+ *     of the two, and #1153 made a single signer permitted); the delegation
+ *     pilot script `packages/qa-agent/src/pilot/provision-hybrid.ts` does so
+ *     as its first step, and `rails/hybrid-account-config.ts` treats an
+ *     owner-only set as a deployable signer config.
+ *  2. It is reachable from the dashboard's own passkey onboarding too:
+ *     `add_owner` then `remove_passkey` — the `remove_passkey` floor in
+ *     `rails/hybrid-signer-actions.ts` refuses only when the passkey is the
+ *     LAST signer (`passkeys.length === 1 && !ownerAddress`).
+ *  3. It is `account_type = 'delegator_hybrid'` / `execution_rail =
+ *     'delegation'`, so it SPENDS: the retired rail's 410s (#1986) do not
+ *     apply, and the owner EOA signs budget grants and revokes (#828).
+ *
+ * What it does to `WalletButton`: with no passkey in the set, neither passkey
+ * branch can fire (`useActiveSigner` resolves `delegator_passkey` only for a
+ * non-empty set — signer.test.ts › "owner-only hybrid set: the connected OWNER
+ * wallet resolves as the EOA signer (#2068)"), so a connected wallet on a
+ * supported chain reaches the connected-EOA branch. WHICH label that branch
+ * carries is `useSafeOperationGate`'s call: the named owner connected renders
+ * the truncated address; any other wallet renders "Wrong wallet" (#2073).
+ * `ownerAddress` is therefore the caller's decision, made explicit.
+ *
+ * Both signer-set reads move together — the account-scoped one `AuthContext`
+ * hydrates from and the agent-scoped twin (#888) — for the reason the shared
+ * handlers give: same account, same answer. Register AFTER `mockHavenApi`
+ * (later-registered routes win); everything else falls back to the shared
+ * fixture. Two specs use it: `wallet-button-collapsed-states.visual.spec.ts`
+ * (the collapsed connected-EOA captures) and `wallet-signer-offering.spec.ts`
+ * (the owner-match / "Wrong wallet" pills, #2073) — one encoding of the shape,
+ * so the two cannot drift the way #2264 found two fixtures drifting.
+ */
+export async function serveOwnerOnlyHybridSigners(page: Page, ownerAddress: string) {
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() !== 'GET') return route.fallback()
+
+    const isAccountRead = path.startsWith('/accounts/hybrid/') && path.endsWith('/signers')
+    const isAgentRead = path.startsWith('/agents/') && path.endsWith('/account-signers')
+    if (!isAccountRead && !isAgentRead) return route.fallback()
+
+    await fulfillJson(route, {
+      account_address: testSafeAddress,
+      chain_id: testSafe.chain_id,
+      owner_address: ownerAddress,
+      passkeys: [],
+    })
   })
 }
 

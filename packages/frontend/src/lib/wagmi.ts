@@ -14,10 +14,9 @@ const connectors = [
     : []),
 ]
 
-// Read-heavy pages (Safe details, on-chain allowance polling, nonce reads on
-// send/revoke) hammer the RPC. viem's default endpoints are aggressively
-// rate-limited and surface as "over rate limit" errors — e.g. when revoking an
-// agent.
+// Read-heavy pages (Safe details and account activity) hammer the RPC. viem's
+// default endpoints are aggressively rate-limited and surface as "over rate
+// limit" errors, so the wallet layer falls back across reliable endpoints.
 //
 // Use a fallback transport per chain: prefer a dedicated provider via env, then
 // rotate through reliable public nodes. If one endpoint rate-limits or fails,
@@ -49,17 +48,10 @@ const RPC_URLS: Record<number, (string | undefined)[]> = {
  * The gap between those two lists did not fail loudly. `@wagmi/core`'s
  * `getClient` CATCHES `ChainNotConfiguredError` and returns `undefined`
  * (`actions/getClient.js`), so `usePublicClient({ chainId: 84532 })` was
- * `undefined` and every consumer bailed at its first line — e.g.
- * `useOnChainAllowances`:
- *
- *     if (!publicClient || !safeAddress) { setLoading(false); return }
- *
- * No request was issued, no error was raised, and the surface rendered its
- * empty branch. On the dev deployment that silently disabled agent-budget
- * reads, unmanaged-delegate discovery, approval execution, on-chain revoke and
- * `NetworkGate`'s own "Switch wallet to Base Sepolia" button; in the screenshot
- * harness it meant **zero JSON-RPC requests had ever left the browser**, so
- * every chain-fed capture was a photograph of an empty state (#1935/#1971).
+ * `undefined` and every consumer bailed at its first line. No request was
+ * issued, no error was raised, and the affected surface rendered its empty
+ * branch. The transport list is derived from the offered chains so this class
+ * of silent mismatch cannot disable a supported account surface.
  *
  * So the list is DERIVED rather than restated: whatever `chains.ts` offers, we
  * build a transport for. Adding a chain to `ENABLED_CHAIN_IDS` can no longer

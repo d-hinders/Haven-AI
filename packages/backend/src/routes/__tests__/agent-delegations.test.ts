@@ -91,6 +91,7 @@ function agentRow(overrides: Record<string, unknown> = {}) {
 
 function mockDb(opts: {
   agent?: Record<string, unknown> | null
+  activated?: boolean
   version?: number
   stored?: Record<string, unknown> | null
   owner?: string | null
@@ -100,8 +101,11 @@ function mockDb(opts: {
 } = {}) {
   mockQuery.mockImplementation((sql: string) => {
     const s = String(sql)
-    if (/FROM agents a/.test(s)) {
+    if (/FROM agents(?:\s|$)/.test(s)) {
       return Promise.resolve({ rows: opts.agent === null ? [] : [opts.agent ?? agentRow()] })
+    }
+    if (/UPDATE agent_delegations/.test(s) && /status = 'active'/.test(s)) {
+      return Promise.resolve({ rows: opts.activated === false ? [] : [{ id: 'row-1' }] })
     }
     if (/COALESCE\(MAX\(version\)/.test(s)) {
       return Promise.resolve({ rows: [{ next_version: opts.version ?? 1 }] })
@@ -445,6 +449,16 @@ describe('delegation lifecycle API (#828)', () => {
       const flip = mockQuery.mock.calls.find((c) => /UPDATE agents SET status = 'active'/.test(String(c[0])))
       expect(flip).toBeDefined()
       expect(String(flip![0])).toMatch(/status = 'pending_approval'/)
+    })
+
+    it('refuses when the pending row was consumed before the conditional activation', async () => {
+      mockDb({ activated: false })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toEqual({ error: 'Delegation is no longer pending' })
     })
 
     it('accepts a WebAuthn-length signature (ABI-encoded assertion, >65 bytes) (#887)', async () => {

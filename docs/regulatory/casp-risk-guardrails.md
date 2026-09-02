@@ -62,7 +62,7 @@ covers:
   - .github/workflows/publish.yml
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-01" # #2246: § Product Copy Rules — the "Known compliance gap" paragraph is DELETED, because the gap it disclosed is fixed in the same change. Its two avoid-listed phrases ("Haven signs and settles the payment.", "Haven gave you the private key.") were live in `packages/frontend/src/components/UsingYourAgentInfo.tsx`, a file this doc `covers:` by exact path; both are gone and both are now literals in the frontend copy lint, so the rule is enforced rather than disclosed. Scope: that paragraph only — the Use/Avoid lists themselves are unchanged, and nothing else in this document was re-verified. Full analysis in docs/regulatory/casp-changelog/2026-09-01-2246.md. Prior: #2274: the #2245 "Current state" note under Core Design Principle corrected — it listed token resolution among the rail-INDEPENDENT checks still preceding the x402 rail 410, which #2274 moved below the gate on that route and on POST /payments together. Scope: that blockquote only; the rest of Core Design Principle was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
+last-verified: "2026-09-02" # #2300: § *What `covers:` must span* gains the measured-floor paragraph — the #1899 pin now asserts 31 of 47 globs after `packages/mcp-server/src/**` joined the money-path list, and this document already covered that path, so no `covers:` change was needed (floor, not ceiling, running the direction money.md § 2 predicted). Scope: that section only; nothing else in this document was re-verified. Full analysis in docs/regulatory/casp-changelog/2026-09-02-2300.md. Prior: #2246: § Product Copy Rules — the "Known compliance gap" paragraph is DELETED, because the gap it disclosed is fixed in the same change. Its two avoid-listed phrases ("Haven signs and settles the payment.", "Haven gave you the private key.") were live in `packages/frontend/src/components/UsingYourAgentInfo.tsx`, a file this doc `covers:` by exact path; both are gone and both are now literals in the frontend copy lint, so the rule is enforced rather than disclosed. Scope: that paragraph only — the Use/Avoid lists themselves are unchanged, and nothing else in this document was re-verified. Full analysis in docs/regulatory/casp-changelog/2026-09-01-2246.md. Prior: #2274: the #2245 "Current state" note under Core Design Principle corrected — it listed token resolution among the rail-INDEPENDENT checks still preceding the x402 rail 410, which #2274 moved below the gate on that route and on POST /payments together. Scope: that blockquote only; the rest of Core Design Principle was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -231,10 +231,11 @@ Haven backend
 > had declared gone), and #2055 dropped the `approval_requests` table itself
 > under the recorded #2021 owner decision.
 > Since #1130 a valid key on a `pending_approval` agent gets a NAMED
-> `403 agent_pending_approval` with the required action, instead of the
-> false `401 Invalid or revoked API key` — the authentication gate stays a
-> positive allow-list (revoked and unknown statuses still 401), the refusal
-> just stopped lying about its cause.
+> `403 agent_pending_approval` with the required action on normal agent API
+> requests, instead of the false `401 Invalid or revoked API key` — the
+> authentication gate stays a positive allow-list (revoked and unknown statuses
+> still 401). The exact sweep-recovery routes are a narrow exception for
+> recovering stranded delegate balances; they grant no spending authority.
 > Since #988 the agents/user-safes data access lives in
 > `infra/repositories/` with tenant scoping as REQUIRED function parameters —
 > the `WHERE user_id = $1` authorization that used to hide in inline route
@@ -345,8 +346,10 @@ Preserve these facts as non-negotiable implementation invariants:
 - Budget, recipient and expiry limits are enforced on-chain by the caveat enforcers, not only by Haven.
 - Agent-initiated transactions, including the EIP-3009 x402 merchant leg, are signed by an agent private key held by the agent or user, not by Haven.
 - Haven may relay execution, but authority comes from the user or agent signature and the controls applicable to that leg, never from Haven authentication or database policy alone.
-- Users can enumerate and revoke every authority on their account, and recover control of the account itself, without Haven — the demonstrated exit story ([`docs/exit/README.md`](../exit/README.md)).
-- Users can revoke or modify agent authority independently of Haven.
+- On the live delegation rail, users can enumerate and revoke every delegation
+  on their account, and recover control of the account itself, without Haven —
+  the demonstrated exit story ([`docs/exit/README.md`](../exit/README.md)).
+- Users can revoke or modify live delegation authority independently of Haven.
 - Haven cannot block users from transacting with their account outside Haven.
 
 **Delegation-rail x402 signing is local-signer-only (owner decision, 2026-08-06, #1138).** The hosted/edge keyless path never signs an account UserOp: on this rail the agent's signature is produced by the local signer holding the delegate key, exactly as invariant "signed by an agent private key held by the agent or user, not by Haven" requires. Haven's role is limited to *declaring* what is to be signed — an expected context it signs with a dedicated binding key — which the signer verifies before signing and can refuse. Because the account validates EIP-712 typed data rather than the bare ERC-4337 hash, that declaration commits to the typed data's digest (expected context v2); the signer re-derives the digest from the payload it actually signs and refuses any mismatch, so Haven cannot substitute a different operation behind a correctly-signed declaration. The refusal extends to declarations the signer does not *understand*: an expected-context version outside the set that signer supports is rejected before any content check (#1143, `SUPPORTED_X402_EXPECTED_VERSIONS`), so a newer backend cannot obtain a signature by declaring a context whose rules the signer cannot evaluate — the same property, applied to the version field itself. Since #1155 the signer also *advertises* that supported set at its MCP `initialize` handshake, so an agent can spot the skew before it quotes. That advertisement is metadata — version numbers, no key material and no authority — and it is advisory by decision: it adds no refusal to the payment path, and the signing-time refusal above remains the control. This is a boundary, not a staging decision: teaching the hosted signer to sign account UserOps would put Haven in the signing path and is out of scope by construction.
@@ -675,6 +678,11 @@ Implementation rule:
 
 **Connection setup never hands out another environment's hosted MCP endpoint (#1129).** The production hosted MCP URL is served as a built-in default only when the backend's own resolved public URL is the production host; any other deployment must set `HAVEN_HOSTED_MCP_URL` explicitly, or `/resolve` and `/register` refuse with an explicit configuration error naming the variable — raised before any state is written, so a misconfigured environment can neither consume the client's one-shot setup token nor leave a registration half-created, and an agent's credentials are never pointed at a different environment's backend. Fail-closed, same as the authority checks above.
 
+The legacy `wallet-approval` check is only a verification read for a retired
+Haven path. “The rail it approves can no longer spend” means Haven cannot
+initiate that payment path; it does not revoke a historical AllowanceModule
+permission. If one remains on-chain, the Safe owner must revoke it externally.
+
 ### Keep Agent Spend Authority Narrow
 
 Scope each agent authority by as many of these as possible:
@@ -755,7 +763,9 @@ The codebase should make it easy to prove:
 - Agent keys are not stored by Haven.
 - All executable transfers require external signatures.
 - On-chain caveat enforcers constrain every delegation redemption; external signatures and exact authenticated context constrain the EIP-3009 x402 merchant leg.
-- Users can revoke permissions outside Haven.
+- Users can revoke live delegation permissions outside Haven; retired legacy Safe
+  permissions remain outside Haven's control and may require an identified Safe
+  owner to manage.
 
 Add comments, docs, tests, and PR notes around these points when touching payment, agent authority, relaying, account setup, SDK, or demo payment flows.
 
@@ -826,7 +836,7 @@ Before merging any payment-related, agent-authority, account, SDK, x402/MPP, or 
 - [ ] Haven database policy is not the only spend control.
 - [ ] A user signature establishes or modifies agent authority — an owner-signed delegation.
 - [ ] Users can revoke agent authority on-chain.
-- [ ] Users can enumerate and revoke authority on their account without Haven (the exit story).
+- [ ] On the live delegation rail, users can enumerate and revoke every delegation on their account without Haven (the exit story).
 - [ ] Haven cannot block or freeze user funds.
 - [ ] Haven cannot expand an agent's budget without an owner signature.
 - [ ] Haven cannot change recipient, amount, token, route, or timing after signature.
@@ -944,6 +954,25 @@ alone cannot say which. That is the point: requote it with its denominator or
 not at all. The `EXEMPT` map's own comments in
 `scripts/ci/money-path.test.mjs` carry the same two bare counts and drift the
 same way.
+
+**The floor is measured, and the number moves (#2300).** As of #2300 the pin
+asserts **31 of the 47 globs**: the 33 runtime `globs` minus the two `EXEMPT`
+entries above, and none of the 14 `controlGlobs`. The addition that moved it
+was `packages/mcp-server/src/**` — the hosted MCP tool surface, whose
+`tools.ts` decides whether a funding userop is relayed and in what order
+(#2282), and which shipped four money defects (#2051, #2282, #2312, #2348) with
+no money-path label by the file half. This document had covered
+`packages/mcp-server/src/**` since before the money-path list did, so the pin
+was satisfied on the day the entry landed with no `covers:` change — the
+*floor, not a ceiling* reading above, running in the direction
+[`money.md`](../contributing/ship-playbooks/money.md) § 2 predicted: "the wider
+list is a useful place to look when adding to the narrower one". The entry was
+scoped to `src/**` rather than the whole package partly for this reason —
+`packages/mcp-server/**` would have forced this list to widen to a `Dockerfile`
+and a `README.md` to keep the pin green, which is the "over-inclusion costs
+little" trade-off inverted: a perimeter shard on a Dockerfile edit answers no
+authority question. Requote the floor with its denominator; a bare "30 of 46"
+is already stale.
 
 Two consequences worth stating outright:
 

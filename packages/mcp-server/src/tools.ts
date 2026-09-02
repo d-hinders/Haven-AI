@@ -78,9 +78,6 @@ export type HostedToolName =
   | 'haven_discover_tools'
   | 'haven_submit_catalog_entry'
 
-/** Legacy aliases kept for one release cycle so existing agents don't break. */
-export type HostedToolNameLegacy = 'haven_x402_authorize' | 'haven_list_transactions'
-
 /**
  * #2282: the hosted MCP tool boundary spells arguments in **snake_case**
  * (`payment_id`, `merchant_url`, `tool_name`), and `mcp_transport` is no
@@ -433,6 +430,44 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
  *     `idempotencyKey` was silent here. Stated because the divergence table in
  *     #2348 reads as though both keys were equally silent, and they were not.
  *
+ * On the list, batch 3 (#2349): the remaining twelve, which closes the list.
+ * Each is either record-reading in #2312's sense (`haven_prepare_catalog_purchase`,
+ * `haven_quote_catalog_purchase`, `haven_resume_x402_payment`,
+ * `haven_sweep_delegate`, the two by-id status reads), a filter or a list where
+ * a stripped key returns the UNFILTERED answer looking filtered
+ * (`haven_discover_tools`, `haven_list_receipts`), or an argument-driven call
+ * where the dropped key is the replay key or a cap that nothing then enforces
+ * (`haven_pay`, `haven_quote_mcp_tool`, `haven_submit_catalog_entry`,
+ * `haven_verify_receipt`). The principle that decides it is the one #2312
+ * started from: every one of these advertises `additionalProperties: false`,
+ * so permissive behaviour was a contract mismatch on each of them, and the
+ * only reason to leave one permissive is a LIVE caller that would break. The
+ * enumeration (SDK, `packages/mcp`, `packages/connect`, the shipped skill text
+ * and its byte-pinned twin, the QA legs, e2e fixtures, docs, `.agents`) found
+ * none for these twelve; the one undeclared caller it found was test-side
+ * (`tools.test.ts` sending `max_amount` to `haven_quote_mcp_tool`, which has
+ * never taken a cap — the #2312 `tools.test.ts:2399` shape again), fixed in the
+ * same change. Measured over the transport on 2026-09-02 against `origin/dev`
+ * `d09a6cf5`: `haven_pay` with `idempotencyKey` reached `POST /payments` with
+ * NO `idempotency_key` field at all — the identical total loss #2348 measured
+ * on `haven_send`.
+ *
+ * Two things the issue asked to be checked, and what was found:
+ *
+ *   - The `max_amount` / `max_amount_human` cap pair is NOT on `haven_pay`
+ *     (its schema is `token`, `amount`, `to`, `idempotency_key`); it is on
+ *     `haven_prepare_catalog_purchase` in this batch. Strictness does not
+ *     change which refusal a caller meets: both cap fields are DECLARED, so a
+ *     strict parse passes them through untouched and `readMaxAmountCap` still
+ *     raises its `AmbiguousMaxAmount` / cap-required refusals, before any
+ *     network call. Only a call carrying an UNDECLARED key alongside meets the
+ *     strict refusal first — and that call has to be repaired anyway. Pinned
+ *     over the transport in `strict-tool-input.test.ts`.
+ *   - `haven_resume_x402_payment` parsed OUTSIDE its `runTool`, the #2348
+ *     embedder-path defect on a third tool: a validation error escaped
+ *     `createToolHandlers` as a raw throw instead of a `ToolFailure`. Moved
+ *     inside, same as the other two.
+ *
  * ## Refuse loudly, or CONVERGE on one spelling? (#2348)
  *
  * Convergence is the destination and a hard refusal is the on-ramp, not a
@@ -494,12 +529,29 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
  *     `strict-tool-input.test.ts` re-asserts the same two literals HERE, so a
  *     revert of the skill text goes red in the suite of the file that carries
  *     this exclusion rather than only in the SDK's.
- *   - `haven_get_agent`, `haven_get_allowances` — schema `{}`. Strict on an
- *     empty object refuses EVERY key, so any client that decorates a
- *     no-argument call breaks, for no money-path gain. #2349.
- *   - everything else — batched, not exempted: #2349 takes the remainder and
- *     adds the guard that stops a NEW tool joining `toolSchemas` without a
- *     strict/permissive decision being made about it at all.
+ *   - `haven_get_agent`, `haven_get_allowances` — schema `{}`, decided in
+ *     #2349 rather than deferred by it. Their entries in
+ *     `PERMISSIVE_INPUT_TOOLS` below carry the reasoning; the short form is
+ *     that a `.strict()` on `{}` changes exactly ONE observable case (a
+ *     decorated no-argument call), protects nothing (the handlers take no
+ *     input at all), and a supported runtime is documented decorating exactly
+ *     that call.
+ *
+ * Every hosted tool is now on one list or the other — `STRICT_INPUT_TOOLS` or
+ * `PERMISSIVE_INPUT_TOOLS` — and a tool on neither fails to compile
+ * (`_everyHostedToolCarriesAnInputDecision` below) and fails
+ * `strict-tool-input.test.ts`. Being permissive is a legitimate answer; not
+ * having decided is not (#2349, the same rule as the `packages/**` Markdown
+ * manifest, #2088).
+ *
+ * `haven_x402_authorize` / `haven_list_transactions` — the "one release
+ * cycle" legacy aliases — are GONE rather than decided. They were defined in
+ * #314 (`d0ed60a0`) and never registered: `server.ts` has iterated
+ * `toolSchemas` only since that commit, `index.ts` never exported them, and
+ * nothing in the repository imported them. A caller using either name has
+ * received "tool not found" since #314; deleting the dead export changes no
+ * observable behaviour and stops the guard below having to reason about a
+ * surface that does not exist.
  *
  * The value is the `.strict()` message: a refusal a caller can act on beats a
  * bare "unrecognized key". It is also what `parseStrict` reuses, so the two
@@ -558,9 +610,132 @@ export const STRICT_INPUT_TOOLS = {
     'idempotencyKey that was dropped in silence, replacing the caller\'s replay scope with ' +
     'a key derived from the quote. Pass payment_required (the paymentRequired field of a ' +
     'haven_quote_x402 result) and idempotency_key.',
+  // ── #2349, batch 3 — the remainder ──────────────────────────────────────
+  // Same discipline as above: each message says what the tool DOES read the
+  // value from, so a caller holding the refused key learns where it belongs.
+  haven_sweep_delegate:
+    'A sweep moves the whole stranded delegate balance back to the account it came from; ' +
+    'destination and amount are re-derived by Haven from the prepared authorization, never ' +
+    'read from arguments. Phase 1 takes nothing; phase 2 takes { authorization, signature } ' +
+    'only — expected_auth belongs to the signer call (haven_sign_sweep_delegate), not here.',
+  haven_pay:
+    'This is the HOSTED surface, which takes token, amount, to and idempotency_key ' +
+    '(snake_case). The SDK spells the replay key idempotencyKey — carrying that spelling here ' +
+    'used to be dropped in silence, and the payment then reached POST /payments with no ' +
+    'idempotency_key at all, so the replay contract never engaged and a retry spent twice. ' +
+    'haven_send (asset / recipient) is a different tool, not another spelling of this one.',
+  haven_quote_mcp_tool:
+    'A quote is informational only and takes no cap: max_amount and max_amount_human are ' +
+    'enforced by haven_pay_mcp_tool and haven_prepare_catalog_purchase against the live ' +
+    'price. A cap sent here used to be dropped in silence, so the quote came back looking ' +
+    'capped when nothing had checked it.',
+  haven_prepare_catalog_purchase:
+    'The merchant URL, tool name and tool arguments come from the catalog row that ' +
+    'catalog_id names, never from arguments — a merchant_url, tool_name or arguments sent ' +
+    'here used to be dropped in silence while the purchase proceeded against the catalog ' +
+    'row. The cap is max_amount_human or max_amount (exactly one), and the replay key is ' +
+    'idempotency_key (snake_case), not idempotencyKey.',
+  haven_quote_catalog_purchase:
+    'Everything about the merchant call comes from the catalog row that catalog_id names, ' +
+    'and a quote takes no cap — a max_amount, tool_name or arguments sent here used to be ' +
+    'dropped in silence while the quote was taken against the row.',
+  haven_resume_x402_payment:
+    'A resume rebuilds the merchant retry from the STORED payment (by payment_id) or from ' +
+    'the resume_state you hand back verbatim — resource, amount, payee and the signed ' +
+    'header are read from there, never from arguments. A payment_header, payment_required ' +
+    'or merchant_url sent alongside used to be dropped in silence while the retry proceeded ' +
+    'against the stored one.',
+  haven_get_payment_status:
+    'The status is read by payment_id alone; nothing else selects or filters it. A tx_hash, ' +
+    'idempotency_key or merchant_url sent alongside used to be dropped in silence, so a ' +
+    'caller could not tell the lookup had ignored it.',
+  haven_get_resume_state:
+    'The resume state is rehydrated by payment_id alone; nothing else selects it. Any other ' +
+    'key used to be dropped in silence.',
+  haven_list_receipts:
+    'This list takes limit only. An offset, cursor, page, status or token filter sent here ' +
+    'used to be dropped in silence and the first page came back looking filtered.',
+  haven_verify_receipt:
+    'Verification is offline and reads only the receipt object itself: the signer is ' +
+    'recovered from receipt.authorization and compared with the delegate the receipt names. ' +
+    'An expected signer, delegate or payment_id sent alongside used to be dropped in silence ' +
+    '— a caller cannot pin what the receipt must say, only ask what it does say.',
+  haven_discover_tools:
+    'The catalog filters are category, search, rail and verified. A query, name, merchant, ' +
+    'chain or limit sent here used to be dropped in silence and the FULL catalog came back ' +
+    'looking filtered.',
+  haven_submit_catalog_entry:
+    'A submission takes resource_url (and the website honeypot, which must stay unset). A ' +
+    'name, description, price, tool_name or contact sent here used to be dropped in silence ' +
+    '— the directory learns everything else from the live merchant probe and the ownership ' +
+    'proof, never from this call.',
 } as const satisfies Partial<Record<HostedToolName, string>>
 
 export type StrictInputToolName = keyof typeof STRICT_INPUT_TOOLS
+
+/**
+ * #2349: the hosted tools that deliberately STRIP an undeclared argument, each
+ * with the reason it is here rather than above. This is the other half of the
+ * decision, not an escape hatch: a tool is on exactly one of the two lists, and
+ * `_everyHostedToolCarriesAnInputDecision` below refuses to compile when a new
+ * `HostedToolName` is on neither. The values are documentation, not refusal
+ * text — nothing on this list refuses.
+ */
+export const PERMISSIVE_INPUT_TOOLS = {
+  // What strictness would MEAN on a `{}` schema, measured over the real
+  // transport on 2026-09-02 (SDK 1.29.0, `validateToolInput`): absent
+  // `arguments` is refused TODAY under both the raw shape and `.strict()`
+  // (`expected object, received undefined`); `arguments: {}` passes under
+  // both; only a DECORATED call — `{ random_string: "dummy" }` — differs, and
+  // there strict refuses where raw strips. So `.strict()` on `{}` changes one
+  // observable case, and that case cannot be a mis-pinned value: these
+  // handlers are `async () =>` and read no input at all, so a stripped key
+  // changes neither what is read nor what the caller can believe it pinned.
+  // Meanwhile Cursor — a runtime `packages/connect` supports by name, and one
+  // whose connect verification step (`runtimeVerificationInstruction`) sends
+  // the user to exactly these two tools — is documented decorating
+  // parameterless tools with a `random_string: "Dummy parameter for
+  // no-parameter tools"` (forum.cursor.com/t/…/109840, Cursor 1.1.6, June
+  // 2025; no fix recorded). A refusal here would land on the read that could
+  // not have been wrong, on the first call a new user is told to make.
+  haven_get_agent:
+    'Schema {}: the handler reads no input, so strictness can protect nothing, and a ' +
+    'supported runtime (Cursor) decorates no-argument calls with a dummy key.',
+  haven_get_allowances:
+    'Schema {}: the handler reads no input, so strictness can protect nothing, and a ' +
+    'supported runtime (Cursor) decorates no-argument calls with a dummy key.',
+  // The rollout blocker, exactly as the doc block above records it (#2353,
+  // corrected by #2363): the corrected SKILL.md copy is auto-installed and an
+  // unknown number of agents still carry the old one, which told them to pass
+  // an undeclared `payment_required`. #2353 owns the switch.
+  haven_complete_mcp_tool:
+    'Rollout: previously installed copies of SKILL.md pass an undeclared payment_required; ' +
+    '#2353 owns the switch once the corrected copy has propagated.',
+} as const satisfies Partial<Record<HostedToolName, string>>
+
+export type PermissiveInputToolName = keyof typeof PERMISSIVE_INPUT_TOOLS
+
+/**
+ * #2349: every hosted tool carries an input decision, enforced at compile time.
+ *
+ * Add a tool to `HostedToolName` without adding it to `STRICT_INPUT_TOOLS` or
+ * `PERMISSIVE_INPUT_TOOLS` and this binding stops type-checking — its type
+ * becomes `{ undecided: 'haven_new_tool' }`, which `true` is not assignable
+ * to, and the error names the tool. Put it on both lists and
+ * `_noHostedToolIsDecidedTwice` fails the same way. The runtime twin lives in
+ * `strict-tool-input.test.ts`, because `vitest` does not type-check and a
+ * guard that only one of the two instruments can see is half a guard.
+ */
+type UndecidedInputTool = Exclude<HostedToolName, StrictInputToolName | PermissiveInputToolName>
+type DoublyDecidedInputTool = StrictInputToolName & PermissiveInputToolName
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _everyHostedToolCarriesAnInputDecision: [UndecidedInputTool] extends [never]
+  ? true
+  : { undecided: UndecidedInputTool } = true
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _noHostedToolIsDecidedTwice: [DoublyDecidedInputTool] extends [never]
+  ? true
+  : { decidedTwice: DoublyDecidedInputTool } = true
 
 function isStrictInputTool(name: HostedToolName): name is StrictInputToolName {
   return Object.prototype.hasOwnProperty.call(STRICT_INPUT_TOOLS, name)
@@ -589,12 +764,6 @@ function strictRefusalMessage(name: StrictInputToolName, keys?: readonly string[
     `${subject} That is deliberate rather than an omission: ${STRICT_INPUT_TOOLS[name]} ` +
     'Send only the fields this tool declares.'
   )
-}
-
-// ── Legacy tool schemas (one release cycle compatibility shim) ───────────────
-export const legacyToolSchemas: Record<HostedToolNameLegacy, z.ZodRawShape> = {
-  haven_x402_authorize: toolSchemas.haven_pay_x402_quote,
-  haven_list_transactions: toolSchemas.haven_list_receipts,
 }
 
 /**
@@ -923,7 +1092,7 @@ export function createToolHandlers(
 
     haven_sweep_delegate: async (input) =>
       runTool(async () => {
-        const args = parse('haven_sweep_delegate', input)
+        const args = parseStrict('haven_sweep_delegate', input)
 
         // Phase 2 — a signature is present: relay the delegate-signed authorization.
         if (args.signature) {
@@ -998,7 +1167,7 @@ export function createToolHandlers(
 
     haven_discover_tools: async (input) =>
       runTool(async () => {
-        const args = parse('haven_discover_tools', input)
+        const args = parseStrict('haven_discover_tools', input)
         const entries = await haven.discoverTools({
           category: args.category,
           search: args.search,
@@ -1087,7 +1256,7 @@ export function createToolHandlers(
 
     haven_pay: async (input) =>
       runTool(async () => {
-        const args = parse('haven_pay', input)
+        const args = parseStrict('haven_pay', input)
         try {
           const intent = await haven.createIntent({
             token: args.token,
@@ -1430,7 +1599,7 @@ export function createToolHandlers(
 
     haven_quote_mcp_tool: async (input) =>
       runTool(async () => {
-        const args = parse('haven_quote_mcp_tool', input)
+        const args = parseStrict('haven_quote_mcp_tool', input)
         const toolArguments = (args.arguments as Record<string, unknown> | undefined) ?? {}
         const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
           merchantUrl: args.merchant_url as string,
@@ -1448,7 +1617,7 @@ export function createToolHandlers(
 
     haven_prepare_catalog_purchase: async (input) =>
       runTool(async () => {
-        const args = parse('haven_prepare_catalog_purchase', input)
+        const args = parseStrict('haven_prepare_catalog_purchase', input)
         // #1351: the cap is REQUIRED here and its shape is checked before the
         // catalog is even read — an uncapped or contradictory guided purchase
         // makes zero network calls.
@@ -2003,7 +2172,7 @@ export function createToolHandlers(
 
     haven_quote_catalog_purchase: async (input) =>
       runTool(async () => {
-        const args = parse('haven_quote_catalog_purchase', input)
+        const args = parseStrict('haven_quote_catalog_purchase', input)
         const entry = await getUsableCatalogMcpEntry(haven, args.catalog_id as string)
         const toolArguments = entry.toolArguments ?? {}
         const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
@@ -2360,11 +2529,15 @@ export function createToolHandlers(
       // construction. Left unchanged deliberately: the 3009 path through here
       // is byte-identical, and inventing an erc7710 resume would be inventing
       // a flow no state machine produces.
-      const args = parse('haven_resume_x402_payment', input)
       // #1328: the mpp-rail redirect (haven_resume_mpp_payment) is retired —
       // a non-x402 resume_state now falls through to resolveResumeState's own
       // rail mismatch, not a "use this other tool" suggestion.
       return runTool(async () => {
+        // #2349: parsed INSIDE the failure envelope. This handler parsed before
+        // its `runTool`, the same embedder-path defect #2348 fixed on
+        // haven_quote_x402 and haven_pay_x402_quote: a validation error
+        // escaped `createToolHandlers` as a raw throw instead of a ToolFailure.
+        const args = parseStrict('haven_resume_x402_payment', input)
         const state = await resolveResumeState(haven, args, 'x402') as X402ResumeState
 
         // Verify the payment is ready to retry before returning signing context.
@@ -2412,7 +2585,7 @@ export function createToolHandlers(
 
     haven_get_payment_status: async (input) =>
       runTool(async () => {
-        const args = parse('haven_get_payment_status', input)
+        const args = parseStrict('haven_get_payment_status', input)
         // #1310/#1311: shared with packages/mcp's haven_get_payment_status
         // handler — see HavenClient.getPaymentStatusWithPostPurchaseAllowance
         // in @haven_ai/sdk for the single home of this "settled x402 only"
@@ -2477,13 +2650,13 @@ export function createToolHandlers(
 
     haven_get_resume_state: async (input) =>
       runTool(async () => {
-        const args = parse('haven_get_resume_state', input)
+        const args = parseStrict('haven_get_resume_state', input)
         return haven.getResumeState(args.payment_id)
       }),
 
     haven_submit_catalog_entry: async (input) =>
       runTool(async () => {
-        const args = parse('haven_submit_catalog_entry', input)
+        const args = parseStrict('haven_submit_catalog_entry', input)
         const submission = await haven.submitCatalogEntry(args.resource_url, {
           ...(args.website ? { website: args.website } : {}),
         })
@@ -2496,13 +2669,13 @@ export function createToolHandlers(
 
     haven_list_receipts: async (input) =>
       runTool(async () => {
-        const args = parse('haven_list_receipts', input)
+        const args = parseStrict('haven_list_receipts', input)
         return haven.listReceipts({ limit: args.limit })
       }),
 
     haven_verify_receipt: async (input) =>
       runTool(async () => {
-        const args = parse('haven_verify_receipt', input)
+        const args = parseStrict('haven_verify_receipt', input)
         return verifyPaymentReceipt(args.receipt as PaymentReceipt)
       }),
   }

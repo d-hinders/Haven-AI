@@ -221,9 +221,11 @@ an extra "about to create agent X, proceed?" gate. That is deliberate: the
 consent already happened when the user minted the one-time setup prompt in the
 Haven dashboard, which enumerates exactly what the command may do. The setup
 stays cancellable from the dashboard throughout, and the registered agent
-starts `pending_approval` with zero spend authority — nothing can move funds
-until the user approves the budget in Haven. A CLI-side confirmation would add
-friction without adding a security boundary. (The local-signer tool-exposure
+starts `pending_approval` with zero spending authority — no budgeted spend can
+move until the user approves the budget in Haven. The exact sweep-recovery
+routes remain available only to recover a stranded delegate balance and do not
+grant spending authority. A CLI-side confirmation would add friction without
+adding a security boundary. (The local-signer tool-exposure
 acknowledgement is a separate, machine-checkable consent about what the local
 MCP tools expose, not a registration gate.)
 

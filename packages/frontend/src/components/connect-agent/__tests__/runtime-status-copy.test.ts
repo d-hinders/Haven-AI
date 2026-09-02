@@ -36,11 +36,27 @@ describe('runtimeStatusHelper for config failures (#1719)', () => {
     // #1719 review: this failure happens after the agent is registered, so the
     // setup token is spent. Telling the user to "run the setup command again"
     // lands on a 409; starting a fresh connection mints a SECOND agent (#1688).
-    const helper = runtimeStatusHelper(installWith('runtime_config_unreadable'))
+    //
+    // #2422: the hint now has TWO branches (server-provided spec, and the
+    // rolling-deploy skew with none). This guarantee has to hold in BOTH, so
+    // assert both rather than whichever one the default argument happens to
+    // select — a one-branch assertion would have gone on passing while the
+    // other branch lost the warning entirely.
+    const withSpec = runtimeStatusHelper(
+      installWith('runtime_config_unreadable'),
+      '@haven_ai/connect@alpha',
+    )
+    const withoutSpec = runtimeStatusHelper(installWith('runtime_config_unreadable'))
 
-    expect(helper).toContain('--doctor --repair')
-    expect(helper).toContain('not the setup command')
-    expect(helper).not.toMatch(/run the setup command again/i)
+    for (const helper of [withSpec, withoutSpec]) {
+      expect(helper).toContain('--doctor --repair')
+      expect(helper).not.toMatch(/run the setup command again/i)
+    }
+
+    // Each branch words the warning to fit its own sentence shape; both say
+    // "do not re-run setup as it stands".
+    expect(withSpec).toContain('not the setup command')
+    expect(withoutSpec).toContain('rather than re-running that setup command as-is')
   })
 
   it('spells the repair command WITH --runtime, because the parser requires it', () => {
@@ -152,11 +168,22 @@ describe('runtimeStatusHelper takes the connector spec from the server (#2422)',
     // they already ran, with the setup flag swapped out.
     const helper = runtimeStatusHelper(installWith('runtime_config_unreadable'))
 
-    expect(helper).toContain('re-run the same `npx` connector command you used for setup')
-    expect(helper).toContain('in place of its `--setup` flag')
+    expect(helper).toContain('re-run the same npx connector command you used for setup')
+    expect(helper).toContain('instead of --setup')
     expect(helper).toContain('--doctor --repair --runtime cursor')
-    // It must still warn against re-running setup UNCHANGED (#1719: the token
-    // is spent and a fresh connection mints a second agent).
-    expect(helper).toMatch(/unchanged/)
+    // It must still warn against re-running setup as it stands (#1719: the
+    // token is spent and a fresh connection mints a second agent).
+    expect(helper).toContain('rather than re-running that setup command as-is')
+  })
+
+  it('spends exactly ONE backtick pair on the fallback sentence', () => {
+    // #2422 rendered re-review: this string lands in a `<dd>` that does no
+    // markdown parsing, so every pair shows up as literal backticks on screen.
+    // The renderer bug is pre-existing and out of scope; the COUNT is a choice
+    // made in this copy, so hold it at one — the flags — and let a future
+    // editor who adds a second pair find out here.
+    const helper = runtimeStatusHelper(installWith('runtime_config_unreadable'))
+
+    expect((helper.match(/`/g) ?? []).length).toBe(2)
   })
 })

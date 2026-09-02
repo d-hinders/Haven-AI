@@ -107,7 +107,21 @@ export function runtimeStatusHelper(
     // channel is worse still, because a plausible-but-wrong connector runs and
     // LOOKS like it worked. The third option delegates to the one invocation
     // that is guaranteed correct for their machine: the one they already ran.
-    return `${lead}re-run the same \`npx\` connector command you used for setup, with \`${repairArgs}\` in place of its \`--setup\` flag — not the setup command unchanged, which this agent no longer needs.`
+    //
+    // Two shaping constraints from the rendered re-review, both easy to undo
+    // by accident:
+    //   1. ONE backtick pair. This string lands in a `<dd>` that does no
+    //      markdown parsing, so every pair renders as literal backticks on
+    //      screen. The bug is pre-existing and out of scope, but the count is
+    //      a choice made here, so the flags carry the only pair.
+    //   2. The closing clause SUBSTITUTES and then names what not to do, in
+    //      that order. An earlier draft ended "not the setup command
+    //      unchanged", which negates a different, unstated command in the same
+    //      breath and parses only on a second read. #1719's guarantee — never
+    //      send the user back through setup, whose token is spent and whose
+    //      re-run mints a SECOND agent (#1688) — is carried by "rather than
+    //      re-running that setup command as-is".
+    return `${lead}re-run the same npx connector command you used for setup, with the flags \`${repairArgs}\` instead of --setup, rather than re-running that setup command as-is.`
   }
   if (install.error_code === 'runtime_config_write_failed') return 'Haven could not update the agent client config on that machine. Check the connector output, then run the setup command again.'
   if (install.error_code === 'claude_code_config_failed') return 'Claude Code did not accept the Haven tools entry. Run the setup command inside Claude Code again.'

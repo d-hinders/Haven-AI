@@ -62,8 +62,15 @@ export interface SafeWithAccountTypeRow {
  * those accounts nicely, the three account-list queries stop returning them
  * and every branch behind them becomes unreachable and deletable.
  *
- * `= 'delegator_hybrid'` excludes NULL by design: a legacy Safe predating the
- * `account_type` column carries NULL, and it is exactly what this hides.
+ * `= 'delegator_hybrid'` is an equality test, not a `<> 'safe'` one, and that
+ * is deliberate: it excludes any future value as well as `'safe'`. It does NOT
+ * exclude NULL, because there is no NULL to exclude — `041_hybrid_accounts.ts`
+ * added the column `NOT NULL DEFAULT 'safe'` under
+ * `CHECK (account_type IN ('safe','delegator_hybrid'))`, so pre-existing rows
+ * were backfilled to `'safe'` and the column's domain has exactly two values.
+ * (An earlier draft of this comment claimed legacy rows "carry NULL" and a
+ * test asserted it; the insert failed the not-null constraint in CI, which is
+ * where the claim was corrected.)
  *
  * Deliberately a FILTER, not a migration. The rows stay, so this is reversible
  * by deleting one clause — the same reason `rails/execution-rail.ts` was kept.

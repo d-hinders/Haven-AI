@@ -36,11 +36,13 @@ async function seedUser(): Promise<string> {
   return user.rows[0].id
 }
 
-async function seedSafe(userId: string, accountType: string | null): Promise<string> {
+// `account_type` is NOT NULL with a two-value CHECK (041_hybrid_accounts), so
+// the parameter is deliberately not nullable: there is no third state to seed.
+async function seedSafe(userId: string, accountType: 'safe' | 'delegator_hybrid'): Promise<string> {
   const safe = await db.query<{ id: string }>(
     `INSERT INTO user_safes (user_id, safe_address, name, chain_id, account_type)
      VALUES ($1, $2, $3, 8453, $4) RETURNING id`,
-    [userId, `0x${String(++n).padStart(40, '0')}`, `acct-${accountType ?? 'null'}`, accountType],
+    [userId, `0x${String(++n).padStart(40, '0')}`, `acct-${accountType}`, accountType],
   )
   return safe.rows[0].id
 }
@@ -73,18 +75,6 @@ describeDb('legacy accounts are not listed (#2413)', () => {
     expect((await listSessionSafesForUser(userId)).map((s) => s.name)).toEqual([
       'acct-delegator_hybrid',
     ])
-  })
-
-  it('a NULL account_type is treated as legacy, not as unknown-so-show-it', async () => {
-    // A Safe predating the account_type column carries NULL. `= 'delegator_hybrid'`
-    // excludes it, which is the intended reading and the one a `<> 'safe'`
-    // predicate would have got backwards.
-    const userId = await seedUser()
-    await seedSafe(userId, null)
-
-    expect(await listSafesForUser(userId)).toEqual([])
-    expect(await listSafesWithAccountTypeForUser(userId)).toEqual([])
-    expect(await listSessionSafesForUser(userId)).toEqual([])
   })
 
   it('a user whose only account is legacy sees no accounts at all', async () => {
@@ -155,7 +145,7 @@ describeDb('legacy accounts are not listed (#2413)', () => {
     expect(listed).toEqual([])
 
     const rows = await db.query<{ id: string }>(`SELECT id FROM agents WHERE user_id = $1`, [userId])
-    expect(await findAgentForUserAllStatuses(userId, rows.rows[0].id)).toBeNull()
+    expect(await findAgentForUserAllStatuses(rows.rows[0].id, userId)).toBeNull()
   })
 
   it('tenant scoping still holds — the filter narrows, it never widens', async () => {

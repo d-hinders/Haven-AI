@@ -54,7 +54,26 @@ export function runtimeStatusLabel(install: AgentConnectionSetupStatusResponse['
   return 'Manual setup needed'
 }
 
-export function runtimeStatusHelper(install: AgentConnectionSetupStatusResponse['install_status']): string {
+export function runtimeStatusHelper(
+  install: AgentConnectionSetupStatusResponse['install_status'],
+  /**
+   * The connector package spec the BACKEND handed out, from
+   * `AgentConnectionSetupStatus.connector_package` (#2422).
+   *
+   * Passed in rather than restated: the dist-tag is deployment configuration
+   * (`HAVEN_CONNECTOR_CHANNEL`), so the hard-coded `@haven_ai/connect@alpha`
+   * that used to live in the template below told a developer on the DEV
+   * dashboard to repair their setup with the PRODUCTION connector — the same
+   * defect on the client that #2422 fixes on the server.
+   *
+   * Optional only to survive a rolling deploy against a backend that predates
+   * the field. When it is missing the sentence names the connector's flags
+   * without inventing a package spec, because a guessed channel is worse than
+   * an unspelled command: the user would run the wrong one and it would look
+   * like it worked.
+   */
+  connectorPackage?: string,
+): string {
   if (!install) return 'Haven is waiting for the connector to report setup status.'
   if (install.error_code === 'local_mcp_ack_required') return 'Haven tools need one-time acknowledgement before this agent can load them.'
   if (install.error_code === 'local_signer_ack_required') return 'Local signing needs one-time acknowledgement before this agent can load Haven tools.'
@@ -76,7 +95,11 @@ export function runtimeStatusHelper(install: AgentConnectionSetupStatusResponse[
   // optional on the wire, so the placeholder keeps the shape correct when the
   // connector never reported one.
   if (install.error_code === 'runtime_config_unreadable') {
-    return `The agent client config on that machine could not be read, so Haven left it untouched. Fix the file the connector named, then run \`npx @haven_ai/connect@alpha --doctor --repair --runtime ${install.runtime ?? '<your agent client>'}\` there — not the setup command, which this agent no longer needs.`
+    const repairArgs = `--doctor --repair --runtime ${install.runtime ?? '<your agent client>'}`
+    const repair = connectorPackage
+      ? `run \`npx ${connectorPackage} ${repairArgs}\``
+      : `run the Haven connector with \`${repairArgs}\``
+    return `The agent client config on that machine could not be read, so Haven left it untouched. Fix the file the connector named, then ${repair} there — not the setup command, which this agent no longer needs.`
   }
   if (install.error_code === 'runtime_config_write_failed') return 'Haven could not update the agent client config on that machine. Check the connector output, then run the setup command again.'
   if (install.error_code === 'claude_code_config_failed') return 'Claude Code did not accept the Haven tools entry. Run the setup command inside Claude Code again.'

@@ -5904,13 +5904,33 @@ export const openapiSpec = {
       },
       CreateAgentConnectionSetupResponse: {
         type: 'object',
-        required: ['setup_id', 'status', 'setup_token', 'expires_at', 'connector_command', 'setup_prompt'],
+        required: [
+          'setup_id',
+          'status',
+          'setup_token',
+          'expires_at',
+          'connector_command',
+          'connector_package',
+          'setup_prompt',
+        ],
         properties: {
           setup_id: uuid,
           status: { $ref: '#/components/schemas/AgentConnectionSetupState' },
           setup_token: { type: 'string', pattern: '^hv_setup_' },
           expires_at: isoDateTime,
           connector_command: { type: 'string' },
+          /**
+           * #2422: the npm package spec named inside `connector_command`,
+           * exposed on its own so a client never has to parse the command or
+           * restate the literal. The dist-tag is deployment configuration
+           * (`HAVEN_CONNECTOR_CHANNEL`, default `alpha`), so a hard-coded
+           * client-side `@alpha` is wrong on the dev backend.
+           *
+           * REQUIRED, not optional, and deliberately so: the backend always
+           * emits it, and making it optional would push a fallback literal
+           * back into the client — the exact restatement this field removes.
+           */
+          connector_package: { type: 'string', pattern: '^@haven_ai/connect@[a-z][a-z0-9-]{0,31}$' },
           setup_prompt: { type: 'string' },
         },
         additionalProperties: false,
@@ -6012,7 +6032,16 @@ export const openapiSpec = {
       },
       AgentConnectionSetupStatus: {
         type: 'object',
-        required: ['setup_id', 'status', 'agent', 'haven_wallet', 'agent_budget', 'install_status', 'approval'],
+        required: [
+          'setup_id',
+          'status',
+          'agent',
+          'haven_wallet',
+          'agent_budget',
+          'connector_package',
+          'install_status',
+          'approval',
+        ],
         properties: {
           setup_id: uuid,
           agent_id: { anyOf: [uuid, { type: 'null' }] },
@@ -6035,6 +6064,8 @@ export const openapiSpec = {
           delegate_address: { anyOf: [address, { type: 'null' }] },
           api_key_prefix: { type: ['string', 'null'] },
           runtime: { type: ['string', 'null'] },
+          /** #2422 — see CreateAgentConnectionSetupResponse.connector_package. */
+          connector_package: { type: 'string', pattern: '^@haven_ai/connect@[a-z][a-z0-9-]{0,31}$' },
           connector: { $ref: '#/components/schemas/AgentConnectionConnector' },
           install_status: { $ref: '#/components/schemas/AgentConnectionInstallStatus' },
           approval: {

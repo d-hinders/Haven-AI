@@ -81,3 +81,69 @@ describe('runtimeStatusHelper for config failures (#1719)', () => {
     expect(runtimeStatusLabel(installWith('runtime_config_write_failed'))).toBe('Needs attention')
   })
 })
+
+/**
+ * #2422: the repair hint must name the connector the BACKEND handed out, not a
+ * literal compiled into the client.
+ *
+ * Before this slice the template said `npx @haven_ai/connect@alpha …`
+ * unconditionally, so a developer connecting to the DEV backend was told to
+ * repair their setup with the PRODUCTION connector — and it would have looked
+ * like it worked. The dist-tag is deployment configuration
+ * (`HAVEN_CONNECTOR_CHANNEL`), so the only correct source is the response.
+ *
+ * These assertions guard the code that GENERATES the sentence, and each one is
+ * mutation-proved: reverting the template to the `@alpha` literal reddens the
+ * first two.
+ */
+describe('runtimeStatusHelper takes the connector spec from the server (#2422)', () => {
+  it('renders the spec it was given, verbatim', () => {
+    const helper = runtimeStatusHelper(
+      installWith('runtime_config_unreadable'),
+      '@haven_ai/connect@dev',
+    )
+
+    expect(helper).toContain('npx @haven_ai/connect@dev --doctor --repair --runtime cursor')
+  })
+
+  it('names NO channel the server did not send', () => {
+    // The failure this closes is specifically a *second*, hard-coded spec
+    // surviving next to the server-provided one, so enumerate every spec in
+    // the sentence rather than asserting the presence of the right one.
+    const helper = runtimeStatusHelper(
+      installWith('runtime_config_unreadable'),
+      '@haven_ai/connect@dev',
+    )
+    const specs = [...helper.matchAll(/@haven_ai\/connect@([a-z0-9-]+)/g)].map((m) => m[1])
+
+    expect(specs).toEqual(['dev'])
+    expect(helper).not.toContain('@haven_ai/connect@alpha')
+  })
+
+  it('passes an alpha spec through unchanged, so production copy is untouched', () => {
+    const helper = runtimeStatusHelper(
+      installWith('runtime_config_unreadable'),
+      '@haven_ai/connect@alpha',
+    )
+
+    // Byte-for-byte the sentence this surface rendered before #2422.
+    expect(helper).toBe(
+      'The agent client config on that machine could not be read, so Haven left it untouched. ' +
+        'Fix the file the connector named, then run `npx @haven_ai/connect@alpha --doctor --repair --runtime cursor` ' +
+        'there — not the setup command, which this agent no longer needs.',
+    )
+  })
+
+  it('invents no package spec when the server sent none', () => {
+    // Rolling-deploy skew against a backend that predates connector_package.
+    // A guessed channel is worse than an unspelled command: the user runs the
+    // wrong connector and it looks like it worked.
+    const helper = runtimeStatusHelper(installWith('runtime_config_unreadable'))
+
+    expect(helper).not.toContain('@haven_ai/connect')
+    expect(helper).not.toContain('npx')
+    // The actionable part still survives.
+    expect(helper).toContain('--doctor --repair --runtime cursor')
+    expect(helper).toContain('Fix the file')
+  })
+})

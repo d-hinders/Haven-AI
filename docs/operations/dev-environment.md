@@ -214,6 +214,19 @@ Isolation rules that are non-negotiable for a payments product:
   (`RELAYER_PRIVATE_KEY_<chainId>`, #640/#678) — a mechanism that *permits*
   isolating testnet from mainnet keys, though the deployed posture shares one
   key (see above).
+- **Connector channel** — `HAVEN_CONNECTOR_CHANNEL=dev` on the dev **backend**
+  so the dashboard's setup command reads
+  `npx -y @haven_ai/connect@dev …` instead of the production `@alpha` (#2422,
+  epic #2420). Production **leaves this unset**; unset means `alpha`, so the
+  production handout is untouched by the variable's existence. The value must
+  match `/^[a-z][a-z0-9-]{0,31}$/` — an invalid value makes the backend refuse
+  to start, naming the variable, rather than falling back to `alpha`, because a
+  silent fallback would hand out the production connector from dev and look
+  like it had worked. Set this only once at least one `@dev` snapshot exists on
+  npm (slice 1, #2421); until then `npx` would fail to resolve the tag. The
+  dev signer and dev backend have to move together — the signer refuses to sign
+  an `x402_expected_context_version` it does not know — which is why the dev
+  dashboard must hand out `@dev` rather than `@alpha`.
 - **Sweep recovery floor** — `SWEEP_MIN_USDC=0` in dev so the QA scenario's
   0.0005-USDC stranded balance exercises the real gasless recovery path. The
   production default is `0.01`; do not copy the dev override into production.

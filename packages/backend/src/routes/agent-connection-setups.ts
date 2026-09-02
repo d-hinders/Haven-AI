@@ -8,6 +8,7 @@ import type {
   UserSafeRow,
 } from '../infra/repositories/agent-connection-setups.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { config } from '../config.js'
 import { findAgentAuthRowByApiKeyHash } from '../infra/repositories/agents.js'
 import {
   SETUP_TOKEN_TTL_MINUTES,
@@ -142,7 +143,24 @@ export function normalizeMcpServerName(value: unknown): string | null {
 
 const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
 const PRODUCTION_API_HOST = 'havenbackend-production-8a00.up.railway.app'
-export const CONNECTOR_PACKAGE = '@haven_ai/connect@alpha'
+/**
+ * The connector package spec the dashboard hands out (#2422, epic #2420).
+ *
+ * Channel-derived rather than literal so the DEV backend can hand out the dev
+ * connector: a developer testing against dev used to be told to install the
+ * PRODUCTION package, and the dev signer and dev backend have to move together
+ * — the signer refuses to sign when the backend emits an
+ * `x402_expected_context_version` it does not know, so a dev backend paired
+ * with a prod signer is exactly the skew this epic exists to make testable.
+ *
+ * `config.connectorChannel` is `alpha` unless `HAVEN_CONNECTOR_CHANNEL` is set,
+ * and production does not set it, so this constant is byte-identical to the
+ * literal it replaced in every production environment. It is resolved ONCE at
+ * import, like the channel itself: the channel is deployment configuration, so
+ * a per-request read would only add the ability for two requests in one process
+ * to disagree.
+ */
+export const CONNECTOR_PACKAGE = `@haven_ai/connect@${config.connectorChannel}`
 
 /**
  * Refuse a request from inside a transaction.
@@ -238,6 +256,13 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         setup_token: setupToken,
         expires_at: expiresAt,
         connector_command: command,
+        // #2422: the spec on its own, not only embedded in the command string.
+        // The frontend renders a `--doctor --repair` hint that used to restate
+        // `@haven_ai/connect@alpha` as a literal; with the channel now a
+        // deployment variable, a client-side literal would be WRONG on dev and
+        // right only by coincidence on prod. Returning the value the backend
+        // actually used makes the hint import the fact instead of guessing it.
+        connector_package: CONNECTOR_PACKAGE,
         setup_prompt: buildSetupPrompt(command, apiUrl),
       })
     },
@@ -985,6 +1010,10 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
     delegate_address: setup.delegate_address,
     api_key_prefix: setup.api_key_prefix,
     runtime: setup.runtime,
+    // #2422: same value as the create response, on the status response too —
+    // this is the shape the connect modal's repair hint actually reads, since
+    // it renders from the POLLED status, not from the one-shot create result.
+    connector_package: CONNECTOR_PACKAGE,
     connector: {
       connector_version: setup.connector_version,
       ...(setup.connector_context ?? {}),

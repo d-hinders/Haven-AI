@@ -57,6 +57,61 @@ export function parseTrustProxyHops(raw: string | undefined): number {
   return hops
 }
 
+/**
+ * npm dist-tag the dashboard hands out in the connector setup command (#2422,
+ * epic #2420).
+ *
+ * Unset means `alpha`, and that default is the whole safety story here: the
+ * PRODUCTION service will never set this variable, so anything that changes
+ * what an unset environment returns changes what every real user is told to
+ * run. `connector-channel-characterization.test.ts` pins the resulting literal
+ * `@haven_ai/connect@alpha` rather than re-deriving it, so a drifted default
+ * reddens instead of shipping.
+ *
+ * Empty/whitespace is treated as unset. Railway (and every dashboard like it)
+ * can store a variable as the empty string, and "the operator cleared it"
+ * should land on the production-safe value, not on a refusal to boot.
+ *
+ * An invalid NON-empty value THROWS, which — because this module is imported
+ * for its side effects at startup — refuses the boot rather than the request.
+ * That direction was chosen deliberately over a silent fallback to `alpha`:
+ * a typo (`HAVEN_CONNECTOR_CHANNEL=dve`) would fall back to the production
+ * channel, the dev dashboard would keep handing out the prod connector, and
+ * the environment would look FIXED while reproducing the exact defect #2422
+ * exists to remove. A refusal at boot is loud, is attributable to one
+ * variable, and cannot be mistaken for success. It also cannot half-serve
+ * traffic: the process never accepts a request.
+ *
+ * The pattern is npm's dist-tag shape, narrowed: lowercase start, then
+ * lowercase alphanumerics and hyphens, 32 chars max. It deliberately excludes
+ * anything that could turn `@haven_ai/connect@<channel>` into a different
+ * argument once it reaches a shell — whitespace, quotes, `;`, `&`, `$`,
+ * backticks, `/`, `@`. The setup command is copied and pasted into a terminal
+ * by a human or executed by an agent, so a channel is an injection surface,
+ * not just a label. `shellQuote` in the route quotes the token and the API
+ * URL; the package spec is NOT quoted, so this validation is what stands in
+ * for it. A value that is merely a nonexistent-but-well-formed tag is left to
+ * fail at `npx`, where the error names the package.
+ */
+export const CONNECTOR_CHANNEL_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
+export const DEFAULT_CONNECTOR_CHANNEL = 'alpha'
+
+export function parseConnectorChannel(raw: string | undefined): string {
+  if (raw === undefined) return DEFAULT_CONNECTOR_CHANNEL
+  const value = raw.trim()
+  if (value === '') return DEFAULT_CONNECTOR_CHANNEL
+  if (!CONNECTOR_CHANNEL_PATTERN.test(value)) {
+    throw new Error(
+      `HAVEN_CONNECTOR_CHANNEL is set to ${JSON.stringify(raw)}, which is not a valid npm ` +
+      'dist-tag: it must match /^[a-z][a-z0-9-]{0,31}$/ (e.g. "alpha", "dev"). ' +
+      'Refusing to start rather than falling back to "alpha", because a silent fallback ' +
+      'would hand out the PRODUCTION connector from a non-production environment and look ' +
+      'like success. Unset the variable to get "alpha" deliberately.',
+    )
+  }
+  return value
+}
+
 // Validate on import — fail fast at startup
 export const config = {
   // Required
@@ -68,6 +123,14 @@ export const config = {
   frontendUrl: optionalEnv('FRONTEND_URL', 'http://localhost:3000'),
   rpcUrl: optionalEnv('RPC_URL', 'https://rpc.gnosischain.com'),
   logLevel: optionalEnv('LOG_LEVEL', 'info'),
+
+  // #2422 (epic #2420): the npm dist-tag in the connector setup command the
+  // dashboard hands out. Dev Railway sets `dev` so a developer testing against
+  // the dev backend installs the dev package set; PRODUCTION LEAVES IT UNSET
+  // and gets `alpha`, byte-for-byte as before. Setting it is an OPERATOR
+  // action, never an agent's. See parseConnectorChannel above for why an
+  // invalid value refuses the boot instead of falling back.
+  connectorChannel: parseConnectorChannel(process.env.HAVEN_CONNECTOR_CHANNEL),
 
   // #1670: how many proxy hops in front of this process are TRUSTED to have
   // appended the real client address to X-Forwarded-For. 0 (the default)

@@ -456,6 +456,29 @@ describe('x402 payment verification and settlement', () => {
         .rejects.toThrow('does not match the challenge')
     })
 
+    it('rejects a version mismatch even when the extensions are echoed PERFECTLY', async () => {
+      // #2397: the dodge test above mismatches the version AND drops the echo,
+      // so it pins the ORDER — move the version check below the subset check
+      // and that test fails, because the dropped echo is caught first and the
+      // message changes. What it does NOT pin is that the version check runs
+      // at all when the echo is fine. This one does: the echo is byte-perfect,
+      // so the version check is the only thing that can refuse this payload,
+      // and it has to do so unconditionally rather than as an exemption.
+      // Measured, not assumed — gate the version check on a missing echo and
+      // this is the only test in the file that fails.
+      const { processor, submit } = makeProcessor()
+      const pr = paymentRequired()
+      const payload = decodePaymentSignatureHeader(await signedHeader(pr)) as PaymentPayload
+      // Precondition: the helper really did echo the challenge verbatim, so a
+      // later change to signedHeader cannot quietly turn this into the drop case.
+      expect((payload as { extensions?: unknown }).extensions).toEqual(DEMO_MERCHANT_EXTENSIONS)
+      ;(payload as { x402Version: number }).x402Version = 1
+
+      await expect(processor.verifyAndSettle(settleInput(pr, encodePaymentSignatureHeader(payload))))
+        .rejects.toThrow('does not match the challenge')
+      expect(submit).not.toHaveBeenCalled()
+    })
+
     it('rejects a payment that OVERWRITES advertised extension info', async () => {
       const { processor } = makeProcessor()
       const pr = paymentRequired()

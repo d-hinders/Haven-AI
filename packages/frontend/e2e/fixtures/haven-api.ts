@@ -575,6 +575,63 @@ export async function optDownToLegacyRail(page: Page) {
   })
 }
 
+/**
+ * Serve the shared account's signer set as OWNER-ONLY: one EOA owner, zero
+ * enrolled passkeys (#2284, the #2068 shape).
+ *
+ * This is a LIVE-RAIL configuration, not a fixture invention — the rule
+ * `injected-wallet.ts` states (a fixture must not reach a state the product
+ * cannot) is met on three counts:
+ *
+ *  1. `POST /accounts/hybrid { owner_address }` with no `passkeys` provisions
+ *     exactly this account (`routes/hybrid-accounts.ts` requires at least one
+ *     of the two, and #1153 made a single signer permitted); the delegation
+ *     pilot script `packages/qa-agent/src/pilot/provision-hybrid.ts` does so
+ *     as its first step, and `rails/hybrid-account-config.ts` treats an
+ *     owner-only set as a deployable signer config.
+ *  2. It is reachable from the dashboard's own passkey onboarding too:
+ *     `add_owner` then `remove_passkey` — the `remove_passkey` floor in
+ *     `rails/hybrid-signer-actions.ts` refuses only when the passkey is the
+ *     LAST signer (`passkeys.length === 1 && !ownerAddress`).
+ *  3. It is `account_type = 'delegator_hybrid'` / `execution_rail =
+ *     'delegation'`, so it SPENDS: the retired rail's 410s (#1986) do not
+ *     apply, and the owner EOA signs budget grants and revokes (#828).
+ *
+ * What it does to `WalletButton`: with no passkey in the set, neither passkey
+ * branch can fire (`useActiveSigner` resolves `delegator_passkey` only for a
+ * non-empty set — signer.test.ts › "owner-only hybrid set: the connected OWNER
+ * wallet resolves as the EOA signer (#2068)"), so a connected wallet on a
+ * supported chain reaches the connected-EOA branch. WHICH label that branch
+ * carries is `useSafeOperationGate`'s call: the named owner connected renders
+ * the truncated address; any other wallet renders "Wrong wallet" (#2073).
+ * `ownerAddress` is therefore the caller's decision, made explicit.
+ *
+ * Both signer-set reads move together — the account-scoped one `AuthContext`
+ * hydrates from and the agent-scoped twin (#888) — for the reason the shared
+ * handlers give: same account, same answer. Register AFTER `mockHavenApi`;
+ * everything else falls back to the shared fixture, as `optDownToLegacyRail`
+ * does. `wallet-signer-offering.spec.ts` carries a spec-local copy of this
+ * shape from before it was shared.
+ */
+export async function serveOwnerOnlyHybridSigners(page: Page, ownerAddress: string) {
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() !== 'GET') return route.fallback()
+
+    const isAccountRead = path.startsWith('/accounts/hybrid/') && path.endsWith('/signers')
+    const isAgentRead = path.startsWith('/agents/') && path.endsWith('/account-signers')
+    if (!isAccountRead && !isAgentRead) return route.fallback()
+
+    await fulfillJson(route, {
+      account_address: testSafeAddress,
+      chain_id: testSafe.chain_id,
+      owner_address: ownerAddress,
+      passkeys: [],
+    })
+  })
+}
+
 export async function seedAuthenticatedSession(page: Page) {
   await page.addInitScript(
     ({ tokenKey, activeSafeKey }) => {

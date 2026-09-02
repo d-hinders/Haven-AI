@@ -30,16 +30,48 @@
  * branch (`WalletButton.tsx:594`), which is the *passkey* avatar — a different
  * state that was already captured. The connected-EOA avatar is the LAST branch
  * (`:766`) and is reached only when neither passkey branch fires and RainbowKit
- * reports `account` + `chain`. So what it needs is a connected wallet with NO
- * passkey on the device, which is precisely the shape the e2e fixture already
- * has: `seedAuthenticatedSession` seeds no passkey store at all, and an `eoa`
- * signer falls through both passkey branches by construction (`WalletButton`
- * narrows on `'passkey'` / `'delegator_passkey'` only). Note the fixture user
- * has no HYBRID account either: since #1969 (owner decision 2026-08-26) a
- * hybrid user with a hydrated signer set resolves a `delegator_passkey` even
- * marker-less, so reaching the connected-EOA branch additionally requires a
- * legacy-Safe (or empty-set) account, which is what this fixture is. This
- * file captures rendering only and changes nothing about signer resolution.
+ * reports `account` + `chain`. So what it needs is a connected wallet and an
+ * account with NO passkey in play: `seedAuthenticatedSession` seeds no passkey
+ * store, and an `eoa` signer falls through both passkey branches by
+ * construction (`WalletButton` narrows on `'passkey'` / `'delegator_passkey'`
+ * only). This file captures rendering only and changes nothing about signer
+ * resolution.
+ *
+ * ── Which ACCOUNT reaches it, measured twice (#2264, #2284) ─────────────────
+ *
+ * This paragraph used to say the connected-EOA branch "additionally requires
+ * a legacy-Safe (or empty-set) account, which is what this fixture is". That
+ * was true by OMISSION — the shared fixture carried no `account_type` and
+ * `railOf` read it as a legacy Safe — and #2264 made it false by flipping the
+ * default to the live rail: a hybrid account with a hydrated signer set
+ * resolves a `delegator_passkey` even marker-less (#1969), and all three
+ * captures photographed the Passkey pill. #2264 opted this file DOWN to the
+ * retired rail to keep the captures honest, and asked (#2284) whether any
+ * SPEND-CAPABLE user still reaches the state, or whether these were
+ * photographs of a retired screen.
+ *
+ * Measured against the code rather than the issue: **yes, on the live rail.**
+ * The column is `CHECK (account_type IN ('safe','delegator_hybrid'))`
+ * (migration 041) and only `delegator_hybrid` spends (every payment entry
+ * point answers 410 for the rest, #1986). `useActiveSigner` resolves a
+ * `delegator_passkey` for a hydrated set only when `passkeys.length > 0`
+ * (`lib/signer.ts`), so an EOA-owned `delegator_hybrid` with ZERO enrolled
+ * passkeys — `POST /accounts/hybrid { owner_address }`, the #829 canary's own
+ * shape, and reachable from passkey onboarding via `add_owner` then
+ * `remove_passkey` — falls through both passkey branches with the owner
+ * wallet connected and lands here. The label is then `useSafeOperationGate`'s:
+ * the named owner connected renders the truncated address (#2068); any other
+ * wallet renders "Wrong wallet" in the danger tone (#2073). So the fixture
+ * names the owner explicitly — `serveOwnerOnlyHybridSigners(page,
+ * connectedWalletAddress)` — and the opt-down is retired. The three
+ * baselines are unchanged by the move: same address, same avatar hash, same
+ * branch, 0 differing pixels measured before/after on one machine.
+ *
+ * What this ALSO makes the file guard, which the legacy fixture could not: a
+ * regression that offered a passkey the set does not hold (the #1969 shape
+ * with an empty set) or that mis-read the owner match (#2068/#2073) now turns
+ * the connected capture red with "Passkey" / "Wrong wallet" instead of the
+ * address — both were run as mutations, see the matrix below.
  *
  * **wrong network.** Recorded as having "no capture path in the mocked harness
  * at all". Re-derived: RainbowKit hands the render prop a `chain` object
@@ -135,12 +167,32 @@
  * design and not a hole in the guard. And the third test — the Connect-wallet
  * control — stayed green through every one of them, which is the other half of
  * a mutation proof: nothing reddened that the mutation could not have touched.
+ *
+ * Two rows added with the live-rail fixture (#2284), applied to the hooks the
+ * fixture now exercises rather than to `WalletButton.tsx`, and restored the
+ * same way (`cp` from a backup, `diff -q` clean):
+ *
+ *   mutation                                          red                 other tests
+ *   useSafeOperationGate: owner match inverted        name (1) — received green
+ *     (`===` <-> `!==` on `owner_address`, #2068/#2073) "Wrong wallet"
+ *   useActiveSigner: hydrated set offers a passkey    name (1) — received ALL red,
+ *     even when EMPTY (`hasPasskeys` guard dropped)     "Passkey"         same reason
+ *
+ * The first is the discriminating one: the connected capture alone went red,
+ * the wrong-network and control tests stayed green. The second reddens all
+ * three because the `delegator_passkey` branch precedes every other branch
+ * in `WalletButton`, so a set that wrongly resolves a passkey hides the
+ * wrong-network and not-connected states too — the blast radius is the
+ * product's branch order, not a leak in the assertions. Neither row is
+ * expressible against the legacy fixture #2264 used: a `'safe'` account never
+ * hydrates a hybrid signer set, so neither hook had anything to mis-read.
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { mockHavenApi, optDownToLegacyRail, seedAuthenticatedSession } from './fixtures/haven-api'
+import { mockHavenApi, seedAuthenticatedSession, serveOwnerOnlyHybridSigners } from './fixtures/haven-api'
 import {
   SUPPORTED_CHAIN_ID_HEX,
   UNSUPPORTED_CHAIN_ID_HEX,
+  connectedWalletAddress,
   connectedWalletShortName,
   installInjectedWallet,
 } from './fixtures/injected-wallet'
@@ -521,23 +573,15 @@ test.describe('WalletButton collapsed states', () => {
 
   test.beforeEach(async ({ page }) => {
     await mockHavenApi(page)
-    // #2264: this file is the sanctioned opt-DOWN, and the header above already
-    // named the dependency in as many words — "reaching the connected-EOA
-    // branch additionally requires a legacy-Safe (or empty-set) account, which
-    // is what this fixture is". It WAS what the fixture was, by OMISSION: the
-    // shared `testSafe` carried no `account_type`, so `railOf` read it as
-    // legacy. Now that the default is the live rail, a hybrid account with a
-    // hydrated signer set resolves a `delegator_passkey` even marker-less
-    // (#1969, owner decision 2026-08-26), the control announces as "Passkey",
-    // and all three captures here photograph the wrong branch. Measured, not
-    // predicted: the three failed on `toHaveAccessibleName` with
-    // `Received: "Passkey"` against the expected truncated address.
-    //
-    // So the dependency is now STATED rather than inherited. The three states
-    // this file captures are the legacy-rail renderings of `WalletButton`; the
-    // delegation rail's own signer offering is `wallet-signer-offering.spec.ts`,
-    // which opts UP for exactly the complementary reason.
-    await optDownToLegacyRail(page)
+    // #2284: the shared fixture's hybrid account holds one passkey, which
+    // resolves a `delegator_passkey` marker-less (#1969) and photographs the
+    // Passkey pill. The states this file captures belong to the OTHER live
+    // hybrid shape — an EOA owner and no enrolled passkey — so the signer-set
+    // reads are served as owner-only, with the injected wallet's address as
+    // the named owner. See the header for why that is a real, spend-capable
+    // account and not a fixture-only state. The passkey offering of the
+    // one-passkey shape is `wallet-signer-offering.spec.ts`'s subject.
+    await serveOwnerOnlyHybridSigners(page, connectedWalletAddress)
     await seedAuthenticatedSession(page)
   })
 

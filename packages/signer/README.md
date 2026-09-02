@@ -77,7 +77,7 @@ const { paymentHeader } = await signer.buildX402PaymentHeader(
 The signer also exposes `signPaymentHash(hash)` (raw ECDSA over a legacy
 AllowanceModule funding/transfer hash) and `signX402FundingHash(hash, expected)`
 for v1 contexts, and `signSweepAuthorization(input)` for the gasless sweep. All
-five are methods on the object `createEdgeSigner` returns, not standalone
+six are methods on the object `createEdgeSigner` returns, not standalone
 exports.
 
 ## Orchestration
@@ -179,17 +179,33 @@ The delegate key is read from `HAVEN_DELEGATE_KEY` or a `--credentials` file's
 `delegate_key` (with a permissive-file warning). It stays in this process, and
 is never transmitted.
 
-**The signer makes exactly one kind of network call.** Since
-[#1263](https://github.com/d-hinders/Haven-AI/issues/1263) it performs an
+**The signer makes at most one kind of network call, on one path, and it is a
+read.** Since [#1263](https://github.com/d-hinders/Haven-AI/issues/1263) the
+`{ payment_id }` form of `haven_sign` and `haven_sign_x402` performs an
 authenticated, read-only `GET /x402/:payment_id/sign-context` against Haven, so
 that agents never have to relay multi-KB EIP-712 payloads through a model's
-context window. It reads `api_url` and `api_key` from an `identity.json` sitting
-next to the signer credential file — the signer's own credential still needs no
-`api_key`. The signer **core** (`src/core.ts`) remains network-free, and fetched
-bytes are treated as untrusted input exactly like a tool argument: the same
-digest re-derivation and Haven-binding verification apply, because what makes
-them safe is the verification, not where they came from. It never relays,
-submits, or broadcasts.
+context window. **Only the Bearer API key goes out; the delegate key is never
+part of that request or its response.** Nothing else in the package reaches the
+network: `haven_x402_sign_header` and `haven_sign_sweep_delegate` never fetch,
+the library surface above (`createEdgeSigner` and its six signing methods, over
+the network-free `src/core.ts`) never fetches, and passing the payload as
+`typed_data_b64` instead of `payment_id` keeps even the two fetching tools
+offline. It never relays, submits, or broadcasts.
+
+The fetch needs `api_url` and `api_key` from an `identity.json` sitting **next
+to the signer credential file** — the signer's own credential still needs no
+`api_key`. So the network call is a property of how you start the signer, not
+just of which tool you call: run it from `HAVEN_DELEGATE_KEY` alone and there is
+no credential file, hence no directory to find an `identity.json` in, so the
+`{ payment_id }` form refuses with a message naming the `typed_data_b64`
+fallback rather than reaching out — and the process makes no network calls at
+all. Egress is needed by `--credentials` / `HAVEN_CREDENTIALS` runs that use the
+preferred `{ payment_id }` call, which is what the
+`npx @haven_ai/connect@alpha` install sets up.
+
+Fetched bytes are treated as untrusted input exactly like a tool argument: the
+same digest re-derivation and Haven-binding verification apply, because what
+makes them safe is the verification, not where they came from.
 
 Connect Agent 2 may create the signer credential file locally during setup. In
 that flow Haven receives the public signing address, proof, API-key hash/prefix,

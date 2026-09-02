@@ -156,8 +156,8 @@ doc that carries an argument rather than a number.
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
-**This table describes the PRODUCTION channel — the `alpha` dist-tag — and only
-that.** Since [#2421](https://github.com/d-hinders/Haven-AI/issues/2421) a push
+**This table describes the PRODUCTION channel — the `alpha` and `latest`
+dist-tags — and only that.** Since [#2421](https://github.com/d-hinders/Haven-AI/issues/2421) a push
 to `dev` also publishes a snapshot of all five packages under the **`dev`**
 dist-tag at `0.0.0-dev.<YYYYMMDDHHMM>.<shortsha>`, so `npx @haven_ai/connect@dev`
 installs a different set of versions from the ones above. That is not drift and

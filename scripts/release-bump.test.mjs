@@ -1,6 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -313,6 +317,17 @@ function devSnapshotStep(workflow) {
 }
 
 function workflowStep(workflow, name, channel) {
+  // BRITTLE BY CONSTRUCTION, and deliberately so: this reads YAML structure
+  // with string matching, because this suite has no third-party imports. The
+  // `\n      - name:` sentinel below assumes the six-space step indentation
+  // `publish.yml` uses today. An unrelated reformat of that file — a job
+  // rename, a nesting change, a switch to flow style — would move it.
+  //
+  // That is acceptable ONLY because every failure here is a throw. If you are
+  // editing this because it broke, the fix is to re-point the matcher at the
+  // real structure, never to relax an assertion until it passes: these helpers
+  // feed the guards for the production publish path, and a matcher that
+  // silently selects nothing turns all of them green.
   const start = workflow.indexOf(`- name: ${name}`)
   assert.notEqual(start, -1, `publish.yml no longer has a step named "${name}"`)
   const rest = workflow.slice(start)
@@ -797,13 +812,31 @@ test('the dev-channel snapshot BUILDS every package it publishes (#2421)', async
   const workflow = await readFile(join(ROOT, '.github', 'workflows', 'publish.yml'), 'utf8')
   const bump = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
 
+  // Both derivations below read CALL STYLE, not behaviour, and are therefore
+  // coupled to how release-bump.mjs happens to spell its builds today:
+  // `run('npm', ['run', 'build', '-w', 'packages/sdk'])`. Rewriting those calls
+  // — a helper, a loop over PACKAGES, a template literal — would stop matching
+  // without changing what is built. The explicit non-empty assertions below
+  // exist for exactly that: a zero-match must fail as a zero-match, and not be
+  // rescued by the accident that "no package is built" also happens to trip the
+  // missing-packages assertion at the end. Guaranteed, not incidental.
   const builtByBump = [...bump.matchAll(/'build', '-w', 'packages\/([\w-]+)'/g)].map((m) => m[1])
+  assert.ok(
+    builtByBump.length > 0,
+    'read no builds out of release-bump.mjs — its build calls were reworded and this ' +
+      'derivation is now blind. Re-point the matcher; do not relax the assertion.',
+  )
   // connect is built by invoking tsup in its directory rather than through the
   // workspace script — see the build-order comment in release-bump.mjs.
   if (/join\(ROOT, 'packages', 'connect'\)/.test(bump)) builtByBump.push('connect')
 
   const builtByStep = [...devSnapshotStep(workflow).matchAll(/npm run build -w packages\/(\S+)/g)]
     .map((m) => m[1])
+  assert.ok(
+    builtByStep.length > 0,
+    'read no builds out of the dev snapshot step — the step exists (devSnapshotStep asserted ' +
+      'that) but this matcher found nothing in it. Re-point the matcher.',
+  )
 
   const built = new Set([...builtByBump, ...builtByStep])
   assert.deepEqual(
@@ -812,5 +845,221 @@ test('the dev-channel snapshot BUILDS every package it publishes (#2421)', async
     'the dev-channel snapshot publishes a package it never builds. release-bump.mjs wipes every ' +
       'dist; anything it does not rebuild must be built explicitly in the snapshot step, or the ' +
       'published tarball ships an empty dist.',
+  )
+})
+/* ── The publish.yml shell guards, pinned (#2421) ─────────────────────────────
+ *
+ * Enforcement points 1 and 2 for the invariant "a snapshot must never be able
+ * to land on `alpha` or `latest`, and the `main` path must never publish a
+ * `0.0.0-dev.*` version" live in bash inside `.github/workflows/publish.yml`.
+ * The third (`snapshotModeViolation`) is pinned above by ordinary unit tests.
+ *
+ * These two were originally proven by hand, once. A review on this PR called
+ * that out and was right: a guard proven once by hand and not pinned in CI
+ * regresses silently on the next PR that touches the file it lives in — and
+ * this file is the production publish path. So the real shell is EXTRACTED
+ * from the workflow and EXECUTED here.
+ *
+ * Extracted, never copied. A second copy of the guard in this file would drift
+ * from the workflow and then pass while production failed — the exact defect
+ * `.github/money-path-globs.json` exists to prevent one directory over. If the
+ * extraction stops finding the step or the function, these tests fail loudly
+ * rather than silently testing nothing.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * A step's `run: |` block, dedented, without a YAML dependency.
+ *
+ * Deliberately not `yaml`-parsed: this suite has no third-party imports and
+ * runs as a bare `node --test` in CI (`.github/workflows/ci.yml`). The block
+ * shape is fixed, and every failure mode here is a throw, not a silent empty
+ * string.
+ */
+function stepRunScript(workflow, name) {
+  const lines = workflow.split('\n')
+  const startIdx = lines.findIndex((l) => l.includes(`- name: ${name}`))
+  assert.notEqual(startIdx, -1, `publish.yml has no step named "${name}"`)
+
+  let runIdx = -1
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    if (/^\s*- name: /.test(lines[i])) break
+    if (/^\s*run: \|\s*$/.test(lines[i])) { runIdx = i; break }
+  }
+  assert.notEqual(runIdx, -1, `the step "${name}" has no block-scalar \`run: |\``)
+
+  const runIndent = lines[runIdx].match(/^\s*/)[0].length
+  const body = []
+  for (let i = runIdx + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.trim() === '') { body.push(''); continue }
+    if (line.match(/^\s*/)[0].length <= runIndent) break
+    body.push(line)
+  }
+  while (body.length && body[body.length - 1] === '') body.pop()
+  assert.ok(body.length > 0, `the step "${name}" has an empty run block`)
+  const dedent = Math.min(...body.filter((l) => l !== '').map((l) => l.match(/^\s*/)[0].length))
+  return body.map((l) => (l === '' ? '' : l.slice(dedent))).join('\n') + '\n'
+}
+
+/** Run a script under bash and return its exit code and combined output. */
+function runBash(script, { env = {}, args = [] } = {}) {
+  const file = join(tmpdir(), `haven-2421-${randomUUID()}.sh`)
+  writeFileSync(file, script)
+  try {
+    const r = spawnSync('bash', [file, ...args], {
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+    })
+    return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
+  } finally {
+    rmSync(file, { force: true })
+  }
+}
+
+async function publishWorkflow() {
+  return readFile(join(ROOT, '.github', 'workflows', 'publish.yml'), 'utf8')
+}
+
+/** The channel-resolution guard, run for real. */
+function resolveChannel(script, REF_NAME, REQUESTED) {
+  const outFile = join(tmpdir(), `haven-2421-out-${randomUUID()}`)
+  writeFileSync(outFile, '')
+  try {
+    const r = runBash(script, { env: { REF_NAME, REQUESTED, GITHUB_OUTPUT: outFile } })
+    return { ...r, output: readFileSync(outFile, 'utf8').trim() }
+  } finally {
+    rmSync(outFile, { force: true })
+  }
+}
+
+/** `assert_publish_allowed()` lifted out of the publish step and invoked. */
+function assertPublishAllowedScript(workflow) {
+  const step = stepRunScript(workflow, 'Publish packages whose version is not yet on npm')
+  const start = step.indexOf('assert_publish_allowed() {')
+  assert.notEqual(start, -1, 'the publish step no longer defines assert_publish_allowed()')
+  const rest = step.slice(start).split('\n')
+  const collected = []
+  let depth = 0
+  for (const line of rest) {
+    collected.push(line)
+    depth += (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length
+    if (depth === 0 && collected.length > 1) break
+  }
+  assert.equal(depth, 0, 'could not find the end of assert_publish_allowed()')
+  return `set -euo pipefail\n${collected.join('\n')}\nassert_publish_allowed "$1" "$2" "$3"\n`
+}
+
+const SNAPSHOT_V = '0.0.0-dev.202609021905.abc1234'
+const REAL_V = '0.1.29-alpha.0'
+
+test('GUARD 1/3: the ref decides the channel, and a mismatch is refused (#2421)', async () => {
+  // The ONLY route by which `dev`-branch code could reach `alpha`: a
+  // workflow_dispatch of channel=prod on the `dev` ref skips the snapshot bump
+  // and publishes the committed release version under its own prerelease tag.
+  // Nothing downstream can see it, because by then the version and the tag both
+  // look entirely ordinary.
+  const script = stepRunScript(await publishWorkflow(), 'Resolve the publish channel')
+
+  const refused = [
+    ['dev', 'prod'],       // ← the alpha case
+    ['main', 'dev'],
+    ['feature/x', 'auto'],
+    ['release/0.1.29', 'auto'],
+  ]
+  for (const [ref, requested] of refused) {
+    const { code, out } = resolveChannel(script, ref, requested)
+    assert.notEqual(code, 0, `ref=${ref} channel=${requested} must be REFUSED, got exit ${code}`)
+    assert.match(out, /GUARD:/, `the refusal for ref=${ref} channel=${requested} must say why`)
+  }
+
+  // The control half. A guard that refuses everything protects nothing, and
+  // these are the four combinations the workflow must actually run on.
+  for (const [ref, requested, expected] of [
+    ['dev', 'auto', 'dev'],
+    ['dev', 'dev', 'dev'],
+    ['main', 'auto', 'prod'],
+    ['main', 'prod', 'prod'],
+  ]) {
+    const { code, output } = resolveChannel(script, ref, requested)
+    assert.equal(code, 0, `ref=${ref} channel=${requested} must be ALLOWED`)
+    assert.equal(output, `channel=${expected}`, `ref=${ref} must resolve to ${expected}`)
+  }
+})
+
+test('GUARD 2/3: no (channel, version, tag) triple reaches npm unchecked (#2421)', async () => {
+  const script = assertPublishAllowedScript(await publishWorkflow())
+  const run = (channel, version, tag) => runBash(script, { args: [channel, version, tag] })
+
+  // THE INVARIANT, both directions. Each of these is a real defect, not
+  // symmetry: a snapshot on alpha/latest is a throwaway build on the channel
+  // users install from, and a real version on `dev` is an unreviewed `dev`
+  // commit published under a version people can pin.
+  const refused = [
+    ['prod', SNAPSHOT_V, 'alpha'],   // ← the alpha case
+    ['prod', SNAPSHOT_V, 'latest'],  // ← the latest case
+    ['prod', SNAPSHOT_V, 'dev'],
+    ['prod', REAL_V, 'dev'],
+    ['dev', REAL_V, 'alpha'],
+    ['dev', REAL_V, 'dev'],
+    ['dev', SNAPSHOT_V, 'alpha'],
+    ['dev', SNAPSHOT_V, 'latest'],
+    ['staging', REAL_V, 'alpha'],    // an unknown channel fails closed
+  ]
+  for (const [channel, version, tag] of refused) {
+    const { code, out } = run(channel, version, tag)
+    assert.notEqual(code, 0, `(${channel}, ${version}, ${tag}) must be REFUSED, got exit ${code}`)
+    assert.match(out, /GUARD:/, `(${channel}, ${version}, ${tag}) must say why it was refused`)
+  }
+
+  // The control half again — the two shapes production actually publishes, and
+  // the one the dev channel does.
+  for (const [channel, version, tag] of [
+    ['prod', REAL_V, 'alpha'],
+    ['prod', '0.2.0', 'latest'],
+    ['dev', SNAPSHOT_V, 'dev'],
+  ]) {
+    const { code, out } = run(channel, version, tag)
+    assert.equal(code, 0, `(${channel}, ${version}, ${tag}) must be ALLOWED, got exit ${code}: ${out}`)
+  }
+})
+
+test('the guard is called before every publish, and outside the failure isolation (#2421)', async () => {
+  // Executing the function proves what it decides; it cannot prove it is
+  // WIRED IN. A guard defined and never called is the failure mode that looks
+  // most like success. Two structural facts carry that, and both are cheap
+  // literal checks over a file with no other legitimate use of these strings.
+  const step = stepRunScript(await publishWorkflow(), 'Publish packages whose version is not yet on npm')
+
+  const call = step.indexOf('assert_publish_allowed "$channel" "$version" "$tag"')
+  assert.notEqual(call, -1, 'the publish loop no longer CALLS assert_publish_allowed')
+
+  // Before the skip check: a version that should never have been built must
+  // fail the job loudly, not be reported as "already on npm" because someone
+  // got there first.
+  const skip = step.indexOf('npm view "$name@$version"')
+  assert.notEqual(skip, -1, 'the publish loop no longer has the already-on-npm skip')
+  assert.ok(call < skip, 'assert_publish_allowed must run BEFORE the already-on-npm skip')
+
+  // And before the publish itself.
+  const publish = step.indexOf('npm publish -w')
+  assert.notEqual(publish, -1, 'the publish loop no longer publishes')
+  assert.ok(call < publish, 'assert_publish_allowed must run BEFORE npm publish')
+
+  // Deliberately NOT wrapped in the per-package `if ... ; then` isolation that
+  // `npm publish` gets (#1159): a package failing to publish is an incident, a
+  // triple that should be impossible is a defect in this file, and continuing
+  // the loop would publish four more of them.
+  // The WHOLE line, not the text before the call. An earlier draft of this
+  // assertion read only the 40 characters preceding it, and a mutation
+  // appending `|| true` — the cheapest possible way to neuter the guard —
+  // passed. A check that cannot fail is worse than no check, so this one was
+  // re-mutated until it could.
+  const callLine = step.split('\n').find((l) => l.includes('assert_publish_allowed "$channel"'))
+  assert.ok(callLine, 'could not isolate the assert_publish_allowed call line')
+  assert.doesNotMatch(
+    callLine,
+    /\bif\b|\|\||&&/,
+    'assert_publish_allowed is being called conditionally — a violation must abort the job, ' +
+      'not skip one package and publish the other four',
   )
 })

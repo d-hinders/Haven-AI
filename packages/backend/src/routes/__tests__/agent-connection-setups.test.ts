@@ -13,11 +13,6 @@ const { mockQuery, mockConnect, mockClientQuery, mockClientRelease } = vi.hoiste
   mockClientRelease: vi.fn(),
 }))
 
-const { mockGetTokenAllowance, mockGetTokensForDelegate } = vi.hoisted(() => ({
-  mockGetTokenAllowance: vi.fn(),
-  mockGetTokensForDelegate: vi.fn(),
-}))
-
 vi.mock('../../db.js', () => ({
   default: {
     query: (...args: unknown[]) => mockQuery(...args),
@@ -29,11 +24,6 @@ vi.mock('../../middleware/auth.js', () => ({
   authMiddleware: async (request: { user?: { sub: string } }) => {
     request.user = { sub: 'user-1' }
   },
-}))
-
-vi.mock('../../rails/allowance-module.js', () => ({
-  getTokenAllowance: (...args: unknown[]) => mockGetTokenAllowance(...args),
-  getTokensForDelegate: (...args: unknown[]) => mockGetTokensForDelegate(...args),
 }))
 
 // Mirrors agents.test.ts: the passport module is mocked so the register-path
@@ -106,7 +96,6 @@ const API_KEY_PREFIX = 'sk_agent_abc'
 const DELEGATE_ADDRESS = '0x3333333333333333333333333333333333333333'
 const TX_HASH = `0x${'a'.repeat(64)}`
 const SAFE_TX_HASH = `0x${'b'.repeat(64)}`
-const ALLOWANCE_MODULE_ADDRESS = '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134'
 
 /** Suite-wide hosted MCP URL (#1129) — see the root beforeEach note. */
 const TEST_HOSTED_MCP_URL = 'https://hosted-mcp.test.haven/v1'
@@ -174,18 +163,6 @@ async function buildApp(): Promise<FastifyInstance> {
   return app
 }
 
-function approvalPayload(result: 'confirmed' | 'proposed') {
-  return {
-    result,
-    tx_hash: result === 'confirmed' ? TX_HASH : undefined,
-    safe_tx_hash: SAFE_TX_HASH,
-    chain_id: SAFE.chain_id,
-    safe_address: SAFE.safe_address,
-    allowance_module_address: ALLOWANCE_MODULE_ADDRESS,
-    delegate_address: DELEGATE_ADDRESS,
-  }
-}
-
 function mockWalletApprovalPersist(setup: SetupFixture = CONNECTED_SETUP) {
   mockClientQuery.mockImplementation(async (sql: string) => {
     if (String(sql).includes('FROM agent_connection_setups')) {
@@ -246,7 +223,7 @@ const setupByAgentApiKey = (row: Record<string, unknown> | null): DbRoute => [
   /a\.api_key_hash = \$2/,
   () => ({ rows: row ? [row] : [] }),
 ]
-/** findSetupForUser (GET /:setupId, wallet-approval, budget-approval). */
+/** findSetupForUser (GET /:setupId, budget-approval). */
 const setupForUser = (row: Record<string, unknown> | null): DbRoute => [
   /s\.id = \$1 AND s\.user_id = \$2/,
   () => ({ rows: row ? [row] : [] }),
@@ -283,8 +260,6 @@ describe('agent connection setup routes', () => {
       query: (...args: unknown[]) => mockClientQuery(...args),
       release: mockClientRelease,
     })
-    mockGetTokenAllowance.mockReset()
-    mockGetTokensForDelegate.mockReset()
     mockRequestPassport.mockReset().mockResolvedValue(true)
     mockIssueBestEffort.mockReset()
     // Env vars (HAVEN_API_URL, HAVEN_HOSTED_MCP_URL, …) are pinned by the
@@ -834,7 +809,61 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
-  it('exercises the Connect Agent 2 setup spine from pending setup through active wallet approval', async () => {
+  // ── #2259: the legacy connect-approval half is DELETED, not tombstoned ──
+  //
+  // These two pin a deliberate CAPABILITY REMOVAL, not dead-code cleanup.
+  // `POST /agent-connection-setups` has no rail gate, so a surviving legacy
+  // Safe account could create a setup and reach `active` by two routes: the
+  // wallet-approval route itself, and — quietly — the dashboard status GET,
+  // which reconciled from live AllowanceModule state and wrote through
+  // `persistWalletApprovalState(..., activateAgent: true)`. Both are gone
+  // under the owner decision on epic #1440 (retirement is deletion, not
+  // accommodation). The first test below fails against the pre-#2259 file;
+  // the second guards a property rather than reproducing the old path — see
+  // its own note for why that distinction is not a formality here.
+  it('has no wallet-approval route at all — the legacy approval path is unregistered', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValue({ rows: [CONNECTED_SETUP] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${CONNECTED_SETUP.id}/wallet-approval`,
+      payload: { result: 'confirmed' },
+    })
+
+    // 404, not 410: nothing calls this, so there is no integrator to tell.
+    expect(response.statusCode).toBe(404)
+    await app.close()
+  })
+
+  it('does not activate a legacy setup from the status read — the GET is a read', async () => {
+    const app = await buildApp()
+    const proposed = { ...CONNECTED_SETUP, status: 'proposed', approval_status: 'proposed' }
+    mockQuery.mockResolvedValue({ rows: [proposed] })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent-connection-setups/${proposed.id}`,
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ status: 'proposed' })
+    // Scope of this assertion, stated because it is narrower than it looks:
+    // it pins the PROPERTY "this GET writes nothing", and is falsifiable —
+    // injecting any `UPDATE` into the handler fails it (verified). It does NOT
+    // reproduce the old behaviour, and cannot: that path needed the
+    // AllowanceModule readers, which no longer exist to mock, so against the
+    // pre-#2259 file this test passes vacuously. It is a forward guard against
+    // a write returning to this read, not a regression test for the one
+    // removed.
+    const writes = mockQuery.mock.calls.filter(([sql]) =>
+      /UPDATE agent_connection_setups|UPDATE agents/i.test(String(sql)),
+    )
+    expect(writes).toEqual([])
+    await app.close()
+  })
+
+  it('exercises the Connect Agent 2 setup spine from pending setup through local registration', async () => {
     const app = await buildApp()
     const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
     const setupRows: SetupFixture[] = []
@@ -1025,42 +1054,6 @@ describe('agent connection setup routes', () => {
       delegate_address: wallet.address.toLowerCase(),
       approval: { status: 'not_started' },
     })
-
-    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
-    mockGetTokenAllowance.mockResolvedValue({
-      amount: BigInt(ALLOWANCE.allowance_amount),
-      spent: 0n,
-      resetTimeMin: ALLOWANCE.reset_period_min,
-      lastResetMin: 0,
-      nonce: 0,
-    })
-    const approvalResponse = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${created.setup_id}/wallet-approval`,
-      payload: {
-        ...approvalPayload('confirmed'),
-        delegate_address: wallet.address,
-      },
-    })
-
-    expect(approvalResponse.statusCode).toBe(200)
-    expect(approvalResponse.json()).toMatchObject({
-      setup_id: created.setup_id,
-      status: 'active',
-      delegate_address: wallet.address.toLowerCase(),
-      approval: {
-        status: 'confirmed',
-        tx_hash: TX_HASH,
-        safe_tx_hash: SAFE_TX_HASH,
-      },
-    })
-    expect(agentStatus).toBe('active')
-    expect(mockGetTokenAllowance).toHaveBeenCalledWith(
-      SAFE.chain_id,
-      SAFE.safe_address,
-      wallet.address.toLowerCase(),
-      ALLOWANCE.token_address.toLowerCase(),
-    )
 
     await app.close()
   })
@@ -1375,311 +1368,6 @@ describe('agent connection setup routes', () => {
     expect(response.statusCode).toBe(409)
     expect(response.json().error).toMatch(/signing address/)
     expect(mockClientQuery).toHaveBeenCalledWith('ROLLBACK')
-
-    await app.close()
-  })
-
-  it('records confirmed wallet approval and activates only after on-chain allowance reconciliation', async () => {
-    const app = await buildApp()
-    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
-    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
-    mockGetTokenAllowance.mockResolvedValue({
-      amount: BigInt(ALLOWANCE.allowance_amount),
-      spent: 0n,
-      resetTimeMin: ALLOWANCE.reset_period_min,
-      lastResetMin: 0,
-      nonce: 0,
-    })
-    mockWalletApprovalPersist()
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: approvalPayload('confirmed'),
-    })
-
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({
-      setup_id: SETUP.id,
-      status: 'active',
-      delegate_address: DELEGATE_ADDRESS,
-      approval: {
-        status: 'confirmed',
-        tx_hash: TX_HASH,
-        safe_tx_hash: SAFE_TX_HASH,
-      },
-    })
-    expect(mockGetTokenAllowance).toHaveBeenCalledWith(
-      SAFE.chain_id,
-      SAFE.safe_address,
-      DELEGATE_ADDRESS,
-      ALLOWANCE.token_address,
-    )
-    const setupUpdate = mockClientQuery.mock.calls.find(([sql]) =>
-      String(sql).includes('UPDATE agent_connection_setups'),
-    )
-    expect(setupUpdate?.[1]).toEqual([
-      SETUP.id,
-      'user-1',
-      'active',
-      'confirmed',
-      TX_HASH,
-      SAFE_TX_HASH,
-      null,
-    ])
-    const agentUpdate = mockClientQuery.mock.calls.find(([sql]) =>
-      String(sql).includes('UPDATE agents'),
-    )
-    expect(String(agentUpdate?.[0])).toContain("status = 'active'")
-
-    await app.close()
-  })
-
-  it('keeps multisig wallet approval proposals non-active', async () => {
-    const app = await buildApp()
-    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
-    mockGetTokensForDelegate.mockResolvedValue([])
-    mockWalletApprovalPersist()
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: approvalPayload('proposed'),
-    })
-
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({
-      setup_id: SETUP.id,
-      status: 'proposed',
-      approval: {
-        status: 'proposed',
-        tx_hash: null,
-        safe_tx_hash: SAFE_TX_HASH,
-      },
-    })
-    const agentUpdate = mockClientQuery.mock.calls.find(([sql]) =>
-      String(sql).includes('UPDATE agents'),
-    )
-    expect(agentUpdate).toBeUndefined()
-
-    await app.close()
-  })
-
-  it('does not activate when the live allowance does not match the pending setup', async () => {
-    const app = await buildApp()
-    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
-    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
-    mockGetTokenAllowance.mockResolvedValue({
-      amount: 1n,
-      spent: 0n,
-      resetTimeMin: ALLOWANCE.reset_period_min,
-      lastResetMin: 0,
-      nonce: 0,
-    })
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: approvalPayload('confirmed'),
-    })
-
-    expect(response.statusCode).toBe(409)
-    expect(response.json().error).toMatch(/budget does not match/)
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agent_connection_setups'))).toBe(false)
-
-    await app.close()
-  })
-
-  it('records submitted confirmation evidence after a receipt timeout without activating', async () => {
-    const app = await buildApp()
-    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
-    mockGetTokensForDelegate.mockResolvedValue([])
-    mockWalletApprovalPersist()
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: {
-        ...approvalPayload('confirmed'),
-        confirmation_status: 'receipt_timeout',
-      },
-    })
-
-    expect(response.statusCode).toBe(202)
-    expect(response.json()).toMatchObject({
-      status: 'approval_in_progress',
-      approval: {
-        status: 'submitted',
-        tx_hash: TX_HASH,
-        safe_tx_hash: SAFE_TX_HASH,
-      },
-    })
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
-
-    await app.close()
-  })
-
-  it('keeps confirmed wallet approval in progress when on-chain budget is not visible yet', async () => {
-    const app = await buildApp()
-    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
-    mockGetTokensForDelegate.mockResolvedValue([])
-    mockWalletApprovalPersist()
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: approvalPayload('confirmed'),
-    })
-
-    expect(response.statusCode).toBe(202)
-    expect(response.json()).toMatchObject({
-      status: 'approval_in_progress',
-      approval: {
-        status: 'submitted',
-        tx_hash: TX_HASH,
-        safe_tx_hash: SAFE_TX_HASH,
-      },
-      failure_reason: 'On-chain agent budget is not active yet',
-    })
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
-    const setupUpdate = mockClientQuery.mock.calls.find(([sql]) =>
-      String(sql).includes('UPDATE agent_connection_setups'),
-    )
-    expect(setupUpdate?.[1]).toEqual([
-      SETUP.id,
-      'user-1',
-      'approval_in_progress',
-      'submitted',
-      TX_HASH,
-      SAFE_TX_HASH,
-      'On-chain agent budget is not active yet',
-    ])
-
-    await app.close()
-  })
-
-  it('keeps confirmed wallet approval in progress when on-chain verification is temporarily unavailable', async () => {
-    const app = await buildApp()
-    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
-    mockGetTokensForDelegate.mockRejectedValue(new Error('rpc unavailable'))
-    mockWalletApprovalPersist()
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: approvalPayload('confirmed'),
-    })
-
-    expect(response.statusCode).toBe(202)
-    expect(response.json()).toMatchObject({
-      status: 'approval_in_progress',
-      approval: {
-        status: 'submitted',
-        tx_hash: TX_HASH,
-        safe_tx_hash: SAFE_TX_HASH,
-      },
-      failure_reason: 'Haven could not verify the on-chain agent rules yet',
-    })
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
-
-    await app.close()
-  })
-
-  it('does not persist wallet approval if setup was cancelled after the initial read', async () => {
-    const app = await buildApp()
-    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
-    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
-    mockGetTokenAllowance.mockResolvedValue({
-      amount: BigInt(ALLOWANCE.allowance_amount),
-      spent: 0n,
-      resetTimeMin: ALLOWANCE.reset_period_min,
-      lastResetMin: 0,
-      nonce: 0,
-    })
-    mockWalletApprovalPersist({ ...CONNECTED_SETUP, status: 'cancelled' })
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: approvalPayload('confirmed'),
-    })
-
-    expect(response.statusCode).toBe(409)
-    expect(response.json().error).toMatch(/state changed/)
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
-
-    await app.close()
-  })
-
-  it('treats repeated confirmed wallet approval evidence as idempotent', async () => {
-    const app = await buildApp()
-    primeDb(
-      setupForUser({
-        ...CONNECTED_SETUP,
-        status: 'active',
-        approval_status: 'confirmed',
-        tx_hash: TX_HASH,
-        safe_tx_hash: SAFE_TX_HASH,
-      }),
-      setupAllowances([ALLOWANCE]),
-    )
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: approvalPayload('confirmed'),
-    })
-
-    expect(response.statusCode).toBe(200)
-    expect(response.json().status).toBe('active')
-    expect(mockGetTokensForDelegate).not.toHaveBeenCalled()
-    expect(mockClientQuery).not.toHaveBeenCalled()
-
-    await app.close()
-  })
-
-  it('recovers a proposed setup to active when status read sees live on-chain authority', async () => {
-    const app = await buildApp()
-    primeDb(
-      setupForUser({
-        ...CONNECTED_SETUP,
-        status: 'proposed',
-        approval_status: 'proposed',
-        safe_tx_hash: SAFE_TX_HASH,
-      }),
-      setupAllowances([ALLOWANCE]),
-    )
-    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
-    mockGetTokenAllowance.mockResolvedValue({
-      amount: BigInt(ALLOWANCE.allowance_amount),
-      spent: 0n,
-      resetTimeMin: ALLOWANCE.reset_period_min,
-      lastResetMin: 0,
-      nonce: 0,
-    })
-    mockWalletApprovalPersist({
-      ...CONNECTED_SETUP,
-      status: 'proposed',
-      approval_status: 'proposed',
-      safe_tx_hash: SAFE_TX_HASH,
-    })
-
-    const response = await app.inject({
-      method: 'GET',
-      url: `/agent-connection-setups/${SETUP.id}`,
-    })
-
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({
-      setup_id: SETUP.id,
-      status: 'active',
-      approval: {
-        status: 'confirmed',
-        safe_tx_hash: SAFE_TX_HASH,
-      },
-    })
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes("status = 'active'"))).toBe(true)
 
     await app.close()
   })
@@ -2305,8 +1993,6 @@ describe('data access characterization (#985)', () => {
       query: (...args: unknown[]) => mockClientQuery(...args),
       release: mockClientRelease,
     })
-    mockGetTokenAllowance.mockReset()
-    mockGetTokensForDelegate.mockReset()
     mockRequestPassport.mockReset().mockResolvedValue(true)
     mockIssueBestEffort.mockReset()
   })

@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Select } from '@/components/ui/Select'
@@ -477,6 +478,17 @@ export default function DesignSystemPage() {
                 Copy feedback
               </Button>
             </div>
+            <div className="mt-4 space-y-1.5">
+              <Input invalid aria-describedby="sample-inline-alert" placeholder="https://your-service.example/pay" />
+              <InlineAlert id="sample-inline-alert">
+                Enter a valid https URL for your service.
+              </InlineAlert>
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              Use <code className="rounded bg-[var(--v2-surface)] px-1">InlineAlert</code> for a short
+              field- or dialog-level failure. It owns the alert role and danger text; the surrounding
+              field or content stack owns spacing. Use a dedicated panel or toast for larger failed states.
+            </p>
           </Card>
         </div>
 

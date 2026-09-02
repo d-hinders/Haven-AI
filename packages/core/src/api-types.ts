@@ -1591,26 +1591,6 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/agent-connection-setups/{setupId}/wallet-approval": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Record wallet approval evidence for Connect Agent 2.
-         * @description Records user wallet approval or a Safe multisig proposal for a locally connected setup. Confirmed approvals activate the pending agent only after Haven verifies the live on-chain allowance state for the exact Haven wallet, public signing address, token budgets, and reset periods. Proposed approvals remain non-active until that on-chain authority is live.
-         */
-        post: operations["recordAgentConnectionWalletApproval"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/agent-connection-setups/{setupId}/budget-approval": {
         parameters: {
             query?: never;
@@ -1622,7 +1602,7 @@ export type paths = {
         put?: never;
         /**
          * Complete a delegation-rail Connect Agent 2 setup.
-         * @description The delegation rail's counterpart to wallet-approval. Activates the pending agent only after Haven confirms that every budget this setup promised exists as an active, owner-signed budget on the agent — the caller asserts nothing, so the request body is empty and the call is safe to retry. Rejected with 409 on a Safe / AllowanceModule wallet, which approves with a wallet transaction instead.
+         * @description Activates the pending agent only after Haven confirms that every budget this setup promised exists as an active, owner-signed budget on the agent — the caller asserts nothing, so the request body is empty and the call is safe to retry. Rejected with 409 on a retired Safe / AllowanceModule account, which has no approval path in Haven since #2259 deleted the wallet-approval route.
          */
         post: operations["recordAgentConnectionBudgetApproval"];
         delete?: never;
@@ -2640,24 +2620,6 @@ export type components = {
                 status: string;
             };
             failure_reason?: string | null;
-        };
-        RecordAgentConnectionWalletApprovalRequest: {
-            /** @enum {string} */
-            result: "confirmed" | "proposed";
-            tx_hash?: string;
-            safe_tx_hash: string;
-            chain_id: number;
-            /** @example 0x1111111111111111111111111111111111111111 */
-            safe_address: string;
-            /** @example 0x1111111111111111111111111111111111111111 */
-            allowance_module_address: string;
-            /** @example 0x1111111111111111111111111111111111111111 */
-            delegate_address: string;
-            /**
-             * @description Use receipt_timeout only when the wallet transaction was submitted but the local receipt wait timed out.
-             * @enum {string}
-             */
-            confirmation_status?: "confirmed" | "receipt_timeout";
         };
         UpdateConnectorInstallStatusRequest: {
             setup_token?: string;
@@ -10891,116 +10853,6 @@ export interface operations {
             };
             /** @description Error response */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    recordAgentConnectionWalletApproval: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                setupId: components["parameters"]["SetupId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RecordAgentConnectionWalletApprovalRequest"];
-            };
-        };
-        responses: {
-            /** @description Wallet approval was recorded and the setup status was returned. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentConnectionSetupStatus"];
-                };
-            };
-            /** @description Confirmation evidence was recorded, but on-chain authority is not verified yet. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentConnectionSetupStatus"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            410: {
                 headers: {
                     [name: string]: unknown;
                 };

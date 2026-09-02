@@ -266,9 +266,12 @@ describe('wiring — run-list filters (#1047, re-pinned by #2404)', () => {
     const arg = (flag) => args[args.indexOf(flag) + 1]
     assert.equal(arg('--workflow'), 'qa-dev.yml')
     // #2404: "on dev" is decided by selectGreenRun on the run's SHA, not by
-    // `--branch`. A deployment_status run has no branch label (Railway deploys
-    // a bare SHA; GitHub: GITHUB_REF is "empty if commit"), so a `--branch dev`
-    // filter excludes the one run whose headSha IS the deployed commit.
+    // `--branch`, because a branch name says nothing about which commit the
+    // harness exercised. (#2404 also predicted a deployment_status run would
+    // carry no branch label — Railway deploys a bare SHA; GitHub: GITHUB_REF
+    // is "empty if commit" — and #2427 measured `headBranch: dev` on all three
+    // runs of deployment 6218620498. The selector must not depend on the field
+    // either way, which the selection tests below pin over all three shapes.)
     assert.equal(args.includes('--branch'), false, 'the query must not filter on branch (#2404)')
     assert.equal(arg('--status'), 'success')
     assert.equal(arg('--limit'), String(GREEN_RUN_WINDOW))
@@ -288,11 +291,13 @@ describe('wiring — run-list filters (#1047, re-pinned by #2404)', () => {
 //
 // The gate used to ask gh for `--branch dev`. #2273's post-deploy run is fired
 // by GitHub's `deployment_status` event for a Railway Deployment created
-// against a BARE SHA, so it carries no branch label and that filter drops it —
-// the run that tests exactly the deployed commit was the one the promotion
-// gate could not see. These tests carry the "before" leg as well as the
-// "after": the pre-#2404 query is replayed through a model of gh's filter so
-// the defect is demonstrated, not asserted.
+// against a BARE SHA; #2404 predicted it would carry no branch label and that
+// the filter would drop the one run that tests exactly the deployed commit.
+// Measured (#2427): the real runs report `headBranch: dev`. The "before" leg
+// below therefore replays the pre-#2404 query over the UNLABELLED shape —
+// what the old filter does to a run GitHub's docs say can exist — and the
+// "after" leg pins that the selector's answer does not depend on the label at
+// all, which is the property the real reason for dropping the filter needs.
 
 /**
  * A model of what `gh run list` does with the flags this gate uses, so the
@@ -331,11 +336,12 @@ const skippedJobs = [
   { name: MONEY_FLOW_JOB, conclusion: 'skipped', steps: [] },
 ]
 
-// The shape #2273's trigger is expected to produce: Railway deploys a bare
-// SHA, GitHub documents GITHUB_REF as "empty if commit", so no headBranch.
-// UNVERIFIED against a real run as of 2026-09-02 (none exists yet); the rows
-// below therefore cover BOTH the predicted shape (null / '') and the
-// alternative (`dev`), and the selector must admit all three.
+// The shape #2404 predicted #2273's trigger would produce: Railway deploys a
+// bare SHA, GitHub documents GITHUB_REF as "empty if commit", so no headBranch.
+// MEASURED on 2026-09-02 (#2427): the real runs report `headBranch: dev`. The
+// fixture keeps the unlabelled shape on purpose — it is the one GitHub's docs
+// say can exist — and the tests below cover null / '' / `dev`; the selector
+// must admit all three.
 const deployRun = {
   databaseId: 900001, event: 'deployment_status', headBranch: null,
   headSha: 'deployed-sha', createdAt: at(10), conclusion: 'success',
@@ -355,8 +361,8 @@ const io = (overrides = {}) => ({
   ...overrides,
 })
 
-describe('run selection — the "before" leg: the defect was real (#2404)', () => {
-  test('the pre-#2404 query cannot return a deployment_status run, because it has no branch to match', () => {
+describe('run selection — the "before" leg: what the old filter does to an unlabelled run (#2404; real runs report `dev`, #2427)', () => {
+  test('the pre-#2404 query cannot return a deployment_status run whose branch label is null — the shape GitHub documents', () => {
     const rows = simulateGhRunList([deployRun, manualRun, nightlyRun], PRE_2404_QUERY)
     assert.equal(rows.length, 1)
     assert.equal(rows[0].databaseId, manualRun.databaseId, 'the old query keyed on the older manual run')

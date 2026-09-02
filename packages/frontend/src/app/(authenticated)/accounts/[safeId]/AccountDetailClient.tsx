@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -841,21 +842,19 @@ export default function AccountDetailClient() {
         open={removeOpen}
         onCancel={closeRemoveDialog}
         onConfirm={handleRemoveConfirmed}
-        title={`Delete ${safe.name}?`}
+        title={`Remove ${safe.name}?`}
         body={(
-          <>
+          <div className="space-y-3">
             <p>
               This only removes the account from Haven. Funds on-chain are unaffected. Removing it
               may permanently remove this read-only record from Haven.
             </p>
             {removeError && (
-              <p className="mt-3 text-xs text-[var(--v2-danger)]" role="alert">
-                {removeError.message}
-              </p>
+              <InlineAlert>{removeError.message}</InlineAlert>
             )}
-          </>
+          </div>
         )}
-        confirmLabel={removeError?.retryable ? 'Try again' : 'Delete account'}
+        confirmLabel={removeError?.retryable ? 'Try again' : 'Remove account'}
         loading={removing}
       />
     </div>

@@ -1211,47 +1211,51 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
-        title="Manual payment review"
-        description="Manual sends lead with the money: amount first, then the wallet-to-recipient path and how you approve the send."
+        title="Manual send"
+        description="The only manual send Haven has is a single editable step — amount, token and recipient collected and submitted on one screen. There is no review step and no approval hold, so this showcase is a FORM, not a confirmation summary."
       >
         <Card hover={false} className="max-w-xl p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-medium text-[var(--v2-ink-3)]">You are sending</p>
-              <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
-                125.00 USDC
-              </p>
+          <div className="space-y-3">
+            <p className="text-sm text-[var(--v2-ink-muted)]">
+              Send from this account with one approval. No network fee for you.
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <label className="sr-only" htmlFor="ds-send-amount">
+                Amount
+              </label>
+              <Input
+                id="ds-send-amount"
+                className="v2-tabular"
+                placeholder="Amount"
+                defaultValue="125.00"
+                inputMode="decimal"
+                rightAction={<MaxButton onClick={() => toast.success('Amount set to balance')} />}
+              />
+              <label className="sr-only" htmlFor="ds-send-token">
+                Token
+              </label>
+              <Select id="ds-send-token" defaultValue="usdc" className="sm:w-28 sm:shrink-0">
+                <option value="usdc">USDC</option>
+                <option value="eth">ETH</option>
+              </Select>
             </div>
-            <StatusBadge>Ready to send</StatusBadge>
-          </div>
-          <div className="mt-5 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
-            <TransactionMovement from="Operating wallet" to="Acme Services" />
-            <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
-                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Operating wallet</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Recipient</dt>
-                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Acme Services</dd>
-                <dd className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">0x7a58...91c2</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
-                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Base</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Approve with</dt>
-                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Device approval</dd>
-              </div>
-            </dl>
-          </div>
-          <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
-            Network fees are paid by Haven (ETH).
-          </p>
-          <div className="mt-5 flex gap-3">
-            <Button variant="ghost" className="flex-1">Back</Button>
-            <Button className="flex-1">Approve and send</Button>
+            <label className="sr-only" htmlFor="ds-send-recipient">
+              Recipient address
+            </label>
+            <Input
+              id="ds-send-recipient"
+              className="font-mono"
+              placeholder="Recipient address (0x…)"
+              defaultValue="0x7a58f0d1c9b4e2a6837f5c1d0e9b4a2c6d8191c2"
+              rightAction={<PasteButton onPaste={() => toast.success('Address pasted')} />}
+            />
+            <p className="text-xs text-[var(--v2-ink-3)]">
+              Sending on Base from Operating wallet.
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="ghost">Cancel</Button>
+              <Button>Send</Button>
+            </div>
           </div>
         </Card>
       </Section>

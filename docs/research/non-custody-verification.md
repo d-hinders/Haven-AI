@@ -169,7 +169,9 @@ forwards a rejection verbatim with nothing written.
 > live exports of `rails/allowance-module.js`. A later retirement slice shrank
 > that module to shared chain infrastructure plus the legacy wallet-approval
 > read (`getProvider`, `getRelayerWallet`, `getTokenAllowance`,
-> `getTokenBalance`, `getTokensForDelegate`), and **two of the three —
+> `getTokenBalance`, `getTokensForDelegate` — #2259 has since deleted the last
+> two with the route that called them, leaving only the three shared reads),
+> and **two of the three —
 > `computeEffectiveAllowance` and `getLatestBlockTimeSec` — stopped being
 > exports**. `vi.mock` replaces the module wholesale, so nothing failed: the
 > factory silently re-invented them and the suite went on asserting nobody

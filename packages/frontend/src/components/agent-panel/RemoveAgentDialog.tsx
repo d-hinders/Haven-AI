@@ -8,6 +8,7 @@ import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import Link from 'next/link'
 import ConfirmDialog from '../ConfirmDialog'
 import { ApprovalRequiredBanner } from '../haven/ApprovalRequiredBanner'
+import { InlineAlert } from '../ui/InlineAlert'
 
 /**
  * #1402: "Remove agent" — ONE action with three effects, in an order that is
@@ -177,22 +178,20 @@ export function RemoveAgentDialog({
             </p>
           )}
           {error && (
-            <p className="text-xs text-[var(--v2-danger)]" role="alert">
-              {error}
-            </p>
+            <InlineAlert>{error}</InlineAlert>
           )}
           {phase === 'filing_failed' && (
-            <p className="text-xs text-[var(--v2-danger)]" role="alert">
+            <InlineAlert>
               {isDelegation
                 ? 'The agent can no longer spend, but it could not be moved to Removed. Choose Finish removal to retry.'
                 : 'The historical agent record could not be moved to Removed. Choose Finish unlinking to retry.'}
-            </p>
+            </InlineAlert>
           )}
           {/* #1437: the backend refuses an oversized batch by naming the
               remedy; repeating "the budget could not be stopped" would leave
               the user pressing the same button forever. */}
           {isDelegation && phase === 'too_many' && (
-            <p className="text-xs text-[var(--v2-danger)]" role="alert">
+            <InlineAlert>
               This agent holds too many budgets to stop in one signature. Stop them individually
               on the{' '}
               <Link
@@ -202,7 +201,7 @@ export function RemoveAgentDialog({
                 agent&apos;s budget card
               </Link>
               , then remove it. Nothing changed — it can still spend until you do.
-            </p>
+            </InlineAlert>
           )}
         </div>
       }

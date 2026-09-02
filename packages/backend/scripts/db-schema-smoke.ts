@@ -32,6 +32,7 @@ import {
 } from '../src/infra/repositories/agents.js'
 import {
   ACTIVATE_PENDING_DELEGATION_SQL,
+  REPLACE_OTHER_ACTIVE_DELEGATIONS_IN_SLOT_SQL,
   SELECT_DELEGATION_FOR_PAYMENT_SQL,
 } from '../src/infra/repositories/delegation-budgets.js'
 import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-signers.js'
@@ -541,6 +542,10 @@ const QUERIES: SmokeQuery[] = [
   {
     name: 'delegations: conditional activation (pending only)',
     sql: ACTIVATE_PENDING_DELEGATION_SQL,
+  },
+  {
+    name: 'delegations: retire the slot\'s OTHER active grants, excluding the row being activated (#2411)',
+    sql: REPLACE_OTHER_ACTIVE_DELEGATIONS_IN_SLOT_SQL,
   },
   {
     name: 'agents: lock before opening re-key',

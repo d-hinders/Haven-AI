@@ -150,7 +150,17 @@ export function AgentCard({
       className={`${entityCardClassName({ muted: isRevoked })} min-w-0 cursor-pointer`}
     >
       {/* Header */}
-      <div className="flex items-start gap-3 mb-4">
+      {/* #2325: `flex-wrap` here, plus the stamp's `basis-full sm:basis-auto`
+          below, is the information-priority decision for a narrow card. Below
+          `sm` the "Last activity" stamp drops to its own line under the
+          name/account/MCP block, so the block gets the row's full width and the
+          MCP chip inside it is distinguishable at 390. At `sm` and up the stamp
+          is `basis-auto` and stays on the line, so the tablet/desktop layout is
+          unchanged. `flex-wrap` alone does nothing (the block's flex-basis is
+          0%, so it never pushes the stamp to a second line); the `basis-full`
+          is what forces the wrap. Proven by rendered geometry in
+          `e2e/agent-card-mcp-chip-measure.spec.ts`. */}
+      <div className="flex flex-wrap items-start gap-3 mb-4">
           <div
             className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
               isActive
@@ -235,7 +245,19 @@ export function AgentCard({
             )}
           </div>
           <p
-            className="ml-auto shrink-0 pt-0.5 text-right text-xs text-[var(--v2-ink-3)]"
+            /* #2325: the information-priority half of the narrow-card fix.
+               `basis-full` makes this stamp a full-width flex item, so on the
+               now-wrapping header row it is forced onto its own line below the
+               name/account/MCP block at every width below `sm`. `sm:basis-auto`
+               restores the on-the-line layout at `sm` and up, where the card is
+               wide enough that the stamp and the block share the row.
+
+               The stamp stays `shrink-0` and `ml-auto`: on its own line,
+               `ml-auto` right-aligns it (the block above is `flex-1` and fills
+               the line, so `ml-auto` is a no-op there) and `shrink-0` keeps the
+               "Last activity 1mo ago" text from wrapping. The `title` tooltip
+               and the text are untouched — only the line it sits on changes. */
+            className="ml-auto shrink-0 basis-full pt-0.5 text-right text-xs text-[var(--v2-ink-3)] sm:basis-auto"
             title={formatAgentLastActivityTitle(agent.mcp_last_seen_at)}
           >
             {formatAgentLastActivity(agent.mcp_last_seen_at)}

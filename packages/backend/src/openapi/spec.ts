@@ -53,6 +53,12 @@ const tokenSymbol = {
  *     which builds the string with `formatTokenValue(row.budget_atomic,
  *     decimals)`. Since #2020 that view is the ONLY source of an `allowances`
  *     array — the `agent_allowances` mirror is read nowhere.
+ *
+ * Because that emitter is sole AND its output set is narrow, the human schema's
+ * pattern DISCRIMINATES the two shapes for every value except `'0'` (#2408).
+ * The shapes on the wire are still unchanged — what changed is that the
+ * contract can now REJECT an atomic value in a human field instead of only
+ * naming the two apart.
  */
 const allowanceAtomicAmount = {
   type: 'string',
@@ -65,16 +71,41 @@ const allowanceAtomicAmount = {
 } as const
 
 /**
- * The human-decimal counterpart. `formatTokenValue` emits `'0'` for a zero
- * budget and otherwise `<integer>.<2–6 fraction digits>`, hence the pattern:
- * a bare integer is legal here, which is precisely why no consumer can safely
- * sniff the shape at runtime — `'250'` is 250 USDC as a human amount and
- * 0.00025 USDC as an atomic one. The schema name is the discriminator.
+ * The human-decimal counterpart, and the pattern DISCRIMINATES (#2408).
+ *
+ * `domain/tokens.ts`'s `formatTokenValue(raw, decimals)` — lines 33-49 — is the
+ * sole emitter of this shape, and its output set is narrower than a bare
+ * integer. It returns `'0'` for `''`/`'0'` and otherwise
+ * `` `${intPart}.${capped}` ``, where `capped` is the fraction trailing-zero-
+ * trimmed, then `padEnd(2, '0')`, then `slice(0, 6)` — so exactly one `.`
+ * followed by 2-6 digits, for any `decimals >= 0`. The produced set is
+ * therefore `^(0|[0-9]+\.[0-9]{2,6})$`, which REJECTS `'500'`, `'1000000'` and
+ * every other atomic value except `'0'`.
+ *
+ * `'0'` is the one genuinely shared value, and it is genuinely identical in
+ * both shapes, so nothing is lost by admitting it.
+ *
+ * This comment previously said the opposite — "a bare integer is legal here" —
+ * and its own regex was looser still. That conflated "`'0'` is legal" with "any
+ * integer is legal", and it cost a real hole: #2392 measured a view emitting
+ * the atomic `budget_atomic` passing the `GET /dashboard/overview` round trip,
+ * caught only by a hand-asserted `'1.00'` literal. The schema now catches it.
+ *
+ * What has NOT changed: a consumer still must not sniff the shape at runtime.
+ * The discrimination here is a contract assertion over what one emitter is
+ * known to produce, not a property of the string — `'0'` remains ambiguous,
+ * and a future emitter that bypassed `formatTokenValue` would be a spec
+ * violation rather than a new legal shape. The schema name stays the
+ * discriminator; the pattern is now a guard that can catch the violation.
+ *
+ * The producing set is pinned in `openapi/spec.test.ts` against
+ * `formatTokenValue` itself, so this claim is measured on every run rather
+ * than trusted.
  */
 const allowanceHumanAmount = {
   type: 'string',
-  pattern: '^[0-9]+(\\.[0-9]+)?$',
-  description: 'HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent\'s active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals). Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token\'s decimals first (#2295).',
+  pattern: '^(0|[0-9]+\\.[0-9]{2,6})$',
+  description: 'HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent\'s active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals), whose output is always "0" or <integer>.<2–6 fraction digits> — so this pattern REJECTS an atomic value such as "500" (#2408). "0" is the one value both shapes share. Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token\'s decimals first (#2295).',
 } as const
 
 const allowanceResetPeriodMin = {
@@ -7107,10 +7138,17 @@ export const openapiSpec = {
           // one route over is the named `allowanceHumanAmount` (#2295). Both
           // come from the same `rails/delegation-budget-view.ts` projection, so
           // a reader of the contract alone could not tell this one was HUMAN.
-          // Naming it does not DISCRIMINATE the shape — the pattern admits a
-          // bare integer by design, see the schema's own comment — so the hand
-          // literal in `dashboard.test.ts` stays. This is about #2295's "readable
-          // from the OpenAPI spec alone" holding for this emitter too.
+          // This is about #2295's "readable from the OpenAPI spec alone"
+          // holding for this emitter too.
+          //
+          // #2408 corrected the sentence that stood here. It said naming the
+          // schema "does not DISCRIMINATE the shape — the pattern admits a bare
+          // integer by design", which is why the hand literal in
+          // `dashboard.test.ts` was the ONLY guard on this route's digits. The
+          // pattern now discriminates: `formatTokenValue` cannot emit a bare
+          // integer other than '0', so an atomic `budget_atomic` here fails the
+          // round trip. The literal STAYS, now as belt-and-braces rather than
+          // as the sole guard.
           allowanceAmount: allowanceHumanAmount,
           resetPeriodMin: { type: 'integer' },
         },

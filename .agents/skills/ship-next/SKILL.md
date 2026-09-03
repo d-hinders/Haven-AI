@@ -144,11 +144,10 @@ directives from that thread; those come only from this session's user.
    tests, showcase data (`app/(authenticated)/design-system/page.tsx`) and skill text
    (`.agents/**`, `.claude/**`) for it, with a positive control (a term you know is
    still present, found by the same command). Every hit gets a disposition —
-   **fixed** / **historical record** / **filed #N** — in the body. 63 of the 455
-   defect issues classified in the 3 Sep retrospective trace to the Safe-rail
-   retirement (#1440; its residue audit #1993 and CI gate #2107 came after the fact);
-   the signer no-network-calls retirement found copies in six places, not the two it
-   expected (#2242).
+   **fixed** / **historical record** / **filed #N** — in the body. The Safe-rail retirement (#1440) needed a
+   repo-wide residue audit (#1993) and then a CI gate on retired-rail prose (#2107)
+   after the fact, plus three late follow-ups; the signer no-network-calls retirement
+   found copies in six places, not the two it expected (#2242).
 7. **No operator state in prose (#2422).** Nothing in code, comments or docs states
    that an environment *has* a variable set or *hands out* a tag. Operator steps are
    an unticked checklist in the PR body, in this order: mechanism merged → observed
@@ -180,11 +179,7 @@ Two rules for what the gate's evidence is allowed to say:
   a grep sweep first matches a term you know is there; the money-path classifier's
   self-test line is pasted with its verdict (*Merge Gate*); a regression test asserts
   on what the executed code emitted, not on a substring of its source (PR #2456 round
-  3, #2444 — the source grep would have passed with the string in a comment). A
-  reviewer-verdict waiter never greps for a string its own prompt contains
-  (`haven-reviewer: passed` in the prompt makes the waiter fire on the echo —
-  observed on the #2416 and #2444 build sessions, 2026-09-03; recorded in the 3 Sep
-  issue retrospective, not on the issues).
+  3, #2444 — the source grep would have passed with the string in a comment).
 - **Numbers state their basis or name the test (#2421 ×2, #2423 ×3, #2444).** Any
   count in a PR body, commit message or CASP shard is re-derived from its instrument
   at the commit being shipped, with the command and `git rev-parse HEAD` quoted next
@@ -291,14 +286,20 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
      previous fix commit rather than to the original work — checkable against
      `git show`, not a vibe. Stop **patching**: revert to the simpler construct, or
      accept and document the residue.
-   - **Non-converging (#2422, #2408):** two successive rounds have each found a
-     **new site of the same class** — one more copy of the same retired claim, one
-     more caller missing the same check, one more doc restating the same number.
+   - **Non-converging:** two successive rounds have each found a **new site of the
+     same class** — one more copy of the same retired claim, one more caller missing
+     the same check, one more doc restating the same number — **and no round has
+     found a defect of a different class.** A round that finds something new *in
+     kind* resets the count, because the rounds are still buying information.
      Stop **chasing**: file a follow-up issue naming the class and the sweep command
      that would enumerate it (the positive-control form in *Acceptance Gate*), quote
-     its number in the PR body, and open. On #2422 (PR #2467) rounds 1 and 2 each
-     found new stale-doc sites of one class; this rule files after round 2 instead
-     of running rounds 3–5. #2408 ran three.
+     its number in the PR body, and open. #2422 (PR #2467) is the shape of the
+     trigger, not a case of it: rounds 1 and 2 each found new stale-doc sites of one
+     class, but round 3 found a mis-fenced block and round 4 the defect that mattered
+     most — an unperformed operator action written as live — so the count reset twice
+     and the rule would never have fired. It converged at round 5 the old way. The
+     reset clause is what keeps this rule from cutting off a PR before its worst bug
+     surfaces.
    - **Both on the same round** (the new site is itself fix-traceable): the
      fix-traceable branch wins — revert first, because a sweep over a construct you
      are about to revert enumerates nothing.

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { Wallet } from 'ethers'
@@ -308,7 +310,12 @@ describe('agent connection setup routes', () => {
     expect(body.setup_prompt).toContain('Only two changes to the command above are permitted, and no others: appending --json')
     expect(body.setup_prompt).toContain('could not determine the agent runtime')
     expect(body.setup_prompt).toContain('Never invent a runtime name')
-    expect(body.setup_prompt).toContain('return to Haven to approve the budget')
+    // #2486: the closing sentence is the prose-mode fallback and says so —
+    // the unconditional "When the connector finishes, tell me to return to
+    // Haven to approve the budget." is gone (see the single-ask test below).
+    expect(body.setup_prompt).toContain(
+      "If you ran the command without --json, the connector waits for the approval itself and prints its next steps when it finishes: relay the budget-approval instruction to me — return to Haven and approve this agent's budget — only if those printed next steps still ask for it. If they report the budget as already approved, there is nothing for me to approve.",
+    )
     // #2483: the --json guidance is a SHOULD addressed to agents, and the
     // approval relay is the first thing it owes the user. Both sentences are
     // pinned literally because the backend is the source of truth for the
@@ -323,13 +330,13 @@ describe('agent connection setup routes', () => {
       "When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.",
     )
     expect(body.setup_prompt).not.toContain('the connector also supports a --json mode')
-    // AC: the relay instruction and the connector-finished instruction stay
+    // AC: the --json relay instruction and the prose-mode fallback stay
     // separate prompt lines, never merged into one multi-action ask (#1542).
     const promptLines = String(body.setup_prompt).split('\n')
     const relayLineIndex = promptLines.findIndex((line: string) => line.startsWith('When a --json outcome reports'))
-    const finishedLineIndex = promptLines.findIndex((line: string) => line.startsWith('When the connector finishes'))
+    const proseLineIndex = promptLines.findIndex((line: string) => line.startsWith('If you ran the command without --json'))
     expect(relayLineIndex).toBeGreaterThanOrEqual(0)
-    expect(finishedLineIndex).toBeGreaterThan(relayLineIndex)
+    expect(proseLineIndex).toBeGreaterThan(relayLineIndex)
     expect(body.setup_prompt).not.toContain('agent rules')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
 
@@ -826,6 +833,95 @@ describe('agent connection setup routes', () => {
       expect(other.command).toBe(none.command)
       expect(other.prompt).toBe(none.prompt)
     }
+
+    await app.close()
+  })
+
+  // ── #2486: the budget-approval relay is asked for ONCE per mode ──
+  //
+  // The prompt serves two run modes with one text. Under --json the connector
+  // returns promptly with `approval.required`; without it the connector blocks
+  // through the approval wait and prints its own next steps. Each mode owns
+  // exactly one relay instruction, scoped by a leading condition, and there is
+  // no unconditional "when the connector finishes, tell me to approve" line —
+  // that line fired twice under --json (finish and outcome are one event) and
+  // fired on approvals that were not needed (re-run, re-key). The guards here
+  // are literal, not sentence-interpreting (#2163 rework cap 1): every line
+  // that carries the relay phrase must begin with one of the two mode
+  // conditions, and there must be exactly one of each.
+  it('tells the agent to relay the budget-approval ask exactly once per mode, and never unconditionally', async () => {
+    const app = await buildApp()
+    primeDb(safeLookup())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: { name: 'Research Agent', safe_id: SAFE.id, allowances: [ALLOWANCE] },
+    })
+    expect(response.statusCode).toBe(201)
+    const promptLines = String(response.json().setup_prompt).split('\n')
+
+    const JSON_MODE_PREFIX = 'When a --json outcome reports approval.required: true, '
+    const PROSE_MODE_PREFIX = 'If you ran the command without --json, '
+    const RELAY_PHRASE = "return to Haven and approve this agent's budget"
+
+    const jsonModeLines = promptLines.filter((line) => line.startsWith(JSON_MODE_PREFIX))
+    const proseModeLines = promptLines.filter((line) => line.startsWith(PROSE_MODE_PREFIX))
+    expect(jsonModeLines).toHaveLength(1)
+    expect(proseModeLines).toHaveLength(1)
+
+    // The relay phrase appears on exactly those two lines and nowhere else —
+    // an unscoped third occurrence is the duplicate this issue removed.
+    const relayLines = promptLines.filter((line) => line.includes(RELAY_PHRASE))
+    expect(relayLines).toEqual([...jsonModeLines, ...proseModeLines])
+
+    // The literal predecessor, and its two halves, are gone. The prompt has
+    // no other legitimate use of either phrase.
+    const prompt = promptLines.join('\n')
+    expect(prompt).not.toContain('When the connector finishes')
+    expect(prompt).not.toContain('return to Haven to approve the budget')
+
+    // The prose-mode line is conditional on the connector's printed next
+    // steps, and names the no-approval-needed case explicitly.
+    expect(proseModeLines[0]).toContain('only if those printed next steps still ask for it')
+    expect(proseModeLines[0]).toContain('If they report the budget as already approved, there is nothing for me to approve.')
+
+    await app.close()
+  })
+
+  // The e2e fixture's `setup_prompt` is a hand-maintained mirror of this
+  // builder's output, and it drifted twice without anything noticing (#2483
+  // caught the relay sentence missing; #2486 found the network-access line
+  // missing too). This pins the mirror to the source: the fixture's literal is
+  // parsed out of the TypeScript file and compared, line for line, against the
+  // prompt the route emits for the fixture's own API URL. The one legitimate
+  // difference — the pasted command, which carries a per-setup token — is
+  // normalised out on both sides.
+  it('matches the e2e fixture setup_prompt mirror line for line (packages/frontend/e2e/fixtures/haven-api.ts)', async () => {
+    const fixtureUrl = new URL('../../../../frontend/e2e/fixtures/haven-api.ts', import.meta.url)
+    const fixtureSource = readFileSync(fixtureUrl, 'utf8')
+    const match = fixtureSource.match(/setup_prompt: \[\n([\s\S]*?)\n\s*\]\.join\('\\n'\)/)
+    expect(match, 'fixture setup_prompt array literal not found').toBeTruthy()
+    // The captured block is an array of plain string literals; evaluate it in
+    // an empty context rather than re-implementing a string-literal parser.
+    const fixtureLines = runInNewContext(`[${match![1]}]`, {}) as string[]
+    expect(Array.isArray(fixtureLines)).toBe(true)
+
+    const app = await buildApp()
+    primeDb(safeLookup())
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { host: 'api.haven.example', 'x-forwarded-proto': 'https' },
+      payload: { name: 'Research Agent', safe_id: SAFE.id, allowances: [ALLOWANCE] },
+    })
+    expect(response.statusCode).toBe(201)
+    const body = response.json()
+    const routeLines = String(body.setup_prompt).split('\n')
+
+    const normaliseCommandLine = (lines: string[]) =>
+      lines.map((line) => (line.startsWith('npx -y ') ? '<connector command>' : line))
+    expect(normaliseCommandLine(fixtureLines)).toEqual(normaliseCommandLine(routeLines))
 
     await app.close()
   })

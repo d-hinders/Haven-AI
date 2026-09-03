@@ -256,6 +256,8 @@ export async function mockHavenApi(page: Page) {
           '',
           'npx -y @haven_ai/connect@alpha --setup hv_setup_e2e123 --api https://api.haven.example --ack-local-tools --runtime claude-code',
           '',
+          'Network access is expected: this command downloads the npm package and contacts the Haven API, so if your environment is sandboxed, run it with network access enabled or request network access escalation; that changes the execution environment, not the command, and is not a third command modification.',
+          '',
           'Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.',
           '',
           'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
@@ -264,7 +266,10 @@ export async function mockHavenApi(page: Page) {
           "When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.",
           'Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.',
           '',
-          'When the connector finishes, tell me to return to Haven to approve the budget.',
+          // #2486: kept line-for-line equal to the backend's `buildSetupPrompt`
+          // by a parity test in packages/backend/src/routes/__tests__/
+          // agent-connection-setups.test.ts — edit the backend first.
+          "If you ran the command without --json, the connector waits for the approval itself and prints its next steps when it finishes: relay the budget-approval instruction to me — return to Haven and approve this agent's budget — only if those printed next steps still ask for it. If they report the budget as already approved, there is nothing for me to approve.",
         ].join('\n'),
       }, 201)
       return

@@ -1112,7 +1112,23 @@ function buildSetupPrompt(command: string, apiUrl: string): string {
     '',
     // #1545: "budget" is the connect flow's one name for the approval gate —
     // the same word the connector's own wait loop and celebration use (#1542).
-    'When the connector finishes, tell me to return to Haven to approve the budget.',
+    // #2486: this is the PROSE-MODE fallback, and it is scoped to that mode.
+    // Its predecessor ("When the connector finishes, tell me to return to
+    // Haven to approve the budget.") was unconditional, which was wrong in
+    // both modes at once: under --json "the connector finishes" and "the
+    // outcome reports approval.required" are ONE event, so an agent obeying
+    // both sentences relayed the same ask twice in one reply; and where no
+    // approval is needed at finish — a re-run against an already-approved
+    // agent, or a re-key — it still demanded one. Without --json the
+    // connector blocks through the approval wait itself and prints next steps
+    // shaped by what that wait saw (`completionHandoffLines` in
+    // packages/connect/src/runtime.ts): "Return to Haven and approve the
+    // budget" while it is still pending, or a confirmation that it is already
+    // approved. The agent has no outcome object to read in that mode, so the
+    // connector's printed next steps are the condition. Each mode now carries
+    // its relay instruction exactly once — the --json sentence above, this
+    // one here — and neither fires on an approval that is not needed.
+    "If you ran the command without --json, the connector waits for the approval itself and prints its next steps when it finishes: relay the budget-approval instruction to me — return to Haven and approve this agent's budget — only if those printed next steps still ask for it. If they report the budget as already approved, there is nothing for me to approve.",
   ].join('\n')
 }
 

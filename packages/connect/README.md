@@ -11,6 +11,15 @@ the private key or plaintext API key.
 npx -y @haven_ai/connect@alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
 ```
 
+`@alpha` is the **production** channel, and the Haven dashboard hands you the
+exact command to run — copy that rather than this one, which uses placeholder
+values. Since #2422 the package in it is per-deployment: the backend's setup
+response names it in `connector_package`, and a non-production deployment can be
+configured to hand out a different channel such as `@haven_ai/connect@dev`.
+Read `connector_package` rather than assuming any particular backend's channel. Pinning `@alpha` by hand against such a backend
+installs a signer that skews against it — the signer refuses to sign an
+`x402_expected_context_version` it does not know.
+
 The connector writes owner-only credential files outside the project by default:
 
 - `~/.haven/agents/<agent-id>/identity.json` contains the Haven API key.
@@ -276,6 +285,10 @@ other:
 npx -y @haven_ai/connect@alpha --setup hv_setup_... --api https://api.haven.example \
   --name research --runtime claude-code
 ```
+
+As above, `@alpha` here is the production channel and the placeholders are
+illustrative: take the package from the setup response's `connector_package`
+and add `--name` to the command the dashboard gave you.
 
 | | Without `--name` | With `--name research` |
 |---|---|---|

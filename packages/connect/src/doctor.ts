@@ -26,6 +26,7 @@
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises'
+import { connectorRerunCommand } from '@haven_ai/sdk'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
@@ -90,7 +91,10 @@ interface IdentityFile {
   hosted_mcp_url?: string
 }
 
-const RERUN = 'npx @haven_ai/connect@alpha'
+// #2423: the channel comes from the SDK's build-time `HAVEN_CONNECTOR_CHANNEL`,
+// so a `@dev` snapshot tells its tester to re-run `@dev` instead of quietly
+// pointing them back at the production connector.
+const RERUN = connectorRerunCommand()
 
 /**
  * Newest agent directory that holds an identity.json, plus every OTHER such

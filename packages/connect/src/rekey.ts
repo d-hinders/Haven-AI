@@ -41,6 +41,7 @@
  */
 
 import { createConnectApiClient, type AgentIdentity, type ConnectApiClient } from './api.js'
+import { connectorRerunCommand } from '@haven_ai/sdk'
 import { writeHostedRuntimeConfig } from './runtime-install.js'
 import { prepareSignerRuntime } from './signer-runtime.js'
 import { generateDelegateKey } from './key.js'
@@ -131,7 +132,7 @@ export async function startRekey(
   })
 
   const finishCommand = [
-    'npx @haven_ai/connect@alpha --rekey-finish',
+    connectorRerunCommand('--rekey-finish'),
     options.serverName ? `--name ${options.serverName}` : undefined,
     '--api-key <the key the dashboard showed you>',
     options.runtime ? `--runtime ${options.runtime}` : '--runtime <your runtime>',

@@ -1,3 +1,4 @@
+import { connectorRerunCommand } from '@haven_ai/sdk'
 import {
   SUPPORTED_SWEEP_BINDING_VERSIONS,
   SUPPORTED_X402_EXPECTED_VERSIONS,
@@ -96,7 +97,7 @@ export function signerInstructions(): string {
     'Haven quote and prepare results report the expected-context version they will emit',
     '(signer_compatibility.x402_expected_context_version). If that version is not in the list',
     'above, this signer is out of date: STOP before signing, and tell the user to update',
-    '@haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`, which reinstalls the pinned',
+    `@haven_ai/signer by rerunning \`${connectorRerunCommand()}\`, which reinstalls the pinned`,
     'MCP runtime. Do not edit the version field to a supported value — it is part of the',
     'Haven-signed binding message, so changing it invalidates the signature.',
     '',

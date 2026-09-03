@@ -1,3 +1,5 @@
+import { HAVEN_CONNECTOR_CHANNEL, connectorRerunCommand } from './connector-channel.js'
+
 // ── Client Configuration ─────────────────────────────────────────
 
 export interface HavenClientConfig {
@@ -707,7 +709,8 @@ export interface HavenAgentSummary extends HavenAgent {
    * Spend-authority readiness: hosted identity + on-chain remaining spend
    * authority. Deliberately named for what it covers — the LOCAL signer's
    * availability is NOT included and must be verified separately (a signer
-   * tool call, or `npx @haven_ai/connect@alpha --doctor`).
+   * tool call, or the connector's `--doctor`, whose exact command this build
+   * renders from `HAVEN_CONNECTOR_CHANNEL` — see `connector-channel.ts`).
    */
   spend_authority_readiness: HavenAgentReadiness
   allowances: HavenAgentAllowanceSummary[]
@@ -1801,10 +1804,24 @@ export type SignerRefusalCode = (typeof SignerRefusalCode)[keyof typeof SignerRe
  * this sentence is exactly how the two surfaces could start disagreeing about
  * what to do.
  */
-export const SIGNER_UPDATE_FALLBACK =
-  'Update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`, which reinstalls the ' +
-  'pinned MCP runtime, then retry the same signing call. Nothing was signed or spent — the ' +
-  'quote or payment this version came from is unaffected and does not need to be re-quoted.'
+export function signerUpdateFallback(channel: string = HAVEN_CONNECTOR_CHANNEL): string {
+  return (
+    `Update @haven_ai/signer by rerunning \`${connectorRerunCommand(undefined, { channel })}\`, which reinstalls the ` +
+    'pinned MCP runtime, then retry the same signing call. Nothing was signed or spent — the ' +
+    'quote or payment this version came from is unaffected and does not need to be re-quoted.'
+  )
+}
+
+/**
+ * The same sentence rendered for THIS build's channel (#2423). Every existing
+ * consumer keeps importing this constant and keeps getting a string; the only
+ * thing that moved is that `alpha` is no longer typed into it.
+ *
+ * The hosted MCP server is the one caller that does NOT use this constant: it
+ * is deployed rather than published, so it renders `signerUpdateFallback()`
+ * with the channel its own environment names.
+ */
+export const SIGNER_UPDATE_FALLBACK = signerUpdateFallback()
 
 /**
  * Thrown by the local signer when a Haven-signed binding (x402 expected

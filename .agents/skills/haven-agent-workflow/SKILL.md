@@ -32,6 +32,30 @@ For every worker, state:
 
 Do not assign overlapping writes. Workers report required shared changes instead of expanding scope. The captain integrates, reviews, and owns all git mutations.
 
+## Isolate every review pass (#2455)
+
+The captain makes the review root, and makes it with **`git worktree add` or
+`git clone` — never `cp -R`**. A worktree's `.git` is a file pointing at the
+parent repository's gitdir, so a `cp -R` copy reads its **files** from a frozen
+snapshot while every `git diff`/`show`/`log`/`status` answers from the
+**builder's live repository**. That produced a false blocking finding and a
+false caveat in the opposite direction on the same day (#2415, #2444, #2421).
+Restricting the reviewer's *paths* does not fix it: such a copy reports its own
+path as the toplevel and still reads the live tree.
+
+Before handing a root over, prove it:
+
+```bash
+HEAD_SHA=$(git -C <review-root> rev-parse HEAD)
+node scripts/ci/review-isolation.mjs <review-root> --builder <builder-tree> --expect-head "$HEAD_SHA"
+```
+
+Give the reviewer the root, that SHA, and the frozen base SHA the guard prints;
+require all three back in the verdict. **Re-run the same command after the pass
+returns** — an unchanged `--expect-head` is the evidence that the tree did not
+move under the review. #2415 caught exactly that drift by luck; this is the
+command form of the same catch.
+
 Follow [the full Haven agent workflow](../../../docs/contributing/ai-agent-workflow.md) and the repository instructions in `AGENTS.md`. Load product, regulatory, and surface playbooks only when the task triggers them.
 
 ## Closeout

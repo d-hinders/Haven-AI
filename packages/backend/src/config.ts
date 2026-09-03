@@ -96,8 +96,17 @@ export function parseTrustProxyHops(raw: string | undefined): number {
 export const CONNECTOR_CHANNEL_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
 export const DEFAULT_CONNECTOR_CHANNEL = 'alpha'
 
-export function parseConnectorChannel(raw: string | undefined): string {
-  if (raw === undefined) return DEFAULT_CONNECTOR_CHANNEL
+// `null` is accepted alongside `undefined` (#2423). a raw environment read is only ever
+// `string | undefined`, so this is unreachable from the sole call site below —
+// but `resolveConnectorChannel` in `@haven_ai/sdk` reads the same variable and
+// DOES accept `null`, and on `null` this function used to throw a raw
+// `TypeError: Cannot read properties of null (reading 'trim')` instead of the
+// designed refusal message. Two readers of one variable that disagree on an
+// input is the divergence the cross-package agreement test in
+// `__tests__/connector-channel.test.ts` exists to prevent, so the gap is closed
+// rather than documented: found by review, and that test now covers `null`.
+export function parseConnectorChannel(raw: string | undefined | null): string {
+  if (raw === undefined || raw === null) return DEFAULT_CONNECTOR_CHANNEL
   const value = raw.trim()
   if (value === '') return DEFAULT_CONNECTOR_CHANNEL
   if (!CONNECTOR_CHANNEL_PATTERN.test(value)) {

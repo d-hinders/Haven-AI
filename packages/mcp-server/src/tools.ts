@@ -13,7 +13,7 @@ import {
   HavenClient,
   HavenError,
   HavenPaymentStateError,
-  SIGNER_UPDATE_FALLBACK,
+  signerUpdateFallback,
   composeDescription,
   discoverMerchantMcpUrl,
   resolveTokenFromAddress,
@@ -36,6 +36,7 @@ import {
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
+import { HOSTED_CONNECTOR_CHANNEL, hostedConnectorRerunCommand } from './connector-channel.js'
 import { z } from 'zod/v3'
 
 /**
@@ -3140,7 +3141,13 @@ function buildX402SigningContext(
  * in `@haven_ai/signer`) remains the only place an unsupported version is
  * actually enforced.
  */
-function signerCompatibilityNotice(emittedVersion: number) {
+// Exported for `connector-channel.test.ts` (#2423), which asserts the
+// deployment's channel reaches this notice. The existing coverage runs through
+// `haven_pay_x402_quote`; that path cannot be re-entered under a different
+// environment without reloading this whole module, so the guard calls the
+// builder directly. mcp-server is deployed, not published, so this widens no
+// npm surface.
+export function signerCompatibilityNotice(emittedVersion: number) {
   return {
     x402_expected_context_version: emittedVersion,
     signer_capability: SIGNER_CAPABILITY_KEY,
@@ -3152,14 +3159,17 @@ function signerCompatibilityNotice(emittedVersion: number) {
     check:
       'The signer enforces this version itself (#1547): on its version-mismatch refusal ' +
       '(code/supported_versions/fallback), STOP before signing again and update @haven_ai/signer ' +
-      'by rerunning `npx @haven_ai/connect@alpha`. Never edit the version — it is Haven-signed, ' +
+      `by rerunning \`${hostedConnectorRerunCommand()}\`. Never edit the version — it is Haven-signed, ` +
       'so changing it invalidates the signature. Nothing has been spent at this point.',
     // #1309: the SAME recovery guidance as `check` above, as structured data
     // instead of prose to parse — and the SAME string
     // `assertSupportedBindingVersion` in `@haven_ai/signer` puts on its
     // structured refusal's `fallback` field when this version turns out to be
-    // unsupported. Single source: `SIGNER_UPDATE_FALLBACK` in `@haven_ai/sdk`.
-    fallback: SIGNER_UPDATE_FALLBACK,
+    // unsupported. Single source: `signerUpdateFallback` in `@haven_ai/sdk` —
+    // the same sentence, rendered for THIS deployment's connector channel
+    // (#2423) rather than the SDK build's, because a hosted server is deployed
+    // per environment while the signer is published per release.
+    fallback: signerUpdateFallback(HOSTED_CONNECTOR_CHANNEL),
   }
 }
 

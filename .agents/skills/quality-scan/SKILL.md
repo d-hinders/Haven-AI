@@ -243,7 +243,9 @@ cannot tell a live copy from a historical one re-files them.
 # Terms: the identifiers the last removal epic's shards list as deleted
 # (#1440 / #2055 today — update the list when the next epic retires more).
 T='executeAllowanceTransfer|generateTransferHash|hasTokenAllowanceConfigured|decideCoverage|legacy-authorize|allowance-nonce|safe_approver_metadata|approval_requests|pendingApprovals|approval queue'
-rg -l -i "$T" docs packages .agents scripts -g '*.md' -g '*.ts' -g '*.tsx' -g '*.mjs' -g '*.json' -g '!node_modules' -g '!**/dist/**' | sort > "$SCRATCH/rv-files.txt"
+# The skill file holds this very list, so it is excluded: an instrument that
+# counts itself reports one live copy on a clean tree.
+rg -l -i "$T" docs packages .agents scripts -g '*.md' -g '*.ts' -g '*.tsx' -g '*.mjs' -g '*.json' -g '!node_modules' -g '!**/dist/**' -g '!.agents/skills/quality-scan/SKILL.md' | sort > "$SCRATCH/rv-files.txt"
 # Positive control: the shards that RECORD the deletion must match, so a zero
 # here means the instrument is broken, not that the residue is gone.
 rg -l -i "$T" docs/regulatory/casp-changelog | wc -l
@@ -261,8 +263,8 @@ Clean: positive control > 0, and every live file is either a guard that names
 the term to assert its absence (a `*retired*.test.ts`, a banned-list) or a
 `status: current` doc that describes the term as history in the same
 sentence. Report the live files by class with the top counts. On
-`893d74f6`: positive control 31 shards; 177 files carry a copy — 39
-historical, 138 live — backend tests and `openapi/spec.ts` lead;
+`893d74f6`: positive control 31 shards; 176 files carry a copy — 39
+historical, 137 live — backend tests and `openapi/spec.ts` lead;
 `docs/architecture/03-payment-sequence.md` is `status: current` with 10
 copies.
 
@@ -271,15 +273,23 @@ is squash; 44% of the wave's landings arrived as merge commits, which is what
 made the promotion recipes and the head-SHA reads go wrong (#1173, #2116).
 
 ```bash
-# Sample: every first-parent landing on dev in the window.
-git log --first-parent origin/dev --since=2026-08-10 --format=%s | awk '/^Merge pull request/{m++} /\(#[0-9]+\)$/{s++} END{print "merge-commit:",m+0,"squash:",s+0,"total:",NR}'
-git log --first-parent origin/dev --since=2026-08-10 --format='%h %ad %s' --date=short | grep ' Merge pull request' | head -5
+# Sample: every first-parent landing on dev in the window. Record the SHA
+# the counts were taken at — dev moves between a fetch and a report, and a
+# figure without its SHA cannot be re-taken (this block's first draft quoted
+# counts from one fetch and a PR list from the previous one). The window is
+# an explicit instant: a bare `--since=2026-08-10` is a git approxidate that
+# takes the CURRENT time of day, so the same SHA counted 257, 256 and 255
+# over one evening.
+git rev-parse --short origin/dev
+git log --first-parent origin/dev --since=2026-08-10T00:00:00Z --format=%s | awk '/^Merge pull request/{m++} /\(#[0-9]+\)$/{s++} END{print "merge-commit:",m+0,"squash:",s+0,"total:",NR}'
+git log --first-parent origin/dev --since=2026-08-10T00:00:00Z --format='%h %ad %s' --date=short | grep ' Merge pull request' | head -5
 ```
 
 Clean: `merge-commit: 0` in the window. Report the rate and the five most
 recent wrong-method landings by PR number and date. On `893d74f6`, since
-2026-08-10: 257 merge-commit, 345 squash, 605 total; the latest five are
-#2494, #2493, #2479, #2480 and #2481, all on 2026-09-03.
+2026-08-10T00:00:00Z: 274 merge-commit, 346 squash, 623 total (3 subjects
+match neither shape); the latest five are #2494, #2493, #2479, #2480 and
+#2481, all on 2026-09-03.
 
 **6. Nets with holes — each gate's allowlist vs the content class it checks.**
 #2317, #2333, #2318, #2088, #1903, #1896 and #2300 were each a gate green on

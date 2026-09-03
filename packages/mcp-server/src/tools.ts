@@ -512,23 +512,35 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
  *     do not read the paragraph above as "the guidance is still wrong, so we
  *     still cannot" — that premise is spent.
  *
- *     What gates the switch now is ROLLOUT, not correctness. The skill is
- *     AUTO-INSTALLED on the caller's machine, so an unknown number of agents
- *     carry the OLD copy on disk right now; flipping this tool strict before
- *     the corrected copy propagates would still turn Haven's own documented
- *     flow into a hard 400 for every one of them — and now for a reason that
- *     no longer exists anywhere in this repository, which is the harder
- *     failure to diagnose, not the easier one. #2353 stays OPEN for exactly
- *     that decision and owns the switch; the propagation evidence is what it
- *     is waiting on, not another guidance fix. Related: #2366 (converge the
- *     local and hosted argument spellings) and #2349 (batch 3).
+ *     What gated the switch was ROLLOUT, and #2353's switch PR (2026-09-03)
+ *     resolved it: the corrected skill shipped to npm in
+ *     `@haven_ai/sdk@0.1.34-alpha.0` (2026-09-01T19:21Z, the `alpha` dist-tag
+ *     `npx @haven_ai/connect@alpha` resolves), which carries #2359's
+ *     corrected auto-installed copy. The tool now REFUSES `payment_required`
+ *     — see STRICT_INPUT_TOOLS below for the reasoning that moved it, and
+ *     note the refusal covers the direct `createToolHandlers` path too,
+ *     because `parseStrict` reads the same list. The residual risk — agents
+ *     still carrying a pre-0.1.34 installed copy on disk — is recorded in the
+ *     STRICT_INPUT_TOOLS entry and the #2353 PR. The tests that used to pin
+ *     the two halves apart have been flipped to pin the switch itself:
+ *     `strict-tool-input.test.ts`'s former `#2353` strip block now asserts
+ *     the refusal over the same transport, and #2363's block pins the
+ *     corrected skill literals the refusal presumes. Related: #2366 (converge
+ *     the local and hosted argument spellings) and #2349 (batch 3).
  *
  *     Both halves of that premise are pinned, not merely written down.
  *     `packages/sdk/src/skill-content.test.ts` asserts the deleted imperative
  *     stays deleted and the correction stays present; the `#2363` block in
  *     `strict-tool-input.test.ts` re-asserts the same two literals HERE, so a
  *     revert of the skill text goes red in the suite of the file that carries
- *     this exclusion rather than only in the SDK's.
+ *     this tool's input decision rather than only in the SDK's.
+ *
+ *     This bullet no longer argues for an exclusion — the switch landed in
+ *     the same PR that resolved the rollout question, recorded below in
+ *     STRICT_INPUT_TOOLS. It is kept under this heading rather than deleted
+ *     so a reader reaching it from the #2312 story finds the reversal where
+ *     they would look for the exclusion.
+ *
  *   - `haven_get_agent`, `haven_get_allowances` — schema `{}`, decided in
  *     #2349 rather than deferred by it. Their entries in
  *     `PERMISSIVE_INPUT_TOOLS` below carry the reasoning; the short form is
@@ -580,6 +592,22 @@ export const STRICT_INPUT_TOOLS = {
   haven_settle_mcp_tool:
     'The MCP call context is rehydrated from payment_id when you omit it, and this tool funds before ' +
     'it delivers — an unrecognised key must not be dropped on the way to a transfer.',
+  // #2353's switch (2026-09-03). The clearest rehydration case on the hosted
+  // surface: payment_id, merchant_url, tool_name, arguments, mcp_transport,
+  // payment_header — and since #1307 the 402 itself is rehydrated from the
+  // payment record. The shipped SKILL.md USED to tell agents to pass
+  // `payment_required` here (fixed by #2359, shipped to npm in
+  // @haven_ai/sdk@0.1.34-alpha.0 on 2026-09-01), which is why this tool was
+  // the last money-path tool left permissive: a refusal would have been a
+  // hard 400 on Haven's own documented flow for every agent still carrying
+  // the old auto-installed copy. That rollout window has closed; what remains
+  // is agents on pre-0.1.34 copies, who now get a refusal that NAMES the key
+  // and says where the value actually comes from, instead of a silent strip
+  // that let them believe they had pinned the 402 they quoted.
+  haven_complete_mcp_tool:
+    'The merchant call context AND the 402 are rehydrated from the payment record by payment_id; ' +
+    'this tool does not take payment_required — an unrecognised key must not be dropped on the way ' +
+    'to a merchant call that spends against a 402 the caller never saw.',
   // ── #2348, the camelCase crossover ──────────────────────────────────────
   // Each message NAMES the local spelling, the way MCP_TRANSPORT_CASE_HINT
   // does for mcp_transport (#2282): the value of refusing here is telling a
@@ -704,13 +732,6 @@ export const PERMISSIVE_INPUT_TOOLS = {
   haven_get_allowances:
     'Schema {}: the handler reads no input, so strictness can protect nothing, and a ' +
     'supported runtime (Cursor) decorates no-argument calls with a dummy key.',
-  // The rollout blocker, exactly as the doc block above records it (#2353,
-  // corrected by #2363): the corrected SKILL.md copy is auto-installed and an
-  // unknown number of agents still carry the old one, which told them to pass
-  // an undeclared `payment_required`. #2353 owns the switch.
-  haven_complete_mcp_tool:
-    'Rollout: previously installed copies of SKILL.md pass an undeclared payment_required; ' +
-    '#2353 owns the switch once the corrected copy has propagated.',
 } as const satisfies Partial<Record<HostedToolName, string>>
 
 export type PermissiveInputToolName = keyof typeof PERMISSIVE_INPUT_TOOLS
@@ -1999,7 +2020,12 @@ export function createToolHandlers(
 
     haven_complete_mcp_tool: async (input) =>
       runTool(async () => {
-        const args = parse('haven_complete_mcp_tool', input)
+        // #2353's switch: parseStrict, like every other strict tool's handler —
+        // the transport-level registration refuses an undeclared key for MCP
+        // callers, and this is the second line for an embedder that imports
+        // `createToolHandlers` directly, where no MCP SDK validation runs.
+        // Both layers read their refusal text from STRICT_INPUT_TOOLS.
+        const args = parseStrict('haven_complete_mcp_tool', input)
         return deliverMerchantPayment(haven, args)
       }),
 

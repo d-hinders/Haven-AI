@@ -142,6 +142,28 @@ Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../
 
 ## Independent Review
 
+**Before any pass runs, make each reviewer's tree and prove it (#2455).** Use
+`git worktree add` or `git clone` — **never `cp -R`**, whose failure is silent and was
+misread three times in two days. Then check it rather than assert it:
+
+```bash
+HEAD_SHA=$(git -C <review-root> rev-parse HEAD)
+node scripts/ci/review-isolation.mjs <review-root> --builder <builder-tree> --expect-head "$HEAD_SHA"
+```
+
+The guard refuses a root whose **git view does not match its file view** — the
+`cp -R`-of-a-worktree case, where the files are a frozen snapshot while every
+`git diff`/`show`/`log`/`status` answers from the live repository, so a builder's
+addition reads as a deletion. It also refuses the builder's own tree, a stale baseline,
+and a HEAD that is not the one under review, and it prints the **frozen base SHA** the
+reviewer must diff against instead of a ref name. Hand the reviewer the root, the head
+and that base; require all three back in the verdict. **Re-run the identical command
+when the pass returns** — an unchanged `--expect-head` is what makes the verdict a claim
+about a tree that stood still. A refusal is not a thing to work around: re-make the root.
+The mechanism and the guard's two limits are in
+[`ai-agent-workflow.md` § Review Isolation](../../../docs/contributing/ai-agent-workflow.md#review-isolation-2455);
+do not restate them here.
+
 1. Review the complete candidate change against `origin/dev`, including staged changes, unstaged tracked changes, and untracked files. If review happens after committing, inspect `git diff origin/dev...HEAD` and separately inspect any later working-tree changes. Never use a committed range that omits the current candidate diff. Use the reviewer role from [haven-agent-workflow](../haven-agent-workflow/SKILL.md); delegate to an independent reviewer when supported, otherwise perform a distinct findings-first review pass. **For `area:frontend` diffs, run a second, rendered pass** with the [design-reviewer role](../haven-agent-workflow/references/design-reviewer.md) (`haven-design-reviewer`) over the #896 screenshots — code review and visual review are complementary, and a finding from either trips the frontend merge gate (see [`frontend.md`](../../../docs/contributing/ship-playbooks/frontend.md) §5–6).
 2. Apply clear, scoped blocking and should-fix findings, then rerun affected checks.
    **A fixed finding is not a cleared finding until the same reviewer says so.** Re-run the

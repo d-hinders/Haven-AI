@@ -53,6 +53,10 @@ const VALID_ARGS: Record<StrictInputToolName, Record<string, unknown>> = {
   haven_report_x402_outcome: { payment_id: 'pay_x402', outcome: 'rejected', merchant_status: 402 },
   haven_submit: { payment_id: 'pay_1', signature: '0x' + 'ab'.repeat(32) },
   haven_settle_mcp_tool: { payment_id: 'pay_1', signature: '0x' + 'ab'.repeat(32) },
+  // #2353's switch — the rehydration pair is enough to reach the handler (the
+  // omitted merchant_url/tool_name take the rehydration branch, which issues
+  // its GET), which is what the "still accepts its own arguments" loop reads.
+  haven_complete_mcp_tool: { payment_id: 'pay_1', payment_header: 'x402-header' },
   // #2348 — the camelCase crossover four.
   haven_send: { asset: 'USDC', recipient: '0xabc', amount: '1' },
   haven_pay_mcp_tool: { merchant_url: 'http://merchant.test/mcp', tool_name: 'buy', max_amount_human: '1' },
@@ -124,6 +128,9 @@ const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   haven_report_x402_outcome: 'tx_hash',
   haven_submit: 'amount',
   haven_settle_mcp_tool: 'merchant_address',
+  // #2353: the exact undeclared key the shipped SKILL.md used to instruct —
+  // not an invented typo, the original defect itself.
+  haven_complete_mcp_tool: 'payment_required',
   haven_send: 'idempotencyKey',
   haven_pay_mcp_tool: 'idempotencyKey',
   // The local surface's local-ONLY field, not a case variant: refusing it is
@@ -237,11 +244,11 @@ describe('#2312 strict hosted tool input — over the real MCP transport', () =>
     // widened without deciding to. The decorated key is the one a supported
     // runtime is documented adding to parameterless tools (Cursor's
     // `random_string`), so this is the live shape, not an invented one.
-    // haven_complete_mcp_tool is pinned here for a sharper reason: it was in
-    // batch 1 until the shipped agent skill was found telling agents to pass it
-    // an undeclared `payment_required` (#2353), and the corrected skill copy
-    // is still propagating, so its permissiveness is a DECISION.
-    for (const permissive of ['haven_get_agent', 'haven_get_allowances', 'haven_complete_mcp_tool']) {
+    // haven_complete_mcp_tool was pinned here until #2353's switch PR moved it
+    // to STRICT_INPUT_TOOLS (2026-09-03): its permissiveness used to be a
+    // DECISION (the auto-installed SKILL.md propagated past a would-be
+    // refusal); the #2353 block below now pins the refusal that replaced it.
+    for (const permissive of ['haven_get_agent', 'haven_get_allowances']) {
       expect(Object.keys(STRICT_INPUT_TOOLS)).not.toContain(permissive)
       expect(Object.keys(PERMISSIVE_INPUT_TOOLS)).toContain(permissive)
     }
@@ -390,21 +397,24 @@ describe('#2349 — the cap refusals stay reachable behind strict', () => {
 })
 
 /**
- * #2353 — the measured half of the CONTROL above.
+ * #2353 — the SWITCH, measured over the real transport.
  *
- * The control asserts `haven_complete_mcp_tool` is absent from
- * `STRICT_INPUT_TOOLS`, which pins the DECISION. This block pins the
- * BEHAVIOUR that decision produces, over the same real transport, using the
- * exact call Haven's shipped `SKILL.md` used to instruct: `payment_required`
- * alongside the declared arguments.
+ * History of this block: it began as the measured half of the CONTROL above —
+ * a characterization test pinning the silent strip that
+ * `haven_complete_mcp_tool`'s deliberate permissiveness produced, so the
+ * eventual strictness switch could not land by accident without coming here.
+ * #2359 fixed the shipped SKILL.md guidance and #2353's switch PR (2026-09-03)
+ * then moved the tool to STRICT_INPUT_TOOLS once the corrected copy had
+ * shipped to npm (@haven_ai/sdk@0.1.34-alpha.0, 2026-09-01T19:21Z), so this
+ * block now pins the opposite behaviour — and it goes red if anyone ever
+ * reverts the tool to permissive, in the file that carries the switch.
  *
- * It is a characterization test of a live permissive path, not an endorsement
- * of it. Its job is to make the silent strip visible and to make the eventual
- * strictness switch impossible to land by accident: the day
- * `haven_complete_mcp_tool` joins `STRICT_INPUT_TOOLS`, this goes red and
- * whoever flips it has to come here and say so.
+ * The args are the ones the OLD skill copy instructed (payment_required
+ * alongside the declared arguments), kept as the live regression shape: an
+ * agent still carrying a pre-0.1.34 installed copy sends exactly this and
+ * must now meet a refusal that names the key, before the handler runs.
  */
-describe('#2353 — haven_complete_mcp_tool silently drops `payment_required` today', () => {
+describe('#2353 — haven_complete_mcp_tool REFUSES `payment_required` over the transport', () => {
   const SKILL_INSTRUCTED_ARGS = {
     payment_id: 'pay_1',
     payment_header: 'x402-header',
@@ -415,20 +425,32 @@ describe('#2353 — haven_complete_mcp_tool silently drops `payment_required` to
     mcp_transport: { handshake_required: false, source: 'path' },
   } as const
 
-  it('accepts the undeclared key at the transport and never carries it anywhere', async () => {
+  it('the undeclared key is refused at the transport and never reaches the handler', async () => {
     const client = await connectedClient()
     const { text } = await callToolText(client, 'haven_complete_mcp_tool', {
       ...SKILL_INSTRUCTED_ARGS,
       payment_required: { accepts: [{ amount: '1000000', payTo: '0xMERCHANT' }] },
     })
 
-    // 1. No refusal: validation let the undeclared key through, stripped.
+    // 1. Refused, and the refusal names the key rather than shrugging — an
+    //    agent carrying the old skill copy is told exactly what is wrong.
+    expect(text).toContain('payment_required')
+    expect(text.toLowerCase()).toContain('unrecognized')
+    // 2. The load-bearing half: nothing was read and nothing was written. The
+    //    merchant call spends against the RECORDED 402 (rehydrated by
+    //    payment_id since #1307); a refusal that still made its Haven calls
+    //    would be a strip with a grumble, not a refusal.
+    expect(fetches).toEqual([])
+  })
+
+  it('the same call WITHOUT the undeclared key still reaches the handler', async () => {
+    // The other half of the mutation-proof: strictness must not take the
+    // documented flow down with it. All-declared args pass validation and
+    // reach Haven — the explicit-context branch of resolveMerchantCallContext
+    // (merchant_url + tool_name supplied), so no rehydration GET appears.
+    const client = await connectedClient()
+    const { text } = await callToolText(client, 'haven_complete_mcp_tool', SKILL_INSTRUCTED_ARGS)
     expect(text.toLowerCase()).not.toContain('unrecognized')
-    expect(text).not.toContain('payment_required')
-    // 2. The call reached the handler and talked to Haven — a strip, not a
-    //    refusal. This is what makes the defect silent: the agent's call
-    //    SUCCEEDS at the transport, so nothing tells it the 402 it pinned was
-    //    discarded.
     expect(fetches.length).toBeGreaterThan(0)
   })
 
@@ -513,6 +535,12 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
     // loops above self-scope to whatever STRICT_INPUT_TOOLS holds, so a
     // deletion removes its own tests; this is what makes that deletion red.
     for (const tool of [
+      // #2353's switch (2026-09-03) — the last money-path tool to leave the
+      // permissive set, after #2359's corrected SKILL.md had shipped to npm
+      // (0.1.34-alpha.0, 2026-09-01). Pinned as a literal for the same reason
+      // as the rest of this list: the loops self-scope, so only a literal
+      // assertion goes red when the entry is deleted.
+      'haven_complete_mcp_tool',
       'haven_sweep_delegate',
       'haven_pay',
       'haven_quote_mcp_tool',
@@ -528,10 +556,10 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
     ]) {
       expect(Object.keys(STRICT_INPUT_TOOLS)).toContain(tool)
     }
-    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(19)
-    // And the three deliberate exclusions, as a literal list for the same reason.
+    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(20)
+    // And the two deliberate exclusions, as a literal list for the same reason.
     expect(Object.keys(PERMISSIVE_INPUT_TOOLS).sort()).toEqual(
-      ['haven_complete_mcp_tool', 'haven_get_agent', 'haven_get_allowances'],
+      ['haven_get_agent', 'haven_get_allowances'],
     )
   })
 
@@ -624,23 +652,25 @@ describe('#2312 — strictness does not change what is advertised', () => {
 })
 
 /**
- * #2363 — the `haven_complete_mcp_tool` exclusion's PREMISE, pinned where the
- * exclusion lives.
+ * #2363 — the premise the `haven_complete_mcp_tool` reasoning rests on,
+ * pinned where that reasoning lives.
  *
- * `STRICT_INPUT_TOOLS`' doc block argues, in prose, that this tool stays
- * permissive because the shipped `SKILL.md` USED TO instruct an undeclared
- * `payment_required` — past tense since #2359 fixed it — and that what now
- * gates the switch is ROLLOUT of the corrected copy, not its correctness.
- * That argument is only as good as its premise, and #2363 exists because the
- * premise changed under the comment and nothing said so.
+ * `STRICT_INPUT_TOOLS`' doc block argues, in prose, from what the shipped
+ * `SKILL.md` did and does say: that it USED TO instruct an undeclared
+ * `payment_required` (fixed by #2359), and — since #2353's switch PR moved
+ * the tool to STRICT_INPUT_TOOLS on 2026-09-03 — that the corrected copy is
+ * what the refusal now presumes. That argument is only as good as its
+ * premise, and #2363 exists because the premise changed under the comment and
+ * nothing said so.
  *
  * `packages/sdk/src/skill-content.test.ts` already pins both literals, and
  * it is the primary guard — this is deliberately the SAME two assertions, not
  * a better one. What it adds is WHERE it goes red: a revert of the skill text
- * fails the suite of the file carrying the exclusion, with a message naming
- * the comment, so whoever repairs the skill is told the rationale above needs
- * re-reading too. Cross-package by design; `@haven_ai/sdk` is already a
- * dependency of this package and already imported at the top of this file.
+ * fails the suite of the file carrying the tool's input decision, with a
+ * message naming the comment, so whoever repairs the skill is told the
+ * rationale above needs re-reading too. Cross-package by design;
+ * `@haven_ai/sdk` is already a dependency of this package and already
+ * imported at the top of this file.
  *
  * Two literals, no sentence interpretation — `ship-next` § Rework caps rule 1.
  * The broader "check skill prose against tool schemas" guard was prototyped
@@ -648,7 +678,7 @@ describe('#2312 — strictness does not change what is advertised', () => {
  * `docs/product/copy-guidelines.md` § Enforcement). This is the cheap literal
  * floor under human review, never a substitute for it.
  */
-describe('#2363 — the shipped skill still matches what the exclusion comment claims', () => {
+describe('#2363 — the shipped skill still matches what the switch comment claims', () => {
   const completeSection = HAVEN_SKILL_MD.slice(HAVEN_SKILL_MD.indexOf('haven_complete_mcp_tool'))
 
   it('CONTROL: the skill really does discuss haven_complete_mcp_tool', () => {
@@ -666,22 +696,30 @@ describe('#2363 — the shipped skill still matches what the exclusion comment c
 
   it('the deleted imperative stays deleted, so the comment\'s past tense stays true', () => {
     // If this fails: `SKILL.md` tells agents to pass `payment_required` again,
-    // so the STRICT_INPUT_TOOLS bullet's "that guidance is FIXED" is false and
-    // the blocker is correctness again, not rollout. Fix both.
+    // so the refusal now hard-400s Haven's own documented flow and the
+    // STRICT_INPUT_TOOLS entry's "the guidance is FIXED" premise is false.
+    // Fix both — and re-derive whether the tool can stay strict at all.
     expect(completeSection).not.toMatch(/Pass\s+`payment_required`/)
   })
 
-  it('the correction stays present, so the rollout framing keeps its subject', () => {
-    // If this fails: there is no corrected copy to propagate, and "what gates
-    // the switch is ROLLOUT" in the STRICT_INPUT_TOOLS bullet has nothing to
-    // refer to.
+  it('the correction stays present, so the switch comment keeps its subject', () => {
+    // If this fails: there is no corrected copy for the refusal to presume,
+    // and the STRICT_INPUT_TOOLS entry's propagation record (0.1.34-alpha.0)
+    // has nothing to refer to.
     expect(completeSection).toMatch(/does not take\s+`payment_required`/)
     expect(completeSection).toMatch(/`payment_id`\s+and the signer's\s+`payment_header`\s+ONLY/)
   })
 
-  it('and the tool it argues about is still permissive', () => {
-    // The comment justifies an EXCLUSION. If the tool ever joins the set, this
-    // whole block is about a decision that was reversed.
-    expect(Object.keys(STRICT_INPUT_TOOLS)).not.toContain('haven_complete_mcp_tool')
+  it('and the refusal it argues for is in force — the switch has landed', () => {
+    // This block once pinned the EXCLUSION (not.toContain): the comment
+    // justified keeping the tool permissive, and #2363's job was to keep that
+    // argument honest. #2353's switch PR (2026-09-03) resolved the rollout
+    // question — the corrected skill shipped in @haven_ai/sdk@0.1.34-alpha.0
+    // (2026-09-01T19:21Z) — and the pin flipped with the decision it tracks.
+    // The whole block now argues for the INCLUSION; if the tool ever leaves
+    // the set again, this is where that reversal must be re-decided, and the
+    // STRICT_INPUT_TOOLS comment re-read with it.
+    expect(Object.keys(STRICT_INPUT_TOOLS)).toContain('haven_complete_mcp_tool')
+    expect(Object.keys(PERMISSIVE_INPUT_TOOLS)).not.toContain('haven_complete_mcp_tool')
   })
 })

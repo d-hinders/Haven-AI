@@ -51,7 +51,7 @@ describe('structured Connect CLI output', () => {
 describe('--json wiring for the approval wait (#1377 D)', () => {
   // The one-line pass-through the review flagged as untested: flipping this
   // boolean would make automation runs block for the full 3-minute bound.
-  it('passes waitForApproval:false under --json and true (default wait) without it', async () => {
+  it('passes waitForApproval:false under --json and unspecified (TTY-gated) without it', async () => {
     const seen: Array<boolean | undefined> = []
     const spy = vi.spyOn(runtime, 'runConnect').mockImplementation(async (options) => {
       seen.push(options.waitForApproval)
@@ -64,7 +64,9 @@ describe('--json wiring for the approval wait (#1377 D)', () => {
     } finally {
       spy.mockRestore()
     }
-    expect(seen).toEqual([false, true])
+    // #2484: prose stays UNDEFINED so runConnect's stdout-TTY narration gate
+    // decides (a non-TTY prose run skips the wait; a real terminal waits).
+    expect(seen).toEqual([false, undefined])
   })
 })
 

@@ -48,6 +48,7 @@ export function restartCopyForRuntime(runtime: string): string | null {
 export function runtimeStatusLabel(install: AgentConnectionSetupStatusResponse['install_status']): string {
   if (!install) return 'Checking runtime setup'
   if (install.error_code) return 'Needs attention'
+  if (install.manual_credential_fallback) return 'Manual credential ready'
   if (install.restart_required && runtimeIsConfigured(install)) return 'Restart ready'
   if (runtimeIsConfigured(install)) return 'Configured'
   if (install.credential_files_written) return 'Credentials stored locally'
@@ -75,6 +76,9 @@ export function runtimeStatusHelper(
   connectorPackage?: string,
 ): string {
   if (!install) return 'Haven is waiting for the connector to report setup status.'
+  if (install.manual_credential_fallback) {
+    return 'Save the one-time credential in the trusted agent workspace before using Haven tools.'
+  }
   if (install.error_code === 'local_mcp_ack_required') return 'Haven tools need one-time acknowledgement before this agent can load them.'
   if (install.error_code === 'local_signer_ack_required') return 'Local signing needs one-time acknowledgement before this agent can load Haven tools.'
   if (install.error_code === 'local_mcp_unsupported_node_version') return 'Update Node.js to version 22 or newer, then run the setup command again.'

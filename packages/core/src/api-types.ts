@@ -2504,6 +2504,7 @@ export type components = {
             signer_acknowledged?: boolean;
             local_mcp_acknowledged?: boolean;
             activation_command_available?: boolean;
+            manual_credential_fallback?: boolean;
             skill_installed?: boolean;
             probe_result?: string;
             restart_required?: boolean;

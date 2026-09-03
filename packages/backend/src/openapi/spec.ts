@@ -5861,6 +5861,12 @@ export const openapiSpec = {
           local_mcp_acknowledged: { type: 'boolean' },
           activation_command_available: { type: 'boolean' },
           /**
+           * True when the browser-hosted manual credential fallback created
+           * this setup. The user must still save the one-time credential and
+           * approve the normal owner-signed agent budget.
+           */
+          manual_credential_fallback: { type: 'boolean' },
+          /**
            * #1445: the connector reports this and the backend persists it
            * (`agent-connection-setup.ts`), but the schema omitted it — and this
            * schema is `additionalProperties: false`, so the spec actively

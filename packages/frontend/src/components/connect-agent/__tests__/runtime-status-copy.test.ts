@@ -187,3 +187,17 @@ describe('runtimeStatusHelper takes the connector spec from the server (#2422)',
     expect((helper.match(/`/g) ?? []).length).toBe(2)
   })
 })
+
+describe('manual credential fallback status (#2472)', () => {
+  const manualFallback = {
+    ...installWith(''),
+    error_code: null,
+    manual_credential_fallback: true,
+  }
+
+  it('does not claim the runtime was automatically configured', () => {
+    expect(runtimeStatusLabel(manualFallback)).toBe('Manual credential ready')
+    expect(runtimeStatusHelper(manualFallback)).toContain('trusted agent workspace')
+    expect(runtimeStatusHelper(manualFallback)).not.toContain('configured')
+  })
+})

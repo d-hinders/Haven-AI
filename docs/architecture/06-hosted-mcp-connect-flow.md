@@ -56,8 +56,11 @@ permissions require action by the Safe owner outside Haven.
 1. The user chooses the Haven wallet, agent rules, and agent budget.
 2. Haven creates a pending setup and returns a setup token and connector
    command.
-3. The connector runs locally, generates the delegate signing key and API key,
-   and stores both in protected local runtime configuration.
+3. The connector normally runs locally, generates the delegate signing key and
+   API key, and stores both in protected local runtime configuration. If it
+   cannot connect, the explicit warning-gated browser fallback may generate a
+   one-time credential for the user to save in the trusted agent workspace. It
+   is marked as a manual credential rather than as a configured local runtime.
 4. Registration sends only the setup token, runtime/version metadata, public
    signing address and proof, API-key hash/prefix, and the MCP server name the
    connector wired this agent as (`haven`, or `haven-<slug>` — a display label
@@ -77,7 +80,10 @@ it. Normal setup links and snippets may contain hosted identity configuration,
 but never a delegate key. A separate manual-recovery fallback may display a
 one-time delegate private key only after the user explicitly chooses that
 warning-gated recovery path; it is not part of hosted setup or routine
-connection snippets.
+connection snippets. Its registration records the public address, proof,
+API-key hash/prefix, and a non-secret manual-fallback marker only. That marker
+does not create authority or activate the agent: the user still makes the same
+owner-signed budget delegation in step 5.
 
 ## Direct payment
 

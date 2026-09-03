@@ -23,6 +23,8 @@ const SETUP = {
   expires_at: EXPIRES_AT,
   status: 'awaiting_connection',
   connector_command: 'npx @haven_ai/connect@alpha --token hv_setup_test',
+  // #2422: the spec on its own, mirroring what the backend now returns.
+  connector_package: '@haven_ai/connect@alpha',
 } satisfies CreateSetupResponse
 
 function renderWaiting(

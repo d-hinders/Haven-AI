@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// `last-verified` chain-integrity check (#1843).
+// `last-verified` chain-integrity check (#1843, extended by #2477).
 //
 // ## The defect this exists for
 //
@@ -31,6 +31,27 @@
 // does not. #1843 proposed the stricter order-preserving SUBSEQUENCE; the
 // measurement that rejected it is recorded on `checkChain` below.
 //
+// ## #2477 — the check was blind to the OPPOSITE failure
+//
+// The containment rule only detects entries going MISSING. A merge that
+// CONCATENATED the chain instead of interleaving it (entry A then entry B,
+// twice) loses nothing, so every "did we drop history" question answers yes
+// and the gate reports `✓ chains intact` on a chain that has doubled. #2477's
+// incident: `docs/operations/mcp-runtime-compatibility.md`'s `last-verified`
+// line reached 774,483 bytes on `dev` through repeated concatenation, all of it
+// invisible to the containment check.
+//
+// So the gate now also asks two questions of the CANDIDATE line itself
+// (`chainAnomalies`):
+//
+//   1. does the same ENTRY — same leading issue ref AND same prose — appear
+//      more than once? (A concatenating merge produces exactly that; legitimate
+//      interleaving never does, because every entry's prose is written once.)
+//   2. does the raw line exceed `MAX_CHAIN_BYTES` (64 KiB)? A cheap backstop:
+//      duplication shows up as growth long before anyone reads the entries.
+//
+// Both are hard failures (exit 1), reported like the existing "broken" status.
+//
 // Deliberately narrow: this is not a general "did prose disappear" detector.
 // It targets the one line where a lost entry is provable rather than guessed,
 // and it stays silent everywhere else. See docs/contributing/docs-quality-system.md.
@@ -42,7 +63,10 @@
 //   last-verified: "2026-08-22" # chain-reset(#1843): <why> …
 //
 // The check then passes and PRINTS the dropped references, so the deletion
-// appears in the run log instead of vanishing.
+// appears in the run log instead of vanishing. The escape hatch covers a
+// DROP — compaction — not duplication: a concatenated chain that stays over
+// the byte ceiling is still reported, because a reset does not make a doubled
+// line smaller.
 //
 // Usage:
 //   npm run docs:chain                       # part of `npm run docs:check`
@@ -102,6 +126,52 @@ export function issueRefs(line) {
 }
 
 /**
+ * THE ENTRY TEXT of a chain line, split on the convention's own separator.
+ *
+ * A `last-verified` chain is a sequence of ENTRIES — one re-verification note
+ * per issue — joined by the `Prior:` chain-word: "#1816: … Prior: #1800: …".
+ * The separator is the chain's own structure, NOT every `#NNN`: an entry's
+ * prose routinely cites other issues ("#1816: §4 reuses #1800's mechanism"),
+ * so splitting on every ref would invent entries and mis-fire the duplicate
+ * check on citations that were never separate entries.
+ *
+ * Two boundary variants exist in the wild:
+ *   - `Prior: #2242` — the dominant form.
+ *   - `Prior #2242` — a bare variant seen in the older tail (#1508), which
+ *     only differs by the missing colon, so it is normalized before splitting.
+ *
+ * The pre-convention tail of some chains (entries from before the `Prior:`
+ * separator took hold) is crammed without separators; those old entries stay
+ * inside one segment. That is a deliberate limit, not a quiet bug — a
+ * concatenation that duplicates the chain duplicates its segments verbatim,
+ * so a doubled crammed tail is still caught as a byte-identical duplicate.
+ */
+export function chainEntries(line) {
+  const m = line.match(/^last-verified:\s*"[^"]*"\s*#\s?(.*)$/)
+  if (!m) return []
+  return m[1]
+    .replace(/\bPrior\s+#/g, 'Prior: #') // bare "Prior #N" boundary variant
+    .split(/\s+Prior:\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+/**
+ * The entry's head — the leading ref CLUSTER for issue entries ("#2100/#2101
+ * (+#2098)"), or the release token for release entries ("0.1.31-alpha.0").
+ * The issue's subtlety: an entry's leading ref is its IDENTITY; refs cited in
+ * its prose belong to OTHER entries and must not make this entry look
+ * duplicated. headOf reads only the ref at the very start of the entry text.
+ */
+export function headOfEntry(entry) {
+  const m = entry.match(/^#(\d+)((?:\/#\d+)*)(\s*\(\s*\+\s*#\d+(?:\s*\/\s*#\d+)*\s*\))?/)
+  if (m) return `#${m[1]}${m[2] || ''}${m[3] ? m[3].replace(/\s+/g, '') : ''}`
+  const rel = entry.match(/^(?:Release\s+)?([0-9]\.[0-9][^\s:]*)/)
+  if (rel) return rel[1]
+  return null
+}
+
+/**
  * The escape hatch is the documented MARKER SYNTAX, not the word. A bare
  * `/chain-reset\b/` would let a note that merely discusses chain resets in
  * prose ("clarified when a chain-reset is not needed") excuse a real deletion —
@@ -144,6 +214,66 @@ export function checkChain(prevLine, nextLine) {
   if (dropped.length === 0) return { status: 'ok', dropped: [] }
   if (CHAIN_RESET_RE.test(nextLine)) return { status: 'reset', dropped }
   return { status: 'broken', dropped }
+}
+
+/**
+ * Size-ceiling backstop (#2477). The chain line is one line in a front-matter
+ * comment — nearly every parser that reads the doc reads the whole line, so a
+ * runaway chain shows up as startup cost on every tool and every agent session
+ * long before anyone reads the entries. A concatenating merge doubles the line
+ * at once, exactly the growth nothing else in this check is shaped to notice.
+ *
+ * 64 KiB is just under 1.5× the largest healthy chain in the repo today
+ * (docs/product/design-system.md, 44.8 KB) and would have gone red on the
+ * actual incident curve: the mcp-runtime-compatibility chain sat at 34 KB when
+ * it was clean (2026-08-27), and the first concatenating merge took it to
+ * 172 KB in a single commit (2026-08-28). A chain that legitimately grows past
+ * it is itself a decision worth making on purpose, and there is no plain-word
+ * escape hatch: `chain-reset(#N)` is documented for compaction, and a reset
+ * does not make a doubled line smaller than the ceiling.
+ */
+export const MAX_CHAIN_BYTES = 64 * 1024
+
+/**
+ * Pure core for the #2477 direction: the OPPOSITE failure of #1843, one entry
+ * appearing twice where the check's containment rule can only see losses.
+ *
+ * `checkChain` compares ref PRESENCE, and `issueRefs` de-duplicates to first
+ * occurrence — so a merge that CONCATENATED the chain (entry A then entry B,
+ * twice) loses nothing, every "did we drop history" question answers yes, and
+ * the gate reported `✓ chains intact` on a chain that had doubled. This check
+ * asks the other question: does the candidate line contain the same ENTRY — the
+ * same leading issue ref AND the same prose — more than once?
+ *
+ * Entries are split the way the chain is actually structured (`chainEntries`):
+ * on the `Prior:` chain-word, never on raw `#NNN` — an entry's prose routinely
+ * cites other issues, and a citation is not a separate entry. Two entries are
+ * duplicates only when their FULL text (leading ref + prose) is byte-identical,
+ * which is exactly what a concatenating merge produces and what legitimate
+ * interleaving never does: every entry's prose is written once, per issue.
+ *
+ * Returns { duplicates: [{ head, count, excerpt }], tooLarge: null | { bytes,
+ * maxBytes } }.
+ *  - duplicates — entries whose text occurs > 1× on the line, with the entry's
+ *                 head (leading ref cluster, or release token) and occurrence
+ *                 count.
+ *  - tooLarge   — the raw line length over the ceiling.
+ */
+export function chainAnomalies(line, maxBytes = MAX_CHAIN_BYTES) {
+  const counts = new Map()
+  for (const entry of chainEntries(line)) {
+    counts.set(entry, (counts.get(entry) || 0) + 1)
+  }
+  const duplicates = []
+  for (const [text, count] of counts) {
+    if (count < 2) continue
+    duplicates.push({ head: headOfEntry(text), count, excerpt: text.slice(0, 96) })
+  }
+  duplicates.sort((a, b) => b.count - a.count)
+  return {
+    duplicates,
+    tooLarge: line.length > maxBytes ? { bytes: line.length, maxBytes } : null,
+  }
 }
 
 function isDocPath(p) {
@@ -281,8 +411,16 @@ async function main() {
     if (prevLine === nextLine) continue
     compared++
     const result = checkChain(prevLine, nextLine)
-    if (result.status === 'broken') failures.push({ rel, ...result })
+    if (result.status === 'broken') failures.push({ rel, kind: 'dropped', ...result })
     if (result.status === 'reset') resets.push({ rel, ...result })
+    // #2477: the opposite failure — an entry appearing twice (a chain that was
+    // CONCATENATED instead of interleaved), plus the size-ceiling backstop.
+    // `chainAnomalies` judges the CANDIDATE line itself, not a prev→next
+    // difference: a concatenating merge produces a line that is broken on its
+    // own, and no "did we drop anything" comparison can see it.
+    const anomalies = chainAnomalies(nextLine)
+    if (anomalies.duplicates.length) failures.push({ rel, kind: 'duplicated', duplicates: anomalies.duplicates })
+    if (anomalies.tooLarge) failures.push({ rel, kind: 'oversize', ...anomalies.tooLarge })
   }
 
   for (const r of resets) {
@@ -292,9 +430,17 @@ async function main() {
   }
 
   if (failures.length) {
-    console.error(`\n✗ \`last-verified\` chain broken in ${failures.length} doc(s):\n`)
+    const failedDocs = new Set(failures.map((f) => f.rel))
+    console.error(`\n✗ \`last-verified\` chain unhealthy in ${failedDocs.size} doc(s):\n`)
     for (const f of failures) {
-      console.error(`  - ${f.rel}: dropped ${f.dropped.join(', ')} from the chain`)
+      if (f.kind === 'duplicated') {
+        const det = f.duplicates.map((d) => `${d.head} ×${d.count}`).slice(0, 8).join(', ')
+        console.error(`  - ${f.rel}: ${det}${f.duplicates.length > 8 ? ' …' : ''} — same entry (leading ref + prose) appears more than once`)
+      } else if (f.kind === 'oversize') {
+        console.error(`  - ${f.rel}: chain line is ${f.bytes} bytes — over the ${f.maxBytes}-byte ceiling`)
+      } else {
+        console.error(`  - ${f.rel}: dropped ${f.dropped.join(', ')} from the chain`)
+      }
     }
     console.error(
       '\nA `last-verified` note line is a chain, one entry per issue that verified ' +
@@ -302,8 +448,15 @@ async function main() {
       'drafts of one — chain them, never choose one (#1496). If you are resolving ' +
       'a conflict, restore the entry AND the paragraph it points at: the entry ' +
       'going missing usually means prose went with it (#1843).\n' +
+      'The chain must hold each entry ONCE: a merge that concatenated the chain ' +
+      'instead of interleaving it doubles entries that were never two findings, ' +
+      'the line grows without bound, and every reader pays the cost (#2477). ' +
+      'Deduplicating a provenance chain needs a rule for which copy survives — ' +
+      'that repair is a decision, not something this gate performs on its own.\n' +
       'A genuinely intended compaction says so on the line: ' +
-      '`last-verified: "…" # chain-reset(#<issue>): <why>`.\n',
+      '`last-verified: "…" # chain-reset(#<issue>): <why>`. ' +
+      'A line that simply exceeds the byte ceiling has no plain-word escape: it ' +
+      'must actually be reduced.\n',
     )
     process.exit(1)
   }

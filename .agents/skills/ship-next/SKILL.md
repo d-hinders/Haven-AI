@@ -293,13 +293,17 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
      issue naming the class and the sweep command that would enumerate it (the
      positive-control form in *Acceptance Gate*), quote its number in the PR body,
      and open. If it finds a defect of a **different class**, the count resets to
-     zero. This costs at most one round over the naive stop-after-two, and that
-     round is the price of not cutting a PR off before its worst bug: on #2422
-     (PR #2467) rounds 1 and 2 each found new stale-doc sites of one class; the one
-     extra round, round 3, found a mis-fenced block — different class, reset — and
-     round 4 then caught an unperformed operator action written as live, the
-     defect that mattered most. #2408 ran three rounds of one class and would have
-     filed after the third.
+     zero — **even if that round also found more of the same class.** This costs
+     at most one round over the naive stop-after-two, and that round is the price
+     of not cutting a PR off before its worst bug. PR #2467 (#2422) is the case,
+     in its own words: "Round 1 found 2 stale docs; round 2 found 3 more; round 3
+     found a mis-fenced block of my own making plus the npm README; round 4 found
+     two more sites plus the correction below; round 5 found the last one and
+     **no new site of the earlier class**, which is what said the set had
+     converged." Rounds 1–2 are the two same-class rounds; round 3 is the one
+     extra, and it found a different class alongside more of the same — reset;
+     round 4 found "the correction below", the PR's most important defect, again
+     alongside more of the same — reset again.
    - **Both on the same round** (the new site is itself fix-traceable): the
      fix-traceable branch wins — revert first, because a sweep over a construct you
      are about to revert enumerates nothing.
@@ -605,12 +609,17 @@ gh pr view <pr> --json autoMergeRequest --jq .autoMergeRequest.mergeMethod
 `SQUASH` or empty proceeds; **`MERGE` (or `REBASE`) refuses** — `gh pr merge <pr>
 --disable-auto`, re-arm with `--squash`, run the command again. A report that says
 "armed" without that output has not checked. The checkable basis is four named
-landings: three wrong-method arms disarmed by hand on 2–3 Sep (#2428, #2460, #2493,
-each with the disarming comment on the PR) and #2438, which merged as a merge commit
-before it was reached. Those four carry the rule. If you census the history as well,
+landings — #2428, #2460, #2493 and #2438 — every one of which reached `dev` as a
+two-parent merge commit (`git rev-list --parents -n1 <merge-sha>` prints three
+hashes for each). Three of them carry a disarming comment on the PR ("disarmed
+auto-merge … it was armed with `mergeMethod: MERGE`", 2–3 Sep) and landed wrong
+anyway: a disarm not followed by a squash re-arm and a read-back changes nothing.
+Those four carry the rule. If you census the history as well,
 **pin the instant** — a bare `--since=<date>` is a git approxidate resolved against
 the wall clock *now*, so the same SHA counts differently every hour of the evening
-(measured on this rule's own draft: 258, 257, 256 for one SHA across one session):
+(this rule's own draft read 258 and then 256 for one SHA in one session; PR #2506's
+body records the same defect independently: "a bare `--since=2026-08-10` is a git
+approxidate that takes the *current time of day*"):
 
 ```bash
 git log <sha> --first-parent --since=2026-08-10T00:00:00Z --oneline | grep -c '^[0-9a-f]* Merge pull request'

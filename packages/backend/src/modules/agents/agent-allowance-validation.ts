@@ -105,7 +105,7 @@ function normalizeAllowanceAmount(input: unknown): ValidationResult<string> {
     return { ok: false, error: 'Allowance amount must be a positive decimal atomic amount' }
   }
   if (amount > MAX_UINT96) {
-    return { ok: false, error: 'Allowance amount exceeds uint96 AllowanceModule limit' }
+    return { ok: false, error: 'Allowance amount exceeds the uint96 enforcer limit' }
   }
   return { ok: true, value: amount.toString() }
 }

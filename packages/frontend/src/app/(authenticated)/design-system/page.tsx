@@ -1782,13 +1782,12 @@ export default function DesignSystemPage() {
 
       <Section
         title="Info modals (InfoStep + InfoNote)"
-        description="Multi-step explainer modals (Contacts info, Using your agent) use the paged InfoModal primitive. Inside each page, compose with `InfoStep` for numbered explanations and `InfoNote` for footnotes / tinted asides — both export from `@/components/InfoModal`."
+        description="Multi-step explainer modals (Using your agent) use the paged InfoModal primitive. Inside each page, compose with `InfoStep` for numbered explanations and `InfoNote` for footnotes / tinted asides — both export from `@/components/InfoModal`."
       >
         <Card hover={false} className="p-5">
           <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
-            Open <code className="rounded bg-[var(--v2-surface)] px-1">UsingYourAgentInfo</code> or{' '}
-            <code className="rounded bg-[var(--v2-surface)] px-1">ContactsInfo</code> from the dashboard to
-            see them in flight. Helpers in <code className="rounded bg-[var(--v2-surface)] px-1">InfoModal.tsx</code>:
+            Open <code className="rounded bg-[var(--v2-surface)] px-1">UsingYourAgentInfo</code> from the
+            dashboard to see it in flight. Helpers in <code className="rounded bg-[var(--v2-surface)] px-1">InfoModal.tsx</code>:
           </p>
           <ul className="mt-3 space-y-1.5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
             <li>

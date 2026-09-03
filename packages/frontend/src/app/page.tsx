@@ -34,7 +34,7 @@ const HAVEN_MODEL = [
   },
   {
     title: 'A policy engine',
-    body: 'Every payment is checked against your rules before it moves. Spending limits, approved currencies, approval thresholds. Your policies, enforced before the transaction is sent.',
+    body: 'Every payment is checked against your rules before it moves. Spending limits, approved currencies, allowed recipients. Your policies, enforced before the transaction is sent.',
   },
   {
     title: 'A scoped agent credential',
@@ -82,7 +82,7 @@ const DIFFERENTIATORS = [
   },
   {
     title: 'Layered security',
-    body: 'Five independent layers protect your account: your rules, your agent credentials, your approval flows, and a full audit trail. No single point of failure.',
+    body: 'Five independent layers protect your account: the account itself, your rules, your agent credentials, on-chain refusal of anything outside them, and a full audit trail. No single point of failure.',
   },
   {
     title: 'Live today',

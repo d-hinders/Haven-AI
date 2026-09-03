@@ -17,7 +17,7 @@ const TIMELINE = [
   { step: '01', label: 'Agent requested premium research data', detail: 'GET api.research.example/query?q=…', tone: 'neutral' },
   { step: '02', label: 'Server responded 402 Payment Required', detail: '0.05 USDC on Base → 0x4F3e…3bcFc', tone: 'warning' },
   { step: '03', label: 'Agent forwarded challenge to Haven', detail: 'POST /x402/authorize · sk_agent_d4c8…9f', tone: 'brand' },
-  { step: '04', label: 'Rules checked', detail: 'Per‑payment limit · network allowlist · allowance', tone: 'brand' },
+  { step: '04', label: 'Rules checked', detail: 'Period budget · network allowlist · allowed recipient', tone: 'brand' },
   { step: '05', label: 'Rules cleared; agent signed the transfer', detail: 'sign_hash 0x8b2f4e93…2c6d4e8f', tone: 'brand' },
   { step: '06', label: 'Settled to the merchant on Base', detail: 'Haven account → merchant · USDC', tone: 'brand' },
   { step: '07', label: 'Confirmed in block 14,892,103', detail: 'tx 0x7a9e3b1d…b6c7d8e9 · gas 41,228', tone: 'success' },
@@ -159,7 +159,7 @@ const data = await fetch(url, {
             Build an agent that pays its own way.
           </h2>
           <p className="text-[15px] text-[var(--v2-ink-2)] mb-8">
-            Rules, approvals, and receipts included. Keys optional.
+            Rules, limits, and receipts included. Keys optional.
           </p>
           <Button href="/signup" size="lg" trailingIcon>Get early access</Button>
         </div>

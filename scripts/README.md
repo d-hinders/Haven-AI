@@ -108,6 +108,30 @@ Add `--yes` to skip the interactive confirmation prompt (useful in automated con
 npm run release:bump -- prerelease --yes
 ```
 
+#### `--snapshot` — the dev channel, and why it is not a release
+
+`--snapshot` marks a **dev-channel snapshot** run ([#2421](https://github.com/d-hinders/Haven-AI/issues/2421), epic [#2420](https://github.com/d-hinders/Haven-AI/issues/2420)). It is used in exactly one place — `.github/workflows/publish.yml`, on a push to `dev` — and it is not a thing to run by hand:
+
+```sh
+# What CI runs, in a checkout it then throws away. Nothing is committed.
+node scripts/release-bump.mjs "$(node scripts/release-snapshot-version.mjs "$(git rev-parse --short=7 HEAD)")" --yes --snapshot
+```
+
+Everything that makes the bump atomic runs identically in both modes — the versions, the cross-package pins, the source constants, the runtime manifest, the ordered rebuild and the bundle verification. That is the whole reason the snapshot job reuses this script instead of setting versions by hand: the version lattice is not a list of numbers, and hand-setting it breaks the pins that make an installed snapshot internally consistent. What `--snapshot` changes is only the sign-off, which otherwise tells the operator to write a CASP shard and open a release PR — instructions with no tree to apply them to.
+
+The **version-shape check is bidirectional**, and the second half is the one that protects production:
+
+| Invocation | Version | Result |
+|---|---|---|
+| `--snapshot` | `0.0.0-dev.<YYYYMMDDHHMM>.<shortsha>` | proceeds |
+| `--snapshot` | anything else | **refused** — CI would publish a real version out of an unreviewed `dev` commit |
+| no `--snapshot` | `0.0.0-dev.*` | **refused** — a snapshot committed to a release branch would ride the `dev → main` promotion onto the production channel |
+| no `--snapshot` | anything else | proceeds |
+
+The shape and both halves of the check live in `scripts/release-snapshot-version.mjs`, so the workflow that *produces* the version and the script that *validates* it cannot drift apart. `0.0.0-` sorts below every real version, so no `^0.1.x` range resolves to a snapshot by accident.
+
+The check here is the third of three enforcement points for one invariant: **a snapshot must never be able to land on `alpha` or `latest`, and the `main` path must never publish a `0.0.0-dev.*` version.** The other two are in `publish.yml` — a ref/channel mismatch refusal, and an assertion immediately before every publish. See that file's header comment; it is written once there rather than restated here.
+
 ### What the script does (in order)
 
 1. **Read** current version from `packages/sdk/package.json`.
@@ -165,8 +189,13 @@ git commit -m "chore(release): bump all published packages to <new-version>"
 git push -u origin release/<new-version>
 gh pr create --base dev --fill
 
-# 4. Merge to `dev`. NOTHING PUBLISHES HERE. Publishing happens on the later
-#    `dev → main` promotion (a separate, human step).
+# 4. Merge to `dev`. NO RELEASE PUBLISHES HERE. The release goes out on the
+#    later `dev → main` promotion (a separate, human step).
+#
+#    Since #2421 this merge DOES publish a dev-channel snapshot under the
+#    `dev` dist-tag, at a 0.0.0-dev.* version built in a throwaway tree. It is
+#    not this release, it cannot become this release, and it moves neither
+#    `alpha` nor `latest` -- see `--snapshot` above.
 
 # 5. Promote `dev → main`. On push to main, the Publish packages workflow
 #    rebuilds dist in dependency order and publishes only the packages whose

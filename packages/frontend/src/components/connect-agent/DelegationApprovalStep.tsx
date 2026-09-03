@@ -129,6 +129,7 @@ export function DelegationApprovalStep({
           <ConnectionVerificationFooter
             delegateAddress={status.delegate_address ?? null}
             install={status.install_status}
+            connectorPackage={status.connector_package}
           />
         }
       />

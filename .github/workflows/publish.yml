@@ -1,28 +1,72 @@
 name: Publish packages
 
-# Merge-triggered npm publish for the five npx-installed packages.
+# Merge-triggered npm publish for the five npx-installed packages, on TWO
+# channels out of ONE file.
 #
-# Fires on push to main when any published package changes. For each package it
-# compares the package.json version against what is live on npm and publishes
-# only the ones whose version is not yet on the registry. The version bump
-# itself (produced by `npm run release:bump` and merged via a reviewed PR) is
-# the gate — npm rejects republishing an existing version, so a normal commit
-# that does not bump a version is a no-op here.
+#   push to `main` → PROD channel (unchanged). For each package it compares the
+#     package.json version against what is live on npm and publishes only the
+#     ones whose version is not yet on the registry. The version bump itself
+#     (produced by `npm run release:bump` and merged via a reviewed PR) is the
+#     gate — npm rejects republishing an existing version, so a normal commit
+#     that does not bump a version is a no-op here. The dist-tag is derived
+#     from the version: a prerelease publishes under its prerelease label
+#     (alpha), a stable version under latest.
+#
+#   push to `dev` → DEV channel (#2421, epic #2420). The job computes
+#     0.0.0-dev.<YYYYMMDDHHMM>.<shortsha>, runs `release-bump.mjs --snapshot`
+#     over the CI checkout WITHOUT committing anything, and publishes all five
+#     packages under the `dev` dist-tag. `0.0.0-` sorts below every real
+#     version, so no `^0.1.x` range can resolve to a snapshot by accident.
+#     The bump script is reused rather than five versions being set by hand
+#     because the version lattice is not five numbers: connect pins exact
+#     sibling versions in runtime-manifest.ts, the signer installs into a
+#     version-named directory, and five source constants are baked into the
+#     bundles. The script rewrites all of it atomically and verifies the connect
+#     bundle; the job then throws the tree away.
+#
+# WHY ONE FILE AND NOT TWO. npm Trusted Publishing pins each package's
+# trusted-publisher entry to the repository AND the workflow FILENAME. A second
+# workflow would need five new trusted-publisher entries created on npm before
+# it could authenticate at all. Extending this file with a condition on the ref
+# needs none — which is why #2420 made "same file" an invariant rather than a
+# preference.
+#
+# THE INVARIANT, stated once: a snapshot may reach only the `dev` dist-tag, and
+# the prod channel may never publish a 0.0.0-dev.* version. It is enforced in
+# three independent places, because they fail differently:
+#
+#   1. "Resolve the publish channel" refuses a ref/channel mismatch. This is the
+#      only route by which dev-branch code could be published under `alpha`: a
+#      workflow_dispatch of channel=prod on the `dev` ref would skip the
+#      snapshot bump and publish the committed release version under its own
+#      prerelease tag. Nothing downstream can see that this happened, because
+#      by then the version and tag look entirely ordinary.
+#   2. assert_publish_allowed() runs immediately before EVERY `npm publish`, so
+#      there is no path to the registry that goes around it.
+#   3. scripts/release-bump.mjs refuses a 0.0.0-dev.* version unless it is given
+#      --snapshot — the other side of the same wall, keeping a snapshot version
+#      from being committed to a release branch and riding the dev → main
+#      promotion into alpha/latest.
+#
+# The committed contract doc docs/operations/mcp-runtime-compatibility.md stays
+# PROD-only. Its Supported Runtime Manifest table is rewritten by the bump
+# script, which on the dev channel happens in the throwaway tree; there is
+# deliberately no docs check run against that tree, and nothing is committed
+# from it.
 #
 # Authenticates to npm via Trusted Publishing (OIDC) — no NPM_TOKEN secret.
-# Each package must have a trusted publisher configured on npm pointing at this
-# repo + workflow filename (publish.yml). OIDC tokens are short-lived, so there
-# is nothing to leak or rotate, and publishes are exempt from the 2FA OTP prompt
-# that blocks token-based publishes. Requires npm >= 11.5.1 (installed below)
-# and the `id-token: write` permission granted to the job.
+# OIDC tokens are short-lived, so there is nothing to leak or rotate, and
+# publishes are exempt from the 2FA OTP prompt that blocks token-based
+# publishes. Requires npm >= 11.5.1 (installed below) and the `id-token: write`
+# permission granted to the job.
 #
 # mcp-server, backend, and frontend are intentionally excluded: they are not
 # published to npm (mcp-server is Docker-deployed; backend/frontend deploy to
-# Railway/Vercel from main).
+# Railway/Vercel from main, and to the dev environment from dev).
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'packages/sdk/**'
       - 'packages/signer/**'
@@ -30,9 +74,21 @@ on:
       - 'packages/connect/**'
       - 'packages/cli/**'
   workflow_dispatch:
+    inputs:
+      channel:
+        description: >-
+          Publish channel. `auto` derives it from the ref (main → prod, dev →
+          dev). Naming it explicitly is a CROSS-CHECK, not an override: a
+          mismatch with the ref fails the run.
+        type: choice
+        options: [auto, dev, prod]
+        default: auto
 
 concurrency:
-  group: publish-packages
+  # Per-ref (#2421). Publishes on the same channel still serialize exactly as
+  # before; what changes is that a stream of dev snapshots can no longer sit in
+  # front of a production promotion.
+  group: publish-packages-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -42,7 +98,7 @@ jobs:
     # the trusted publisher accepts.
     if: github.repository == 'd-hinders/Haven-AI'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     permissions:
       contents: read
@@ -50,6 +106,36 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve the publish channel
+        id: channel
+        # Enforcement point 1 of 3 (see the header). Both inputs arrive through
+        # the environment rather than being interpolated into the script body.
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REQUESTED: ${{ inputs.channel || 'auto' }}
+        run: |
+          set -euo pipefail
+
+          case "$REF_NAME" in
+            main) derived=prod ;;
+            dev)  derived=dev ;;
+            *)
+              echo "GUARD: refusing to publish from ref '$REF_NAME' — only 'main' (prod) and 'dev' (snapshots) may publish." >&2
+              exit 1
+              ;;
+          esac
+
+          if [ "$REQUESTED" != "auto" ] && [ "$REQUESTED" != "$derived" ]; then
+            echo "GUARD: channel mismatch — ref '$REF_NAME' is the '$derived' channel, but '$REQUESTED' was requested." >&2
+            echo "A 'prod' run on 'dev' would skip the snapshot bump and publish the committed" >&2
+            echo "release version under its own prerelease tag, putting unreviewed dev-branch" >&2
+            echo "code on the channel users install from. That is what this refusal exists for." >&2
+            exit 1
+          fi
+
+          echo "channel=$derived" >> "$GITHUB_OUTPUT"
+          echo "Publishing on the '$derived' channel (ref '$REF_NAME', requested '$REQUESTED')."
 
       - uses: actions/setup-node@v4
         with:
@@ -65,13 +151,52 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Bump the throwaway tree to a snapshot version and build
+        if: steps.channel.outputs.channel == 'dev'
+        # DEV CHANNEL ONLY. release-bump.mjs performs the dist wipe, the
+        # ordered rebuild (sdk → signer → mcp → connect) and
+        # verify-connect-bundle.mjs itself, so the prod build step below is not
+        # repeated here — running both would rebuild from an already-bumped
+        # tree for no benefit.
+        #
+        # NOTHING IS COMMITTED. The bump rewrites package versions, pins,
+        # source constants, connect's runtime-manifest and the contract-doc
+        # table in place; the checkout is discarded with the runner. The
+        # `git status` below is printed so that claim is checkable in the log
+        # rather than merely asserted here.
+        run: |
+          set -euo pipefail
+
+          version="$(node scripts/release-snapshot-version.mjs "$(git rev-parse --short=7 HEAD)")"
+          echo "Snapshot version: $version"
+
+          node scripts/release-bump.mjs "$version" --yes --snapshot
+
+          # release-bump.mjs WIPES packages/cli/dist and does not rebuild it —
+          # its builds exist to verify the connect bundle, and cli inlines
+          # nothing that check looks at (scripts/README.md says so, and says
+          # not to "correct" it). On the PROD channel that is harmless because
+          # the build step below rebuilds every published package from a clean
+          # checkout. Here the bump IS the build, so without this line the
+          # snapshot would publish @haven_ai/cli with an empty `dist` — its
+          # `files` ships dist and its `main` points into it.
+          npm run build -w packages/cli
+
+          echo "HAVEN_PUBLISH_TAG=dev" >> "$GITHUB_ENV"
+
+          echo "--- working tree after the bump (intentionally dirty, never committed) ---"
+          git status --porcelain
+          echo "--- end of tree state ---"
+
       - name: Build published packages in dependency order
-        # dist is not committed (it ships via the `files` field) and there are
-        # no prepublishOnly hooks, so the tarball is only correct if we build
-        # here. The dist-wipe + ordered build mirrors release-bump.mjs and
-        # avoids the build-order bug where connect's tsup inlines a stale
-        # MCP_VERSION from a leftover dist (connect's build also runs
-        # verify-connect-bundle.mjs, which fails the job if that happens).
+        if: steps.channel.outputs.channel == 'prod'
+        # PROD CHANNEL ONLY, and unchanged. dist is not committed (it ships via
+        # the `files` field) and there are no prepublishOnly hooks, so the
+        # tarball is only correct if we build here. The dist-wipe + ordered
+        # build mirrors release-bump.mjs and avoids the build-order bug where
+        # connect's tsup inlines a stale MCP_VERSION from a leftover dist
+        # (connect's build also runs verify-connect-bundle.mjs, which fails the
+        # job if that happens).
         run: |
           rm -rf packages/sdk/dist packages/signer/dist packages/mcp/dist packages/connect/dist packages/cli/dist
           npm run build -w packages/sdk
@@ -81,6 +206,8 @@ jobs:
           npm run build -w packages/cli
 
       - name: Publish packages whose version is not yet on npm
+        env:
+          HAVEN_PUBLISH_CHANNEL: ${{ steps.channel.outputs.channel }}
         # One package's failure must not abort the rest (#1159): the loop
         # attempts every package, records each outcome, writes a per-package
         # table to the run summary, and only then exits non-zero naming the
@@ -90,6 +217,59 @@ jobs:
         run: |
           set -euo pipefail
 
+          channel="$HAVEN_PUBLISH_CHANNEL"
+
+          # ── Enforcement point 2 of 3 (#2421) ───────────────────────────────
+          # Called immediately before every `npm publish`, on both channels, so
+          # no route to the registry goes around it. Deliberately NOT wrapped in
+          # the per-package failure isolation below: a package failing to
+          # publish is an incident, but a channel/version/tag combination that
+          # should be impossible is a defect in this file, and continuing to the
+          # next package would publish four more of them.
+          #
+          # Both directions are real, and they are not symmetry for its own
+          # sake:
+          #   dev  + a tag other than `dev`  → an unreviewed dev commit lands on
+          #                                    the channel users install from
+          #   prod + a 0.0.0-dev.* version   → a throwaway snapshot lands on
+          #                                    alpha or latest, below every real
+          #                                    version but ahead of nothing
+          assert_publish_allowed() {
+            guard_channel="$1"; guard_version="$2"; guard_tag="$3"
+            case "$guard_channel" in
+              dev)
+                if [ "$guard_tag" != "dev" ]; then
+                  echo "GUARD: refusing to publish $guard_version under --tag '$guard_tag' on the dev channel — the only tag a snapshot may carry is 'dev'" >&2
+                  return 1
+                fi
+                case "$guard_version" in
+                  0.0.0-dev.*) ;;
+                  *)
+                    echo "GUARD: refusing to publish non-snapshot version $guard_version on the dev channel" >&2
+                    return 1
+                    ;;
+                esac
+                ;;
+              prod)
+                case "$guard_version" in
+                  0.0.0-dev.*)
+                    echo "GUARD: refusing to publish snapshot version $guard_version on the prod channel — 0.0.0-dev.* must never reach alpha or latest" >&2
+                    return 1
+                    ;;
+                esac
+                if [ "$guard_tag" = "dev" ]; then
+                  echo "GUARD: refusing to publish $guard_version under --tag dev on the prod channel" >&2
+                  return 1
+                fi
+                ;;
+              *)
+                echo "GUARD: unknown publish channel '$guard_channel'" >&2
+                return 1
+                ;;
+            esac
+            return 0
+          }
+
           published_any=false
           failed=""
           results=""
@@ -98,24 +278,36 @@ jobs:
             name=$(node -p "require('./packages/$pkg/package.json').name")
             version=$(node -p "require('./packages/$pkg/package.json').version")
 
+            if [ -n "${HAVEN_PUBLISH_TAG:-}" ]; then
+              # Set by the snapshot step. Never derived from the version on the
+              # dev channel: deriving it would make the tag a property of a
+              # string this job just computed, which proves nothing.
+              tag="$HAVEN_PUBLISH_TAG"
+            else
+              # Derive the dist-tag from the version: a prerelease such as
+              # 0.1.16-alpha.0 publishes under its prerelease label (alpha),
+              # a stable 0.2.0 publishes under latest.
+              case "$version" in
+                *-*)
+                  tag="${version#*-}"   # alpha.0
+                  tag="${tag%%.*}"      # alpha
+                  ;;
+                *)
+                  tag="latest"
+                  ;;
+              esac
+            fi
+
+            # Before the skip check, not after: a version that should never have
+            # been built must fail the job loudly, not be reported as "already
+            # on npm" because someone got there first.
+            assert_publish_allowed "$channel" "$version" "$tag"
+
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "✓ $name@$version already on npm — skipping"
               results="$results| \`$name\` | $version | skipped — already on npm |"$'\n'
               continue
             fi
-
-            # Derive the dist-tag from the version: a prerelease such as
-            # 0.1.16-alpha.0 publishes under its prerelease label (alpha),
-            # a stable 0.2.0 publishes under latest.
-            case "$version" in
-              *-*)
-                tag="${version#*-}"   # alpha.0
-                tag="${tag%%.*}"      # alpha
-                ;;
-              *)
-                tag="latest"
-                ;;
-            esac
 
             echo "→ Publishing $name@$version with --tag $tag"
             if npm publish -w "packages/$pkg" --tag "$tag" --access public; then
@@ -130,6 +322,8 @@ jobs:
 
           {
             echo "### npm publish results"
+            echo ""
+            echo "Channel: \`$channel\`"
             echo ""
             echo "| package | version | outcome |"
             echo "|---|---|---|"

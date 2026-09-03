@@ -24,7 +24,6 @@ import {
   testUser,
   testSafe,
   testAgent,
-  legacySafe,
   dashboardOverview,
   dashboardTransaction,
 } from '../../e2e/fixtures/haven-api'
@@ -89,10 +88,11 @@ describe('fixture shape parity (screenshot dataset ↔ e2e dataset)', () => {
  * again — a re-inversion now fails a named test instead of turning 28 spec
  * files quietly false.
  *
- * It guards the DEFAULT, not the opt-downs: a spec whose subject IS the retired
- * rail spreads `legacySafe` and says why, exactly as each legacy screenshot
- * scenario opts down per-scenario. What must never happen again is the retired
- * rail arriving by default, or by omission.
+ * It guards the DEFAULT, not the opt-downs — and since #2459 there are no
+ * opt-downs left to guard: `legacySafe` and the opt-down page helper are
+ * deleted, the retired rail cannot arrive by default, by omission, or at
+ * all. What must never happen again is the retired rail arriving in the
+ * shared fixtures in any form.
  */
 describe('the shared fixtures default to the LIVE rail (#2264)', () => {
   it('the e2e account and its agent are both delegator_hybrid', () => {
@@ -112,12 +112,27 @@ describe('the shared fixtures default to the LIVE rail (#2264)', () => {
     expect(FIXTURE_SAFE.account_type).toBe('delegator_hybrid')
   })
 
-  it('the opt-DOWN is explicit, named, and the only way back to the retired rail', () => {
-    expect(legacySafe.account_type).toBe('safe')
-    // `'safe'`, never `null` or absent: migration 041 declares the column
-    // `VARCHAR(32) NOT NULL DEFAULT 'safe'` with a two-value CHECK, so an
-    // absent value is not in the column's domain (#2202).
-    expect(legacySafe.safe_address).toBe(testSafe.safe_address)
+  it('the shared e2e fixture carries no legacy-rail account literal (#2459)', () => {
+    // DELETION, decided deliberately: `legacySafe` was removed, not kept.
+    // #2413 filtered every account list query to `delegator_hybrid`
+    // (`infra/repositories/{user-safes,agents,dashboard}.ts`), so an
+    // `account_type: 'safe'` session/agent payload stopped being servable on
+    // these routes, and a fixture stubbing one asserts against a state that
+    // cannot occur in production. This block keeps the deletion honest in the
+    // direction that matters: a `safe`-shaped account literal returning to the
+    // shared e2e fixture fails HERE, by name — the same re-inversion tripwire
+    // the #2264 default pin above provides for the delegated shape.
+    //
+    // Scope boundary: scenario-level legacy stubs inside
+    // `scripts/screenshot.mjs` are NOT covered here — they pre-date #2413's
+    // funnel, are outside #2459's file ownership, and are tracked as the
+    // follow-up cascade slice.
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+    const source = readFileSync(path.join(root, 'e2e/fixtures/haven-api.ts'), 'utf8')
+    expect(
+      /account_type: 'safe'/.test(source),
+      'e2e/fixtures/haven-api.ts constructs a legacy-rail account the API can no longer serve (#2413, #2459)',
+    ).toBe(false)
   })
 
   it('every account the session fixture serves states its rail', () => {

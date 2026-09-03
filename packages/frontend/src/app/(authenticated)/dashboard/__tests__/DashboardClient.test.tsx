@@ -216,24 +216,30 @@ describe('DashboardClient', () => {
    * This replaces `uses singular copy for one agent payment that needs action`,
    * whose entire subject was the deleted row.
    *
-   * The fixture is deliberately the WORST case for these absences rather than
-   * the easiest: a legacy (non-`delegator_hybrid`) Safe account — the exact
-   * account type both affordances used to render for — with a non-zero
-   * `actionableApprovals`. On `dev` before this change every one of these
-   * assertions fails. That is what stops it being a guard over the empty set:
-   * put either affordance back and it goes red here.
+   * #2459 — fixture decision, DELETED not kept: this test used to drive a
+   * legacy (`account_type: 'safe'`) account. #2413 filtered every account
+   * list query to `delegator_hybrid`
+   * (`infra/repositories/{user-safes,agents,dashboard}.ts`), so that payload
+   * can no longer occur on the wire, and DashboardClient no longer reads
+   * `account_type` at all — it is rail-blind by construction and leans on the
+   * backend funnel (`delegationSafe` is just `safes[0]`). There is no
+   * defensive branch left for a legacy input to exercise, so keeping one
+   * would pin an unreachable state; the test is converted to the worst case
+   * that still exists: the same funded account, with pending approvals, on
+   * the live rail. On `dev` before #2413 every assertion below failed, which
+   * is what keeps this from guarding the empty set — put either affordance
+   * back and it goes red here.
    */
-  it('offers neither a Send affordance nor an approvals route, even for a funded legacy Safe with pending approvals', () => {
-    const legacySafe = { ...SAFE, account_type: 'safe' as const }
+  it('offers neither a Send affordance nor an approvals route, even for a funded account with pending approvals', () => {
     mockUseAuth.mockReturnValue({
       user: {
         id: 'user-1',
         name: 'Ada',
         email: 'ada@example.com',
         wallet_address: '0x5555555555555555555555555555555555555555',
-        safes: [legacySafe],
+        safes: [SAFE],
       },
-      activeSafe: legacySafe,
+      activeSafe: SAFE,
     })
     mockUseDashboardOverview.mockReturnValue({
       data: {

@@ -59,9 +59,12 @@
  * variable: empty or whitespace-only, containing whitespace or a control
  * character, or containing a shell metacharacter. The install runs through
  * `execFile` (no shell), so a metacharacter could not inject anything — the
- * refusal is because such a value is never a spec npm would accept and the
- * failure would otherwise surface minutes later as an npm error that does not
- * name the variable.
+ * refusal is because such a value is almost never a spec npm would accept, and
+ * when it is not, the failure would otherwise surface minutes later as an npm
+ * error that does not name the variable. The one legitimate casualty is a
+ * `file:` path whose segments contain `*`, `[`, `]`, `{` or `}` — legal in a
+ * filesystem name, refused here on purpose: the check fails closed, the
+ * message names the variable, and a developer can rename the checkout.
  */
 
 import { createHash } from 'node:crypto'

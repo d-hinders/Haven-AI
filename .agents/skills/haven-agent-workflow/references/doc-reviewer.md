@@ -44,7 +44,7 @@ A CASP shard, an archive doc, a `last-verified` `Prior:` entry or a quotation th
 
 ## 6. `last-verified`: a bump records a re-read, never substitutes for one
 
-A bump records the re-read scope and what was **NOT** re-verified; a stamp without a re-read is a false verification claim and the staleness audit ranks on it. A doc whose claims did not change is right to stay unbumped with a scoped note (PR #2467: `e2e-qa-runbook.md`). When the strict coupling gate forces a touch on a `contract: true` doc whose claims did not change, the note says exactly that — `re-verified, not edited, scope: <claim>` (PR #2502: `package-dev-channel.md`). Convention: [`docs-quality-system.md` § `last-verified` chain integrity](../../../../docs/contributing/docs-quality-system.md#last-verified-chain-integrity-1843).
+A bump records the re-read scope and what was **NOT** re-verified; a stamp without a re-read is a false verification claim and the staleness audit ranks on it. A doc whose claims did not change is right to stay unbumped with a scoped note. When the strict coupling gate forces a touch on a `contract: true` doc whose claims did not change, the note says exactly that — `re-verified, not edited, scope: <claim>` (PR #2502: `package-dev-channel.md`). Convention: [`docs-quality-system.md` § `last-verified` chain integrity](../../../../docs/contributing/docs-quality-system.md#last-verified-chain-integrity-1843).
 
 ## 7. Chain ceiling (#2477)
 

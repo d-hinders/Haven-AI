@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { createConnectApiClient, ConnectRequestError, type ConnectApiClient, type ResolvedSetup } from './api.js'
-import { resolveTokenFromAddress } from '@haven_ai/sdk'
+import { connectorRerunCommand, resolveTokenFromAddress } from '@haven_ai/sdk'
 import {
   agentApiKeyPrefix,
   generateAgentApiKey,
@@ -1181,7 +1181,7 @@ function activationInstructionWithWhy(profile: RuntimeProfile): string {
   return profile.activationInstruction
 }
 
-const RERUN_HINT = 'npx @haven_ai/connect@alpha'
+const RERUN_HINT = connectorRerunCommand()
 
 /**
  * Agent ids of every OTHER credential directory (#1688) — the agents this

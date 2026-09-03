@@ -139,7 +139,18 @@ export const GOVERNED_PACKAGE_DOCS = [
     // Nothing flagged this file: the coupling gate did not list it, because
     // the commit that broke it did not touch packages/signer/src. Found by
     // sweeping, not by tooling. Rest of the README NOT re-verified.
-    'last-verified': '2026-09-01',
+    // #2423: EDITED, two spots. The install block's `npx @haven_ai/connect@alpha`
+    // and the Custody paragraph's second copy of it both stated one channel as
+    // THE answer. Since #2423 every "rerun the connector" hint this package
+    // prints renders from `HAVEN_CONNECTOR_CHANNEL` (the channel the build was
+    // published under), so a snapshot build's README saying `@alpha` would
+    // contradict the package's own output. The install block keeps `@alpha` —
+    // it IS the production channel and this README is read on npm — and now
+    // says to run the command your dashboard shows you and what the package's
+    // own hints do; the Custody sentence points at that block instead of
+    // repeating the tag. No custody, network or signing claim moved. Rest of
+    // the README NOT re-verified.
+    'last-verified': '2026-09-03',
   },
   {
     doc: 'packages/mcp/README.md',
@@ -153,7 +164,17 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/connect/src/**'],
-    'last-verified': '2026-09-01',
+    // #2423: re-verified and EDITED (the `--rekey` phase-two instruction only).
+    // The page showed `npx @haven_ai/connect@alpha --rekey-finish` as the line
+    // to run, which is right for a production install and wrong for any other
+    // channel; since #2423 the connector derives that command from the npm
+    // dist-tag it was published under, so phase one prints the correct one and
+    // the page now says to prefer what the tool printed. The `--doctor` and
+    // `--setup` examples were left alone deliberately: they are entry points
+    // with no prior phase to quote, so they rely on the general caveat already
+    // stated once at the top of the file. Nothing else re-verified. Prior:
+    // '2026-09-01' carried no provenance note.
+    'last-verified': '2026-09-03',
   },
   {
     doc: 'packages/cli/README.md',

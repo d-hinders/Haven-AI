@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile, chmod, unlink } from 'node:fs/promises'
+import { connectorRerunCommand } from '@haven_ai/sdk'
 import { homedir, platform } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { isMap, parseDocument, stringify } from 'yaml'
@@ -90,10 +91,13 @@ export class InvalidCodexTomlError extends Error {
  * succeed.
  */
 /**
- * Mirrors `RERUN` in doctor.ts — the moving alpha tag, so the advice resolves
- * to a connector that has `--repair` regardless of what is cached locally.
+ * Mirrors `RERUN` in doctor.ts — a moving dist-tag rather than a pinned
+ * version, so the advice resolves to a connector that has `--repair`
+ * regardless of what is cached locally. Which tag that is comes from the SDK's
+ * build-time `HAVEN_CONNECTOR_CHANNEL` (#2423), so a build published under
+ * `dev` repairs with the `dev` connector.
  */
-const REPAIR_COMMAND_PREFIX = 'npx @haven_ai/connect@alpha --doctor --repair --runtime'
+const REPAIR_COMMAND_PREFIX = connectorRerunCommand('--doctor --repair --runtime')
 
 export class UnreadableRuntimeConfigError extends Error {
   readonly configPath: string

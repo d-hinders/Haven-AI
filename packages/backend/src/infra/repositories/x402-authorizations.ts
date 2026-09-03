@@ -5,8 +5,8 @@
  * `modules/mpp/authorize.ts` by #997).
  *
  * The aggregate here is the x402 AUTHORIZATION LIFECYCLE, not a table of its
- * own: idempotent replay lookup, stale-intent refresh, one-shot execute
- * transitions, and the erc7710 settle handoff — all x402-scoped statements
+ * own: idempotent replay lookup, one-shot execute transitions, and the
+ * erc7710 settle handoff — all x402-scoped statements
  * against `payment_intents` (`COALESCE(payment_rail, source) = 'x402'` guards)
  * plus the per-agent hourly cap read (#961).
  *
@@ -16,8 +16,9 @@
  *
  * **The SQL here is verbatim from the call sites.** Behaviour-preserving by
  * construction — in particular the #961 idempotency semantics: the lookup that
- * decides "resume the winner" and the guarded refresh that frees a stale key
- * keep exactly their original predicates.
+ * decides "resume the winner" keeps exactly its original predicate. (The
+ * guarded stale-replay refresh that freed a stale key went with the legacy
+ * rail — #2469 deleted its now-callerless exports.)
  */
 
 import pool from '../../db.js'
@@ -97,67 +98,11 @@ export const FIND_ACTIVE_X402_INTENT_BY_KEY_SQL = `SELECT *
  * The post-insert-conflict reload on the legacy rail — narrower than the
  * replay lookup above (`expired` excluded too, matching the unique index's
  * partial predicate). The two predicates differ deliberately; see #961.
+ *
+ * Its only caller (`findActiveX402IntentByIdempotencyKey`) went with the
+ * legacy rail (#2469); the narrower predicate is kept here and PREPAREd by
+ * the schema smoke as the recorded #961 semantics.
  */
-export async function findActiveX402IntentByIdempotencyKey(
-  agentId: string,
-  idempotencyKey: string,
-  db: Executor = pool,
-): Promise<PaymentIntentRow | null> {
-  const result = await db.query<PaymentIntentRow>(FIND_ACTIVE_X402_INTENT_BY_KEY_SQL, [
-    agentId,
-    idempotencyKey,
-  ])
-  return result.rows[0] ?? null
-}
-
-// ── Stale-replay refresh (legacy rail) ───────────────────────────────────────
-
-export const REFRESH_STALE_X402_INTENT_SQL = `UPDATE payment_intents
-           SET allowance_nonce = $1,
-               sign_hash = $2,
-               status = 'pending_signature',
-               expires_at = NOW() + interval '10 minutes',
-               error_message = NULL
-           WHERE id = $3
-             AND agent_id = $4
-             AND COALESCE(payment_rail, source) = 'x402'
-             AND status IN ('pending_signature', 'expired')
-             AND tx_hash IS NULL
-             AND signature IS NULL
-             AND (
-               status = 'expired'
-               OR expires_at <= NOW()
-               OR allowance_nonce <> $1
-               OR sign_hash <> $2
-             )
-           RETURNING id, status, sign_hash, allowance_nonce, expires_at`
-
-export interface RefreshedX402IntentRow {
-  id: string
-  status: string
-  sign_hash: string
-  allowance_nonce: number
-  expires_at: string
-}
-
-/**
- * Revive a stale/expired replayed intent with a fresh nonce+hash — guarded so
- * it can never touch a signed, submitted, or progressed row. Returns the
- * refreshed row, or `null` when the guard matched nothing (the caller decides
- * whether that is fine — nothing was stale — or a 409).
- */
-export async function refreshStaleX402Intent(
-  input: { allowanceNonce: number; signHash: string; intentId: string; agentId: string },
-  db: Executor = pool,
-): Promise<RefreshedX402IntentRow | null> {
-  const result = await db.query<RefreshedX402IntentRow>(REFRESH_STALE_X402_INTENT_SQL, [
-    input.allowanceNonce,
-    input.signHash,
-    input.intentId,
-    input.agentId,
-  ])
-  return result.rows[0] ?? null
-}
 
 // ── One-shot execute transitions (legacy rail) ───────────────────────────────
 

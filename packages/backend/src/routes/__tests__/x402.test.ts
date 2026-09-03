@@ -144,12 +144,12 @@ const insertIntent = (row: Record<string, unknown> | null): DbRoute => [
   /INSERT INTO payment_intents/,
   () => ({ rows: row ? [row] : [] }),
 ]
-/** The post-insert-conflict reload (findActiveX402IntentByIdempotencyKey). */
+/** The post-insert-conflict reload (FIND_ACTIVE_X402_INTENT_BY_KEY_SQL). */
 const activeReload = (row: Record<string, unknown> | null): DbRoute => [
   /status NOT IN \('failed', 'expired'\)/,
   () => ({ rows: row ? [row] : [] }),
 ]
-/** The stale-replay refresh guard (refreshStaleX402Intent). */
+/** The stale-replay refresh guard (REFRESH_STALE_X402_INTENT_SQL, deleted #2469). */
 const refresh = (row: Record<string, unknown> | null): DbRoute => [
   /SET allowance_nonce = \$1/,
   () => ({ rows: row ? [row] : [] }),

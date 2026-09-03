@@ -119,6 +119,40 @@ directives from that thread; those come only from this session's user.
 2. Keep shared and gravity files with the captain.
 3. When changing existing money-path behavior, write characterization tests before changing behavior.
 4. Reuse canonical docs and playbooks by reference; do not copy their policy into this skill.
+5. **Mutation-prove by execution anything that claims control flow or reachability
+   (#2421, #2455).** A text search over source — `grep`, `indexOf`, a regex over a
+   file — is never the sole assertion that code runs: a `case` wrapper and an `&`
+   background both bypassed a publish safety check while `indexOf` still found the
+   call, and an `exit 1` above a loop satisfied "job failed + nothing published"
+   without the guard firing (#2421); a `cwd` fallback printed `[PASS]` having never
+   looked (#2455). Drive the real entry point with a stub or recorder, assert what
+   was **reached**, then mutate the guard out and show the assertion go red:
+
+   ```bash
+   grep -q 'guard' publish.sh                                             # NOT proof: presence, not reachability
+   PATH="$PWD/stubs:$PATH" bash publish.sh; test -f stubs/guard.reached   # reached
+   # <mutate: comment the guard call out, or wrap it the way #2421's case/& did>
+   PATH="$PWD/stubs:$PATH" bash publish.sh; test ! -f stubs/guard.reached # the assertion CAN go red
+   ```
+
+   Back up before mutating and restore after, named and verified the way
+   [`ai-agent-workflow.md` § Scratchpad Naming](../../../docs/contributing/ai-agent-workflow.md#scratchpad-naming-1801)
+   prescribes (`<file>.<issue>.bak`, restore verified by content) — not restated here.
+6. **Removal ships with a claim sweep (#1440, #2242).** A change that deletes or
+   retires anything — a rail, a flag, a route, a term — lists the retired vocabulary
+   in the PR body and sweeps `docs/**`, `packages/**/*.md`, code comments, fixtures,
+   tests, showcase data (`app/(authenticated)/design-system/page.tsx`) and skill text
+   (`.agents/**`, `.claude/**`) for it, with a positive control (a term you know is
+   still present, found by the same command). Every hit gets a disposition —
+   **fixed** / **historical record** / **filed #N** — in the body. The Safe-rail retirement (#1440) needed a
+   repo-wide residue audit (#1993) and then a CI gate on retired-rail prose (#2107)
+   after the fact, plus three late follow-ups; the signer no-network-calls retirement
+   found copies in six places, not the two it expected (#2242).
+7. **No operator state in prose (#2422).** Nothing in code, comments or docs states
+   that an environment *has* a variable set or *hands out* a tag. Operator steps are
+   an unticked checklist in the PR body, in this order: mechanism merged → observed
+   (run log, `npm view`) → flag flipped. Sweep code comments as well as docs — the
+   last survivor on #2422 was a comment.
 
 ## Acceptance Gate
 
@@ -137,6 +171,24 @@ Run the **repository's own required checks** locally before pushing, for fast fe
 These are **CI required checks** (#1023), not gates this skill owns — every PR gets them however it was opened. Running them here only saves a round trip. Do not restate their rules in this file: the workflow comments and `docs/contributing/docs-quality-system.md` are the definition, and a second copy drifts.
 
 Fix failures before pushing. Never open or update a pull request with a known red local gate.
+
+Two rules for what the gate's evidence is allowed to say:
+
+- **Prove the instrument can say yes before using its no (#2444).** Every "none
+  found" in a PR body is preceded by the same instrument finding a known hit, quoted:
+  a grep sweep first matches a term you know is there; the money-path classifier's
+  self-test line is pasted with its verdict (*Merge Gate*); a regression test asserts
+  on what the executed code emitted, not on a substring of its source (PR #2456 round
+  3, #2444 — the source grep would have passed with the string in a comment).
+- **Numbers state their basis or name the test (#2421 ×2, #2423 ×3, #2444).** Any
+  count in a PR body, commit message or CASP shard is re-derived from its instrument
+  at the commit being shipped, with the command and `git rev-parse HEAD` quoted next
+  to it. If the number can change without this PR (file totals, test counts), lead
+  with the stable figures and cite the volatile one against a named commit — or
+  replace it with a pointer to the test that asserts it. Five wrong figures reached
+  CASP shards in one week (#2421's "1 in 4300" and its case counts; #2423's file
+  total, metacharacter count and mutation total), and #2444's body carried three
+  different suite counts.
 
 Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../../docs/contributing/ai-agent-workflow.md).
 
@@ -157,7 +209,10 @@ The guard refuses a root whose **git view does not match its file view** — the
 addition reads as a deletion. It also refuses the builder's own tree, a stale baseline,
 and a HEAD that is not the one under review, and it prints the **frozen base SHA** the
 reviewer must diff against instead of a ref name. Hand the reviewer the root, the head
-and that base; require all three back in the verdict. **Re-run the identical command
+and that base; require all three back in the verdict — the reviewer's half of this
+(run the guard first, quote its contract, report `blocked` on refusal) is
+[`reviewer.md`](../haven-agent-workflow/references/reviewer.md) § *Before anything
+else* and is not restated here (#2455, landed by #2488). **Re-run the identical command
 when the pass returns** — an unchanged `--expect-head` is what makes the verdict a claim
 about a tree that stood still. A refusal is not a thing to work around: re-make the root.
 The mechanism and the guard's two limits are in
@@ -170,6 +225,13 @@ do not restate them here.
    pass that raised it over the *fixed* diff — for `haven-design-reviewer`, over freshly
    captured screenshots of the changed surface, not the ones the finding was raised on.
    The author asserting "addressed" is not a reviewer verdict and never substitutes for one.
+
+   **A verdict belongs to the SHA it saw (#2423).** The verdict line names the head
+   the guard's contract printed — `haven-reviewer: passed @ <sha>`; a line with no SHA
+   is unfilled. **Any commit after the verdict SHA re-runs the pass that covered it.**
+   There is no comment-only exemption, because no instrument in the repository can
+   prove one. PR #2492 (#2423) lists three commits no pass saw; that disclosure is the
+   only alternative to the re-run, and it is a disclosure, not a clearance.
 3. Ask the user before applying ambiguous architectural, product, security, money-movement, authorization, or schema findings.
 4. Record applied and deferred findings with reasons. When a deferred finding is filed
    as its own issue **and must land before something already queued**, write
@@ -218,15 +280,38 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    outcome on #2131 (sound on the first attempt, while four successive
    prose-interpreting guards each failed against realistic edits in the file's
    own house style).
-2. **Stopping rule for the fix→review loop.** When a review round's findings are
-   all traceable to your own previous fix commit rather than to the original
-   work — checkable against `git show`, not a vibe — stop **patching**: choose
-   between reverting to the simpler construct or accepting and documenting the
-   residue — and that choice, including whether the round really was all
-   fix-traceable, still clears through the same reviewer. This ends the fix
-   loop, never the review: it is not a licence to merge over an uncleared
-   finding, and the reviewer accepting the documented residue is the exit,
-   exactly as *Independent Review* step 2 above requires.
+2. **One stopping rule for the fix→review loop, with two triggers.** Decide which
+   branch a round is on before writing the next fix:
+   - **Fix-traceable (#2131):** the round's findings are all traceable to your own
+     previous fix commit rather than to the original work — checkable against
+     `git show`, not a vibe. Stop **patching**: revert to the simpler construct, or
+     accept and document the residue.
+   - **Non-converging:** two successive rounds have each found a **new site of the
+     same class** — one more copy of the same retired claim, one more caller missing
+     the same check, one more doc restating the same number. Run **exactly one more
+     round**. If it finds only more of that class, stop **chasing**: file a follow-up
+     issue naming the class and the sweep command that would enumerate it (the
+     positive-control form in *Acceptance Gate*), quote its number in the PR body,
+     and open. If it finds a defect of a **different class**, the count resets to
+     zero — **even if that round also found more of the same class.** This costs
+     at most one round over the naive stop-after-two, and that round is the price
+     of not cutting a PR off before its worst bug. PR #2467 (#2422) is the case,
+     in its own words: "Round 1 found 2 stale docs; round 2 found 3 more; round 3
+     found a mis-fenced block of my own making plus the npm README; round 4 found
+     two more sites plus the correction below; round 5 found the last one and
+     **no new site of the earlier class**, which is what said the set had
+     converged." Rounds 1–2 are the two same-class rounds; round 3 is the one
+     extra, and it found a different class alongside more of the same — reset;
+     round 4 found "the correction below", the PR's most important defect, again
+     alongside more of the same — reset again.
+   - **Both on the same round** (the new site is itself fix-traceable): the
+     fix-traceable branch wins — revert first, because a sweep over a construct you
+     are about to revert enumerates nothing.
+
+   Either exit, including whether the trigger really held, still clears through the
+   same reviewer. This ends the fix loop, never the review: it is not a licence to
+   merge over an uncleared finding, and the reviewer accepting the documented residue
+   or the filed follow-up is the exit, exactly as *Independent Review* step 2 requires.
 3. **A check must cover the scope of the claim written from it.** Before writing
    "appears nowhere in backend production code" into a doc, run the check over
    the scope the sentence names — `packages/`, not `packages/backend/src`, since
@@ -236,10 +321,11 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
 4. **Process reflection stays out of compliance artifacts.** A CASP shard is a
    regulatory record, not a retrospective; an account of the author's own fix
    churn belongs in the PR body at most.
-5. **Reviewer verdicts in the PR body are the named verdict line plus its scope
-   caveats — not a multi-paragraph transcript.** A bound, not a ban: quote what
-   a later reader needs in order to know what was cleared and what was not,
-   including any limit the reviewer put on their own clearance.
+5. **Reviewer verdicts in the PR body are the named verdict line — with the head
+   SHA it reviewed — plus its scope caveats verbatim, not a multi-paragraph
+   transcript.** A bound, not a ban: quote what a later reader needs in order to
+   know what was cleared and what was not, including every limit the reviewer put on
+   their own clearance, in the reviewer's words (*Independent Review* step 2).
 
 ## Commit And Pull Request
 
@@ -255,6 +341,13 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
 
    Ask "did `dev` touch *my* files", never "did `dev` move" — on a busy day the
    second question is always yes, and an alarm that is always on gets ignored.
+
+   Diff the merged result with the three-dot form *Independent Review* step 1
+   already requires — a two-dot diff against a base that moved reports everyone
+   else's additions as your deletions (a phantom-revert blocking finding on 3 Sep,
+   in the #2421 build session). A merge that touches a `last-verified` chain
+   interleaves it; the rule and its check are the docs-quality system's (#2477,
+   #2504), not this skill's.
 3. Commit conventionally using any attribution required by the active client or repository policy.
 4. Push the issue branch.
 5. Open a pull request with base `dev`, never `main`, using the available GitHub integration or authenticated `gh`.
@@ -264,9 +357,20 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    - intentionally excluded work;
    - generated-artifact and handoff impact;
    - CASP/MiCA status when applicable;
-   - review findings and resolution, including the **named verdict line for every pass**
-     (`haven-reviewer: passed | skipped because ___`, and on `area:frontend` the same for
-     `haven-design-reviewer`) — an unfilled line blocks the merge gate below;
+   - review findings and resolution, including the **named verdict line for every pass,
+     each naming the head it reviewed** (`haven-reviewer: passed @ <sha> | skipped
+     because ___`, and on `area:frontend` the same for `haven-design-reviewer`) — an
+     unfilled line, or one with no SHA, blocks the merge gate below;
+   - **every "could not verify" the reviewer wrote, verbatim, beneath its verdict
+     line (#2423)** — suites it could not run ("could not run vitest, tsc,
+     check:api-types or check:openapi (no node_modules)"), scopes it approximated
+     ("a hand-rolled fnmatch translation, not the real coupling gate") — never
+     summarised into "passed"; and anything only the author measured labelled
+     **author-only**. This is the builder's duty over the body;
+     [`reviewer.md`](../haven-agent-workflow/references/reviewer.md) owns the
+     reviewer's duty to write them;
+   - operator steps as an **unticked checklist**, never as prose stating that the
+     environment already has them (*Implement* step 7);
    - merge readiness: CI, local checks, review status, risk, why safe, residual risk, and merge order.
 7. Include the closing keyword — **bare**, never inside backticks or a code span,
    in the body, the pull-request title and the commit messages alike. GitHub does
@@ -407,6 +511,13 @@ The label matters because money-sensitive changes do not always touch listed fil
 (a new signing scheme, a new rail); the file list matters because a diff can be
 money-sensitive without the issue being labeled. Union, never intersection.
 
+**Do not answer the file half by eye — run the classifier (#2444).** The command is
+`node scripts/ci/money-path-classify.mjs` with the merge base as its argument; paste
+its output into the PR body, both the verdict and the `=== SELF-TEST PASSED
+(6 positive, 6 negative) ===` line above it. It refuses to classify at all when one
+of its controls fails, and that refusal is what makes its "no" worth quoting rather
+than merely asserted. The label half is read off the issue.
+
 **The file half fails silently, so it needs the guard the label half does not.** When
 a route is missing from the list, a labeled issue still classifies correctly and
 nothing looks wrong — the right answer comes out for the wrong reason, and only
@@ -446,11 +557,12 @@ Classification drives the **playbook and the testing bar**, not a merge pause. A
 **Before arming anything, the reviewer verdict has to be written down.** Do not enable
 auto-merge while a pull request leaves either verdict line unfilled:
 
-- `haven-reviewer:` — on every pull request;
+- `haven-reviewer:` — on every pull request, naming the head it reviewed;
 - `haven-design-reviewer:` — on every pull request too, where `n/a (not area:frontend)`
   is the fill for a diff that does not need the rendered pass.
 
-A filled `skipped because <reason>` is enough to proceed, a blank is not. The point is
+A filled `skipped because <reason>` is enough to proceed, a blank is not, and a
+`passed` with no SHA is a blank (#2423). The point is
 that a skipped pass leaves a trace a human can argue with, not that skipping is
 forbidden; `AGENTS.md` § *Run `haven-reviewer` on every pull request* is why the default
 is "ran".
@@ -471,13 +583,54 @@ Route the merge:
   re-arms auto-merge on its own. Ask the user in the three cases a re-review does not
   cover — the re-review raises a **new** finding, the finding is being **deferred or
   disputed** rather than fixed, or there is no re-review at all.
-- **Everything else, money-path included:** after local gates pass and independent review has no blocking or should-fix findings, enable squash auto-merge — `gh pr merge <pr> --auto --squash --delete-branch` right after opening; do not sit in a poll loop waiting.
+- **Everything else, money-path included:** after local gates pass and independent
+  review has no blocking or should-fix findings, enable squash auto-merge right after
+  opening and **read the method back** — the arming line alone is not the evidence:
+
+  ```bash
+  gh pr merge <pr> --auto --squash --delete-branch
+  gh pr view <pr> --json autoMergeRequest --jq .autoMergeRequest.mergeMethod   # must print SQUASH
+  ```
+
+  Do not sit in a poll loop waiting.
 
 Merge method, stated once because the two rules cross-contaminate: **feature → dev
 is squash; dev → main promotion is a merge commit, never squash** (the promotion
 rule and the pointer to its already-squashed recovery (#1173) live in
 [`branch-and-release-flow.md`](../../../docs/contributing/branch-and-release-flow.md)).
 Do not let the promotion rule leak backwards into feature PRs.
+
+**The squash rule is checked, not remembered (#2165) — a stopgap until the
+repository setting changes.** Before any merge-related action on a feature PR, and
+again before reporting it armed, run
+
+```bash
+gh pr view <pr> --json autoMergeRequest --jq .autoMergeRequest.mergeMethod
+```
+
+`SQUASH` or empty proceeds; **`MERGE` (or `REBASE`) refuses** — `gh pr merge <pr>
+--disable-auto`, re-arm with `--squash`, run the command again. A report that says
+"armed" without that output has not checked. The checkable basis is four named
+landings — #2428, #2460, #2493 and #2438 — every one of which reached `dev` as a
+two-parent merge commit (`git rev-list --parents -n1 <merge-sha>` prints three hashes
+for each). Three of them (#2428, #2460, #2493) carry a comment saying "disarmed
+auto-merge" and landed wrong anyway: a disarm not followed by a squash re-arm and a
+read-back changes nothing. Those four carry the rule. If you census the history as well,
+**pin the instant** — a bare `--since=<date>` is a git approxidate resolved against
+the wall clock *now*, so the same SHA counts differently every hour of the evening
+(this rule's own draft read 258 and then 256 for one SHA in one session; PR #2506's
+body records the same defect independently: "a bare `--since=2026-08-10` is a git
+approxidate that takes the *current time of day*"):
+
+```bash
+git log <sha> --first-parent --since=2026-08-10T00:00:00Z --oneline | grep -c '^[0-9a-f]* Merge pull request'
+git log <sha> --first-parent --since=2026-08-10T00:00:00Z --oneline | grep -cE '\(#[0-9]+\)$'
+```
+
+At `ff052462`, pinned: 275 merge-commit landings, 346 squash, 624 first-parent, stable
+across re-runs. Run `git rev-parse --is-shallow-repository` first as well — a shallow
+clone *can* truncate the window silently, even though it was not the cause here
+(#2500 review rounds 2–3).
 
 **Check `mergeStateStatus` before arming auto-merge.** On `DIRTY`, merge `dev` in and
 resolve first — arming auto-merge on a conflicted PR does nothing, silently. The
@@ -531,7 +684,49 @@ Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
   [`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md) §
   *Known CI flake signatures* — check the failing job's log against it first; a
   second failure after the rerun is a real failure.
-- **When a wait is genuinely needed** (holding a UI PR on a review finding, or confirming a specific run): use `gh pr checks <pr> --watch --fail-fast` (blocks until checks resolve, exits non-zero on failure) rather than a hand-rolled poll, or arm a Monitor if the client supports it.
+- **When a wait is genuinely needed** (holding a UI PR on a review finding, or
+  confirming a specific run), poll the condition below, or arm a Monitor on it if the
+  client supports one. Not `gh pr checks <pr> --watch --fail-fast`: it resolves on
+  the checks that *exist*, so it returns before the ones that have not been created
+  yet, which is the same hole as an empty rollup.
+- **A wait loop's terminal condition is the ruleset's named list, not a count, and
+  cannot be satisfied by an empty rollup.** Before the first run is created,
+  `statusCheckRollup` is empty, and an empty list satisfies both "nothing in
+  progress" and "nothing failed". A count is the wrong floor too: on PR #2503, 6 of
+  the 15 required contexts concluded `SUCCESS` and 9 `SKIPPED` (surface-gated behind *Detect changed
+  surfaces*), so a predicate that accepts only `SUCCESS` reports 6/15 forever. The
+  expected set is the ruleset's, read live and documented in
+  [`autonomous-pr-loop.md` § One-time GitHub setup](../../../docs/contributing/autonomous-pr-loop.md#one-time-github-setup-required)
+  step 3 (a context listed there but absent from the rule is a pending operator
+  step, #2321):
+
+  ```bash
+  REQ=$(gh api repos/<o>/<r>/rules/branches/dev --jq '[.[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]')
+  gh pr view <pr> --json mergeStateStatus,statusCheckRollup | jq --argjson req "$REQ" '
+    (.statusCheckRollup | map({name: (.name // .context), c: ((.conclusion // .state // "PENDING") | ascii_upcase)})) as $r
+    | { state: .mergeStateStatus,
+        missing: [ $req[] | select(. as $n | $r | map(.name) | index($n) | not) ],
+        failed:  [ $r[] | select(.name as $n | $req | index($n)) | select(.c | IN("FAILURE","ERROR","CANCELLED","TIMED_OUT")) | .name ],
+        pending: [ $r[] | select(.name as $n | $req | index($n)) | select(.c | IN("SUCCESS","SKIPPED","NEUTRAL","FAILURE","ERROR","CANCELLED","TIMED_OUT") | not) | .name ],
+        nonrequired_failed: [ $r[] | select(.name as $n | $req | index($n) | not) | select(.c | IN("FAILURE","ERROR")) | .name ] }'
+  ```
+
+  The loop ends **only** on one of three outcomes, tested in this order: **red** —
+  `failed` non-empty (a **required** context with a failing conclusion; `CANCELLED`
+  means read `gh run list --commit <sha>` for the superseding run before believing
+  it); **green** — `missing`, `failed` and `pending` all empty **and**
+  `state ∈ {CLEAN, UNSTABLE}` — `UNSTABLE` *is* green here: every required context
+  is satisfied and something non-required failed (#2503 merged clean with `Vercel`
+  = `FAILURE`; name `nonrequired_failed` in the report, never stop on it); or
+  **stuck** — the three lists empty and `state ∈ {BLOCKED, BEHIND, DIRTY}`, which is
+  a review requirement, a stale branch or a conflict, not CI: stop waiting and act
+  on the state (`BEHIND`/`DIRTY` guidance is above). Anything else — a non-empty
+  `missing` or `pending`, an empty rollup, `state: UNKNOWN` (GitHub has not computed
+  mergeability for that head yet; measured to persist across re-reads on a freshly
+  pushed PR) — keeps waiting under a wall-clock ceiling you state, and a loop that
+  outlives the ceiling reports that, not green. The rollup mixes `CheckRun`
+  (`status`/`conclusion`/`name`) and `StatusContext` (`state`/`context`) shapes, which
+  is why every field above is read with a fallback.
 - **BEHIND does NOT self-resolve under `--auto` in this repo** — observed twice:
   the armed PR sat BEHIND indefinitely until a manual `gh pr update-branch <pr>`.
   Treat BEHIND like DIRTY's quieter sibling: update the branch yourself, then let
@@ -544,6 +739,20 @@ Leave the issue open until the pull request merges. Report the issue, pull reque
 Report an open `qa-failure` when selection found one — one line naming the issue and
 that `dev → main` is gated by it. The user decides what to do about it; the loop's job
 is to stop it being invisible.
+
+**Record what a reviewer reproduced per mutation cell, never as a total (#2423).**
+Three drafts of one PR body said twelve, fourteen and sixteen for the same mutation
+set, and the final table says four of fourteen reproduced (#2423, commit `12ea16c1`) —
+different denominators, different definitions of *reproduced*, and until the table
+existed nothing either could be checked against.
+The closeout (and the PR body it summarises) carries one row per cell:
+
+| # | Cell (guard + mutation) | Author result @ sha | Reproduced by (pass @ sha) | Status |
+|---|---|---|---|---|
+| 1 | `verify-connect-bundle` — stale `dist` → exit 0 | red → green @ `2097f9e0` | `haven-reviewer` @ `2097f9e0` | reproduced |
+| 2 | dev-snapshot rebuild at `0.0.0-dev.*` — four `@alpha` assertions go red | 2/4/1/1 @ `12ea16c1` | — | **author-only** |
+
+The table is the source; any total in the prose is derived from it and says so.
 
 **Parent epic.** When the shipped issue is an epic sub-issue and the epic body carries
 a build-order list, tick that slice's line, so the epic reads as status instead of

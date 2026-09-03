@@ -13,7 +13,7 @@ covers:
   - packages/connect/src/storage.ts
   - packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx
   - 'packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx'
-last-verified: "2026-09-01" # #1868: abandon-and-restart is now a recovery, not a write-off — the step-2 callout and the doctor section's "no spend authority" paragraph both updated: a fresh re-key inherits the abandoned attempt's frozen remainder and boundary, unless a new budget was granted in between (then it starts clean, deliberately). The rest of the walkthrough was re-read against the diff and stands. Prior: Promotion review: corrected the dashboard walkthrough's stale boundary warning to match #1849 — an expired remainder is dropped and, while the recurring grant remains active, the full current-period budget is issued. Clarified #1699 applies revoke-and-reissue only to an anchored attestation while standing remains unchanged, and #1868 recovery depends on the stage where the flow stopped. Prior: #1849: "What carries over" gains the boundary-crossing edge — a re-key started in one budget period and finished in the next drops the stale carry and hands you the full budget for the period you are actually in. Prior: #1702: written against epic #1694 as merged — #1698 (backend stages), #1699 (passport re-anchor), #1700 (connect --rekey), #1701's shipped half (dashboard). Prior: #2258: the page-level agent detail gate is now covered here; legacy Safe records are readable-only in Haven and have no payment-credential, pause/resume, re-key, or revoke controls.
+last-verified: "2026-09-03" # #2466: re-verified and EDITED, scope = § Doing it only. (a) One callout on which `npx` package to use. Keeping the three `@alpha` commands is the BUILDER'S RECOMMENDATION on #2466, not a recorded owner decision — the issue marks this page's scope an owner call, and no owner comment on it exists yet; the reasoning is that this is a production-customer page and `alpha` is the production channel, and the owner can reverse it on the PR. The callout names the mechanism (the dashboard's `connector_package`, per-deployment since #2422, pointing at `docs/operations/package-dev-channel.md`) rather than asserting any deployment's value; it exists because `--rekey-finish` runs `prepareSignerRuntime` (`packages/connect/src/rekey.ts`), which installs the signer pinned by the connector running it, so finishing from another channel replaces the signer. (b) Step 1 now says what `--rekey` asks Haven: one `GET /machine-payments/agent` read (`probeIdentity` + `assertRekeyable` in `rekey.ts`), never the owner-only re-key routes — resolving the #2466 §3 reading of `rekey.ts`'s JSDoc against `mcp-runtime-compatibility.md`; both were true, the JSDoc's "re-key API" being the owner-only routes. (c) Step 3 points at the finish line step 1 prints (#2423). Nothing else on the page re-read. Prior: #1868: abandon-and-restart is now a recovery, not a write-off — the step-2 callout and the doctor section's "no spend authority" paragraph both updated: a fresh re-key inherits the abandoned attempt's frozen remainder and boundary, unless a new budget was granted in between (then it starts clean, deliberately). The rest of the walkthrough was re-read against the diff and stands. Prior: Promotion review: corrected the dashboard walkthrough's stale boundary warning to match #1849 — an expired remainder is dropped and, while the recurring grant remains active, the full current-period budget is issued. Clarified #1699 applies revoke-and-reissue only to an anchored attestation while standing remains unchanged, and #1868 recovery depends on the stage where the flow stopped. Prior: #1849: "What carries over" gains the boundary-crossing edge — a re-key started in one budget period and finished in the next drops the stale carry and hands you the full budget for the period you are actually in. Prior: #1702: written against epic #1694 as merged — #1698 (backend stages), #1699 (passport re-anchor), #1700 (connect --rekey), #1701's shipped half (dashboard). Prior: #2258: the page-level agent detail gate is now covered here; legacy Safe records are readable-only in Haven and have no payment-credential, pause/resume, re-key, or revoke controls.
 ---
 
 # Replacing an agent's signing key
@@ -123,6 +123,16 @@ The mechanics are identical. The difference is what you should look at.
 Re-key spans two places, because the new key is generated on the agent's machine and
 never leaves it. Haven only ever receives an address.
 
+> **Which `npx` package.** `@alpha` below is the production channel. If the setup
+> command your dashboard handed you named a different `@haven_ai/connect@…` package
+> (a non-production deployment — the backend's setup response calls it
+> `connector_package`; see
+> [`package-dev-channel.md`](../operations/package-dev-channel.md)), use that package
+> in every command on this page. It matters most in step 3: `--rekey-finish`
+> reinstalls the signer runtime pinned by the connector that runs it, so finishing
+> from another channel replaces the signer you were re-keying. The connector prints
+> the exact step-3 command for its own channel at the end of step 1.
+
 **1. On the machine that runs the agent**
 
 ```
@@ -131,7 +141,9 @@ npx @haven_ai/connect@alpha --rekey
 
 Add `--name <slug>` if you wired the agent under a name. It prints a new **public
 signing address** and stops. Nothing has changed yet — the agent keeps working on its
-old key.
+old key. The one thing it asks Haven is who the stored API key belongs to, so it can refuse
+a legacy-rail or revoked agent the way the backend would; the re-key routes themselves are
+owner-only and the connector never calls them — that is why step 2 is yours.
 
 **2. In the dashboard**
 
@@ -157,7 +169,7 @@ it shows a **new API key, once**. Copy it.
 npx -y @haven_ai/connect@alpha --rekey-finish --api-key <the key> --runtime <your runtime>
 ```
 
-Add the same `--name <slug>` if you used one. This writes both new credentials in
+Add the same `--name <slug>` if you used one, or run the line step 1 printed. This writes both new credentials in
 place, at the same path as before, and updates that agent's entries in your MCP
 config.
 

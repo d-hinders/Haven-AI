@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import type {
   CopyKind,
   CreateSetupResponse,
@@ -8,9 +9,9 @@ import type {
 import type { AwaitingConnectionStage } from '@/hooks/useAgentConnectionSetupStatus'
 import { ChevronRight } from 'lucide-react'
 import { Button } from '../ui/Button'
-import { Checkbox } from '../ui/Checkbox'
 import { Icon } from '../ui/Icon'
 import { CopyBlock } from './CopyBlock'
+import { SegmentedControl } from './SegmentedControl'
 import { InlineErrorNote } from './SetupNotices'
 import { formatAbsoluteDate } from './setup-copy'
 
@@ -19,10 +20,6 @@ export function WaitingForConnector({
   runtime,
   copied,
   onCopy,
-  manualPathRevealed,
-  onManualPathRevealedChange,
-  manualFallbackConfirmed,
-  onManualFallbackConfirmedChange,
   manualCredential,
   manualCredentialAcknowledged,
   manualCreating,
@@ -39,10 +36,6 @@ export function WaitingForConnector({
   runtime: string
   copied: CopyKind | null
   onCopy: (kind: CopyKind, value: string) => void
-  manualPathRevealed: boolean
-  onManualPathRevealedChange: (revealed: boolean) => void
-  manualFallbackConfirmed: boolean
-  onManualFallbackConfirmedChange: (confirmed: boolean) => void
   manualCredential: ManualCredential | null
   manualCredentialAcknowledged: boolean
   manualCreating: boolean
@@ -55,6 +48,11 @@ export function WaitingForConnector({
   expiresAt: string
   onCancel: () => void
 }) {
+  // Which rendering of the manual credential is shown — .env by default;
+  // selecting the format is pure presentation, so it stays local to this
+  // component rather than riding the flow hook (#2482).
+  const [manualFormat, setManualFormat] = useState<'env' | 'prompt'>('env')
+
   return (
     <>
       {/* #1391: no status badge here. The shell ticker (Waiting → Connected →
@@ -176,7 +174,95 @@ export function WaitingForConnector({
           lighter convention for exactly this — chevron summary, left rule for
           the body, no box at all (ConnectionVerificationFooter) — so use it. Depth now reads from indentation
           instead of from stacked surfaces, and the only card left inside is
-          the CopyBlock, which is genuinely one. */}
+          the CopyBlock, which is genuinely one.
+
+          #2482 lifts the manual path OUT of "Having trouble connecting?" —
+          and out of the "one click deeper than the harmless one" rationale
+          that nested it there. That rationale was written when the manual
+          credential was only ever a fallback for a local runtime that
+          failed. A server or hosted backend is not that: the setup command
+          writes files under ~/.haven and edits a local MCP config, so it
+          cannot run there at all, and the manual credential IS the supported
+          integration path (it emits exactly the HAVEN_* values the SDK reads).
+          Burying that path under a heading about a connection problem hid it
+          from the developers it exists for.
+
+          What #1391 still gets right is the DEFAULT ordering: the setup prompt
+          above keeps its primacy and this stays a single recessive
+          disclosure — this is a reframing, not a re-ranking. And the friction
+          is gone: no reveal button, no warning panel, no acknowledgement
+          checkbox. One plain intro says what you are about to get and that
+          the signing key is shown once; the safety facts live at the result,
+          beside the key, where they are actionable. The generate action still
+          registers with connector_version 'browser-manual-fallback' so
+          install_status.manual_credential_fallback keeps the flow able to
+          reach the budget-approval step (#2472/#2475) — that wiring lives in
+          useAgentConnectionSetup.handleCreateManualCredential and is covered
+          by the hook tests. */}
+      <details className="group text-xs">
+        <summary className="flex cursor-pointer list-none items-center gap-1 text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
+          <Icon
+            icon={ChevronRight}
+            className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
+          />
+          Running in a server or hosted backend?
+        </summary>
+        <div className="mt-3 space-y-3 border-l border-[var(--v2-border)] pl-3">
+          {!manualCredential ? (
+            <>
+              <p className="leading-relaxed text-[var(--v2-ink-2)]">
+                When your agent runs on a server or hosted backend, the setup command cannot run there. Paste these values into the backend&rsquo;s secrets instead — an API key that identifies your agent and a private signing key the runtime uses to sign payments. The signing key is shown once.
+              </p>
+              {manualError && <InlineErrorNote>{manualError}</InlineErrorNote>}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full"
+                onClick={onCreateManualCredential}
+                disabled={manualCreating}
+              >
+                {manualCreating ? 'Creating credentials...' : 'Generate credentials'}
+              </Button>
+            </>
+          ) : (
+            <div className="space-y-3">
+              <SegmentedControl
+                label="Credential format"
+                options={[
+                  { value: 'env', label: '.env' },
+                  { value: 'prompt', label: 'Agent workspace prompt' },
+                ]}
+                value={manualFormat}
+                onChange={setManualFormat}
+              />
+              <CopyBlock
+                label={manualFormat === 'env' ? '.env block' : 'Agent workspace prompt'}
+                value={manualFormat === 'env' ? manualCredential.env : manualCredential.prompt}
+                copied={copied === 'manual'}
+                onCopy={() =>
+                  onCopy(
+                    'manual',
+                    manualFormat === 'env' ? manualCredential.env : manualCredential.prompt,
+                  )
+                }
+              />
+              <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                The signing key is shown once. If it leaks, replace it from the agent page.
+              </p>
+              {!manualCredentialAcknowledged && (
+                <Button onClick={onContinueAfterManualCredential} className="w-full">
+                  Continue to wallet approval
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      </details>
+
+      {/* The local-command recovery path no longer hosts the manual route:
+          #2482 moved the manual credential to its own disclosure directly
+          under the setup prompt, so this one keeps a single job — the
+          command to re-run when the connector did not connect. */}
       <details className="group text-xs">
         <summary className="flex cursor-pointer list-none items-center gap-1 text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
           <Icon
@@ -192,76 +278,6 @@ export function WaitingForConnector({
             copied={copied === 'command'}
             onCopy={() => onCopy('command', setup.connector_command)}
           />
-
-          <details className="group/manual text-xs">
-            <summary className="flex cursor-pointer list-none items-center gap-1 text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
-              <Icon
-                icon={ChevronRight}
-                className="h-3 w-3 shrink-0 transition-transform group-open/manual:rotate-90"
-              />
-              Manual credential fallback
-            </summary>
-            <div className="mt-3 space-y-3 border-l border-[var(--v2-border)] pl-3">
-              <p className="leading-relaxed text-[var(--v2-ink-2)]">
-                Use this only if the agent cannot run the setup command or store the local connector files. Haven will still receive only the public signing address and API key hash.
-              </p>
-              {!manualPathRevealed && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onManualPathRevealedChange(true)}
-                  className="w-full"
-                >
-                  I really can't run the connector — show the manual path
-                </Button>
-              )}
-              {manualPathRevealed && (<>
-              <div className="rounded-[10px] border border-warning/20 bg-[var(--v2-warning-soft)] p-3">
-                <p className="font-semibold text-[var(--v2-ink)]">Before creating a manual credential</p>
-                <ul className="mt-2 list-disc space-y-1 pl-4 leading-relaxed text-[var(--v2-ink-2)]">
-                  <li>Use it only in a trusted agent workspace.</li>
-                  <li>The private signing key lets the agent sign payments within the approved agent budget.</li>
-                  <li>The API key identifies the agent but cannot spend alone.</li>
-                  <li>If it may have leaked, pause or revoke the agent in Haven.</li>
-                  <li>Do not commit it, upload it, or paste it into shared logs.</li>
-                </ul>
-              </div>
-              <Checkbox
-                checked={manualFallbackConfirmed}
-                onChange={(event) => onManualFallbackConfirmedChange(event.target.checked)}
-                className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 text-[var(--v2-ink-2)]"
-                label="I understand this fallback shows a one-time private signing key and should only be pasted into a trusted agent workspace."
-              />
-              {manualError && <InlineErrorNote>{manualError}</InlineErrorNote>}
-              {!manualCredential && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onCreateManualCredential}
-                  disabled={!manualFallbackConfirmed || manualCreating}
-                  className="w-full"
-                >
-                  {manualCreating ? 'Creating manual credential...' : 'Create manual credential'}
-                </Button>
-              )}
-              {manualCredential && (
-                <div className="space-y-3">
-                  <CopyBlock
-                    label="Manual credential prompt"
-                    value={manualCredential.prompt}
-                    copied={copied === 'manual'}
-                    onCopy={() => onCopy('manual', manualCredential.prompt)}
-                  />
-                  {!manualCredentialAcknowledged && (
-                    <Button onClick={onContinueAfterManualCredential} className="w-full">
-                      Continue to wallet approval
-                    </Button>
-                  )}
-                </div>
-              )}
-              </>)}
-            </div>
-          </details>
         </div>
       </details>
 

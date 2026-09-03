@@ -50,10 +50,6 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           runtime={effectiveRuntime}
           copied={flow.copied}
           onCopy={flow.copyText}
-          manualPathRevealed={flow.manualPathRevealed}
-          onManualPathRevealedChange={flow.setManualPathRevealed}
-          manualFallbackConfirmed={flow.manualFallbackConfirmed}
-          onManualFallbackConfirmedChange={flow.setManualFallbackConfirmed}
           manualCredential={flow.manualCredential}
           manualCredentialAcknowledged={flow.manualCredentialAcknowledged}
           manualCreating={flow.manualCreating}

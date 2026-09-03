@@ -610,11 +610,10 @@ gh pr view <pr> --json autoMergeRequest --jq .autoMergeRequest.mergeMethod
 --disable-auto`, re-arm with `--squash`, run the command again. A report that says
 "armed" without that output has not checked. The checkable basis is four named
 landings — #2428, #2460, #2493 and #2438 — every one of which reached `dev` as a
-two-parent merge commit (`git rev-list --parents -n1 <merge-sha>` prints three
-hashes for each). Three of them carry a disarming comment on the PR ("disarmed
-auto-merge … it was armed with `mergeMethod: MERGE`", 2–3 Sep) and landed wrong
-anyway: a disarm not followed by a squash re-arm and a read-back changes nothing.
-Those four carry the rule. If you census the history as well,
+two-parent merge commit (`git rev-list --parents -n1 <merge-sha>` prints three hashes
+for each). Three of them (#2428, #2460, #2493) carry a comment saying "disarmed
+auto-merge" and landed wrong anyway: a disarm not followed by a squash re-arm and a
+read-back changes nothing. Those four carry the rule. If you census the history as well,
 **pin the instant** — a bare `--since=<date>` is a git approxidate resolved against
 the wall clock *now*, so the same SHA counts differently every hour of the evening
 (this rule's own draft read 258 and then 256 for one SHA in one session; PR #2506's

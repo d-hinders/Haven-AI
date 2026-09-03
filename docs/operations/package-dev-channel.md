@@ -5,10 +5,16 @@ contract: true
 covers:
   - .github/workflows/publish.yml
   - scripts/release-snapshot-version.mjs
+  - scripts/release-channel.mjs
+  - scripts/release-bump.mjs
   - packages/sdk/src/connector-channel.ts
   - packages/mcp-server/src/connector-channel.ts
+  - packages/backend/src/config.ts
+  - packages/backend/src/routes/agent-connection-setups.ts
   - packages/connect/src/runtime-spec-override.ts
-last-verified: "2026-09-03" # #2425: written against the merged slices, not the epic text — `publish.yml`, `scripts/release-snapshot-version.mjs` and `scripts/release-channel.mjs` (#2463), `parseConnectorChannel` in `packages/backend/src/config.ts` (#2467), `packages/sdk/src/connector-channel.ts` and `packages/mcp-server/src/connector-channel.ts` (#2492), and `packages/connect/src/runtime-spec-override.ts` as merged by PR #2495 (`fceb0891`, #2424). The one measured publish it quotes is run 33772207035 on `fd49e1a3`, as recorded in the #2420 comment thread on 2026-09-03. No deployment state is asserted anywhere in the body: the operator checklist is unticked by design.
+  - packages/connect/src/doctor.ts
+  - packages/connect/src/cli.ts
+last-verified: "2026-09-03" # #2425: written against the merged slices, not the epic text — `publish.yml`, `scripts/release-snapshot-version.mjs` and `scripts/release-channel.mjs` (#2463), `parseConnectorChannel` in `packages/backend/src/config.ts` (#2467), `packages/sdk/src/connector-channel.ts` and `packages/mcp-server/src/connector-channel.ts` (#2492), and `packages/connect/src/runtime-spec-override.ts` as merged by PR #2495 (`fceb0891`, #2424). The one measured publish it quotes is run 33772207035 on `fd49e1a3`, as recorded in the #2420 comment thread on 2026-09-03. No deployment state is asserted anywhere in the body: the operator checklist is unticked by design. covers: was widened on review (haven-reviewer at a5349eed): the first draft listed five files while the body states the behaviour of eleven — parseConnectorChannel (config.ts), connector_package (agent-connection-setups.ts), doctor.ts, cli.ts, release-channel.mjs and release-bump.mjs were uncovered, so a change to any of them would never have re-implicated this contract doc.
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -77,7 +83,7 @@ it.
    the PR changes; there is no version to bump.
 
 2. **Wait for `publish.yml` on `dev`, and check that it actually ran.** The
-   workflow's `paths:` filter is `packages/{sdk,signer,mcp,connect,cli}/**`, so a
+   workflow's `paths:` filter lists `packages/sdk/**`, `packages/signer/**`, `packages/mcp/**`, `packages/connect/**` and `packages/cli/**` as five separate entries (written here as `packages/{sdk,signer,mcp,connect,cli}/**` for short), so a
    merge that touches only scripts, docs or other packages publishes nothing —
    PR #2463, which added the dev channel, published nothing itself for exactly
    that reason.

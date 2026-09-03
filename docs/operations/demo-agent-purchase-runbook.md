@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # presentation runbook — narrative, no direct code mirror
-last-verified: "2026-08-12" # #1350: discovery narration now mentions category/search instead of implying exact-category lookup only
+last-verified: "2026-08-12" # #2422: Act 0 step 1 hardcoded `npx @haven_ai/connect@alpha` while this runbook's own preamble runs everything on the DEV environment. The connector's dist-tag became per-deployment (`HAVEN_CONNECTOR_CHANNEL`) in that PR, so the step now says to copy the command the dashboard hands you and names `connector_package` as the source of truth — deliberately written against the MECHANISM, not against an asserted deployed value, because the dev backend's variable is an owner step that has NOT been performed. `covers: []` means no automatic gate implicates this file, which is why it survived three earlier sweeps. Scope: that ONE step ONLY — the demo narrative, the Fortnox acts, the timings and every other step were NOT re-read or re-verified in this pass. Prior: #1350: discovery narration now mentions category/search instead of implying exact-category lookup only
 ---
 
 # Demo Runbook — Agent Purchase, End to End (incl. Fortnox/SIE)
@@ -22,7 +22,10 @@ touches mainnet funds.
 ## Act 0 — Pre-demo setup (do this the day before)
 
 1. **Agent + signer connected** (the production default topology):
-   `npx @haven_ai/connect@alpha` on the demo laptop — hosted MCP + local
+   run the setup command the dashboard hands you on the demo laptop — since
+   #2422 the connector package it names is per-deployment (its
+   `connector_package` field), so copy it rather than pinning a channel by hand;
+   this runbook runs against **dev**, where that need not be `@alpha` — hosted MCP + local
    signer, consent ack, budget granted in the dashboard (e.g. 5 USDC /day on
    Base Sepolia). Verify with a throwaway purchase.
 2. **Fortnox sandbox connected**: dashboard → Fortnox → Connect (OAuth to the

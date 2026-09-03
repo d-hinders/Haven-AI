@@ -1711,6 +1711,46 @@ const BACKUP_RECOVERY_STAGES = {
   'load-error': null,
 }
 
+/**
+ * #2473: the agent budget card's three no-happy-path states.
+ *
+ * The bug this scenario is evidence for: the grant form's token options came
+ * from `currentAgent.allowances`, a view over ACTIVE delegations — empty for
+ * exactly the agent that has no budget yet — so a budget-less agent got no
+ * form at all and the page's "Add budget" scrolled to an empty anchor. The
+ * fixed empty state is therefore the one state a reviewer most needs to see,
+ * and no route capture reaches it: the shared fixture's `agent-research`
+ * always has a budget.
+ *
+ *   no-budget   delegations `[]` AND allowances `[]` — the state the fix is
+ *               about. The card must show the grant form, not nothing.
+ *   load-error  the delegations fetch FAILS. Reachable only as a throw:
+ *               `useDelegationBudget`'s `reload` sets `budgetsError` in its
+ *               `catch`, and `lib/api.ts` throws only on `!response.ok`, so
+ *               no 200 body of any shape reaches the branch — hence
+ *               `httpError(500)` rather than a cleverer payload.
+ *   loading     the fetch stays pending. The skeleton has to hold the card's
+ *               shape, which is a claim only a render can settle.
+ */
+const AGENT_BUDGET_STAGES = {
+  'no-budget': { kind: 'ok', delegations: [] },
+  'load-error': { kind: 'error' },
+  loading: { kind: 'pending' },
+}
+
+let agentBudgetStage = 'no-budget'
+
+/** Move `agent-budget-card` onto one of its three states. */
+function setAgentBudgetStage(next) {
+  if (!(next in AGENT_BUDGET_STAGES)) {
+    throw new Error(
+      `agent-budget-card: unknown stage "${next}" — expected one of ` +
+        Object.keys(AGENT_BUDGET_STAGES).join(', '),
+    )
+  }
+  agentBudgetStage = next
+}
+
 let backupRecoveryStage = 'healthy'
 
 /** Move `account-backup-recovery` onto one of its three states. */
@@ -1762,6 +1802,117 @@ function sweepRecoveryScenario(description, response, marker, { delayMs = 0 } = 
 // On-chain AllowanceModule fixtures were removed with the retired legacy
 // dashboard surfaces. The screenshot registry below only drives API-backed
 // and browser-visible states that remain supported.
+
+
+/**
+ * #2422 — the connector-repair hint, in both of its branches.
+ *
+ * `connectorPackage` present is the normal case (the backend hands out the
+ * channel it is configured for, `@alpha` in production). Absent is the
+ * rolling-deploy skew where a NEW frontend polls an OLD backend that predates
+ * the `connector_package` field — the branch that renders a command the user
+ * has to reconstruct, and the one the design review asked to see rendered.
+ */
+function connectorRepairHintScenarios() {
+  const build = (connectorPackage) => ({
+    description:
+      connectorPackage
+        ? 'Connect agent modal, approve screen, runtime_config_unreadable repair hint WITH the server-provided connector spec (#2422)'
+        : 'Connect agent modal, approve screen, runtime_config_unreadable repair hint with NO connector spec — rolling-deploy skew (#2422)',
+    api(apiPath, method) {
+      if (apiPath === '/agent-connection-setups' && method === 'POST') {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          status: 'connected_local',
+          setup_token: CONNECT_SETUP_TOKEN,
+          expires_at: '2099-01-01T00:00:00.000Z',
+          connector_command: CONNECT_COMMAND,
+          ...(connectorPackage ? { connector_package: connectorPackage } : {}),
+          setup_prompt: 'Please connect this workspace to Haven.',
+        }
+      }
+      if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          agent_id: 'agent-fixture-1',
+          status: 'connected_local',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          agent: { name: 'Research agent', description: 'Pays for research APIs' },
+          haven_wallet: {
+            id: FIXTURE_SAFE.id,
+            name: FIXTURE_SAFE.name,
+            address: FIXTURE_SAFE.safe_address,
+            chain_id: FIXTURE_SAFE.chain_id,
+            network: 'Base Sepolia',
+          },
+          agent_budget: [
+            {
+              id: 'budget-1',
+              token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+              token_symbol: 'USDC',
+              allowance_amount: '25000000',
+              reset_period_min: 1440,
+            },
+          ],
+          delegate_address: '0x3333333333333333333333333333333333333333',
+          // The ONE field that selects the sentence under review. Everything
+          // else mirrors `connect-agent-approve` so the diff between the two
+          // captures is the hint and nothing else.
+          ...(connectorPackage ? { connector_package: connectorPackage } : {}),
+          install_status: {
+            runtime: 'cursor',
+            runtime_mcp_mode: 'local_stdio',
+            local_mcp_configured: true,
+            local_mcp_acknowledged: true,
+            credential_files_written: true,
+            skill_installed: true,
+            restart_required: true,
+            error_code: 'runtime_config_unreadable',
+          },
+          approval: { status: 'not_started', safe_tx_hash: null, tx_hash: null },
+        }
+      }
+      if (apiPath === '/agents/agent-fixture-1/account-signers') {
+        return {
+          account_address: FIXTURE_SAFE.safe_address,
+          chain_id: FIXTURE_SAFE.chain_id,
+          owner_address: null,
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      await dialog.getByLabel('Agent name').fill('Research agent')
+      await dialog.getByRole('button', { name: 'Set agent budget' }).click()
+      await dialog.getByPlaceholder('Amount').fill('25')
+      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
+      await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
+
+      await dialog.getByRole('button', { name: 'Approve budget' }).waitFor({ timeout: 30_000 })
+
+      // The hint lives in the COLLAPSED-by-default verification disclosure, so
+      // open it: a capture of the resting state would show none of it and
+      // would be evidence that cannot show the defect.
+      await dialog.getByText(/Local connection verified/).click()
+      await dialog.getByText('Public address').waitFor({ timeout: 10_000 })
+      // Fail the run rather than shoot the wrong state: without this the
+      // capture silently falls back to a generic runtime-status sentence.
+      await dialog.getByText(/could not be read/).waitFor({ timeout: 10_000 })
+      await shoot(dialog, 'repair-hint')
+    },
+  })
+
+  return {
+    'connect-agent-repair-hint': build('@haven_ai/connect@alpha'),
+    'connect-agent-repair-hint-no-spec': build(null),
+  }
+}
 
 export const SCENARIOS = {
   /**
@@ -2480,7 +2631,7 @@ export const SCENARIOS = {
     },
   },
   'connect-agent-approve': {
-    description: 'Connect agent modal, step 4, the APPROVE screen on the delegation rail (#1684)',
+    description: 'Connect agent modal, step 4, manual credential fallback at the owner-signed approval rail (#2472)',
     // The third pin the other two connect scenarios cannot hold: `connect-agent`
     // pins awaiting_connection for its whole run and `connect-agent-approved`
     // pins active, so the screen BETWEEN them — where the user actually grants
@@ -2523,11 +2674,15 @@ export const SCENARIOS = {
           ],
           delegate_address: '0x3333333333333333333333333333333333333333',
           install_status: {
-            runtime_mcp_mode: 'local_stdio',
-            local_mcp_configured: true,
-            local_mcp_acknowledged: true,
-            credential_files_written: true,
-            skill_installed: true,
+            // Manual credentials cannot report a local runtime probe. The
+            // browser flow marks the credential ready, then reaches this
+            // same owner-signed approval screen without claiming that the
+            // runtime was configured automatically (#2472).
+            manual_credential_fallback: true,
+            local_mcp_configured: false,
+            local_mcp_acknowledged: false,
+            credential_files_written: false,
+            skill_installed: false,
             restart_required: true,
           },
           // #2120: `approval.status` is `agent_connection_setups.approval_status`,
@@ -2567,11 +2722,19 @@ export const SCENARIOS = {
 
       // ...and again with the verification disclosure open, since #1684 made
       // that one row the collapsed state: both halves need evidence.
-      await dialog.getByText(/Local connection verified/).click()
+      await dialog.getByText(/Manual credential created/).click()
       await dialog.getByText('Public address').waitFor({ timeout: 10_000 })
       await shoot(dialog, 'approve-verification-open')
     },
   },
+  // #2422: the repair hint's TWO branches, which nothing else captures.
+  // `connect-agent-approve` pins a healthy install_status, so the
+  // `runtime_config_unreadable` sentence in ConnectionVerificationFooter's
+  // "Runtime setup" row has never had rendered evidence. Built as a factory
+  // over one variable — whether the backend sent `connector_package` — because
+  // the whole point of the change is that those two renders must differ, and a
+  // reviewer has to see both side by side.
+  ...connectorRepairHintScenarios(),
   'retired-rail-account': {
     description:
       'Account detail for a LEGACY Safe account after the rail retirement (#1989) — RetiredRailNotice present, no Send action',
@@ -3186,6 +3349,99 @@ export const SCENARIOS = {
       }
 
       await shoot(page.locator('main').first(), 'grid')
+    },
+  },
+  /**
+   * #2473: the budget card with no budget, with a failed fetch, and loading.
+   * See AGENT_BUDGET_STAGES above for why each stage is reachable.
+   */
+  'agent-budget-card': {
+    stages: AGENT_BUDGET_STAGES,
+    /** Exposed so the fixture-contract test can pin each stage (#1409). */
+    stage: setAgentBudgetStage,
+    api(apiPath) {
+      if (apiPath === `/agents/agent-research/delegations`) {
+        const stage = AGENT_BUDGET_STAGES[agentBudgetStage]
+        if (stage.kind === 'error') return httpError(500)
+        // Long enough to capture, short enough not to stall the run.
+        if (stage.kind === 'pending') return delayedHttp(20_000, { delegations: [] })
+        return { delegations: stage.delegations }
+      }
+      // The agent's own `allowances` is a VIEW over active delegations
+      // (#1090), so a no-budget agent whose allowances still listed a token
+      // would be a shape the product cannot produce — and would hide the very
+      // bug this scenario is evidence for, since the old code derived the
+      // token options from exactly that field.
+      if (apiPath === '/agents') {
+        return {
+          agents: FIXTURE_AGENTS.map((a) =>
+            a.id === 'agent-research' ? { ...a, allowances: [] } : a,
+          ),
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      // Module state, and `run` is called once per viewport: without this the
+      // mobile pass would open wherever the desktop pass left off and shoot a
+      // wrong state under the right name.
+      setAgentBudgetStage('no-budget')
+
+      const heading = page.getByRole('heading', { name: 'Agent budgets' })
+
+      const settle = async (navigate) => {
+        await navigate()
+        await page.evaluate(() => document.fonts.ready)
+        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await dismissMobileSidebar(page, vp)
+        await heading.waitFor({ timeout: 15_000 })
+      }
+
+      await settle(() =>
+        page.goto(`${BASE_URL}/agents/agent-research`, {
+          waitUntil: 'networkidle',
+          timeout: 30_000,
+        }),
+      )
+
+      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
+      const emptyCopy = card.getByText(/No budget yet/)
+      const errorCopy = card.getByText(/could not load this agent.s current budgets/)
+      const setBudget = card.getByRole('button', { name: 'Set budget' })
+
+      const openStage = async (stage) => {
+        setAgentBudgetStage(stage)
+        await settle(() => page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 }))
+      }
+
+      // ── no budget yet ─────────────────────────────────────────────────────
+      // The grant form is the SUBJECT: before #2473 it did not render here at
+      // all. Waiting on the heading alone would accept the broken state as
+      // the evidence.
+      await emptyCopy.waitFor({ timeout: 15_000 })
+      await setBudget.waitFor({ timeout: 15_000 })
+      await refuseIfPresent(errorCopy, 'agent-budget-card · no-budget · error copy')
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'no-budget')
+
+      // ── load failure ──────────────────────────────────────────────────────
+      // The card must KEEP its form here rather than collapse to a bare error,
+      // which is the design-review finding this state exists to show.
+      await openStage('load-error')
+      await errorCopy.waitFor({ timeout: 15_000 })
+      await setBudget.waitFor({ timeout: 15_000 })
+      await refuseIfPresent(emptyCopy, 'agent-budget-card · load-error · empty copy')
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'load-error')
+
+      // ── loading ───────────────────────────────────────────────────────────
+      // The skeleton branch renders no form and no list, so both are the
+      // negative proof that this is the loading card and not a settled one.
+      await openStage('loading')
+      await refuseIfPresent(setBudget, 'agent-budget-card · loading · settled form')
+      await refuseIfPresent(emptyCopy, 'agent-budget-card · loading · empty copy')
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'loading')
     },
   },
   // 'send-review' (#1856) is DELETED with its subject (#1989, epic #1440): it

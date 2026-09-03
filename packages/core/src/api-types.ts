@@ -2504,6 +2504,7 @@ export type components = {
             signer_acknowledged?: boolean;
             local_mcp_acknowledged?: boolean;
             activation_command_available?: boolean;
+            manual_credential_fallback?: boolean;
             skill_installed?: boolean;
             probe_result?: string;
             restart_required?: boolean;
@@ -2532,6 +2533,7 @@ export type components = {
             /** Format: date-time */
             expires_at: string;
             connector_command: string;
+            connector_package: string;
             setup_prompt: string;
         };
         ResolveAgentConnectionSetupRequest: {
@@ -2612,6 +2614,7 @@ export type components = {
             delegate_address?: string | null;
             api_key_prefix?: string | null;
             runtime?: string | null;
+            connector_package: string;
             connector?: components["schemas"]["AgentConnectionConnector"];
             install_status: components["schemas"]["AgentConnectionInstallStatus"];
             approval: {

@@ -55,6 +55,10 @@ The default Hermes home is `~/.hermes`. If `HERMES_HOME` is set, use that direct
    npx @haven_ai/connect@alpha --tombstone <directory> --reason "haven-reset" --json
    ```
 
+   `--tombstone` rewrites local files only — it installs nothing and never calls
+   Haven — so the connector's channel does not matter here: `@alpha` is the
+   production channel, and any published connector does the same job.
+
    **Check the result before deleting anything.** Success is exit 0 with `{"tombstoned": true, …}` on stdout; a refusal is exit 1 with `{"tombstoned": false, "error": {"code": …}}` on stdout and the prose on stderr. Confirm `TOMBSTONE.json` is present in the directory (`test -f <directory>/TOMBSTONE.json`). Do not proceed on the absence of visible output — a harness that stopped reading the stream sees the same nothing either way ([#2175](https://github.com/d-hinders/Haven-AI/issues/2175)).
 
    Only after that verification, delete the directory's `identity.json`, `signer.json`, `signer-runtime.json`, and other runtime/key files. Preserve `bin/haven-signer.mjs` and `TOMBSTONE.json`: a process started before the reset may still invoke that old path, and the tombstone names the retired agent instead of masking the failure as a closed connection. A tombstone does not revoke an agent; revoke it on the Haven agent page if its authority must end.
@@ -71,7 +75,10 @@ The default Hermes home is `~/.hermes`. If `HERMES_HOME` is set, use that direct
    npx @haven_ai/connect@alpha --doctor --runtime hermes
    ```
 
-   After a full credential reset, this command normally exits non-zero because there is no remaining `identity.json` / `signer.json`; that is expected until fresh setup. Verify that it names no live `superseded` credential directory and reports preserved tombstone directories as `retired`. If a wired Haven pair intentionally remains, its `identity_match` check must pass. That check proves the hosted API identity and local signing key belong to the same agent. A failed `identity_match` means Hermes would quote as one agent and sign as another; stop and resolve it rather than reconnecting or paying.
+   Any published connector gives this inventory: `--doctor` reads local files, and
+   its one channel-sensitive check — `signer_runtime`, which compares the installed
+   signer with the manifest of the connector running it — has nothing left to pass
+   on after a reset. After a full credential reset, this command normally exits non-zero because there is no remaining `identity.json` / `signer.json`; that is expected until fresh setup. Verify that it names no live `superseded` credential directory and reports preserved tombstone directories as `retired`. If a wired Haven pair intentionally remains, its `identity_match` check must pass. That check proves the hosted API identity and local signing key belong to the same agent. A failed `identity_match` means Hermes would quote as one agent and sign as another; stop and resolve it rather than reconnecting or paying.
 4. Treat any remaining usable credential directory that is no longer referenced by Hermes as a `superseded` finding, not a clean slate. Tombstone it first, then remove its key material and re-run `--doctor`. A tombstoned directory whose keys are gone is reported as `retired`; keep that tombstone until every long-lived host has restarted.
 
 Do not continue to reconnect until the configuration and credential inventory match the reset you performed. If YAML cannot be safely edited or the diagnostic reports a mismatch, stop and report the failing step rather than hand-patching credentials.
@@ -92,5 +99,5 @@ Do not continue to reconnect until the configuration and credential inventory ma
    against it.
 
 2. Start a new Hermes session, or run `/restart` in every Hermes Gateway that will use the new pair.
-3. Run `npx @haven_ai/connect@alpha --doctor --runtime hermes` again. A clean reconnection report exits zero, `identity_match` passes, and no `superseded` agent is named. Retained tombstone directories may still be reported as `retired` until every long-lived host has restarted.
+3. Run `npx -y <connector_package> --doctor --runtime hermes` again, with the same package step 1 used: `--doctor` checks the installed signer against the manifest of the connector running it, so a doctor from another channel reports a false `signer_runtime` mismatch, and the `--repair` it then suggests would reinstall that channel's signer. A clean reconnection report exits zero, `identity_match` passes, and no `superseded` agent is named. Retained tombstone directories may still be reported as `retired` until every long-lived host has restarted.
 4. Run a real payment only after separate explicit authorization. Do not use a reset or reconnect request as payment authorization.

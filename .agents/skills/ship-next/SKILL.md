@@ -415,12 +415,7 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
 ## Merge Gate
 
 Classify a change as money-path when **either** the issue carries the `money-path`
-label **or** the diff touches a file on the perimeter. **The file half is the
-script's answer, not yours:** run
-`node scripts/ci/money-path-classify.mjs $(git merge-base origin/dev HEAD)` and paste
-its output — the `=== SELF-TEST PASSED (6 positive, 6 negative) ===` line and the
-verdict — into the PR body; it refuses to classify when a control fails, which is
-what makes its "no" worth quoting (#2444). The label half is read off the issue.
+label **or** the diff touches a file on the perimeter.
 
 **The perimeter's single source of truth is
 [`.github/money-path-globs.json`](../../../.github/money-path-globs.json)** (#1030) —
@@ -515,6 +510,13 @@ you need the reasoning. Never edit one without the other — CI will not let you
 The label matters because money-sensitive changes do not always touch listed files
 (a new signing scheme, a new rail); the file list matters because a diff can be
 money-sensitive without the issue being labeled. Union, never intersection.
+
+**Do not answer the file half by eye — run the classifier (#2444).** The command is
+`node scripts/ci/money-path-classify.mjs` with the merge base as its argument; paste
+its output into the PR body, both the verdict and the `=== SELF-TEST PASSED
+(6 positive, 6 negative) ===` line above it. It refuses to classify at all when one
+of its controls fails, and that refusal is what makes its "no" worth quoting rather
+than merely asserted. The label half is read off the issue.
 
 **The file half fails silently, so it needs the guard the label half does not.** When
 a route is missing from the list, a labeled issue still classifies correctly and

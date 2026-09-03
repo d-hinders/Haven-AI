@@ -20,9 +20,19 @@
  *
  * If this fails: run `npm run release:bump -- <type>` (see scripts/README.md),
  * which wipes all dist directories before rebuilding in the correct order.
+ *
+ * Since #2423 it also verifies the CONNECTOR CHANNEL the same way, and for the
+ * same reason. Every "re-run `npx @haven_ai/connect@<tag>`" hint in the
+ * published packages now renders from `HAVEN_CONNECTOR_CHANNEL` in
+ * `packages/sdk/src/connector-channel.ts`, so a stale `packages/sdk/dist`
+ * would ship a snapshot build telling its tester to re-run the PRODUCTION
+ * connector — the identical stale-dist failure, one constant over. It is
+ * checked by CALLING the built SDK's own helper rather than by matching source
+ * text: what matters is what the artifact renders at runtime.
  */
 
 import { readFile } from 'node:fs/promises'
+import { channelForVersion, readConnectorChannel } from './release-channel.mjs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -98,6 +108,80 @@ async function main() {
   }
 
   ok(`connect bundle mcpVersion = "${bundleVersion}" ✓ (matches packages/mcp/src/server.ts)`)
+
+  await verifyConnectorChannel(req)
+}
+
+/**
+ * The connector channel, checked on the BUILT artifact (#2423).
+ *
+ * Three independent readings have to agree:
+ *   1. the channel declared in packages/sdk/src/connector-channel.ts (source);
+ *   2. the channel derived from packages/sdk/package.json's version, by the
+ *      same rule publish.yml uses to choose `npm publish --tag`;
+ *   3. what the BUILT sdk bundle actually renders when called.
+ *
+ * (3) is the one that catches a stale dist, and it is a call rather than a
+ * grep: after #2423 the hint is assembled at runtime from the package name and
+ * the channel, so no `@haven_ai/connect@alpha` literal exists in any bundle to
+ * search for. Searching would find nothing and report success.
+ */
+async function verifyConnectorChannel(req) {
+  const channelTsPath = join(ROOT, 'packages', 'sdk', 'src', 'connector-channel.ts')
+  const sourceChannel = readConnectorChannel(await readFile(channelTsPath, 'utf8'))
+  if (!sourceChannel) {
+    die(
+      `Could not find HAVEN_CONNECTOR_CHANNEL in ${channelTsPath}.\n` +
+      `Expected: export const HAVEN_CONNECTOR_CHANNEL = '...'`,
+    )
+  }
+
+  const sdkPkg = JSON.parse(await readFile(join(ROOT, 'packages', 'sdk', 'package.json'), 'utf8'))
+  const expected = channelForVersion(sdkPkg.version)
+  if (sourceChannel !== expected) {
+    die(
+      [
+        `Connector channel mismatch: packages/sdk/src/connector-channel.ts declares`,
+        `"${sourceChannel}", but version ${sdkPkg.version} publishes under "${expected}".`,
+        ``,
+        `HAVEN_CONNECTOR_CHANNEL is owned by scripts/release-bump.mjs — do not hand-edit it.`,
+        `Re-run the bump so the constant is rewritten with the version:`,
+        `  npm run release:bump -- <version>`,
+      ].join('\n'),
+    )
+  }
+
+  const sdkBundlePath = join(ROOT, 'packages', 'sdk', 'dist', 'index.cjs')
+  let rendered
+  try {
+    rendered = req(sdkBundlePath).connectorRerunCommand()
+  } catch (err) {
+    die(
+      `Could not read connectorRerunCommand from ${sdkBundlePath}.\n` +
+      `Run "npm run build -w packages/sdk" first.\n` +
+      `Error: ${err.message}`,
+    )
+  }
+
+  const want = `npx @haven_ai/connect@${sourceChannel}`
+  if (rendered !== want) {
+    die(
+      [
+        `Build-order mismatch: the built SDK renders its re-run hint as`,
+        `  ${rendered}`,
+        `but packages/sdk/src/connector-channel.ts declares channel "${sourceChannel}",`,
+        `which should render`,
+        `  ${want}`,
+        ``,
+        `packages/sdk/dist/ is stale. Every published package's "re-run the connector"`,
+        `hint resolves through it, so this ships hints pointing at the wrong npm channel.`,
+        ``,
+        `Fix: rm -rf packages/sdk/dist && npm run build -w packages/sdk`,
+      ].join('\n'),
+    )
+  }
+
+  ok(`connector channel = "${sourceChannel}" ✓ (source, version ${sdkPkg.version}, and built SDK all agree)`)
 }
 
 function ok(msg) {

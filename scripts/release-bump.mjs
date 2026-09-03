@@ -28,6 +28,13 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { bumpLockfileText, lockfileDiffViolations } from './release-lockfile.mjs'
 import {
+  CONNECTOR_CHANNEL_CONSTANT,
+  CONNECTOR_CHANNEL_FILE,
+  channelForVersion,
+  readConnectorChannel,
+  rewriteConnectorChannel,
+} from './release-channel.mjs'
+import {
   MANIFEST_ROWS,
   manifestTableViolations,
   rewriteManifestTable,
@@ -87,6 +94,14 @@ const RUNTIME_MANIFEST = join(ROOT, 'packages', 'connect', 'src', 'runtime-manif
 // above (#1790). The bump writes the table; scripts/release-manifest-doc.mjs
 // owns both the write and the independent check.
 const MANIFEST_DOC = join(ROOT, 'docs', 'operations', 'mcp-runtime-compatibility.md')
+
+// The build-time connector channel (#2423). Not in SOURCE_VERSION_CONSTANTS
+// because it does not carry the version — it carries the npm dist-tag DERIVED
+// from the version, by the same rule `.github/workflows/publish.yml` uses to
+// pick `npm publish --tag`. Owned here for the same reason the version
+// constants are: it drifts on every release that changes channel, and a bump
+// is only atomic if the script writes it.
+const CONNECTOR_CHANNEL_TS = join(ROOT, ...CONNECTOR_CHANNEL_FILE.split('/'))
 
 // Source-level version constants that must stay in lockstep with the release.
 // Each is an `export const NAME = '...'` literal. They are self-reported
@@ -194,6 +209,43 @@ async function verifySourceVersionConstants(newVersion) {
     }
     log(`  ✓ ${entry.name} = '${newVersion}' in ${entry.label}`)
   }
+}
+
+/**
+ * Write the connector channel derived from `newVersion` into the SDK constant.
+ */
+async function updateConnectorChannel(newVersion) {
+  const channel = channelForVersion(newVersion)
+  const source = await readFile(CONNECTOR_CHANNEL_TS, 'utf8')
+  const updated = rewriteConnectorChannel(source, channel)
+  if (updated === null) {
+    die(
+      `Could not find ${CONNECTOR_CHANNEL_CONSTANT} in ${CONNECTOR_CHANNEL_FILE}. ` +
+      `Pattern: export const ${CONNECTOR_CHANNEL_CONSTANT} = '...'`,
+    )
+  }
+  await writeFile(CONNECTOR_CHANNEL_TS, updated, 'utf8')
+  log(`  ${CONNECTOR_CHANNEL_CONSTANT} → '${channel}' in ${CONNECTOR_CHANNEL_FILE}`)
+}
+
+/**
+ * Verify the channel constant on DISK matches the channel this version
+ * publishes under.
+ *
+ * Re-derives from the version and re-reads the file rather than trusting what
+ * `updateConnectorChannel` returned, so deleting that function leaves this one
+ * failing rather than silently passing.
+ */
+async function verifyConnectorChannel(newVersion) {
+  const expected = channelForVersion(newVersion)
+  const actual = readConnectorChannel(await readFile(CONNECTOR_CHANNEL_TS, 'utf8'))
+  if (actual !== expected) {
+    die(
+      `Verification failed: ${CONNECTOR_CHANNEL_CONSTANT} in ${CONNECTOR_CHANNEL_FILE} is ` +
+      `'${actual ?? '<not found>'}' but ${newVersion} publishes under '${expected}'.`,
+    )
+  }
+  log(`  ✓ ${CONNECTOR_CHANNEL_CONSTANT} = '${expected}' in ${CONNECTOR_CHANNEL_FILE}`)
 }
 
 /**
@@ -489,6 +541,7 @@ async function main() {
   log(`  sdkVersion + signerVersion = '${newVersion}'  (packages/connect/src/runtime-manifest.ts)`)
   log(`  ${SOURCE_VERSION_CONSTANTS.map((c) => c.name).join(', ')} = '${newVersion}'`)
   log(`  Supported Runtime Manifest table = '${newVersion}'  (docs/operations/mcp-runtime-compatibility.md)`)
+  log(`  ${CONNECTOR_CHANNEL_CONSTANT} = '${channelForVersion(newVersion)}'  (${CONNECTOR_CHANNEL_FILE})`)
   // These two are CHECKS THIS RUN WILL PERFORM, not results — the guards run
   // after the pins are rewritten, further down. Saying "(verified)" here
   // printed a reassuring line immediately before the run died on that very
@@ -559,6 +612,7 @@ async function main() {
   header('Updating source-code version constants')
   await updateMcpVersionConstant(newVersion)
   await updateRuntimeManifest(newVersion)
+  await updateConnectorChannel(newVersion)
   for (const entry of SOURCE_VERSION_CONSTANTS) {
     await updateSourceVersionConstant(entry, newVersion)
   }
@@ -626,6 +680,7 @@ async function main() {
   header('Verifying connect bundle')
   await verifyConnectBundle(newVersion)
   await verifySourceVersionConstants(newVersion)
+  await verifyConnectorChannel(newVersion)
   // Takes no version argument, and that is deliberate (#1790): it compares the
   // contract doc's table against the source constants on disk, so it cannot be
   // satisfied by the write this run performed.

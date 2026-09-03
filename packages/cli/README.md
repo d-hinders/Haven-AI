@@ -16,7 +16,7 @@ The CLI talks to the hosted Haven backend by default. Point it elsewhere with
 `http://localhost:3001`).
 
 > **This version: login, read, and backend-only management.** On-chain,
-> owner-signed actions (deploy, budgets, approvers, send) are signed in the
+> owner-signed actions (budgets, send) are signed in the
 > dashboard — this CLI never holds your keys. See
 > [`docs/research/haven-cli.md`](../../docs/research/haven-cli.md) for the full
 > design and roadmap.

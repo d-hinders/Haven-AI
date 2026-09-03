@@ -68,8 +68,12 @@ export interface ConnectOptions {
   localMcp?: boolean
   /**
    * #1377 D: keep the process alive after registering and poll for the
-   * user's budget approval (default). Set false for structured/automation
-   * runs (--json) where prompt output emission matters more than narration.
+   * user's budget approval. Set false for structured/automation runs (--json)
+   * where prompt output emission matters more than narration. #2484: when
+   * UNSPECIFIED (the default), the wait runs only when stdout is a TTY — the
+   * wait exists to narrate to a watching human, and a prose run whose stdout
+   * is not a TTY (an agent tool call) skips it. An explicit true waits
+   * regardless of TTY.
    */
   waitForApproval?: boolean
   /** Test/injection overrides for the approval poll cadence and clock. */
@@ -174,6 +178,14 @@ export interface ConnectDeps {
   env?: NodeJS.ProcessEnv
   /** Overridable so the #1719 TTY gate is testable without faking process.stdin. */
   isTty?: boolean
+  /**
+   * Overridable so the #2484 non-TTY narration gate is testable without
+   * faking process.stdout. Distinct from `isTty`: that gate decides whether
+   * the stdin prompt rung can run (INTERACTIVITY); this one decides whether
+   * the budget-approval wait has a watching human to narrate to, so it is
+   * keyed on STDOUT.
+   */
+  isStdoutTty?: boolean
   /** Overridable so the #1719 installed-client prompt is testable without readline. */
   promptRuntime?: () => Promise<RuntimeId>
   /**
@@ -560,7 +572,12 @@ async function executeConnect(
         // manual_runtime_setup_required. One name for the gate: the budget
         // (#1542).
         if (!early.errorCode || early.errorCode === 'manual_runtime_setup_required') {
-          log('→ Action needed: approve this agent\'s budget in the Haven dashboard — the approval button is live now. Setup continues here in the meantime.')
+          // #2484: the CTA carries the approval-relevant facts — budget
+          // amount/token/period and the wallet label + network — so an agent
+          // relaying it verbatim hands the user everything without a second
+          // call. No secrets: every value here is already in the
+          // printSetupSummary output; nothing in it is a key or an address.
+          log(approveBudgetCta(setup))
         }
       } catch {
         // ignore — the final report follows either way
@@ -649,8 +666,21 @@ async function executeConnect(
   // the install itself needs manual completion first. The observed outcome
   // shapes the printed next steps (#1542): an approval the wait just
   // celebrated must not be requested again two lines later.
+  //
+  // #2484: a prose run whose STDOUT is not a TTY also skips the wait unless
+  // the caller explicitly demands it. The wait exists to narrate live to a
+  // watching human; an agent running the prose command as a tool call has no
+  // watching human, and before this it sat opaque for up to 3 minutes while
+  // the CTA it could have relayed was trapped inside the unfinished command's
+  // output. Keyed on STDOUT rather than STDIN on purpose: the #1719 prompt
+  // gate keys on stdin because it decides INTERACTIVITY; this gate decides
+  // NARRATION. An explicit waitForApproval: true from a library caller still
+  // waits regardless of TTY.
   let approval: BudgetApprovalOutcome | undefined
-  if (options.waitForApproval !== false && !runtimeInstall.errorCode) {
+  const narrateApprovalWait =
+    options.waitForApproval === true ||
+    (options.waitForApproval === undefined && (deps.isStdoutTty ?? Boolean(process.stdout.isTTY)))
+  if (narrateApprovalWait && !runtimeInstall.errorCode) {
     approval = await waitForBudgetApproval(api, registration.setup_id, localApiKey, log, options.approvalWait)
   }
 
@@ -883,6 +913,43 @@ function printSetupSummary(setup: ResolvedSetup, log: (message: string) => void)
     }
   }
   log(`Setup challenge expires at ${setup.challenge.expires_at}. If it expires, return to Haven for a fresh setup and rerun Connect — do not reuse or paste credentials.`)
+}
+
+/**
+ * #2484: the approve-budget CTA carries the facts an agent relaying it
+ * verbatim would otherwise have to go fetch — budget amount/token/period and
+ * the wallet label + network. No secrets: those exact values are already
+ * printed by `printSetupSummary` (atomic amounts, and the wallet label —
+ * nothing here is a key or an address). The budget phrase reuses the same
+ * formatter as the celebration line (`describeApprovedBudget` —
+ * `formatAtomicAmount` + `describeResetPeriod` + `resolveTokenFromAddress`,
+ * with the tokenless atomic-units fallback), so the CTA, the celebration,
+ * and the pending handoff can never phrase the same setup differently. A
+ * setup with no budget rows keeps today's plain phrasing. Multiple budget
+ * rows join with commas. One name for the gate throughout: the budget
+ * (#1542).
+ */
+function approveBudgetCta(setup: ResolvedSetup): string {
+  const budgetPhrase =
+    setup.agent_budget.length > 0
+      ? setup.agent_budget.map((budget) => `up to ${describeSetupBudget(budget)}`).join(', ')
+      : undefined
+  if (budgetPhrase) {
+    return `→ Action needed: approve this agent's budget — ${budgetPhrase} from ${setup.haven_wallet.name} on ${setup.haven_wallet.network} — in the Haven dashboard. The approval button is live now; setup continues here in the meantime.`
+  }
+  return "→ Action needed: approve this agent's budget in the Haven dashboard — the approval button is live now. Setup continues here in the meantime."
+}
+
+function describeSetupBudget(budget: ResolvedSetup['agent_budget'][number]): string {
+  // The celebration line's formatter takes the connector-status shape (atomic
+  // `amount`, token ident pair, reset period); the setup row carries the same
+  // fields under its own names, so adapt and reuse rather than fork.
+  return describeApprovedBudget({
+    token_symbol: budget.token_symbol,
+    token_address: budget.token_address,
+    amount: budget.allowance_amount,
+    reset_period_min: budget.reset_period_min,
+  })
 }
 
 function assertSetupChallengeIsUsable(expiresAt: string): void {

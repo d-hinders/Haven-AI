@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ConnectRequestError } from './api.js'
-import type { ConnectApiClient, ConnectorStatusResponse, RegisterSetupInput, UpdateInstallStatusInput } from './api.js'
+import type { ConnectApiClient, ConnectorStatusResponse, RegisterSetupInput, ResolvedSetup, UpdateInstallStatusInput } from './api.js'
 import { delegateKeyFromPrivateKey } from './key.js'
 import type { InstalledClientCandidate } from './installed-clients.js'
 import { completionHandoffLines, failedConnectOutcome, failureOutcomeFor, runConnect, waitForBudgetApproval } from './runtime.js'
@@ -943,6 +943,8 @@ describe('runConnect', () => {
   it('still reports completion when the install-status telemetry call fails', async () => {
     // The status report is best-effort and must not gate the user-facing
     // "you're done + next steps" output, nor make runConnect reject.
+    // A TTY prose run (#2484): stdout is a terminal, so the approval wait
+    // still runs and narrates to the watching human.
     const logs: string[] = []
     const lifecycleCalls: string[] = []
     const installRuntime = vi.fn(async () => ({
@@ -1009,6 +1011,7 @@ describe('runConnect', () => {
     }, {
       api,
       nodeVersion: SUPPORTED_NODE,
+      isStdoutTty: true,
       generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
       generateApiKey: () => 'sk_agent_telemetry',
       preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-telemetry'),
@@ -1556,7 +1559,9 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     }
   })
 
-  it('runConnect polls after registering by default and forwards approvalWait overrides', async () => {
+  it('runConnect polls after registering on a TTY prose run and forwards approvalWait overrides', async () => {
+    // A TTY stdout run (#2484): a real terminal, so the bounded approval
+    // wait keeps today's behavior and narrates to the watching human.
     const logs: string[] = []
     const lifecycleCalls: string[] = []
     const getConnectorStatus = vi.fn(async () => {
@@ -1601,6 +1606,7 @@ describe('waitForBudgetApproval (#1377 D)', () => {
         getAgentIdentity: vi.fn(),
       },
       nodeVersion: SUPPORTED_NODE,
+      isStdoutTty: true,
       generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
       generateApiKey: () => 'sk_agent_waitkey',
       preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-wait'),
@@ -1628,6 +1634,227 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     expect(output).not.toContain('waiting for you to approve')
     expect(output).not.toContain('Return to Haven')
     expect(output).toContain('the budget is already approved')
+  })
+})
+
+/**
+ * #2484 — the approval wait is narration for a watching human. When
+ * `waitForApproval` is NOT set and stdout is not a TTY, a prose run skips
+ * the wait (the way --json always has) and lets the full #1542 handoff carry
+ * the instruction; a TTY stdout, or an explicit `waitForApproval: true`,
+ * still waits. Keyed on STDOUT (narration), not stdin — the #1719 prompt
+ * rung's INTERACTIVITY gate stays where it is.
+ */
+describe('approval wait gating (#2484)', () => {
+  // Base USDC — resolvable in the shared token registry (6 decimals).
+  const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+  const noSleep = async () => {}
+
+  async function narrateRun(overrides: {
+    waitForApproval?: boolean
+    isStdoutTty?: boolean
+  }) {
+    const logs: string[] = []
+    const getConnectorStatus = vi.fn(async () => ({
+      status: 'active' as const,
+      approved_budget: { token_symbol: 'USDC', token_address: BASE_USDC, amount: '25000000', reset_period_min: 1440 },
+    }))
+    const result = await runConnect({
+      setupToken: 'hv_setup_test_nontty',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir: '/tmp/haven-connect-test-nontty',
+      approvalWait: { sleep: noSleep },
+      ...(overrides.waitForApproval !== undefined ? { waitForApproval: overrides.waitForApproval } : {}),
+    }, {
+      api: {
+        resolveSetup: vi.fn(async () => ({
+          setup_id: 'setup-nontty',
+          status: 'awaiting_connection',
+          agent: { name: 'Narration Agent' },
+          haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 8453, network: 'Base' },
+          agent_budget: [],
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          challenge: { id: 'challenge-nontty', message: 'Haven Connect Agent 2\nsetup_id: setup-nontty\nchallenge: xyz', expires_at: '2099-01-01T00:00:00.000Z' },
+        })),
+        registerSetup: vi.fn(async (input) => ({
+          setup_id: 'setup-nontty',
+          agent_id: 'agent-nontty',
+          status: 'connected_local',
+          agent_status: 'pending_approval',
+          api_key_prefix: input.apiKeyPrefix,
+          api_key_scope: 'setup_pending',
+          delegate_address: input.delegateAddress.toLowerCase(),
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          next_action: 'return_to_haven_for_wallet_approval',
+        })),
+        updateInstallStatus: vi.fn(async () => {}),
+        getConnectorStatus,
+        getAgentIdentity: vi.fn(),
+      } as unknown as ConnectApiClient,
+      nodeVersion: SUPPORTED_NODE,
+      ...(overrides.isStdoutTty !== undefined ? { isStdoutTty: overrides.isStdoutTty } : {}),
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => '«redacted:sk_…»',
+      preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-nontty'),
+      writeCredentials: vi.fn(async () => ({
+        directory: '/tmp/haven-connect-test-nontty/agent-nontty',
+        identityPath: '/tmp/haven-connect-test-nontty/agent-nontty/identity.json',
+        signerPath: '/tmp/haven-connect-test-nontty/agent-nontty/signer.json',
+        agentPath: '/tmp/haven-connect-test-nontty/agent-nontty/agent.json',
+      })),
+      installRuntime: vi.fn(async () => completedInstall('claude-code')),
+      log: (message) => logs.push(message),
+    })
+    return { result, logs, getConnectorStatus }
+  }
+
+  it('a prose run with non-TTY stdout does not poll and prints the full handoff instruction', async () => {
+    const { logs, getConnectorStatus } = await narrateRun({ isStdoutTty: false })
+
+    expect(getConnectorStatus).not.toHaveBeenCalled()
+    const output = logs.join('\n')
+    // approval stays undefined → the full #1542 handoff: approve whenever
+    // ready, then verify with the read-only tool.
+    expect(output).toContain('1. Return to Haven and approve the budget.')
+    expect(output).toContain('Approval — not restarting — unlocks Haven tools.')
+    expect(output).toContain('haven_get_agent')
+    // No wait ran, so no celebration and no waiting line.
+    expect(output).not.toContain('Budget approved 🎉')
+    expect(output).not.toContain('waiting for you to approve')
+  })
+
+  it('a prose run with TTY stdout still polls the approval wait', async () => {
+    const { logs, getConnectorStatus } = await narrateRun({ isStdoutTty: true })
+
+    expect(getConnectorStatus).toHaveBeenCalled()
+    expect(logs.join('\n')).toContain('Budget approved 🎉')
+  })
+
+  it('explicit waitForApproval: true waits even with non-TTY stdout', async () => {
+    const { logs, getConnectorStatus } = await narrateRun({ waitForApproval: true, isStdoutTty: false })
+
+    expect(getConnectorStatus).toHaveBeenCalled()
+    expect(logs.join('\n')).toContain('Budget approved 🎉')
+  })
+
+  it('explicit waitForApproval: false (--json) skips the wait even with TTY stdout', async () => {
+    const { logs, getConnectorStatus } = await narrateRun({ waitForApproval: false, isStdoutTty: true })
+
+    expect(getConnectorStatus).not.toHaveBeenCalled()
+    const output = logs.join('\n')
+    expect(output).toContain('1. Return to Haven and approve the budget.')
+    expect(output).not.toContain('Budget approved 🎉')
+  })
+})
+
+/**
+ * #2484 — the approve-budget CTA carries the facts an agent relaying it
+ * verbatim needs: budget amount/token/period and the wallet label + network,
+ * composed from the resolved setup through the same helpers as the
+ * celebration line. Unknown token address → atomic-units fallback; multiple
+ * budget rows join with commas; an empty budget keeps today's plain
+ * phrasing. No secrets: nothing here is a key or an address.
+ */
+describe('approve-budget CTA content (#2484)', () => {
+  const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+  // Unknown to the shared token registry → the atomic-units fallback.
+  const UNKNOWN_TOKEN = '0x1234567890abcdef1234567890abcdef12345678'
+
+  async function ctaRun(budget: ResolvedSetup['agent_budget'], wallet: { name: string; network: string }) {
+    const logs: string[] = []
+    await runConnect({
+      setupToken: 'hv_setup_test_cta',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir: '/tmp/haven-connect-test-cta',
+      waitForApproval: false,
+    }, {
+      api: {
+        resolveSetup: vi.fn(async () => ({
+          setup_id: 'setup-cta',
+          status: 'awaiting_connection',
+          agent: { name: 'CTA Agent' },
+          haven_wallet: { id: 'safe-1', name: wallet.name, address: '0x2222222222222222222222222222222222222222', chain_id: 8453, network: wallet.network },
+          agent_budget: budget,
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          challenge: { id: 'challenge-cta', message: 'Haven Connect Agent 2\nsetup_id: setup-cta\nchallenge: abc', expires_at: '2099-01-01T00:00:00.000Z' },
+        })),
+        registerSetup: vi.fn(async (input) => ({
+          setup_id: 'setup-cta',
+          agent_id: 'agent-cta',
+          status: 'connected_local',
+          agent_status: 'pending_approval',
+          api_key_prefix: input.apiKeyPrefix,
+          api_key_scope: 'setup_pending',
+          delegate_address: input.delegateAddress.toLowerCase(),
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          next_action: 'return_to_haven_for_wallet_approval',
+        })),
+        updateInstallStatus: vi.fn(async () => {}),
+        getConnectorStatus: vi.fn(),
+        getAgentIdentity: vi.fn(),
+      } as unknown as ConnectApiClient,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => '«redacted:sk_…»',
+      preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-cta'),
+      writeCredentials: vi.fn(async () => ({
+        directory: '/tmp/haven-connect-test-cta/agent-cta',
+        identityPath: '/tmp/haven-connect-test-cta/agent-cta/identity.json',
+        signerPath: '/tmp/haven-connect-test-cta/agent-cta/signer.json',
+        agentPath: '/tmp/haven-connect-test-cta/agent-cta/agent.json',
+      })),
+      installRuntime: vi.fn(async (_input, installDeps) => {
+        await installDeps?.onRuntimeConfigured?.({
+          runtime: 'claude-code',
+          runtimeMcpMode: 'hosted_plus_signer',
+          hostedMcpConfigured: true,
+          localSignerConfigured: true,
+          localMcpConfigured: false,
+          restartRequired: true,
+          nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
+        })
+        return completedInstall('claude-code')
+      }),
+      log: (message) => logs.push(message),
+    })
+    return logs.join('\n')
+  }
+
+  it('carries human-formatted amount, token, reset period, and wallet label', async () => {
+    const output = await ctaRun(
+      [{ token_address: BASE_USDC, token_symbol: 'USDC', allowance_amount: '4000000', reset_period_min: 1440 }],
+      { name: 'My account', network: 'Base' },
+    )
+    expect(output).toContain("→ Action needed: approve this agent's budget — up to 4 USDC per day from My account on Base — in the Haven dashboard")
+    // One name for the gate (#1542) in the enriched line.
+    expect(output).toContain('budget')
+  })
+
+  it('falls back to atomic units for an unknown token address', async () => {
+    const output = await ctaRun(
+      [{ token_address: UNKNOWN_TOKEN, token_symbol: 'FOO', allowance_amount: '25000000', reset_period_min: 1440 }],
+      { name: 'My account', network: 'Base' },
+    )
+    expect(output).toContain("approve this agent's budget — up to 25000000 FOO (atomic units) per day from My account on Base")
+  })
+
+  it('joins multiple budget rows with commas', async () => {
+    const output = await ctaRun(
+      [
+        { token_address: BASE_USDC, token_symbol: 'USDC', allowance_amount: '4000000', reset_period_min: 1440 },
+        // Zero-address resolves to ETH (18 decimals) in the shared registry.
+        { token_address: '0x0000000000000000000000000000000000000000', token_symbol: 'ETH', allowance_amount: '500000000000000000', reset_period_min: 10080 },
+      ],
+      { name: 'My account', network: 'Base' },
+    )
+    expect(output).toContain("approve this agent's budget — up to 4 USDC per day, up to 0.5 ETH per week from My account on Base")
+  })
+
+  it('keeps the plain phrasing when the setup has no budget rows', async () => {
+    const output = await ctaRun([], { name: 'My account', network: 'Base' })
+    expect(output).toContain("→ Action needed: approve this agent's budget in the Haven dashboard")
   })
 })
 

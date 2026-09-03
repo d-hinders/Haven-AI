@@ -2,6 +2,12 @@
  * #1530 — the preflight exists because the harness could not see the resource
  * that broke 2026-08-17. These tests pin the behaviour that matters:
  * a below-floor resource BLOCKS, and an unknown one does not.
+ *
+ * #2490 — the merchant's signal is a three-state band, not a boolean: warn
+ * (below the warn floor — loud on every run, never a blocker) and fail
+ * (below the fail floor — refuses the run) are different events. The band
+ * travels from the merchant on /healthz; the harness renders it and never
+ * re-derives it.
  */
 import { describe, it, expect, vi } from 'vitest'
 import { ethers } from 'ethers'
@@ -40,26 +46,104 @@ function providerWithUsdc(raw: bigint): ethers.Provider {
 }
 
 describe('checkMerchantSettlement', () => {
-  it('BLOCKS on the 2026-08-17 outage shape', async () => {
+  const BAND_WIRE = { warn_floor: 25, fail_floor: 12 }
+
+  it('BLOCKS on the 2026-08-17 outage shape (#1530: 255 gwei lands in the FAIL band)', async () => {
+    // The state #1530 was built for. The fail band must catch it: the run is
+    // refused while it cannot complete, not merely when the wallet is empty.
     const check = await checkMerchantSettlement(
       MERCHANT,
-      health({ address: SETTLEMENT, native_balance_wei: '255000000000', settlements_remaining: 0, ok: false }),
+      health({ address: SETTLEMENT, native_balance_wei: '255000000000', settlements_remaining: 0, status: 'fail', ...BAND_WIRE, ok: false }),
     )
     expect(check.ok).toBe(false)
+    expect(check.warn).toBeUndefined()
     expect(check.address).toBe(SETTLEMENT)
     expect(check.headroom).toBe('0 settlement(s)')
     // The detail must name the consequence, not just the number — the whole
     // failure was that "255 gwei" appeared nowhere and meant nothing.
-    expect(check.detail).toMatch(/top this wallet up/)
+    expect(check.detail).toMatch(/top this wallet up/i)
+    expect(check.detail).toMatch(/fail floor/)
   })
 
-  it('passes a funded wallet', async () => {
+  it('does NOT block on the #2485 shape (24 settlements) — warn band: loud, run proceeds', async () => {
+    // Three consecutive qa-dev failures at 24 settlements against the old
+    // single floor of 25 — short by one settlement, ~3 runs of real capacity
+    // unused. The merchant's own band (`status: 'warn'`) says top up, not
+    // refuse; `blocked` must stay false.
+    const check = await checkMerchantSettlement(
+      MERCHANT,
+      health({ address: SETTLEMENT, native_balance_wei: '60000000000000', settlements_remaining: 24, status: 'warn', ...BAND_WIRE, ok: true }),
+    )
+    expect(check.ok).toBe(true)
+    expect(check.warn).toBe(true)
+    expect(check.headroom).toBe('24 settlement(s)')
+    expect(check.detail).toMatch(/warn floor/)
+    expect(check.detail).toMatch(/top this wallet up/i)
+    expect(check.detail).toMatch(/the run proceeds/)
+  })
+
+  it('renders the warn band distinguishably from both clean and failing (⚠, not ✓ or ✗)', async () => {
+    const result = await runPreflight(
+      { ...baseCfg, demoMerchantUrl: MERCHANT },
+      {
+        fetchImpl: health({ address: SETTLEMENT, native_balance_wei: '60000000000000', settlements_remaining: 24, status: 'warn', ...BAND_WIRE, ok: true }),
+        provider: providerWithUsdc(0n),
+      },
+    )
+    expect(result.blocked).toBe(false)
+    const out = formatPreflight(result)
+    expect(out).toContain('⚠ merchant settlement wallet (gas)')
+    expect(out).not.toContain('✗ merchant settlement wallet')
+    expect(out).not.toContain('✓ merchant settlement wallet')
+    // Rule 2: report on every run — the warn detail names the wallet's
+    // remaining settlements and the top-up action.
+    expect(out).toContain('24 settlement(s)')
+    expect(out).toContain(SETTLEMENT)
+    expect(out).toMatch(/Top this wallet up soon/)
+  })
+
+  it('carries the merchant floors into the detail line without restating them (#2490)', async () => {
+    // Derive, never restate: the floors in the rendered line are the ones the
+    // MERCHANT shipped, echoed verbatim — not constants copied into the harness.
+    const check = await checkMerchantSettlement(
+      MERCHANT,
+      health({ address: SETTLEMENT, native_balance_wei: '60000000000000', settlements_remaining: 24, status: 'warn', warn_floor: 30, fail_floor: 9, ok: true }),
+    )
+    expect(check.detail).toContain('warn 30/fail 9')
+  })
+
+  it('treats a usable band as a plain pass with no warn flag', async () => {
+    const check = await checkMerchantSettlement(
+      MERCHANT,
+      health({ address: SETTLEMENT, native_balance_wei: '1469790000000000', settlements_remaining: 587, status: 'usable', ...BAND_WIRE, ok: true }),
+    )
+    expect(check.ok).toBe(true)
+    expect(check.warn).toBeUndefined()
+    expect(check.detail).toBeUndefined()
+  })
+
+  it('passes a funded wallet reported by a PRE-#2490 merchant (legacy boolean, no status)', async () => {
+    // Rollout: the merchant deploys independently of the harness. A merchant
+    // whose /healthz predates the band field must keep working.
     const check = await checkMerchantSettlement(
       MERCHANT,
       health({ address: SETTLEMENT, native_balance_wei: '1469790000000000', settlements_remaining: 587, ok: true }),
     )
     expect(check.ok).toBe(true)
-    expect(check.detail).toBeUndefined()
+    expect(check.warn).toBeUndefined()
+  })
+
+  it('BLOCKS via the legacy boolean against a PRE-#2490 merchant (degrades to today behaviour)', async () => {
+    // Same rollout rule, fail direction: no `status` on the wire means the
+    // old single-boolean contract — below the old floor blocks, exactly as
+    // before #2490. No crash, and never a silent pass.
+    const check = await checkMerchantSettlement(
+      MERCHANT,
+      health({ address: SETTLEMENT, native_balance_wei: '255000000000', settlements_remaining: 0, ok: false }),
+    )
+    expect(check.ok).toBe(false)
+    expect(check.warn).toBeUndefined()
+    expect(check.detail).toMatch(/top this wallet up/)
   })
 
   it('is UNKNOWN, not failed, against a merchant deployed before #1530', async () => {
@@ -69,7 +153,7 @@ describe('checkMerchantSettlement', () => {
     expect(check.detail).toMatch(/deployed before #1530/)
   })
 
-  it('is UNKNOWN when the merchant cannot read its own balance', async () => {
+  it('is UNKNOWN when the merchant cannot read its own balance — ok:null never blocks (#2490 unchanged)', async () => {
     const check = await checkMerchantSettlement(
       MERCHANT,
       health({ address: SETTLEMENT, ok: null, error: 'rpc timeout' }),

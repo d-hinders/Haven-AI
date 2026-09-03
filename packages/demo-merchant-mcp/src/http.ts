@@ -102,7 +102,14 @@ async function handle(
           native_balance_wei: ready.balanceWei.toString(),
           cost_per_settlement_wei: ready.costPerSettlementWei.toString(),
           settlements_remaining: ready.settlementsRemaining,
-          ok: ready.ok,
+          // #2490: the band plus BOTH floors, so a harness renders the
+          // merchant's own decision instead of restating the thresholds —
+          // the merchant owns this resource (preflight design rule 1).
+          // Additive: `ok` stays for a harness that predates the band.
+          status: ready.status,
+          warn_floor: ready.warnFloor,
+          fail_floor: ready.failFloor,
+          ok: ready.status !== 'fail',
         }
       }
     } catch (error) {

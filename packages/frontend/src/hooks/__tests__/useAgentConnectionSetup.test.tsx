@@ -87,6 +87,8 @@ import {
   resolveConnectStepView,
   runtimeIsConfigured,
   useAgentConnectionSetup,
+  buildManualCredentialEnv,
+  buildManualCredentialPrompt,
 } from '@/hooks/useAgentConnectionSetup'
 
 const CONFIGURED_INSTALL = {
@@ -226,6 +228,40 @@ describe('resolveConnectStepView (#2413: no rail branch left)', () => {
   })
 })
 
+describe('manual credential renderings (#2482)', () => {
+  const input = {
+    apiKey: 'sk_agent_render_test',
+    delegatePrivateKey: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    delegateAddress: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    apiBaseUrl: 'https://api.haven.example',
+    hostedMcpUrl: 'https://mcp.haven.example',
+  }
+
+  it('builds the .env block as the five HAVEN_* lines the SDK reads, values verbatim', () => {
+    const env = buildManualCredentialEnv(input)
+    expect(env.split('\n')).toEqual([
+      'HAVEN_API_KEY=sk_agent_render_test',
+      'HAVEN_DELEGATE_KEY=0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'HAVEN_DELEGATE_ADDRESS=0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      'HAVEN_API_URL=https://api.haven.example',
+      'HAVEN_MCP_URL=https://mcp.haven.example',
+    ])
+  })
+
+  it('carries the SAME five values in the prose prompt — no information is dropped (#2482)', () => {
+    const prompt = buildManualCredentialPrompt({
+      agentName: 'Research Agent',
+      havenWallet: 'Operating wallet on Gnosis',
+      budgets: ['10 USDC every day'],
+      ...input,
+    })
+    for (const line of buildManualCredentialEnv(input).split('\n')) {
+      expect(prompt).toContain(line)
+    }
+    expect(prompt).toContain('Manual Haven credential for Research Agent')
+  })
+})
+
 describe('useAgentConnectionSetup — rail awareness without rendering the modal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -295,5 +331,88 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
 
     expect(result.current.isWrongChain).toBe(true)
     expect(result.current.approvalChainName).not.toBe('the required network')
+  })
+
+  it('a generated manual credential keeps the budget-approval step reachable when acknowledged (#2482/#2472/#2475)', async () => {
+    // The #2472/#2475 wiring: registering with connector_version
+    // 'browser-manual-fallback' is what the backend turns into
+    // install_status.manual_credential_fallback — the marker that lets this
+    // path reach the same owner-signed budget approval as every other.
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus({
+        install_status: {
+          ...CONFIGURED_INSTALL,
+          hosted_mcp_configured: false,
+          local_signer_configured: false,
+          local_mcp_configured: false,
+          local_mcp_acknowledged: false,
+          manual_credential_fallback: true,
+        },
+      }),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockApiPost.mockImplementation(async (path: string) => {
+      if (path === '/agent-connection-setups/resolve') {
+        return {
+          agent: { name: 'Research Agent', description: null },
+          haven_wallet: {
+            id: SAFE.id,
+            name: SAFE.name,
+            address: SAFE.safe_address,
+            chain_id: 100,
+            network: 'Gnosis',
+          },
+          agent_budget: [],
+          challenge: { id: 'challenge-1', message: 'Sign to prove control of this delegate address' },
+          hosted_mcp_url: 'https://mcp.haven.example',
+        }
+      }
+      if (path === '/agent-connection-setups/register') {
+        return {
+          setup_id: 'setup-1',
+          agent_id: 'agent-1',
+          status: 'connected_local',
+          delegate_address: '0x3333333333333333333333333333333333333333',
+          hosted_mcp_url: 'https://mcp.haven.example',
+        }
+      }
+      return {
+        setup_id: 'setup-1',
+        status: 'awaiting_connection',
+        setup_token: 'hv_setup_abc',
+        expires_at: '2099-01-01T00:00:00.000Z',
+        connector_command: 'npx -y @haven_ai/connect@alpha --setup hv_setup_abc',
+        setup_prompt: 'prompt',
+      }
+    })
+    const { result } = renderFlow()
+
+    await act(async () => {
+      await result.current.handleCreateSetup()
+    })
+    await act(async () => {
+      await result.current.handleCreateManualCredential()
+    })
+
+    expect(result.current.manualCredential).not.toBeNull()
+    // The generate action still registers with the fallback connector version —
+    // removing this line would strand the path before budget approval.
+    const registerCall = mockApiPost.mock.calls.find(
+      ([path]) => path === '/agent-connection-setups/register',
+    )
+    expect(registerCall?.[1]).toMatchObject({
+      connector_version: 'browser-manual-fallback',
+    })
+    // While the credential is unacknowledged the screen stays on the waiting
+    // view so the user can copy it; acknowledging advances to budget approval.
+    expect(result.current.connectView).toEqual({ kind: 'waiting_for_connector' })
+
+    await act(async () => {
+      await result.current.handleContinueAfterManualCredential()
+    })
+    expect(result.current.manualCredentialAcknowledged).toBe(true)
+    expect(result.current.connectView).toEqual({ kind: 'delegation_approval', agentId: 'agent-1' })
   })
 })

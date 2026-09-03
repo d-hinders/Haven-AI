@@ -11,6 +11,19 @@ export type { ToolDescription, SharedToolKey } from './tool-descriptions.js'
 
 export { HAVEN_SKILL_MD, HAVEN_SKILL_BODY_MD, SKILL_FOLDER_NAME } from './skill-content.js'
 
+// The npm dist-tag every published package's "re-run the connector" hint names
+// (#2423). One build-time constant, written by `scripts/release-bump.mjs` from
+// the release version with the same rule `publish.yml` uses to pick the
+// `--tag`, so a `@dev` snapshot tells its tester to re-run `@dev`.
+export {
+  HAVEN_CONNECTOR_CHANNEL,
+  CONNECTOR_PACKAGE_NAME,
+  connectorSpec,
+  connectorRerunCommand,
+  resolveConnectorChannel,
+  isConnectorChannel,
+} from './connector-channel.js'
+
 // The Node.js floor every published Haven package enforces (#1161). Shared here
 // because connect (at setup), signer and mcp (at startup) all need the same
 // number, and a copy per package is how it drifted to begin with.
@@ -106,6 +119,7 @@ export {
   HavenUnsupportedSignerVersionError,
   SignerRefusalCode,
   SIGNER_UPDATE_FALLBACK,
+  signerUpdateFallback,
 } from './types.js'
 
 export {

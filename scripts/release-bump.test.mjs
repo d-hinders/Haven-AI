@@ -23,6 +23,37 @@ import {
   isSnapshotVersion,
   snapshotModeViolation,
 } from './release-snapshot-version.mjs'
+import {
+  CONNECTOR_CHANNEL_CONSTANT,
+  CONNECTOR_CHANNEL_FILE,
+  channelForVersion,
+  publishWorkflowChannelScript,
+  readConnectorChannel,
+  rewriteConnectorChannel,
+} from './release-channel.mjs'
+import { execFile } from 'node:child_process'
+import { readdir } from 'node:fs/promises'
+import { promisify } from 'node:util'
+
+const execFileAsync = promisify(execFile)
+
+/**
+ * Any `@haven_ai/connect@<tag>` literal — the shape #2423 removed from the
+ * published packages' source. Deliberately matches ANY tag, not just `alpha`:
+ * a hard-coded `@dev` would be the same defect pointing the other way.
+ */
+const HARD_CODED_CHANNEL = /@haven_ai\/connect@[a-z][a-z0-9-]*/
+
+/** Every file under `dir`, recursively. */
+async function walk(dir) {
+  const out = []
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) out.push(...(await walk(full)))
+    else out.push(full)
+  }
+  return out
+}
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -1171,6 +1202,76 @@ test('GUARD 2/3 (behavioural): a forbidden combination PUBLISHES NOTHING (#2421)
   }
 })
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Connector channel (#2423, slice 3 of epic #2420)
+//
+// The published packages' "re-run `npx @haven_ai/connect@<tag>`" hints render
+// from one build-time constant. Two things can go wrong and they fail
+// differently, so they are guarded separately:
+//
+//   1. the bump script's rule for choosing the channel drifts away from
+//      publish.yml's rule for choosing the `npm publish --tag` — the packages
+//      would then tell a user to install from a channel they were not
+//      published under;
+//   2. the bump stops writing the constant at all — the constant would sit at
+//      the previous release's channel, which is right until the first release
+//      that changes channel and silently wrong from then on.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('channelForVersion implements the documented rule', () => {
+  assert.equal(channelForVersion('0.1.34-alpha.0'), 'alpha')
+  assert.equal(channelForVersion('0.0.0-dev.202609021200.abc1234'), 'dev')
+  assert.equal(channelForVersion('0.2.0'), 'latest')
+  assert.equal(channelForVersion('1.0.0-beta.2'), 'beta')
+  // A prerelease label with no trailing dot segment is still the whole label.
+  assert.equal(channelForVersion('0.1.0-alpha'), 'alpha')
+  assert.throws(() => channelForVersion(''), /expected a version string/)
+  assert.throws(() => channelForVersion(undefined), /expected a version string/)
+})
+
+test('release-bump and publish.yml derive the SAME channel — proved by RUNNING the workflow shell', async () => {
+  // The rule lives in two languages. This does not compare their source text —
+  // a reworded but equivalent `case` would fail such a check, and a rewritten
+  // and DIFFERENT one could pass it if the regex were loose. It extracts the
+  // workflow's own `case` block and EXECUTES it in bash, then compares the tag
+  // it prints against channelForVersion for the same input.
+  const script = await publishWorkflowChannelScript(join(ROOT, '.github', 'workflows', 'publish.yml'))
+
+  const versions = [
+    '0.1.34-alpha.0',
+    '0.1.0-alpha',
+    '0.0.0-dev.202609021200.abc1234',
+    '0.0.0-dev.202601010000.0abcdef',
+    '0.2.0',
+    '1.0.0',
+    '1.0.0-beta.2',
+    '2.3.4-rc.1',
+  ]
+
+  // Instrument self-test FIRST: if the extracted shell cannot produce two
+  // different answers, agreement below would be vacuous.
+  const answers = new Set()
+  for (const version of versions) {
+    const { stdout } = await execFileAsync('bash', ['-c', script, 'workflow-channel', version])
+    answers.add(stdout)
+  }
+  assert.ok(
+    answers.size >= 3,
+    `the extracted publish.yml shell produced only ${answers.size} distinct answers ` +
+      `(${[...answers].join(', ')}) — it is not discriminating, so agreement would prove nothing`,
+  )
+
+  for (const version of versions) {
+    const { stdout } = await execFileAsync('bash', ['-c', script, 'workflow-channel', version])
+    assert.equal(
+      stdout,
+      channelForVersion(version),
+      `publish.yml and channelForVersion disagree on ${version}: the workflow would publish ` +
+        `under "${stdout}" while the packages' re-run hints would say "${channelForVersion(version)}"`,
+    )
+  }
+})
+
 test('GUARD 2/3 (behavioural): the permitted combinations still publish all five (#2421)', async () => {
   // The control half, and it is not a formality: a guard that refuses
   // everything protects nothing, and this suite would still be green.
@@ -1185,4 +1286,88 @@ test('GUARD 2/3 (behavioural): the permitted combinations still publish all five
     assert.equal(code, 0, `${label}: the job must SUCCEED, got exit ${code}: ${out}`)
     assert.equal(published.length, 5, `${label}: expected 5 publishes, got ${published.length}`)
   }
+})
+
+test('the REAL connector channel constant agrees with the REAL package version', async () => {
+  // The drift guard, and the one that catches an UNWIRED bump. It runs on
+  // every pull request, not only at release: if release-bump.mjs ever stops
+  // rewriting HAVEN_CONNECTOR_CHANNEL, the first release that changes channel
+  // leaves the constant behind and this goes red on that release's own PR.
+  const source = await readFile(join(ROOT, CONNECTOR_CHANNEL_FILE), 'utf8')
+  const declared = readConnectorChannel(source)
+  assert.ok(declared, `could not read ${CONNECTOR_CHANNEL_CONSTANT} from ${CONNECTOR_CHANNEL_FILE}`)
+
+  const sdkPkg = JSON.parse(await readFile(join(ROOT, 'packages', 'sdk', 'package.json'), 'utf8'))
+  assert.equal(
+    declared,
+    channelForVersion(sdkPkg.version),
+    `${CONNECTOR_CHANNEL_FILE} declares channel "${declared}" but ${sdkPkg.version} publishes ` +
+      `under "${channelForVersion(sdkPkg.version)}" — do not hand-edit the constant; re-run the bump`,
+  )
+})
+
+test('rewriteConnectorChannel rewrites the real file, and reports a rename instead of silently passing', async () => {
+  const source = await readFile(join(ROOT, CONNECTOR_CHANNEL_FILE), 'utf8')
+
+  const rewritten = rewriteConnectorChannel(source, 'dev')
+  assert.equal(readConnectorChannel(rewritten), 'dev')
+  // Only the constant moved: everything else in the file is untouched.
+  assert.equal(rewritten.replace("= 'dev'", "= 'alpha'"), source.replace(/= '[a-z0-9-]+'/, "= 'alpha'"))
+
+  // The failure mode that matters: someone renames or reshapes the
+  // declaration and the bump's regex quietly matches nothing. `null` is what
+  // makes release-bump.mjs die instead of shipping the previous channel.
+  const renamed = source.replace(
+    `export const ${CONNECTOR_CHANNEL_CONSTANT}`,
+    'export const HAVEN_CONNECTOR_DIST_TAG',
+  )
+  assert.notEqual(renamed, source, 'expected the rename fixture to actually change the source')
+  assert.equal(rewriteConnectorChannel(renamed, 'dev'), null)
+})
+
+test('no published package still hard-codes a connector channel in a re-run hint', async () => {
+  // The acceptance criterion of #2423, as a standing guard. This one IS a text
+  // search, and legitimately so: the question is literally "does this literal
+  // appear anywhere it should not", which is exactly what a text search
+  // answers well. (Whether a guard is REACHED is the question a text search
+  // answers badly, and that is not this.)
+  const scanned = []
+  for (const pkg of ['sdk', 'signer', 'mcp', 'mcp-server', 'connect', 'cli']) {
+    const dir = join(ROOT, 'packages', pkg, 'src')
+    for (const file of await walk(dir)) {
+      if (file.endsWith('.test.ts') || file.endsWith('.test.tsx')) continue
+      // The constant's own home is exempt, exactly as the acceptance criterion
+      // of #2423 words it: its prose explains the rule with worked examples,
+      // and the code below asserts that exemption is load-bearing rather than
+      // decorative, so it cannot quietly become an escape hatch.
+      if (file.endsWith(join('sdk', 'src', 'connector-channel.ts'))) continue
+      scanned.push([file, await readFile(file, 'utf8')])
+    }
+  }
+
+  // Instrument self-test: prove the scanner CAN say yes before believing its
+  // no. `packages/connect/README.md` is the npm landing page and still carries
+  // the literal by design (a README is not rendered from a constant), so it is
+  // a known positive control that lives right next to the negative set.
+  const control = await readFile(join(ROOT, 'packages', 'connect', 'README.md'), 'utf8')
+  assert.ok(
+    HARD_CODED_CHANNEL.test(await readFile(join(ROOT, CONNECTOR_CHANNEL_FILE), 'utf8')),
+    `${CONNECTOR_CHANNEL_FILE} is skipped above on the grounds that its PROSE carries the ` +
+      'literal. It no longer does, so the skip is now an unexplained hole — delete it.',
+  )
+  assert.ok(
+    HARD_CODED_CHANNEL.test(control),
+    'the scanner found no hard-coded channel in packages/connect/README.md, where one is known ' +
+      'to exist — the pattern is broken and its "no findings" below would be meaningless',
+  )
+
+  const findings = scanned
+    .filter(([, text]) => HARD_CODED_CHANNEL.test(text))
+    .map(([file]) => file.slice(ROOT.length + 1))
+  assert.deepEqual(
+    findings,
+    [],
+    'these files hard-code a connector channel instead of rendering it from ' +
+      `${CONNECTOR_CHANNEL_CONSTANT} (#2423): ${findings.join(', ')}`,
+  )
 })

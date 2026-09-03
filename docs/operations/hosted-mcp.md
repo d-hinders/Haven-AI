@@ -4,7 +4,7 @@ status: current
 covers:
   - packages/mcp-server/**
   - docker-compose.yml
-last-verified: "2026-08-12" # re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
+last-verified: "2026-09-03" # #2423: EDITED, scope = the Variables list in step 3 and the Variables bullet under "Verifying the custody posture in production". Both enumerated the service's environment variables and so became incomplete when the hosted server gained the optional HAVEN_CONNECTOR_CHANNEL (unset = alpha = today's behaviour; a malformed value refuses the boot). The custody claims those two lists exist to support are unchanged — the new variable is a dist-tag for hint text, carries no key material, and HAVEN_DELEGATE_KEY still refuses the boot. Nothing else in this document was re-verified in this pass. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Deploy — Hosted MCP server (`@haven_ai/mcp-server`)
@@ -50,6 +50,18 @@ for the wire contract and the custody invariant.
      e.g. `https://havenbackend-production-8a00.up.railway.app`.
    - `HAVEN_MCP_PATH` = `/v1` (default — only change if you need a different
      mount path).
+   - `HAVEN_CONNECTOR_CHANNEL` (optional, #2423) = the npm dist-tag this
+     deployment's "re-run `npx @haven_ai/connect@<tag>`" hints should name.
+     **Unset is `alpha`**, the production channel, which is what production
+     wants — leave it unset there. A deployment paired with a non-production
+     package channel sets it to that tag so the hints it emits install the
+     matching connector instead of sending the tester to production. A value
+     that is not a well-formed dist-tag (`[a-z][a-z0-9-]*`) makes the process
+     **refuse to start**: a silent fallback would leave a misconfigured
+     deployment quietly handing out the production connector while looking
+     configured. Setting this on any environment is an operator action; no
+     agent performs it, and nothing in this repository records which
+     deployments have it set.
    - **Do not set** `HAVEN_DELEGATE_KEY`. The process refuses to start if it
      is set; this is intentional defense-in-depth.
    - `PORT` is provided by Railway automatically.
@@ -129,7 +141,8 @@ tests above.
 
 - Railway → Service → **Variables** has no `HAVEN_DELEGATE_KEY`, no
   credential JSON, no relayer key. (Only `HAVEN_API_URL`, optional
-  `HAVEN_MCP_PATH`, and the Railway-provided `PORT`.)
+  `HAVEN_MCP_PATH`, optional `HAVEN_CONNECTOR_CHANNEL`, and the
+  Railway-provided `PORT`.)
 - Service logs at startup do **not** include the line
   `HAVEN_DELEGATE_KEY is set in the environment…` — if they do, the process
   has refused to boot and the deploy is misconfigured.

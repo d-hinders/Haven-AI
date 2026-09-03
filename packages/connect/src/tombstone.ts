@@ -33,6 +33,7 @@
  */
 
 import { chmod, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { connectorRerunCommand } from '@haven_ai/sdk'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { redactSecrets } from './redact.js'
@@ -130,7 +131,7 @@ function tombstoneScript(info: TombstoneInfo): string {
     'one of them: each holds the snapshot from its own start time, so after',
     'a chain of recreations each can be parked on a DIFFERENT old agent.',
     '',
-    'Then verify with: npx @haven_ai/connect@alpha --doctor --runtime <runtime>',
+    `Then verify with: ${connectorRerunCommand('--doctor --runtime <runtime>')}`,
   ]
   // Fully self-contained: no imports, no reads — a tombstone that could
   // itself fail to start would recreate the exact masking it exists to end.

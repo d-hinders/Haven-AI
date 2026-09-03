@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { connectorRerunCommand } from '@haven_ai/sdk'
 import { promisify } from 'node:util'
 import { writeRuntimeConfig, type RuntimeMcpMode, type RuntimeConfigWriteResult } from './config-writers.js'
 import { serverNamesFor } from './server-names.js'
@@ -260,7 +261,7 @@ export async function installRuntime(
         restartRequired: false,
         nextUserAction:
           'The local Haven signer runtime could not be installed, so no configuration was written. ' +
-          'Check your network (a cold install downloads the signer package set) and re-run: npx @haven_ai/connect@alpha',
+          `Check your network (a cold install downloads the signer package set) and re-run: ${connectorRerunCommand()}`,
         errorCode: 'signer_runtime_install_failed',
         configTarget: profile.label,
         signerAcknowledged: signerConsent?.acknowledged,
@@ -271,7 +272,7 @@ export async function installRuntime(
           ...consentMessages,
           `Could not pre-install the local Haven signer: ${err instanceof Error ? err.message : String(err)}`,
           'No runtime configuration was written (fail-closed): a config pointing at an uninstalled signer looks wired but cannot start.',
-          'Re-run `npx @haven_ai/connect@alpha` to retry the setup.',
+          `Re-run \`${connectorRerunCommand()}\` to retry the setup.`,
         ],
       }
     }
@@ -388,7 +389,7 @@ export async function installRuntime(
       ? ['Verified local Haven signer with a stdio handshake.']
       : [
           `Local Haven signer handshake failed: ${signerProbe.status}.`,
-          'Re-run `npx @haven_ai/connect@alpha` to repair the signer setup.',
+          `Re-run \`${connectorRerunCommand()}\` to repair the signer setup.`,
         ]
     : []
   const localProbeMessages = localMcpProbe && localMcpProbe.status !== 'ok'

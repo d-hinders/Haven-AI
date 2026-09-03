@@ -24,6 +24,14 @@ runtime:
 npx @haven_ai/connect@alpha
 ```
 
+`@alpha` is the production channel and is the right answer unless your
+dashboard hands you a different one — **run the command that dashboard shows
+you**, which names the npm dist-tag that backend is paired with. This signer's
+own messages do the same: since [#2423](https://github.com/d-hinders/Haven-AI/issues/2423)
+every "rerun the connector" hint it prints names the channel THIS build was
+published under, so a build installed from a non-production channel tells you
+to reinstall from that same channel rather than sending you to production.
+
 Rerunning it is also the documented fix for a signer that has fallen behind the
 backend's expected-context version. To run the signer directly:
 
@@ -200,8 +208,8 @@ no credential file, hence no directory to find an `identity.json` in, so the
 `{ payment_id }` form refuses with a message naming the `typed_data_b64`
 fallback rather than reaching out — and the process makes no network calls at
 all. Egress is needed by `--credentials` / `HAVEN_CREDENTIALS` runs that use the
-preferred `{ payment_id }` call, which is what the
-`npx @haven_ai/connect@alpha` install sets up.
+preferred `{ payment_id }` call, which is what the connector install above
+sets up.
 
 Fetched bytes are treated as untrusted input exactly like a tool argument: the
 same digest re-derivation and Haven-binding verification apply, because what

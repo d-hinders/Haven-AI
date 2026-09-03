@@ -255,6 +255,22 @@ export function isIncidentalPath(file) {
 }
 
 /**
+ * Report the reverse edge of the doc↔code relationship. A changed doc has
+ * already satisfied the forward gate, but its `covers:` declaration is the
+ * list of code claims a reviewer should re-check against the diff.
+ *
+ * Keep declared entries rather than expanding broad globs into every
+ * repository file: expansion would make package-wide declarations unusable.
+ * Reverse findings are advisory only and never add a blocking condition.
+ */
+export function reverseImplications(changed, docs) {
+  const changedSet = new Set(changed)
+  return docs
+    .filter(({ doc, covers }) => changedSet.has(doc) && covers?.length > 0)
+    .map(({ doc, covers }) => ({ doc, covered: [...covers], direction: 'doc-to-code' }))
+}
+
+/**
  * Pure core: given changed files and the docs (each with its `covers` globs),
  * return the docs implicated by the change. A doc is implicated when a changed
  * file matches one of its globs AND the doc itself was not changed.
@@ -507,7 +523,9 @@ async function main() {
 
   const docsByPath = new Map(docs.map((d) => [d.doc, d]))
   const findings = implicatedDocs(changed, docs, { strict, added })
-  const hasFindings = findings.length > 0
+  const reverseFindings = reverseImplications(changed, docs)
+  const hasForwardFindings = findings.length > 0
+  const hasFindings = hasForwardFindings || reverseFindings.length > 0
   // #2323: a doc cleared by an ADDED shard is reported but never blocks. This
   // is the ONLY place that decides what blocks, so the two claims the gate used
   // to conflate are now separated in exactly one line: "the coupling
@@ -522,7 +540,8 @@ async function main() {
     return `(last verified ${f.lastVerified}, ${age === null ? 'unknown' : `${age}d ago`})`
   }
 
-  if (hasFindings) {
+  let outputBody = ''
+  if (hasForwardFindings) {
     let body = '<!-- docs-coupling-gate -->\n'
     if (coverFindings.length > 0) {
       body += '### 📝 Docs that may need updating\n\n'
@@ -567,7 +586,7 @@ async function main() {
       }
       body += '\n'
     }
-    await writeFile(outPath, body, 'utf8')
+    outputBody = body
     if (coverFindings.length > 0) {
       console.log(`Coupling gate: ${coverFindings.length} doc(s) may need updating.`)
       for (const f of coverFindings) console.log(`  - ${f.contract ? '[contract] ' : ''}${f.doc}`)
@@ -584,6 +603,24 @@ async function main() {
   } else {
     console.log('Coupling gate: no covered docs implicated by the changed files.')
   }
+
+  if (reverseFindings.length > 0) {
+    let body = hasForwardFindings ? '\n' : '<!-- docs-coupling-gate -->\n'
+    body += '### 🔁 Covered files in changed docs — re-check the claims\n\n'
+    body +=
+      'This PR changes the docs below. Their `covers:` declarations name the ' +
+      'code whose claims should be re-checked against this diff. This is ' +
+      'advisory reviewer routing; it does not add a blocking requirement.\n\n'
+    for (const f of reverseFindings) {
+      body += `- \`${f.doc}\`\n`
+      for (const covered of f.covered) body += `  - covered by \`${covered}\`\n`
+    }
+    outputBody += body
+    console.log(`Coupling gate: ${reverseFindings.length} changed doc(s) name covered code to re-check (advisory):`)
+    for (const f of reverseFindings) console.log(`  - [doc-to-code] ${f.doc}`)
+  }
+
+  if (outputBody) await writeFile(outPath, outputBody, 'utf8')
 
   if (process.env.GITHUB_OUTPUT) {
     await appendFile(process.env.GITHUB_OUTPUT, `has_findings=${hasFindings}\n`)

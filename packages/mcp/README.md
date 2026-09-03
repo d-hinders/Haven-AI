@@ -35,7 +35,7 @@ Create a private JSON file from the values in the Haven agent handoff:
 The Haven connector may also write split credentials:
 
 ```sh
-npx @haven_ai/mcp --identity ~/.haven/agents/<agent-id>/identity.json --signer ~/.haven/agents/<agent-id>/signer.json
+npx @haven_ai/mcp@alpha --identity ~/.haven/agents/<agent-id>/identity.json --signer ~/.haven/agents/<agent-id>/signer.json
 ```
 
 `identity.json` holds the local API key and setup metadata. `signer.json` holds
@@ -137,7 +137,7 @@ Acknowledge in one of two ways:
 - **Sidecar file (recommended).** Re-run once with `--ack`:
 
   ```sh
-  npx @haven_ai/mcp --credentials /absolute/path/to/haven-agent.json --ack
+  npx @haven_ai/mcp@alpha --credentials /absolute/path/to/haven-agent.json --ack
   ```
 
   This writes `haven-agent.json.ack.json` next to your credential. Future
@@ -192,6 +192,6 @@ flow above instead.
 ## Non-custodial invariant
 
 Do not run this as a hosted multi-tenant signer. The expected deployment is
-`npx @haven_ai/mcp` running beside the agent runtime that owns the credential
+`npx @haven_ai/mcp@alpha` running beside the agent runtime that owns the credential
 file. Revoking the agent on-chain disables spending even if this MCP server is
 still running.

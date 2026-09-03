@@ -191,7 +191,7 @@ Developers can also integrate directly with `@haven_ai/sdk`. The SDK wraps direc
 ### Install
 
 ```bash
-npm install @haven_ai/sdk
+npm install @haven_ai/sdk@alpha
 ```
 
 ### Direct SDK payment

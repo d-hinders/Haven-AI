@@ -95,16 +95,16 @@ describe('ApiClient', () => {
     })
 
     it('omits JSON content type when called without a body', async () => {
-      mockFetchOk({ rejected: true })
+      mockFetchOk({ revoked: true })
 
-      const result = await api.post('/approvals/1/reject')
+      const result = await api.post('/agents/agt_1/revoke')
 
-      expect(fetch).toHaveBeenCalledWith('/api/approvals/1/reject', {
+      expect(fetch).toHaveBeenCalledWith('/api/agents/agt_1/revoke', {
         method: 'POST',
         body: undefined,
         headers: {},
       })
-      expect(result).toEqual({ rejected: true })
+      expect(result).toEqual({ revoked: true })
     })
   })
 

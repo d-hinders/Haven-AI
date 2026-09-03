@@ -16,7 +16,7 @@ const PROTOCOL_LINES = [
 const TIMELINE = [
   { step: '01', label: 'Agent drafted payment intent', detail: 'Insightly Pro · 29.00 USDC → 0x4F3e…3bcFc', tone: 'neutral' },
   { step: '02', label: 'Agent forwarded intent to Haven', detail: 'POST /mpp/authorize · sk_agent_a1b9…7e', tone: 'brand' },
-  { step: '03', label: 'Rules checked', detail: 'Per‑payment limit · network allowlist · allowance', tone: 'brand' },
+  { step: '03', label: 'Rules checked', detail: 'Period budget · network allowlist · allowed recipient', tone: 'brand' },
   { step: '04', label: 'Rules cleared; agent signed the transfer', detail: 'sign_hash 0x6c1f4e93…2c6d9b3a', tone: 'brand' },
   { step: '05', label: 'Settled to the merchant on Base', detail: 'Haven account → merchant · USDC', tone: 'brand' },
   { step: '06', label: 'Confirmed in block 14,892,103', detail: 'tx 0x4d8a3b1d…b6c7e2f8 · gas 41,228', tone: 'success' },
@@ -93,7 +93,7 @@ export default function MPP() {
               </p>
               <p>
                 Haven supports the stablecoin path: agents settle USDC directly to merchants from
-                your Haven account, gated by the same rules, approval, and audit model that wraps x402.
+                your Haven account, gated by the same rules and audit model that wraps x402.
                 SPT‑backed fiat rails are on the roadmap.
               </p>
             </div>

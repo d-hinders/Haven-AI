@@ -28,6 +28,7 @@ import {
   derivePort,
   identityMarkerPath,
   identityMismatch,
+  hashWorktreeSnapshot,
   isPortFree,
   removeIdentityMarker,
   reserveFreePort,
@@ -101,6 +102,31 @@ describe('derivePort', () => {
     // …and even if it somehow reached that server, the identity probe refuses.
     const mine = identityFor(WORKTREE_B)
     expect(identityMismatch(mine, identityFor(WORKTREE_A))).not.toBeNull()
+  })
+})
+
+describe('hashWorktreeSnapshot', () => {
+  const base = { commit: 'a'.repeat(40), trackedDiff: Buffer.from('diff --git a/a b/a\n+one\n') }
+
+  it('is stable when its canonical source inputs are unchanged', () => {
+    const first = hashWorktreeSnapshot({ ...base, untrackedFiles: [{ path: 'new.txt', type: 'file', content: 'hello' }] })
+    const second = hashWorktreeSnapshot({ ...base, untrackedFiles: [{ path: 'new.txt', type: 'file', content: 'hello' }] })
+    expect(first).toEqual(second)
+    expect(first).toMatchObject({ version: 1, algorithm: 'sha256', untracked_file_count: 1 })
+    expect(first.sha256).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('changes for every source input that could change the rendered tree', () => {
+    const canonical = hashWorktreeSnapshot({ ...base, untrackedFiles: [{ path: 'new.txt', type: 'file', content: 'hello' }] })
+    expect(hashWorktreeSnapshot({ ...base, commit: 'b'.repeat(40), untrackedFiles: [{ path: 'new.txt', type: 'file', content: 'hello' }] }).sha256).not.toBe(canonical.sha256)
+    expect(hashWorktreeSnapshot({ ...base, trackedDiff: Buffer.from('diff --git a/a b/a\ntwo\n'), untrackedFiles: [{ path: 'new.txt', type: 'file', content: 'hello' }] }).sha256).not.toBe(canonical.sha256)
+    expect(hashWorktreeSnapshot({ ...base, untrackedFiles: [{ path: 'new.txt', type: 'file', content: 'goodbye' }] }).sha256).not.toBe(canonical.sha256)
+  })
+
+  it('does not let filesystem enumeration order change the provenance claim', () => {
+    const first = hashWorktreeSnapshot({ ...base, untrackedFiles: [{ path: 'b.txt', type: 'file', content: 'b' }, { path: 'a.txt', type: 'file', content: 'a' }] })
+    const reversed = hashWorktreeSnapshot({ ...base, untrackedFiles: [{ path: 'a.txt', type: 'file', content: 'a' }, { path: 'b.txt', type: 'file', content: 'b' }] })
+    expect(reversed.sha256).toBe(first.sha256)
   })
 })
 
@@ -291,6 +317,8 @@ describe('worktreeIdentity', { timeout: 60_000 }, () => {
     const id = worktreeIdentity(path.resolve(__dirname, '..', '..'))
     expect(id.worktree.length).toBeGreaterThan(0)
     expect(id.commit).toMatch(/^[0-9a-f]{40}$|^unknown$/)
+    expect(id.worktree_provenance).toMatchObject({ version: 1, algorithm: 'sha256' })
+    expect(id.worktree_provenance.sha256).toMatch(/^[0-9a-f]{64}$/)
   })
 
   it('degrades to the directory outside a git checkout instead of failing the run', async () => {

@@ -604,11 +604,23 @@ gh pr view <pr> --json autoMergeRequest --jq .autoMergeRequest.mergeMethod
 
 `SQUASH` or empty proceeds; **`MERGE` (or `REBASE`) refuses** — `gh pr merge <pr>
 --disable-auto`, re-arm with `--squash`, run the command again. A report that says
-"armed" without that output has not checked. Basis, at `origin/dev` `ff052462`:
-`git log origin/dev --first-parent --since=2026-08-10 --oneline | grep -c '^[0-9a-f]* Merge pull request'`
-→ 258 merge-commit landings against 345 squash (`grep -cE '\(#[0-9]+\)$'`) of 606;
-three wrong-method arms were disarmed by hand on 2–3 Sep (#2428, #2460, #2493, each
-with the comment on the PR) and #2438 merged as `MERGE` before it was reached.
+"armed" without that output has not checked. The checkable basis is four named
+landings: three wrong-method arms disarmed by hand on 2–3 Sep (#2428, #2460, #2493,
+each with the disarming comment on the PR) and #2438, which merged as a merge commit
+before it was reached. Wrong-method landings are a large minority of `dev` rather
+than a rarity — but **count them on a full clone or not at all**:
+
+```bash
+git log <base> --first-parent --since=<date> --oneline | grep -c '^[0-9a-f]* Merge pull request'
+git log <base> --first-parent --since=<date> --oneline | grep -cE '\(#[0-9]+\)$'
+```
+
+In a shallow clone these undercount silently — the walk completes and prints a
+plausible number instead of failing. Measured while writing this rule: the identical
+command at the identical base SHA returned 258 merge / 606 total on a full clone and
+256 / 604 in a shallow worktree, with the squash count identical in both, so the
+error is invisible in the ratio. Check `git rev-parse --is-shallow-repository` before
+quoting any history census (#2500 review round 2).
 
 **Check `mergeStateStatus` before arming auto-merge.** On `DIRTY`, merge `dev` in and
 resolve first — arming auto-merge on a conflicted PR does nothing, silently. The

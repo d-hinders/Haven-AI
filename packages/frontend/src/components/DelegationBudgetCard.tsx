@@ -15,6 +15,7 @@ import type { Address } from 'viem'
 import { useDelegationBudget, type DelegationBudget, type GrantInput } from '@/hooks/useDelegationBudget'
 import BudgetGrantAction from './BudgetGrantAction'
 import { Card } from './ui/Card'
+import { Skeleton } from './ui/Skeleton'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Select } from './ui/Select'
@@ -53,7 +54,7 @@ const PERIODS: Array<{ label: string; seconds: number }> = [
 ]
 
 export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudgetChange }: Props) {
-  const { budgets, grant, revoke, busy, ready, signersError, reloadSigners } =
+  const { budgets, grant, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners } =
     useDelegationBudget(agentId, chainId)
   const { toast } = useToast()
 
@@ -112,9 +113,34 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
     [onBudgetChange, revoke, toast],
   )
 
-  if (budgets === null) return null
+  // #2473: never render NOTHING while loading. The agent page's "Add budget"
+  // scrolls to this card's anchor, so an empty card is a button that visibly
+  // does nothing. The skeleton also reserves roughly the shape the loaded card
+  // takes, so arrival is not a layout jump.
+  if (budgets === null && !budgetsError) {
+    return (
+      <Card hover={false} className="mt-6 p-5 md:p-6">
+        <div>
+          <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent budgets</h2>
+          <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
+            Set how much this agent can spend each period. The budget refills itself — no monthly signing.
+          </p>
+        </div>
+        <Card.Section divided className="mt-4">
+          <div className="py-3"><Skeleton className="h-5 w-48" /></div>
+        </Card.Section>
+        <div className="mt-4 space-y-2">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+        </div>
+      </Card>
+    )
+  }
 
-  const active = budgets.filter((b) => b.status === 'active')
+  // A failed fetch keeps the card and its form (#2473 design review): the same
+  // shape `signersError` already uses below, rather than collapsing the whole
+  // card and taking the grant form with it.
+  const active = (budgets ?? []).filter((b) => b.status === 'active')
 
   return (
     <Card hover={false} className="mt-6 p-5 md:p-6">
@@ -139,7 +165,16 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
       ) : null}
 
       <Card.Section divided className="mt-4">
-        {active.length === 0 ? (
+        {budgetsError ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 py-3">
+            <p className="text-sm text-[var(--v2-ink-2)]">
+              Haven could not load this agent&rsquo;s current budgets.
+            </p>
+            <Button size="sm" variant="ghost" onClick={() => void reload()}>
+              Try again
+            </Button>
+          </div>
+        ) : active.length === 0 ? (
           <p className="py-3 text-sm text-[var(--v2-ink-muted)]">
             No budget yet — set one below and your agent can start paying within it.
           </p>
@@ -193,7 +228,11 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
             onGranted={handleGranted}
           />
         </div>
-      ) : null}
+      ) : (
+        <p className="mt-4 text-sm text-[var(--v2-ink-muted)]">
+          Budgets aren&rsquo;t available for this network yet.
+        </p>
+      )}
     </Card>
   )
 }

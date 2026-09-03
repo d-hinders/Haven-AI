@@ -1,10 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { mockGet, mockGrant, mockRevoke } = vi.hoisted(() => ({
+const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError } = vi.hoisted(() => ({
   mockGet: vi.fn(),
   mockGrant: vi.fn(),
   mockRevoke: vi.fn(),
+  mockReload: vi.fn(),
+  mockBudgetsError: vi.fn(() => false),
 }))
 
 vi.mock('@/hooks/useDelegationBudget', () => ({
@@ -14,7 +16,8 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     revoke: mockRevoke,
     busy: false,
     ready: true,
-    reload: vi.fn(),
+    budgetsError: mockBudgetsError(),
+    reload: mockReload,
   }),
 }))
 vi.mock('@/components/ui/Toast', () => ({
@@ -43,6 +46,8 @@ beforeEach(() => {
   mockGet.mockReset()
   mockGrant.mockReset()
   mockRevoke.mockReset()
+  mockReload.mockReset()
+  mockBudgetsError.mockReturnValue(false)
 })
 
 describe('DelegationBudgetCard (#833)', () => {
@@ -98,12 +103,6 @@ describe('DelegationBudgetCard (#833)', () => {
     await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith('0x' + 'ab'.repeat(32)))
   })
 
-  it('renders nothing while budgets are loading (null)', () => {
-    mockGet.mockReturnValue(null)
-    const { container } = render(<DelegationBudgetCard {...PROPS} />)
-    expect(container.textContent).toBe('')
-  })
-
   it('notifies onBudgetChange after a successful revoke — the page summary reads a different source (#1090)', async () => {
     mockGet.mockReturnValue([budget()])
     mockRevoke.mockResolvedValue({ ok: true })
@@ -123,5 +122,68 @@ describe('DelegationBudgetCard (#833)', () => {
     fireEvent.click(screen.getByText('Stop'))
     await waitFor(() => expect(mockRevoke).toHaveBeenCalled())
     expect(onBudgetChange).not.toHaveBeenCalled()
+  })
+})
+
+// #2473: a failed budget fetch used to collapse into the same `null` as the
+// pre-first-load state, so the card rendered nothing and the agent page's
+// "Add budget" button scrolled to an empty region with no error anywhere.
+describe('DelegationBudgetCard load failure (#2473)', () => {
+  it('renders a retryable error instead of nothing when the budget fetch failed', async () => {
+    mockGet.mockReturnValue(null)
+    mockBudgetsError.mockReturnValue(true)
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText(/could not load/i)).toBeTruthy())
+    fireEvent.click(screen.getByText('Try again'))
+    expect(mockReload).toHaveBeenCalled()
+  })
+
+  // Design review (#2473): a failed budget fetch is the same CATEGORY of
+  // problem as a failed signer fetch, so it gets the same shape — an inline
+  // banner inside the card — instead of collapsing the card and taking the
+  // grant form with it.
+  it('keeps the card and its grant form when the budget fetch failed', async () => {
+    mockGet.mockReturnValue(null)
+    mockBudgetsError.mockReturnValue(true)
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText(/could not load/i)).toBeTruthy())
+    expect(screen.getByText('Set budget')).toBeTruthy()
+    expect(screen.getByLabelText('Budget amount')).toBeTruthy()
+    // The unknown budget list must not read as "you have no budget".
+    expect(screen.queryByText(/No budget yet/i)).toBeNull()
+  })
+
+  // Money-path review (#2473): a grant REPLACES the active budget in the same
+  // (token, recipient) slot, silently. The rows above the form are what let an
+  // owner see that coming — with the list unknown they cannot, so the action
+  // is gated on reloading rather than on the owner reading a warning.
+  it('refuses to grant while the current budgets are unknown', async () => {
+    mockGet.mockReturnValue(null)
+    mockBudgetsError.mockReturnValue(true)
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText(/could not load/i)).toBeTruthy())
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '2.5' } })
+    fireEvent.click(screen.getByText('Set budget'))
+    await waitFor(() => expect(screen.getByText(/Reload the current budgets/i)).toBeTruthy())
+    expect(mockGrant).not.toHaveBeenCalled()
+  })
+
+  it('says it is loading while the first load is still in flight — never renders empty', () => {
+    mockGet.mockReturnValue(null)
+    mockBudgetsError.mockReturnValue(false)
+    const { container } = render(<DelegationBudgetCard {...PROPS} />)
+    // The agent page scrolls to this card's anchor; an empty card is a
+    // button that visibly does nothing.
+    expect(container.textContent).not.toBe('')
+    // Skeleton placeholders reserve the loaded card's shape (design review).
+    expect(container.querySelectorAll('[aria-hidden="true"]').length).toBeGreaterThan(0)
+    expect(screen.getByText(/Agent budgets/)).toBeTruthy()
+  })
+
+  it('explains itself rather than rendering no form when the chain offers no grantable token', async () => {
+    mockGet.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} tokens={[]} />)
+    await waitFor(() => expect(screen.getByText(/aren.t available for this network/i)).toBeTruthy())
+    expect(screen.queryByText('Set budget')).toBeNull()
   })
 })

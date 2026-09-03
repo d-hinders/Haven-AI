@@ -884,13 +884,13 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(connect.api('/auth/me', 'GET')).toBeUndefined()
     })
 
-    // #1684: the APPROVE screen — the one between the other two connect
+    // #1684/#2472: the APPROVE screen — the one between the other two connect
     // scenarios' pins, and the screen that actually grants spend authority.
-    describe('connect-agent-approve (#1684)', () => {
-      it('pins the setup at connected_local with the runtime already configured', () => {
-        // `resolveConnectStepView` only reaches the approval step when the
-        // runtime reports configured; without both flags the capture would
-        // silently shoot the "Finishing setup" state instead.
+    describe('connect-agent-approve (#1684/#2472)', () => {
+      it('pins the manual credential fallback at connected_local and approval-ready', () => {
+        // The fallback cannot truthfully report a configured runtime. Its
+        // explicit marker is what routes it to the same owner-signed approval
+        // screen instead of silently shooting "Finishing setup".
         const first = approve.api(`/agent-connection-setups/${SETUP_ID}`, 'GET') as {
           status: string
           agent_id: string
@@ -899,8 +899,9 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         const second = approve.api(`/agent-connection-setups/${SETUP_ID}`, 'GET')
         expect(first).toMatchObject({ status: 'connected_local', agent_id: 'agent-fixture-1' })
         expect(first.install_status).toMatchObject({
-          local_mcp_configured: true,
-          local_mcp_acknowledged: true,
+          manual_credential_fallback: true,
+          local_mcp_configured: false,
+          local_mcp_acknowledged: false,
         })
         expect(second).toMatchObject({ status: 'connected_local' })
       })

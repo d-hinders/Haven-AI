@@ -81,8 +81,15 @@ Do not continue to reconnect until the configuration and credential inventory ma
 1. Run the published connector to create a fresh pair:
 
    ```bash
-   npx @haven_ai/connect@alpha --setup <token> --api <url> --runtime hermes
+   npx -y <connector_package> --setup <token> --api <url> --runtime hermes
    ```
+
+   Use the package the target backend's own setup response names — its
+   `connector_package`, which is also the package named inside its
+   `connector_command`. Since #2422 that dist-tag is set per deployment by
+   `HAVEN_CONNECTOR_CHANNEL` and is `@alpha` only in production; pinning
+   `@alpha` by hand against a `@dev` backend installs a signer that skews
+   against it.
 
 2. Start a new Hermes session, or run `/restart` in every Hermes Gateway that will use the new pair.
 3. Run `npx @haven_ai/connect@alpha --doctor --runtime hermes` again. A clean reconnection report exits zero, `identity_match` passes, and no `superseded` agent is named. Retained tombstone directories may still be reported as `retired` until every long-lived host has restarted.

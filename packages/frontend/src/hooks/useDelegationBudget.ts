@@ -153,6 +153,7 @@ export function useDelegationBudget(
   const [budgets, setBudgets] = useState<DelegationBudget[] | null>(null)
   const [signers, setSigners] = useState<AccountSigners | null>(null)
   const [signersError, setSignersError] = useState(false)
+  const [budgetsError, setBudgetsError] = useState(false)
   const [busy, setBusy] = useState(false)
   // The ACCOUNT address scopes the signer lookup (#1079): without it the
   // stored-passkey/hybrid branches are unreachable and `ready` would depend
@@ -162,13 +163,20 @@ export function useDelegationBudget(
     chainId,
   })
 
+  // A failed budget fetch is RETRYABLE, exactly like the signer set below
+  // (#2473): it used to collapse into `budgets === null`, which the card
+  // reads as "still loading" and renders as nothing at all — so an API
+  // failure looked identical to a first paint, and the page's "Add budget"
+  // button scrolled to an empty div with no error anywhere.
   const reload = useCallback(async () => {
     if (!enabled) return
     try {
       const res = await api.get<{ delegations: DelegationBudget[] }>(`/agents/${agentId}/delegations`)
       setBudgets(res.delegations)
+      setBudgetsError(false)
     } catch {
       setBudgets(null)
+      setBudgetsError(true)
     }
   }, [agentId, enabled])
 
@@ -190,6 +198,7 @@ export function useDelegationBudget(
   useEffect(() => {
     if (!enabled) {
       setBudgets(null)
+      setBudgetsError(false)
       setSigners(null)
       setSignersError(false)
       setBusy(false)
@@ -338,6 +347,7 @@ export function useDelegationBudget(
     busy,
     ready: signingPath !== null,
     reload,
+    budgetsError,
     signersError,
     reloadSigners,
   }

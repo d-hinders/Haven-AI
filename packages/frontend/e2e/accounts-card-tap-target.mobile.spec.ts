@@ -89,7 +89,7 @@
  *    the title row, and #2223/#2235/#2236 spent three issues on that row's
  *    width.
  *  - The 44px HIT rectangle is asserted together with the PAINT being
- *    unchanged, exactly as `e2e/investor-briefing-tap-target.mobile.spec.ts`
+ *    unchanged, exactly as the two-part assertion in this spec requires
  *    does: a "fix" that raises the painted height satisfies the floor and
  *    breaks the density the compact sizes exist for, which is the call #1726
  *    made and this borrows.
@@ -355,10 +355,9 @@ test('/accounts: the card action clears the 44px touch-target floor without movi
 
   /*
     The other half of #1726's call, asserted for the same reason
-    `investor-briefing-tap-target.mobile.spec.ts` asserts it: a "fix" that
-    raises the painted height clears the floor and destroys the density the
-    compact control was chosen for. Without this the floor check above would
-    bless exactly the wrong fix.
+    this same two-part assertion: a "fix" that raises the painted height clears
+    the floor and destroys the density the compact control was chosen for.
+    Without this the floor check above would bless exactly the wrong fix.
   */
   expect(
     Math.abs(setActive.paint.h - PAINT.setActive.h),

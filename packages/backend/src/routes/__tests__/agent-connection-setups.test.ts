@@ -863,7 +863,7 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
-  it('exercises the Connect Agent 2 setup spine from pending setup through local registration', async () => {
+  it('records the manual credential fallback as approval-ready without activating the agent', async () => {
     const app = await buildApp()
     const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
     const setupRows: SetupFixture[] = []
@@ -1025,12 +1025,13 @@ describe('agent connection setup routes', () => {
         proof_signature: proof,
         api_key_hash: API_KEY_HASH,
         api_key_prefix: 'sk_agent_fed',
-        runtime: 'claude-code',
-        connector_version: '0.1.0',
+        runtime: 'browser-manual-fallback',
+        connector_version: 'browser-manual-fallback',
         connector_context: {
-          environment_label: 'Local workspace',
-          runtime_version: 'claude-code 1.2.3',
+          environment_label: 'Manual browser fallback',
+          config_target: 'paste-to-agent',
         },
+        install_capabilities: { can_write_runtime_config: false, restart_required: true },
       },
     })
     expect(registerResponse.statusCode).toBe(201)
@@ -1042,6 +1043,16 @@ describe('agent connection setup routes', () => {
     })
     expect(registerResponse.json()).not.toHaveProperty('api_key')
     expect(JSON.stringify(mockClientQuery.mock.calls)).not.toContain(wallet.privateKey)
+    expect(setupRows[0].install_status).toMatchObject({
+      manual_credential_fallback: true,
+      hosted_mcp_configured: false,
+      local_signer_configured: false,
+      local_mcp_configured: false,
+      local_mcp_acknowledged: false,
+    })
+    // The marker is UI state only; registration still leaves the API key
+    // pending until the owner signs the existing budget delegation.
+    expect(agentStatus).toBe('pending_approval')
 
     const statusResponse = await app.inject({
       method: 'GET',

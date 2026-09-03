@@ -142,12 +142,19 @@ a signable setup.
 Structure:
 1. Create and copy a single setup prompt — identical for every environment.
 2. Wait for the local connector to generate the signing key and API key, then
-   register the public signing address and proof with Haven.
+   register the public signing address and proof with Haven. If it cannot
+   connect after the bounded wait, the warning-gated manual credential fallback
+   may create the one-time credential in the browser; the user saves it in the
+   trusted agent workspace, and the browser registers the same public address
+   and proof. It must be labeled as manual, never as an automatically
+   configured runtime.
    If Haven still reports no connection after a bounded wait, say only that it
-   has not received one yet; tell the user not to approve the budget, point them
-   at the connector's own output first (it can refuse locally without ever
-   contacting Haven, and then it is the only place naming why), offer the same
-   local command, and let them cancel before creating a fresh one-time prompt.
+   has not received one yet; point them at the connector's own output first (it
+   can refuse locally without ever contacting Haven, and then it is the only
+   place naming why), offer the same local command, and let them cancel before
+   creating a fresh one-time prompt. Do not show the budget approval until the
+   connector or the manual fallback has registered that public address and
+   proof.
 3. Show the registered public address and reviewed agent budget before the
    delegation signature.
 4. Ask the user to grant the agent budget in the modal; that signature activates

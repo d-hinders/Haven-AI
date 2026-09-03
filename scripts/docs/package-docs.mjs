@@ -164,7 +164,17 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/connect/src/**'],
-    'last-verified': '2026-09-01',
+    // #2423: re-verified and EDITED (the `--rekey` phase-two instruction only).
+    // The page showed `npx @haven_ai/connect@alpha --rekey-finish` as the line
+    // to run, which is right for a production install and wrong for any other
+    // channel; since #2423 the connector derives that command from the npm
+    // dist-tag it was published under, so phase one prints the correct one and
+    // the page now says to prefer what the tool printed. The `--doctor` and
+    // `--setup` examples were left alone deliberately: they are entry points
+    // with no prior phase to quote, so they rely on the general caveat already
+    // stated once at the top of the file. Nothing else re-verified. Prior:
+    // '2026-09-01' carried no provenance note.
+    'last-verified': '2026-09-03',
   },
   {
     doc: 'packages/cli/README.md',

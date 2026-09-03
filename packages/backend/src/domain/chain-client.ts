@@ -41,8 +41,8 @@
  *   not forced, per #994's own instruction.
  */
 
-/** The two live rails (`lib/execution-rail.ts`); selects which SDK backs a `ChainClient`. */
-export type ChainRail = 'allowance_module' | 'delegation'
+/** Which SDK backs a `ChainClient` — a client choice, not an execution rail; the rails themselves live in `rails/execution-rail.ts`. */
+export type ChainClientImpl = 'ethers' | 'viem'
 
 export interface ChainClient {
   /** The chain-native currency balance (wei-equivalent) for `address`. */

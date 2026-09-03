@@ -16,13 +16,11 @@ import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-h
 import {
   confirmX402Intent,
   failPendingX402Intent,
-  findActiveX402IntentByIdempotencyKey,
   findSettleIntent,
   findX402IntentByIdempotencyKey,
   getX402HourlyUsage,
   markIntentSubmittedForSettlement,
   recordX402Signature,
-  refreshStaleX402Intent,
 } from '../x402-authorizations.js'
 
 let seq = 0
@@ -141,21 +139,12 @@ describeDb('x402-authorizations repository (#1222)', () => {
     expect((await findX402IntentByIdempotencyKey(agentId, 'key-1'))?.id).toBe(newest)
   })
 
-  it('the ACTIVE lookup additionally excludes expired — the two predicates differ on purpose', async () => {
-    const { agentId, userId } = await seedAgent()
-    await seedIntent({ agentId, userId, x402Key: 'key-2', status: 'expired' })
-
-    expect(await findActiveX402IntentByIdempotencyKey(agentId, 'key-2')).toBeNull()
-    expect((await findX402IntentByIdempotencyKey(agentId, 'key-2'))).not.toBeNull()
-  })
-
   it('lookups are tenant-scoped: another agent never finds the key', async () => {
     const { agentId, userId } = await seedAgent()
     const other = await seedAgent()
     await seedIntent({ agentId, userId, x402Key: 'key-3' })
 
     expect(await findX402IntentByIdempotencyKey(other.agentId, 'key-3')).toBeNull()
-    expect(await findActiveX402IntentByIdempotencyKey(other.agentId, 'key-3')).toBeNull()
   })
 
   it('the partial unique index dedupes a replayed ACTIVE key but frees it after failure/expiry', async () => {
@@ -175,8 +164,8 @@ describeDb('x402-authorizations repository (#1222)', () => {
 
   // ── Rail scoping (#1288) ────────────────────────────────────────────────
 
-  it('the rail-scoping clause excludes a same-key direct-source row from x402 lookups and refresh', async () => {
-    // x402 row seeded FIRST (older) so the assertions below are meaningful:
+  it('the rail-scoping clause excludes a same-key direct-source row from x402 lookups', async () => {
+    // x402 row seeded FIRST (older) so the assertion below is meaningful:
     // without the rail-scoping clause, `ORDER BY created_at DESC LIMIT 1`
     // would pick the NEWER direct row instead, not just an unscoped one.
     const { agentId, userId } = await seedAgent()
@@ -186,11 +175,7 @@ describeDb('x402-authorizations repository (#1222)', () => {
     // issue describes: a direct-payment row (payment_rail NULL, source
     // 'direct') that happens to share a key with an x402 replay. A different
     // column so the two rows don't 23505 on the same partial unique index.
-    // Status stays the active default ('pending_signature') so the ACTIVE
-    // lookup's OWN status filter can't be what excludes it — only the rail
-    // clause should; an expired `expires_at` still trivially satisfies the
-    // refresh guard's staleness OR-clause below.
-    const direct = await seedIntent({
+    await seedIntent({
       agentId,
       userId,
       source: 'direct',
@@ -201,80 +186,14 @@ describeDb('x402-authorizations repository (#1222)', () => {
       signHash: `0x${'1'.repeat(64)}`,
     })
 
-    // Both idempotency lookups must find ONLY the x402 row — even though the
-    // direct row is NEWER (so it would win the `ORDER BY` unscoped) and
-    // matches via the OTHER key column.
+    // The lookup must find ONLY the x402 row — even though the direct row is
+    // NEWER (so it would win the `ORDER BY` unscoped) and matches via the
+    // OTHER key column. (#2469: the same-scenario refresh-guard assertion went
+    // with the deleted refreshStaleX402Intent.)
     expect((await findX402IntentByIdempotencyKey(agentId, 'rail-key-1'))?.id).toBe(x402)
-    expect((await findActiveX402IntentByIdempotencyKey(agentId, 'rail-key-1'))?.id).toBe(x402)
-
-    // refreshStaleX402Intent is keyed by id, not the idempotency key — prove
-    // it separately refuses the direct row even though every OTHER guard
-    // predicate (status='pending_signature', tx_hash/signature NULL, expired) is
-    // satisfied.
-    const refreshed = await refreshStaleX402Intent({
-      allowanceNonce: 2,
-      signHash: `0x${'2'.repeat(64)}`,
-      intentId: direct,
-      agentId,
-    })
-    expect(refreshed).toBeNull()
-    const after = await readIntent(direct)
-    expect(after.allowance_nonce).toBe(1)
-    expect(after.sign_hash).toBe(`0x${'1'.repeat(64)}`)
-    expect(after.status).toBe('pending_signature')
   })
 
-  // ── Stale-replay refresh ───────────────────────────────────────────────
-
-  it('refresh revives an EXPIRED replay with a fresh nonce+hash and clears the error', async () => {
-    const { agentId, userId } = await seedAgent()
-    const id = await seedIntent({
-      agentId,
-      userId,
-      status: 'expired',
-      allowanceNonce: 1,
-      expiresAt: '2026-08-08T00:00:00Z',
-    })
-    await db.query(`UPDATE payment_intents SET error_message = 'stale' WHERE id = $1`, [id])
-
-    const refreshed = await refreshStaleX402Intent({
-      allowanceNonce: 2,
-      signHash: `0x${'b'.repeat(64)}`,
-      intentId: id,
-      agentId,
-    })
-    expect(refreshed).not.toBeNull()
-    expect(refreshed!.status).toBe('pending_signature')
-    expect(refreshed!.allowance_nonce).toBe(2)
-
-    const row = await readIntent(id)
-    expect(row.error_message).toBeNull()
-    expect(new Date(row.expires_at).getTime()).toBeGreaterThan(Date.now())
-  })
-
-  it('refresh refuses a signed or progressed row — and a fresh row with the SAME nonce+hash', async () => {
-    const { agentId, userId } = await seedAgent()
-    const signed = await seedIntent({ agentId, userId, signature: '0xsig', allowanceNonce: 5 })
-    const progressed = await seedIntent({ agentId, userId, status: 'confirmed', txHash: `0x${'c'.repeat(64)}` })
-    const fresh = await seedIntent({ agentId, userId, allowanceNonce: 5, signHash: `0x${'d'.repeat(64)}` })
-
-    for (const intentId of [signed, progressed]) {
-      expect(
-        await refreshStaleX402Intent({ allowanceNonce: 6, signHash: `0x${'e'.repeat(64)}`, intentId, agentId }),
-      ).toBeNull()
-    }
-    // A fresh, unexpired row whose nonce and hash already match: nothing is
-    // stale — the guard's final OR-clause matches nothing and returns null.
-    expect(
-      await refreshStaleX402Intent({ allowanceNonce: 5, signHash: `0x${'d'.repeat(64)}`, intentId: fresh, agentId }),
-    ).toBeNull()
-    // …but a NONCE DRIFT on that same fresh row IS stale, and refreshes:
-    expect(
-      await refreshStaleX402Intent({ allowanceNonce: 6, signHash: `0x${'d'.repeat(64)}`, intentId: fresh, agentId }),
-    ).not.toBeNull()
-  })
-
-  // ── One-shot execute transitions ───────────────────────────────────────
+  // ── One-shot execute transitions ─────────────────────────────────────────
 
   it('recordX402Signature stores the signature WITHOUT leaving pending_signature, exactly once', async () => {
     const { agentId, userId } = await seedAgent()

@@ -182,7 +182,6 @@ import {
   GET_MAX_X402_PER_HOUR_SQL,
   MARK_INTENT_SUBMITTED_FOR_SETTLEMENT_SQL,
   RECORD_X402_SIGNATURE_SQL,
-  REFRESH_STALE_X402_INTENT_SQL,
 } from '../src/infra/repositories/x402-authorizations.js'
 import {
   ATTACH_EVIDENCE_FOR_INTENT_SQL,
@@ -691,7 +690,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'x402: hourly cap config read (#961)', sql: GET_MAX_X402_PER_HOUR_SQL },
   { name: 'x402: hourly cap usage count (#961)', sql: COUNT_RECENT_X402_INTENTS_SQL },
   { name: 'x402: post-conflict active-intent reload', sql: FIND_ACTIVE_X402_INTENT_BY_KEY_SQL },
-  { name: 'x402: stale-replay refresh (guarded, #961)', sql: REFRESH_STALE_X402_INTENT_SQL },
   { name: 'x402: one-shot signature record', sql: RECORD_X402_SIGNATURE_SQL },
   { name: 'x402: one-shot confirm', sql: CONFIRM_X402_INTENT_SQL },
   { name: 'x402: one-shot fail', sql: FAIL_X402_INTENT_SQL },

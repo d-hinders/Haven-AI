@@ -53,10 +53,10 @@
 Name each pass and its verdict. A blank line is not a pass — leave it unfilled and
 the merge gate stops here.
 
-- `haven-reviewer`: passed / skipped because ___
+- `haven-reviewer`: passed @ <sha> / skipped because ___
   - Required on **every** pull request (`AGENTS.md`). Skipping is allowed and has to be
     argued in writing, right here, where a human reads it.
-- `haven-design-reviewer`: passed / passed on re-review after fixes / n/a (not `area:frontend`) / skipped because ___
+- `haven-design-reviewer`: passed @ <sha> / passed on re-review after fixes @ <sha> / n/a (not `area:frontend`) / skipped because ___
 - [ ] Self-reviewed
 - [ ] External review requested
 - [ ] External review completed

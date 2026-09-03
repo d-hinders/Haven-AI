@@ -13,7 +13,6 @@ import { useAggregatedBalances } from '@/hooks/useAggregatedPortfolio'
 import { useCountUp } from '@/hooks/useCountUp'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useBalances } from '@/hooks/useBalances'
-import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { RESET_PERIODS } from '@/lib/budget-period'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
@@ -672,7 +671,9 @@ export default function DashboardClient() {
   // safe on login. A plain synchronous read, so no extra request and no
   // signing-provider context — a dashboard banner has no business requiring
   // the wallet machinery `useAccountSigners` pulls in.
-  const delegationSafe = safes.find((safe) => safe.account_type === 'delegator_hybrid')
+  // #2413: the account list is delegation-only, so "the first delegation
+  // account" is just the first account.
+  const delegationSafe = safes[0]
   const recoverySigners = getStoredHybridSigners({
     safeAddress: delegationSafe?.safe_address as Address | undefined,
     chainId: delegationSafe?.chain_id,
@@ -725,12 +726,10 @@ export default function DashboardClient() {
     () => activeSafe ?? safes.find((safe) => safe.is_default) ?? safes[0] ?? null,
     [activeSafe, safes],
   )
-  const hasDelegationAccounts = safes.some((safe) => safe.account_type === 'delegator_hybrid')
+  const hasDelegationAccounts = safes.length > 0
   const agentSafe = useMemo(
     () =>
-      activeSafe?.account_type === 'delegator_hybrid'
-        ? activeSafe
-        : safes.find((safe) => safe.account_type === 'delegator_hybrid') ?? null,
+      activeSafe ?? safes[0] ?? null,
     [activeSafe, safes],
   )
 
@@ -1052,7 +1051,7 @@ export default function DashboardClient() {
         // Home for the backup-signer prompt (#1162, #1153). Onboarding used
         // to render it on its "You're in" screen, which #1162 removed and
         // relocated here; #1153 replaces the unconditional
-        // "any delegator_hybrid account" render with a funded-state trigger
+        // "any account" render with a funded-state trigger
         // — the owner does not want this in front of the user before they
         // have funds at risk. `hasFunds` is already fail-closed: it only
         // goes true once `fundingStateKnown` is true (safes loaded, balance

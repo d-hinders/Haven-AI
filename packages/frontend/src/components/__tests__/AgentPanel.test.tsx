@@ -107,19 +107,6 @@ describe('AgentPanel rail affordances', () => {
     expect(screen.getByText('1.00')).toBeInTheDocument()
   })
 
-  it('keeps legacy agents readable while removing connect and authority actions', () => {
-    const legacySafe = { ...SAFE, account_type: 'safe' }
-    mockUseAuth.mockReturnValue({ activeSafe: legacySafe })
-    setAgents([agent({ account_type: 'safe', safe_name: 'Legacy account' })])
-
-    render(<AgentPanel />)
-
-    expect(screen.getByText(/older Safe account/i)).toBeInTheDocument()
-    expect(screen.getByText('Research agent')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Connect agent' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Revoke Research agent' })).not.toBeInTheDocument()
-  })
-
   it('shows a retry state instead of claiming there are no agents when the list fails', () => {
     const refetch = vi.fn()
     setAgents([], { error: 'request failed', refetch })

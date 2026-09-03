@@ -7,7 +7,7 @@ Haven lets AI agents request and sign payments within strict, user-approved on-c
 ## Install
 
 ```bash
-npm install @haven_ai/sdk
+npm install @haven_ai/sdk@alpha
 ```
 
 ## Quick Start

@@ -324,44 +324,6 @@ export const APPROVER_PASSKEY = '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2'
 export const APPROVER_WALLET = '0x5B1869D9A4C187F2Eaa108F3062412ECf0526B24'
 export const APPROVER_UNKNOWN = '0x9A7f6E2b1c4D8e05F3a2B9c6D1e8F40b3C5a7D91'
 
-/**
- * `agent-ops`'s OWN account — a genuinely legacy-rail Safe (#2202).
- *
- * Why this exists rather than a second `account_type` on the shared safe:
- * `account_type` is not an agent column. Every agent-row read selects it as
- * `us.account_type` off the joined `user_safes` row
- * (`LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL` and
- * `FIND_AGENT_FOR_USER_ALL_STATUSES_SQL`,
- * `infra/repositories/agents.ts:183`/`:203` with `LEFT JOIN user_safes us ON
- * a.safe_id = us.id` at `:194`/`:214`; likewise
- * `FIND_DELEGATE_AGENT_FOR_USER_SQL` at `:226-228`). ONE safe answers ONE
- * `account_type`, so three agents sharing `FIXTURE_SAFE.id` cannot report two
- * different values — which is what they did until #2202.
- *
- * And the value is `'safe'`, not `null`. Migration
- * `041_hybrid_accounts.ts:29` adds the column `VARCHAR(32) NOT NULL DEFAULT
- * 'safe'` with `CHECK (account_type IN ('safe','delegator_hybrid'))` at `:38`,
- * so `null` is not in the column's domain at all. The only way `us.account_type`
- * comes back null is the LEFT JOIN finding no row — `agents.safe_id` is
- * nullable (`000_initial.ts:209`) — and then `us.safe_address`, `us.name` and
- * `us.chain_id` are null in the SAME row. `agent-ops` populated all three while
- * claiming a null `account_type`, so its old value was impossible independently
- * of the shared-safe contradiction. `railOf` reads anything-but-`delegator_hybrid`
- * as the legacy rail (`lib/custody-rail.ts:37-38`), which is why the lie was
- * invisible: `null` and `'safe'` render identically.
- *
- * A second account is a REACHABLE state, not a workaround: `user_safes` is
- * per-user with an `is_default` flag, and the active-account switcher (#625)
- * is how a user moves between them.
- */
-export const FIXTURE_LEGACY_SAFE = {
-  id: 'safe-legacy-fixture',
-  name: 'Imported Safe',
-  safe_address: '0x3333333333333333333333333333333333333333',
-  chain_id: FIXTURE_SAFE.chain_id,
-  is_default: false,
-  created_at: '2026-04-20T10:00:00.000Z',
-}
 
 export const FIXTURE_USER = {
   id: 'user-fixture',
@@ -374,13 +336,15 @@ export const FIXTURE_USER = {
   // without perturbing FIXTURE_SAFE's identity shape (pinned against the e2e
   // fixture by fixture-shape-parity.test.ts).
   //
-  // #2202: the legacy account is listed BESIDE it rather than replacing it.
-  // `agent-ops` lives on that one, so the user really does hold the safe its
-  // agent row names — the join above has a row to find, and it answers 'safe'.
-  safes: [
-    { ...FIXTURE_SAFE, account_type: 'delegator_hybrid' },
-    { ...FIXTURE_LEGACY_SAFE, account_type: 'safe' },
-  ],
+  // #2413: the legacy account #2202 listed beside it is GONE, and this is a
+  // contract fix rather than a fixture preference. `/auth/me` filters to
+  // `account_type = 'delegator_hybrid'`, so a legacy row is a state the client
+  // can no longer receive — and since the rail branches behind it are deleted,
+  // a fixture that still served one would render it AS a delegation account.
+  // Every screenshot taken from that would depict a screen production cannot
+  // produce. The harness caught this itself ("a fixture-shape gap or a real
+  // client bug"), which is what that check is for.
+  safes: [{ ...FIXTURE_SAFE, account_type: 'delegator_hybrid' }],
   currency_preference: 'USD',
   created_at: '2026-05-01T10:00:00.000Z',
 }
@@ -506,47 +470,6 @@ export const FIXTURE_AGENTS = [
       token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
       token_symbol: 'USDC', allowance_amount: '250.000000', reset_period_min: 10080,
     }],
-  },
-  {
-    id: 'agent-ops', name: 'Ops agent',
-    description: 'Recurring vendor payments',
-    // #2202: the LEGACY-rail agent, now on a legacy-rail ACCOUNT. It used to
-    // carry `account_type: null` while pointing at `FIXTURE_SAFE` — the safe
-    // the two `delegator_hybrid` agents share and that `FIXTURE_USER.safes`
-    // independently calls `delegator_hybrid`. All four `us.*` fields below come
-    // from ONE joined row, so they must describe one account; see
-    // `FIXTURE_LEGACY_SAFE` for why the value is `'safe'` and why `null` was
-    // impossible rather than merely inconsistent.
-    delegate_address: ADDR.delegate, safe_id: FIXTURE_LEGACY_SAFE.id,
-    safe_address: FIXTURE_LEGACY_SAFE.safe_address, safe_name: FIXTURE_LEGACY_SAFE.name,
-    safe_chain_id: FIXTURE_LEGACY_SAFE.chain_id, account_type: 'safe',
-    api_key_prefix: 'hvn_d4e5f6', status: 'active',
-    created_at: '2026-05-18T10:00:00.000Z',
-    // #1878: the BARE pair, reported — must not read like the agent below,
-    // which reported nothing at all.
-    mcp_server_name: 'haven',
-    mcp_last_seen_at: '2026-07-09T16:40:00.000Z',
-    // #2224: EMPTY, and this is derived rather than chosen. A legacy-rail
-    // agent's `allowances` array is filled by nothing: `GET /agents` returns
-    // `agent.account_type === 'delegator_hybrid' ? derived : []`
-    // (`backend/src/routes/agents.ts:92-98`), `GET /agents/:id` does the same
-    // (`:113-121`), and the `agent_allowances` read surface it used to mirror
-    // is RETIRED — the four LIST_* projections are deleted
-    // (`infra/repositories/agents.ts:232-237`, #1440/#2020) and the write
-    // routes answer 410. So the 500 USDC / daily row this used to carry was
-    // path-impossible for the same reason `account_type: null` was (#2202):
-    // union-legal on the wire type, emitted by nothing.
-    //
-    // It was also RENDERED — that is what makes it the #2205 shape rather than
-    // dead data. `AgentCard.showConfiguredFallback` turned it into a budget row
-    // on `/agents`, and #2224's own evidence table was built on that row. The
-    // card now shows "No agent budget configured" for this agent, which is what
-    // the retired rail actually looks like.
-    //
-    // The delegation-rail agents keep their arrays: theirs are the derived
-    // projection of an active delegation, which is the one thing that fills
-    // this field (see the note on `agent-research`).
-    allowances: [],
   },
   {
     id: 'agent-retired', name: 'Data-feed agent',
@@ -855,21 +778,6 @@ export const FIXTURE_DELEGATE_BALANCES = {
   // `agent.safe_chain_id ?? DEFAULT_CHAIN_ID` (`:143`, echoed at `:161`) — the
   // coalesce never fires for a real account, which always has a chain, but the
   // read is not a bare echo and the citation should not say it is
-  // (`haven-reviewer`). So this body must
-  // name the safe THIS agent is on — the shared one would claim the delegate
-  // belongs to an account it has nothing to do with. Caught by #2205's own
-  // echoed-field guard when `agent-ops` moved, which is what that guard is for.
-  'agent-ops': {
-    delegate_address: ADDR.delegate,
-    safe_address: FIXTURE_LEGACY_SAFE.safe_address,
-    chain_id: FIXTURE_LEGACY_SAFE.chain_id,
-    eth: '0',
-    eth_atomic: '0',
-    usdc: '0',
-    usdc_atomic: '0',
-    usdc_address: resolveToken(FIXTURE_LEGACY_SAFE.chain_id, 'USDC').address,
-    sweep_min_usdc: '0.01',
-  },
   // `agent-retired` has no delegate address, so the route never reaches the
   // balance reads — it answers 422 at `routes/agents.ts:140-142`. Served as a
   // real 422 by `fixtureFor` below.
@@ -944,26 +852,6 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
     }
   }
-  if (pathname === `/safe/${FIXTURE_LEGACY_SAFE.safe_address}/details`) {
-    // #2202. `/custody` renders `SafeControlCard` for the legacy account, and
-    // that card reads its owners and threshold from here (`useSafeDetails`).
-    // Unkeyed, it fell to `FIXTURE_EMPTY_FALLBACK` and the card photographed
-    // "Threshold: of 0" — an owner-less Safe, which is not a state a Safe can
-    // be in: `000_initial.ts` never creates one, and a deployed Safe with a
-    // zero threshold could not have been deployed. Same mechanism #2194/#2205
-    // fixed for `/agents/:id/delegate-balance`, on the endpoint this issue's
-    // own second account newly reaches — the fallback cannot say "not seeded",
-    // it says 200 with the fields missing and the UI renders the gap as data.
-    //
-    // Two owners at threshold 2, matching the legacy Safe fixture.
-    // the same card, so the two captures of one card agree.
-    return {
-      address: FIXTURE_LEGACY_SAFE.safe_address,
-      owners: [APPROVER_WALLET, APPROVER_UNKNOWN],
-      threshold: 2,
-      nonce: 12,
-    }
-  }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/delegate-balance')) {
     // #2194. Keyed for EVERY fixture agent — the point is not that this one
     // path now answers correctly, it is that the generic fallback can no
@@ -985,7 +873,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     // so the capture has to carry both recipient states — PINNED (an
     // AllowedCalldataEnforcer caveat) and open — or the rendered review never
     // sees the branch that was wrong.
-    if (pathname === `/agents/${FIXTURE_AGENTS[0].id}/delegations`) {
+    if (pathname === `/agents/agent-research/delegations`) {
       return {
         delegations: [{
           id: 'dlg-1', chain_id: FIXTURE_SAFE.chain_id,
@@ -1000,7 +888,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
         }],
       }
     }
-    if (pathname === `/agents/${FIXTURE_AGENTS[2].id}/delegations`) {
+    if (pathname === `/agents/agent-retired/delegations`) {
       return {
         delegations: [{
           id: 'dlg-2', chain_id: FIXTURE_SAFE.chain_id,
@@ -2439,18 +2327,6 @@ export const SCENARIOS = {
         .waitFor({ timeout: 15_000 })
       await shoot(noSigner, 'no-signer-refusal')
 
-      // ── The legacy-rail agent: the refusal ──────────────────────────────
-      await page.goto(`${BASE_URL}/agents/agent-ops`, {
-        waitUntil: 'networkidle',
-        timeout: 30_000,
-      })
-      await dismissMobileSidebar(page, vp)
-      await page.getByRole('button', { name: 'Agent options' }).click()
-      await page.getByRole('menuitem', { name: 'Replace signing key' }).click()
-
-      const refusal = page.getByRole('dialog')
-      await refusal.getByText(/not available for this agent/i).waitFor({ timeout: 15_000 })
-      await shoot(refusal, 'legacy-rail-refusal')
     },
   },
   'account-signer-removal': {
@@ -2771,47 +2647,6 @@ export const SCENARIOS = {
       )
 
       await shoot(main, 'account')
-    },
-  },
-  'retired-rail-agent': {
-    description:
-      'Legacy Safe agent list and archived detail with read-only retirement copy and restore action (#2258)',
-    api(apiPath) {
-      if (apiPath === '/agents') {
-        return {
-          agents: FIXTURE_AGENTS.map((agent) =>
-            agent.id === 'agent-ops'
-              ? { ...agent, archived_at: '2026-08-28T10:00:00.000Z' }
-              : agent,
-          ),
-        }
-      }
-      if (apiPath.endsWith('/stats') && apiPath.startsWith('/agent-activity/')) return FIXTURE_AGENT_STATS
-      if (apiPath.endsWith('/activity') && apiPath.startsWith('/agent-activity/')) return { activity: [] }
-      if (apiPath.startsWith('/agents/agent-ops/passport')) return { passport: null, standing: null }
-      return undefined
-    },
-    async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
-      await dismissMobileSidebar(page, vp)
-      const removedToggle = page.getByRole('button', { name: /Removed/ })
-      await removedToggle.waitFor({ timeout: 20_000 })
-      await removedToggle.click()
-      await page.getByText('Ops agent', { exact: true }).waitFor({ timeout: 20_000 })
-      await shoot(page.locator('main'), 'list')
-
-      await page.goto(`${BASE_URL}/agents/agent-ops`, { waitUntil: 'networkidle', timeout: 60_000 })
-      await dismissMobileSidebar(page, vp)
-      const main = page.locator('main')
-      await main.waitFor({ timeout: 30_000 })
-      await page.getByRole('heading', { name: 'Ops agent' }).waitFor({ timeout: 20_000 })
-      await page.getByText(/Haven no longer sends payments from this account/i).waitFor({ timeout: 20_000 })
-      await page.getByRole('button', { name: 'Restore to list' }).waitFor({ timeout: 20_000 })
-      await refuseIfPresent(
-        page.getByRole('button', { name: 'Unlink agent', exact: true }),
-        'retired-rail-agent · Unlink button on archived detail',
-      )
-      await shoot(main, 'detail')
     },
   },
   'retired-rail-recovery': sweepRecoveryScenario(

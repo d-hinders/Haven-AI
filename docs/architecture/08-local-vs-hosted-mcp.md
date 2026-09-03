@@ -40,7 +40,7 @@ narrower than running the whole Haven stack locally.
 Opt in on a supported runtime:
 
 ```bash
-npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --ack-local-tools --local
+npx -y @haven_ai/connect@alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --local
 ```
 
 ## Custody boundary

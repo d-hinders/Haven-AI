@@ -30,8 +30,8 @@
  * What is left is exactly the three shared, rail-agnostic exports named above
  * — `getProvider`, `getRelayerWallet`, `getTokenBalance` — which is what
  * CLAUDE.md has claimed all along and what is now true. The module no longer
- * constructs the AllowanceModule contract at all, so `contracts.allowanceModule`
- * has no backend reader (its removal from the shared registry is #2260).
+ * constructs the AllowanceModule contract at all, and
+ * `contracts.allowanceModule` has been removed from the shared registry (#2260).
  *
  * All functions accept a chainId to select the correct RPC and contract addresses.
  */

@@ -267,7 +267,18 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
               ) AS has_stranded_funds
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
-       WHERE a.user_id = $1
+       -- #2413: only agents on a live delegation account are listed, so every
+       -- account_type branch in the agent UI becomes unreachable and deletable.
+       --
+       -- This also drops ORPHANED agents (safe_id NULL, from an account
+       -- unlink), which is an owner decision rather than a side effect: since
+       -- #2331 such an agent gets 403 from agentAuth on every route, and the
+       -- one exemption -- sweep recovery -- refuses them too, because
+       -- has_bound_safe is false. They are already dead records, not usable
+       -- ones. An INNER-shaped predicate on the LEFT JOIN is what excludes
+       -- them: us.account_type is NULL for an orphan, and NULL = 'x' is not
+       -- true.
+       WHERE a.user_id = $1 AND us.account_type = 'delegator_hybrid'
        ORDER BY a.created_at DESC`
 
 /**
@@ -287,7 +298,9 @@ export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.desc
               ) AS has_stranded_funds
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
-       WHERE a.user_id = $1 AND a.id = $2
+       -- #2413: matches the list filter, so an agent dropped from the list
+       -- cannot be read back individually through the single-record route.
+       WHERE a.user_id = $1 AND a.id = $2 AND us.account_type = 'delegator_hybrid'
        LIMIT 1`
 
 /**

@@ -8,7 +8,8 @@
  * budgets are shown as signed control, while legacy accounts remain readable
  * without presenting an actionable Haven spending surface.
  *
- * `UserSafe.account_type === 'delegator_hybrid'` is the rail marker (#1069).
+ * #2413: no rail marker is read here any more — the account list is
+ * delegation-only, so every account this page renders is on the live rail.
  * Both rails live in the same `user.safes` list, so the branch is per ACCOUNT,
  * not per page — and there is no third state: an account is either on the
  * delegation rail or it is a legacy Safe.
@@ -52,17 +53,15 @@ import { type UserSafe } from '@/context/AuthContext'
 // #2106: rail classification and the rail-correct claim list live in
 // `lib/`, NOT here — Next type-checks a page MODULE and refuses arbitrary
 // named exports from `page.tsx` (`next build` fails; `tsc --noEmit` does not).
-import { havenCannotLines, railOf } from '@/lib/custody-rail'
+import { havenCannotLines } from '@/lib/custody-rail'
 import { getChainConfig, getExplorerUrl, getTokensForChain } from '@/lib/chains'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { budgetPeriodLabel } from '@/lib/budget-period'
 import { truncate } from '@/lib/format'
-import { useRetiredRailOwnerAccess } from '@/hooks/useRetiredRailOwnerAccess'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
-import RetiredRailNotice from '@/components/RetiredRailNotice'
 
 /** EIP-3770 short names Safe{Wallet} uses in its deep links. */
 const SAFE_SHORT_NAME: Record<number, string> = { 100: 'gno', 8453: 'base', 84532: 'basesep' }
@@ -352,58 +351,6 @@ function DelegationRow({
   )
 }
 
-// ── Legacy Safe rail ────────────────────────────────────────────────────────
-
-function SafeControlCard({ safe }: { safe: UserSafe }) {
-  const {
-    details,
-    loading: detailsLoading,
-    error: detailsError,
-    refetch: refetchDetails,
-    ownerAccess,
-  } = useRetiredRailOwnerAccess(safe)
-
-  return (
-    <Card className="p-5" hover={false}>
-      <AccountCardHeader
-        safe={safe}
-        linkHref={ownerAccess === 'wallet' ? safeWalletUrl(safe) : undefined}
-        linkLabel={ownerAccess === 'wallet' ? <>Open in Safe&#123;Wallet&#125;</> : undefined}
-      />
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Stat label="Owners (control this Safe — Haven is not one)">
-          {detailsLoading ? (
-            <Skeleton variant="text" className="h-4 w-40" />
-          ) : detailsError ? (
-            <div className="space-y-2">
-              <p className="text-xs text-[var(--v2-ink-3)]">Haven could not verify the Safe owners.</p>
-              <Button size="sm" variant="ghost" onClick={() => void refetchDetails()}>
-                Try again
-              </Button>
-            </div>
-          ) : details ? (
-            <div className="space-y-1">
-              {details.owners.map((o) => (
-                <p key={o} className="font-mono text-xs text-[var(--v2-ink-2)]">{truncate(o)}</p>
-              ))}
-              <p className="text-xs text-[var(--v2-ink-3)]">Threshold: {details.threshold} of {details.owners.length}</p>
-            </div>
-          ) : (
-            <span className="text-[var(--v2-ink-3)]">—</span>
-          )}
-        </Stat>
-
-        <Stat label="Spend control">
-          <span className="text-[var(--v2-ink-3)]">Legacy agent spending is retired in Haven</span>
-        </Stat>
-      </div>
-
-      <RetiredRailNotice ownerAccess={ownerAccess} className="mt-5" />
-    </Card>
-  )
-}
-
 // ── "What Haven cannot do" ──────────────────────────────────────────────────
 
 export default function CustodyPage() {
@@ -420,7 +367,7 @@ export default function CustodyPage() {
       <Card className="mb-5 p-5" elevation="anchor" hover={false}>
         <p className="mb-2 text-sm font-medium text-[var(--v2-ink)]">What Haven cannot do</p>
         <ul className="space-y-1.5">
-          {havenCannotLines(safes).map((line) => (
+          {havenCannotLines().map((line) => (
             <li key={line} className="flex gap-2 text-sm text-[var(--v2-ink-2)]">
               <span className="text-[var(--v2-success)]">✓</span>
               <span>{line}</span>
@@ -435,13 +382,12 @@ export default function CustodyPage() {
         <p className="text-sm text-[var(--v2-ink-3)]">No accounts linked yet.</p>
       ) : (
         <div className="space-y-5">
-          {safes.map((safe) =>
-            railOf(safe) === 'delegation' ? (
-              <DelegationControlCard key={safe.id} safe={safe} agents={agents} />
-            ) : (
-              <SafeControlCard key={safe.id} safe={safe} />
-            ),
-          )}
+          {/* #2413: only delegation accounts reach this page — the account
+              list queries filter the retired rail out — so there is no rail
+              branch left to make. */}
+          {safes.map((safe) => (
+            <DelegationControlCard key={safe.id} safe={safe} agents={agents} />
+          ))}
         </div>
       )}
     </div>

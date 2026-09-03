@@ -1397,3 +1397,124 @@ function okLocalMcpProbe() {
     toolNames: [...MCP_RUNTIME_MANIFEST.requiredTools],
   }))
 }
+
+// ── #2424: the override env reaches the signer preinstall THROUGH installRuntime ──
+
+describe('runtime-spec override through installRuntime (#2424)', () => {
+  // No prepareSignerRuntime fake on purpose (the #1586/#1593 lesson): the
+  // point pinned is that runtime-install threads `deps.env` into the real
+  // prepare call, so a unit-green override cannot be dead in production.
+  it('HAVEN_SIGNER_SPEC set in deps.env changes the install npm runs and is printed in the setup messages', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-override-env-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const runCommand = vi.fn(async (_command: string, args: string[]) => {
+      const prefix = args[args.indexOf('--prefix') + 1]!
+      const cliDir = join(prefix, 'node_modules', '@haven_ai', 'signer', 'dist')
+      await mkdir(cliDir, { recursive: true })
+      await writeFile(join(cliDir, 'cli.js'), '// cli')
+      for (const [pkg, version] of [['signer', '0.0.0-local'], ['sdk', MCP_RUNTIME_MANIFEST.sdkVersion]] as const) {
+        const pkgDir = join(prefix, 'node_modules', '@haven_ai', pkg)
+        await mkdir(pkgDir, { recursive: true })
+        await writeFile(join(pkgDir, 'package.json'), JSON.stringify({ version }))
+      }
+    })
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackSigner: true,
+    }, {
+      homeDir: dir,
+      env: { HAVEN_SIGNER_SPEC: 'file:/abs/path/packages/signer' },
+      fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
+      runCommand,
+    })
+
+    expect(result.signerRuntimePrepared).toBe(true)
+    expect(result.errorCode).toBeUndefined()
+    const npmArgs = runCommand.mock.calls[0]![1]
+    expect(npmArgs).toContain('file:/abs/path/packages/signer')
+    expect(npmArgs[npmArgs.indexOf('--prefix') + 1]).toContain(join('.haven', 'signer-runtime', 'override-'))
+    expect(result.messages.join('\n')).toContain('RUNTIME SPEC OVERRIDE ACTIVE')
+    expect(result.messages.join('\n')).toContain('HAVEN_SIGNER_SPEC=file:/abs/path/packages/signer')
+  })
+
+  it('HAVEN_MCP_SPEC set in deps.env reaches the --local MCP runtime install THROUGH installRuntime', async () => {
+    // Twin of the signer case for the local-stdio topology — no
+    // prepareLocalMcpRuntime fake, so a dropped `env` in
+    // prepareRuntimeForLocalMcp turns this red.
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-override-local-env-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const runCommand = vi.fn(async (_command: string, args: string[]) => {
+      const prefix = args[args.indexOf('--prefix') + 1]!
+      await mkdir(join(prefix, 'node_modules', '@haven_ai', 'mcp', 'dist'), { recursive: true })
+      await writeFile(join(prefix, 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js'), '// cli')
+      for (const [pkg, version] of [['mcp', '0.0.0-local'], ['sdk', MCP_RUNTIME_MANIFEST.sdkVersion]] as const) {
+        const pkgDir = join(prefix, 'node_modules', '@haven_ai', pkg)
+        await mkdir(pkgDir, { recursive: true })
+        await writeFile(join(pkgDir, 'package.json'), JSON.stringify({ version }))
+      }
+    })
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+      localMcp: true,
+    }, {
+      homeDir: dir,
+      env: { HAVEN_MCP_SPEC: 'file:/abs/path/packages/mcp' },
+      fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
+      probeLocalMcpTools: okLocalMcpProbe(),
+      runCommand,
+    })
+    expect(result.localMcpConfigured).toBe(true)
+    const npmArgs = runCommand.mock.calls[0]![1]
+    expect(npmArgs).toContain('file:/abs/path/packages/mcp')
+    expect(npmArgs[npmArgs.indexOf('--prefix') + 1]).toContain(join('.haven', 'mcp-runtime', 'override-'))
+    expect(result.messages.join('\n')).toContain('HAVEN_MCP_SPEC=file:/abs/path/packages/mcp')
+  })
+
+  it('a malformed HAVEN_SIGNER_SPEC fails setup closed — npm never runs and no runtime config is written', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-override-bad-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const runCommand = vi.fn(async () => undefined)
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackSigner: true,
+    }, {
+      homeDir: dir,
+      env: { HAVEN_SIGNER_SPEC: '' },
+      fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
+      runCommand,
+    })
+
+    expect(result.errorCode).toBe('signer_runtime_install_failed')
+    expect(result.signerRuntimePrepared).toBe(false)
+    expect(runCommand).not.toHaveBeenCalled()
+    expect(result.messages.join('\n')).toContain('HAVEN_SIGNER_SPEC is set but not usable')
+    await expect(readFile(join(dir, '.codex', 'config.toml'), 'utf8')).rejects.toThrow()
+  })
+})

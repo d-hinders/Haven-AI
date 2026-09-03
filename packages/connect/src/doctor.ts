@@ -38,10 +38,17 @@ import {
 } from './probes.js'
 import {
   installedRuntimeMatches,
+  installedRuntimeMatchesVersions,
   prepareSignerRuntime,
   readRuntimeSidecar,
   type SignerRuntimeSidecar,
 } from './signer-runtime.js'
+import {
+  RUNTIME_SPEC_ENV,
+  describeRuntimeSpecOverride,
+  resolveRuntimeSpecOverride,
+  RuntimeSpecOverrideError,
+} from './runtime-spec-override.js'
 import { runtimeConfigPathFor, writeRuntimeConfig } from './config-writers.js'
 import { restartRequiredForRuntime, type RuntimeId } from './runtime-registry.js'
 import { getLocalSignerConsentStatus } from './signer-consent.js'
@@ -443,6 +450,61 @@ function rekeyPendingCheck(
   }
 }
 
+async function runtimeSpecOverrideCheck(
+  directory: string,
+  sidecar: SignerRuntimeSidecar | null,
+  env: NodeJS.ProcessEnv,
+): Promise<DoctorCheck | undefined> {
+  const facts: string[] = []
+  const installed = sidecar?.runtime_spec_override
+  if (installed) {
+    facts.push(
+      `signer runtime installed under ${describeRuntimeSpecOverride(installed.specs)} ` +
+        `(resolved: ${installed.resolved_specs.join(' ')}; directory key ${installed.directory_key})`,
+    )
+  }
+  // The `--local` topology's sidecar, when this directory has one.
+  const mcpInstalled = await readMcpSidecarOverride(directory)
+  if (mcpInstalled) {
+    facts.push(
+      `local MCP runtime installed under ${describeRuntimeSpecOverride(mcpInstalled.specs)} ` +
+        `(resolved: ${mcpInstalled.resolved_specs.join(' ')}; directory key ${mcpInstalled.directory_key})`,
+    )
+  }
+  let shell: string | undefined
+  try {
+    const active = resolveRuntimeSpecOverride(env)
+    if (active) shell = `set in this shell: ${describeRuntimeSpecOverride(active)} — a --repair from here installs these, not the pin`
+  } catch (err) {
+    shell = err instanceof RuntimeSpecOverrideError
+      ? `set in this shell but REFUSED: ${err.message}`
+      : `set in this shell but unreadable: ${err instanceof Error ? err.message : String(err)}`
+  }
+  if (shell) facts.push(shell)
+  if (facts.length === 0) return undefined
+  const variables = Object.values(RUNTIME_SPEC_ENV).join(' / ')
+  return {
+    id: 'runtime_spec_override',
+    label: 'Runtime spec override',
+    ok: false,
+    detail: `runtime spec overridden — not the pinned manifest (${MCP_RUNTIME_MANIFEST.signerPackage}@${MCP_RUNTIME_MANIFEST.signerVersion}, ${MCP_RUNTIME_MANIFEST.sdkPackage}@${MCP_RUNTIME_MANIFEST.sdkVersion}). ${facts.join('. ')}.`,
+    repair: `Developer override (#2424). To return to the pinned manifest: unset ${variables}, then run ${RERUN} --doctor --repair --runtime <runtime>. If the override is intentional, this finding is the record of it.`,
+  }
+}
+
+async function readMcpSidecarOverride(
+  directory: string,
+): Promise<{ specs: Record<string, string>; resolved_specs: string[]; directory_key: string } | undefined> {
+  try {
+    const parsed = JSON.parse(await readFile(join(directory, 'mcp-runtime.json'), 'utf8')) as {
+      runtime_spec_override?: { specs: Record<string, string>; resolved_specs: string[]; directory_key: string }
+    }
+    return parsed.runtime_spec_override
+  } catch {
+    return undefined
+  }
+}
+
 async function readIdentity(directory: string): Promise<IdentityFile | undefined> {
   try {
     return JSON.parse(await readFile(join(directory, 'identity.json'), 'utf8')) as IdentityFile
@@ -489,6 +551,24 @@ async function checksForAgent(
       detail: 'No signer-runtime.json sidecar — the pinned signer runtime was never prepared (or a pre-#1586 npx config).',
       repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}`,
     })
+  } else if (sidecar.runtime_spec_override) {
+    // #2424: an override install is compared against what the run that wrote
+    // the sidecar recorded, not against the manifest — the manifest is exactly
+    // what the developer chose not to install. The override itself is the
+    // separate `runtime_spec_override` finding below.
+    const matches = await installedRuntimeMatchesVersions(sidecar.runtime_directory, sidecar.cli_path, {
+      signerVersion: sidecar.signer_version,
+      sdkVersion: sidecar.sdk_version,
+    })
+    checks.push({
+      id: 'signer_runtime',
+      label: 'Signer runtime (preinstalled wrapper)',
+      ok: matches,
+      detail: matches
+        ? `Installed ${sidecar.signer_package}@${sidecar.signer_version} at ${sidecar.runtime_directory} (override install — see runtime_spec_override)`
+        : `Override runtime directory is stale or empty (${sidecar.runtime_directory}) — the CLI or package versions are missing.`,
+      ...(matches ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime} with the same HAVEN_*_SPEC variables set.` }),
+    })
   } else {
     const matches = await installedRuntimeMatches(sidecar.runtime_directory, sidecar.cli_path)
     const versionOk = sidecar.signer_version === MCP_RUNTIME_MANIFEST.signerVersion
@@ -505,6 +585,17 @@ async function checksForAgent(
       ...(ok ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}` }),
     })
   }
+
+  // ── Runtime spec override (#2424) ─────────────────────────────────────────
+  // A finding, not a note: a developer override is legitimate and it is also
+  // the one state in which "the signer runtime check is green" says nothing
+  // about the pinned manifest. It fires on EITHER the installed truth (the
+  // sidecar says this directory was built under an override) or the shell
+  // truth (a HAVEN_*_SPEC variable is set right now, so a `--repair` from this
+  // shell would install that instead of the pin). No override anywhere → no
+  // check at all, so a production `--doctor` reads exactly as before.
+  const overrideCheck = await runtimeSpecOverrideCheck(directory, sidecar, deps.env ?? process.env)
+  if (overrideCheck) checks.push(overrideCheck)
 
   // ── Hosted MCP ────────────────────────────────────────────────────────────
   const hostedUrl = identity?.hosted_mcp_url ?? (identity?.api_url ? `${identity.api_url}/mcp` : undefined)
@@ -791,7 +882,9 @@ export async function runDoctor(
       signerCapabilities = result.signerCapabilities
       for (const check of result.checks) primaryChecksById.set(check.id, check)
     }
-    for (const id of ['credentials', 'signer_runtime']) {
+    // #2424: `runtime_spec_override` rides directly behind `signer_runtime`
+    // so the flat list shows the override next to the install it describes.
+    for (const id of ['credentials', 'signer_runtime', 'runtime_spec_override']) {
       const check = primaryChecksById.get(id)
       if (check) checks.push(check)
     }
@@ -1100,7 +1193,7 @@ export async function runRepair(
   const signerPath = join(directory, 'signer.json')
   const prepared = await prepareSignerRuntime(
     { credentialDirectory: directory, signerPath, homeDir, serverName },
-    { runCommand: deps.runCommand },
+    { runCommand: deps.runCommand, env: deps.env },
   )
   messages.push(...prepared.messages)
 

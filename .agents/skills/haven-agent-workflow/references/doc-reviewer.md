@@ -30,19 +30,21 @@ Mechanism and the guard's limits live in [`ai-agent-workflow.md` § Review Isola
 
 ## 3. Contract docs: derive `covers:` from the body (#2425)
 
-For any new or edited `contract: true` doc, walk its body and for each behavioural claim name the file that makes it true. The `covers:` list must contain that file. Report **derived vs declared** as two lists with the difference — #2425 was born with 5 entries while its body depended on 12, and a change to any of the other seven would never have re-implicated the doc.
+Start from what the gate already derived: since PR #2478 `npm run docs:coupling` prints `[doc-to-code]` lines naming the covered code a changed doc's claims should be re-checked against — re-derive only what the gate missed. For any new or edited `contract: true` doc, walk its body and for each behavioural claim name the file that makes it true. The `covers:` list must contain that file. Report **derived vs declared** as two lists with the difference — #2425 was born with 5 entries while its body depended on 12, and a change to any of the other seven would never have re-implicated the doc.
 
 ## 4. Re-run every re-runnable figure (#2421, #2423, #2444)
 
 Any count, pass/fail total, byte size or version quoted in the diff — body, shard, comment, `last-verified` note — is reproduced from its instrument at the reviewed head, and the command is quoted next to the result. The shard said "39 passed"; the one command a reviewer re-ran returned 38/1 (#2421). "27 files" became 30, 32, 33 (#2423). A figure you cannot reproduce is a **finding**, not a nit, and the fix to prefer is *name the test* over *state the number*.
 
+A root with no `node_modules` cannot re-run anything, and every verdict that says so has turned this step into a permanent *could not verify* line. Get a runnable copy: `git worktree add --detach <root> <sha>` then `npm ci` inside the root — it is disposable, and the guard stays ACCEPTED. For a figure that needs a live service, the captain re-runs it on request; quote the command you asked for and the output you were handed, labelled as captain-run.
+
 ## 5. History is not staleness (#2408)
 
 A CASP shard, an archive doc, a `last-verified` `Prior:` entry or a quotation that correctly records what *was* true is not stale. Say so **per hit** — `historical record, correct` — rather than flagging it or skipping it silently. Every hit gets one of: `stale`, `historical record`, `conditional truth (still holds)`, `out of scope, why`.
 
-## 6. `last-verified`: no bump without a re-read (#2445, #2448)
+## 6. `last-verified`: a bump records a re-read, never substitutes for one
 
-Never recommend a bump on a doc whose claims did not change; a stamp without a re-read is a false verification claim and the staleness audit ranks on it. When a bump is warranted, your note names the exact passages re-read and states what was **NOT** re-verified. Convention: [`docs-quality-system.md` § `last-verified` chain integrity](../../../../docs/contributing/docs-quality-system.md#last-verified-chain-integrity-1843).
+A bump records the re-read scope and what was **NOT** re-verified; a stamp without a re-read is a false verification claim and the staleness audit ranks on it. A doc whose claims did not change is right to stay unbumped with a scoped note (PR #2467: `e2e-qa-runbook.md`). When the strict coupling gate forces a touch on a `contract: true` doc whose claims did not change, the note says exactly that — `re-verified, not edited, scope: <claim>` (PR #2502: `package-dev-channel.md`). Convention: [`docs-quality-system.md` § `last-verified` chain integrity](../../../../docs/contributing/docs-quality-system.md#last-verified-chain-integrity-1843).
 
 ## 7. Chain ceiling (#2477)
 
@@ -83,4 +85,4 @@ git grep -n -i -E 'no network calls|never calls the Haven API|no API access|no-n
      ':!docs/archive/**' ':!docs/regulatory/casp-changelog/**'
 ```
 
-Review found four more copies than the issue named — `src/cli.ts --help`, `src/capabilities.ts` (JSDoc), `docs/architecture/06-hosted-mcp-connect-flow.md:234`, `docs/architecture/08-local-vs-hosted-mcp.md:55` — six, not two; the last three survived the first pass and fell only to this repo-wide sweep by phrase. Re-run at `893d74f6` it returns five hits: three `last-verified` chain lines (historical record, correct) and two conditional truths that still hold (`README.md:209`, `credentials.ts:16`: the `HAVEN_DELEGATE_KEY`-only process really makes no network calls). Could not verify: a restatement using none of those four phrase families would not surface. When re-running this sweep at a later head, exclude this reference file (`':!.agents/skills/haven-agent-workflow/references/doc-reviewer.md'`) — it quotes the phrase families and would hit itself.
+Review found four more copies than the issue named — `src/cli.ts --help`, `src/capabilities.ts` (the module JSDoc — not the instructions string #2242 cited as correct), `docs/architecture/06-hosted-mcp-connect-flow.md:234`, `docs/architecture/08-local-vs-hosted-mcp.md:55` — six, not two; the last three survived the first pass and fell only to this repo-wide sweep by phrase. Re-run at `893d74f6` it returns five hits: three `last-verified` chain lines (historical record, correct) and two conditional truths that still hold (`README.md:209`, `credentials.ts:16`: the `HAVEN_DELEGATE_KEY`-only process really makes no network calls). Could not verify: a restatement using none of those four phrase families would not surface. When re-running this sweep at a later head, exclude this reference file (`':!.agents/skills/haven-agent-workflow/references/doc-reviewer.md'`) — it quotes the phrase families and would hit itself.

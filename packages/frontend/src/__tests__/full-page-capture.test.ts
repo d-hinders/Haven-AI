@@ -415,7 +415,7 @@ describe('resolveScrollShell', () => {
   })
 
   it('captures a marketing route with no shell instead of throwing', async () => {
-    // #1939: `/` and `/investor-briefing` have no `#main-content` at all, and
+    // #1939: marketing routes such as `/` have no `#main-content` at all, and
     // need none — they scroll natively. Every one of these used to throw, and
     // the caller deleted the PNG.
     const page = fakePage([MARKETING])
@@ -514,8 +514,8 @@ describe('resolveScrollShell', () => {
   })
 
   it('ignores a decorative overlay that holds a few pixels', async () => {
-    // Measured, not imagined: the first real run of this fix against `/` and
-    // `/investor-briefing` failed all four captures on
+    // Measured, not imagined: the first real run of this fix against `/` failed
+    // all four captures on
     // `div.pointer-events-none.absolute.inset-0` holding **32px** — a
     // background layer, not a scroll shell. "Any overflow counts" would have
     // re-created #1939 with a better error message.

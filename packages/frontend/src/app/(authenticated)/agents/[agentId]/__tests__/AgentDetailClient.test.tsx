@@ -2,6 +2,10 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const { budgetCardTokens } = vi.hoisted(() => ({
+  budgetCardTokens: [] as Array<Array<{ address: string; symbol: string; decimals: number }>>,
+}))
+
 const {
   mockUseAuth,
   mockUseAgents,
@@ -65,7 +69,12 @@ vi.mock('@/components/EditAgentModal', () => ({
 }))
 
 vi.mock('@/components/DelegationBudgetCard', () => ({
-  default: () => <div>DelegationBudgetCard</div>,
+  // #2473: records the token options it was handed, so the first-budget
+  // regression can be asserted without rendering the real card.
+  default: (props: { tokens: Array<{ address: string; symbol: string; decimals: number }> }) => {
+    budgetCardTokens.push(props.tokens)
+    return <div>DelegationBudgetCard</div>
+  },
   DELEGATION_BUDGET_CARD_ID: 'delegation-budget-card',
 }))
 
@@ -781,5 +790,118 @@ describe('AgentDetailClient last-activity metadata', () => {
     release()
     await Promise.resolve()
     expect(unarchiveAgent).toHaveBeenCalledTimes(1)
+  })
+})
+
+// #2473: the token options for a FIRST budget grant must come from the chain,
+// not from `allowances` — which is a view over ACTIVE delegations (#1090) and
+// is therefore empty for exactly the agent that has no budget yet. Deriving
+// them from allowances left the grant form unrendered and "Add budget" inert.
+describe('AgentDetailClient first-budget token options (#2473)', () => {
+  beforeEach(() => {
+    budgetCardTokens.length = 0
+    mockUseAuth.mockReturnValue({
+      user: { safes: [{ ...SAFE, chain_id: 8453 }] },
+    })
+    mockUseAgents.mockReturnValue({
+      agents: [
+        {
+          id: 'agent-1',
+          name: 'Research agent',
+          description: null,
+          delegate_address: '0x2222222222222222222222222222222222222222',
+          safe_id: 'safe-1',
+          safe_address: SAFE.safe_address,
+          safe_name: 'Main account',
+          status: 'active',
+          created_at: '2026-05-01T00:00:00Z',
+          mcp_last_seen_at: null,
+          allowances: [],
+          account_type: 'delegator_hybrid',
+        },
+      ],
+      loading: false,
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      revokeAgent: vi.fn(),
+      refetch: vi.fn(),
+    })
+    mockUseAgentActivity.mockReturnValue({ activity: [], stats: null, loading: false })
+    mockUseDelegateBalance.mockReturnValue({
+      balance: null,
+      hasStranded: false,
+      hasRecoverableUsdc: false,
+      hasBelowMinimumUsdc: false,
+      loading: false,
+      refetch: vi.fn(),
+    })
+    mockUseAgentPassport.mockReturnValue({ passport: null, loading: false, refetch: vi.fn() })
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('offers grantable tokens to an agent with no budget yet', () => {
+    render(<AgentDetailClient agentId="agent-1" />)
+    const tokens = budgetCardTokens.at(-1)
+    expect(tokens).toBeDefined()
+    expect(tokens!.length).toBeGreaterThan(0)
+    expect(tokens!.map((t) => t.symbol)).toContain('USDC')
+  })
+
+  // Reviewer finding (#2473): an allowance token the chain registry does not
+  // know has no trustworthy `decimals`. Guessing one and handing it to
+  // BudgetRow makes `formatUnits` render a real on-chain amount at the wrong
+  // scale — a spend cap shown as ~0 or ~unlimited. Omitting it instead lets
+  // BudgetRow fall through to its raw-atomic fallback: ugly, never wrong.
+  it('omits an allowance token the chain registry does not know, rather than guessing its decimals', () => {
+    mockUseAgents.mockReturnValue({
+      agents: [
+        {
+          id: 'agent-1',
+          name: 'Research agent',
+          description: null,
+          delegate_address: '0x2222222222222222222222222222222222222222',
+          safe_id: 'safe-1',
+          safe_address: SAFE.safe_address,
+          safe_name: 'Main account',
+          status: 'active',
+          created_at: '2026-05-01T00:00:00Z',
+          mcp_last_seen_at: null,
+          allowances: [
+            {
+              token_symbol: 'MYSTERY',
+              token_address: '0x9999999999999999999999999999999999999999',
+              allowance_amount: '1.00',
+              reset_period_min: 1440,
+            },
+          ],
+          account_type: 'delegator_hybrid',
+        },
+      ],
+      loading: false,
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      revokeAgent: vi.fn(),
+      refetch: vi.fn(),
+    })
+    render(<AgentDetailClient agentId="agent-1" />)
+    const tokens = budgetCardTokens.at(-1)!
+    expect(tokens.map((t) => t.symbol)).not.toContain('MYSTERY')
+    expect(
+      tokens.some((t) => t.address.toLowerCase() === '0x9999999999999999999999999999999999999999'),
+    ).toBe(false)
+    // The registry's own tokens are still offered.
+    expect(tokens.map((t) => t.symbol)).toContain('USDC')
+  })
+
+  it('offers only tokens a budget can be metered in — no native token', () => {
+    render(<AgentDetailClient agentId="agent-1" />)
+    const tokens = budgetCardTokens.at(-1)!
+    // A budget delegation is per ERC-20 token; the chain's native token has
+    // no token address in the registry and cannot be granted.
+    expect(tokens.map((t) => t.symbol)).not.toContain('ETH')
+    expect(tokens.every((t) => /^0x[0-9a-fA-F]{40}$/.test(t.address))).toBe(true)
   })
 })

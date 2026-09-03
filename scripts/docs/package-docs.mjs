@@ -164,6 +164,12 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/connect/src/**'],
+    // #2425: EDITED, scope = one closing paragraph appended to the #2424 section,
+    // linking the repository runbook docs/operations/package-dev-channel.md (the
+    // merged-to-dev `@dev` loop and its owner steps) as the counterpart to the
+    // no-merge override loop. Absolute GitHub URL because this file ships to
+    // npm, where a relative repo path resolves to nothing. Nothing else
+    // re-verified. Prior:
     // #2424: EDITED, scope = two places. (a) A new closing section, "Installing
     // an unpublished signer / SDK / MCP build", written against the
     // runtime-spec override this branch adds (the three variables, the

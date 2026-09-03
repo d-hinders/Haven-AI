@@ -1084,10 +1084,24 @@ function buildSetupPrompt(command: string, apiUrl: string): string {
     '',
     'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
     '',
-    // #1545: one sentence of discoverability for agent operators — the flag is
-    // opt-in and the pasted command stays the prose-mode default, so the
-    // relay-to-human narration keeps working when the operator ignores this.
-    'If you are orchestrating this setup programmatically, the connector also supports a --json mode: one machine-readable, secret-free result object on stdout, progress on stderr.',
+    // #1545 introduced this as one sentence of *discoverability* — the flag was
+    // opt-in and the pasted command stayed the prose-mode default. #2483 turns
+    // it into a recommendation, because "supports" was read as "optional" by
+    // the agent in the 2026-09 Codex field test: it ran the setup in prose mode
+    // as one blocking tool call, so the connector's approve-budget CTA sat
+    // inside the running command's output and did not reach the user's chat
+    // until the command returned — after the 3-minute approval wait. --json
+    // returns promptly with approval.required instead of blocking, which is
+    // what hands the agent control back in time to say something. The prose
+    // mode stays correct for a human pasting the command, so this is a SHOULD
+    // addressed to agents, not a change to the command's default behaviour.
+    'If you are an AI agent running this command yourself rather than a human pasting it, you should append --json: the connector then emits one machine-readable, secret-free result object on stdout with progress on stderr, and returns promptly instead of blocking while it waits for the budget approval.',
+    // #2483: one gate at a time (the #1542 discipline) — the approval relay is
+    // the FIRST thing the agent owes the user when the outcome says approval is
+    // required, and any restart the outcome asks for is a separate, later
+    // instruction. Merging the two hands the user two actions at once, and the
+    // one they can actually do now is the approval.
+    'When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — return to Haven and approve this agent\'s budget — before verifying the connection, restarting anything, or any other step. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.',
     // #1719: the old sentence said appending --json was the ONLY permitted
     // change, which forbade the one retry the connector now asks an agent for
     // by name. Exactly two changes are permitted, and the second is bounded to

@@ -207,7 +207,13 @@ npm run dev -w packages/demo-merchant-mcp
 Endpoints:
 
 - `POST /mcp` - MCP endpoint and x402-gated resource
-- `GET /healthz` - liveness
+- `GET /healthz` - liveness plus settlement-wallet readiness (#2490): when the
+  settlement client can read its balance, the response carries a `settlement`
+  block with `address`, `native_balance_wei`, `cost_per_settlement_wei`,
+  `settlements_remaining`, the band `status` (`usable` | `warn` | `fail`) and
+  both floors (`warn_floor` 25 / `fail_floor` 12) beside the legacy `ok`
+  boolean (`ok` is true unless `status` is `fail`). A read failure reports
+  `ok: null` + `error` instead of taking health down.
 
 `MERCHANT_ADDRESS` is required and must be the Base address that receives USDC.
 `SETTLEMENT_PRIVATE_KEY` is the gas-funded key that submits USDC

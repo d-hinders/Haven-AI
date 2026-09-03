@@ -43,7 +43,9 @@ export interface ResourceCheck {
    */
   headroom?: string
   /**
-   * `true` usable, `false` below floor (fails the run), `null` unknown.
+   * `true` usable or in the warn band (never a blocker on its own — see
+   * `warn`), `false` below the resource's FAIL floor (fails the run), `null`
+   * unknown.
    *
    * `null` is deliberately NOT a failure: an unreachable RPC or a merchant
    * that predates the readiness endpoint says nothing about the resource, and
@@ -51,13 +53,21 @@ export interface ResourceCheck {
    * than the silence it replaces.
    */
   ok: boolean | null
+  /**
+   * #2490: `true` when the resource is usable but below its WARNING floor —
+   * reported loudly on every run (rule 2 below) with the top-up action, but
+   * never counted toward `blocked`. Only the merchant settlement check
+   * produces this today; the band is the merchant's own, carried on
+   * `/healthz` (`status` + both floors), not re-derived here (rule 1).
+   */
+  warn?: boolean
   /** Why, when `ok` is not `true`. */
   detail?: string
 }
 
 export interface PreflightResult {
   checks: ResourceCheck[]
-  /** True when at least one resource is definitively below its floor. */
+  /** True when at least one resource is definitively below its FAIL floor. */
   blocked: boolean
 }
 
@@ -67,6 +77,15 @@ interface MerchantHealth {
     address?: string
     native_balance_wei?: string
     settlements_remaining?: number
+    /** #2490: the merchant's own band, plus the floors it measured it against. */
+    status?: 'usable' | 'warn' | 'fail'
+    warn_floor?: number
+    fail_floor?: number
+    /**
+     * Pre-#2490 field, kept for rollout: a merchant that predates `status`
+     * still reports the single boolean. ON a new merchant it means "not in
+     * the fail band" — the warn band flips it too.
+     */
     ok?: boolean | null
     error?: string
   }
@@ -105,6 +124,53 @@ export async function checkMerchantSettlement(
     }
     const eth = s.native_balance_wei ? ethers.formatEther(s.native_balance_wei) : '?'
     const remaining = s.settlements_remaining ?? 0
+    // #2490: the BAND is the merchant's own — carried on /healthz as `status`
+    // plus both floors, because the merchant owns this resource and the
+    // harness must derive, never restate (rule 1). Rollout: a merchant that
+    // predates the band field carries no `status`, so the check falls back to
+    // exactly today's behaviour — the single `ok` boolean, unknown-null guard
+    // above included — rather than crashing or silently passing (pinned by
+    // test). On a NEW merchant `ok` means only "not in the fail band" (the
+    // warn band flips it too), so it is used solely as the fail signal.
+    if (s.status) {
+      const floors = `warn ${s.warn_floor ?? '?'}/fail ${s.fail_floor ?? '?'}`
+      if (s.status === 'fail') {
+        return {
+          name,
+          address: s.address,
+          balance: `${eth} ETH`,
+          headroom: `${remaining} settlement(s)`,
+          ok: false,
+          detail:
+            `below the merchant's fail floor (${floors}) — a run cannot complete: ${remaining} ` +
+            'settlement(s) of gas left, ~8 per run. Top this wallet up, or every x402 leg ' +
+            'needing a merchant-side settlement will fail with a merchant error that does ' +
+            'not name gas (the 2026-08-17 outage)',
+        }
+      }
+      if (s.status === 'warn') {
+        return {
+          name,
+          address: s.address,
+          balance: `${eth} ETH`,
+          headroom: `${remaining} settlement(s)`,
+          ok: true,
+          warn: true,
+          detail:
+            `below the merchant's warn floor (${floors}) — a slow drain, not an incident: ` +
+            'the run proceeds. Top this wallet up soon, or every x402 leg needing a ' +
+            'merchant-side settlement will fail with a merchant error that does not name ' +
+            'gas (the 2026-08-17 outage)',
+        }
+      }
+      return {
+        name,
+        address: s.address,
+        balance: `${eth} ETH`,
+        headroom: `${remaining} settlement(s)`,
+        ok: true,
+      }
+    }
     return {
       name,
       address: s.address,
@@ -231,7 +297,10 @@ export async function checkDelegationTreasury(
 export function formatPreflight(result: PreflightResult): string {
   const lines = ['preflight — resources this run consumes:']
   for (const c of result.checks) {
-    const mark = c.ok === true ? '✓' : c.ok === false ? '✗' : '?'
+    // #2490: three marks, not two. A warn-band resource is usable — the run
+    // proceeds — but must stay LOUD on every run (rule 2), and distinguishable
+    // from both a clean `✓` and a refused `✗`.
+    const mark = c.ok === true ? (c.warn ? '⚠' : '✓') : c.ok === false ? '✗' : '?'
     const where = c.address ? ` ${c.address}` : ''
     const headroom = c.headroom ? ` (${c.headroom})` : ''
     lines.push(`  ${mark} ${c.name}${where}: ${c.balance}${headroom}`)

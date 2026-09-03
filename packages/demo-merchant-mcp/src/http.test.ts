@@ -13,8 +13,10 @@ import {
   PAYMENT_SIGNATURE_HEADER,
   AuthorizationAlreadyUsedError,
   SettlementRevertedError,
+  SETTLEMENT_COST_WEI,
   USDC_ADDRESS,
   createX402PaymentProcessor,
+  settlementReadiness,
   type Eip3009Authorization,
   type SettlementClient,
 } from './x402.js'
@@ -44,6 +46,11 @@ async function startServer(client: Partial<SettlementClient> = {}) {
     merchantAddress: MERCHANT,
     baseUrl: 'http://127.0.0.1:0',
     paymentProcessor: createX402PaymentProcessor(settlementClient),
+    // #2490: wire the readiness through so /healthz tests can stub it via the
+    // same partial client the payment path uses. Absent a readiness stub this
+    // is still a client whose `readiness` is undefined, so /healthz omits the
+    // settlement block exactly as before.
+    settlementClient,
   })
   servers.push(server)
   await new Promise<void>((resolve, reject) => {
@@ -516,6 +523,49 @@ describe('demo merchant MCP x402 flow', () => {
     expect(products.status).toBe(200)
     expect(products.headers.get('mcp-session-id')).toBeNull()
     expect(text).toContain('vpn_basic')
+  })
+
+  // #2490: /healthz must carry the BAND and both floors, not just a boolean,
+  // so the QA harness renders the merchant's own decision without restating
+  // the thresholds (preflight rule 1: derive, never restate — the merchant
+  // owns this resource). `ok` stays additive for a harness predating the
+  // band; on a banded merchant it means only "not in the fail band", which
+  // the warn case here proves: `ok: true` while `status: 'warn'`.
+  describe('/healthz settlement block (#2490 wire shape)', () => {
+    async function healthzFor(balance: bigint) {
+      const { url } = await startServer({
+        readiness: () => Promise.resolve(settlementReadiness(MERCHANT, balance)),
+      })
+      const res = await fetch(`${url.replace(/\/mcp$/, '')}/healthz`)
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { settlement: Record<string, unknown> }
+      return body.settlement
+    }
+
+    it('carries status plus both floors alongside the legacy ok boolean', async () => {
+      const settlement = await healthzFor(SETTLEMENT_COST_WEI * 30n)
+      expect(settlement['status']).toBe('usable')
+      expect(settlement['warn_floor']).toBe(25)
+      expect(settlement['fail_floor']).toBe(12)
+      expect(settlement['ok']).toBe(true)
+      expect(settlement['settlements_remaining']).toBe(30)
+      expect(settlement['cost_per_settlement_wei']).toBe(SETTLEMENT_COST_WEI.toString())
+    })
+
+    it('reports the warn band with ok: true — a warn must not fail the legacy boolean', async () => {
+      // The #2485 state: 24 settlements, one below the warn floor. The run
+      // proceeds, so the legacy `ok` boolean must stay true; only `status`
+      // says the drain is underway.
+      const settlement = await healthzFor(SETTLEMENT_COST_WEI * 24n)
+      expect(settlement['status']).toBe('warn')
+      expect(settlement['ok']).toBe(true)
+    })
+
+    it('reports the fail band with ok: false', async () => {
+      const settlement = await healthzFor(255_000_000_000n)
+      expect(settlement['status']).toBe('fail')
+      expect(settlement['ok']).toBe(false)
+    })
   })
 
   /**

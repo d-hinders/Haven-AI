@@ -516,7 +516,7 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
  *     What gated the switch was ROLLOUT, and #2353's switch PR (2026-09-03)
  *     resolved it: the corrected skill shipped to npm in
  *     `@haven_ai/sdk@0.1.34-alpha.0` (2026-09-01T19:21Z, the `alpha` dist-tag
- *     `npx @haven_ai/connect@alpha` resolves), which carries #2359's
+ *     that `npx @haven_ai/connect` resolves by default), which carries #2359's
  *     corrected auto-installed copy. The tool now REFUSES `payment_required`
  *     — see STRICT_INPUT_TOOLS below for the reasoning that moved it, and
  *     note the refusal covers the direct `createToolHandlers` path too,

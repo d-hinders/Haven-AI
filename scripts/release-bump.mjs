@@ -18,6 +18,22 @@
  *   prerelease   0.1.9 → 0.1.10-alpha.0  |  0.1.9-alpha.0 → 0.1.9-alpha.1
  *   <version>    any explicit semver, e.g. 0.2.0-beta.1
  *
+ * Flags:
+ *   --yes        skip the interactive confirmation
+ *   --snapshot   CI ONLY (#2421). Marks this as a dev-channel snapshot run:
+ *                the version MUST be 0.0.0-dev.<YYYYMMDDHHMM>.<shortsha>, and
+ *                the sign-off describes a throwaway tree instead of a release
+ *                branch. The check is bidirectional — WITHOUT this flag the
+ *                script refuses a 0.0.0-dev.* version outright, which is what
+ *                keeps a snapshot from being committed to a release branch,
+ *                riding the dev → main promotion and landing on alpha/latest.
+ *                Everything that makes the bump atomic — the five package
+ *                versions, the cross-package pins, the source constants,
+ *                connect's runtime-manifest, the ordered rebuild and the
+ *                bundle verification — runs identically in both modes. That
+ *                is the entire reason the snapshot job reuses this script
+ *                rather than setting five versions by hand.
+ *
  * See scripts/README.md for full documentation.
  */
 
@@ -39,6 +55,7 @@ import {
   manifestTableViolations,
   rewriteManifestTable,
 } from './release-manifest-doc.mjs'
+import { snapshotModeViolation } from './release-snapshot-version.mjs'
 
 const execAsync = promisify(execFile)
 
@@ -519,8 +536,9 @@ async function main() {
   const bumpArg = process.argv[2]
   if (!bumpArg) {
     die(
-      'Usage: node scripts/release-bump.mjs <bump-type>\n' +
-      'Bump types: patch | minor | major | prerelease | <explicit-version>',
+      'Usage: node scripts/release-bump.mjs <bump-type> [--yes] [--snapshot]\n' +
+      'Bump types: patch | minor | major | prerelease | <explicit-version>\n' +
+      '--snapshot is CI-only and requires a 0.0.0-dev.<YYYYMMDDHHMM>.<shortsha> version.',
     )
   }
 
@@ -532,6 +550,16 @@ async function main() {
 
   const newVersion = await nextVersion(currentVersion, bumpArg)
   log(`  New version:         ${newVersion}  (${bumpArg})`)
+
+  // ── 1b. Snapshot-mode agreement (#2421) ───────────────────────────────────
+  // Runs BEFORE anything is written, so a mismatch leaves the tree untouched.
+  // Both directions are load-bearing; see release-snapshot-version.mjs.
+  const snapshot = process.argv.includes('--snapshot')
+  const modeViolation = snapshotModeViolation(newVersion, { snapshot })
+  if (modeViolation) die(modeViolation)
+  if (snapshot) {
+    log('  Mode:                dev-channel SNAPSHOT (throwaway tree, nothing to commit)')
+  }
 
   // ── 2. Preview + confirm ──────────────────────────────────────────────────
   header('Changes to be applied')
@@ -697,6 +725,28 @@ async function main() {
 
   // ── Done ──────────────────────────────────────────────────────────────────
   header('Done')
+
+  // A snapshot run is not a release and must not print a release's checklist
+  // (#2421). Everything in the block below — the contract doc, the CASP shard,
+  // the coupling gate, the release branch — describes work on a COMMITTED
+  // tree, and there is no commit here: the CI tree is discarded when the job
+  // ends. Printing it would be an instruction nobody can follow, in the logs
+  // of a job that already did the only thing it was asked to do.
+  if (snapshot) {
+    log(`\n  Built snapshot: ${newVersion}`)
+    log('')
+    log('  This tree is THROWAWAY. Nothing here is committed, and nothing here')
+    log('  should be: the version, the pins, the source constants and the contract-doc')
+    log('  table were all rewritten in place so the artifacts are internally consistent.')
+    log('')
+    log('  The workflow publishes the built artifacts under the `dev` dist-tag and then')
+    log('  discards the checkout. The prod channel is unaffected — a snapshot version can')
+    log('  reach neither `alpha` nor `latest`, and this script refuses to produce one at')
+    log('  all without --snapshot.')
+    log('')
+    return
+  }
+
   log(`\n  Released: ${newVersion}`)
   log('')
   // #1788: this block used to end with `npm publish` invocations — the one

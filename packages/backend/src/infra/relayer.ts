@@ -86,11 +86,12 @@ export function getProvider(chainId: number): JsonRpcProvider {
 /**
  * Returns a signer connected to the given chain's RPC, funded by the relayer key
  * for that chain — `RELAYER_PRIVATE_KEY_<chainId>` with a global
- * `RELAYER_PRIVATE_KEY` fallback (#640). This is the signer that submits Safe
- * **deploys** and **execTransaction**, so it must resolve per chain to honour the
- * per-chain relayer isolation; otherwise a single backend serving multiple chains
- * would deploy/exec on every chain with the same key (e.g. a prod Base Sepolia
- * deploy run by the mainnet relayer key → unfunded on Sepolia). Cached per chainId.
+ * `RELAYER_PRIVATE_KEY` fallback (#640). This is the signer that submits
+ * relayed transactions on that chain — delegator activation, passport
+ * attestations, sweeps and owner-signed Safe `exec` relays — so it must resolve
+ * per chain to honour the per-chain relayer isolation; otherwise a single
+ * backend serving multiple chains would exec on every chain with the same key.
+ * Cached per chainId.
  */
 export function getRelayer(chainId: number): Wallet {
   let relayer = relayers.get(chainId)

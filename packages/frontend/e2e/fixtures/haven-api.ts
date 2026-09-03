@@ -14,10 +14,12 @@ export const testRecipientAddress = '0x2222222222222222222222222222222222222222'
  * therefore pinning the pixel-and-DOM behaviour of a configuration that answers
  * HTTP 410 in production (#1986): green, and true about nobody.
  *
- * The default is now the live rail and a legacy spec opts DOWN explicitly, the
- * same inversion `scripts/screenshot.mjs` was corrected to across #2205/#2227/
- * #2233. `legacySafe` below is the sanctioned opt-down shape, and
- * `optDownToLegacyRail` the page helper built on it.
+ * The default is now the live rail and the shared fixture carries NO opt-down:
+ * #2264 made the legacy shape explicit, and #2459 deleted it — `legacySafe`
+ * and the opt-down page helper built on it — once #2413 removed the last
+ * caller and the list queries stopped serving legacy accounts altogether. A
+ * spec that wants a retired-rail page today has nothing to opt down TO — the
+ * state does not exist on the wire.
  *
  * The value is `'safe'` / `'delegator_hybrid'` and never `null` or absent:
  * migration `041_hybrid_accounts.ts` declares the column `VARCHAR(32) NOT NULL
@@ -33,17 +35,6 @@ export const testSafe = {
   account_type: 'delegator_hybrid',
   created_at: '2026-05-01T10:00:00.000Z',
 }
-
-/**
- * The explicit opt-DOWN to the retired AllowanceModule rail (#2264).
- *
- * Spread over `testSafe` (and mirrored onto the agent, whose `account_type` is
- * selected as `us.account_type` off the joined `user_safes` row — one account
- * answers one value, #2202) by a spec whose SUBJECT is legacy-rail rendering.
- * Anything that is merely rail-independent must NOT reach for this: the point
- * of the inversion is that the retired rail appears only where a spec says so.
- */
-export const legacySafe = { ...testSafe, account_type: 'safe' as const }
 
 export const testUser = {
   id: 'user-e2e',
@@ -69,8 +60,8 @@ export const testAgent = {
   // #2264: the agent's rail marker. It is not an `agents` column — every
   // agent-row read selects it as `us.account_type` off the joined `user_safes`
   // row (`infra/repositories/agents.ts`), so it must agree with `testSafe`,
-  // which this agent names via `safe_id`. A spec that opts DOWN to
-  // `legacySafe` has to move BOTH or it describes an account that cannot exist.
+  // which this agent names via `safe_id` — one account answers one value,
+  // and since #2459 there is no opt-down shape left to disagree with.
   account_type: 'delegator_hybrid',
   created_at: '2026-05-02T10:00:00.000Z',
   // #2264: the DERIVED delegation-budget projection, which is what fills this
@@ -517,72 +508,6 @@ export async function mockHavenApi(page: Page) {
     }
 
     await fulfillUnmockedRoute(route, method, path)
-  })
-}
-
-/**
- * Opt this page DOWN to the retired AllowanceModule rail (#2264).
- *
- * Register it AFTER `mockHavenApi` — Playwright matches the most recently
- * registered handler first, and this one defers to the shared fixture for every
- * route it does not answer, via `route.fallback()`. Same layering as
- * `focus-visible.visual.spec.ts`'s `seedAgents`, for the same reason: the
- * shared fixture is read by a dozen specs, so a legacy account must not arrive
- * there.
- *
- * BOTH sides move together. `account_type` is not an `agents` column — it is
- * selected as `us.account_type` off the joined `user_safes` row — so a legacy
- * account with a `delegator_hybrid` agent pointing at it is a row no query can
- * produce (#2202). The agent's `allowances` empties for a related reason:
- * `GET /agents` returns the derived delegation projection for a
- * `delegator_hybrid` agent and `[]` for every other, and the `agent_allowances`
- * read surface it used to mirror is retired (#1440/#2020), so a legacy agent
- * carrying budget rows is union-legal on the wire and emitted by nothing
- * (#2224).
- *
- * ⚠️ **NO CALLERS since #2413, and do not add one without reading this.** Its
- * last caller was `agent-panel-states.visual.spec.ts`'s retirement-boundary
- * capture (#2258), deleted with the UI it asserted on. This helper stubs
- * `/auth/me` and `/agents` returning a legacy account — a response the API can
- * no longer produce, because six list queries filter to `delegator_hybrid`
- * (`infra/repositories/{user-safes,agents,dashboard}.ts`). A spec built on it
- * would therefore assert against a state that cannot occur in production,
- * which is the same defect the screenshot fixture had before #2413 fixed it.
- *
- * Kept rather than deleted only to bound this change: `legacySafe` below still
- * has three consumers (`fixture-shape-parity.test.ts`, `DashboardClient.test.tsx`),
- * and unpicking them is a separate slice. Deleting both is the right end state.
- */
-export async function optDownToLegacyRail(page: Page) {
-  await page.route('**/api/**', async (route) => {
-    const request = route.request()
-    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
-    if (request.method() !== 'GET') return route.fallback()
-
-    if (path === '/auth/me') {
-      await fulfillJson(route, { ...testUser, safes: [legacySafe] })
-      return
-    }
-    if (path === '/agents') {
-      await fulfillJson(route, {
-        agents: [{ ...testAgent, account_type: 'safe', allowances: [] }],
-      })
-      return
-    }
-    // The dashboard's own copy of the same projection, and it empties for the
-    // same reason: `routes/dashboard.ts` fills `allowancesByAgent` from the
-    // derived delegation view only for a `delegator_hybrid` account and hands
-    // every other agent `[]`. Left on the shared fixture, an opted-down page
-    // would serve a 250 USDC budget row for an account the backend would
-    // answer with none — the very shape this helper exists to keep out.
-    if (path === '/dashboard/overview') {
-      await fulfillJson(route, {
-        ...dashboardOverview,
-        agents: dashboardOverview.agents.map((agent) => ({ ...agent, allowances: [] })),
-      })
-      return
-    }
-    await route.fallback()
   })
 }
 

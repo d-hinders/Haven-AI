@@ -26,7 +26,7 @@ export function isPositiveDecimalAtomicAmount(value: string): boolean {
  * (#994) for why this goes through `normaliseAddress` and not a raw SDK call.
  */
 export function normaliseAddress(addr: string): string {
-  return getChainClient('allowance_module').normaliseAddress(addr)
+  return getChainClient('ethers').normaliseAddress(addr)
 }
 
 export function chainIdFromX402Network(network: string): number | null {

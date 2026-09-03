@@ -13,7 +13,7 @@ import { ETH_ADDRESS_RE } from '@haven_ai/core'
 // route has no agent/rail context to resolve one from — it reads a Safe address
 // directly. Kept on the existing ethers-backed implementation (#994) so this
 // route's behavior is unchanged; there's no per-rail branch to make here.
-const BALANCE_READ_RAIL = 'allowance_module'
+const BALANCE_READ_IMPL = 'ethers'
 
 const balanceCache = createCache<{ balances: BalanceItem[] }>(30_000)
 
@@ -75,7 +75,7 @@ export default async function balanceRoutes(
 
       const cacheKey = `bal:${chainId}:${safeAddress.toLowerCase()}`
       const result = await balanceCache.getOrFetch(cacheKey, async () => {
-        const chainClient = getChainClient(BALANCE_READ_RAIL)
+        const chainClient = getChainClient(BALANCE_READ_IMPL)
         const tokens = Object.values(chain.tokens)
         const nativeToken = tokens.find((t) => t.address === null)!
         const erc20Tokens = tokens.filter((t) => t.address !== null)

@@ -288,18 +288,18 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
      accept and document the residue.
    - **Non-converging:** two successive rounds have each found a **new site of the
      same class** — one more copy of the same retired claim, one more caller missing
-     the same check, one more doc restating the same number — **and no round has
-     found a defect of a different class.** A round that finds something new *in
-     kind* resets the count, because the rounds are still buying information.
-     Stop **chasing**: file a follow-up issue naming the class and the sweep command
-     that would enumerate it (the positive-control form in *Acceptance Gate*), quote
-     its number in the PR body, and open. #2422 (PR #2467) is the shape of the
-     trigger, not a case of it: rounds 1 and 2 each found new stale-doc sites of one
-     class, but round 3 found a mis-fenced block and round 4 the defect that mattered
-     most — an unperformed operator action written as live — so the count reset twice
-     and the rule would never have fired. It converged at round 5 the old way. The
-     reset clause is what keeps this rule from cutting off a PR before its worst bug
-     surfaces.
+     the same check, one more doc restating the same number. Run **exactly one more
+     round**. If it finds only more of that class, stop **chasing**: file a follow-up
+     issue naming the class and the sweep command that would enumerate it (the
+     positive-control form in *Acceptance Gate*), quote its number in the PR body,
+     and open. If it finds a defect of a **different class**, the count resets to
+     zero. This costs at most one round over the naive stop-after-two, and that
+     round is the price of not cutting a PR off before its worst bug: on #2422
+     (PR #2467) rounds 1 and 2 each found new stale-doc sites of one class; the one
+     extra round, round 3, found a mis-fenced block — different class, reset — and
+     round 4 then caught an unperformed operator action written as live, the
+     defect that mattered most. #2408 ran three rounds of one class and would have
+     filed after the third.
    - **Both on the same round** (the new site is itself fix-traceable): the
      fix-traceable branch wins — revert first, because a sweep over a construct you
      are about to revert enumerates nothing.
@@ -607,20 +607,20 @@ gh pr view <pr> --json autoMergeRequest --jq .autoMergeRequest.mergeMethod
 "armed" without that output has not checked. The checkable basis is four named
 landings: three wrong-method arms disarmed by hand on 2–3 Sep (#2428, #2460, #2493,
 each with the disarming comment on the PR) and #2438, which merged as a merge commit
-before it was reached. Wrong-method landings are a large minority of `dev` rather
-than a rarity — but **count them on a full clone or not at all**:
+before it was reached. Those four carry the rule. If you census the history as well,
+**pin the instant** — a bare `--since=<date>` is a git approxidate resolved against
+the wall clock *now*, so the same SHA counts differently every hour of the evening
+(measured on this rule's own draft: 258, 257, 256 for one SHA across one session):
 
 ```bash
-git log <base> --first-parent --since=<date> --oneline | grep -c '^[0-9a-f]* Merge pull request'
-git log <base> --first-parent --since=<date> --oneline | grep -cE '\(#[0-9]+\)$'
+git log <sha> --first-parent --since=2026-08-10T00:00:00Z --oneline | grep -c '^[0-9a-f]* Merge pull request'
+git log <sha> --first-parent --since=2026-08-10T00:00:00Z --oneline | grep -cE '\(#[0-9]+\)$'
 ```
 
-In a shallow clone these undercount silently — the walk completes and prints a
-plausible number instead of failing. Measured while writing this rule: the identical
-command at the identical base SHA returned 258 merge / 606 total on a full clone and
-256 / 604 in a shallow worktree, with the squash count identical in both, so the
-error is invisible in the ratio. Check `git rev-parse --is-shallow-repository` before
-quoting any history census (#2500 review round 2).
+At `ff052462`, pinned: 275 merge-commit landings, 346 squash, 624 first-parent, stable
+across re-runs. Run `git rev-parse --is-shallow-repository` first as well — a shallow
+clone *can* truncate the window silently, even though it was not the cause here
+(#2500 review rounds 2–3).
 
 **Check `mergeStateStatus` before arming auto-merge.** On `DIRTY`, merge `dev` in and
 resolve first — arming auto-merge on a conflicted PR does nothing, silently. The

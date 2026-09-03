@@ -130,7 +130,7 @@ scripts 27 → 24, db-mocks 62/465/66 → 58/312/61, zod 0 → 0.
 retirement (#1440) ran to 43 sub-issues (`gh api graphql` →
 `subIssuesSummary { total completed }` → 43/43) plus the residue rounds
 #1993 and #2107 after the epic was "done"; `gh issue list --state all
---search 'safe-retirement in:title' --limit 200 | jq length` → 53. A sweep
+--search 'safe-retirement in:title' --limit 200 --json number | jq length` → 53. A sweep
 that cannot tell a live copy from a historical one re-files them. The
 residue has a code half too: an exported function with no live importer.
 
@@ -252,7 +252,12 @@ Clean: each list is empty or every entry is exempted by name with a reason
 visual spec's stated scope, `EXEMPT_PACKAGE_DOCS`), and every exit branch is
 documented in the script and named in `autonomous-pr-loop.md`'s safety
 model. Report per gate: what it does not reach, which entries carry the
-content class, and the exit-branch list with line numbers. On `893d74f6`:
+content class, and the exit-branch list with line numbers. **Take the
+docs-boundary count pinned** — `git ls-tree -r --name-only <sha>` rather than
+`git ls-files`, which reads the live worktree: re-taken unpinned on a branch
+that ADDS a Markdown file, this block reads 37 where the pinned figure is 36,
+and the extra file is the reader's own change. (Observed on this block's own
+review; the same hazard is why block 5 prints its SHA.) On `893d74f6`:
 copy lint 72 unscanned files, 5 with hits (all identifier-shaped — the
 documented false-positive class); money path 29 verb files, 20 outside the
 perimeter (qa-agent pilots, backend scripts, `sdk/src/sweep.ts`,

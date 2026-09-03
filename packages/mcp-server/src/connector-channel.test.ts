@@ -14,6 +14,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
  * test can see and none of these tests claim has happened.
  */
 
+// Each case reloads the module graph so the env is read at module load, which
+// is the behaviour under test. A cold transform of the SDK + server module
+// graph exceeds vitest's 5s default on its own, so these carry an explicit
+// budget — without it the suite goes red on transform time rather than on any
+// assertion (observed in review).
+const RELOAD_TIMEOUT_MS = 30_000
+
 async function loadWithChannel(value?: string) {
   vi.resetModules()
   if (value === undefined) vi.stubEnv('HAVEN_CONNECTOR_CHANNEL', '')
@@ -39,7 +46,7 @@ describe('hosted connector channel', () => {
     expect(server.HOSTED_INSTRUCTIONS).toContain(
       'npx @haven_ai/connect@alpha; nothing has been spent at that point.',
     )
-  })
+  }, RELOAD_TIMEOUT_MS)
 
   it('takes the channel from the environment, and the instructions follow it', async () => {
     const { channel, server } = await loadWithChannel('dev')
@@ -50,7 +57,7 @@ describe('hosted connector channel', () => {
     // The literal that used to be hard-coded must be GONE, not merely joined by
     // a second one: a hint naming both channels is worse than either.
     expect(server.HOSTED_INSTRUCTIONS).not.toContain('connect@alpha')
-  })
+  }, RELOAD_TIMEOUT_MS)
 
   it('carries the environment channel into the signer-compatibility advisory', async () => {
     // This is the string a paying agent meets on a version-mismatch refusal,
@@ -65,18 +72,18 @@ describe('hosted connector channel', () => {
     expect(compat.check).not.toContain('connect@alpha')
     expect(compat.fallback).toContain('npx @haven_ai/connect@dev')
     expect(compat.fallback).not.toContain('connect@alpha')
-  })
+  }, RELOAD_TIMEOUT_MS)
 
   it('treats an empty or whitespace value as unset', async () => {
     for (const blank of ['', '   ']) {
       const { channel } = await loadWithChannel(blank)
       expect(channel.HOSTED_CONNECTOR_CHANNEL).toBe('alpha')
     }
-  })
+  }, RELOAD_TIMEOUT_MS)
 
   it('REFUSES to load on a malformed value rather than serving the production hint', async () => {
     vi.resetModules()
     vi.stubEnv('HAVEN_CONNECTOR_CHANNEL', 'DEV;rm -rf /')
     await expect(import('./connector-channel.js')).rejects.toThrow(/not a valid npm dist-tag/)
-  })
+  }, RELOAD_TIMEOUT_MS)
 })

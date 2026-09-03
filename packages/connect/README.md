@@ -338,6 +338,14 @@ npx -y @haven_ai/connect@alpha --rekey-finish --api-key sk_agent_... \
   --runtime claude-code [--name research]
 ```
 
+**Phase one prints the exact phase-two command — prefer it over the line above.**
+Since [#2423](https://github.com/d-hinders/Haven-AI/issues/2423) the connector
+builds that command from the npm dist-tag **it** was published under, so a build
+installed from a non-production channel tells you to finish with that same
+channel rather than sending you to production mid-re-key. `@alpha` here is the
+production channel and is right for a production install; it is not right for
+every install, which is why the tool computes it and this page cannot.
+
 Between the two phases nothing has changed: the agent keeps working on its old
 key until you finish. Phase one refuses up front what the backend would refuse
 anyway — a legacy-rail account, a revoked agent — so you find out before signing

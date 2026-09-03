@@ -36,12 +36,15 @@
  * published packages the channel is baked in at release time. A surface that is
  * *deployed* rather than published has no release at which to bake anything in,
  * so it reads the `HAVEN_CONNECTOR_CHANNEL` environment variable and falls back
- * to this constant. In this repository that surface is the hosted MCP server
- * (`packages/mcp-server/src/connector-channel.ts`); slice 2 of the epic (#2422,
- * open at the time of writing, not merged) gives the backend's connector
- * handout the same treatment under the same variable name, default and
- * validation pattern — deliberately, so the two cannot disagree about what a
- * valid channel is.
+ * to this constant. Two surfaces do that: the hosted MCP server
+ * (`packages/mcp-server/src/connector-channel.ts`) and, since slice 2 (#2422),
+ * the backend's connector handout (`parseConnectorChannel` in
+ * `packages/backend/src/config.ts`). All three readers share one variable name,
+ * one default and one validation pattern, and that agreement is EXECUTED rather
+ * than asserted: `packages/backend/src/__tests__/connector-channel.test.ts`
+ * runs this module's `resolveConnectorChannel` and the backend's
+ * `parseConnectorChannel` over the same input table and fails if they ever
+ * diverge.
  *
  * **This says nothing about how any environment is configured.** Setting the
  * variable anywhere is an operator action (epic #2420, operator step 3); no
@@ -68,9 +71,10 @@ export const HAVEN_CONNECTOR_CHANNEL = 'alpha'
  * express a different package, a registry, a path or a shell metacharacter:
  * a wrong value selects another Haven channel and nothing else.
  *
- * Deliberately the same pattern slice 2 (#2422, open, not merged) uses for the
- * backend's copy of this variable: two readers of one environment variable that
- * disagree about what is valid is a worse failure than either rule alone.
+ * Deliberately identical to `CONNECTOR_CHANNEL_PATTERN` in the backend's
+ * `config.ts` (#2422): two readers of one environment variable that disagree
+ * about what is valid is a worse failure than either rule alone. Pinned by an
+ * executing agreement test, not by this comment.
  */
 const CHANNEL_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
 

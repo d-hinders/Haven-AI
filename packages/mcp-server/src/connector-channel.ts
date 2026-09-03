@@ -6,10 +6,9 @@ import { connectorRerunCommand, resolveConnectorChannel } from '@haven_ai/sdk'
  * The hosted MCP server is deployed per environment rather than published to
  * npm, so unlike `@haven_ai/sdk`, `signer` and `connect` it has no release at
  * which a channel could be baked in. It reads `HAVEN_CONNECTOR_CHANNEL` — the
- * same variable slice 2 of the epic gives the backend's connector handout
- * (#2422, open, not merged) — and falls back to the SDK's build-time constant,
- * which keeps an unconfigured deployment on the production channel: today's
- * behaviour, exactly.
+ * same variable the backend's connector handout reads (#2422) — and falls back
+ * to the SDK's build-time constant, which keeps an unconfigured deployment on
+ * the production channel: today's behaviour, exactly.
  *
  * Resolution happens once, at module load, so a malformed value refuses the
  * BOOT rather than serving a mixture of correct and incorrect hints. A silent

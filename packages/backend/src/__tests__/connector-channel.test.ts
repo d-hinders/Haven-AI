@@ -4,6 +4,11 @@ import {
   DEFAULT_CONNECTOR_CHANNEL,
   parseConnectorChannel,
 } from '../config.js'
+// #2423: imported statically, NOT with `await import()` inside the test. The
+// SDK is a large module and its cold transform alone exceeded vitest's 5s
+// per-test budget, so a dynamic import made this test fail for a reason that
+// had nothing to do with its subject — the worst kind of red.
+import { HAVEN_CONNECTOR_CHANNEL, resolveConnectorChannel } from '@haven_ai/sdk'
 
 /**
  * `HAVEN_CONNECTOR_CHANNEL` parsing (#2422, epic #2420).
@@ -144,5 +149,77 @@ describe('CONNECTOR_CHANNEL_PATTERN (#2422)', () => {
     // A /g regex carries lastIndex across .test() calls, which would make this
     // validator pass and fail on alternate boots for the same value.
     expect(CONNECTOR_CHANNEL_PATTERN.flags).toBe('')
+  })
+})
+
+/**
+ * Cross-package agreement (#2423, slice 3 of epic #2420).
+ *
+ * `HAVEN_CONNECTOR_CHANNEL` now has THREE readers: this backend
+ * (`parseConnectorChannel` above), the hosted MCP server, and
+ * `resolveConnectorChannel` in `@haven_ai/sdk` — which the hosted server and
+ * every published package resolve through. Each was written to the same
+ * pattern, the same default and the same refuse-rather-than-fall-back rule, and
+ * three hand-maintained copies of one rule is precisely how the three start
+ * disagreeing about what a valid channel is.
+ *
+ * So the agreement is EXECUTED rather than asserted in a comment: both
+ * implementations are run over the same table, including the inputs where the
+ * two could plausibly diverge — the empty string, whitespace, the boundary
+ * lengths, and every excluded shell metacharacter. A comment claiming they
+ * match is not a guard; this is.
+ */
+describe('the backend and @haven_ai/sdk agree about what a channel is (#2423)', () => {
+  const CASES: (string | undefined)[] = [
+    undefined, '', '   ', '\t', 'alpha', 'dev', 'latest', 'next-2', 'a',
+    'a'.repeat(32), 'a'.repeat(33), 'Dev', 'DEV', '-dev', '9dev', 'dev.1',
+    'dev/x', 'dev@x', 'dev x', 'dev;x', 'dev|x', 'dev&x', 'dev$x', 'dev`x',
+    'dev"x', "dev'x", 'dev\nx', 'dve',
+  ]
+
+  it('resolves identically, or refuses identically, on every input', () => {
+    // Instrument self-test first: if the table cannot produce BOTH outcomes,
+    // "they agree" would be vacuous.
+    const outcomes = new Set(
+      CASES.map((c) => {
+        try {
+          parseConnectorChannel(c)
+          return 'resolved'
+        } catch {
+          return 'threw'
+        }
+      }),
+    )
+    expect(outcomes, 'the input table must exercise both acceptance and refusal').toEqual(
+      new Set(['resolved', 'threw']),
+    )
+
+    for (const input of CASES) {
+      let mine: string | Error
+      let theirs: string | Error
+      try {
+        mine = parseConnectorChannel(input)
+      } catch (err) {
+        mine = err as Error
+      }
+      try {
+        theirs = resolveConnectorChannel(input)
+      } catch (err) {
+        theirs = err as Error
+      }
+
+      const describeOutcome = (r: string | Error) => (r instanceof Error ? 'REFUSED' : r)
+      expect(
+        describeOutcome(theirs),
+        `backend and SDK disagree on ${JSON.stringify(input)}: backend says ` +
+          `${describeOutcome(mine)}, SDK says ${describeOutcome(theirs)}`,
+      ).toBe(describeOutcome(mine))
+    }
+  })
+
+  it('shares the default, so an unconfigured environment lands in the same place', () => {
+    // Both literals, not both derived — see the note on the first test above.
+    expect(DEFAULT_CONNECTOR_CHANNEL).toBe('alpha')
+    expect(HAVEN_CONNECTOR_CHANNEL).toBe('alpha')
   })
 })

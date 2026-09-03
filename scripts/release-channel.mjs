@@ -84,6 +84,24 @@ export async function publishWorkflowChannelScript(workflowPath) {
   const yaml = await readFile(workflowPath, 'utf8')
   // The block, verbatim from the workflow, from `case "$version" in` through
   // its matching `esac`. Indentation is preserved; shell does not care.
+  // Refuse ambiguity rather than guess. The extractor below is non-greedy and
+  // would otherwise take the FIRST `case "$version" in` block, which need not
+  // be the dist-tag one — slice 1 (#2463) plausibly adds a snapshot-version
+  // block above it. Taking the wrong block does not fail silently (the
+  // extracted shell dies on an unbound `tag` under `set -eu`), but it fails as
+  // a confusing unbound-variable error on an unrelated pull request instead of
+  // saying what is actually wrong. Raised in review on this change; named here
+  // so the next editor repoints the guard deliberately.
+  const blocks = yaml.match(/^(\s*)case "\$version" in\n[\s\S]*?\n\1esac$/gm) ?? []
+  if (blocks.length > 1) {
+    throw new Error(
+      `${workflowPath} now contains ${blocks.length} \`case "$version" in\` blocks, and this ` +
+        'guard cannot know which one selects the npm dist-tag. Repoint the extraction at the ' +
+        'right block (anchor it on the enclosing step, not on the case header) — do NOT delete ' +
+        `the guard: the rule it pins is still live in ${CONNECTOR_CHANNEL_FILE}.`,
+    )
+  }
+
   const match = yaml.match(/^(\s*)case "\$version" in\n[\s\S]*?\n\1esac$/m)
   if (!match) {
     throw new Error(

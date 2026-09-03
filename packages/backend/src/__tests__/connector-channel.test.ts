@@ -182,8 +182,13 @@ describe('CONNECTOR_CHANNEL_PATTERN (#2422)', () => {
  * hit exactly this and could not verify these assertions as a result.
  */
 describe('the backend and @haven_ai/sdk agree about what a channel is (#2423)', () => {
-  const CASES: (string | undefined)[] = [
-    undefined, '', '   ', '\t', 'alpha', 'dev', 'latest', 'next-2', 'a',
+  const CASES: (string | undefined | null)[] = [
+    // `null` is here because it is the ONE input the two signatures predicted
+    // would diverge, and it did: the SDK treated it as unset while the backend
+    // threw a raw TypeError out of `.trim()`. Unreachable from `process.env`,
+    // which is why nothing caught it — a review pass did. Kept as a permanent
+    // case rather than a fixed-and-forgotten one.
+    undefined, null, '', '   ', '\t', 'alpha', 'dev', 'latest', 'next-2', 'a',
     'a'.repeat(32), 'a'.repeat(33), 'Dev', 'DEV', '-dev', '9dev', 'dev.1',
     'dev/x', 'dev@x', 'dev x', 'dev;x', 'dev|x', 'dev&x', 'dev$x', 'dev`x',
     'dev"x', "dev'x", 'dev\nx', 'dve',

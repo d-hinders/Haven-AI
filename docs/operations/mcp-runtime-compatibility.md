@@ -958,10 +958,21 @@ writing), so on a non-production deployment the correct rerun
 names that backend's own channel — its setup response reports it in
 `connector_package`. The strings above are unchanged and still say `@alpha`,
 because they are baked into `packages/sdk` and `packages/signer` at build time
-and this repository's production release channel really is `alpha`; making those
-re-run hints environment-derived is the explicit job of **#2423**, the next
-slice of the same epic. Until it lands, read the hint as "reinstall the
-connector **your backend hands out**", which is exactly the skew this section is
+and this repository's production release channel really is `alpha`.
+
+**#2423 has since landed, and it did NOT make those hints environment-derived** —
+a published tarball cannot read a deployment's environment. It made them derive
+from a build-time constant that mirrors the npm dist-tag the build was published
+under, so an `alpha` build still says `@alpha` (byte-identically to the strings
+above) and a build published on another channel says that channel. See
+*The connector channel is a fifth bump-managed constant* earlier in this
+document for the mechanism. The runtime-environment half applies only to the two
+surfaces that are DEPLOYED rather than published: the backend's handout (#2422)
+and the hosted MCP server (#2423).
+
+So the reading stands, for a slightly different reason than it used to: treat the
+hint as "reinstall the connector **your backend hands out**", whose spec that
+backend reports in `connector_package`. That is exactly the skew this section is
 about: a signer installed from one channel against a backend emitting another is
 how an unknown `x402_expected_context_version` arises in the first place.
 

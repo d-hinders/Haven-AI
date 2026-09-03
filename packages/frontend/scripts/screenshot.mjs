@@ -43,7 +43,8 @@
  * run's random token. Both halves matter: the fixed 3111 this replaces meant a
  * second concurrent session captured the OTHER worktree's app, and a 200 OK is
  * not proof of identity. See `scripts/capture-identity.mjs`. Provenance
- * (branch, commit, worktree, port) is printed and stamped into
+ * (branch, commit, worktree, port, plus a content-addressed worktree snapshot
+ * when there are local changes) is printed and stamped into
  * `.screenshots/capture-manifest.json`, so a PNG can be traced afterwards.
  *
  * ── Route captures are un-clipped, and checked (#1738) ───────────────────────
@@ -3497,6 +3498,7 @@ async function main() {
   console.log(
     `screenshot: branch ${identity.branch} @ ${identity.commit.slice(0, 12)}${identity.dirty ? ' (dirty working tree)' : ''}`,
   )
+  console.log(`screenshot: worktree snapshot sha256 ${identity.worktree_provenance.sha256}`)
   // Printed for both cases on purpose. "Which widths did this run shoot" is a
   // question a reviewer reading a PNG in a thread has to be able to answer, and
   // an override that announces itself only when something goes wrong is one
@@ -3849,6 +3851,9 @@ async function main() {
         branch: identity.branch,
         commit: identity.commit,
         dirty: identity.dirty,
+        // `dirty` says the commit alone is insufficient; this hash says WHICH
+        // source state was rendered (#2464).
+        worktree_provenance: identity.worktree_provenance,
         base_url: BASE_URL,
         port,
         own_server: OWN_SERVER,
@@ -4044,7 +4049,7 @@ async function main() {
     console.log('  (a fixture-shape gap or a real client bug — fix before trusting these screenshots)')
   }
   console.log(
-    `\nProvenance: branch ${identity.branch} @ ${identity.commit.slice(0, 12)}${identity.dirty ? ' (dirty)' : ''}, ` +
+    `\nProvenance: branch ${identity.branch} @ ${identity.commit.slice(0, 12)}${identity.dirty ? ` (dirty; worktree ${identity.worktree_provenance.sha256.slice(0, 12)})` : ''}, ` +
       `captured from ${BASE_URL}${identity.identity_verified === true ? ' (identity verified)' : ' (identity NOT verified)'}.`,
   )
   console.log(`  Full record: ${path.relative(ROOT, MANIFEST)}`)

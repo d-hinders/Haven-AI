@@ -39,7 +39,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import net from 'node:net'
 import { writeFile, rm } from 'node:fs/promises'
-import { rmSync } from 'node:fs'
+import { lstatSync, readFileSync, readlinkSync, rmSync } from 'node:fs'
 import path from 'node:path'
 
 /** Served at `${BASE_URL}/capture-identity.json` out of the app's `public/`. */
@@ -68,6 +68,70 @@ function git(args, cwd) {
   }
 }
 
+function gitBuffer(args, cwd) {
+  try {
+    return execFileSync('git', args, { cwd, encoding: null, stdio: ['ignore', 'pipe', 'ignore'] })
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Hash the source state a capture can actually render, rather than treating a
+ * dirty flag as a substitute for provenance. The framing is deliberately
+ * binary, and `version` makes a future framing improvement explicit.
+ */
+export function hashWorktreeSnapshot({ commit, trackedDiff, untrackedFiles }) {
+  const snapshot = createHash('sha256')
+  const tracked = createHash('sha256').update(trackedDiff).digest('hex')
+  const untracked = createHash('sha256')
+  const files = [...untrackedFiles].sort((a, b) => a.path.localeCompare(b.path))
+  const write = (value) => snapshot.update(Buffer.isBuffer(value) ? value : Buffer.from(value))
+
+  write('haven-capture-worktree-v1\0')
+  write(`${commit}\0tracked-diff\0`)
+  write(trackedDiff)
+  for (const file of files) {
+    const content = Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content)
+    const header = `${file.path}\0${file.type}\0`
+    write('untracked\0')
+    write(header)
+    write(content)
+    untracked.update(header)
+    untracked.update(content)
+  }
+
+  return {
+    version: 1,
+    algorithm: 'sha256',
+    sha256: snapshot.digest('hex'),
+    tracked_diff_sha256: tracked,
+    untracked_files_sha256: untracked.digest('hex'),
+    untracked_file_count: files.length,
+  }
+}
+
+/** A reproducible, content-addressed record of a worktree's renderable state (#2464). */
+export function worktreeProvenance(cwd, commit) {
+  const trackedDiff = gitBuffer(['diff', '--binary', 'HEAD', '--'], cwd) ?? Buffer.alloc(0)
+  const listed = gitBuffer(['ls-files', '--others', '--exclude-standard', '-z'], cwd) ?? Buffer.alloc(0)
+  const root = path.resolve(cwd)
+  const untrackedFiles = listed
+    .toString('utf8')
+    .split('\0')
+    .filter(Boolean)
+    .map((relativePath) => {
+      const absolutePath = path.resolve(root, relativePath)
+      if (!absolutePath.startsWith(`${root}${path.sep}`)) throw new Error(`refusing untracked path outside worktree: ${relativePath}`)
+      const stat = lstatSync(absolutePath)
+      if (stat.isSymbolicLink()) return { path: relativePath, type: 'symlink', content: readlinkSync(absolutePath) }
+      if (!stat.isFile()) return { path: relativePath, type: 'other', content: '' }
+      return { path: relativePath, type: 'file', content: readFileSync(absolutePath) }
+    })
+
+  return hashWorktreeSnapshot({ commit, trackedDiff, untrackedFiles })
+}
+
 /**
  * Where this capture is being taken FROM: the worktree root, its branch, its
  * commit, and whether it is dirty. Degrades to the given directory outside a
@@ -76,11 +140,13 @@ function git(args, cwd) {
  */
 export function worktreeIdentity(cwd) {
   const worktree = git(['rev-parse', '--show-toplevel'], cwd) ?? path.resolve(cwd)
+  const commit = git(['rev-parse', 'HEAD'], cwd) ?? 'unknown'
   return {
     worktree,
     branch: git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd) ?? 'unknown',
-    commit: git(['rev-parse', 'HEAD'], cwd) ?? 'unknown',
+    commit,
     dirty: (git(['status', '--porcelain'], cwd) ?? '') !== '',
+    worktree_provenance: worktreeProvenance(worktree, commit),
   }
 }
 
@@ -98,6 +164,7 @@ export function buildRunIdentity(base, { token = randomUUID(), now = () => new D
     branch: base.branch,
     commit: base.commit,
     dirty: base.dirty,
+    worktree_provenance: base.worktree_provenance,
     pid: process.pid,
     started_at: now().toISOString(),
   }

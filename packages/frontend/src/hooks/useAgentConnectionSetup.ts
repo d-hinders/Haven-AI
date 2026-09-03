@@ -46,7 +46,10 @@ type ResolveSetupResponse = ApiSchema<'ResolveAgentConnectionSetupResponse'>
 type RegisterSetupResponse = ApiSchema<'RegisterAgentConnectionSetupResponse'>
 
 export interface ManualCredential {
+  /** The prose prompt (the pre-#2482 rendering, kept for agent workspaces). */
   prompt: string
+  /** The .env rendering — the default, pasteable into backend secrets (#2482). */
+  env: string
   apiKey: string
   delegatePrivateKey: `0x${string}`
   delegateAddress: string
@@ -232,6 +235,40 @@ export function connectorApiBaseUrl(connectorCommand?: string): string | null {
   return value ? value.replace(/\\'/g, "'").replace(/\/+$/, '') : null
 }
 
+/**
+ * The five `HAVEN_*` values a manual credential hands out — emitted verbatim
+ * by this ONE source and rendered by both the .env block and the prose
+ * prompt so the two representations of the credential cannot drift (#2482).
+ * These are the exact variable names the SDK reads server-side.
+ */
+export function manualCredentialEnvLines(input: {
+  apiKey: string
+  delegatePrivateKey: string
+  delegateAddress: string
+  apiBaseUrl: string
+  hostedMcpUrl: string
+}): string[] {
+  return [
+    `HAVEN_API_KEY=${input.apiKey}`,
+    `HAVEN_DELEGATE_KEY=${input.delegatePrivateKey}`,
+    `HAVEN_DELEGATE_ADDRESS=${input.delegateAddress}`,
+    `HAVEN_API_URL=${input.apiBaseUrl}`,
+    `HAVEN_MCP_URL=${input.hostedMcpUrl}`,
+  ]
+}
+
+/** The .env rendering of a manual credential (#2482): five `HAVEN_*` lines,
+ * pasteable straight into Lovable Secrets / Vercel / Railway. */
+export function buildManualCredentialEnv(input: {
+  apiKey: string
+  delegatePrivateKey: string
+  delegateAddress: string
+  apiBaseUrl: string
+  hostedMcpUrl: string
+}): string {
+  return manualCredentialEnvLines(input).join('\n')
+}
+
 export function buildManualCredentialPrompt(input: {
   agentName: string
   havenWallet: string
@@ -250,11 +287,7 @@ export function buildManualCredentialPrompt(input: {
     `Public signing address: ${input.delegateAddress}`,
     '',
     'Add these values only in the trusted agent workspace:',
-    `HAVEN_API_KEY=${input.apiKey}`,
-    `HAVEN_DELEGATE_KEY=${input.delegatePrivateKey}`,
-    `HAVEN_DELEGATE_ADDRESS=${input.delegateAddress}`,
-    `HAVEN_API_URL=${input.apiBaseUrl}`,
-    `HAVEN_MCP_URL=${input.hostedMcpUrl}`,
+    ...manualCredentialEnvLines(input),
     '',
     'Important:',
     '- The private signing key lets the agent sign payments within the approved agent budget.',
@@ -320,8 +353,6 @@ export function useAgentConnectionSetup({
   const [createError, setCreateError] = useState<string | null>(null)
   const [copied, setCopied] = useState<CopyKind | null>(null)
   const [cancelled, setCancelled] = useState(false)
-  const [manualPathRevealed, setManualPathRevealed] = useState(false)
-  const [manualFallbackConfirmed, setManualFallbackConfirmed] = useState(false)
   const [manualCredential, setManualCredential] = useState<ManualCredential | null>(null)
   const [manualCredentialAcknowledged, setManualCredentialAcknowledged] = useState(false)
   const [manualCreating, setManualCreating] = useState(false)
@@ -444,8 +475,6 @@ export function useAgentConnectionSetup({
     setCreateError(null)
     setCopied(null)
     setCancelled(false)
-    setManualPathRevealed(false)
-    setManualFallbackConfirmed(false)
     setManualCredential(null)
     setManualCredentialAcknowledged(false)
     setManualCreating(false)
@@ -562,7 +591,7 @@ export function useAgentConnectionSetup({
   }
 
   async function handleCreateManualCredential() {
-    if (!setup || !manualFallbackConfirmed) return
+    if (!setup) return
     setManualCreating(true)
     setManualError(null)
     try {
@@ -602,6 +631,13 @@ export function useAgentConnectionSetup({
           budgets: resolved.agent_budget.map((budget) =>
             `${formatAllowanceForToken(budget.allowance_amount, resolved.haven_wallet.chain_id, budget.token_symbol)} ${budget.token_symbol} ${budgetPeriodLabel(budget.reset_period_min)}`,
           ),
+          apiKey,
+          delegatePrivateKey,
+          delegateAddress: registration.delegate_address,
+          apiBaseUrl: manualApiBaseUrl(setup.connector_command),
+          hostedMcpUrl: registration.hosted_mcp_url || resolved.hosted_mcp_url,
+        }),
+        env: buildManualCredentialEnv({
           apiKey,
           delegatePrivateKey,
           delegateAddress: registration.delegate_address,
@@ -688,10 +724,6 @@ export function useAgentConnectionSetup({
     }),
     copied,
     copyText,
-    manualPathRevealed,
-    setManualPathRevealed,
-    manualFallbackConfirmed,
-    setManualFallbackConfirmed,
     manualCredential,
     manualCredentialAcknowledged,
     manualCreating,

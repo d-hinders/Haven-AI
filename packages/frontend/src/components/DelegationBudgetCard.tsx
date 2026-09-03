@@ -217,14 +217,24 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
             className="font-mono"
             aria-label="Recipient"
           />
+          {/* #2473 (money-path review): a grant REPLACES the active budget in
+              the same (token, recipient) slot, server-side and silently. In
+              the normal state the rows above the form are what let an owner
+              see that coming; when the list failed to load they cannot, so
+              the action is gated on knowing the current budgets rather than
+              on the owner reading a warning. `Try again` is the way out. */}
           <BudgetGrantAction
             grant={grant}
             busy={busy}
             ready={ready}
-            input={grantInput}
+            input={budgetsError ? null : grantInput}
             label="Set budget"
             busyLabel="Setting…"
-            helper="One signature. Refills every period automatically."
+            helper={
+              budgetsError
+                ? 'Reload the current budgets before setting one — a new budget replaces the one it matches.'
+                : 'One signature. Refills every period automatically.'
+            }
             onGranted={handleGranted}
           />
         </div>

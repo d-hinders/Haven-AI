@@ -153,6 +153,21 @@ describe('DelegationBudgetCard load failure (#2473)', () => {
     expect(screen.queryByText(/No budget yet/i)).toBeNull()
   })
 
+  // Money-path review (#2473): a grant REPLACES the active budget in the same
+  // (token, recipient) slot, silently. The rows above the form are what let an
+  // owner see that coming — with the list unknown they cannot, so the action
+  // is gated on reloading rather than on the owner reading a warning.
+  it('refuses to grant while the current budgets are unknown', async () => {
+    mockGet.mockReturnValue(null)
+    mockBudgetsError.mockReturnValue(true)
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText(/could not load/i)).toBeTruthy())
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '2.5' } })
+    fireEvent.click(screen.getByText('Set budget'))
+    await waitFor(() => expect(screen.getByText(/Reload the current budgets/i)).toBeTruthy())
+    expect(mockGrant).not.toHaveBeenCalled()
+  })
+
   it('says it is loading while the first load is still in flight — never renders empty', () => {
     mockGet.mockReturnValue(null)
     mockBudgetsError.mockReturnValue(false)

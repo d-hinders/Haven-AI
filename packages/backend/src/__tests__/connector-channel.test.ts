@@ -168,6 +168,18 @@ describe('CONNECTOR_CHANNEL_PATTERN (#2422)', () => {
  * two could plausibly diverge — the empty string, whitespace, the boundary
  * lengths, and every excluded shell metacharacter. A comment claiming they
  * match is not a guard; this is.
+ *
+ * **Build precondition.** This block imports `@haven_ai/sdk`, so it needs
+ * `packages/sdk/dist` to exist: in a FRESH clone, `npm ci` alone leaves it
+ * unbuilt and the whole file fails to collect with
+ * `Failed to resolve entry for package "@haven_ai/sdk"` — which reads like a
+ * broken test rather than a missing build. Run:
+ *
+ *     npm run build -w packages/sdk
+ *
+ * CI builds the workspace before running suites, so this bites reviewers and
+ * fresh checkouts rather than the pipeline. Recorded here because a reviewer
+ * hit exactly this and could not verify these assertions as a result.
  */
 describe('the backend and @haven_ai/sdk agree about what a channel is (#2423)', () => {
   const CASES: (string | undefined)[] = [

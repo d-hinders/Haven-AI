@@ -81,3 +81,17 @@ describe('runtimeStatusHelper for config failures (#1719)', () => {
     expect(runtimeStatusLabel(installWith('runtime_config_write_failed'))).toBe('Needs attention')
   })
 })
+
+describe('manual credential fallback status (#2472)', () => {
+  const manualFallback = {
+    ...installWith(''),
+    error_code: null,
+    manual_credential_fallback: true,
+  }
+
+  it('does not claim the runtime was automatically configured', () => {
+    expect(runtimeStatusLabel(manualFallback)).toBe('Manual credential ready')
+    expect(runtimeStatusHelper(manualFallback)).toContain('trusted agent workspace')
+    expect(runtimeStatusHelper(manualFallback)).not.toContain('configured')
+  })
+})

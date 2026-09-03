@@ -424,16 +424,34 @@ export default function AgentDetailClient({ agentId }: Props) {
   })
   // #796/#804: recipients bind per token — the card gets EVERY configured
   // token (a picker appears only when there is more than one).
-  const recipientTokens = currentAgent.allowances.flatMap((allowance) => {
-    if (!chainConfig) return []
-    const cfg = Object.values(chainConfig.tokens).find((t) => t.symbol === allowance.token_symbol)
-    if (!cfg) return []
-    return [{
-      address: (cfg.address ?? allowance.token_address) as string,
-      symbol: cfg.symbol,
-      decimals: cfg.decimals,
-    }]
-  })
+  // #2473: the token options a FIRST budget is granted from come from the
+  // chain, not from the agent's existing budgets. `allowances` is a view
+  // projected from ACTIVE delegation rows (#1090), so deriving the options
+  // from it meant a brand-new agent offered no tokens, the grant form never
+  // rendered, and the page's "Add budget" button scrolled to nothing.
+  //
+  // A budget delegation is metered per ERC-20 token, so native tokens (no
+  // token address in the registry) are not grantable and are left out.
+  // Existing budgets are then unioned in so a delegation on a token outside
+  // the chain registry still resolves its symbol and decimals in the list.
+  const budgetTokenOptions: Array<{ address: string; symbol: string; decimals: number }> = []
+  const seenBudgetTokens = new Set<string>()
+  for (const token of Object.values(chainConfig?.tokens ?? {})) {
+    if (!token.address) continue
+    budgetTokenOptions.push({ address: token.address, symbol: token.symbol, decimals: token.decimals })
+    seenBudgetTokens.add(token.address.toLowerCase())
+  }
+  for (const allowance of currentAgent.allowances) {
+    const address = allowance.token_address
+    if (!address || seenBudgetTokens.has(address.toLowerCase())) continue
+    const cfg = Object.values(chainConfig?.tokens ?? {}).find((t) => t.symbol === allowance.token_symbol)
+    // Only a token the registry knows can be sized correctly; without decimals
+    // the amount would be parsed at the wrong scale, so an unknown token is
+    // left out of the picker rather than guessed at.
+    if (!cfg) continue
+    budgetTokenOptions.push({ address, symbol: cfg.symbol, decimals: cfg.decimals })
+    seenBudgetTokens.add(address.toLowerCase())
+  }
   const agentStatus = agentStatusPresentation(currentAgent.status)
 
   async function handlePause() {
@@ -548,7 +566,7 @@ export default function AgentDetailClient({ agentId }: Props) {
             <DelegationBudgetCard
               agentId={agentId}
               chainId={chainId}
-              tokens={recipientTokens}
+              tokens={budgetTokenOptions}
               onBudgetChange={refetch}
             />
           </div>

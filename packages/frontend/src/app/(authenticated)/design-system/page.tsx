@@ -189,7 +189,7 @@ export default function DesignSystemPage() {
               + a lucide glyph), or a hand-rolled address slice (use{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">&lt;Address&gt;</code>) — each exempts
               its own primitive's home file. Marketing/landing surfaces (brand, marketing, the landing page,
-              protocols, investor-briefing, how-it-works) are intentionally bespoke and exempt; the
+              protocols and how-it-works) are intentionally bespoke and exempt; the
               product app and this page stay fully gated. Existing debt lives in a shrink-only baseline
               (<code className="rounded bg-[var(--v2-surface)] px-1 text-xs">design-lint-baseline.json</code>) —
               counts may only go down. Route colours through{' '}

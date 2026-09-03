@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { lastVerifiedLine, issueRefs, checkChain, isPromotionPR } from './chain-integrity.mjs'
+import { lastVerifiedLine, issueRefs, checkChain, isPromotionPR, chainEntries, headOfEntry, chainAnomalies, MAX_CHAIN_BYTES } from './chain-integrity.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./chain-integrity.mjs', import.meta.url))
 
@@ -124,6 +124,92 @@ test('issueRefs reads refs in order and de-duplicates', () => {
     '#1760',
     '#1800',
   ])
+})
+
+// ── #2477: the OPPOSITE failure — an entry appearing TWICE. The containment
+// rule can only see entries going missing; `issueRefs` de-duplicates, so a
+// chain that was CONCATENATED instead of interleaved loses nothing and the
+// gate used to report `✓ chains intact` on a doubled chain.
+
+test('chainEntries splits on the `Prior:` chain-word, never on raw issue refs', () => {
+  const line =
+    'last-verified: "2026-08-22" # #1816: §4 reuses #1800\'s port mechanism. ' +
+    'Prior: #1805/#1760: a. Prior: #1800: b'
+  assert.deepEqual(chainEntries(line), [
+    "#1816: §4 reuses #1800's port mechanism.",
+    '#1805/#1760: a.',
+    '#1800: b',
+  ])
+})
+
+test('chainEntries normalizes the bare `Prior #N` boundary variant', () => {
+  const line = 'last-verified: "2026-08-22" # #1508: a. Prior #1508: b'
+  assert.deepEqual(chainEntries(line), ['#1508: a.', '#1508: b'])
+})
+
+test('chainEntries returns [] for a line with no chain comment', () => {
+  assert.deepEqual(chainEntries('last-verified: "2026-08-22"'), [])
+  assert.deepEqual(chainEntries('no chain here'), [])
+})
+
+test('headOfEntry reads the leading ref CLUSTER, not refs cited in prose', () => {
+  assert.equal(headOfEntry("#1816: §4 reuses #1800's mechanism"), '#1816')
+  assert.equal(headOfEntry('#2100/#2101 (+#2098): re-verified'), '#2100/#2101(+#2098)')
+  assert.equal(headOfEntry('#1508 (actual fix): x'), '#1508')
+  assert.equal(headOfEntry('Release 0.1.31-alpha.0: x'), '0.1.31-alpha.0')
+  assert.equal(headOfEntry('0.1.34-alpha.0 release: x'), '0.1.34-alpha.0')
+  assert.equal(headOfEntry('no ref'), null)
+})
+
+test('a doubled chain is DETECTED (duplicate entries) where containment alone was green', () => {
+  // The #2477 incident shape: the same chain CONCATENATED instead of
+  // interleaved. Containment passes — nothing is dropped — which is exactly why
+  // the old gate reported `✓ chains intact` on a doubled chain.
+  const base = 'last-verified: "2026-08-02" # #100: a. Prior: #90: b.'
+  const concatenated = 'last-verified: "2026-08-02" # #100: a. Prior: #90: b. Prior: #100: a. Prior: #90: b.'
+  assert.equal(checkChain(base, concatenated).status, 'ok') // containment: green
+  const r = chainAnomalies(concatenated)
+  assert.equal(r.tooLarge, null)
+  assert.equal(r.duplicates.length, 2)
+  const byHead = Object.fromEntries(r.duplicates.map((d) => [d.head, d.count]))
+  assert.equal(byHead['#100'], 2)
+  assert.equal(byHead['#90'], 2)
+})
+
+test('a chain where an entry merely CITES another issue is NOT a duplicate', () => {
+  // The prose-citation subtlety: #1816's entry cites #1800, which also has its
+  // own chain entry. A naive split on every #NNN would count #1800 twice;
+  // split on the chain-word it is one cited ref and one entry.
+  const line =
+    'last-verified: "2026-08-22" # #1816: §4 reuses #1800\'s port mechanism. ' +
+    'Prior: #1805/#1760: a. Prior: #1800: b'
+  const r = chainAnomalies(line)
+  assert.equal(r.duplicates.length, 0)
+})
+
+test('two DIFFERENT entries for the same issue are NOT duplicates (text differs)', () => {
+  // #1508 appears twice on the real dev chain — once as "(actual fix)", once as
+  // a later re-verification. Different prose, so not a concatenation duplicate.
+  const line =
+    'last-verified: "2026-08-22" # #1508 (actual fix): x. Prior #1508: y'
+  const r = chainAnomalies(line)
+  assert.equal(r.duplicates.length, 0)
+})
+
+test('the size ceiling is a hard failure and reports bytes vs ceiling', () => {
+  const small = `last-verified: "2026-08-02" # ${'x'.repeat(100)}`
+  const big = `last-verified: "2026-08-02" # ${'x'.repeat(MAX_CHAIN_BYTES)}`
+  assert.equal(chainAnomalies(small).tooLarge, null)
+  const r = chainAnomalies(big)
+  assert.ok(r.tooLarge.bytes > MAX_CHAIN_BYTES) // prefix pushes the line over the ceiling
+  assert.equal(r.tooLarge.maxBytes, MAX_CHAIN_BYTES)
+})
+
+test('chain-reset does NOT excuse a chain over the size ceiling', () => {
+  // The escape hatch is for compaction (a DROP). A doubled line that stays over
+  // the ceiling is still a growth problem a reset does not fix.
+  const big = `last-verified: "2026-08-02" # chain-reset(#1843): compacted. ${'x'.repeat(MAX_CHAIN_BYTES)}`
+  assert.ok(chainAnomalies(big).tooLarge.bytes > MAX_CHAIN_BYTES)
 })
 
 test('only a dev → main promotion is exempt; a hotfix into main is not', () => {

@@ -740,7 +740,7 @@ async function prepareRuntimeForLocalMcp(
   // onProgress threaded through on purpose (#1593, the #1586 review lesson):
   // without it the install heartbeat is dead code in production.
   const prepare = deps.prepareLocalMcpRuntime ?? ((runtimeInput: PrepareLocalMcpRuntimeInput) =>
-    prepareLocalMcpRuntime(runtimeInput, { runCommand: deps.runCommand, onProgress: deps.onProgress }))
+    prepareLocalMcpRuntime(runtimeInput, { runCommand: deps.runCommand, onProgress: deps.onProgress, env: deps.env }))
   return prepare({
     credentialDirectory: input.credentialDirectory,
     identityPath: input.identityPath,
@@ -759,7 +759,7 @@ async function prepareSignerForRuntime(
     // install heartbeat was dead code in production and the console still
     // went silent for the whole cold install — the exact symptom the issue
     // set out to remove, at a longer timeout.
-    prepareSignerRuntime(runtimeInput, { runCommand: deps.runCommand, onProgress: deps.onProgress }))
+    prepareSignerRuntime(runtimeInput, { runCommand: deps.runCommand, onProgress: deps.onProgress, env: deps.env }))
   return prepare({
     credentialDirectory: input.credentialDirectory,
     signerPath: input.signerPath,

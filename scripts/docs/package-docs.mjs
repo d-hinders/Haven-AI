@@ -164,7 +164,14 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/connect/src/**'],
-    // #2423: re-verified and EDITED (the `--rekey` phase-two instruction only).
+    // #2424: EDITED, scope = two places. (a) A new closing section, "Installing
+    // an unpublished signer / SDK / MCP build", written against the
+    // runtime-spec override this branch adds (the three variables, the
+    // hash-keyed directory, the loud setup line, the sidecar/wrapper records,
+    // the `runtime_spec_override` doctor finding, the malformed-value refusal,
+    // and the no-override byte-for-byte guarantee); (b) one parenthetical in
+    // the `--doctor` paragraph pointing at it. Nothing else re-verified.
+    // Prior: #2423: re-verified and EDITED (the `--rekey` phase-two instruction only).
     // The page showed `npx @haven_ai/connect@alpha --rekey-finish` as the line
     // to run, which is right for a production install and wrong for any other
     // channel; since #2423 the connector derives that command from the npm

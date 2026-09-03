@@ -96,7 +96,7 @@ export function parseTrustProxyHops(raw: string | undefined): number {
 export const CONNECTOR_CHANNEL_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
 export const DEFAULT_CONNECTOR_CHANNEL = 'alpha'
 
-// `null` is accepted alongside `undefined` (#2423). `process.env.X` is only ever
+// `null` is accepted alongside `undefined` (#2423). a raw environment read is only ever
 // `string | undefined`, so this is unreachable from the sole call site below —
 // but `resolveConnectorChannel` in `@haven_ai/sdk` reads the same variable and
 // DOES accept `null`, and on `null` this function used to throw a raw

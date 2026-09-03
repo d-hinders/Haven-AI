@@ -276,12 +276,47 @@ describe('caveats and contract', () => {
     assert.equal(facts.refsSharedWithBuilder, false)
   })
 
-  test('omitting the builder is a caveat, not a pass on the distinctness check', () => {
+  test('omitting the builder is inconclusive, not a pass on the distinctness check', () => {
     const good = path.join(lab, 'reviewer-wt-nobuilder')
     git(mainRepo, 'worktree', 'add', '-q', '--detach', good, 'dev')
     const facts = collectFacts(good, { builder: null, baseCheck: false })
     const result = evaluate(facts)
+    assert.equal(idOf(result, 'distinct-from-builder').ok, null)
     assert.ok(result.caveats.some((c) => c.includes('was NOT verified')))
+  })
+
+  // Round-one review of this change found the hole these two close: the CLI's
+  // only way of omitting --builder fell back to `process.cwd()`, so running the
+  // guard from inside ANY unrelated git repo printed a clean, caveat-free
+  // `[PASS] distinct-from-builder` having never looked at the real builder.
+  // Every other CLI test passes --builder, so 23 green tests said nothing about
+  // it. These drive the CLI, which is where the defect lived.
+  test('the CLI without --builder does NOT invent one from cwd, even when cwd is a repo', () => {
+    const good = path.join(lab, 'reviewer-wt-cli-nobuilder')
+    const head = git(mainRepo, 'rev-parse', 'dev')
+    git(mainRepo, 'worktree', 'add', '-q', '--detach', good, 'dev')
+    const decoy = path.join(lab, 'decoy-repo')
+    execFileSync('git', ['clone', '-q', origin, decoy])
+
+    const stdout = execFileSync('node', [GUARD, good, '--no-base-check', '--expect-head', head], {
+      encoding: 'utf8',
+      cwd: decoy,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    assert.match(stdout, /\[–\] distinct-from-builder: not asserted; no builder tree was given/)
+    assert.doesNotMatch(stdout, /\[PASS\] distinct-from-builder/)
+    assert.doesNotMatch(stdout, new RegExp(decoy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    assert.match(stdout, /was NOT verified/)
+  })
+
+  test('a --builder path git cannot read says so, rather than reporting no builder', () => {
+    const good = path.join(lab, 'reviewer-wt-badbuilder')
+    git(mainRepo, 'worktree', 'add', '-q', '--detach', good, 'dev')
+    const notARepo = mkdtempSync(path.join(lab, 'plain-dir-'))
+    const facts = collectFacts(good, { builder: notARepo, baseCheck: false })
+    const result = evaluate(facts)
+    assert.equal(idOf(result, 'distinct-from-builder').ok, null)
+    assert.match(idOf(result, 'distinct-from-builder').detail, /git could not read a working tree there/)
   })
 
   test('the contract names a frozen SHA, never the ref name', () => {

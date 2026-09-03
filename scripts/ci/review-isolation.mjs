@@ -137,19 +137,28 @@ export function evaluate(facts) {
   )
 
   // 3. Not the builder's own tree. Prose told the reviewer to use a copy;
-  //    this asks whether it did.
-  const distinct = facts.builderToplevel === null || facts.builderToplevel !== facts.toplevel
-  add(
-    'distinct-from-builder',
-    distinct,
-    distinct
-      ? facts.builderToplevel === null
-        ? 'no builder tree given to compare against'
-        : `builder tree is ${facts.builderToplevel}`
-      : `review root IS the builder's live working tree (${facts.builderToplevel}) — a verdict from it describes a moving target`,
-  )
+  //    this asks whether it did. With no builder to compare against the answer
+  //    is INCONCLUSIVE, never a pass — the same shape as an unasserted head
+  //    below. A `[PASS] distinct-from-builder` that never saw the builder is a
+  //    check that cannot fail, which is the defect this file exists to remove
+  //    (found in review of this very change).
   if (facts.builderToplevel === null) {
-    caveats.push('No builder tree was supplied, so "the reviewer is not reading the live tree" was NOT verified.')
+    const why = facts.builderGiven
+      ? `--builder ${facts.builderGiven} was given but git could not read a working tree there`
+      : 'no builder tree was given'
+    add('distinct-from-builder', null, `not asserted; ${why}`)
+    caveats.push(
+      `"The reviewer is not reading the builder's live tree" was NOT verified — ${why}. Pass --builder <builder-tree> to check it.`,
+    )
+  } else {
+    const distinct = facts.builderToplevel !== facts.toplevel
+    add(
+      'distinct-from-builder',
+      distinct,
+      distinct
+        ? `builder tree is ${facts.builderToplevel}`
+        : `review root IS the builder's live working tree (${facts.builderToplevel}) — a verdict from it describes a moving target`,
+    )
   }
 
   // 4. HEAD binding, when the caller states what it expects.
@@ -237,6 +246,7 @@ export function collectFacts(rootArg, opts = {}) {
     gitDir: null,
     gitCommonDir: null,
     registeredWorktrees: [],
+    builderGiven: opts.builder ?? null,
     builderToplevel: null,
     head: null,
     expectHead: opts.expectHead ?? null,
@@ -264,10 +274,10 @@ export function collectFacts(rootArg, opts = {}) {
     .map((l) => l.slice('worktree '.length))
     .map((p) => (existsSync(p) ? realpathSync(p) : p))
 
-  // `builder: null` is an explicit "none given" and must NOT fall back to the
-  // process cwd — a fallback would silently compare the review root against
-  // whatever directory the guard happened to run in and call that a pass.
-  const builderArg = 'builder' in opts ? opts.builder : process.cwd()
+  // An absent or explicitly null `builder` means "none given", and must NOT
+  // fall back to the process cwd — that would silently compare the review root
+  // against whatever directory the guard happened to run in and call it a pass.
+  const builderArg = opts.builder ?? null
   if (builderArg) {
     const bt = gitOrNull(builderArg, ['rev-parse', '--path-format=absolute', '--show-toplevel'])
     if (bt) {
@@ -304,9 +314,11 @@ export function splitRef(ref) {
 }
 
 export function parseArgs(argv) {
-  // No `builder` key here on purpose: its absence means "default to cwd", and
-  // collectFacts distinguishes an absent key from an explicit null.
-  const opts = { root: null, base: DEFAULT_BASE, expectHead: null, baseCheck: true, json: false }
+  // `builder: null` by default. It is NOT filled from `process.cwd()`: doing so
+  // compares the review root against whatever directory the guard happened to
+  // run in and reports that as a pass, which is a false assurance on exactly
+  // the property this guard exists to establish.
+  const opts = { root: null, builder: null, base: DEFAULT_BASE, expectHead: null, baseCheck: true, json: false }
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i]
     if (a === '--builder') opts.builder = argv[++i]

@@ -347,6 +347,7 @@ It refuses a root that is not registered as a worktree at its own path (the `cp 
 Two limits, stated because a guard whose limits are unwritten gets over-trusted:
 
 - **It is not a sandbox.** Nothing here prevents a subagent `cd`-ing to the live worktree; this makes the claim checkable, not impossible to violate. Re-running the identical command after the pass returns, with the same `--expect-head`, is the evidence that the tree stood still — [#2415](https://github.com/d-hinders/Haven-AI/issues/2415) caught that drift by luck, and this is the command form of the same catch.
+- **`--builder` is what makes "not the builder's tree" a check at all.** Omit it and that one line reports `[–] not asserted` with a caveat rather than a pass — the guard will not substitute the directory it happens to be running in. Round-one review of the change that added this file found exactly that fallback and it was removed; pass the flag.
 - **A legitimate `git worktree add` shares its ref store with the parent**, so the builder fetching can advance `origin/dev` mid-pass. The guard says so in a caveat and hands out a frozen SHA precisely so a verdict never rests on a ref name. `git clone` is the stronger isolation where the cost is affordable.
 
 ## Scratchpad Naming ([#1801](https://github.com/d-hinders/Haven-AI/issues/1801))

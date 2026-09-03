@@ -20,7 +20,7 @@ import { describeDeletedCapture, formatDeletionReport } from '../../scripts/scre
 // @ts-ignore — plain .mjs
 import { ContentNotSettledError, ScrollShellError } from '../../scripts/full-page-capture.mjs'
 
-const at = { route: '/investor-briefing', viewport: 'desktop', file: '.screenshots/x-desktop.png' }
+const at = { route: '/how-it-works', viewport: 'desktop', file: '.screenshots/x-desktop.png' }
 
 describe('describeDeletedCapture', () => {
   it('records WHICH PNG was deleted, not just that something failed', () => {
@@ -32,7 +32,7 @@ describe('describeDeletedCapture', () => {
     expect(record.file, 'the deleted path must be on the record').toBe(
       '.screenshots/x-desktop.png',
     )
-    expect(record.route).toBe('/investor-briefing')
+    expect(record.route).toBe('/how-it-works')
     expect(record.text, 'the measurement in the message must survive the record').toMatch(
       /BLANK below the fold/,
     )

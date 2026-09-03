@@ -146,7 +146,7 @@ async function apiCall<T>(
 
 /**
  * Sign a hash with raw ECDSA (no Ethereum message prefix).
- * This matches what AllowanceModule's checkSignature expects.
+ * This matches the raw-hash shape the payment sign step returns.
  */
 function signHash(privateKey: string, hash: string): string {
   const signingKey = new ethers.SigningKey(privateKey)

@@ -1,8 +1,4 @@
 {
-  "packages/frontend/src/app/investor-briefing/page.tsx": {
-    "policy engine": 1,
-    "smart account": 1
-  },
   "packages/frontend/src/app/page.tsx": {
     "policy engine": 1
   }

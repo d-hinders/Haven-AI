@@ -6,7 +6,7 @@ import { TrailingArrow } from '../TrailingArrow'
  * The shared marketing trailing arrow (#1954).
  *
  * The page-level suites (`app/__tests__/page.test.tsx`,
- * `app/investor-briefing/__tests__/page.test.tsx`,
+ * the retired investor-briefing page test,
  * `BrandBandButton.test.tsx`) are what prove each SURFACE uses this and stays
  * hidden — that is where the real regression lives, because the failure mode
  * #1954 documents is a hand-copy nobody enumerated, which a component test

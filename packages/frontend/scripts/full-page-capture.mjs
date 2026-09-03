@@ -50,7 +50,7 @@
  * different situations arrived at the same sentence ("update SCROLL_SHELL_ROOT"),
  * and two of them were not about the selector at all:
  *
- *   1. a MARKETING route (`/`, `/investor-briefing`) has no app shell and needs
+ *   1. a MARKETING route (for example `/`) has no app shell and needs
  *      no un-clipping — every such capture failed and was deleted (#1939);
  *   2. an AUTHENTICATED route whose shell has not mounted YET, because
  *      `ProtectedRoute` renders `null` while auth resolves (#1936, #1943);
@@ -510,8 +510,8 @@ export const SHELL_MODE = {
   UNCLIPPED: 'unclipped',
   /**
    * The page has no scroll shell and does not need one — it scrolls natively
-   * and nothing is clipping content away. Marketing routes (`/`,
-   * `/investor-briefing`, …) live here: they are captured directly.
+   * and nothing is clipping content away. Marketing routes (for example `/`)
+   * live here: they are captured directly.
    */
   NO_SCROLL_SHELL: 'no-scroll-shell',
 }
@@ -610,8 +610,8 @@ async function probeShell(page, selector) {
  *
  * KNOWN LIMIT, stated rather than papered over: a marketing page that grew its
  * own scroller taller than a viewport (a long `overflow-y-auto` panel) would be
- * reported as a renamed scroll root. Neither `/` nor `/investor-briefing` has
- * one today — measured, both capture clean — and the failure is loud and names
+ * reported as a renamed scroll root. `/` has none today — measured, it captures
+ * clean — and the failure is loud and names
  * the offending box, which is the opposite of the silent deletion this change
  * exists to remove.
  */

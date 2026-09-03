@@ -309,6 +309,27 @@ describe('agent connection setup routes', () => {
     expect(body.setup_prompt).toContain('could not determine the agent runtime')
     expect(body.setup_prompt).toContain('Never invent a runtime name')
     expect(body.setup_prompt).toContain('return to Haven to approve the budget')
+    // #2483: the --json guidance is a SHOULD addressed to agents, and the
+    // approval relay is the first thing it owes the user. Both sentences are
+    // pinned literally because the backend is the source of truth for the
+    // prompt, and the field-test failure was the *wording* ("also supports")
+    // being read as optional — so the negative assertion below guards the
+    // regression directly. The prompt has no other legitimate use of that
+    // phrase.
+    expect(body.setup_prompt).toContain(
+      'If you are an AI agent running this command yourself rather than a human pasting it, you should append --json: the connector then emits one machine-readable, secret-free result object on stdout with progress on stderr, and returns promptly instead of blocking while it waits for the budget approval.',
+    )
+    expect(body.setup_prompt).toContain(
+      "When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.",
+    )
+    expect(body.setup_prompt).not.toContain('the connector also supports a --json mode')
+    // AC: the relay instruction and the connector-finished instruction stay
+    // separate prompt lines, never merged into one multi-action ask (#1542).
+    const promptLines = String(body.setup_prompt).split('\n')
+    const relayLineIndex = promptLines.findIndex((line: string) => line.startsWith('When a --json outcome reports'))
+    const finishedLineIndex = promptLines.findIndex((line: string) => line.startsWith('When the connector finishes'))
+    expect(relayLineIndex).toBeGreaterThanOrEqual(0)
+    expect(finishedLineIndex).toBeGreaterThan(relayLineIndex)
     expect(body.setup_prompt).not.toContain('agent rules')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
 

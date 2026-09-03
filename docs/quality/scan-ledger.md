@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - .agents/skills/quality-scan/SKILL.md
-last-verified: "2026-08-19" # #1882: front-matter only — the `last-verified` chain had DROPPED `#1442`. A whole-entry silent replacement, not a compression: `be5bf280` (PR #1560, 2026-08-18) overwrote the 2026-08-14 run's entry with the 2026-08-18 run's. Restored verbatim from `be5bf280^` at the chain tail. Nothing in the body was re-verified in this pass. #1602: entry conventions added (measurement blocks `command → number`, mandatory `Probed clean:` baselines); dispositions now appended by ship-next's closeout when a scan-born epic closes. Prior: 2026-08-18 full-repo run appended (epic #1554) Prior: 2026-08-14 full-repo run appended: the API-contract finding (epic #1442, approved); prior real-DB finding re-checked and excluded as improved
+last-verified: "2026-09-03" # #2501: header only — the entry conventions gain the wave-dimension coverage bullet (`Probed clean:` names every Method § *Wave dimensions* block by number, so an untaken block is distinguishable from a clean one). No body entry re-verified; nothing appended. Prior: #1882: front-matter only — the `last-verified` chain had DROPPED `#1442`. A whole-entry silent replacement, not a compression: `be5bf280` (PR #1560, 2026-08-18) overwrote the 2026-08-14 run's entry with the 2026-08-18 run's. Restored verbatim from `be5bf280^` at the chain tail. Nothing in the body was re-verified in this pass. #1602: entry conventions added (measurement blocks `command → number`, mandatory `Probed clean:` baselines); dispositions now appended by ship-next's closeout when a scan-born epic closes. Prior: 2026-08-18 full-repo run appended (epic #1554) Prior: 2026-08-14 full-repo run appended: the API-contract finding (epic #1442, approved); prior real-DB finding re-checked and excluded as improved
 ---
 
 # Quality-Scan Ledger
@@ -29,6 +29,12 @@ entries predate them and stand as written):
   the dated disposition line in the same pass — `ship-next`'s closeout names
   this in its ready-to-close report, so the update is owned by the process,
   not by memory.
+- **Wave-dimension coverage (#2501, binding for entries from 2026-09-03
+  on):** `Probed clean:` names each of the seven blocks in the skill's
+  *Method* § *Wave dimensions* by number — `block N → command → number` —
+  including a block whose number became a finding. A block missing from the
+  section means the run did not take it; a reader must never have to guess
+  whether "no finding" meant "looked" or "did not look".
 
 ---
 

@@ -689,10 +689,9 @@ Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
   yet, which is the same hole as an empty rollup.
 - **A wait loop's terminal condition is the ruleset's named list, not a count, and
   cannot be satisfied by an empty rollup.** Before the first run is created,
-  `statusCheckRollup` is empty — "nothing in progress, nothing failed" (a
-  coordinator wait loop on 3 Sep read 9 of 23 checks as done because it had no floor
-  at all). A count is the wrong floor too: on PR #2503, 6 of the 15 required
-  contexts concluded `SUCCESS` and 9 `SKIPPED` (surface-gated behind *Detect changed
+  `statusCheckRollup` is empty, and an empty list satisfies both "nothing in
+  progress" and "nothing failed". A count is the wrong floor too: on PR #2503, 6 of
+  the 15 required contexts concluded `SUCCESS` and 9 `SKIPPED` (surface-gated behind *Detect changed
   surfaces*), so a predicate that accepts only `SUCCESS` reports 6/15 forever. The
   expected set is the ruleset's, read live and documented in
   [`autonomous-pr-loop.md` § One-time GitHub setup](../../../docs/contributing/autonomous-pr-loop.md#one-time-github-setup-required)

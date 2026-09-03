@@ -343,12 +343,21 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         apiKeyPrefix = request.body.api_key_prefix
         const mcpServerName = normalizeMcpServerName(request.body.mcp_server_name)
         const connectorContext = sanitizeConnectorContext(request.body.connector_context)
+        // The browser-hosted fallback creates the credential in the browser and
+        // hands it to the user to save in their agent workspace. It cannot run
+        // the local connector, so it will never PATCH ordinary runtime probes.
+        // This marker is presentation state only: the owner still must sign the
+        // existing budget delegation before the pending agent becomes active.
+        const manualCredentialFallback =
+          request.body.connector_version === 'browser-manual-fallback' &&
+          request.body.install_capabilities?.can_write_runtime_config === false
         const initialInstallStatus = {
           hosted_mcp_configured: false,
           local_signer_configured: false,
           local_mcp_configured: false,
           local_mcp_acknowledged: false,
           restart_required: Boolean(request.body.install_capabilities?.restart_required),
+          ...(manualCredentialFallback ? { manual_credential_fallback: true } : {}),
         }
         setupId = setup.id
         issuePassportForSetup = setup.issue_passport === true

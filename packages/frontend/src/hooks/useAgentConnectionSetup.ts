@@ -116,15 +116,11 @@ export function resolveConnectStepView({
 }): ConnectStepView {
   if (!visibleStatus) return null
   if (visibleStatus === 'awaiting_connection') return { kind: 'waiting_for_connector' }
-  const runtimeConfigured = runtimeIsConfigured(installStatus)
-  const installErrored = Boolean(installStatus?.error_code)
-  if (visibleStatus === 'connected_local' && !runtimeConfigured && !installErrored) {
+  const approvalReady = installIsReadyForApproval(installStatus)
+  if (visibleStatus === 'connected_local' && !approvalReady) {
     return { kind: 'finalizing_local' }
   }
-  const approvalReady =
-    (visibleStatus === 'connected_local' && (runtimeConfigured || installErrored)) ||
-    visibleStatus === 'awaiting_wallet_approval'
-  if (approvalReady) {
+  if ((visibleStatus === 'connected_local' && approvalReady) || visibleStatus === 'awaiting_wallet_approval') {
     // agent_id lands with the register step; polling is a beat behind at most.
     // Never route the user away for it.
     return agentId ? { kind: 'delegation_approval', agentId } : { kind: 'finalizing_local' }
@@ -145,9 +141,9 @@ export function resolveConnectStepView({
 
 // ── Pure status helpers ────────────────────────────────────────────
 
-export function headerSubtitle(step: SetupStep, status: string | undefined, runtimeConfigured?: boolean): string {
+export function headerSubtitle(step: SetupStep, status: string | undefined, approvalReady?: boolean): string {
   if (step === 'connect') {
-    if (status === 'connected_local' && !runtimeConfigured) return 'Finishing local setup'
+    if (status === 'connected_local' && !approvalReady) return 'Finishing local setup'
     if (status === 'connected_local' || status === 'awaiting_wallet_approval') return 'Approve the agent budget'
     if (status === 'approval_in_progress' || status === 'proposed') return 'Waiting for approval to land'
     // #1394: NOT "Agent rules approved" — the shell ticker already reads
@@ -177,6 +173,18 @@ export function runtimeIsConfigured(
   if (!install) return false
   if (install.local_mcp_configured && install.local_mcp_acknowledged) return true
   return Boolean(install.hosted_mcp_configured && install.local_signer_configured)
+}
+
+/**
+ * A manual credential is deliberately not reported as an automatically
+ * configured runtime. It does, however, have a verified public signing address
+ * and no connector process that can ever report additional setup state, so the
+ * owner can continue to the same budget-approval signature after saving it.
+ */
+export function installIsReadyForApproval(
+  install: AgentConnectionSetupStatusResponse['install_status'] | undefined,
+): boolean {
+  return Boolean(install?.manual_credential_fallback || install?.error_code || runtimeIsConfigured(install))
 }
 
 // ── Manual credential helpers ──────────────────────────────────────
@@ -631,7 +639,7 @@ export function useAgentConnectionSetup({
     setStep,
     setupStepCount: setupSteps.length,
     currentStepIndex,
-    headerSubtitleText: headerSubtitle(step, visibleStatus, runtimeIsConfigured(setupStatus?.install_status)),
+    headerSubtitleText: headerSubtitle(step, visibleStatus, installIsReadyForApproval(setupStatus?.install_status)),
     busy: creating || manualCreating,
     handleClose,
     // Details step

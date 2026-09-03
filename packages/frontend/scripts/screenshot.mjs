@@ -2533,6 +2533,36 @@ export const SCENARIOS = {
           ].join('\n'),
         }
       }
+      // #2482: the server-credential path now CREATES in-capture (it is one
+      // click to generate, no acknowledgement to arm), so this scenario needs
+      // the resolve/register round-trip it performs.
+      if (apiPath === '/agent-connection-setups/resolve') {
+        return {
+          agent: { name: 'Research agent', description: null },
+          haven_wallet: {
+            id: FIXTURE_SAFE.id,
+            name: FIXTURE_SAFE.name,
+            address: FIXTURE_SAFE.safe_address,
+            chain_id: FIXTURE_SAFE.chain_id,
+            network: 'Base Sepolia',
+          },
+          agent_budget: [],
+          challenge: {
+            id: 'challenge-capture-1',
+            message: 'Sign to prove control of this delegate address',
+          },
+          hosted_mcp_url: 'https://mcp.haven.example',
+        }
+      }
+      if (apiPath === '/agent-connection-setups/register') {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          agent_id: 'agent-capture-1',
+          status: 'connected_local',
+          delegate_address: '0x3333333333333333333333333333333333333333',
+          hosted_mcp_url: 'https://mcp.haven.example',
+        }
+      }
       if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
         return {
           setup_id: CONNECT_SETUP_ID,
@@ -2612,23 +2642,19 @@ export const SCENARIOS = {
       await dialog.getByText('Haven has not received a connection yet').waitFor({ timeout: 15_000 })
       await shoot(dialog, 'waiting-recovery')
 
-      // The manual-credential path, revealed. It holds the most
-      // safety-relevant string in the flow — the confirmation gating a
-      // one-time private signing key — and it is behind two disclosures, so
-      // it is invisible to every other capture. Revealing it shows the
-      // warning and its checkbox; it creates nothing (that needs the button
-      // below it, which is deliberately NOT clicked).
-      // #1391 folded both fallbacks under one recessive disclosure, and kept
-      // the manual path nested one level deeper — so the outer one has to be
-      // opened first. The previous selector timed out rather than silently
-      // shooting the wrong screen, which is the guard working.
-      await dialog.getByText('Having trouble connecting?').click()
-      await dialog.getByText('Manual credential fallback').click()
-      const revealManual = dialog.getByRole('button', { name: /show the manual path/i })
-      await revealManual.waitFor({ timeout: 10_000 })
-      await revealManual.click()
-      await dialog.getByText(/one-time private signing key/i).first().waitFor({ timeout: 10_000 })
-      await shoot(dialog, 'manual-credential-warning')
+      // #2482: the server-side credential path now lives in its own top-level
+      // disclosure directly under the setup prompt — one click from the
+      // connect step, no reveal button, no warning panel, no checkbox. It is
+      // the most safety-relevant surface in the flow (it hands out the
+      // one-time private signing key), so it is captured twice: BEFORE
+      // generation (intro + the single Generate action) and AFTER, where the
+      // .env-first output and the safety line beside the key render.
+      await dialog.getByText('Running in a server or hosted backend?').click()
+      await dialog.getByText(/shown once/i).first().waitFor({ timeout: 10_000 })
+      await shoot(dialog, 'server-credential-intro')
+      await dialog.getByRole('button', { name: 'Generate credentials' }).click()
+      await dialog.getByText('HAVEN_API_KEY=').waitFor({ timeout: 10_000 })
+      await shoot(dialog, 'server-credential-result')
     },
   },
   'connect-agent-approve': {

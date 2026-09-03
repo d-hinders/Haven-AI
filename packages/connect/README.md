@@ -478,3 +478,11 @@ To return to the pinned manifest: unset the variables and run
 `--doctor --repair --runtime <runtime>` (or re-run setup). The override
 directories live under `~/.haven` like every other runtime directory, so the
 same reset that removes `~/.haven` removes them.
+
+That is the loop for a build that has **not** merged. For one that has — a
+`@dev` snapshot of all five packages, published from every package-touching
+push to `dev` — and for the owner steps that make the dev dashboard hand out
+`npx -y @haven_ai/connect@dev …` in the first place, see the repository runbook
+[`docs/operations/package-dev-channel.md`](https://github.com/d-hinders/Haven-AI/blob/dev/docs/operations/package-dev-channel.md).
+The two compose: `@dev` picks the connector, these variables pick what it
+installs.

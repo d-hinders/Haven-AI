@@ -132,6 +132,8 @@ The shape and both halves of the check live in `scripts/release-snapshot-version
 
 The check here is the third of three enforcement points for one invariant: **a snapshot must never be able to land on `alpha` or `latest`, and the `main` path must never publish a `0.0.0-dev.*` version.** The other two are in `publish.yml` — a ref/channel mismatch refusal, and an assertion immediately before every publish. See that file's header comment; it is written once there rather than restated here.
 
+The developer loop that *consumes* a snapshot — merge, wait for the run, poll `npm view` past the registry's replication lag, install against the dev backend, `--doctor` — and the owner steps that make the dev dashboard hand out `@dev` are in [`docs/operations/package-dev-channel.md`](../docs/operations/package-dev-channel.md). This section stays about the script.
+
 ### What the script does (in order)
 
 1. **Read** current version from `packages/sdk/package.json`.

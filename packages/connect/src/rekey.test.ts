@@ -590,6 +590,41 @@ describe('the config rewrite reaches the REAL writer (#1700)', () => {
     messages: [] as string[],
   })
 
+  it('#2424: a runtime-spec override in deps.env reaches the REAL signer reinstall and is printed', async () => {
+    // No prepareSigner fake: the point is that finishRekey threads `env` into
+    // prepareSignerRuntime, so a re-key under HAVEN_SIGNER_SPEC reinstalls the
+    // same build setup did instead of quietly restoring the registry pin.
+    const { baseDir } = await startedFor()
+    const commands: Array<{ command: string; args: string[] }> = []
+    const { mkdir } = await import('node:fs/promises')
+    const result = await finishRekey(
+      { credentialsDir: baseDir, agentId: AGENT_ID, newApiKey: NEW_API_KEY, runtime: 'claude-code', homeDir: baseDir },
+      {
+        createApi: () => apiReturning(identity({ delegate_address: NEW_DELEGATE })),
+        env: { HAVEN_SIGNER_SPEC: 'file:/abs/path/packages/signer' },
+        runCommand: (async (command: string, args: string[]) => {
+          commands.push({ command, args })
+          if (command !== 'npm') return
+          const prefix = args[args.indexOf('--prefix') + 1]
+          const cliDir = join(prefix, 'node_modules', '@haven_ai', 'signer', 'dist')
+          await mkdir(cliDir, { recursive: true })
+          await writeFile(join(cliDir, 'cli.js'), '// cli')
+          for (const pkg of ['signer', 'sdk']) {
+            const pkgDir = join(prefix, 'node_modules', '@haven_ai', pkg)
+            await mkdir(pkgDir, { recursive: true })
+            await writeFile(join(pkgDir, 'package.json'), JSON.stringify({ version: '0.0.0-local' }))
+          }
+        }) as never,
+      },
+    )
+    expect(result.configRewritten).toBe(true)
+    const npm = commands.find((c) => c.command === 'npm')
+    expect(npm?.args).toContain('file:/abs/path/packages/signer')
+    expect(npm?.args[npm.args.indexOf('--prefix') + 1]).toContain(join('.haven', 'signer-runtime', 'override-'))
+    expect(result.messages.join('\n')).toContain('RUNTIME SPEC OVERRIDE ACTIVE')
+    expect(result.messages.join('\n')).toContain('HAVEN_SIGNER_SPEC=file:/abs/path/packages/signer')
+  })
+
   it('configures Claude Code through `claude mcp add-json`, carrying the NEW key', async () => {
     const { baseDir } = await startedFor()
     const commands: Array<{ command: string; args: string[] }> = []

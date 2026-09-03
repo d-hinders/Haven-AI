@@ -44,6 +44,7 @@ import { createConnectApiClient, type AgentIdentity, type ConnectApiClient } fro
 import { connectorRerunCommand } from '@haven_ai/sdk'
 import { writeHostedRuntimeConfig } from './runtime-install.js'
 import { prepareSignerRuntime } from './signer-runtime.js'
+import { describeRuntimeSpecOverride } from './runtime-spec-override.js'
 import { generateDelegateKey } from './key.js'
 import { redactSecrets } from './redact.js'
 import { REKEY_FINISH_NEEDS_API_KEY } from './rekey-messages.js'
@@ -80,6 +81,8 @@ export interface RekeyDeps {
   writeConfig?: typeof writeHostedRuntimeConfig
   prepareSigner?: typeof prepareSignerRuntime
   runCommand?: Parameters<typeof prepareSignerRuntime>[1] extends { runCommand?: infer R } ? R : never
+  /** #2424: the runtime-spec override env, threaded so a re-key reinstalls the same build setup did. */
+  env?: NodeJS.ProcessEnv
 }
 
 export interface RekeyStartResult {
@@ -261,7 +264,7 @@ export async function finishRekey(
         signerPath: `${stored.directory}/signer.json`,
         homeDir: options.homeDir,
       },
-      { runCommand: deps.runCommand },
+      { runCommand: deps.runCommand, env: deps.env },
     )
     // `writeHostedRuntimeConfig`, NOT `writeRuntimeConfig`. The latter has no
     // `claude-code` case — that runtime is configured by shelling out to
@@ -282,6 +285,15 @@ export async function finishRekey(
       { command: prepared.command, args: prepared.args },
     )
     configRewritten = result.hostedConfigured
+    // #2424: a re-key reinstalls the signer runtime, so the override is
+    // printed here exactly as setup prints it — a developer must not learn
+    // from a 401-free but wrong-build agent that the variable was still set.
+    if (prepared.runtimeSpecOverride) {
+      messages.push(
+        `  Signer runtime:   RUNTIME SPEC OVERRIDE ACTIVE — ${describeRuntimeSpecOverride(prepared.runtimeSpecOverride.specs)} ` +
+          `(NOT the pinned manifest; installed into ${prepared.runtimeDirectory})`,
+      )
+    }
     messages.push(`  Config:           ${result.target}`)
     messages.push(...result.messages.map((line) => `  ${line}`))
     if (!configRewritten) {

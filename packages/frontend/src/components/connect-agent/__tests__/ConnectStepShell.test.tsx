@@ -12,7 +12,7 @@ import { WaitingForConnector } from '../WaitingForConnector'
 import { TerminalSetupState } from '../SetupStates'
 import { FinalizingLocalSetup } from '../SetupStates'
 import { ConnectStepShell } from '../ConnectStepShell'
-import type { CreateSetupResponse } from '@/hooks/useAgentConnectionSetup'
+import type { CreateSetupResponse, ManualCredential } from '@/hooks/useAgentConnectionSetup'
 import type { AwaitingConnectionStage } from '@/hooks/useAgentConnectionSetupStatus'
 
 const EXPIRES_AT = '2099-01-01T00:00:00.000Z'
@@ -38,10 +38,6 @@ function renderWaiting(
       runtime="claude-code"
       copied={null}
       onCopy={() => {}}
-      manualPathRevealed={false}
-      onManualPathRevealedChange={() => {}}
-      manualFallbackConfirmed={false}
-      onManualFallbackConfirmedChange={() => {}}
       manualCredential={null}
       manualCredentialAcknowledged={false}
       manualCreating={false}
@@ -106,21 +102,152 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
     expect(queryByRole('button', { name: 'Cancel this setup' })).toBeNull()
   })
 
-  it('keeps the manual-credential path nested INSIDE the trouble disclosure (#1391)', () => {
-    // jsdom has no layout engine, so a closed <details> does not hide its
-    // children: every existing manual-credential test clicks straight into
-    // "Manual credential fallback" and would pass even if these two
-    // disclosures were siblings. This asserts the ancestry directly, so an
-    // accidental flattening — which would put the private-key path back at
-    // the same depth as the harmless one — fails here rather than silently.
+describe('server-side credential path (#2482)', () => {
+  // #1391 deliberately nested the manual path one disclosure deeper than the
+  // harmless one: "the dangerous route stays one click deeper than the
+  // harmless one" was written when the path was only ever a fallback. #2482
+  // lifts it to its own top-level disclosure — a server/hosted-backend
+  // integration is a supported path, not a confession — while keeping the
+  // setup prompt visually primary. jsdom has no layout engine, so a closed
+  // <details> does not hide its children (DOM order is what is asserted here).
+
+  const MANUAL = {
+    apiKey: 'sk_agent_fixture',
+    delegatePrivateKey:
+      '0x1111111111111111111111111111111111111111111111111111111111111111',
+    delegateAddress: '0x2222222222222222222222222222222222222222',
+    prompt: [
+      'Manual Haven credential for Research Agent',
+      'HAVEN_API_KEY=sk_agent_fixture',
+      'HAVEN_DELEGATE_KEY=0x1111111111111111111111111111111111111111111111111111111111111111',
+      'HAVEN_DELEGATE_ADDRESS=0x2222222222222222222222222222222222222222',
+      'HAVEN_API_URL=https://api.haven.example',
+      'HAVEN_MCP_URL=https://mcp.haven.example',
+    ].join('\n'),
+    env: [
+      'HAVEN_API_KEY=sk_agent_fixture',
+      'HAVEN_DELEGATE_KEY=0x1111111111111111111111111111111111111111111111111111111111111111',
+      'HAVEN_DELEGATE_ADDRESS=0x2222222222222222222222222222222222222222',
+      'HAVEN_API_URL=https://api.haven.example',
+      'HAVEN_MCP_URL=https://mcp.haven.example',
+    ].join('\n'),
+  } satisfies ManualCredential
+
+  function renderWaitingWithManual() {
+    return (
+      <WaitingForConnector
+        setup={SETUP}
+        runtime="claude-code"
+        copied={null}
+        onCopy={() => {}}
+        manualCredential={MANUAL}
+        manualCredentialAcknowledged={false}
+        manualCreating={false}
+        manualError={null}
+        onCreateManualCredential={() => {}}
+        onContinueAfterManualCredential={() => {}}
+        loading={false}
+        error={null}
+        connectionStage="starting"
+        expiresAt={EXPIRES_AT}
+        onCancel={() => {}}
+      />
+    )
+  }
+
+  function serverDisclosure(container: HTMLElement) {
+    const found = Array.from(container.querySelectorAll('details')).find((d) =>
+      d.textContent?.includes('Running in a server or hosted backend?'),
+    )
+    expect(found).toBeDefined()
+    return found!
+  }
+
+  it('puts the credential path in its own TOP-LEVEL disclosure labeled for a backend integration, not the trouble disclosure (#2482)', () => {
     const { container } = render(renderWaiting(false, 'starting'))
-    const manual = container.querySelector('details details')
-    expect(manual).not.toBeNull()
-    expect(manual?.textContent).toContain('Manual credential fallback')
-    expect(manual?.closest('details:not(details details)')?.textContent).toContain(
-      'Having trouble connecting?',
+    const disclosures = Array.from(container.querySelectorAll('details'))
+    // Two sibling top-level disclosures, nothing nested at all.
+    expect(disclosures).toHaveLength(2)
+    const server = disclosures.find((d) =>
+      d.textContent?.includes('Running in a server or hosted backend?'),
+    )
+    const trouble = disclosures.find((d) => d.textContent?.includes('Having trouble connecting?'))
+    expect(server).toBeDefined()
+    expect(trouble).toBeDefined()
+    // The flattening the old nesting test pinned is now REQUIRED: no details
+    // may be nested inside another.
+    for (const d of disclosures) expect(d.querySelector('details')).toBeNull()
+    // Server disclosure sits first — directly under the setup prompt — and
+    // the trouble disclosure no longer carries the manual path.
+    expect(disclosures[0]).toBe(server)
+    expect(disclosures[1]).toBe(trouble)
+    expect(trouble!.textContent).not.toContain('Generate credentials')
+    expect(server!.textContent).toContain('Generate credentials')
+    // The label names an integration context, not a connection problem.
+    expect(server!.textContent).toMatch(/server|hosted backend/i)
+  })
+
+  it('keeps the setup prompt before the server disclosure so the prompt keeps primacy (#2482)', () => {
+    const { container } = render(renderWaiting(false, 'starting'))
+    const html = container.innerHTML
+    expect(html.indexOf('>Setup prompt<')).toBeGreaterThanOrEqual(0)
+    expect(html.indexOf('Running in a server or hosted backend?')).toBeGreaterThan(
+      html.indexOf('>Setup prompt<'),
     )
   })
+
+  it('offers the generate action directly in the open disclosure — one click, no reveal button, no warning panel, no acknowledgement gate (#2482)', () => {
+    const { container, queryByRole } = render(renderWaiting(false, 'starting'))
+    const server = serverDisclosure(container)
+    const buttons = server.querySelectorAll('button')
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0].textContent).toBe('Generate credentials')
+    // The gates are gone, not hidden: no checkbox, no warning headline, no
+    // "I really can't run the connector" button anywhere on the screen.
+    expect(queryByRole('checkbox')).toBeNull()
+    expect(container.textContent).not.toContain('Before creating a manual credential')
+    expect(container.textContent).not.toContain("I really can't run the connector")
+    // The intro says what is about to be issued and that the key shows once.
+    expect(server.textContent).toContain('shown once')
+  })
+
+  it('shows the .env block by default with the prose prompt behind the second format, same five values in both (#2482)', () => {
+    const { container, getByRole } = render(renderWaitingWithManual())
+    const server = serverDisclosure(container)
+    const FIVE = [
+      'HAVEN_API_KEY=',
+      'HAVEN_DELEGATE_KEY=',
+      'HAVEN_DELEGATE_ADDRESS=',
+      'HAVEN_API_URL=',
+      'HAVEN_MCP_URL=',
+    ]
+    // Default format is .env with the prose prompt available as the switch.
+    const envTab = getByRole('button', { name: '.env' })
+    expect(envTab.getAttribute('aria-pressed')).toBe('true')
+    for (const key of FIVE) expect(server.textContent).toContain(key)
+    expect(getByRole('button', { name: 'Agent workspace prompt' })).toBeDefined()
+
+    // Switching to the prose format keeps all five values — no info dropped.
+    fireEvent.click(getByRole('button', { name: 'Agent workspace prompt' }))
+    expect(envTab.getAttribute('aria-pressed')).toBe('false')
+    for (const key of FIVE) expect(server.textContent).toContain(key)
+    expect(server.textContent).toContain('Manual Haven credential for Research Agent')
+  })
+
+  it('states key safety at the RESULT, beside the key, not before generation (#2482)', () => {
+    const { container } = render(renderWaitingWithManual())
+    const server = serverDisclosure(container)
+    expect(server.textContent).toContain(
+      'The signing key is shown once. If it leaks, replace it from the agent page.',
+    )
+    // The old pre-generation warning panel and its acknowledgement
+    // checkbox are absent from the result state too.
+    expect(container.textContent).not.toContain('Before creating a manual credential')
+    expect(container.querySelector('[type="checkbox"]')).toBeNull()
+    // The flow still offers the forward action once the credential is saved.
+    expect(server.textContent).toContain('Continue to wallet approval')
+  })
+})
 
   it('offers exactly one cancel at every stage (#1391)', () => {
     // starting/slow: the quiet footer link. recovery: the warning block's own
@@ -151,10 +278,6 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
       runtime: 'claude-code',
       copied: null,
       onCopy,
-      manualPathRevealed: false,
-      onManualPathRevealedChange: () => {},
-      manualFallbackConfirmed: false,
-      onManualFallbackConfirmedChange: () => {},
       manualCredential: null,
       manualCredentialAcknowledged: false,
       manualCreating: false,

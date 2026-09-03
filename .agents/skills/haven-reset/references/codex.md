@@ -36,7 +36,9 @@ Haven's connector writes Codex MCP configuration to `~/.codex/config.toml`. Curr
    **correct, not residue**: `SKILL.md` *Required Sequence* step 4 preserves it
    deliberately so a stale long-lived host can name the agent it is parked on.
    `npx @haven_ai/connect@alpha --doctor --runtime codex` reports such a
-   directory as `retired`; that is a clean result. Do **not** delete `~/.haven`
+   directory as `retired`; that is a clean result (any published connector gives
+   this inventory — the doctor reads local files, and its one channel-sensitive
+   check, `signer_runtime`, has no install left to pass on after a reset). Do **not** delete `~/.haven`
    outright to make this check read "absent" — that destroys the diagnosis this
    reset exists to leave behind ([#2175](https://github.com/d-hinders/Haven-AI/issues/2175)).
    Full absence is correct only after the user confirms every long-lived host

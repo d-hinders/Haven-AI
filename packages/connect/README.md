@@ -377,7 +377,9 @@ npx @haven_ai/connect@alpha --doctor --repair --runtime codex-desktop
 ```
 
 `--doctor` is read-only and needs NO setup token: it checks the runtime config,
-the agent credential files, the pinned signer runtime install, the hosted MCP
+the agent credential files, the pinned signer runtime install (and, since
+#2424, whether that install was made under a local runtime-spec override —
+see the last section of this file), the hosted MCP
 (authorized `tools/list`), and starts the local signer for a real stdio
 handshake — reporting its advertised compat versions. Every failing check
 prints one concrete repair action; the exit code is non-zero on any failure.
@@ -404,3 +406,75 @@ which.
 `--repair` re-runs what setup already owns — reinstall the pinned signer
 runtime, rewrite the wrapper + sidecar, and re-write the runtime config from
 the STORED credentials. It never touches keys and never needs a new token.
+
+## Installing an unpublished signer / SDK / MCP build (`HAVEN_SIGNER_SPEC`, #2424)
+
+Setup installs the connector's **pinned** siblings — `@haven_ai/signer@<pin>`
+and `@haven_ai/sdk@<pin>` into `~/.haven/signer-runtime/<pin>`, and for
+`--local` also `@haven_ai/mcp@<pin>` into `~/.haven/mcp-runtime/<pin>`. That
+is right for every user and wrong for the one developer iterating on the
+signer or SDK, who otherwise has to publish to find out whether a change works
+end to end. Three environment variables name a different spec:
+
+| Variable | Replaces | Read by |
+|---|---|---|
+| `HAVEN_SIGNER_SPEC` | `@haven_ai/signer@<pin>` | the signer runtime (default topology) |
+| `HAVEN_SDK_SPEC` | `@haven_ai/sdk@<pin>` | both runtimes — each installs the SDK |
+| `HAVEN_MCP_SPEC` | `@haven_ai/mcp@<pin>` | the `--local` MCP runtime |
+
+A value is anything `npm install` accepts for that package: a checkout
+(`file:/abs/path/to/packages/signer`), a tarball from `npm pack`
+(`/abs/haven_ai-signer-0.0.0.tgz`), or an explicit version
+(`@haven_ai/signer@<version>`). Set it in the shell that runs the setup
+command — the command itself is unchanged:
+
+```bash
+HAVEN_SIGNER_SPEC=file:$PWD/packages/signer npx @haven_ai/connect@alpha --setup <token> --runtime claude-code
+```
+
+Environment variables rather than a flag, deliberately: the install runs from
+three entry points (`--setup`, `--doctor --repair`, `--rekey-finish`) and all
+three honour the same variables, so a re-key cannot silently reinstall the
+registry build; and the setup command is minted by the dashboard and pasted
+verbatim, often by an agent, so the override sits beside it instead of being
+spliced into a line the developer did not write.
+
+**What an active override changes:**
+
+- The runtime directory is `~/.haven/signer-runtime/override-<hash>` (or
+  `mcp-runtime/override-<hash>`), keyed by a short hash of the **resolved**
+  specs — overridden and pinned alike — so it can never poison the
+  version-named directory the normal path reuses, and a pinned-sibling bump
+  gets a fresh one.
+- The install is **never reused** from an earlier run: a rebuilt `file:`
+  package must not be shadowed by a cache hit.
+- Setup prints `RUNTIME SPEC OVERRIDE ACTIVE …` first, naming each variable
+  and the pin it replaced; `--rekey-finish` prints the same line.
+- `signer-runtime.json` / `mcp-runtime.json` record the override under
+  `runtime_spec_override`, and their `*_version` fields hold what npm actually
+  installed rather than the manifest pins.
+- The wrapper the agent client launches carries a
+  `// HAVEN RUNTIME SPEC OVERRIDE (#2424): …` comment.
+- `--doctor` reports a failing `runtime_spec_override` check — "runtime spec
+  overridden — not the pinned manifest" — whenever the sidecar says the
+  install ran under one **or** a `HAVEN_*_SPEC` variable is set in the shell
+  running the doctor (a `--repair` from that shell would install it). The
+  override is legitimate; the finding is its record. Under an override the
+  `signer_runtime` check compares the directory against the sidecar's own
+  record, not the manifest.
+
+**What it never changes:** the post-setup handshake probe still requires
+every tool in the manifest's `requiredTools` / `requiredSignerTools`, so a
+local build that dropped a tool fails setup exactly like a bad registry
+version would. A set-but-malformed value — empty, containing whitespace or a
+shell metacharacter — is refused **before** npm runs and before anything is
+written, with a message naming the variable. With no variable set, nothing
+here runs: the install arguments, directory, sidecar and wrapper are
+byte-for-byte what they were before the override existed (pinned by exact
+characterization tests in `signer-runtime.test.ts` and
+`local-mcp-runtime.test.ts`).
+
+To return to the pinned manifest: unset the variables and run
+`--doctor --repair --runtime <runtime>` (or re-run setup). The override
+directories live under `~/.haven` like every other runtime directory, so the
+same reset that removes `~/.haven` removes them.

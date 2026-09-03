@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { assertSupportedNodeVersion, prepareLocalMcpRuntime } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST, mcpPackageSpec, sdkPackageSpec } from './runtime-manifest.js'
+import { runtimeSpecOverrideDirectoryKey } from './runtime-spec-override.js'
 
 // Use the manifest's pinned MCP version everywhere we mock the install layout,
 // so a version bump in runtime-manifest.ts (or in @haven_ai/mcp's MCP_VERSION
@@ -167,3 +168,89 @@ async function writePackage(path: string, version: string): Promise<void> {
   await mkdir(join(path, '..'), { recursive: true })
   await writeFile(path, `${JSON.stringify({ version })}\n`, 'utf8')
 }
+
+// ── #2424: local runtime-spec override on the --local topology ─────────────
+
+function mcpLayoutAtPrefix(mcpVersion: string, sdkVersion: string) {
+  return vi.fn(async (_command: string, args: string[]) => {
+    const prefix = args[args.indexOf('--prefix') + 1]!
+    const cliPath = join(prefix, 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js')
+    await mkdir(join(cliPath, '..'), { recursive: true })
+    await writeFile(cliPath, 'console.log("mcp")\n', 'utf8')
+    await writePackage(join(prefix, 'node_modules', '@haven_ai', 'mcp', 'package.json'), mcpVersion)
+    await writePackage(join(prefix, 'node_modules', '@haven_ai', 'sdk', 'package.json'), sdkVersion)
+  })
+}
+
+async function freshLocalHome(prefix: string) {
+  const homeDir = await mkdtemp(join(tmpdir(), prefix))
+  const credentialDirectory = join(homeDir, '.haven', 'agents', 'agent-1')
+  const identityPath = join(credentialDirectory, 'identity.json')
+  const signerPath = join(credentialDirectory, 'signer.json')
+  await mkdir(credentialDirectory, { recursive: true })
+  await writeFile(identityPath, JSON.stringify({ api_key: API_KEY }), 'utf8')
+  await writeFile(signerPath, JSON.stringify({ delegate_key: PRIVATE_KEY }), 'utf8')
+  return { homeDir, credentialDirectory, identityPath, signerPath }
+}
+
+describe('runtime-spec override on the local MCP runtime (#2424)', () => {
+  it('characterization: no override → exact pre-#2424 args, directory and sidecar keys', async () => {
+    const { homeDir, credentialDirectory, identityPath, signerPath } = await freshLocalHome('haven-local-mcp-noop-')
+    const runCommand = mcpLayoutAtPrefix(PINNED_MCP_VERSION, PINNED_SDK_VERSION)
+    const result = await prepareLocalMcpRuntime(
+      { credentialDirectory, identityPath, signerPath, homeDir, nodeVersion: SUPPORTED_NODE },
+      // A signer-only override is the signer runtime's business, not this one's.
+      { runCommand, env: { HAVEN_SIGNER_SPEC: 'file:/only-the-signer-runtime-cares' } },
+    )
+    const runtimeDirectory = join(homeDir, '.haven', 'mcp-runtime', PINNED_MCP_VERSION)
+    expect(result.runtimeDirectory).toBe(runtimeDirectory)
+    expect(runCommand.mock.calls[0]![1]).toEqual([
+      'install', '--prefix', runtimeDirectory, '--no-audit', '--no-fund', '--omit=dev', '--prefer-offline',
+      mcpPackageSpec(), sdkPackageSpec(),
+    ])
+    const sidecar = JSON.parse(await readFile(join(credentialDirectory, 'mcp-runtime.json'), 'utf8'))
+    expect(Object.keys(sidecar)).toEqual([
+      'mcp_package', 'mcp_version', 'sdk_package', 'sdk_version', 'minimum_node_version',
+      'wrapper_path', 'runtime_directory', 'npm_cache_directory', 'cli_path',
+    ])
+    expect(result.messages.join('\n')).not.toContain('OVERRIDE')
+    expect(await readFile(result.wrapperPath, 'utf8')).not.toContain('OVERRIDE')
+  })
+
+  it('HAVEN_MCP_SPEC installs that spec into a hash-keyed mcp-runtime directory and records it', async () => {
+    const { homeDir, credentialDirectory, identityPath, signerPath } = await freshLocalHome('haven-local-mcp-override-')
+    const runCommand = mcpLayoutAtPrefix('0.0.0-local', PINNED_SDK_VERSION)
+    const env = { HAVEN_MCP_SPEC: 'file:/abs/path/packages/mcp' }
+    const result = await prepareLocalMcpRuntime(
+      { credentialDirectory, identityPath, signerPath, homeDir, nodeVersion: SUPPORTED_NODE },
+      { runCommand, env },
+    )
+    const key = runtimeSpecOverrideDirectoryKey(['file:/abs/path/packages/mcp', sdkPackageSpec()])
+    const runtimeDirectory = join(homeDir, '.haven', 'mcp-runtime', key)
+    expect(result.runtimeDirectory).toBe(runtimeDirectory)
+    expect(runCommand.mock.calls[0]![1].slice(-2)).toEqual(['file:/abs/path/packages/mcp', sdkPackageSpec()])
+    expect(result.messages[0]).toContain('RUNTIME SPEC OVERRIDE ACTIVE')
+    expect(result.messages.join('\n')).toContain(`HAVEN_MCP_SPEC=file:/abs/path/packages/mcp (instead of ${mcpPackageSpec()})`)
+    const sidecar = JSON.parse(await readFile(join(credentialDirectory, 'mcp-runtime.json'), 'utf8'))
+    expect(sidecar.runtime_spec_override).toEqual({
+      specs: { mcp: 'file:/abs/path/packages/mcp' },
+      resolved_specs: ['file:/abs/path/packages/mcp', sdkPackageSpec()],
+      directory_key: key,
+    })
+    expect(sidecar.mcp_version).toBe('0.0.0-local')
+    const wrapper = await readFile(result.wrapperPath, 'utf8')
+    expect(wrapper).toContain('// HAVEN RUNTIME SPEC OVERRIDE (#2424): HAVEN_MCP_SPEC=file:/abs/path/packages/mcp')
+    expect(wrapper).not.toContain(API_KEY)
+    expect(wrapper).not.toContain(PRIVATE_KEY)
+  })
+
+  it('a malformed HAVEN_MCP_SPEC is refused before npm runs, naming the variable', async () => {
+    const { homeDir, credentialDirectory, identityPath, signerPath } = await freshLocalHome('haven-local-mcp-override-bad-')
+    const runCommand = vi.fn(async () => undefined)
+    await expect(prepareLocalMcpRuntime(
+      { credentialDirectory, identityPath, signerPath, homeDir, nodeVersion: SUPPORTED_NODE },
+      { runCommand, env: { HAVEN_MCP_SPEC: 'file:/abs/$(id)' } },
+    )).rejects.toThrow(/HAVEN_MCP_SPEC/)
+    expect(runCommand).not.toHaveBeenCalled()
+  })
+})

@@ -11,7 +11,7 @@ import {
 /**
  * The chains the connected backend actually serves account **deploys** on (#679).
  *
- * Onboarding and the Add-account modal use this so a user can't pick a chain the
+ * Onboarding uses this so a user can't pick a chain the
  * environment can't deploy on — e.g. Base mainnet on the testnet-only dev backend,
  * which would otherwise fail mid-deploy with a misleading "relayer unfunded". The
  * backend is the source of truth (`GET /chains`); the frontend intersects it with

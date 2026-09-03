@@ -41,7 +41,9 @@ export function ConnectionVerificationFooter({
   const check = (
     <Icon icon={Check} className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--v2-success)]" />
   )
-  const VERIFIED_LABEL = 'Local connection verified'
+  const VERIFIED_LABEL = install?.manual_credential_fallback
+    ? 'Manual credential created'
+    : 'Local connection verified'
 
   // Nothing to disclose (no address, no runtime report, single-owner Safe):
   // the same line renders as plain text rather than a summary that opens onto

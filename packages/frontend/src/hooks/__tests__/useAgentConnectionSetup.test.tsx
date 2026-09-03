@@ -82,8 +82,10 @@ vi.mock('@/hooks/useEscapeToClose', () => ({
 }))
 
 import {
+  installIsReadyForApproval,
   railBudgetRules,
   resolveConnectStepView,
+  runtimeIsConfigured,
   useAgentConnectionSetup,
 } from '@/hooks/useAgentConnectionSetup'
 
@@ -172,6 +174,27 @@ describe('resolveConnectStepView (#2413: no rail branch left)', () => {
       resolveConnectStepView({
         visibleStatus: 'connected_local',
         installStatus: erroredInstall,
+        agentId: 'agent-1',
+      }),
+    ).toEqual({ kind: 'delegation_approval', agentId: 'agent-1' })
+  })
+
+  it('a manual credential fallback reaches the approval step without pretending its runtime was configured (#2472)', () => {
+    const manualFallbackInstall = {
+      ...CONFIGURED_INSTALL,
+      hosted_mcp_configured: false,
+      local_signer_configured: false,
+      local_mcp_configured: false,
+      local_mcp_acknowledged: false,
+      manual_credential_fallback: true,
+    }
+
+    expect(runtimeIsConfigured(manualFallbackInstall)).toBe(false)
+    expect(installIsReadyForApproval(manualFallbackInstall)).toBe(true)
+    expect(
+      resolveConnectStepView({
+        visibleStatus: 'connected_local',
+        installStatus: manualFallbackInstall,
         agentId: 'agent-1',
       }),
     ).toEqual({ kind: 'delegation_approval', agentId: 'agent-1' })

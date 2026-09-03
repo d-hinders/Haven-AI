@@ -2520,7 +2520,7 @@ export const SCENARIOS = {
     },
   },
   'connect-agent-approve': {
-    description: 'Connect agent modal, step 4, the APPROVE screen on the delegation rail (#1684)',
+    description: 'Connect agent modal, step 4, manual credential fallback at the owner-signed approval rail (#2472)',
     // The third pin the other two connect scenarios cannot hold: `connect-agent`
     // pins awaiting_connection for its whole run and `connect-agent-approved`
     // pins active, so the screen BETWEEN them — where the user actually grants
@@ -2563,11 +2563,15 @@ export const SCENARIOS = {
           ],
           delegate_address: '0x3333333333333333333333333333333333333333',
           install_status: {
-            runtime_mcp_mode: 'local_stdio',
-            local_mcp_configured: true,
-            local_mcp_acknowledged: true,
-            credential_files_written: true,
-            skill_installed: true,
+            // Manual credentials cannot report a local runtime probe. The
+            // browser flow marks the credential ready, then reaches this
+            // same owner-signed approval screen without claiming that the
+            // runtime was configured automatically (#2472).
+            manual_credential_fallback: true,
+            local_mcp_configured: false,
+            local_mcp_acknowledged: false,
+            credential_files_written: false,
+            skill_installed: false,
             restart_required: true,
           },
           // #2120: `approval.status` is `agent_connection_setups.approval_status`,
@@ -2607,7 +2611,7 @@ export const SCENARIOS = {
 
       // ...and again with the verification disclosure open, since #1684 made
       // that one row the collapsed state: both halves need evidence.
-      await dialog.getByText(/Local connection verified/).click()
+      await dialog.getByText(/Manual credential created/).click()
       await dialog.getByText('Public address').waitFor({ timeout: 10_000 })
       await shoot(dialog, 'approve-verification-open')
     },

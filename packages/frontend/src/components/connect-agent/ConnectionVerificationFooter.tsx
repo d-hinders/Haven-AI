@@ -25,11 +25,19 @@ import { runtimeStatusHelper, runtimeStatusLabel } from './setup-copy'
 export function ConnectionVerificationFooter({
   delegateAddress,
   install,
+  connectorPackage,
   safeThreshold = 1,
   safeOwnerCount = 1,
 }: {
   delegateAddress: string | null
   install: AgentConnectionSetupStatusResponse['install_status'] | undefined
+  /**
+   * `AgentConnectionSetupStatus.connector_package` — the spec the backend
+   * handed out for THIS setup (#2422). Threaded through so the repair hint
+   * names the connector the user was actually told to install, instead of a
+   * client-side literal that is wrong on any non-production backend.
+   */
+  connectorPackage?: string
   safeThreshold?: number
   safeOwnerCount?: number
 }) {
@@ -105,7 +113,9 @@ export function ConnectionVerificationFooter({
             </dt>
             <dd className="mt-0.5 text-xs text-[var(--v2-ink-2)]">
               <span className="text-[var(--v2-ink)]">{runtimeStatusLabel(install)}</span>
-              {runtimeStatusHelper(install) ? ` — ${runtimeStatusHelper(install)}` : ''}
+              {runtimeStatusHelper(install, connectorPackage)
+                ? ` — ${runtimeStatusHelper(install, connectorPackage)}`
+                : ''}
             </dd>
           </div>
         )}

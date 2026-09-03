@@ -55,7 +55,26 @@ export function runtimeStatusLabel(install: AgentConnectionSetupStatusResponse['
   return 'Manual setup needed'
 }
 
-export function runtimeStatusHelper(install: AgentConnectionSetupStatusResponse['install_status']): string {
+export function runtimeStatusHelper(
+  install: AgentConnectionSetupStatusResponse['install_status'],
+  /**
+   * The connector package spec the BACKEND handed out, from
+   * `AgentConnectionSetupStatus.connector_package` (#2422).
+   *
+   * Passed in rather than restated: the dist-tag is deployment configuration
+   * (`HAVEN_CONNECTOR_CHANNEL`), so the hard-coded `@haven_ai/connect@alpha`
+   * that used to live in the template below told a developer on the DEV
+   * dashboard to repair their setup with the PRODUCTION connector — the same
+   * defect on the client that #2422 fixes on the server.
+   *
+   * Optional only to survive a rolling deploy against a backend that predates
+   * the field. When it is missing the sentence names the connector's flags
+   * without inventing a package spec, because a guessed channel is worse than
+   * an unspelled command: the user would run the wrong one and it would look
+   * like it worked.
+   */
+  connectorPackage?: string,
+): string {
   if (!install) return 'Haven is waiting for the connector to report setup status.'
   if (install.manual_credential_fallback) {
     return 'Save the one-time credential in the trusted agent workspace before using Haven tools.'
@@ -80,7 +99,33 @@ export function runtimeStatusHelper(install: AgentConnectionSetupStatusResponse[
   // optional on the wire, so the placeholder keeps the shape correct when the
   // connector never reported one.
   if (install.error_code === 'runtime_config_unreadable') {
-    return `The agent client config on that machine could not be read, so Haven left it untouched. Fix the file the connector named, then run \`npx @haven_ai/connect@alpha --doctor --repair --runtime ${install.runtime ?? '<your agent client>'}\` there — not the setup command, which this agent no longer needs.`
+    const repairArgs = `--doctor --repair --runtime ${install.runtime ?? '<your agent client>'}`
+    const lead =
+      'The agent client config on that machine could not be read, so Haven left it untouched. Fix the file the connector named, then '
+    // The spec the server handed out: spell the whole command.
+    if (connectorPackage) {
+      return `${lead}run \`npx ${connectorPackage} ${repairArgs}\` there — not the setup command, which this agent no longer needs.`
+    }
+    // #2422 design review: rolling-deploy skew. Bare FLAGS are not an
+    // instruction — the user has nothing to attach them to — and inventing a
+    // channel is worse still, because a plausible-but-wrong connector runs and
+    // LOOKS like it worked. The third option delegates to the one invocation
+    // that is guaranteed correct for their machine: the one they already ran.
+    //
+    // Two shaping constraints from the rendered re-review, both easy to undo
+    // by accident:
+    //   1. ONE backtick pair. This string lands in a `<dd>` that does no
+    //      markdown parsing, so every pair renders as literal backticks on
+    //      screen. The bug is pre-existing and out of scope, but the count is
+    //      a choice made here, so the flags carry the only pair.
+    //   2. The closing clause SUBSTITUTES and then names what not to do, in
+    //      that order. An earlier draft ended "not the setup command
+    //      unchanged", which negates a different, unstated command in the same
+    //      breath and parses only on a second read. #1719's guarantee — never
+    //      send the user back through setup, whose token is spent and whose
+    //      re-run mints a SECOND agent (#1688) — is carried by "rather than
+    //      re-running that setup command as-is".
+    return `${lead}re-run the same npx connector command you used for setup, with the flags \`${repairArgs}\` instead of --setup, rather than re-running that setup command as-is.`
   }
   if (install.error_code === 'runtime_config_write_failed') return 'Haven could not update the agent client config on that machine. Check the connector output, then run the setup command again.'
   if (install.error_code === 'claude_code_config_failed') return 'Claude Code did not accept the Haven tools entry. Run the setup command inside Claude Code again.'

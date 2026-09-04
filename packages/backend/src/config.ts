@@ -60,18 +60,25 @@ export function parseTrustProxyHops(raw: string | undefined): number {
 /**
  * Boot warning for the public Base Sepolia RPC default (#2511).
  *
- * When `RPC_URL_BASE_SEPOLIA` is unset, this process is writing on-chain legs
- * through the SHARED public endpoint, so a provider-side outage there surfaces
- * as qa-dev failures (502s whose body carries `URL: https://sepolia.base.org`)
- * even though no Haven code changed — the exact shape run 33796886018
- * produced, eight times. Logging ONCE at boot makes the default
- * distinguishable from a configured value in the logs, the same way
- * `parseTrustProxyHops` refuses to disarm silently. Empty/whitespace counts as
- * unset, matching `optionalEnv`'s treatment and the Railway empty-string
- * pattern `parseConnectorChannel` already documents.
+ * When `RPC_URL_BASE_SEPOLIA` is unset (or empty — `optionalEnv` semantics:
+ * Railway can store an empty string, and "the operator cleared it" must land
+ * on the same signal as "never configured"), this process is writing on-chain
+ * legs through the SHARED public endpoint, so a provider-side outage there
+ * surfaces as qa-dev failures (502s whose body carries
+ * `URL: https://sepolia.base.org`) even though no Haven code changed — the
+ * exact shape run 33796886018 produced, eight times. Logging ONCE at boot
+ * makes the default distinguishable from a configured value in the logs, the
+ * same way `parseTrustProxyHops` refuses to disarm silently.
+ *
+ * Branches on the RAW value, not the resolved one: a variable that is SET is
+ * a deliberate configuration even when it names the same public endpoint, and
+ * must stay silent (the issue's criterion — "silent when the variable is
+ * set"). This function also owns the resolution, replacing the plain
+ * `optionalEnv` call, so the default literal exists in exactly one place.
  */
-export function warnPublicBaseSepoliaRpc(resolved: string): string {
-  if (resolved !== 'https://sepolia.base.org') return resolved
+export function warnPublicBaseSepoliaRpc(raw: string | undefined): string {
+  const resolved = raw?.trim() || 'https://sepolia.base.org'
+  if (raw?.trim()) return resolved
   // eslint-disable-next-line no-console
   console.warn(
     'RPC_URL_BASE_SEPOLIA is not set — using the PUBLIC endpoint https://sepolia.base.org. ' +
@@ -186,9 +193,7 @@ export const config = {
 
   // Chain-specific RPC URLs
   rpcUrlBase: optionalEnv('RPC_URL_BASE', 'https://mainnet.base.org'),
-  rpcUrlBaseSepolia: warnPublicBaseSepoliaRpc(
-    optionalEnv('RPC_URL_BASE_SEPOLIA', 'https://sepolia.base.org'),
-  ),
+  rpcUrlBaseSepolia: warnPublicBaseSepoliaRpc(process.env.RPC_URL_BASE_SEPOLIA),
 
   // Optional (features degrade gracefully without these)
   gnosisscanApiKey: process.env.GNOSISSCAN_API_KEY ?? '',

@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: research
 covers:
   - packages/cli/**
-last-verified: "2026-08-31" # #2313: the tier table — which sits BELOW this doc's "read the sections below as proposed" banner but states live-facing FACTS, and which this doc's own #1988 entry set the precedent of correcting — carried three retired items: Tier A `approvals` (route deregistered, `approval_requests` dropped, #2055), Tier B approver *metadata* (five routes deleted by #1988, `safe_approver_metadata` dropped by migration 069/#1990), and Tier C `deploy Safe, create/modify agent allowance, approve over-budget payment, add/remove approver` (closed by #1984 or deleted by #1988/#2055). Rows re-based on the live owner-signed actions and the removals recorded in a note below the table, following #1988's keep-the-record style rather than deleting silently. The tiering ARGUMENT is untouched. Scope: the tier table and its new note. NOT re-verified and deliberately LEFT: the command sketch, the signing-handoff options and the P0-P3 roadmap, which are inside the banner's design-record scope and read as proposed. Prior: #1988: the Tier-C deep-link sketch cited `/user/safes/:id/approvers/tx` as a live example of a backend that already returns unsigned tx data. #1988 deleted it, so the example is marked historical and the agent-connection-setup flow carries the point. Tier C is still NOT built and nothing else here was re-verified. Prior: weekly #1248 audit: package SHIPPED — status header rewritten to record what was built vs the sketch (Tier A/B live as @haven_ai/cli; Tier C/D unbuilt; no connect code reuse; unplanned SIE export shipped); covers: corrected to the package this doc is actually about
+last-verified: "2026-09-04" # #2525: the shipped-status banner records the machine contract this sketch did not anticipate — `--json` on every command including refusals, the six documented exit codes, `whoami`'s session expiry and API URL, and `haven guide`. Also records the zero-runtime-dependency constraint and why the runbook is a generated copy rather than an `@haven_ai/sdk` import (~94 MB of transitive deps on the `npx` path, measured in this repo). Scope: that banner ONLY — the command sketch, the signing-handoff options and the P0-P3 roadmap are still the original design record and were not re-verified. Prior: #2313: the tier table — which sits BELOW this doc's "read the sections below as proposed" banner but states live-facing FACTS, and which this doc's own #1988 entry set the precedent of correcting — carried three retired items: Tier A `approvals` (route deregistered, `approval_requests` dropped, #2055), Tier B approver *metadata* (five routes deleted by #1988, `safe_approver_metadata` dropped by migration 069/#1990), and Tier C `deploy Safe, create/modify agent allowance, approve over-budget payment, add/remove approver` (closed by #1984 or deleted by #1988/#2055). Rows re-based on the live owner-signed actions and the removals recorded in a note below the table, following #1988's keep-the-record style rather than deleting silently. The tiering ARGUMENT is untouched. Scope: the tier table and its new note. NOT re-verified and deliberately LEFT: the command sketch, the signing-handoff options and the P0-P3 roadmap, which are inside the banner's design-record scope and read as proposed. Prior: #1988: the Tier-C deep-link sketch cited `/user/safes/:id/approvers/tx` as a live example of a backend that already returns unsigned tx data. #1988 deleted it, so the example is marked historical and the agent-connection-setup flow carries the point. Tier C is still NOT built and nothing else here was re-verified. Prior: weekly #1248 audit: package SHIPPED — status header rewritten to record what was built vs the sketch (Tier A/B live as @haven_ai/cli; Tier C/D unbuilt; no connect code reuse; unplanned SIE export shipped); covers: corrected to the package this doc is actually about
 ---
 
 # Sketch — `haven` CLI (terminal-native parallel to the dashboard)
@@ -19,7 +19,20 @@ last-verified: "2026-08-31" # #2313: the tier table — which sits BELOW this do
 > (SDK-backed `haven pay`/`haven x402`) and Tier C (deep-link owner actions,
 > `haven connect`, `approvers`) are NOT built** — #460 tracks Tier C; and one
 > unplanned feature shipped: `haven activity export --format sie` (Fortnox/
-> Visma/Bokio-compatible SIE 4I, part of the bookkeeping-export arc). The
+> Visma/Bokio-compatible SIE 4I, part of the bookkeeping-export arc).
+>
+> **Since #2525 the CLI also carries a machine contract, which this sketch did
+> not anticipate:** `--json` now applies to *every* command including refusals
+> (one JSON value on stdout, prose on stderr), exit codes are documented and
+> asserted (`0` ok, `1` failed, `2` usage, `3` not authenticated, `4` refused,
+> `5` network), `whoami` reports session expiry and the API URL, and `haven
+> guide` prints the agent onboarding runbook (#2523) offline. The sketch's
+> framing of the CLI as a companion *for a human at a terminal* is the part
+> that has moved: it is now also the owner-side surface an agent drives, which
+> is what epic #2519 is for. `@haven_ai/cli` keeps **zero runtime
+> dependencies** — the runbook is a generated, byte-pinned copy rather than an
+> `@haven_ai/sdk` import, because that import would put ethers + viem + x402
+> (~94 MB) on the `npx @haven_ai/cli` path an agent uses. The
 > sections below are kept as the original design record; read them as
 > "proposed", with the above as what reality did.
 

@@ -56,6 +56,7 @@ function newSetup(userId: string, safeId: string, overrides: Partial<NewSetup> =
     challengeMessage: 'sign me',
     issuePassport: false,
     source: null,
+    via: null,
     ...overrides,
   }
 }

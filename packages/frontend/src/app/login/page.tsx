@@ -4,6 +4,7 @@ import { Suspense, useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
+import { postAuthDestination, sanitizeNextPath } from '@/lib/discovery'
 import { ApiRequestError } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -20,16 +21,19 @@ function LoginForm() {
 
   const justRegistered = searchParams.get('registered') === '1'
 
+  // #2522: the hand-off target, sanitised to a same-origin path. An agent may
+  // paste `/login?next=/agents%3Fsetup%3D…` for a user who already has an
+  // account, and the link is worth nothing if signing in forgets it.
+  const nextPath = sanitizeNextPath(searchParams.get('next'))
+
   // Redirect if already logged in
   useEffect(() => {
     if (!loading && user) {
-      if (user.safes?.length > 0 || user.safe_address) {
-        router.replace('/dashboard')
-      } else {
-        router.replace('/onboarding')
-      }
+      router.replace(
+        postAuthDestination(Boolean(user.safes?.length > 0 || user.safe_address), nextPath),
+      )
     }
-  }, [loading, user, router])
+  }, [loading, user, router, nextPath])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -38,11 +42,7 @@ function LoginForm() {
 
     try {
       const u = await login(email, password)
-      if (u.safe_address) {
-        router.push('/dashboard')
-      } else {
-        router.push('/onboarding')
-      }
+      router.push(postAuthDestination(Boolean(u.safe_address), nextPath))
     } catch (err) {
       // Generic message — don't surface raw backend errors here (prevents
       // account-enumeration: "user not found" vs "wrong password").

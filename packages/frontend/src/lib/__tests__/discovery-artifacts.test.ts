@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -34,15 +35,33 @@ const ARTIFACTS = ['llms.txt', 'llms-full.txt', '402.md', '402/index.html'] as c
  */
 const ALLOWED_HOSTS = new Set(['www.npmjs.com', 'github.com'])
 
+/**
+ * The single `github.com` URL the allow-list exists for. Asserted exactly,
+ * because a host-scoped allow-list would let any future GitHub link inherit a
+ * permission granted to one temporary one — the comment above would stay
+ * written while stopping being true.
+ */
+const TEMPORARY_GITHUB_LINK =
+  'https://github.com/d-hinders/Haven-AI/blob/dev/docs/product/account-recovery.md'
+
 const DEAD_HOSTS = ['haven.xyz', 'app.haven.xyz', 'docs.haven.xyz']
 
 function read(name: string): string {
   return readFileSync(join(PUBLIC_DIR, name), 'utf8')
 }
 
-/** Every absolute `http(s)://` URL in the text, whatever syntax carries it. */
+/**
+ * Every off-origin URL in the text, whatever syntax carries it.
+ *
+ * Protocol-relative (`//host/path`) counts. Review found that omitting it left
+ * the guard blind to the likeliest way a dead host comes back: someone
+ * "relativizing" a link by dropping `https:` instead of the whole origin, which
+ * still leaves the browser fetching another host. Bare `//` forms are returned
+ * with a scheme so `new URL()` can read their hostname.
+ */
 export function absoluteUrls(text: string): string[] {
-  return [...text.matchAll(/https?:\/\/[^\s"'`)<>\]]+/g)].map((m) => m[0])
+  return [...text.matchAll(/(?:https?:)?\/\/[^\s"'`)<>\]]+/g)]
+    .map((m) => (m[0].startsWith('//') ? `https:${m[0]}` : m[0]))
 }
 
 describe('discovery artifacts (#2520)', () => {
@@ -84,6 +103,35 @@ describe('discovery artifacts (#2520)', () => {
     }
   })
 
+  it('allows exactly one github.com link, the temporary docs one', () => {
+    const githubLinks = ARTIFACTS.flatMap((name) =>
+      absoluteUrls(read(name)).filter((url) => new URL(url).hostname === 'github.com'),
+    )
+    expect(githubLinks).toEqual([TEMPORARY_GITHUB_LINK])
+  })
+
+  it('no shipped frontend source links a domain we do not own', () => {
+    // The artifacts were the issue's stated scope, but the claim is wider than
+    // the four files: review found `docs.haven.xyz` live in the recovery UI,
+    // where a user clicks it. The surface class is the boundary, not the file
+    // list (#2512).
+    const SRC = join(__dirname, '../..')
+    // `git grep -l` exits 1 when it matches nothing, which is the healthy case
+    // here — so read the status rather than letting a throw stand in for a
+    // result. The first version of this test threw on a clean tree.
+    const run = (pattern: string) =>
+      spawnSync('git', ['grep', '-l', '-E', pattern, '--', ':!**/__tests__/**', '.'], {
+        cwd: SRC,
+        encoding: 'utf8',
+      })
+    const found = run(DEAD_HOSTS.join('|'))
+    expect(found.status, found.stderr).not.toBe(2)
+    expect(found.stdout.split('\n').filter(Boolean)).toEqual([])
+    // Positive control: the same command must be able to find something.
+    const control = run('classifyAgentUserAgent')
+    expect(control.stdout.split('\n').filter(Boolean).length).toBeGreaterThan(0)
+  })
+
   it('rejects a reintroduced dead host and an unlisted off-site host', () => {
     // The negative control: the two assertions above must be able to fail.
     // Without this, a regex that matches nothing passes every artifact.
@@ -94,5 +142,9 @@ describe('discovery artifacts (#2520)', () => {
       .map((url) => new URL(url).hostname)
       .filter((hostname) => !ALLOWED_HOSTS.has(hostname))
     expect(hostnames).toEqual(['example.com'])
+    // Protocol-relative, the form that slipped past the first version.
+    expect(absoluteUrls('<a href="//exit.example-cdn.com/x">')).toEqual([
+      'https://exit.example-cdn.com/x',
+    ])
   })
 })

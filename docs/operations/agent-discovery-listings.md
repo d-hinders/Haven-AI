@@ -9,7 +9,7 @@ covers:
   - packages/frontend/src/middleware.ts
   - packages/frontend/src/lib/discovery.ts
   - packages/frontend/src/lib/__tests__/discovery-artifacts.test.ts
-last-verified: "2026-09-04" # #2520: § *The artifacts* URL column rewritten from the `haven.xyz` / `app.haven.xyz` / `docs.haven.xyz` hosts, none of which resolve, to same-origin paths; the section gains the same-origin rule, its guard test (added to `covers:` with this entry) and the one temporary off-site allow-list entry (product docs, until #2532). Scope: that table and the paragraph above the connect-one-liner rule — the one-liner rule itself is unchanged and still reads verbatim-everywhere, and the registry checklist below was not re-read. First entry on this chain; the file carried a bare date before.
+last-verified: "2026-09-04" # #2520 (follow-up): the *Listing copy (canonical)* block one section below still said `haven.xyz/402` — found by haven-doc-reviewer, and my own scope sentence in the entry below had excluded exactly that part of the file. It cannot take a same-origin path (the copy is pasted into external registries and needs an absolute URL), and no production host is recorded here, so it now reads `<host>/402` with a paragraph saying it is unsubmittable until a domain is decided. Scope: that block and its new paragraph. Prior: #2520: § *The artifacts* URL column rewritten from the `haven.xyz` / `app.haven.xyz` / `docs.haven.xyz` hosts, none of which resolve, to same-origin paths; the section gains the same-origin rule, its guard test (added to `covers:` with this entry) and the one temporary off-site allow-list entry (product docs, until #2532). Scope: that table and the paragraph above the connect-one-liner rule — the one-liner rule itself is unchanged and still reads verbatim-everywhere, and the registry checklist below was not re-read. First entry on this chain; the file carried a bare date before.
 ---
 
 # Agent discovery listings — registry audit & cadence
@@ -80,7 +80,9 @@ Status legend: `listed` / `submitted` / `todo`. Re-audit **monthly** (rank + fre
 
 ## Listing copy (canonical)
 
-> **Haven — budgeted payments for AI agents.** Give your agent a budget, not your wallet: pay x402/HTTP-402 APIs in USDC within on-chain-enforced spending limits. Non-custodial (the agent never holds funds or keys), hosted MCP + local signer, receipts for every payment. `npx @haven_ai/connect@alpha` — details: haven.xyz/402
+> **Haven — budgeted payments for AI agents.** Give your agent a budget, not your wallet: pay x402/HTTP-402 APIs in USDC within on-chain-enforced spending limits. Non-custodial (the agent never holds funds or keys), hosted MCP + local signer, receipts for every payment. `npx @haven_ai/connect@alpha` — details: <host>/402
+
+**This copy is not submittable yet, and the `<host>` placeholder is why (#2520).** It carried `haven.xyz/402` — a domain nobody owns, so any registry that accepted this text would publish a dead link on our behalf. Unlike the artifacts, a registry submission cannot take a same-origin path: the copy is pasted somewhere else and needs an absolute URL that resolves. No production host is recorded in this repository today, so the placeholder stays until one is — which fits the epic's own decision (#2519) not to submit listings for now. Fill it in the same PR that decides the domain; do not fill it from memory.
 
 Adapt length per registry; never change the one-liner or invent capability claims (no "MPP support" until it ships — the track's credibility rule is that every listing is verifiably true).
 

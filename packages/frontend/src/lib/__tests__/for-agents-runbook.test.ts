@@ -36,8 +36,14 @@ describe('/for-agents.md (#2523)', () => {
   it('stays small enough for an agent to read cheaply', () => {
     // The issue's budget is ~6 KB: this page is fetched mid-task by a model
     // paying for every token of it. A regression here is prose creep, so the
-    // ceiling is stated rather than left to judgement.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(6600)
+    // ceiling is stated rather than left to judgement. It sits at 7000 rather
+    // than 6144 because the first cold read of the draft (recorded in the PR)
+    // came back with five things it could not answer from the page — where
+    // `haven_get_agent` comes from, how to run `--doctor` without breaking the
+    // two-changes rule, whose voice the imported bullets speak in, where the
+    // setup id comes from, and whether the user needs gas as well as USDC.
+    // Answering those cost ~480 bytes and is the whole point of the page.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(7000)
   })
 
   it('states the rules in the SDK words the setup prompt also uses', () => {
@@ -86,6 +92,18 @@ describe('/for-agents.md (#2523)', () => {
     expect(served).toMatch(/you must not have their password/i)
   })
 
+  it('answers the five questions the first cold read could not', () => {
+    // Each of these is a gap a fresh agent hit when given only this page (run
+    // recorded in the PR body). They are asserted so a later trim cannot
+    // quietly reopen one.
+    expect(served).toContain('one of the Haven MCP tools the connector wires into your runtime')
+    expect(served).toContain('--doctor')
+    expect(served).toContain('so the two-changes rule does not bind it')
+    expect(served).toContain('"me" in them is your user, not Haven')
+    expect(served).toContain('carries the approval link and the setup id')
+    expect(served).toContain('no ETH: Haven sponsors the gas')
+  })
+
   it('is advertised in the discovery surfaces an agent reads first', () => {
     expect(PUBLIC_SURFACES).toContain('/for-agents.md')
   })
@@ -93,10 +111,16 @@ describe('/for-agents.md (#2523)', () => {
   it('names the connector command shape the backend actually builds', () => {
     // `buildConnectorCommand` in routes/agent-connection-setups.ts emits
     // `npx -y <package> --setup <token> --api <url> --ack-local-tools`. The
-    // example here must be that shape with an obviously fake token, never a
-    // shorter one an agent might run as-is.
-    expect(served).toContain("npx -y @haven_ai/connect@alpha --setup 'EXAMPLE-SETUP-TOKEN-NOT-REAL'")
+    // example here must carry that flag set with an obviously fake token,
+    // never a shorter command an agent might run as-is.
+    expect(served).toContain('npx -y @haven_ai/connect@alpha --setup EXAMPLE-SETUP-TOKEN-NOT-REAL')
     expect(served).toContain('--ack-local-tools')
+    // The example is illustrative, and the page says so in as many words —
+    // `shellQuote` leaves an ordinary token and URL unquoted, and the package
+    // tag is per-deployment (`config.connectorChannel`), so an agent that
+    // reconstructs the command from this page rather than from its prompt is
+    // wrong on both counts.
+    expect(served).toContain("Run the prompt's version, not this one")
     expect(served).not.toMatch(/hv_setup_[0-9a-f]/)
   })
 })

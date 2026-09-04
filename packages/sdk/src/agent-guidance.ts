@@ -73,16 +73,16 @@ You are an AI agent whose user has no Haven account yet, or has one but has not 
 
 ## What Haven is, in three sentences
 
-Your user gives you a **budget on their own account** — not their wallet, and not a key to their funds. The budget is a delegation they sign, enforced on-chain: a payment over it, to the wrong recipient, or past its expiry is refused at execution time, not by a dashboard promise. Haven constructs and relays the payments; you get an agent credential and a signing key made on your own machine, and your user can revoke the budget without you and without Haven.
+Your user gives you a **budget on their own account** — not their wallet, and not a key to their funds. The budget is a delegation they sign, enforced on-chain: a payment over it, to the wrong recipient, or past its expiry is refused at execution time, not by a dashboard promise. Haven constructs and relays the payments; you get an agent credential and a signing key made on your machine, and your user can revoke the budget without you and without Haven.
 
 ## The sequence
 
-Four of the six steps are your user's — each needs a human signature or a human decision. The rest is yours.
+Four of the six steps are your user's — each needs a human signature or a human decision. The rest is yours. If they already have a funded account, start at step 3.
 
 1. **HUMAN — create the account.** Name, email, password, then a passkey (Face ID / Touch ID) or a wallet. Never offer to enter any of it: you must not have their password, and the passkey is bound to their device.
 2. **HUMAN — fund it.** USDC on Base, to the address the dashboard shows.
 3. **HUMAN — create the agent, set its budget**, and paste you the **setup prompt** it hands back.
-4. **YOU — run the connector command** in that prompt (below). It makes your signing key locally and registers only the public address.
+4. **YOU — run the connector command** in that prompt (below). It makes your signing key locally, registering only the public address.
 5. **HUMAN — approve the budget** with their passkey, at the link you relay.
 6. **YOU — verify, then pay.**
 
@@ -100,11 +100,11 @@ Send these as your own message, \`<host>\` replaced by the host you fetched this
 
 **At funding** (step 2):
 
-> Your Haven account needs USDC on Base before I can pay for anything. The dashboard shows the address to send it to; a small amount first is fine.
+> Your Haven account needs USDC on Base before I can pay for anything — USDC only, no ETH: Haven sponsors the gas. The dashboard shows the address to send it to; a small amount first is fine.
 
 **At the budget** (step 3):
 
-> On \`<host>/agents\`, create an agent for me and set a budget — say 25 USDC per day. That is the limit I cannot exceed. It hands back a setup prompt: paste it to me and I will run it here.
+> On \`<host>/agents\`, create an agent for me and set a budget — say 25 USDC per day. That is the limit I cannot exceed. It hands back a setup prompt: paste it to me and I run it here.
 
 **At budget approval** (step 5) — relay the link the connector returns, verbatim, first:
 
@@ -112,11 +112,13 @@ Send these as your own message, \`<host>\` replaced by the host you fetched this
 
 ## What you run
 
-The setup prompt carries a **connector command** shaped like this, with a real one-time setup token in place of the example:
+The setup prompt carries a **connector command** shaped like this:
 
 \`\`\`
-npx -y @haven_ai/connect@alpha --setup 'EXAMPLE-SETUP-TOKEN-NOT-REAL' --api '<host>/api' --ack-local-tools
+npx -y @haven_ai/connect@alpha --setup EXAMPLE-SETUP-TOKEN-NOT-REAL --api <api-url> --ack-local-tools
 \`\`\`
+
+Run the prompt's version, not this one: the token is one-time, the API URL is the backend's own, and the package tag differs by deployment. The rules below come from that prompt, so "me" in them is your user, not Haven.
 
 - ${AGENT_JSON_MODE_SENTENCE}
 - ${AGENT_APPROVAL_RELAY_JSON_SENTENCE}
@@ -124,17 +126,17 @@ npx -y @haven_ai/connect@alpha --setup 'EXAMPLE-SETUP-TOKEN-NOT-REAL' --api '<ho
 - ${AGENT_COMMAND_MODIFICATION_SENTENCE}
 - ${AGENT_SECRET_HYGIENE_SENTENCE}
 
-If the connector's approval wait times out, nothing is lost: send your user \`<host>/agents?setup=<setup-id>\`.
+If the approval wait times out, nothing is lost: the \`--json\` outcome carries the approval link and the setup id, so relay the link again or send your user \`<host>/agents?setup=<setup-id>\`.
 
 ## How to verify
 
-Call \`haven_get_agent\`. It returns identity plus \`spend_authority_readiness\`:
+Call \`haven_get_agent\`, one of the Haven MCP tools the connector wires into your runtime in step 4. It returns identity plus \`spend_authority_readiness\`:
 
 - \`ready\` — a budget is live; you can pay.
 - \`needs_approval\` — the connector finished, nobody approved yet. Relay the approval link again; there is no queue to wait in.
 - \`revoked\` — the credential is not active; ask your user to create a new agent.
 
-\`ready\` covers hosted identity and the budget only; it does not prove your local signer works — check that with \`--doctor\`.
+\`ready\` covers hosted identity and the budget only, not your local signer. Check that with \`npx -y @haven_ai/connect@alpha --doctor\` — a separate command, so the two-changes rule does not bind it.
 
 ## If you cannot open a browser
 
@@ -144,7 +146,7 @@ Nothing here needs you to. Every human step is a link: hand your user the full \
 
 | Term | What it is |
 |---|---|
-| **setup prompt** | The text the dashboard hands your user to paste to you. Carries the command and the rules. |
+| **setup prompt** | The text the dashboard hands your user to paste to you. Carries the command and its rules. |
 | **connector command** | The \`npx -y @haven_ai/connect@…\` line you run. One-time token, one use. |
 | **agent credential** | Your API key (\`sk_agent_…\`), written to \`~/.haven\`. It identifies you; alone it cannot move money. |
 | **delegate key** | Your signing key, made on this machine and never sent anywhere. |

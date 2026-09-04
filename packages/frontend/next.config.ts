@@ -13,16 +13,21 @@ import { generate } from './scripts/serve-docs.mjs'
  * this repository, so the deployed command is not knowable from the tree.
  * Putting the call here makes the question stop mattering.
  *
- * PHASE-GATED, and that is not a detail. `next start` ALSO loads this config —
- * measured, not assumed: deleting `public/docs/` and starting the server
- * without rebuilding put the four files back. So an unguarded call runs at
- * SERVER START too, and this app builds with `output: 'standalone'`, where the
- * deployed artifact need not contain the repository's `docs/` tree at all.
- * There, `generate()` would throw on a missing source and take the server down
- * on boot — strictly worse than the 404 it exists to prevent.
+ * PHASE-GATED. `next start` also loads this config — measured, not assumed:
+ * deleting `public/docs/` and starting the server without rebuilding put the
+ * four files back — so an unguarded call does filesystem work at server start
+ * for no reason.
  *
- * Build and dev generate; a production server does not. Failure stays LOUD in
- * the two phases where a missing or non-`current` source is a real defect.
+ * It is NOT load-bearing against a standalone crash, and an earlier version of
+ * this comment claimed it was. The standalone `server.js` inlines the config
+ * as serialized JSON at build time (`const nextConfig = {...}`) and never
+ * re-executes this file, so the deployed runtime could not have thrown here.
+ * Corrected on review rather than left as a scarier-sounding justification
+ * than the truth.
+ *
+ * The gate is still right: build and dev generate, a server does not, and
+ * failure stays LOUD in exactly the two phases where a missing or
+ * non-`current` source is a real defect.
  */
 const GENERATING_PHASES = new Set<string>([PHASE_PRODUCTION_BUILD, PHASE_DEVELOPMENT_SERVER])
 

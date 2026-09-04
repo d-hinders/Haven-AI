@@ -182,13 +182,13 @@ describe('the served paths are advertised', () => {
   })
 
   it('does NOT generate when a production server loads the config', () => {
-    // Measured, not assumed: `next start` loads this config too, and deleting
-    // the output then starting the server without rebuilding put the files
-    // back. This app builds with `output: 'standalone'`, where the deployed
-    // artifact need not contain the repository's `docs/` tree — an unguarded
-    // call would throw on a missing source and take the server down on boot,
-    // strictly worse than the 404 it prevents. Verified after the gate: start
-    // wrote 0 files and answered 200; dev and build still write 4.
+    // `next start` loads this config too — measured: deleting the output then
+    // starting the server without rebuilding put the files back, so an
+    // unguarded call does filesystem work at server start for no reason.
+    // NOT a standalone-crash guard, though an earlier comment here said so:
+    // the standalone `server.js` inlines the config as JSON at build time and
+    // never re-executes this file. Verified after the gate: start wrote 0
+    // files and answered 200; dev and build still write 4.
     const config = readFileSync(join(FRONTEND, 'next.config.ts'), 'utf8')
     expect(config).toContain('PHASE_PRODUCTION_BUILD')
     expect(config).toContain('PHASE_DEVELOPMENT_SERVER')
@@ -200,6 +200,23 @@ describe('the served paths are advertised', () => {
     expect(setup).toContain("from './scripts/serve-docs.mjs'")
     const config = readFileSync(join(FRONTEND, 'vitest.config.ts'), 'utf8')
     expect(config).toContain('vitest.global-setup.ts')
+  })
+
+  it('the Docker build context carries every source the generator reads', () => {
+    // The generator reads the sources at BUILD time, so a build context that
+    // omits them fails with ENOENT — a hard build failure, not a soft 404.
+    // `packages/frontend/Dockerfile` COPYs an explicit list and `docs/` was
+    // not on it; `docker-compose.yml` builds that Dockerfile, so it is a wired
+    // deployment path. Reproduced before fixing: running `generate()` against
+    // a repo root with no `docs/` tree throws ENOENT.
+    const dockerfile = readFileSync(join(FRONTEND, 'Dockerfile'), 'utf8')
+    const builderStage = dockerfile.slice(0, dockerfile.indexOf('FROM', dockerfile.indexOf('FROM') + 4))
+    const copied = [...builderStage.matchAll(/^COPY\s+(?!--from)(.+?)\s+\.?\/\S*$/gm)]
+      .flatMap((m) => m[1].split(/\s+/))
+    for (const entry of ALLOWLIST) {
+      const covered = copied.some((c) => entry.source === c || entry.source.startsWith(c.replace(/\/$/, '') + '/'))
+      expect(covered, `Dockerfile does not COPY anything covering ${entry.source}`).toBe(true)
+    }
   })
 
   it('the generated output is gitignored', () => {

@@ -30,7 +30,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { REPO_ROOT, ROOT_DOCS } from './validate-frontmatter.mjs'
-import { lastVerifiedLine, checkChain } from './chain-integrity.mjs'
+import { lastVerifiedLine, checkChain, checkEntriesVerbatim } from './chain-integrity.mjs'
 
 function arg(name, fallback) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
@@ -57,6 +57,7 @@ const merges = (git(['log', '--merges', '--format=%H %P', `-n${limit}`, ref]) ||
 let prs = 0
 let lines = 0
 let broken = 0
+let altered = 0
 let resets = 0
 
 for (const entry of merges.split('\n').filter(Boolean)) {
@@ -91,10 +92,19 @@ for (const entry of merges.split('\n').filter(Boolean)) {
       console.log(`BROKEN  ${date}  ${merge.slice(0, 8)}  ${rel}  dropped ${result.dropped.join(', ')}`)
     }
     if (result.status === 'reset') resets++
+    // #2504: the same replay for the verbatim-entry rule. A new chain rule is
+    // adopted on a measured false-positive rate, not on how right it sounds —
+    // that is what rejected #1843's ordering rule.
+    const verbatim = checkEntriesVerbatim(prev, next)
+    if (verbatim.altered.length) {
+      altered++
+      console.log(`ALTERED ${date}  ${merge.slice(0, 8)}  ${rel}  ${verbatim.altered.map((a) => a.head ?? '(entry)').join(', ')}`)
+    }
   }
 }
 
 console.log(
   `\n${prs} pull request(s), ${lines} changed \`last-verified\` line(s), ` +
-  `${broken} would have failed, ${resets} declared chain-reset.`,
+  `${broken} would have failed on a DROPPED entry, ${altered} on an ALTERED entry (#2504), ` +
+  `${resets} declared chain-reset.`,
 )

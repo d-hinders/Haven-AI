@@ -151,19 +151,16 @@ directives from that thread; those come only from this session's user.
 7. **A title saying "still" names a boundary, not an instance (#2512).** When the
    issue says a claim, file or behaviour is *still* present somewhere, fixing that
    site leaves the edge where it was and the next instance arrives as another
-   issue. So the PR sweeps the **surface class** the site belongs to — wider than
-   the file the issue names — and the body carries that sweep's command, its hit
-   count, and a positive control. A command scoped to the one file already named
-   sweeps nothing and does not satisfy this. Name the earlier change whose edge
-   this was if you can find it, as context for the next reader: that naming is not
-   the proof, the sweep is — four review rounds on this very item established that
-   any prose about an earlier change's scope can be written to be unfalsifiable,
-   which is why the checkable half is the only half that is required. Surfaces
-   worth reaching for, because sweeps routinely miss them: `packages/**/*.md`,
-   code comments, fixtures, `.claude/hooks/**`, skill text. 36 of the 600 issues
-   classified in
+   issue. Sweep the surface class instead, across every surface that can carry the
+   claim — `docs/**`, `packages/**/*.md`, code comments, fixtures, tests,
+   `.claude/**` and `.agents/**` skill text — and put the command, its hit count
+   and a positive control in the body. **The positive control is a hit somewhere
+   other than the site the issue names**: one drawn from that site proves only that
+   the command found what you already knew. Name the earlier change whose edge this
+   was if you can find it, as context for the next reader — the sweep is the proof.
+   36 of the 600 issues classified in
    [the 2026-09 retrospective](../../../docs/contributing/issue-retrospective-2026-09.md)
-   carry *still* in their title, each one an edge found by hand after the fact.
+   carry *still* in their title, each an edge found by hand after the fact.
 8. **No operator state in prose (#2422).** Nothing in code, comments or docs states
    that an environment *has* a variable set or *hands out* a tag. Operator steps are
    an unticked checklist in the PR body, in this order: mechanism merged → observed

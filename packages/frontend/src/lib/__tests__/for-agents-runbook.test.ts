@@ -63,7 +63,7 @@ describe('/for-agents.md (#2523)', () => {
     }
   })
 
-  it('carries a hand-off link for every human-only step', () => {
+  it('carries the right hand-off for each human-only step', () => {
     // Every step the human must do themselves, each as a link the agent can
     // paste. `via=agent` and `next=` are the #2522 shapes.
     expect(served).toContain('/signup?next=/agents&via=agent')
@@ -77,6 +77,16 @@ describe('/for-agents.md (#2523)', () => {
     expect(served).not.toContain('?setup=<setup-id>')
     expect(served).toContain('Go back to the Haven tab where you created the agent')
     expect(served).toContain('the connector\'s outcome carries no URL and no setup id')
+    // The CLASS, not the two instances. Removing `<approval_url>` and
+    // `?setup=<setup-id>` left the sentence they were instances OF standing in
+    // the no-browser section — "Every human step is a link" — which contradicts
+    // the fix 30 lines above it (haven-reviewer, blocking @ 718275cc). A
+    // universal claim about the human steps is the shape that keeps coming
+    // back, so it is the shape that is guarded. No legitimate use in this file.
+    for (const universal of ['every human step', 'each human step', 'every step is a link']) {
+      expect(served.toLowerCase()).not.toContain(universal)
+    }
+    expect(served).toContain('Step 5 is not a link')
   })
 
   it('tags every step with the actor who performs it', () => {

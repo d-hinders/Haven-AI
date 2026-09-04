@@ -4,10 +4,12 @@
 
 Haven connects agents through MCP (hosted, keyless) plus a local signer. Payments settle in USDC on Base via x402, using ERC-7710 delegated settlement natively and EIP-3009 as the compatibility path — so a Haven agent with an open (unpinned) budget can pay any standard x402 merchant today; recipient-pinned budgets settle via ERC-7710 only. Every payment produces a receipt: which agent, what it bought, which policy allowed it, and the on-chain proof.
 
+> Links below are paths on this same host: resolve them against the URL you fetched this file from.
+
 ## Start here
 
-- [Your agent hit a 402 — how to pay it](https://haven.xyz/402.md): what HTTP 402 means and how an agent pays it with a budget, not a wallet
-- [Dashboard](https://app.haven.xyz): create an account (one passkey prompt), create an agent, set its budget, get the connect command
+- [Your agent hit a 402 — how to pay it](/402.md): what HTTP 402 means and how an agent pays it with a budget, not a wallet
+- [Dashboard](/): create an account (one passkey prompt), create an agent, set its budget, get the connect command
 
 ## Packages (npm)
 
@@ -19,9 +21,9 @@ Haven connects agents through MCP (hosted, keyless) plus a local signer. Payment
 
 ## Trust and verification
 
-- [Independent exit tool](https://haven.xyz/exit/): inspect and revoke every agent budget with only a wallet and a public RPC — works even if Haven disappears
-- [Account recovery](https://docs.haven.xyz/product/account-recovery): signer-set management and recovery model
+- [Independent exit tool](/exit): inspect and revoke every agent budget with only a wallet and a public RPC — works even if Haven disappears
+- [Account recovery](https://github.com/d-hinders/Haven-AI/blob/dev/docs/product/account-recovery.md): signer-set management and recovery model
 
 ## Optional
 
-- [Full agent-readable overview](https://haven.xyz/llms-full.txt): product model, payment flow, and integration surface in one file
+- [Full agent-readable overview](/llms-full.txt): product model, payment flow, and integration surface in one file

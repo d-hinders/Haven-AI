@@ -8,11 +8,12 @@ covers:
   - packages/frontend/public/402.md
   - packages/frontend/src/middleware.ts
   - packages/frontend/src/lib/discovery.ts
+  - packages/frontend/src/lib/__tests__/discovery-artifacts.test.ts
   - packages/frontend/src/lib/discovery-surfaces.ts
   - packages/frontend/src/app/robots.txt/route.ts
   - packages/frontend/src/app/sitemap.xml/route.ts
   - packages/frontend/src/app/layout.tsx
-last-verified: "2026-09-04" # #2521: added the robots.txt / sitemap.xml / auth-marker rows below and the four `covers:` entries above. Scope: § *The artifacts* and the new § *Discovery hooks* only. The URL column of the pre-existing rows still reads `haven.xyz` and is deliberately UNTOUCHED — that rewrite is #2520's, in flight on a parallel branch, and editing it here would conflict for no reason. Prior: (no note recorded)
+last-verified: "2026-09-04" # #2521: § *The artifacts* gains rows for `robots.txt`, `sitemap.xml` and the auth-wall marker, and the new § *Discovery hooks* records the four hooks and why the two generated artifacts are route handlers rather than files in `public/`. Scope: those additions and the four `covers:` entries above them. The URL column of the pre-existing rows is #2520's work, merged in beneath this and not re-read here; the registry checklist was not re-read either. Prior: #2520 (follow-up): the *Listing copy (canonical)* block one section below still said `haven.xyz/402` — found by haven-doc-reviewer, and my own scope sentence in the entry below had excluded exactly that part of the file. It cannot take a same-origin path (the copy is pasted into external registries and needs an absolute URL), and no production host is recorded here, so it now reads `<host>/402` with a paragraph saying it is unsubmittable until a domain is decided. Scope: that block and its new paragraph. Prior: #2520: § *The artifacts* URL column rewritten from the `haven.xyz` / `app.haven.xyz` / `docs.haven.xyz` hosts, none of which resolve, to same-origin paths; the section gains the same-origin rule, its guard test (added to `covers:` with this entry) and the one temporary off-site allow-list entry (product docs, until #2532). Scope: that table and the paragraph above the connect-one-liner rule — the one-liner rule itself is unchanged and still reads verbatim-everywhere, and the registry checklist below was not re-read. First entry on this chain; the file carried a bare date before.
 ---
 
 # Agent discovery listings — registry audit & cadence
@@ -23,14 +24,31 @@ Operational home of the **Agent Discovery (AEO) GTM track**, Phase 0 (strategy d
 
 | Artifact | URL | Sync rule |
 |---|---|---|
-| `llms.txt` | `haven.xyz/llms.txt` | Curated manifest. Update when a top-level surface (402 page, exit tool, packages, docs) is added/renamed. |
-| `llms-full.txt` | `haven.xyz/llms-full.txt` | Single-file overview. Update on product-model changes (rails, settlement schemes, onboarding flow). |
-| 402 page | `haven.xyz/402/` | Human landing for the 402 moment. Mirror of `402.md` — **edit both together** (sync note in the HTML header). |
-| `402.md` | `haven.xyz/402.md` | Agent-readable mirror; token-cheap, answer-first. |
+| `llms.txt` | `/llms.txt` | Curated manifest. Update when a top-level surface (402 page, exit tool, packages, docs) is added/renamed. |
+| `llms-full.txt` | `/llms-full.txt` | Single-file overview. Update on product-model changes (rails, settlement schemes, onboarding flow). |
+| 402 page | `/402` | Human landing for the 402 moment. Mirror of `402.md` — **edit both together** (sync note in the HTML header). |
+| `402.md` | `/402.md` | Agent-readable mirror; token-cheap, answer-first. |
 | npm metadata | package.json of sdk / signer / mcp / connect / cli | Keywords + descriptions carry the category phrases (x402, agent-payments, budget, non-custodial). Ships on next `release:bump`; do not hand-edit versions (see `scripts/README.md`). |
 | `robots.txt` | `/robots.txt` | **Generated**, not a static file (`src/app/robots.txt/route.ts`). Names the agent-readable artifacts and `Disallow`s the authenticated prefixes. Update when a public artifact is added or an authenticated prefix appears — both come from `AUTHENTICATED_PREFIXES` in `src/lib/discovery-surfaces.ts`, so edit that list, not the template. |
 | `sitemap.xml` | `/sitemap.xml` | **Generated** (`src/app/sitemap.xml/route.ts`) from `PUBLIC_SURFACES` in `src/lib/discovery-surfaces.ts`. Add a public page → add it there. The guard test fails if an entry resolves to no route or file, or if an authenticated prefix reaches the list. |
 | Auth-wall marker | `<meta name="haven:auth" content="required">` | Emitted by `src/app/(authenticated)/layout.tsx` on every authenticated page, plus a `<noscript>` sentence. Lets a non-browser client tell a wall from a page — they all answer 200 with an SSR shell. Never add it to a public route; never remove it from an authenticated one. |
+
+**Own-product links in these artifacts are same-origin paths, never absolute hosts (#2520).**
+The URL column above is written that way for the same reason: the dev preview,
+production and any custom domain mapped later all resolve the same file, so a
+host change never needs a sweep. Until #2520 these files pointed at `haven.xyz`,
+`app.haven.xyz` and `docs.haven.xyz` — three domains nobody owns — and every one
+of those links answered `Could not resolve host`. Off-site links are allow-listed
+in `packages/frontend/src/lib/__tests__/discovery-artifacts.test.ts`, which fails
+on a reintroduced dead host or an unlisted one; adding a host is a decision, not
+an edit. `llms.txt` and `llms-full.txt` also state in one line that their links
+are paths on the serving host, since an agent may have been handed the text
+rather than the URL it came from.
+
+One allow-list entry is temporary and says so: the product docs have no served
+home until [#2532](https://github.com/d-hinders/Haven-AI/issues/2532) publishes
+them under `/docs/`, so `account-recovery` points at the public repository
+meanwhile. That entry leaving the allow-list is how you know #2532 finished.
 
 The connect one-liner is `npx @haven_ai/connect@alpha` **everywhere, verbatim** — agents copy exact strings. If the dist-tag ever changes, sweep every artifact above in one PR.
 
@@ -43,7 +61,7 @@ The artifacts above are only worth having if an agent can *find* them. The 2026-
 3. **`/sitemap.xml`** — the public surfaces, absolute.
 4. **One server-rendered sentence on the landing page**, plus a **"For agents"** footer link. Real content in the HTML a `curl` sees, not a hidden element.
 
-**Why `robots.txt` and `sitemap.xml` are route handlers and not files in `public/`.** Both specs require *absolute* URLs — a relative `Sitemap:` line is silently ignored by crawlers, which is the same defect class as the dead hosts #2520 is fixing. Epic #2519's invariant forbids hardcoding a host. Taking the origin off the request satisfies both, with no env var to set per deployment and nothing to sweep if a custom domain is ever mapped.
+**Why `robots.txt` and `sitemap.xml` are route handlers and not files in `public/`.** Both specs require *absolute* URLs — a relative `Sitemap:` line is silently ignored by crawlers, which is the same defect class as the dead hosts #2520 removed. Epic #2519's invariant forbids hardcoding a host. Taking the origin off the request satisfies both, with no env var to set per deployment and nothing to sweep if a custom domain is ever mapped.
 
 Guard test: `packages/frontend/src/lib/__tests__/discovery-surfaces.test.ts`.
 
@@ -82,7 +100,9 @@ Status legend: `listed` / `submitted` / `todo`. Re-audit **monthly** (rank + fre
 
 ## Listing copy (canonical)
 
-> **Haven — budgeted payments for AI agents.** Give your agent a budget, not your wallet: pay x402/HTTP-402 APIs in USDC within on-chain-enforced spending limits. Non-custodial (the agent never holds funds or keys), hosted MCP + local signer, receipts for every payment. `npx @haven_ai/connect@alpha` — details: haven.xyz/402
+> **Haven — budgeted payments for AI agents.** Give your agent a budget, not your wallet: pay x402/HTTP-402 APIs in USDC within on-chain-enforced spending limits. Non-custodial (the agent never holds funds or keys), hosted MCP + local signer, receipts for every payment. `npx @haven_ai/connect@alpha` — details: <host>/402
+
+**This copy is not submittable yet, and the `<host>` placeholder is why (#2520).** It carried `haven.xyz/402` — a domain nobody owns, so any registry that accepted this text would publish a dead link on our behalf. Unlike the artifacts, a registry submission cannot take a same-origin path: the copy is pasted somewhere else and needs an absolute URL that resolves. No production host is recorded in this repository today, so the placeholder stays until one is — which fits the epic's own decision (#2519) not to submit listings for now. Fill it in the same PR that decides the domain; do not fill it from memory.
 
 Adapt length per registry; never change the one-liner or invent capability claims (no "MPP support" until it ships — the track's credibility rule is that every listing is verifiably true).
 

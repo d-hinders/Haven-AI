@@ -94,6 +94,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/signer/src/**'],
+    // #2515: EDITED, scope = the one connector command example. `@alpha` became
+    // `<channel>`, with the sentence beside it still naming `@alpha` as what
+    // production hands out. Same reason as the connect README: this file ships in
+    // every channel's tarball. Nothing else re-verified. Prior:
     // #2330: re-verified and EDITED (every merchant-header mention). This was
     // the most out-of-date surface found: six spots named X-PAYMENT alone,
     // including two "agent: retry merchant with X-PAYMENT" lines in the
@@ -150,7 +154,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // own hints do; the Custody sentence points at that block instead of
     // repeating the tag. No custody, network or signing claim moved. Rest of
     // the README NOT re-verified.
-    'last-verified': '2026-09-03',
+    'last-verified': '2026-09-04',
   },
   {
     doc: 'packages/mcp/README.md',
@@ -164,6 +168,13 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/connect/src/**'],
+    // #2515: EDITED, scope = the command examples only. Every
+    // `npx @haven_ai/connect@alpha` became `@haven_ai/connect@<channel>`, and the
+    // paragraph under the first example now defines `<channel>` as a placeholder
+    // like the `hv_setup_...` token beside it. This file is in the package's
+    // `files` array, so it is the npm landing page for EVERY channel's tarball —
+    // a `@dev` snapshot was telling its tester to install production. Behaviour,
+    // the doctor/repair text and the override section unchanged. Prior:
     // #2425: EDITED, scope = one closing paragraph appended to the #2424 section,
     // linking the repository runbook docs/operations/package-dev-channel.md (the
     // merged-to-dev `@dev` loop and its owner steps) as the counterpart to the
@@ -187,7 +198,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // with no prior phase to quote, so they rely on the general caveat already
     // stated once at the top of the file. Nothing else re-verified. Prior:
     // '2026-09-01' carried no provenance note.
-    'last-verified': '2026-09-03',
+    'last-verified': '2026-09-04',
   },
   {
     doc: 'packages/cli/README.md',

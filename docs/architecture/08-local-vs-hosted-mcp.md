@@ -40,11 +40,11 @@ narrower than running the whole Haven stack locally.
 Opt in on a supported runtime:
 
 ```bash
-npx -y @haven_ai/connect@alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --local
+npx -y @haven_ai/connect@<channel> --setup hv_setup_... --api https://api.haven.example --ack-local-tools --local
 ```
 
-`@alpha` and `https://api.haven.example` are placeholders for the production
-channel and your backend. Run the setup command your dashboard hands you with
+`<channel>`, `hv_setup_...` and `https://api.haven.example` are all
+placeholders — production hands out `@alpha`. Run the setup command your dashboard hands you with
 `--ack-local-tools --local` appended: since #2422 the package in that command
 is per-deployment — the backend's setup response names it in
 `connector_package` — and a connector pinned by hand to another channel

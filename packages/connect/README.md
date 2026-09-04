@@ -8,14 +8,17 @@ public signing address, proof signature, and API-key hash. Haven never receives
 the private key or plaintext API key.
 
 ```sh
-npx -y @haven_ai/connect@alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
+npx -y @haven_ai/connect@<channel> --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
 ```
 
-`@alpha` is the **production** channel, and the Haven dashboard hands you the
-exact command to run — copy that rather than this one, which uses placeholder
-values. Since #2422 the package in it is per-deployment: the backend's setup
-response names it in `connector_package`, and a non-production deployment can be
-configured to hand out a different channel such as `@haven_ai/connect@dev`.
+`<channel>` is a placeholder, like `hv_setup_...` and the API URL beside it:
+**the Haven dashboard hands you the exact command to run — copy that one.** The
+channel is per-deployment and has been since #2422: the backend's setup response
+names the whole package in `connector_package`, production hands out
+`@haven_ai/connect@alpha`, and a non-production deployment can be configured to
+hand out another, such as `@haven_ai/connect@dev`. This README ships inside every
+channel's tarball and is the npm landing page for all of them, so a literal here
+would be wrong for every reader it did not describe (#2515).
 Read `connector_package` rather than assuming any particular backend's channel. Pinning `@alpha` by hand against such a backend
 installs a signer that skews against it — the signer refuses to sign an
 `x402_expected_context_version` it does not know.
@@ -102,8 +105,11 @@ minutes. Two rules follow:
 2. **Tombstone a directory before (or instead of) deleting it:**
 
    ```
-   npx @haven_ai/connect@alpha --tombstone ~/.haven/agents/<directory> --reason "superseded" --json
+   npx @haven_ai/connect@<channel> --tombstone ~/.haven/agents/<directory> --reason "superseded" --json
    ```
+
+   `<channel>` is the placeholder defined under the first example; this command
+   rewrites local files only, so any published connector does the same job.
 
    This replaces the directory's signer wrapper with a diagnostic that logs the
    retirement (agent id, date, reason, restart guidance) to the host's MCP
@@ -132,9 +138,12 @@ Hermes) the `MCP_HAVEN_API_KEY` dotenv line behind, and the runtime quoted as
 one agent while signing as another. `--unwire` is the erase half:
 
 ```
-npx @haven_ai/connect@alpha --unwire ~/.haven/agents/<directory> [--reason "..."]
-npx @haven_ai/connect@alpha --unwire --name research [--reason "..."]
+npx @haven_ai/connect@<channel> --unwire ~/.haven/agents/<directory> [--reason "..."]
+npx @haven_ai/connect@<channel> --unwire --name research [--reason "..."]
 ```
+
+`<channel>` is the placeholder defined under the first example; `--unwire`
+touches local files only, so any published connector does the same job.
 
 It tombstone-first (so a stale long-lived host still hears `HAVEN-TOMBSTONE`,
 never a masked `ENOENT`), then removes THAT agent's hosted + signer pair from
@@ -282,12 +291,12 @@ directory, so several agents coexist in one runtime instead of replacing each
 other:
 
 ```sh
-npx -y @haven_ai/connect@alpha --setup hv_setup_... --api https://api.haven.example \
+npx -y @haven_ai/connect@<channel> --setup hv_setup_... --api https://api.haven.example \
   --name research --runtime claude-code
 ```
 
-As above, `@alpha` here is the production channel and the placeholders are
-illustrative: take the package from the setup response's `connector_package`
+As above, `<channel>` is a placeholder like the rest of this line: take the
+package from the setup response's `connector_package`
 and add `--name` to the command the dashboard gave you.
 
 | | Without `--name` | With `--name research` |
@@ -328,13 +337,13 @@ design. So it runs in two phases with the dashboard between them:
 
 ```sh
 # 1. On this machine: generate the new key, print its public address.
-npx -y @haven_ai/connect@alpha --rekey [--name research]
+npx -y @haven_ai/connect@<channel> --rekey [--name research]
 
 # 2. In the dashboard: agent → Replace signing key → paste that address.
 #    Sign the steps. It shows a new API key ONCE.
 
 # 3. Back here: write the new credentials and rewire this agent's MCP pair.
-npx -y @haven_ai/connect@alpha --rekey-finish --api-key sk_agent_... \
+npx -y @haven_ai/connect@<channel> --rekey-finish --api-key sk_agent_... \
   --runtime claude-code [--name research]
 ```
 
@@ -342,8 +351,8 @@ npx -y @haven_ai/connect@alpha --rekey-finish --api-key sk_agent_... \
 Since [#2423](https://github.com/d-hinders/Haven-AI/issues/2423) the connector
 builds that command from the npm dist-tag **it** was published under, so a build
 installed from a non-production channel tells you to finish with that same
-channel rather than sending you to production mid-re-key. `@alpha` here is the
-production channel and is right for a production install; it is not right for
+channel rather than sending you to production mid-re-key. `@alpha` is what
+production hands out and is right for a production install; it is not right for
 every install, which is why the tool computes it and this page cannot.
 
 Between the two phases nothing has changed: the agent keeps working on its old
@@ -372,9 +381,14 @@ across the rest is yours.
 ## Diagnosing a stuck setup: `--doctor` / `--repair` (#1589)
 
 ```bash
-npx @haven_ai/connect@alpha --doctor --runtime codex-desktop
-npx @haven_ai/connect@alpha --doctor --repair --runtime codex-desktop
+npx @haven_ai/connect@<channel> --doctor --runtime codex-desktop
+npx @haven_ai/connect@<channel> --doctor --repair --runtime codex-desktop
 ```
+
+`<channel>` is the placeholder defined under the first example — and here it is
+not indifferent: `signer_runtime` compares the sidecar against the manifest of
+the connector **that runs the check**, so a doctor from another channel reports
+a skew that is not there. Use the channel your dashboard hands out.
 
 `--doctor` is read-only and needs NO setup token: it checks the runtime config,
 the agent credential files, the pinned signer runtime install (and, since
@@ -429,8 +443,10 @@ A value is anything `npm install` accepts for that package: a checkout
 command — the command itself is unchanged:
 
 ```bash
-HAVEN_SIGNER_SPEC=file:$PWD/packages/signer npx @haven_ai/connect@alpha --setup <token> --runtime claude-code
+HAVEN_SIGNER_SPEC=file:$PWD/packages/signer npx @haven_ai/connect@<channel> --setup <token> --runtime claude-code
 ```
+
+`<channel>` is the placeholder defined under the first example.
 
 Environment variables rather than a flag, deliberately: the install runs from
 three entry points (`--setup`, `--doctor --repair`, `--rekey-finish`) and all

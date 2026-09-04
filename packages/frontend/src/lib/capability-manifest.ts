@@ -46,7 +46,7 @@ export interface CapabilityManifest {
   summary: string
   human_only_steps: readonly string[]
   dashboard: Record<string, string>
-  api: { base: string; openapi: string; root: string }
+  api: { base: string | null; openapi: string | null; root: string | null }
   hosted_mcp: { url: string | null; note?: string; auth: string; signer: string }
   packages: Record<string, { name: string; channel?: string; one_liner?: string }>
   chains: DiscoveryFacts['chains'] | null
@@ -61,8 +61,27 @@ export interface CapabilityManifest {
  */
 export const HUMAN_ONLY_STEPS = ['signup_and_passkey', 'fund', 'approve_budget'] as const
 
-export function buildManifestFrom(origin: string, facts: DiscoveryFacts | null): CapabilityManifest {
-  const apiBase = facts ? new URL(facts.openapi_url).origin : `${origin}/api`
+/**
+ * Own-origin fields are RELATIVE PATHS, not absolute URLs (#2531, review round).
+ *
+ * The manifest is a document an agent's code acts on, and `dashboard.signup`
+ * is the field it would send a human to. Emitting an absolute URL built from
+ * `x-forwarded-host` meant echoing a caller-supplied host into exactly the
+ * actionable field — a thinner phishing primitive than the SSRF above, but a
+ * real one, and the reviewer was right to name the difference from
+ * `robots.txt`, whose reflected origin only ever names bare paths.
+ *
+ * A relative path removes the reflection instead of documenting it. An agent
+ * resolves `/signup` against the URL it actually fetched this file from, which
+ * is unspoofable by construction: it is the origin the agent chose to connect
+ * to. This is also the same-origin rule the rest of the epic already follows
+ * (#2520, #2521) — the artifacts link paths, not hosts.
+ *
+ * The two fields that stay ABSOLUTE name a DIFFERENT origin and come from
+ * configuration rather than from a header: the API base and the hosted MCP.
+ */
+export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null): CapabilityManifest {
+  const apiBase = facts ? new URL(facts.openapi_url).origin : null
   return {
     schema_version: MANIFEST_SCHEMA_VERSION,
     name: 'haven',
@@ -70,10 +89,13 @@ export function buildManifestFrom(origin: string, facts: DiscoveryFacts | null):
       'Give an agent a budget, not your wallet. Agents pay x402 merchants within owner-set, ' +
       'on-chain-enforced limits; Haven never holds funds and the agent never holds a key.',
     human_only_steps: HUMAN_ONLY_STEPS,
-    dashboard: { signup: `${origin}/signup`, login: `${origin}/login` },
+    dashboard: { signup: '/signup', login: '/login' },
     api: {
+      // Absolute: a different origin, and read from configuration — never from
+      // a request header. Null when the backend could not be reached, which is
+      // an honest answer rather than a guessed URL.
       base: apiBase,
-      openapi: facts?.openapi_url ?? `${origin}/api/openapi.json`,
+      openapi: facts?.openapi_url ?? null,
       root: apiBase,
     },
     hosted_mcp: {
@@ -95,10 +117,10 @@ export function buildManifestFrom(origin: string, facts: DiscoveryFacts | null):
     },
     chains: facts?.chains ?? null,
     docs: {
-      llms: `${origin}/llms.txt`,
-      llms_full: `${origin}/llms-full.txt`,
-      pay_402: `${origin}/402.md`,
-      exit: `${origin}/exit`,
+      llms: '/llms.txt',
+      llms_full: '/llms-full.txt',
+      pay_402: '/402.md',
+      exit: '/exit',
     },
     environment: process.env.NEXT_PUBLIC_HAVEN_ENV ?? 'unknown',
   }

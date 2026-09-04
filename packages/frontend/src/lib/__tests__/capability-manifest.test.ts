@@ -29,11 +29,11 @@ const FACTS: DiscoveryFacts = {
   chains: { deployable: [84532], supported: [8453, 84532, 100] },
 }
 
-/** Every same-origin path the manifest names, flattened. */
+/** Every own-origin path the manifest names. They are relative by design. */
 function manifestPaths(manifest: unknown): string[] {
   const out: string[] = []
   const walk = (value: unknown): void => {
-    if (typeof value === 'string' && value.startsWith(ORIGIN)) out.push(value.slice(ORIGIN.length) || '/')
+    if (typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')) out.push(value)
     else if (Array.isArray(value)) value.forEach(walk)
     else if (value && typeof value === 'object') Object.values(value).forEach(walk)
   }
@@ -56,9 +56,31 @@ describe('capability manifest', () => {
   it('positive control: the check would catch a path that is not served', () => {
     // Without this, the assertion above passes just as well on an empty list
     // or a broken extractor.
-    const paths = manifestPaths({ docs: { bogus: `${ORIGIN}/not-a-real-surface` } })
+    const paths = manifestPaths({ docs: { bogus: '/not-a-real-surface' } })
     expect(paths).toEqual(['/not-a-real-surface'])
     expect(PUBLIC_SURFACES).not.toContain('/not-a-real-surface')
+  })
+
+  it('REFLECTION: own-origin fields are paths, so no caller-supplied host reaches them', () => {
+    // The residual the reviewer named. `dashboard.signup` is the field an
+    // agent would send a human to, and building it from `x-forwarded-host`
+    // echoed a caller-chosen host into exactly the actionable place. A path is
+    // resolved by the agent against the URL it actually fetched — unspoofable
+    // by construction — and is the same-origin rule the rest of the epic
+    // already follows (#2520, #2521).
+    const manifest = buildManifestFrom('https://attacker.example', FACTS)
+    expect(JSON.stringify(manifest)).not.toContain('attacker.example')
+    expect(manifest.dashboard.signup).toBe('/signup')
+    expect(manifest.docs.llms).toBe('/llms.txt')
+  })
+
+  it('the two absolute fields name a different origin, from configuration', () => {
+    // Positive control for the case above: if EVERY field were relative, the
+    // no-reflection assertion would prove nothing about the fields that must
+    // stay absolute because they name another host.
+    const manifest = buildManifestFrom('https://attacker.example', FACTS)
+    expect(manifest.api.base).toBe('https://api.test')
+    expect(manifest.hosted_mcp.url).toBe('https://mcp.test')
   })
 
   it('omits the keys whose targets do not exist yet, and names what lands them', () => {
@@ -135,8 +157,8 @@ describe('capability manifest', () => {
     expect(manifest.hosted_mcp.url).toBeNull()
     expect(manifest.chains).toBeNull()
     expect(manifest.packages.connect).not.toHaveProperty('channel')
-    expect(manifest.dashboard.signup).toBe(`${ORIGIN}/signup`)
-    expect(manifest.docs.llms).toBe(`${ORIGIN}/llms.txt`)
+    expect(manifest.dashboard.signup).toBe('/signup')
+    expect(manifest.docs.llms).toBe('/llms.txt')
   })
 
   it('never guesses a connector channel when it does not know one', () => {

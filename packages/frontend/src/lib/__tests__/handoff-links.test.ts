@@ -124,6 +124,15 @@ describe('parseSetupId', () => {
     expect(setupIdFromSearch(`?setup=${ID}`)).toBe(ID)
   })
 
+  it('leaves the pre-existing ?setup=first sentinel alone (#352)', () => {
+    // `setup` is a SHARED parameter: `?setup=first` already means "auto-open
+    // the connect flow for this user's first agent". The two shapes coexist
+    // only because that handler tests for the literal and this one accepts a
+    // UUID — loosening either is what this case is here to catch.
+    expect(parseSetupId('first')).toBeNull()
+    expect(setupIdFromSearch('?setup=first')).toBeNull()
+  })
+
   it('drops anything else rather than interpolating it into a request path', () => {
     // "the server will 404 it" is not a reason to send arbitrary input into a
     // URL path. An unusable value reads as absent, so the page renders.

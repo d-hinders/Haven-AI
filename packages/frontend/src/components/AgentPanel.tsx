@@ -3,7 +3,6 @@
 import { ChevronRight, CircleAlert, Clock, LoaderCircle, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useCallback, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { setupIdFromSearch } from '@/lib/discovery'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
@@ -48,8 +47,13 @@ export default function AgentPanel() {
    * not special-cased here: the modal opens, `GET /agent-connection-setups/:id`
    * answers 404 for a setup that is not this owner's, and the flow renders its
    * not-found state.
+   *
+   * `setup` is a SHARED parameter: `?setup=first` already means "auto-open the
+   * connect flow for this user's first agent" (#352). The two do not collide —
+   * that handler tests for the literal `'first'` and `parseSetupId` accepts
+   * only a UUID — and `lib/__tests__/handoff-links.test.ts` pins both halves so a
+   * future loosening of either shape fails a test rather than a user.
    */
-  const router = useRouter()
   const resumeSetupId = useMemo(
     () => (typeof window === 'undefined' ? null : setupIdFromSearch(window.location.search)),
     [],
@@ -59,13 +63,19 @@ export default function AgentPanel() {
 
   const closeConnectModal = useCallback(() => {
     panel.setConnectAgentOpen(false)
-    // Closing must also drop the deep link, or the modal reopens on the next
-    // render from a URL the user has just dismissed.
-    if (resumeSetupId) {
-      setResumeDismissed(true)
-      router.replace('/agents')
+    if (!resumeSetupId) return
+    // `resumeDismissed` is what actually keeps the modal shut; the URL tidy is
+    // cosmetic, so it uses `history.replaceState` rather than the Next router.
+    // A router navigation would re-render the page to change nothing, and
+    // reaching for `useRouter` here would make every AgentPanel test mount an
+    // app router to render a panel that does not navigate.
+    setResumeDismissed(true)
+    try {
+      window.history.replaceState(null, '', '/agents')
+    } catch {
+      // A URL that stays tidy is not worth a thrown render.
     }
-  }, [panel, resumeSetupId, router])
+  }, [panel, resumeSetupId])
 
 
   if (!safeAddress) {

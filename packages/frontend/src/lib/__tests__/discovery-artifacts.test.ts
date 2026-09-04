@@ -111,10 +111,11 @@ describe('discovery artifacts (#2520)', () => {
   })
 
   it('no shipped frontend source links a domain we do not own', () => {
-    // The artifacts were the issue's stated scope, but the claim is wider than
-    // the four files: review found `docs.haven.xyz` live in the recovery UI,
-    // where a user clicks it. The surface class is the boundary, not the file
-    // list (#2512).
+    // The artifacts were #2520's stated scope, but the claim is wider than the
+    // four files: this PR's own review found `docs.haven.xyz` live in the
+    // recovery UI, where a user clicks it. The rule that the surface class is
+    // the boundary rather than the file list is #2512's; the site it caught
+    // here is #2520's.
     const SRC = join(__dirname, '../..')
     // `git grep -l` exits 1 when it matches nothing, which is the healthy case
     // here — so read the status rather than letting a throw stand in for a

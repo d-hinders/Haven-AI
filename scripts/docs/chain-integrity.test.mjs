@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { lastVerifiedLine, issueRefs, checkChain, isPromotionPR, chainEntries, headOfEntry, chainAnomalies, checkEntriesVerbatim, normalizeEntryText, MAX_CHAIN_BYTES } from './chain-integrity.mjs'
+import { lastVerifiedLine, issueRefs, checkChain, isPromotionPR, chainEntries, headOfEntry, chainAnomalies, checkEntriesVerbatim, normalizeEntryText, chainNoteBody, MAX_CHAIN_BYTES } from './chain-integrity.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./chain-integrity.mjs', import.meta.url))
 
@@ -337,4 +337,20 @@ test('#2504: normalizeEntryText touches whitespace and a terminal period, nothin
   assert.equal(normalizeEntryText('  a   b .'), 'a b')
   assert.equal(normalizeEntryText('a b.'), 'a b')
   assert.equal(normalizeEntryText('a. b.'), 'a. b')
+})
+
+test('#2504: a LOST `# ` comment marker is not read as an altered entry (review finding)', () => {
+  // docs/architecture/00-overview.md carried this exact shape for one commit:
+  // the structural marker replaced by a space, every entry byte-identical.
+  // Read naively the regex eats #1992's own `#` and the containment check
+  // reports a rewrite that never happened.
+  const prev = 'last-verified: "2026-08-25" # #1992: the two-rails line was false. Prior: #1900: earlier note.'
+  const next = 'last-verified: "2026-08-25"  #1992: the two-rails line was false. Prior: #1900: earlier note.'
+  assert.deepEqual(checkEntriesVerbatim(prev, next).altered, [])
+  assert.equal(chainNoteBody(next).startsWith('#1992:'), true)
+})
+
+test('#2504: a marker followed by a space still opens the comment (release-token entries)', () => {
+  const line = 'last-verified: "2026-09-01" # 0.1.31-alpha.0: published from this branch.'
+  assert.equal(chainNoteBody(line), '0.1.31-alpha.0: published from this branch.')
 })

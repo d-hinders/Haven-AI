@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// `last-verified` chain-integrity check (#1843, extended by #2477).
+// `last-verified` chain-integrity check (#1843, extended by #2477 and #2504).
 //
 // ## The defect this exists for
 //
@@ -55,6 +55,23 @@
 // Deliberately narrow: this is not a general "did prose disappear" detector.
 // It targets the one line where a lost entry is provable rather than guessed,
 // and it stays silent everywhere else. See docs/contributing/docs-quality-system.md.
+//
+// ## #2504 — an entry that survives by REFERENCE but not by TEXT
+//
+// Both checks above read the chain from the outside: one counts refs, the
+// other counts repetitions. Neither opens an entry to ask whether it still
+// says what it said. A base refresh conflicts on this one line and is resolved
+// by hand, and a hand resolution can keep `#1849` on the line while cutting
+// its sentence in half — which is exactly what happened to
+// `docs/product/agent-key-rotation.md`, and what both existing checks call
+// healthy. `checkEntriesVerbatim` asks the third question: is every entry of
+// the base line still present, verbatim, in the candidate?
+//
+// Entries `checkChain` already reports as DROPPED are excluded, so one defect
+// is never reported under two names. Whitespace and one terminal period are
+// normalised away — measured, not assumed: the replay in
+// `chain-integrity-backtest.mjs` turned up a deleted full stop, and a gate
+// that goes red over punctuation teaches people to route around it.
 //
 // ## Escape hatch — named and logged, never silent
 //
@@ -147,9 +164,20 @@ export function issueRefs(line) {
  * so a doubled crammed tail is still caught as a byte-identical duplicate.
  */
 export function chainNoteBody(line) {
-  const m = line.match(/^last-verified:\s*"[^"]*"\s*#\s?(.*)$/)
+  const m = line.match(/^last-verified:\s*"[^"]*"\s*(#\s?)(.*)$/)
   if (!m) return ''
-  return m[1].replace(/\bPrior\s+#/g, 'Prior: #') // bare "Prior #N" boundary variant
+  let body = m[2]
+  // The structural `# ` that opens the comment can itself be lost to an edit —
+  // `docs/architecture/00-overview.md` carried `"2026-08-25"  #1992: …` for one
+  // commit in August, the marker replaced by a space. Without this branch the
+  // regex above eats the FIRST ENTRY's own `#` as if it were the marker, the
+  // body reads `1992: …` where the base read `#1992: …`, and #2504's
+  // containment check reports an altered entry against text that is
+  // byte-identical. That is a false positive found by review, and it would have
+  // sent triage looking for a rewrite that never happened. A `#` immediately
+  // followed by a digit was never the marker: markers are followed by a space.
+  if (m[1] === '#' && /^\d/.test(body)) body = `#${body}`
+  return body.replace(/\bPrior\s+#/g, 'Prior: #') // bare "Prior #N" boundary variant
 }
 
 export function chainEntries(line) {

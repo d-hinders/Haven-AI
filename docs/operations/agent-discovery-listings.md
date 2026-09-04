@@ -8,7 +8,8 @@ covers:
   - packages/frontend/public/402.md
   - packages/frontend/src/middleware.ts
   - packages/frontend/src/lib/discovery.ts
-last-verified: "2026-08-31"
+  - packages/frontend/src/lib/__tests__/discovery-artifacts.test.ts
+last-verified: "2026-09-04" # #2520: § *The artifacts* URL column rewritten from the `haven.xyz` / `app.haven.xyz` / `docs.haven.xyz` hosts, none of which resolve, to same-origin paths; the section gains the same-origin rule, its guard test (added to `covers:` with this entry) and the one temporary off-site allow-list entry (product docs, until #2532). Scope: that table and the paragraph above the connect-one-liner rule — the one-liner rule itself is unchanged and still reads verbatim-everywhere, and the registry checklist below was not re-read. First entry on this chain; the file carried a bare date before.
 ---
 
 # Agent discovery listings — registry audit & cadence
@@ -19,11 +20,28 @@ Operational home of the **Agent Discovery (AEO) GTM track**, Phase 0 (strategy d
 
 | Artifact | URL | Sync rule |
 |---|---|---|
-| `llms.txt` | `haven.xyz/llms.txt` | Curated manifest. Update when a top-level surface (402 page, exit tool, packages, docs) is added/renamed. |
-| `llms-full.txt` | `haven.xyz/llms-full.txt` | Single-file overview. Update on product-model changes (rails, settlement schemes, onboarding flow). |
-| 402 page | `haven.xyz/402/` | Human landing for the 402 moment. Mirror of `402.md` — **edit both together** (sync note in the HTML header). |
-| `402.md` | `haven.xyz/402.md` | Agent-readable mirror; token-cheap, answer-first. |
+| `llms.txt` | `/llms.txt` | Curated manifest. Update when a top-level surface (402 page, exit tool, packages, docs) is added/renamed. |
+| `llms-full.txt` | `/llms-full.txt` | Single-file overview. Update on product-model changes (rails, settlement schemes, onboarding flow). |
+| 402 page | `/402` | Human landing for the 402 moment. Mirror of `402.md` — **edit both together** (sync note in the HTML header). |
+| `402.md` | `/402.md` | Agent-readable mirror; token-cheap, answer-first. |
 | npm metadata | package.json of sdk / signer / mcp / connect / cli | Keywords + descriptions carry the category phrases (x402, agent-payments, budget, non-custodial). Ships on next `release:bump`; do not hand-edit versions (see `scripts/README.md`). |
+
+**Own-product links in these artifacts are same-origin paths, never absolute hosts (#2520).**
+The URL column above is written that way for the same reason: the dev preview,
+production and any custom domain mapped later all resolve the same file, so a
+host change never needs a sweep. Until #2520 these files pointed at `haven.xyz`,
+`app.haven.xyz` and `docs.haven.xyz` — three domains nobody owns — and every one
+of those links answered `Could not resolve host`. Off-site links are allow-listed
+in `packages/frontend/src/lib/__tests__/discovery-artifacts.test.ts`, which fails
+on a reintroduced dead host or an unlisted one; adding a host is a decision, not
+an edit. `llms.txt` and `llms-full.txt` also state in one line that their links
+are paths on the serving host, since an agent may have been handed the text
+rather than the URL it came from.
+
+One allow-list entry is temporary and says so: the product docs have no served
+home until [#2532](https://github.com/d-hinders/Haven-AI/issues/2532) publishes
+them under `/docs/`, so `account-recovery` points at the public repository
+meanwhile. That entry leaving the allow-list is how you know #2532 finished.
 
 The connect one-liner is `npx @haven_ai/connect@alpha` **everywhere, verbatim** — agents copy exact strings. If the dist-tag ever changes, sweep every artifact above in one PR.
 

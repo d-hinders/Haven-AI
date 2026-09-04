@@ -827,6 +827,30 @@ export const openapiSpec = {
         },
       },
     },
+    '/discovery': {
+      get: {
+        tags: ['Health'],
+        operationId: 'getDiscovery',
+        summary: 'Public, read-only facts an agent client needs to configure itself.',
+        description:
+          'The environment as data (#2531): which connector package this deployment hands ' +
+          'out, which hosted MCP it points at, which chains it serves, and where its spec ' +
+          'is. Every value is already public elsewhere — this route re-serves them together ' +
+          'so the frontend capability manifest does not restate the backend\'s env logic. ' +
+          'Never per-user or per-agent data, no relayer address, nothing from /health.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'Public deployment facts.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DiscoveryDocument' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/health': {
       get: {
         tags: ['Health'],
@@ -5720,6 +5744,32 @@ export const openapiSpec = {
         type: 'string',
         enum: Object.values(AgentPaymentRail),
         description: 'Stable rail identifier for Haven agent payment states.',
+      },
+      DiscoveryDocument: {
+        type: 'object',
+        required: ['hosted_mcp_url', 'connector_package', 'openapi_url', 'chains'],
+        properties: {
+          hosted_mcp_url: {
+            anyOf: [{ type: 'string', format: 'uri' }, { type: 'null' }],
+            description:
+              'Null when this deployment has none configured — a discovery document that ' +
+              'refuses is less useful than one that says so, so the connect handout\'s ' +
+              'configuration error is reported here rather than propagated as a 500.',
+          },
+          hosted_mcp_note: { type: 'string', description: 'Why the URL is null, when it is.' },
+          connector_package: { type: 'string', pattern: '^@haven_ai/connect@[a-z][a-z0-9-]{0,31}$' },
+          openapi_url: { type: 'string', format: 'uri' },
+          chains: {
+            type: 'object',
+            required: ['deployable', 'supported'],
+            properties: {
+              deployable: { type: 'array', items: { type: 'integer' } },
+              supported: { type: 'array', items: { type: 'integer' } },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
       },
       HealthResponse: {
         type: 'object',

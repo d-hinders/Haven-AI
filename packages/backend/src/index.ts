@@ -15,6 +15,7 @@ import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './infra/relay
 import { runIfLeader, LEADER_LOCK_KEYS } from './platform/leader-lock.js'
 import { SETTLEMENT_SWEEP_INTERVAL_MS } from './modules/x402/index.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './domain/chains.js'
+import discoveryRoutes from './routes/discovery.js'
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
 import balanceRoutes from './routes/balances.js'
@@ -151,6 +152,10 @@ setRateLimitDegradedReporter((reason) => {
 })
 
 await app.register(openapiRoutes)
+// #2531: the public, read-only facts an agent's code needs — the same values
+// the setup handout computes, so a channel or hosted-MCP change propagates to
+// the frontend manifest instead of being restated there.
+await app.register(discoveryRoutes)
 
 // Capture X-Haven-MCP-Tool header and write an agent_tool_invocations row
 // whenever an authenticated agent request advertises an MCP tool name. Must

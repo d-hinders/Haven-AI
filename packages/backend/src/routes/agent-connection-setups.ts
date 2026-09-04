@@ -1137,7 +1137,9 @@ function joinApprovedActions(actions: string[]): string {
   return `${actions.slice(0, -1).join(', ')}, and ${actions[actions.length - 1]}`
 }
 
-function apiBaseUrl(request: FastifyRequest): string {
+// #2531: exported so `GET /discovery` derives the same origin this route
+// already uses for the connector command — one answer, not two.
+export function apiBaseUrl(request: FastifyRequest): string {
   const env = process.env.HAVEN_API_URL ?? process.env.PUBLIC_API_URL
   if (env) return env.replace(/\/+$/, '')
   const host = request.headers.host ?? `localhost:${process.env.PORT ?? 3001}`

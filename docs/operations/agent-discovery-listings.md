@@ -13,7 +13,10 @@ covers:
   - packages/frontend/src/app/robots.txt/route.ts
   - packages/frontend/src/app/sitemap.xml/route.ts
   - packages/frontend/src/app/layout.tsx
-last-verified: "2026-09-04" # #2521: § *The artifacts* gains rows for `robots.txt`, `sitemap.xml` and the auth-wall marker, and the new § *Discovery hooks* records the four hooks and why the two generated artifacts are route handlers rather than files in `public/`. Scope: those additions and the four `covers:` entries above them. The URL column of the pre-existing rows is #2520's work, merged in beneath this and not re-read here; the registry checklist was not re-read either. Prior: #2520 (follow-up): the *Listing copy (canonical)* block one section below still said `haven.xyz/402` — found by haven-doc-reviewer, and my own scope sentence in the entry below had excluded exactly that part of the file. It cannot take a same-origin path (the copy is pasted into external registries and needs an absolute URL), and no production host is recorded here, so it now reads `<host>/402` with a paragraph saying it is unsubmittable until a domain is decided. Scope: that block and its new paragraph. Prior: #2520: § *The artifacts* URL column rewritten from the `haven.xyz` / `app.haven.xyz` / `docs.haven.xyz` hosts, none of which resolve, to same-origin paths; the section gains the same-origin rule, its guard test (added to `covers:` with this entry) and the one temporary off-site allow-list entry (product docs, until #2532). Scope: that table and the paragraph above the connect-one-liner rule — the one-liner rule itself is unchanged and still reads verbatim-everywhere, and the registry checklist below was not re-read. First entry on this chain; the file carried a bare date before.
+  - packages/frontend/src/lib/capability-manifest.ts
+  - packages/frontend/src/app/.well-known/haven.json/route.ts
+  - packages/backend/src/routes/discovery.ts
+last-verified: "2026-09-04" # #2531: § *The artifacts* gains two rows — the `/.well-known/haven.json` capability manifest and the backend `GET /discovery` it draws its environment-dependent half from — plus the rule that a manifest key must never name a 404, which is why two keys the issue specified (`docs.for_agents`, `dashboard.device_approval`) are deliberately absent until #2523 and the device-code flow land; they are recorded as data so a test asserts their absence. Also records the degrade-rather-than-refuse behaviour and why no connector channel is ever guessed. Three new `covers:` entries. Scope: that table and the new paragraphs — the discovery-hooks section, the registry checklist and the measurement section were not re-read. Prior: #2521: § *The artifacts* gains rows for `robots.txt`, `sitemap.xml` and the auth-wall marker, and the new § *Discovery hooks* records the four hooks and why the two generated artifacts are route handlers rather than files in `public/`. Scope: those additions and the four `covers:` entries above them. The URL column of the pre-existing rows is #2520's work, merged in beneath this and not re-read here; the registry checklist was not re-read either. Prior: #2520 (follow-up): the *Listing copy (canonical)* block one section below still said `haven.xyz/402` — found by haven-doc-reviewer, and my own scope sentence in the entry below had excluded exactly that part of the file. It cannot take a same-origin path (the copy is pasted into external registries and needs an absolute URL), and no production host is recorded here, so it now reads `<host>/402` with a paragraph saying it is unsubmittable until a domain is decided. Scope: that block and its new paragraph. Prior: #2520: § *The artifacts* URL column rewritten from the `haven.xyz` / `app.haven.xyz` / `docs.haven.xyz` hosts, none of which resolve, to same-origin paths; the section gains the same-origin rule, its guard test (added to `covers:` with this entry) and the one temporary off-site allow-list entry (product docs, until #2532). Scope: that table and the paragraph above the connect-one-liner rule — the one-liner rule itself is unchanged and still reads verbatim-everywhere, and the registry checklist below was not re-read. First entry on this chain; the file carried a bare date before.
 ---
 
 # Agent discovery listings — registry audit & cadence
@@ -28,6 +31,8 @@ Operational home of the **Agent Discovery (AEO) GTM track**, Phase 0 (strategy d
 | `llms-full.txt` | `/llms-full.txt` | Single-file overview. Update on product-model changes (rails, settlement schemes, onboarding flow). |
 | 402 page | `/402` | Human landing for the 402 moment. Mirror of `402.md` — **edit both together** (sync note in the HTML header). |
 | `402.md` | `/402.md` | Agent-readable mirror; token-cheap, answer-first. |
+| capability manifest | `/.well-known/haven.json` | **Generated, never hand-edited.** The same environment as JSON for an agent's code. Its environment-dependent half comes from the backend's `GET /discovery`, so a connector-channel or hosted-MCP change propagates instead of being restated. Adding a key is non-breaking; removing one or changing its meaning bumps `schema_version`. |
+| discovery facts | `GET /discovery` (backend) | Public, read-only, unauthenticated. Re-serves values that are already public elsewhere — never per-user or per-agent data, no relayer address, nothing from `/health`. A test enumerates the keys, so adding one is a decision. |
 | npm metadata | package.json of sdk / signer / mcp / connect / cli | Keywords + descriptions carry the category phrases (x402, agent-payments, budget, non-custodial). Ships on next `release:bump`; do not hand-edit versions (see `scripts/README.md`). |
 | `robots.txt` | `/robots.txt` | **Generated**, not a static file (`src/app/robots.txt/route.ts`). Names the agent-readable artifacts and `Disallow`s the authenticated prefixes. Update when a public artifact is added or an authenticated prefix appears — both come from `AUTHENTICATED_PREFIXES` in `src/lib/discovery-surfaces.ts`, so edit that list, not the template. |
 | `sitemap.xml` | `/sitemap.xml` | **Generated** (`src/app/sitemap.xml/route.ts`) from `PUBLIC_SURFACES` in `src/lib/discovery-surfaces.ts`. Add a public page → add it there. The guard test fails if an entry resolves to no route or file, or if an authenticated prefix reaches the list. |
@@ -49,6 +54,29 @@ One allow-list entry is temporary and says so: the product docs have no served
 home until [#2532](https://github.com/d-hinders/Haven-AI/issues/2532) publishes
 them under `/docs/`, so `account-recovery` points at the public repository
 meanwhile. That entry leaving the allow-list is how you know #2532 finished.
+
+**A manifest key must never name a surface that 404s (#2531).** The manifest's
+whole value is that an agent's *code* can follow it without guessing, and a key
+pointing at a missing page is worse than a missing key: the agent cannot tell
+"not offered here" from "offered and broken". Two keys the issue specified are
+therefore **absent on purpose** until the surfaces exist — `docs.for_agents`
+(`/for-agents.md`, lands with [#2523](https://github.com/d-hinders/Haven-AI/issues/2523))
+and `dashboard.device_approval` (`/device`, the device-code flow). They are
+recorded as data in `DEFERRED_MANIFEST_KEYS` rather than as a comment, so a
+guard test asserts they are still absent and adding one is a deliberate edit.
+`schema_version` is what makes adding them later a non-breaking change.
+
+The same rule is enforced mechanically: every same-origin path the manifest
+names is checked against `PUBLIC_SURFACES`, with a positive control proving the
+check can still fail.
+
+**The manifest degrades rather than refuses.** If the backend is unreachable,
+`hosted_mcp.url` and `chains` are `null` and the connector `channel` is absent
+— the static half (where to sign up, which docs to read, which steps are the
+human's) is still true. `null` is distinguishable from wrong; a 500 is not.
+And the manifest never guesses a connector channel it does not know, because a
+hard-coded `@alpha` is right on production by coincidence and wrong on dev
+(#2422).
 
 The connect one-liner is `npx @haven_ai/connect@alpha` **everywhere, verbatim** — agents copy exact strings. If the dist-tag ever changes, sweep every artifact above in one PR.
 

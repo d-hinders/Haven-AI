@@ -47,6 +47,7 @@ export const config = {
   matcher: [
     '/llms.txt',
     '/llms-full.txt',
+    '/.well-known/haven.json',
     '/402',
     '/402/:path*',
     '/402.md',

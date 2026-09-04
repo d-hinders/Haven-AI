@@ -24,6 +24,10 @@ Haven connects agents through MCP (hosted, keyless) plus a local signer. Payment
 - [Independent exit tool](/exit): inspect and revoke every agent budget with only a wallet and a public RPC — works even if Haven disappears
 - [Account recovery](https://github.com/d-hinders/Haven-AI/blob/dev/docs/product/account-recovery.md): signer-set management and recovery model
 
+## Machine-readable
+
+- [Capability manifest](/.well-known/haven.json): the same environment as JSON — where to sign up, which steps only a human can do, the API and its spec, the connector package this deployment hands out, the chains it serves. Generated, never hand-edited.
+
 ## Optional
 
 - [Full agent-readable overview](/llms-full.txt): product model, payment flow, and integration surface in one file

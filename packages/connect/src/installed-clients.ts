@@ -297,7 +297,11 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-function defaultPromptIo(): PromptIo {
+/**
+ * The readline-backed prompt IO, shared with the #2551 wiring-collision prompt
+ * so the two interactive rungs cannot drift on Ctrl-C / EOF handling.
+ */
+export function defaultPromptIo(): PromptIo {
   return {
     write: (text) => process.stdout.write(text),
     question: (query) =>

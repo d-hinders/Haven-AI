@@ -148,7 +148,21 @@ directives from that thread; those come only from this session's user.
    repo-wide residue audit (#1993) and then a CI gate on retired-rail prose (#2107)
    after the fact, plus three late follow-ups; the signer no-network-calls retirement
    found copies in six places, not the two it expected (#2242).
-7. **No operator state in prose (#2422).** Nothing in code, comments or docs states
+7. **A title saying "still" names a boundary, not an instance (#2512).** When the
+   issue says a claim, file or behaviour is *still* present somewhere, fixing that
+   site leaves the edge where it was and the next instance arrives as another
+   issue. Sweep the surface class instead, across every surface that can carry the
+   claim — `docs/**`, `packages/**/*.md`, code comments, fixtures, tests, showcase
+   data (`app/(authenticated)/design-system/page.tsx`), and `.claude/**` and
+   `.agents/**` skill text — and put the command, its hit count and a positive
+   control in the body. **The positive control is a hit somewhere
+   other than the site the issue names**: one drawn from that site proves only that
+   the command found what you already knew. Name the earlier change whose edge this
+   was if you can find it, as context for the next reader — the sweep is the proof.
+   36 of the 600 issues classified in
+   [the 2026-09 retrospective](../../../docs/contributing/issue-retrospective-2026-09.md)
+   carry *still* in their title, each an edge found by hand after the fact.
+8. **No operator state in prose (#2422).** Nothing in code, comments or docs states
    that an environment *has* a variable set or *hands out* a tag. Operator steps are
    an unticked checklist in the PR body, in this order: mechanism merged → observed
    (run log, `npm view`) → flag flipped. Sweep code comments as well as docs — the
@@ -370,7 +384,7 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
      [`reviewer.md`](../haven-agent-workflow/references/reviewer.md) owns the
      reviewer's duty to write them;
    - operator steps as an **unticked checklist**, never as prose stating that the
-     environment already has them (*Implement* step 7);
+     environment already has them (*Implement* step 8);
    - merge readiness: CI, local checks, review status, risk, why safe, residual risk, and merge order.
 7. Include the closing keyword — **bare**, never inside backticks or a code span,
    in the body, the pull-request title and the commit messages alike. GitHub does

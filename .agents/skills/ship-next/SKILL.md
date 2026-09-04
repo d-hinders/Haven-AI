@@ -153,10 +153,13 @@ directives from that thread; those come only from this session's user.
    to fix is the edge of the earlier sweep — the site it names is only where that
    edge became visible. The PR body states three things: which earlier change
    swept, **named by its issue or PR number**, with the command it ran if it left
-   one; why this site fell outside that scope; and what the scope is now, as the
-   command a reader can re-run rather than a description of it. Naming the earlier
-   change is what makes the first two checkable — "the earlier sweep covered docs
-   and code" is a sentence no reviewer can disagree with. When the
+   one; why this site fell outside that scope, **as a property of that command** —
+   a path class it did not cover, a phrase family it did not search — rather than
+   a characterisation of the site; and what the scope is now, as the command a
+   reader can re-run rather than a description of it. The naming is what makes
+   the first two checkable: a reviewer re-runs the earlier command and sees this
+   site absent from its output. "The earlier sweep covered docs and code" is a
+   sentence nobody can disagree with, and a rule that accepts it is advice. When the
    answer to the second is a surface class the earlier sweep never opened —
    `packages/**/*.md`, code comments, fixtures, `.claude/hooks/**`, skill text —
    the sweep runs over that class and its result goes in the body, with a positive

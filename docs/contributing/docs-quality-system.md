@@ -535,6 +535,11 @@ its own — front matter only, `Refs` the tracking issue, the shape
 > `chain-reset(#<issue>)` naming what was dropped and why; the older entries
 > leave the line and stay recoverable in `git log -p` on the file.
 
+`node scripts/docs/chain-integrity.mjs --warn-bytes=<n>` reports against a
+different threshold for one run — lower it to see which chains are next in the
+queue rather than only those already past 40 KiB. It changes nothing that is
+enforced.
+
 Twenty is a floor, not a target — keep more while they fit comfortably. Git
 history is what makes truncation defensible at all, so a compaction that does
 not say where the dropped entries went is not one. Do it in its own diff for the
@@ -548,7 +553,7 @@ smaller. And the measure on both sides is **UTF-8 bytes**: `chainAnomalies`
 compared `line.length` (UTF-16 code units) while reporting "N bytes" until
 #2562, so on a chain dense with em-dashes and arrows the same line could be
 under the enforced limit and over the reported one — 65,448 against 65,719 on
-`mcp-runtime-compatibility.md`, measured 2026-09-03. Either measure is
+`mcp-runtime-compatibility.md` at `f37184b5c0d6` (2026-09-04). Either measure is
 defensible; enforcing one while reporting the other is not, and it put wrong
 figures into two separate write-ups before it was fixed.
 

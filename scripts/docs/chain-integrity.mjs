@@ -81,8 +81,8 @@
 // FIRST, `chainAnomalies` compared `line.length` — UTF-16 code units — while
 // naming the result `bytes` and failing with "chain line is N bytes". On a
 // chain full of em-dashes and arrows the two differ measurably: the
-// mcp-runtime-compatibility line was 65,448 code units and 65,719 bytes on
-// 2026-09-03, so the SAME line was under the limit by the measure enforced and
+// mcp-runtime-compatibility line was 65,448 code units and 65,719 bytes at
+// `f37184b5c0d6` (2026-09-04), so the SAME line was under the limit by the measure enforced and
 // over it by the measure reported. Either is defensible; enforcing one while
 // reporting the other is not, and it put wrong numbers into #2563's first
 // framing and into #2562's own first draft. The measure is now UTF-8 bytes on

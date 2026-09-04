@@ -159,6 +159,10 @@ export const config = {
   // OPERATOR action, never an agent's.
   trustProxyHops: parseTrustProxyHops(process.env.TRUST_PROXY_HOPS),
 
+  // Optional operator-only health diagnostics. Unset keeps GET /health/ops
+  // indistinguishable from a route that does not exist.
+  opsToken: process.env.HAVEN_OPS_TOKEN ?? '',
+
   // Chain-specific RPC URLs
   rpcUrlBase: optionalEnv('RPC_URL_BASE', 'https://mainnet.base.org'),
   rpcUrlBaseSepolia: optionalEnv('RPC_URL_BASE_SEPOLIA', 'https://sepolia.base.org'),

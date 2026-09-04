@@ -95,7 +95,7 @@ function chainState(issuance: boolean, verification: boolean): PassportChainStat
 }
 
 /**
- * Summarise passport configuration for `/health` and the boot warning.
+ * Summarise passport configuration for `/health/ops` and the boot warning.
  *
  * Chains outside `PASSPORT_CHAIN_IDS` are absent rather than reported
  * unconfigured: a chain that serves no passports has nothing to be ready for,

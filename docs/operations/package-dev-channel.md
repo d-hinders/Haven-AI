@@ -15,7 +15,7 @@ covers:
   - packages/connect/src/doctor.ts
   - packages/connect/src/cli.ts
   - packages/connect/src/args.ts
-last-verified: "2026-09-04" # #2420 rollout: added § "First rollout — 2026-09-04", a dated record of the epic's operator steps. Deliberately does NOT tick the checklist above — its preamble says the boxes stay unticked because live environment state is read from the environment, and a ticked box would assert a Railway variable nothing keeps true. Evidence is split into measured (steps 2-4, re-run for this edit: ancestor check on 709f87f3, four publish.yml runs, `npm view` dist-tags on all five) and owner-reported (steps 1, 5, 6 — an npmjs.com settings page and two Railway variables, none of which this repository can observe). Step 8 is recorded as NOT verified rather than assumed. Also records that the published @dev SDK bundle carries HAVEN_CONNECTOR_CHANNEL = "dev", read from the tarball, and links #2515 for the README gap the rollout surfaced. Scope: the new section and this note ONLY — the mechanism sections (what @dev is, the loop, the single-developer override, the checklist, failure modes) were NOT re-verified in this pass. Prior: #2486: re-verified, NOT edited. The strict coupling gate implicated this doc because PR #2502 edits `packages/backend/src/routes/agent-connection-setups.ts` (added to covers: by #2497). The one claim this doc makes about that file — `connector_package` is built from `config.connectorChannel` at import time — was re-read against #2502's diff, which changes `buildSetupPrompt`'s closing sentence and nothing on the `connector_package` path. Claim holds; no body change. Scope: that one claim only. Prior: #2425: written against the merged slices, not the epic text — `publish.yml`, `scripts/release-snapshot-version.mjs` and `scripts/release-channel.mjs` (#2463), `parseConnectorChannel` in `packages/backend/src/config.ts` (#2467), `packages/sdk/src/connector-channel.ts` and `packages/mcp-server/src/connector-channel.ts` (#2492), and `packages/connect/src/runtime-spec-override.ts` as merged by PR #2495 (`fceb0891`, #2424). The one measured publish it quotes is run 33772207035 on `fd49e1a3`, as recorded in the #2420 comment thread on 2026-09-03. No deployment state is asserted anywhere in the body: the operator checklist is unticked by design. covers: was widened on review (haven-reviewer at a5349eed): the first draft listed five files while the body states the behaviour of twelve — parseConnectorChannel (config.ts), connector_package (agent-connection-setups.ts), doctor.ts, cli.ts, release-channel.mjs and release-bump.mjs were uncovered (and, on the second pass, args.ts — the file that actually parses --version and --doctor, which cli.ts only dispatches after), so a change to any of them would never have re-implicated this contract doc.
+last-verified: "2026-09-04" # chain-reset(#2542): scoped re-verification that HAVEN_OPS_TOKEN does not affect connector package selection; prior notes remain in git history.
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -219,7 +219,9 @@ the live state of an environment is read from the environment, not from prose.
 - [ ] **5. `HAVEN_CONNECTOR_CHANNEL=dev` on the dev Railway *backend*
       service — only now.** Set earlier, the dashboard hands out a tag npm
       cannot resolve. The value must match `/^[a-z][a-z0-9-]{0,31}$/`
-      (`parseConnectorChannel`, `packages/backend/src/config.ts`); anything else
+      (`parseConnectorChannel`, `packages/backend/src/config.ts`); unrelated
+      backend configuration such as `HAVEN_OPS_TOKEN` does not affect this
+      package-selection path; anything else
       makes the backend **refuse to boot**, naming the variable, rather than
       fall back to `alpha`. Verify by creating a setup in the dev dashboard and
       reading `connector_package` in the response — `@haven_ai/connect@dev`.

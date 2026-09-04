@@ -9,7 +9,8 @@
  * Two halves, by where it runs:
  *
  * 1. FROM ANYWHERE (`HAVEN_API_URL` pointing at prod):
- *    - `/health` answers and reports ok
+ *    - public `/health` answers and reports ok
+ *    - authenticated `/health/ops` returns the relayer monitor state
  *    - the relayer-balance monitor is ALIVE (its cached 8453 entry exists and
  *      `checkedAt` is fresh — the monitor is hourly, so stale > 2h means the
  *      monitor is dead even if the balance was fine when it last ran)
@@ -42,10 +43,16 @@ async function main(): Promise<void> {
     process.exit(2)
   }
 
+  const opsToken = (process.env.HAVEN_OPS_TOKEN ?? '').trim()
+  if (!opsToken) {
+    console.error('HAVEN_OPS_TOKEN is required to read /health/ops relayer diagnostics')
+    process.exit(2)
+  }
+
   let failed = false
 
-  // ── half 1: /health + relayer-monitor liveness ────────────────────────────
-  let health: { status?: string; relayer?: RelayerEntry[] }
+  // ── half 1: public health + authenticated relayer-monitor liveness ────────
+  let health: { status?: string }
   try {
     const res = await fetch(`${apiUrl}/health`)
     health = (await res.json()) as typeof health
@@ -59,9 +66,22 @@ async function main(): Promise<void> {
     process.exit(2)
   }
 
-  const entry = (health.relayer ?? []).find((r) => r.chainId === MAINNET_CHAIN_ID)
+  let ops: { relayer?: RelayerEntry[] }
+  try {
+    const res = await fetch(`${apiUrl}/health/ops`, { headers: { 'x-haven-ops-token': opsToken } })
+    ops = (await res.json()) as typeof ops
+    if (!res.ok) {
+      console.error(`✗ /health/ops is unavailable (HTTP ${res.status})`)
+      process.exit(2)
+    }
+  } catch (err) {
+    console.error(`✗ could not reach ${apiUrl}/health/ops: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(2)
+  }
+
+  const entry = (ops.relayer ?? []).find((r) => r.chainId === MAINNET_CHAIN_ID)
   if (!entry) {
-    console.error(`✗ no relayer entry for chain ${MAINNET_CHAIN_ID} in /health — is the chain served?`)
+    console.error(`✗ no relayer entry for chain ${MAINNET_CHAIN_ID} in /health/ops — is the chain served?`)
     failed = true
   } else {
     const age = Date.now() - new Date(entry.checkedAt).getTime()

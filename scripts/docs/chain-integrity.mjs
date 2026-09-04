@@ -146,11 +146,16 @@ export function issueRefs(line) {
  * concatenation that duplicates the chain duplicates its segments verbatim,
  * so a doubled crammed tail is still caught as a byte-identical duplicate.
  */
-export function chainEntries(line) {
+export function chainNoteBody(line) {
   const m = line.match(/^last-verified:\s*"[^"]*"\s*#\s?(.*)$/)
-  if (!m) return []
-  return m[1]
-    .replace(/\bPrior\s+#/g, 'Prior: #') // bare "Prior #N" boundary variant
+  if (!m) return ''
+  return m[1].replace(/\bPrior\s+#/g, 'Prior: #') // bare "Prior #N" boundary variant
+}
+
+export function chainEntries(line) {
+  const body = chainNoteBody(line)
+  if (!body) return []
+  return body
     .split(/\s+Prior:\s*/)
     .map((s) => s.trim())
     .filter(Boolean)
@@ -232,6 +237,78 @@ export function checkChain(prevLine, nextLine) {
  * escape hatch: `chain-reset(#N)` is documented for compaction, and a reset
  * does not make a doubled line smaller than the ceiling.
  */
+/**
+ * The third failure mode (#2504): an entry that SURVIVES by reference but not
+ * by text.
+ *
+ * `checkChain` asks whether each prior issue ref is still present, and
+ * `chainAnomalies` asks whether any entry appears twice. Neither asks whether
+ * the entry that is present still says what it said. A base-refresh conflict on
+ * the `last-verified` scalar is resolved by hand, and a hand resolution can
+ * keep the ref while rewriting, truncating or re-wording the prose behind it —
+ * at which point the chain still passes both existing checks while the record
+ * of what was verified, and what was explicitly NOT verified, has quietly
+ * changed. A provenance chain whose entries can be edited in place is not
+ * provenance.
+ *
+ * The rule is CONTAINMENT of the entry TEXT, deliberately not a subsequence or
+ * an ordering rule. That stricter shape was written for #1843, backtested, and
+ * rejected: zero additional real defects, two false positives (#1832, #1601)
+ * from entries that legitimately cite each other. Interleaving reorders
+ * entries on purpose — the incoming side's newest entry lands ahead of ours —
+ * so an order-sensitive rule would go red on the very resolution this check
+ * exists to require.
+ *
+ * Entries reported DROPPED by `checkChain` are excluded here. A deletion is
+ * already named by that check, and reporting one defect under two names splits
+ * the reader's attention between a real cause and its echo. What is left is
+ * exactly the alteration case: the ref is still on the line, the text is not.
+ *
+ * `chain-reset(#N)` is honoured as it is everywhere else — a declared
+ * compaction rewrites entries on purpose and says so.
+ *
+ * Returns { altered: [{ head, excerpt }] }.
+ */
+/**
+ * The comparison form for #2504's containment test.
+ *
+ * "Byte-verbatim" is the rule the convention states, and it is very nearly the
+ * rule this check enforces — but the replay over merged history (see
+ * `chain-integrity-backtest.mjs`) turned up one hit that was a full stop
+ * deleted from the end of an entry, against two that were real: an entry
+ * truncated mid-sentence, and an entry deleted outright whose ref survived
+ * only as a citation inside another entry. A gate that goes red over a
+ * trailing period teaches people to route around it, and the two real defects
+ * are both changes of MEANING, which no amount of whitespace or terminal
+ * punctuation can disguise: a truncation ends the text early, so containment
+ * still fails after this normalisation.
+ *
+ * So: collapse internal whitespace runs, and ignore trailing whitespace and a
+ * single terminal `.` — nothing else. Any change to a word is still a finding.
+ */
+export function normalizeEntryText(text) {
+  return text.replace(/\s+/g, ' ').trim().replace(/\.$/, '').trim()
+}
+
+export function checkEntriesVerbatim(prevLine, nextLine) {
+  if (CHAIN_RESET_RE.test(nextLine)) return { altered: [] }
+  const body = normalizeEntryText(chainNoteBody(nextLine))
+  if (!body) return { altered: [] }
+  const survivingRefs = new Set(issueRefs(nextLine))
+  const altered = []
+  for (const entry of chainEntries(prevLine)) {
+    if (body.includes(normalizeEntryText(entry))) continue
+    const head = headOfEntry(entry)
+    // A dropped entry is checkChain's finding, not this one. An entry whose
+    // head is a release token rather than an issue ref has no ref to check, so
+    // it is judged on its text alone.
+    const refs = head ? head.match(/#\d+/g) : null
+    if (refs && !refs.some((r) => survivingRefs.has(r))) continue
+    altered.push({ head, excerpt: entry.slice(0, 96) })
+  }
+  return { altered }
+}
+
 export const MAX_CHAIN_BYTES = 64 * 1024
 
 /**
@@ -421,6 +498,11 @@ async function main() {
     const anomalies = chainAnomalies(nextLine)
     if (anomalies.duplicates.length) failures.push({ rel, kind: 'duplicated', duplicates: anomalies.duplicates })
     if (anomalies.tooLarge) failures.push({ rel, kind: 'oversize', ...anomalies.tooLarge })
+    // #2504: the entry is still referenced but no longer says what it said. A
+    // hand-resolved base refresh can keep the ref and rewrite the prose behind
+    // it, which both checks above read as healthy.
+    const verbatim = checkEntriesVerbatim(prevLine, nextLine)
+    if (verbatim.altered.length) failures.push({ rel, kind: 'altered', altered: verbatim.altered })
   }
 
   for (const r of resets) {
@@ -436,12 +518,25 @@ async function main() {
       if (f.kind === 'duplicated') {
         const det = f.duplicates.map((d) => `${d.head} ×${d.count}`).slice(0, 8).join(', ')
         console.error(`  - ${f.rel}: ${det}${f.duplicates.length > 8 ? ' …' : ''} — same entry (leading ref + prose) appears more than once`)
+      } else if (f.kind === 'altered') {
+        const det = f.altered.map((a) => a.head ?? '(entry)').slice(0, 8).join(', ')
+        console.error(`  - ${f.rel}: ${det}${f.altered.length > 8 ? ' …' : ''} — entry still referenced, but its text changed`)
+        for (const a of f.altered.slice(0, 3)) console.error(`      was: ${a.excerpt}${a.excerpt.length === 96 ? '…' : ''}`)
       } else if (f.kind === 'oversize') {
         console.error(`  - ${f.rel}: chain line is ${f.bytes} bytes — over the ${f.maxBytes}-byte ceiling`)
       } else {
         console.error(`  - ${f.rel}: dropped ${f.dropped.join(', ')} from the chain`)
       }
     }
+    console.error(
+      '\nAn entry that keeps its ref while its text changes is not a surviving ' +
+      'entry: a chain records what was verified and what was explicitly NOT, so ' +
+      'editing that prose in place rewrites the record rather than extending it ' +
+      '(#2504). Resolving a base refresh, INTERLEAVE — newest first, every prior ' +
+      'entry byte-verbatim behind `Prior:`, no ref dropped and none doubled — ' +
+      'rather than taking one side. To correct what an entry claimed, add a new ' +
+      'entry that says how it was wrong; do not overwrite it.\n',
+    )
     console.error(
       '\nA `last-verified` note line is a chain, one entry per issue that verified ' +
       'the doc. Two notes on that line are two findings about the file, not two ' +

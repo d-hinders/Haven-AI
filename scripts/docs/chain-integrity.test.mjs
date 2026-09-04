@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { lastVerifiedLine, issueRefs, checkChain, isPromotionPR, chainEntries, headOfEntry, chainAnomalies, MAX_CHAIN_BYTES } from './chain-integrity.mjs'
+import { lastVerifiedLine, issueRefs, checkChain, isPromotionPR, chainEntries, headOfEntry, chainAnomalies, checkEntriesVerbatim, normalizeEntryText, MAX_CHAIN_BYTES } from './chain-integrity.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./chain-integrity.mjs', import.meta.url))
 
@@ -271,4 +271,70 @@ test('a dev → main promotion exits early, before any base resolution', () => {
   })
   assert.equal(r.code, 0)
   assert.match(r.out, /promotion/)
+})
+
+// ---------------------------------------------------------------------------
+// #2504 — an entry that survives by REFERENCE but not by TEXT.
+//
+// The two existing checks answer "is every prior ref still here" and "is any
+// entry here twice". Neither asks whether the entry that is here still says
+// what it said, which is precisely what a hand-resolved base refresh can get
+// wrong. The boundary these tests pin was set by replaying the rule over
+// merged history (`chain-integrity-backtest.mjs`): 169 pull requests, 256
+// changed chain lines, and the only three hits were one deleted full stop
+// against two real defects — an entry truncated mid-sentence, and an entry
+// deleted outright whose ref survived as a citation inside another entry.
+// ---------------------------------------------------------------------------
+
+const BASE_CHAIN =
+  'last-verified: "2026-09-01" # #300: the alpha claim re-read against `src/a.ts` and corrected. ' +
+  'Prior: #200: the beta paragraph verified; nothing else re-read.'
+
+test('#2504: an unchanged chain is clean', () => {
+  assert.deepEqual(checkEntriesVerbatim(BASE_CHAIN, BASE_CHAIN).altered, [])
+})
+
+test('#2504: ONE word changed inside a prior entry is a finding, named by its ref', () => {
+  const next = BASE_CHAIN.replace('the beta paragraph verified', 'the beta paragraph checked')
+  const { altered } = checkEntriesVerbatim(BASE_CHAIN, next)
+  assert.equal(altered.length, 1)
+  assert.equal(altered[0].head, '#200')
+})
+
+test('#2504: a prior entry truncated mid-sentence is a finding — the real defect the replay found', () => {
+  const next = BASE_CHAIN.replace(
+    'the beta paragraph verified; nothing else re-read.',
+    'the beta paragraph verified.',
+  )
+  assert.equal(checkEntriesVerbatim(BASE_CHAIN, next).altered[0].head, '#200')
+})
+
+test('#2504: an entry DELETED while its ref survives as a citation is caught — checkChain cannot see this', () => {
+  const next =
+    'last-verified: "2026-09-02" # #400: follow-up to #200 and #300. ' +
+    'Prior: #300: the alpha claim re-read against `src/a.ts` and corrected.'
+  // The ref check passes: #200 is still on the line, inside #400's prose.
+  assert.equal(checkChain(BASE_CHAIN, next).status, 'ok')
+  // The text check does not.
+  assert.equal(checkEntriesVerbatim(BASE_CHAIN, next).altered[0].head, '#200')
+})
+
+test('#2504: a deleted trailing period and collapsed whitespace are NOT findings', () => {
+  const period = BASE_CHAIN.replace('and corrected.', 'and corrected')
+  assert.deepEqual(checkEntriesVerbatim(BASE_CHAIN, period).altered, [])
+  const spaces = BASE_CHAIN.replace('Prior: #200: the beta', 'Prior: #200:  the   beta')
+  assert.deepEqual(checkEntriesVerbatim(BASE_CHAIN, spaces).altered, [])
+})
+
+test('#2504: a declared chain-reset rewrites entries on purpose and is exempt', () => {
+  const next =
+    'last-verified: "2026-09-02" # chain-reset(#999): compacted. ' +
+    '#300: the alpha claim re-read against `src/a.ts` and corrected.'
+  assert.deepEqual(checkEntriesVerbatim(BASE_CHAIN, next).altered, [])
+})
+
+test('#2504: normalizeEntryText touches whitespace and a terminal period, nothing else', () => {
+  assert.equal(normalizeEntryText('  a   b .'), 'a b')
+  assert.equal(normalizeEntryText('a b.'), 'a b')
+  assert.equal(normalizeEntryText('a. b.'), 'a. b')
 })

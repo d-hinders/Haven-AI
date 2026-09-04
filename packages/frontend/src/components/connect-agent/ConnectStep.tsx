@@ -28,8 +28,12 @@ function shellPhase(kind: string | undefined): ConnectShellPhase {
 }
 
 export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
-  const { setup, setupStatus, connectView } = flow
-  if (!setup) return null
+  const { setup, setupStatus, connectView, resumed } = flow
+  // #2522: `setup` is the CREATE response, and a session resumed from a
+  // hand-off link (`/agents?setup=<id>`) never has one — it renders from the
+  // polled status instead. Guarding on `setup` alone returned null for every
+  // status on that path, so the modal opened with chrome and a blank body.
+  if (!setup && !resumed) return null
 
   // #1672: once the connector has run, the setup status carries the runtime it
   // DETECTED in the executing environment. Runtime-specific copy (restart
@@ -44,7 +48,24 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
 
   return (
     <ConnectStepShell phase={shellPhase(connectView?.kind)} stateKey={connectView?.kind ?? 'none'}>
-      {connectView?.kind === 'waiting_for_connector' && (
+      {/*
+        The waiting screen is the "paste this into your agent" screen, so it
+        needs the create response's token and command. A resumed session has
+        neither, by design — the person following the link is here to approve a
+        budget, and handing them a connector command would be handing them
+        somebody else's terminal step. They get an honest state instead.
+      */}
+      {connectView?.kind === 'waiting_for_connector' && !setup && (
+        <SetupStatusState
+          title="Not connected yet"
+          body="Nothing to approve until the agent runs its setup command. That command is in the session where this setup was created, and you do not need it here."
+          tone="neutral"
+          primaryLabel="Close"
+          onPrimary={flow.handleClose}
+        />
+      )}
+
+      {connectView?.kind === 'waiting_for_connector' && setup && (
         <WaitingForConnector
           setup={setup}
           runtime={effectiveRuntime}
@@ -72,7 +93,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         <DelegationApprovalStep
           key={connectView.agentId}
           agentId={connectView.agentId}
-          setupId={setup.setup_id}
+          setupId={setup?.setup_id ?? setupStatus.setup_id}
           chainId={flow.approvalChainId}
           status={setupStatus}
           walletName={flow.approvalWalletLabel}

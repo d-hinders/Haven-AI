@@ -1,4 +1,21 @@
 import type { NextConfig } from 'next'
+import { generate } from './scripts/serve-docs.mjs'
+
+/**
+ * Generate the served product docs (#2532) as Next loads its config, so they
+ * exist for `next build` AND `next dev`.
+ *
+ * Deliberately here rather than only in an npm `prebuild` hook. That hook fires
+ * for `npm run build`, which is what CI uses — but a deployment whose build
+ * command invokes `next build` directly would skip it, and every `/docs/*.md`
+ * path would 404 in production with nothing failing. This repository has no
+ * `vercel.json`, so the deployed build command is not knowable from the tree;
+ * putting the call here means the answer stops mattering. Reviewer finding.
+ *
+ * Cheap and idempotent: four file reads and four writes, into a directory it
+ * clears first.
+ */
+generate()
 
 const nextConfig: NextConfig = {
   output: 'standalone',

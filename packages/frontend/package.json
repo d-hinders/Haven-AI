@@ -4,7 +4,6 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/serve-docs.mjs",
     "build": "npm --prefix ../core run build && next build",
     "typecheck": "npm --prefix ../core run build && tsc --noEmit",
     "start": "next start",

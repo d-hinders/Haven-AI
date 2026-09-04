@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import {
   ALLOWLIST,
   SERVED_PREFIX,
@@ -32,8 +33,26 @@ function source(entry: { source: string }): string {
 
 describe('the generated docs match their sources', () => {
   it('generates every allowlisted doc', () => {
-    const written = generate()
-    expect(written).toEqual(ALLOWLIST.map((e) => `${SERVED_PREFIX}/${e.served}`))
+    // Into a THROWAWAY directory, never the real one. `generate()` clears its
+    // output directory before writing, and `discovery-surfaces.test.ts` reads
+    // the real one to assert that every public surface exists — running both in
+    // parallel workers against the same directory is a race whose window is
+    // widest for the file written last. It failed exactly that way once.
+    const outDir = mkdtempSync(join(tmpdir(), 'haven-served-docs-'))
+    try {
+      const written = generate({ outDir })
+      expect(written).toEqual(ALLOWLIST.map((e) => `${SERVED_PREFIX}/${e.served}`))
+      for (const entry of ALLOWLIST) {
+        expect(existsSync(join(outDir, entry.served)), entry.served).toBe(true)
+      }
+    } finally {
+      rmSync(outDir, { recursive: true, force: true })
+    }
+  })
+
+  it('the real output directory is populated for the whole run', () => {
+    // The global setup's job (vitest.global-setup.ts). Asserted here so the
+    // hook cannot be dropped without a test saying so.
     for (const entry of ALLOWLIST) {
       expect(existsSync(join(OUT_DIR, entry.served)), entry.served).toBe(true)
     }
@@ -143,13 +162,30 @@ describe('the served paths are advertised', () => {
     expect(readFileSync(join(FRONTEND, 'src/middleware.ts'), 'utf8')).toContain("'/docs/:path*'")
   })
 
-  it('the build actually runs the generator', () => {
-    // Nothing else guarantees the files exist in a deployment. Without this,
-    // a change to how the frontend is built would 404 every path above with
-    // no test noticing.
+  it('the generator is invoked by next.config, not by an npm lifecycle hook', () => {
+    // Nothing else guarantees the files exist in a deployment. An npm
+    // `prebuild` hook fires for `npm run build` — which is what CI uses — but
+    // a deployment whose build command invokes `next build` directly would
+    // skip it and 404 every path above with nothing failing. This repository
+    // has no `vercel.json`, so the deployed command is not knowable from the
+    // tree; invoking from the config makes the answer stop mattering.
+    // Verified by running a bare `next build` against an empty output dir.
+    const config = readFileSync(join(FRONTEND, 'next.config.ts'), 'utf8')
+    expect(config).toContain("from './scripts/serve-docs.mjs'")
+    expect(config).toMatch(/^generate\(\)$/m)
+
     const pkg = JSON.parse(readFileSync(join(FRONTEND, 'package.json'), 'utf8'))
-    expect(pkg.scripts.prebuild).toBe('node scripts/serve-docs.mjs')
     expect(pkg.scripts.build).toContain('next build')
+    // Deliberately ONE mechanism: a second, partial one invites a reader to
+    // trust the weaker guarantee.
+    expect(pkg.scripts.prebuild).toBeUndefined()
+  })
+
+  it('the test run generates them too, independently of any build', () => {
+    const setup = readFileSync(join(FRONTEND, 'vitest.global-setup.ts'), 'utf8')
+    expect(setup).toContain("from './scripts/serve-docs.mjs'")
+    const config = readFileSync(join(FRONTEND, 'vitest.config.ts'), 'utf8')
+    expect(config).toContain('vitest.global-setup.ts')
   })
 
   it('the generated output is gitignored', () => {

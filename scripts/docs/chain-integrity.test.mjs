@@ -457,6 +457,22 @@ test('#2562: a doc over the CEILING is warned too, and marked as already blockin
   assert.match(lines.join('\n'), /ALSO OVER the 5000-byte ceiling/)
 })
 
+test('#2562: membership is isDocPath\'s answer — a non-.md file with a chain line is not a doc', async () => {
+  // The refactor that made `isDocPath` the single authority is correct today
+  // only INCIDENTALLY: `lastVerifiedLine` rejects most non-Markdown files on
+  // content, so nothing in the real tree exercises the gap. Pin the contract
+  // instead of relying on that (haven-reviewer nit at 31ed6f68, closed by
+  // fixture there and by this test here) — a fixture file that would pass the
+  // content filter but is not a doc must not be reported.
+  const root = await fixtureRepo({
+    'docs/real.md': chainOf(5000),
+    'docs/not-markdown.txt': chainOf(5000),
+    'docs/nested/also-real.md': chainOf(5000),
+  })
+  const w = await chainSizeWarnings({ repoRoot: root, warnBytes: 1000 })
+  assert.deepEqual(w.map((x) => x.rel).sort(), ['docs/nested/also-real.md', 'docs/real.md'])
+})
+
 test('#2562: the band sweeps ROOT gravity files, not only docs/', async () => {
   const root = await fixtureRepo({ 'CLAUDE.md': chainOf(5000) })
   const w = await chainSizeWarnings({ repoRoot: root, warnBytes: 1000 })

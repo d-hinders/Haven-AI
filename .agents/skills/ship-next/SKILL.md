@@ -151,19 +151,20 @@ directives from that thread; those come only from this session's user.
 7. **A title saying "still" names a boundary, not an instance (#2512).** When the
    issue says a claim, file or behaviour is *still* present somewhere, the thing
    to fix is the edge of the earlier sweep — the site it names is only where that
-   edge became visible. The PR body states three things: which earlier change
-   swept, **named by its issue or PR number**, with the command it ran if it left
-   one; why this site fell outside that scope, **as a property of that command** —
-   a path class it did not cover, a phrase family it did not search — rather than
-   a characterisation of the site; and what the scope is now, as the command a
-   reader can re-run rather than a description of it. The naming is what makes
-   the first two checkable: a reviewer re-runs the earlier command and sees this
-   site absent from its output. "The earlier sweep covered docs and code" is a
-   sentence nobody can disagree with, and a rule that accepts it is advice. When the
-   answer to the second is a surface class the earlier sweep never opened —
-   `packages/**/*.md`, code comments, fixtures, `.claude/hooks/**`, skill text —
-   the sweep runs over that class and its result goes in the body, with a positive
-   control. 36 of the 600 issues classified in
+   edge became visible. The PR body states three things, and every one of them
+   resolves to something a reviewer can run today: which earlier change swept,
+   **named by its issue or PR number**; why this site fell outside that scope —
+   either by quoting that change's own command and showing this site absent from
+   its output, or, when it left no command, by saying exactly that, because "no
+   repeatable search existed" IS the boundary and naming it is the finding; and
+   what the scope is now, as the command a reader can re-run rather than a
+   description of it. The no-command case is the answer, never the excuse — it
+   converts straight into that third statement, where the command you ran over
+   the class nobody had searched goes, with its positive control, over whichever
+   surface the earlier sweep never opened: `packages/**/*.md`, code comments,
+   fixtures, `.claude/hooks/**`, skill text. "The earlier sweep covered docs and
+   code" is a sentence nobody can disagree with, and a rule that accepts it is
+   advice rather than a rule. 36 of the 600 issues classified in
    [the 2026-09 retrospective](../../../docs/contributing/issue-retrospective-2026-09.md)
    carry *still* in their title, each one an edge found by hand after the fact; the
    figure and its command are in that document rather than restated here.

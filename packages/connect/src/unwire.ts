@@ -159,18 +159,13 @@ export async function unwireAgent(input: UnwireInput): Promise<UnwireOutcome> {
 
   // ── Tombstone first (#1681 ordering): the long-lived host that still
   //    references this wrapper must hear "retired", never "ENOENT". ─────────
-  let tombstoned = false
-  const tombstonePath = join(input.directory, TOMBSTONE_FILENAME)
-  if ((await readOptionalText(tombstonePath)) === null) {
-    await writeAgentTombstone({
-      directory: input.directory,
-      agentId,
-      reason: input.reason ?? 'unwired via --unwire',
-      replacedBy: input.replacedBy,
-      tombstonesDir: input.tombstonesDir,
-    })
-    tombstoned = true
-  }
+  const tombstoned = await tombstoneDirectoryIfAbsent({
+    directory: input.directory,
+    agentId,
+    reason: input.reason ?? 'unwired via --unwire',
+    replacedBy: input.replacedBy,
+    tombstonesDir: input.tombstonesDir,
+  })
 
   // ── Runtime configs. ──────────────────────────────────────────────────────
   for (const model of RUNTIMES) {
@@ -277,14 +272,52 @@ export async function unwireAgent(input: UnwireInput): Promise<UnwireOutcome> {
   // key), and #2155's mirrored record is what keeps the retirement observable
   // after the keys are gone. The backend is NOT revoked — that stays an owner
   // action on the Haven agent page.
+  await teardownLocalKeyMaterial(input.directory, identity)
+
+  return { directory: input.directory, agentId, slug, tombstoned, runtimes }
+}
+
+/**
+ * Write the #1681 tombstone unless the directory already carries one.
+ * Returns whether THIS call wrote it. Shared with the #2551 replace path,
+ * which retires a superseded directory after the new wiring is written.
+ */
+export async function tombstoneDirectoryIfAbsent(input: {
+  directory: string
+  agentId: string
+  reason: string
+  replacedBy?: string
+  tombstonesDir?: string
+}): Promise<boolean> {
+  if ((await readOptionalText(join(input.directory, TOMBSTONE_FILENAME))) !== null) return false
+  await writeAgentTombstone(input)
+  return true
+}
+
+/**
+ * The local half of a retirement: delete the signer private key and any
+ * abandoned re-key, and strip the API key from `identity.json` while keeping
+ * its orientation fields. This is what `--doctor`'s mutation-proof rule
+ * requires before it will say `retired` instead of `superseded` — a tombstone
+ * never excuses a live key. Nothing is revoked on the backend; that stays an
+ * owner action on the Haven agent page. Shared by `--unwire` (#2169) and the
+ * #2551 replace path.
+ */
+export async function teardownLocalKeyMaterial<T extends { api_key?: string }>(
+  directory: string,
+  identity: T | null,
+): Promise<void> {
   await Promise.all([
-    rm(join(input.directory, 'signer.json'), { force: true }),
-    rm(join(input.directory, REKEY_PENDING_FILENAME), { force: true }),
+    rm(join(directory, 'signer.json'), { force: true }),
+    rm(join(directory, REKEY_PENDING_FILENAME), { force: true }),
   ])
   if (identity && identity.api_key !== undefined) {
     const { api_key: _dropped, ...rest } = identity
-    await writeFile(join(input.directory, 'identity.json'), `${JSON.stringify(rest, null, 2)}\n`, { mode: 0o600 })
+    await writeFile(join(directory, 'identity.json'), `${JSON.stringify(rest, null, 2)}\n`, { mode: 0o600 })
   }
+}
 
-  return { directory: input.directory, agentId, slug, tombstoned, runtimes }
+/** Parse a directory's `identity.json`, or `null` when absent/unreadable. Exported for the #2551 replace path. */
+export async function readIdentityFile(directory: string): Promise<IdentityFile | null> {
+  return identityAt(directory)
 }

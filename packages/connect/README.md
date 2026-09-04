@@ -92,7 +92,8 @@ already-running host, which is why the restart guidance below matters.
 
 ## Retiring an old agent directory
 
-Re-running setup creates a NEW agent and retires nothing. Long-lived MCP hosts
+Re-running setup without `--replace` creates a NEW agent and retires nothing
+(with `--replace`, see [Running setup again](#running-setup-again)). Long-lived MCP hosts
 (gateways, TUI workers, editors, desktop apps) load their MCP wiring once, at
 process start — a host started before your latest setup keeps spawning the OLD
 agent's signer path forever, and when that directory is later removed the spawn
@@ -173,7 +174,9 @@ dashboard whenever ready and verify later with the read-only `haven_get_agent`
 tool. The object includes runtime/topology status,
 probe result, activation and next-action guidance, approval state/expiry (null
 when the backend does not provide an approval expiry), the two
-read-only verification tools, `hosted_mcp_url`, and `superseded_agent_ids`. It
+read-only verification tools, `hosted_mcp_url`, `superseded_agent_ids`, and —
+on a run that replaced existing wiring — `superseded_agents_retired_locally`
+with `retired_agent_ids`. It
 contains no API key, private key, credential
 contents, full credential paths, or full delegate address. The same redacted
 object is available to library callers as `runConnect(...).outcome`; the older
@@ -186,11 +189,26 @@ mismatch. It is non-secret: the same string goes into your own MCP config file,
 and the API key travels beside it in a header.
 
 `superseded_agent_ids` lists the other agent directories on this machine. A
-re-run mints a NEW agent and retires nothing, so those older agents still hold
-live API and signing keys — revoke them on the Haven agent page if you meant to
-replace them. Empty on a clean first run; an empty list is not a guarantee,
-since a scan that cannot read the credential root also yields one rather than
-failing a completed setup.
+re-run mints a NEW agent, and without `--replace` retires nothing, so those
+older agents still hold live API and signing keys — revoke them on the Haven
+agent page if you meant to replace them. Empty on a clean first run; an empty
+list is not a guarantee, since a scan that cannot read the credential root also
+yields one rather than failing a completed setup. On a `--replace` run, `retired_agent_ids` names the
+directories that were actually tombstoned and had their local key files removed
+— **the collision set only**, never the whole `superseded_agent_ids` list, which
+also names named agents that coexist with the replaced bare pair and are
+untouched — and `superseded_agents_retired_locally` is `true` when that
+retirement covered every collision entry (`false`: the install ended with an
+error code and the retirement was skipped, or one entry failed). Both fields
+are absent on any other run and say nothing about the backend, where nothing is
+revoked.
+
+A `wiring_collision` refusal (a non-interactive bare setup over a live
+previous agent, #2551) carries `error.superseded_agent_ids` and
+`error.suggested_name` — the ids the human needs in order to decide, and a
+valid `--name` the run can be re-issued with — with `next_action:
+relay_wiring_collision_to_user`. It is a relay, not a retry hint: do not append
+`--replace` or `--name` on the agent's own initiative.
 
 For a recoverable install, configuration, probe, consent, or manual-runtime
 condition, inspect `error.code` and `error.next_action`, then follow the safe
@@ -247,6 +265,17 @@ adding a security boundary. (The local-signer tool-exposure
 acknowledgement is a separate, machine-checkable consent about what the local
 MCP tools expose, not a registration gate.)
 
+The one question Connect does put before registration is not about the
+agent being created but about the one already here: a **wiring collision**
+([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)). When the bare
+`haven` / `haven-signer` pair on this machine already belongs to a different
+agent whose directory still holds a live key, proceeding would silently
+re-point that pair — the state `--doctor` reports as a still-spend-capable
+`superseded` directory. That choice (replace it, or install alongside under a
+name) belongs to the user, and it is asked *before* the key is minted or the
+agent registered so that declining leaves no orphaned `pending_approval` agent
+behind. See [Running setup again](#running-setup-again).
+
 ## Running setup again
 
 Each setup prompt is one-time and each successful run creates a **new** agent
@@ -264,17 +293,44 @@ already-configured machine behaves as follows (characterized in
   credentials into its own directory under `~/.haven/agents/<agent-id>/`,
   alongside the previous agent's directory, which stays byte-identical.
   Nothing is rotated, revoked, or deleted locally.
-- **Runtime MCP entries are replaced, not duplicated**: Connect owns the
-  `haven` and `haven-signer` entries (and the managed Codex/Hermes
-  equivalents) and re-points them at the newest agent's credentials.
-  Unrelated MCP servers and configuration are preserved. Without `--name`, one
-  runtime is therefore wired to one Haven agent — the newest one. With
+- **A bare re-run over a live previous agent is a decision, not a default
+  ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)).** Before
+  minting a key or registering, Connect scans the credential root for a
+  bare-pair directory that still holds a usable key — the same reading
+  `--doctor` classifies as `wired` or `superseded`; `retired`, `orphaned`,
+  `parked` and **named** directories never count. If it finds one:
+  - an **interactive terminal** is asked to choose — **replace** (below) or
+    **install alongside** under a name Connect proposes from the agent's
+    display name (e.g. `payment-agent`), collision-checked against the
+    directories already there;
+  - a **non-interactive run** (`--json`, CI, an agent tool call, a pipe)
+    refuses with `wiring_collision` — nothing written, token still unused —
+    naming the superseded agent ids and the two flags that resolve it. The
+    refusal is written as a **relay instruction**: an agent running the
+    dashboard's command may append only `--json` (and `--runtime` after a
+    runtime refusal), so it must hand the choice to its user rather than add
+    a flag itself, and re-run only with the flag the user picks.
+  - **`--replace`** is the unattended answer "yes, replace". `--name <slug>`
+    installs alongside. Passing both is a usage error — they contradict.
+- **Replacing re-points the bare pair, then retires the previous directory
+  locally.** Connect owns the `haven` and `haven-signer` entries (and the
+  managed Codex/Hermes equivalents) and re-points them at the new agent's
+  credentials; unrelated MCP servers and configuration are preserved. Once
+  the runtime install has actually completed, each superseded directory is
+  tombstoned and its local key files removed — the same teardown `--unwire`
+  performs — so `--doctor` reads it as `retired` rather than still
+  spend-capable. If the install ends with an error code the retirement is
+  **skipped**, because the old wiring may still be the only working one; the
+  outcome's `superseded_agents_retired_locally` says which happened and
+  `retired_agent_ids` names exactly the directories it reached. With
   `--name`, each agent owns its own suffixed pair and they coexist; see
   [Running several agents in one runtime](#running-several-agents-in-one-runtime).
-- **The previous agent is not revoked by a re-run.** Its credentials remain on
-  disk and its authority remains whatever its on-chain rules say. Revoke
-  agents you no longer use from the Haven dashboard, then delete their
-  credential directories.
+- **The previous agent is not revoked by a re-run — with or without
+  `--replace`.** Local retirement is local: its authority remains whatever
+  its on-chain rules and the Haven agent page say. Revoke agents you no
+  longer use from the Haven dashboard. Connect never calls revoke — that
+  route is owner-authenticated, and an agent credential revoking a sibling
+  agent would be an agent editing its own authority.
 - **A re-run never overwrites an existing credential file.** A write that would
   collide with an existing `identity.json`/`signer.json`/`agent.json` is
   refused outright (and a partially failed write rolls itself back), so a
@@ -401,10 +457,14 @@ Add `--json` for a machine-readable report. No secret material is ever
 printed.
 
 `--doctor` also probes every OTHER agent credential directory it did not
-select (#1688). A re-run of setup mints a NEW agent and retires nothing, so
-a directory from a previous setup can hold an API key that still
-authenticates — meaning any host that started before the re-run keeps
-spending as the agent you believe you replaced. A superseded directory
+select (#1688). A re-run of setup mints a NEW agent and, unless it ran with
+`--replace` (#2551), retires nothing, so a directory from a previous setup
+can hold an API key that still authenticates — meaning any host that started
+before the re-run keeps spending as the agent you believe you replaced. Since
+#2551 a bare setup no longer reaches that state silently: it asks at a
+terminal and refuses everywhere else, so a `superseded` directory now means
+someone chose it — a `--replace` whose install failed, an older connector, or
+a directory this scan could not classify. A superseded directory
 whose key is still live is a FAILING check naming the agent id, with the
 repair spelled out: revoke it on the Haven agent page, then remove the
 directory. An already-revoked one reports as informational; an unreachable

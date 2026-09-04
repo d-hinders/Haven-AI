@@ -171,3 +171,35 @@ describe('parseArgs --name (#1696)', () => {
     expect(() => parseArgs(['--setup', 'hv_setup_x', '--name', 'signer-ops'], {})).toThrow(/reserved/)
   })
 })
+
+describe('--replace (#2551)', () => {
+  it('parses into options.replaceExistingWiring on a setup run', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_test', '--replace'], {})
+    expect(parsed.options.replaceExistingWiring).toBe(true)
+  })
+
+  it('is off by default — a plain setup never carries an implicit "overwrite"', () => {
+    expect(parseArgs(['--setup', 'hv_setup_test'], {}).options.replaceExistingWiring).toBeUndefined()
+  })
+
+  it('REFUSES --replace together with --name: overwrite and alongside contradict each other', () => {
+    expect(() => parseArgs(['--setup', 'hv_setup_test', '--replace', '--name', 'ops'], {})).toThrow(/contradict/)
+    expect(() => parseArgs(['--setup', 'hv_setup_test', '--name', 'ops', '--replace'], {})).toThrow(/contradict/)
+  })
+
+  it.each([
+    [['--doctor', '--runtime', 'claude-code', '--replace']],
+    [['--repair', '--runtime', 'claude-code', '--replace']],
+    [['--tombstone', '/tmp/x', '--replace']],
+    [['--unwire', '/tmp/x', '--replace']],
+    [['--rekey', '--replace']],
+  ])('REFUSES --replace outside a setup run (%j) — never a silent no-op', (argv) => {
+    expect(() => parseArgs(argv, {})).toThrow(/--replace belongs to a --setup run/)
+  })
+
+  it('documents --replace in help output, next to the refusal code it resolves', () => {
+    const help = helpText()
+    expect(help).toContain('--replace')
+    expect(help).toContain('wiring_collision')
+  })
+})

@@ -48,6 +48,53 @@ describe('structured Connect CLI output', () => {
   })
 })
 
+describe('wiring-collision refusal under --json (#2551)', () => {
+  // The refusal is a RELAY instruction: the ids the human needs and the
+  // proposed --name ride structurally, because --json discards the prose.
+  it('carries superseded_agent_ids and suggested_name in the record, mirrors the message to stderr, exits 1', async () => {
+    const stdout: string[] = []
+    const stderr: string[] = []
+    const spy = vi.spyOn(runtime, 'runConnect').mockRejectedValue(
+      new ConnectError(
+        'wiring_collision',
+        'already wired to agent-old — relay this to your user',
+        'relay_wiring_collision_to_user',
+        { supersededAgentIds: ['agent-old'], suggestedServerName: 'payment-agent' },
+      ),
+    )
+    try {
+      const exitCode = await runCli(
+        ['--setup', 'hv_setup_x', '--api', 'https://api.haven.example', '--json'],
+        { stdout: (message) => stdout.push(message), stderr: (message) => stderr.push(message) },
+      )
+      expect(exitCode).toBe(1)
+      expect(stdout).toHaveLength(1)
+      expect(JSON.parse(stdout[0])).toMatchObject({
+        outcome: 'failed',
+        error: {
+          code: 'wiring_collision',
+          next_action: 'relay_wiring_collision_to_user',
+          superseded_agent_ids: ['agent-old'],
+          suggested_name: 'payment-agent',
+        },
+      })
+      expect(stderr.join('')).toContain('relay this to your user')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('a parse-time --replace/--name contradiction is one JSON refusal on stdout', async () => {
+    const stdout: string[] = []
+    const exitCode = await runCli(
+      ['--setup', 'hv_setup_x', '--replace', '--name', 'ops', '--json'],
+      { stdout: (message) => stdout.push(message), stderr: () => undefined },
+    )
+    expect(exitCode).toBe(1)
+    expect(JSON.parse(stdout[0])).toMatchObject({ outcome: 'failed', error: { code: 'connect_failed' } })
+  })
+})
+
 describe('--json wiring for the approval wait (#1377 D)', () => {
   // The one-line pass-through the review flagged as untested: flipping this
   // boolean would make automation runs block for the full 3-minute bound.

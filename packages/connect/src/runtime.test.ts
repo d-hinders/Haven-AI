@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
+import type { WiringCollision, WiringCollisionResolution } from './wiring-collision.js'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ConnectRequestError } from './api.js'
@@ -2221,14 +2222,15 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
     messages: [],
   }))
 
-  async function runWithPriorDir(seedPrior: boolean) {
+  async function runWithPriorDir(seedPrior: boolean, replaceExistingWiring?: boolean) {
     const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1688-'))
+    const oldDir = join(credentialsDir, 'agent-old-uuid')
     if (seedPrior) {
-      const oldDir = join(credentialsDir, 'agent-old-uuid')
       await mkdir(oldDir, { recursive: true })
       await writeFile(join(oldDir, 'identity.json'), JSON.stringify({
         api_key: 'sk_agent_oldsecret', agent_id: 'agent-old',
       }))
+      await writeFile(join(oldDir, 'signer.json'), JSON.stringify({ private_key: PRIVATE_KEY }))
     }
     const logs: string[] = []
     await runConnect({
@@ -2237,6 +2239,10 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
       runtime: 'claude-code',
       credentialsDir,
       waitForApproval: false,
+      // #2551: a prior spend-capable bare directory is now a COLLISION, and a
+      // non-interactive run without this flag refuses before registering.
+      // The heads-up this block tests is the replace path's completion prose.
+      replaceExistingWiring,
     }, {
       api: apiFor('agent-new') as never,
       nodeVersion: SUPPORTED_NODE,
@@ -2253,18 +2259,33 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
       log: (message: string) => logs.push(message),
       redactPaths: true,
     })
-    return logs.join('\n')
+    return { output: logs.join('\n'), oldDir }
   }
 
-  it('MUTATION PROOF: names the superseded agent and the revoke step when a prior dir exists', async () => {
-    const output = await runWithPriorDir(true)
+  it('MUTATION PROOF: names the superseded agent and the revoke step when a prior dir is replaced', async () => {
+    const { output, oldDir } = await runWithPriorDir(true, true)
 
     expect(output).toContain('agent-old')
     expect(output).toMatch(/[Rr]evoke/)
-    expect(output).toMatch(/keeps acting as them/)
+    // #2551: replaced means retired LOCALLY — the restart guidance survives,
+    // the "keeps acting as them" warning is now false and must not print.
+    expect(output).toMatch(/NOT revoked/)
+    expect(output).toMatch(/restart EVERY long-lived host/)
+    expect(output).not.toMatch(/keeps acting as them/)
     // Never the secret, never an auto-action claim.
     expect(output).not.toContain('sk_agent_oldsecret')
     expect(output).not.toMatch(/revoked (it|them) for you/)
+    // The local retirement actually happened: tombstone written, signer key
+    // gone, API key stripped — the doctor's `retired`, not `superseded`.
+    await expect(stat(join(oldDir, 'TOMBSTONE.json'))).resolves.toBeDefined()
+    await expect(stat(join(oldDir, 'signer.json'))).rejects.toThrow()
+    expect(JSON.parse(await readFile(join(oldDir, 'identity.json'), 'utf8'))).toEqual({ agent_id: 'agent-old' })
+  })
+
+  it('#2551: the same prior dir WITHOUT --replace is refused before anything is minted', async () => {
+    const error = await expectRejection(runWithPriorDir(true))
+    expect(error).toBeInstanceOf(ConnectError)
+    expect((error as ConnectError).code).toBe('wiring_collision')
   })
 
   it('REGRESSION (B1): filesystem junk under the credentials root is never named as an agent', async () => {
@@ -2309,7 +2330,7 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
   })
 
   it('says nothing extra on a first-ever setup — no prior dirs, no heads-up', async () => {
-    const output = await runWithPriorDir(false)
+    const { output } = await runWithPriorDir(false)
     expect(output).not.toContain('agent-old')
     expect(output).not.toMatch(/previous agent/)
   })
@@ -2773,5 +2794,351 @@ describe('runtime_undetermined installed-client hint (#2174)', () => {
     expect((error as ConnectError).code).toBe('runtime_force_unrecognized')
     expect((error as ConnectError).details.installedClients).toBeUndefined()
     expect(failedConnectOutcome(undefined, error).error).not.toHaveProperty('installed_clients')
+  })
+})
+
+
+/**
+ * #2551: an existing-agent wiring collision is resolved at setup, before
+ * registration, instead of by the #1569 remove-first overwrite plus the #1688
+ * after-the-fact heads-up. The harness seeds REAL credential directories
+ * under a temp root, because "collision" is defined in the doctor's terms —
+ * what is on disk — and a mock of the scan would prove only that the mock
+ * was consulted.
+ */
+describe('existing-agent wiring collision at setup (#2551)', () => {
+  const SETUP: ResolvedSetup = {
+    setup_id: 'setup-2551',
+    status: 'awaiting_connection',
+    agent: { name: 'Payment Agent' },
+    haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 84532, network: 'Base Sepolia' },
+    agent_budget: [],
+    hosted_mcp_url: 'https://mcp.haven.example/v1',
+    challenge: { id: 'challenge-2551', message: 'sign me', expires_at: '2099-01-01T00:00:00.000Z' },
+  }
+
+  function apiSpies() {
+    return {
+      resolveSetup: vi.fn(async () => SETUP),
+      registerSetup: vi.fn(async (input: RegisterSetupInput) => ({
+        setup_id: 'setup-2551',
+        agent_id: 'agent-new',
+        status: 'connected_local',
+        agent_status: 'pending_approval',
+        api_key_prefix: input.apiKeyPrefix,
+        api_key_scope: 'setup_pending',
+        delegate_address: input.delegateAddress.toLowerCase(),
+        hosted_mcp_url: 'https://mcp.haven.example/v1',
+        next_action: 'return_to_haven_for_wallet_approval',
+      })),
+      updateInstallStatus: vi.fn(async () => {}),
+      getConnectorStatus: vi.fn(),
+      getAgentIdentity: vi.fn(),
+    }
+  }
+
+  async function seedDir(root: string, name: string, files: Record<string, unknown>) {
+    const dir = join(root, name)
+    await mkdir(dir, { recursive: true })
+    for (const [file, content] of Object.entries(files)) {
+      await writeFile(join(dir, file), typeof content === 'string' ? content : JSON.stringify(content))
+    }
+    return dir
+  }
+
+  /** A bare (unnamed) prior agent with a usable key — the collision case. */
+  const liveBare = (agentId: string) => ({
+    'identity.json': { api_key: `sk_agent_${agentId}`, agent_id: agentId },
+    'signer.json': { private_key: PRIVATE_KEY },
+  })
+
+  function harness(root: string, extra: Partial<ConnectDeps> & { installErrorCode?: string } = {}) {
+    const { installErrorCode, ...extraDeps } = extra
+    const api = apiSpies()
+    const writeCredentials = vi.fn(async (input: { serverName?: string }) => {
+      const dir = join(root, input.serverName ?? 'agent-new')
+      return { directory: dir, identityPath: join(dir, 'identity.json'), signerPath: join(dir, 'signer.json'), agentPath: join(dir, 'agent.json') }
+    })
+    const installRuntime = vi.fn(async (input: { serverName?: string; errorCode?: string }) => ({
+      runtime: 'claude-code' as const,
+      runtimeMcpMode: 'local_stdio' as const,
+      hostedMcpConfigured: false,
+      localSignerConfigured: true,
+      localMcpConfigured: true,
+      localMcpAcknowledged: true,
+      probeResult: 'local_stdio_mcp_ready',
+      restartRequired: true,
+      nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
+      configTarget: 'Claude Code MCP config',
+      messages: [],
+      ...(installErrorCode ? { errorCode: installErrorCode } : {}),
+    }))
+    const logs: string[] = []
+    const deps: ConnectDeps = {
+      api: api as never,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_newsecret',
+      preflightStorage: vi.fn(async () => root),
+      writeCredentials: writeCredentials as never,
+      installRuntime: installRuntime as never,
+      log: (message: string) => logs.push(message),
+      redactPaths: true,
+      ...extraDeps,
+    }
+    return { api, writeCredentials, installRuntime, logs, deps }
+  }
+
+  const baseOptions = (root: string) => ({
+    setupToken: 'hv_setup_test',
+    apiBaseUrl: 'https://api.haven.example',
+    runtime: 'claude-code',
+    credentialsDir: root,
+    waitForApproval: false,
+  })
+
+  it('MUTATION PROOF: a non-interactive bare setup over a live prior agent refuses BEFORE registerSetup, minting and writing nothing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-refuse-'))
+    await seedDir(root, 'agent-old-uuid', liveBare('agent-old'))
+    const h = harness(root)
+
+    const error = await expectRejection(runConnect(baseOptions(root), h.deps))
+
+    expect(error).toBeInstanceOf(ConnectError)
+    const refusal = error as ConnectError
+    expect(refusal.code).toBe('wiring_collision')
+    expect(refusal.nextAction).toBe('relay_wiring_collision_to_user')
+    expect(refusal.details.supersededAgentIds).toEqual(['agent-old'])
+    expect(refusal.details.suggestedServerName).toBe('payment-agent')
+    // The relay shape (review addendum, point 1): the agent is told NOT to
+    // add a flag itself, and both resolving flags are named for the human.
+    expect(refusal.message).toMatch(/do NOT add a flag yourself/)
+    expect(refusal.message).toMatch(/relay this to your user/)
+    expect(refusal.message).toContain('--replace')
+    expect(refusal.message).toContain('--name payment-agent')
+    expect(refusal.message).not.toContain('sk_agent_agent-old')
+    // Ordering is the whole point: nothing after the check ran.
+    expect(h.api.resolveSetup).toHaveBeenCalledTimes(1)
+    expect(h.api.registerSetup).not.toHaveBeenCalled()
+    expect(h.writeCredentials).not.toHaveBeenCalled()
+    expect(h.installRuntime).not.toHaveBeenCalled()
+    // The prior directory is byte-untouched — no tombstone, key still there.
+    await expect(stat(join(root, 'agent-old-uuid', 'TOMBSTONE.json'))).rejects.toThrow()
+    await expect(stat(join(root, 'agent-old-uuid', 'signer.json'))).resolves.toBeDefined()
+  })
+
+  it('the refusal reaches the --json record with the ids and the proposed name', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-json-'))
+    await seedDir(root, 'agent-old-uuid', liveBare('agent-old'))
+    const h = harness(root)
+    const error = await expectRejection(runConnect(baseOptions(root), h.deps))
+    const outcome = failureOutcomeFor('claude-code', error)
+    expect(outcome.outcome).toBe('failed')
+    expect(outcome.error).toMatchObject({
+      code: 'wiring_collision',
+      next_action: 'relay_wiring_collision_to_user',
+      superseded_agent_ids: ['agent-old'],
+      suggested_name: 'payment-agent',
+    })
+    expect(JSON.stringify(outcome)).not.toContain('sk_agent_')
+  })
+
+  it('--replace proceeds, re-points the bare pair, and retires the prior directory locally AFTER the install', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-replace-'))
+    const oldDir = await seedDir(root, 'agent-old-uuid', { ...liveBare('agent-old'), 'rekey-pending.json': { agent_id: 'agent-old' } })
+    const h = harness(root)
+
+    const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+    expect(h.api.registerSetup).toHaveBeenCalledTimes(1)
+    // Bare pair, exactly as a first run — replace does not rename anything.
+    expect(h.api.registerSetup.mock.calls[0][0].mcpServerName).toBe('haven')
+    expect(h.installRuntime.mock.calls[0][0].serverName).toBeUndefined()
+    // Retired locally: tombstone + the --unwire teardown (signer key and
+    // abandoned re-key gone, API key stripped, orientation kept).
+    const tombstone = JSON.parse(await readFile(join(oldDir, 'TOMBSTONE.json'), 'utf8'))
+    expect(tombstone).toMatchObject({ agent_id: 'agent-old', replaced_by: 'agent-new' })
+    await expect(stat(join(oldDir, 'signer.json'))).rejects.toThrow()
+    await expect(stat(join(oldDir, 'rekey-pending.json'))).rejects.toThrow()
+    expect(JSON.parse(await readFile(join(oldDir, 'identity.json'), 'utf8'))).toEqual({ agent_id: 'agent-old' })
+    // The outcome says what happened locally and, by omission, nothing about the backend.
+    expect(result.outcome.superseded_agent_ids).toEqual(['agent-old'])
+    expect(result.outcome.superseded_agents_retired_locally).toBe(true)
+    expect(result.outcome.retired_agent_ids).toEqual(['agent-old'])
+    const output = h.logs.join('\n')
+    expect(output).toMatch(/Retired previous agent agent-old locally/)
+    expect(output).toMatch(/NOT revoked/)
+    expect(output).not.toMatch(/keeps acting as them/)
+  })
+
+  it('--replace does NOT retire the prior directory when the runtime install ended with an errorCode', async () => {
+    // Fail-closed the other way round: the old wiring may be the only working
+    // one, and retiring its key behind a failed install would strand the user.
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-replace-err-'))
+    const oldDir = await seedDir(root, 'agent-old-uuid', liveBare('agent-old'))
+    const h = harness(root, { installErrorCode: 'runtime_config_write_failed' })
+
+    const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+    await expect(stat(join(oldDir, 'TOMBSTONE.json'))).rejects.toThrow()
+    await expect(stat(join(oldDir, 'signer.json'))).resolves.toBeDefined()
+    expect(result.outcome.superseded_agents_retired_locally).toBe(false)
+    expect(result.outcome.retired_agent_ids).toEqual([])
+    expect(h.logs.join('\n')).toMatch(/were NOT retired/)
+  })
+
+  it('REGRESSION (review): retired_agent_ids names only the collision set — a coexisting NAMED agent is listed as superseded but never retired', async () => {
+    // superseded_agent_ids is every OTHER directory (#1688), named agents
+    // included; the boolean read against that list would overclaim.
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-replace-named-'))
+    await seedDir(root, 'agent-old-uuid', liveBare('agent-old'))
+    const opsDir = await seedDir(root, 'ops', { ...liveBare('agent-ops'), 'signer-runtime.json': { server_name: 'ops', wrapper_path: '/w' } })
+    const h = harness(root)
+
+    const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+    expect([...(result.outcome.superseded_agent_ids ?? [])].sort()).toEqual(['agent-old', 'agent-ops'])
+    expect(result.outcome.retired_agent_ids).toEqual(['agent-old'])
+    expect(result.outcome.superseded_agents_retired_locally).toBe(true)
+    await expect(stat(join(opsDir, 'TOMBSTONE.json'))).rejects.toThrow()
+    expect(JSON.parse(await readFile(join(opsDir, 'identity.json'), 'utf8')).api_key).toBe('sk_agent_agent-ops')
+  })
+
+  it('--replace on a clean machine is a harmless no-op — no prompt, no retirement, no outcome flag', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-replace-clean-'))
+    const prompt = vi.fn()
+    const h = harness(root, { promptWiringCollision: prompt, isTty: true })
+    const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true, interactive: true }, h.deps)
+    expect(prompt).not.toHaveBeenCalled()
+    expect(result.outcome.superseded_agents_retired_locally).toBeUndefined()
+    expect(result.outcome.retired_agent_ids).toBeUndefined()
+    expect(result.outcome.superseded_agent_ids).toEqual([])
+  })
+
+  it('an interactive TTY run is asked at the conflict; "replace" proceeds on the bare pair', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-prompt-replace-'))
+    const oldDir = await seedDir(root, 'agent-old-uuid', liveBare('agent-old'))
+    const prompt = vi.fn(async (): Promise<WiringCollisionResolution> => ({ action: 'replace' }))
+    const h = harness(root, { promptWiringCollision: prompt, isTty: true })
+
+    await runConnect({ ...baseOptions(root), interactive: true }, h.deps)
+
+    expect(prompt).toHaveBeenCalledTimes(1)
+    const [collision, agentName] = prompt.mock.calls[0] as unknown as [WiringCollision, string]
+    expect(agentName).toBe('Payment Agent')
+    expect(collision.superseded.map((e) => e.agentId)).toEqual(['agent-old'])
+    expect(collision.suggestedServerName).toBe('payment-agent')
+    // The prompt ran BEFORE registration — the whole reason it moved.
+    expect(prompt.mock.invocationCallOrder[0]).toBeLessThan(h.api.registerSetup.mock.invocationCallOrder[0])
+    await expect(stat(join(oldDir, 'TOMBSTONE.json'))).resolves.toBeDefined()
+  })
+
+  it('"alongside" at the prompt installs under the chosen slug — named pair, slug-keyed directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-prompt-alongside-'))
+    const oldDir = await seedDir(root, 'agent-old-uuid', liveBare('agent-old'))
+    const prompt = vi.fn(async (): Promise<WiringCollisionResolution> => ({ action: 'alongside', serverName: 'payments' }))
+    const h = harness(root, { promptWiringCollision: prompt, isTty: true })
+
+    const result = await runConnect({ ...baseOptions(root), interactive: true }, h.deps)
+
+    expect(h.api.registerSetup.mock.calls[0][0].mcpServerName).toBe('haven-payments')
+    expect(h.writeCredentials.mock.calls[0][0].serverName).toBe('payments')
+    expect(h.installRuntime.mock.calls[0][0].serverName).toBe('payments')
+    // Alongside leaves the previous agent exactly as it was.
+    await expect(stat(join(oldDir, 'TOMBSTONE.json'))).rejects.toThrow()
+    await expect(stat(join(oldDir, 'signer.json'))).resolves.toBeDefined()
+    expect(result.outcome.superseded_agents_retired_locally).toBeUndefined()
+  })
+
+  it('"alongside" with a slug that is already taken is refused before anything is written', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-prompt-taken-'))
+    await seedDir(root, 'agent-old-uuid', liveBare('agent-old'))
+    await seedDir(root, 'payments', { 'identity.json': { api_key: 'sk_agent_x', agent_id: 'agent-named' }, 'signer-runtime.json': { server_name: 'payments', wrapper_path: '/w' } })
+    const prompt = vi.fn(async (): Promise<WiringCollisionResolution> => ({ action: 'alongside', serverName: 'payments' }))
+    const h = harness(root, { promptWiringCollision: prompt, isTty: true })
+
+    const error = await expectRejection(runConnect({ ...baseOptions(root), interactive: true }, h.deps))
+    expect(error.message).toMatch(/already wired on this machine/)
+    expect(h.api.registerSetup).not.toHaveBeenCalled()
+    expect(h.writeCredentials).not.toHaveBeenCalled()
+  })
+
+  it('declining at the prompt refuses with its own code, and nothing was minted or written', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-prompt-abort-'))
+    await seedDir(root, 'agent-old-uuid', liveBare('agent-old'))
+    const prompt = vi.fn(async (): Promise<WiringCollisionResolution> => ({ action: 'abort' }))
+    const h = harness(root, { promptWiringCollision: prompt, isTty: true })
+
+    const error = await expectRejection(runConnect({ ...baseOptions(root), interactive: true }, h.deps))
+    expect((error as ConnectError).code).toBe('wiring_collision_declined')
+    expect((error as ConnectError).nextAction).toBe('rerun_connect_with_replace_or_name')
+    expect(h.api.registerSetup).not.toHaveBeenCalled()
+    expect(h.writeCredentials).not.toHaveBeenCalled()
+  })
+
+  it('MUTATION PROOF: the prompt shares the #1719 gate — interactive without a TTY is the refusal, never a prompt', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-gate-'))
+    await seedDir(root, 'agent-old-uuid', liveBare('agent-old'))
+    const prompt = vi.fn(async (): Promise<WiringCollisionResolution> => ({ action: 'replace' }))
+
+    const noTty = harness(root, { promptWiringCollision: prompt, isTty: false })
+    const e1 = await expectRejection(runConnect({ ...baseOptions(root), interactive: true }, noTty.deps))
+    expect((e1 as ConnectError).code).toBe('wiring_collision')
+
+    const notInteractive = harness(root, { promptWiringCollision: prompt, isTty: true })
+    const e2 = await expectRejection(runConnect({ ...baseOptions(root), interactive: false }, notInteractive.deps))
+    expect((e2 as ConnectError).code).toBe('wiring_collision')
+
+    expect(prompt).not.toHaveBeenCalled()
+  })
+
+  it('a --name run never collides: it installs alongside by construction, prompting nothing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-named-'))
+    const oldDir = await seedDir(root, 'agent-old-uuid', liveBare('agent-old'))
+    const prompt = vi.fn()
+    const h = harness(root, { promptWiringCollision: prompt, isTty: true })
+
+    await runConnect({ ...baseOptions(root), interactive: true, serverName: 'research' }, h.deps)
+
+    expect(prompt).not.toHaveBeenCalled()
+    expect(h.api.registerSetup.mock.calls[0][0].mcpServerName).toBe('haven-research')
+    await expect(stat(join(oldDir, 'TOMBSTONE.json'))).rejects.toThrow()
+  })
+
+  it('directories the doctor would call retired, orphaned or parked — and NAMED agents — do not trigger it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-noncollide-'))
+    // retired: tombstoned, keys removed (the haven-reset shape)
+    await seedDir(root, 'retired-uuid', { 'TOMBSTONE.json': { agent_id: 'agent-retired', retired_at: 'x', reason: 'r' } })
+    // retired: tombstoned but identity still present (the --tombstone shape)
+    await seedDir(root, 'tombstoned-uuid', { ...liveBare('agent-tombstoned'), 'TOMBSTONE.json': { agent_id: 'agent-tombstoned', retired_at: 'x', reason: 'r' } })
+    // orphaned: identity without a usable key
+    await seedDir(root, 'orphan-uuid', { 'identity.json': { agent_id: 'agent-orphan' } })
+    // orphaned: identity that does not parse
+    await seedDir(root, 'corrupt-uuid', { 'identity.json': '{not json' })
+    // parked: only a pending re-key
+    await seedDir(root, 'parked-uuid', { 'rekey-pending.json': { agent_id: 'agent-parked' } })
+    // named: coexists on its own pair
+    await seedDir(root, 'ops', { ...liveBare('agent-ops'), 'signer-runtime.json': { server_name: 'ops', wrapper_path: '/w' } })
+    // junk
+    await writeFile(join(root, '.DS_Store'), 'junk')
+    const prompt = vi.fn()
+    const h = harness(root, { promptWiringCollision: prompt, isTty: true })
+
+    const result = await runConnect({ ...baseOptions(root), interactive: true }, h.deps)
+
+    expect(prompt).not.toHaveBeenCalled()
+    expect(h.api.registerSetup).toHaveBeenCalledTimes(1)
+    expect(result.outcome.superseded_agents_retired_locally).toBeUndefined()
+  })
+
+  it('a clean first run is byte-for-byte unchanged: bare names, no prompt, no new outcome field', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-clean-'))
+    const prompt = vi.fn()
+    const h = harness(root, { promptWiringCollision: prompt, isTty: true })
+    const result = await runConnect({ ...baseOptions(root), interactive: true }, h.deps)
+    expect(prompt).not.toHaveBeenCalled()
+    expect(h.api.registerSetup.mock.calls[0][0].mcpServerName).toBe('haven')
+    expect(result.outcome.schema_version).toBe(1)
+    expect('superseded_agents_retired_locally' in result.outcome).toBe(false)
   })
 })

@@ -118,6 +118,15 @@ describe('catalog routes', () => {
     }
   })
 
+  it('a HEAD request takes the authenticated path, not the public one (#2530)', async () => {
+    // Characterization, not a claim that this is ideal: `isPublicCatalogRead`
+    // tests for GET, so `curl -I` gets a 401 where `curl` gets 200. Recorded
+    // because a reviewer asked and the answer should be watched rather than
+    // reasoned about — if this is ever made public too, this case says so.
+    const res = await app.inject({ method: 'HEAD', url: '/catalog' })
+    expect(res.statusCode).toBe(401)
+  })
+
   it('still refuses an unauthenticated caller on every OTHER catalogue route (#2530)', async () => {
     // Positive control: the public read is one route, not a hole in the hook.
     const res = await app.inject({ method: 'GET', url: '/catalog/some-id' })

@@ -32,7 +32,8 @@ covers:
   - packages/backend/src/domain/request-origin.ts
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/middleware/agentAuth.ts
-last-verified: "2026-09-04" # #2530: new § *Discoverability from a bare URL* — the three unauthenticated surfaces, the request-derived `servers[0]`, the two things the origin helper deliberately does NOT do (the trust-gated host with an UNgated scheme, and the path prefix it cannot infer because the frontend rewrite strips `/api` before the backend sees it — measured as a 404, not assumed), the 401 `hint` with the two constraints it must not break (#1640 body identity; the uniform invalid-key string), and the public catalogue allow-list. Three new `covers:` entries. Scope: that section and the front matter — the coverage tables, the drift check and the authority-boundaries section were not re-read. Prior: chain-reset(#2542): scoped re-count after the documented health routes; prior notes remain in git history.
+  - packages/frontend/next.config.ts
+last-verified: "2026-09-04" # #2530: new § *Discoverability from a bare URL* — the three unauthenticated surfaces, the request-derived `servers[0]`, the two things the origin helper deliberately does NOT do (the trust-gated host with an UNgated scheme, and the path prefix it cannot infer because the frontend rewrite strips `/api` before the backend sees it — measured as a 404, not assumed), the 401 `hint` with the two constraints it must not break (#1640 body identity; the uniform invalid-key string), and the public catalogue allow-list. Four new `covers:` entries — `packages/frontend/next.config.ts` added on review, since the path-prefix claim in this section is made true by that rewrite and nothing would have re-implicated the doc if it changed. The forwarded-header paragraph was also corrected on review: it claimed parity with `authRateLimit`, which gates on the same variable but hands SELECTION to `proxy-addr` counting from the right — the host now indexes from the trusted end for that reason, the scheme deliberately does not, and the accepted residue is stated rather than implied. Scope: that section and the front matter — the coverage tables, the drift check and the authority-boundaries section were not re-read. Prior: chain-reset(#2542): scoped re-count after the documented health routes; prior notes remain in git history.
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -73,12 +74,29 @@ surfaces.
 Two things that helper does **not** do, both recorded because they look like
 omissions:
 
-- It honours `x-forwarded-host` only when `TRUST_PROXY_HOPS > 0`. The header is
-  client-supplied, and trusting it unconditionally lets a caller choose the
-  host this service names in its own contract. The **scheme** is deliberately
-  not gated: the host is the spoofable target, while gating the scheme would
-  make every TLS-terminating deployment that has not set the variable advertise
-  `http://` for its own API.
+- It honours `x-forwarded-host` only when `TRUST_PROXY_HOPS > 0`, and reads the
+  entry that many hops **from the right**. Gating is not the whole job:
+  a forwarded header can be APPENDED to, so the leftmost entry is the one an
+  original client could have written, and reading index 0 would hand a
+  multi-hop deployment exactly the value an attacker controls. (An earlier
+  draft claimed parity with `authRateLimit` here. It gates on the same
+  variable, but hands selection to `proxy-addr`, which counts from the right —
+  the gating matched and the selection did not. A reviewer caught it.)
+- The **scheme** takes the LEFTMOST entry and is not gated, both deliberately
+  and for different reasons than the host. `x-forwarded-proto: https,http`
+  means the client reached the edge over https and an inner hop continued over
+  http, so a public URL should name the client's protocol; right-indexing it
+  would make a correct two-hop deployment advertise its own internal `http`.
+  And gating it would make every TLS-terminating deployment that has not set
+  the variable advertise `http://` for its own API.
+
+  **The residue is accepted, not closed, and is written here rather than
+  implied:** the scheme stays injectable. Its blast radius is bounded by the
+  host — the part that decides where a client is told to send its next request
+  — being both gated and right-indexed, so a downgraded scheme on a correct
+  host yields a URL that simply fails against a TLS-only origin. Confirming
+  that the edge overwrites this header is an infrastructure question this
+  repository cannot answer.
 - It cannot infer a path prefix. The frontend proxies `/api/:path*` and its
   rewrite **strips** the prefix before the backend sees the path — measured:
   `GET /api/openapi.json` against the backend is a 404. A deployment that wants

@@ -30,9 +30,12 @@ describe('request origin', () => {
     )
   })
 
-  it('takes the FIRST scheme when several proxies appended one', () => {
-    // `x-forwarded-proto: https,http` means the client used https; reading the
-    // last entry would describe the hop, not the caller.
+  it('takes the LEFTMOST scheme — the client\'s protocol, not an inner hop\'s', () => {
+    // `x-forwarded-proto: https,http` means the client reached the edge over
+    // https and an inner hop continued over http. A public URL should name the
+    // client's protocol. This is deliberately the opposite selection from the
+    // HOST below, which indexes from the trusted end: the host is the
+    // spoofable target, the scheme is a semantic.
     expect(apiBaseUrl(req({ host: 'a.test', 'x-forwarded-proto': 'https,http' }))).toBe('https://a.test')
   })
 
@@ -77,6 +80,53 @@ describe('request origin', () => {
       delete process.env.HAVEN_API_URL
     }
   })
+
+    it('SPOOFING: a client-prepended x-forwarded-host loses to the trusted hop', () => {
+      // The correction a reviewer forced. Selecting index 0 reads the value an
+      // ORIGINAL CLIENT could have written whenever a proxy appends rather than
+      // overwrites — precisely the spoofing class the hop count exists to close.
+      // `proxy-addr` counts from the right for `x-forwarded-for`; so does this.
+      const original = config.trustProxyHops
+      try {
+        ;(config as { trustProxyHops: number }).trustProxyHops = 1
+        expect(
+          apiBaseUrl(
+            req({
+              host: 'backend.internal',
+              'x-forwarded-host': 'attacker.example, real-edge.test',
+              'x-forwarded-proto': 'https',
+            }),
+          ),
+        ).toBe('https://real-edge.test')
+      } finally {
+        ;(config as { trustProxyHops: number }).trustProxyHops = original
+      }
+    })
+
+    it('counts hops from the right, so two trusted hops read two from the end', () => {
+      const original = config.trustProxyHops
+      try {
+        ;(config as { trustProxyHops: number }).trustProxyHops = 2
+        expect(
+          apiBaseUrl(req({ host: 'b.internal', 'x-forwarded-host': 'attacker.example, edge.test, inner.test' })),
+        ).toBe('http://edge.test')
+      } finally {
+        ;(config as { trustProxyHops: number }).trustProxyHops = original
+      }
+    })
+
+    it('a repeated header field cannot disagree with a comma chain', () => {
+      const original = config.trustProxyHops
+      try {
+        ;(config as { trustProxyHops: number }).trustProxyHops = 1
+        const asArray = { host: 'b.internal', 'x-forwarded-host': ['attacker.example', 'real-edge.test'] }
+        expect(apiBaseUrl({ headers: asArray, url: '/', raw: { url: '/' } } as never)).toBe(
+          'http://real-edge.test',
+        )
+      } finally {
+        ;(config as { trustProxyHops: number }).trustProxyHops = original
+      }
+    })
 })
 
 describe('401 hints', () => {

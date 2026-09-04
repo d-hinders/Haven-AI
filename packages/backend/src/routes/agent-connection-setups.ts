@@ -27,6 +27,9 @@ import {
 import { normalizeAgentAllowances } from '../modules/agents/index.js'
 import { getChain } from '../domain/chains.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
+// #2530: lifted to a shared helper — the root document and the OpenAPI
+// servers[] list need the identical answer.
+import { apiBaseUrl } from '../domain/request-origin.js'
 import {
   requestPassport,
   issuePassportBestEffort,
@@ -1135,15 +1138,6 @@ function buildSetupPrompt(command: string, apiUrl: string): string {
 function joinApprovedActions(actions: string[]): string {
   if (actions.length <= 1) return actions[0] ?? ''
   return `${actions.slice(0, -1).join(', ')}, and ${actions[actions.length - 1]}`
-}
-
-function apiBaseUrl(request: FastifyRequest): string {
-  const env = process.env.HAVEN_API_URL ?? process.env.PUBLIC_API_URL
-  if (env) return env.replace(/\/+$/, '')
-  const host = request.headers.host ?? `localhost:${process.env.PORT ?? 3001}`
-  const proto = request.headers['x-forwarded-proto']
-  const scheme = typeof proto === 'string' && proto ? proto.split(',')[0] : 'http'
-  return `${scheme}://${host}`.replace(/\/+$/, '')
 }
 
 /**

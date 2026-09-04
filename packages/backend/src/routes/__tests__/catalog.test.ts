@@ -101,9 +101,45 @@ describe('catalog routes', () => {
     mockQuery.mockReset()
   })
 
-  it('rejects unauthenticated requests', async () => {
+  it('serves the PUBLIC subset to an unauthenticated caller (#2530)', async () => {
+    // The catalogue is a discovery surface (#1717) and used to answer 401,
+    // which meant an agent could not find a payable merchant until after the
+    // onboarding the catalogue was supposed to lead to.
+    mockCatalogWithIngestion([ENTRY])
     const res = await app.inject({ method: 'GET', url: '/catalog' })
+    expect(res.statusCode).toBe(200)
+    const [entry] = res.json().entries
+    expect(entry).toHaveProperty('name')
+    expect(entry).toHaveProperty('endpoint_host')
+    // The reduction, asserted where the route is: no callable URL, no prices,
+    // no tool-invocation detail for a caller with no credential.
+    for (const withheld of ['resource_url', 'price_atomic', 'price_display', 'tool_name', 'tool_arguments']) {
+      expect(entry, withheld).not.toHaveProperty(withheld)
+    }
+  })
+
+  it('still refuses an unauthenticated caller on every OTHER catalogue route (#2530)', async () => {
+    // Positive control: the public read is one route, not a hole in the hook.
+    const res = await app.inject({ method: 'GET', url: '/catalog/some-id' })
     expect(res.statusCode).toBe(401)
+  })
+
+  it('still refuses a BAD credential rather than downgrading it to the public shape', async () => {
+    // Silently serving a reduced answer to a revoked agent would hide the
+    // revocation from the only party who would notice. The agent lookup is
+    // mocked to find NOTHING here — the shared helpers above always answer it
+    // with a live agent, which is exactly what this case must not have.
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('api_key_hash')) return { rows: [] }
+      return { rows: [] }
+    })
+    const res = await app.inject({
+      method: 'GET',
+      url: '/catalog',
+      headers: { authorization: 'Bearer sk_agent_definitely_not_valid' },
+    })
+    expect(res.statusCode).toBe(401)
+    expect(res.json().error).toBe('Invalid or revoked API key')
   })
 
   it('lists entries for a dashboard JWT', async () => {

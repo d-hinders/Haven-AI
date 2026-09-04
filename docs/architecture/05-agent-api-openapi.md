@@ -29,7 +29,10 @@ covers:
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
   - packages/backend/src/routes/safe-details.ts
-last-verified: "2026-09-04" # chain-reset(#2542): scoped re-count after the documented health routes; prior notes remain in git history.
+  - packages/backend/src/domain/request-origin.ts
+  - packages/backend/src/middleware/auth.ts
+  - packages/backend/src/middleware/agentAuth.ts
+last-verified: "2026-09-04" # #2530: new § *Discoverability from a bare URL* — the three unauthenticated surfaces, the request-derived `servers[0]`, the two things the origin helper deliberately does NOT do (the trust-gated host with an UNgated scheme, and the path prefix it cannot infer because the frontend rewrite strips `/api` before the backend sees it — measured as a 404, not assumed), the 401 `hint` with the two constraints it must not break (#1640 body identity; the uniform invalid-key string), and the public catalogue allow-list. Three new `covers:` entries. Scope: that section and the front matter — the coverage tables, the drift check and the authority-boundaries section were not re-read. Prior: chain-reset(#2542): scoped re-count after the documented health routes; prior notes remain in git history.
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -42,6 +45,69 @@ Haven publishes the agent payment API as OpenAPI 3.1 JSON:
 The source of truth lives in
 [`packages/backend/src/openapi/spec.ts`](../../packages/backend/src/openapi/spec.ts)
 and is served by the backend at `/openapi.json`.
+
+## Discoverability from a bare URL (#2530)
+
+An agent handed only a backend URL has three things to read, none of which need
+a credential:
+
+| Surface | What it gives |
+| --- | --- |
+| `GET /` | The root document: what this service is, the absolute URL of its OpenAPI spec, which credential each door wants, and the health path. |
+| `GET /openapi.json` | The machine-readable contract. |
+| `GET /catalog` | The merchant catalogue, in a reduced public shape — see below. |
+
+**The root document is deliberately thin.** Names, paths, and credential
+guidance — no version, build identifier or environment name. A service banner
+that fingerprints the deployment is a gift to a scanner and buys an agent
+nothing.
+
+**`servers[0]` is derived from the request, not read from the static list.**
+The static list named the production Railway host first, always, so the dev
+backend served a spec telling clients to call production. Production stays
+listed as the documented second entry. The origin comes from
+`packages/backend/src/domain/request-origin.ts`, which is also what builds the
+connector command and the root document's own URLs — one answer, three
+surfaces.
+
+Two things that helper does **not** do, both recorded because they look like
+omissions:
+
+- It honours `x-forwarded-host` only when `TRUST_PROXY_HOPS > 0`. The header is
+  client-supplied, and trusting it unconditionally lets a caller choose the
+  host this service names in its own contract. The **scheme** is deliberately
+  not gated: the host is the spoofable target, while gating the scheme would
+  make every TLS-terminating deployment that has not set the variable advertise
+  `http://` for its own API.
+- It cannot infer a path prefix. The frontend proxies `/api/:path*` and its
+  rewrite **strips** the prefix before the backend sees the path — measured:
+  `GET /api/openapi.json` against the backend is a 404. A deployment that wants
+  its spec to advertise `https://preview.example/api` sets `HAVEN_API_URL` to
+  exactly that. A stated fact, not an inference, is the right shape for
+  something a client will call.
+
+**401s name the credential they want.** `authMiddleware` and
+`agentAuthMiddleware` add a `hint` alongside the unchanged `error` string. Two
+constraints hold: the #1640 rule that a purpose-scoped token gets a body
+**identical** to a failed verification (the bodies are shared constants, so the
+identity is structural rather than remembered), and the uniformity of
+`Invalid or revoked API key` across archived, revoked, unknown-status and
+no-such-key — the hint must not say which, or it puts back the distinction the
+single error string exists to hide.
+
+**`GET /catalog` reads without a credential, in a reduced shape.** The
+catalogue is a discovery surface by design (#1717) and used to answer 401,
+which meant an agent could not find a payable merchant until after the
+onboarding the catalogue was supposed to lead to. The public shape is an
+**allow-list** (`PUBLIC_CATALOG_FIELDS`) and a test fails on any key outside
+it, so the exposure is reviewable as a list. It gives the endpoint **host**,
+not the full callable URL, and withholds prices and tool-invocation detail: an
+agent that intends to pay holds a credential by then. Every other catalogue
+route still requires one, and a caller presenting a **bad** credential still
+gets its 401 rather than a silent downgrade — serving a reduced answer to a
+revoked agent would hide the revocation from the only party who would notice.
+There is no per-agent or per-user data in `merchant_catalog` to leak; every
+column is merchant metadata, which somebody checked rather than assumed.
 
 ## Coverage
 

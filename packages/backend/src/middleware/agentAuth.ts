@@ -95,6 +95,34 @@ function isSweepRecoveryRequest(request: FastifyRequest): boolean {
  * On success, decorates request.agent with the agent context
  * (including the owning user's safe_address via JOIN).
  */
+/**
+ * Agent-credential refusal bodies (#2530).
+ *
+ * `error` strings are unchanged and asserted verbatim by existing tests; the
+ * `hint` is additive and names which credential this door wants.
+ *
+ * TWO bodies, not five, and the split is the existing information boundary
+ * rather than a new one. "Missing" and "invalid" are already distinguishable
+ * to any caller — one presented no key at all — so a hint may differ there.
+ * But `Invalid or revoked API key` is deliberately identical across an
+ * archived agent, a revoked agent, a key that matches nothing, and an
+ * unrecognised status: which of those it was is not something an
+ * unauthenticated caller is told. The hint is shared by reference so it cannot
+ * drift apart into four subtly different sentences that put that distinction
+ * back.
+ */
+const AGENT_KEY_DOCS = 'Present it as `Authorization: Bearer sk_agent_…` or `X-API-Key`. Run `npx @haven_ai/connect@alpha` to provision one; see /openapi.json.'
+
+export const AGENT_MISSING_KEY_BODY = {
+  error: 'Missing or invalid API key',
+  hint: `This route needs an agent API key, not an owner session. ${AGENT_KEY_DOCS}`,
+} as const
+
+export const AGENT_INVALID_KEY_BODY = {
+  error: 'Invalid or revoked API key',
+  hint: `This agent API key is not usable. ${AGENT_KEY_DOCS}`,
+} as const
+
 export async function agentAuthMiddleware(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -115,7 +143,7 @@ export async function agentAuthMiddleware(
   }
 
   if (!apiKey) {
-    return reply.code(401).send({ error: 'Missing or invalid API key' })
+    return reply.code(401).send(AGENT_MISSING_KEY_BODY)
   }
 
   // Look up agent + its linked Safe address (multi-Safe via user_safes)
@@ -124,7 +152,7 @@ export async function agentAuthMiddleware(
   )
 
   if (row === null) {
-    return reply.code(401).send({ error: 'Invalid or revoked API key' })
+    return reply.code(401).send(AGENT_INVALID_KEY_BODY)
   }
 
   const sweepRecoveryRequest = isSweepRecoveryRequest(request)
@@ -149,7 +177,7 @@ export async function agentAuthMiddleware(
   // restore spending authority, but removal can honestly promise that a
   // stranded balance remains recoverable later.
   if (row.archived_at && !sweepRecoveryRequest) {
-    return reply.code(401).send({ error: 'Invalid or revoked API key' })
+    return reply.code(401).send(AGENT_INVALID_KEY_BODY)
   }
 
   // Positive allow-list: active and paused agents are recognised for normal
@@ -157,7 +185,7 @@ export async function agentAuthMiddleware(
   // recovery routes above. Everything else (including future status strings)
   // is rejected, so an unknown status cannot silently authenticate as active.
   if (row.status === 'revoked' && !sweepRecoveryRequest) {
-    return reply.code(401).send({ error: 'Invalid or revoked API key' })
+    return reply.code(401).send(AGENT_INVALID_KEY_BODY)
   }
   if (
     row.status !== 'active' &&
@@ -165,7 +193,7 @@ export async function agentAuthMiddleware(
     row.status !== 'pending_approval' &&
     row.status !== 'revoked'
   ) {
-    return reply.code(401).send({ error: 'Invalid or revoked API key' })
+    return reply.code(401).send(AGENT_INVALID_KEY_BODY)
   }
 
   if (row.status === 'paused' && !sweepRecoveryRequest) {

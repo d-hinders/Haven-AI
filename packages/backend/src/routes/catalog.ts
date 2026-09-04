@@ -39,7 +39,85 @@ const VALID_RAILS = new Set(['x402', 'mpp'])
  * full agent auth (which also feeds liveness + audit hooks); everything else
  * falls back to JWT verification.
  */
+/**
+ * Fields a caller with NO credential may see (#2530).
+ *
+ * The catalogue is a discovery surface by design (#1717) and answered 401,
+ * which meant an agent could not find a payable merchant until after it had
+ * been onboarded — the discovery surface required the thing it was supposed to
+ * lead to. This exposes a reduced shape to unauthenticated callers.
+ *
+ * The list is an ALLOW-LIST and a test fails on any key outside it, so the
+ * blast radius of this change is reviewable as a list rather than as prose.
+ * Two things it deliberately leaves out even though they are non-sensitive:
+ * the full `resource_url` (the public shape gives the HOST, which is enough to
+ * know who the merchant is and not enough to be a copy-paste call target) and
+ * the price/tool-invocation details. An agent that intends to PAY holds a
+ * credential by then and gets the full shape; conservative is the right
+ * default for a surface that has never been public before, and widening it
+ * later is a smaller decision than narrowing it after the fact.
+ *
+ * There is no per-agent or per-user data in `merchant_catalog` to leak — every
+ * column is merchant metadata — so this is a narrowing of an already
+ * agent-agnostic row, not a redaction of someone's data. Stated because
+ * "never per-agent data" is only a guarantee if somebody checked.
+ */
+const PUBLIC_CATALOG_FIELDS = [
+  'id',
+  'name',
+  'description',
+  'category',
+  'rail',
+  'protocol',
+  'endpoint_host',
+  'status',
+  'verified_at',
+  'source',
+  'domain_verified',
+  'verified_payable',
+] as const
+
+/** The host of a merchant endpoint, or null if it will not parse. */
+export function endpointHost(resourceUrl: string | null | undefined): string | null {
+  if (typeof resourceUrl !== 'string' || !resourceUrl) return null
+  try {
+    return new URL(resourceUrl).host || null
+  } catch {
+    return null
+  }
+}
+
+/** Reduce a full listing to the public shape. Never widens: it picks. */
+export function toPublicListing(entry: Record<string, unknown>): Record<string, unknown> {
+  const host = endpointHost(entry.resource_url as string | null)
+  const source: Record<string, unknown> = { ...entry, endpoint_host: host }
+  const out: Record<string, unknown> = {}
+  for (const field of PUBLIC_CATALOG_FIELDS) out[field] = source[field] ?? null
+  return out
+}
+
+export { PUBLIC_CATALOG_FIELDS }
+
+/**
+ * #2530: `GET /catalog` is readable WITHOUT a credential, in the reduced shape
+ * above. Every other catalogue route still requires one.
+ *
+ * A caller that presents a credential is still verified — a bad or revoked key
+ * gets its 401 rather than a silent downgrade to the public shape, because
+ * silently serving a reduced answer to a revoked agent hides the revocation
+ * from the only party who would notice.
+ */
+function isPublicCatalogRead(request: FastifyRequest): boolean {
+  if (request.method !== 'GET') return false
+  const path = request.routeOptions?.url ?? request.url.split('?')[0]
+  if (path !== '/' && path !== '/catalog' && path !== '/catalog/') return false
+  const authHeader = request.headers.authorization
+  const xApiKey = request.headers['x-api-key']
+  return !authHeader && typeof xApiKey !== 'string'
+}
+
 async function eitherAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  if (isPublicCatalogRead(request)) return
   const authHeader = request.headers.authorization
   const xApiKey = request.headers['x-api-key']
   const hasAgentKey =
@@ -185,6 +263,7 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
       )
 
       const entries: CatalogListingEntry[] = result.rows.map(serialize)
+      const isPublic = isPublicCatalogRead(request)
 
       // Ingestion half (#1715, epic #1717): verified_payable self-submitted
       // entries, same read-only contract, for BOTH clients. Agents get them
@@ -210,6 +289,15 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
       entries.sort(
         (a, b) => SOURCE_RANK[a.source] - SOURCE_RANK[b.source] || String(a.name).localeCompare(String(b.name)),
       )
+
+      // #2530: an unauthenticated caller gets the reduced public shape. The
+      // reduction happens HERE, at the response boundary, rather than in the
+      // query — so the filtering, sorting and ingestion-merge logic above has
+      // exactly one behaviour to reason about, and the public shape can never
+      // be a differently-assembled list that drifts from the real one.
+      if (isPublic) {
+        return { entries: entries.map((entry) => toPublicListing(entry as unknown as Record<string, unknown>)) }
+      }
 
       return { entries }
     },

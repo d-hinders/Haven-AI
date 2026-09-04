@@ -172,13 +172,27 @@ describe('the served paths are advertised', () => {
     // Verified by running a bare `next build` against an empty output dir.
     const config = readFileSync(join(FRONTEND, 'next.config.ts'), 'utf8')
     expect(config).toContain("from './scripts/serve-docs.mjs'")
-    expect(config).toMatch(/^generate\(\)$/m)
+    expect(config).toContain('GENERATING_PHASES.has(phase)')
 
     const pkg = JSON.parse(readFileSync(join(FRONTEND, 'package.json'), 'utf8'))
     expect(pkg.scripts.build).toContain('next build')
     // Deliberately ONE mechanism: a second, partial one invites a reader to
     // trust the weaker guarantee.
     expect(pkg.scripts.prebuild).toBeUndefined()
+  })
+
+  it('does NOT generate when a production server loads the config', () => {
+    // Measured, not assumed: `next start` loads this config too, and deleting
+    // the output then starting the server without rebuilding put the files
+    // back. This app builds with `output: 'standalone'`, where the deployed
+    // artifact need not contain the repository's `docs/` tree — an unguarded
+    // call would throw on a missing source and take the server down on boot,
+    // strictly worse than the 404 it prevents. Verified after the gate: start
+    // wrote 0 files and answered 200; dev and build still write 4.
+    const config = readFileSync(join(FRONTEND, 'next.config.ts'), 'utf8')
+    expect(config).toContain('PHASE_PRODUCTION_BUILD')
+    expect(config).toContain('PHASE_DEVELOPMENT_SERVER')
+    expect(config).not.toContain('PHASE_PRODUCTION_SERVER')
   })
 
   it('the test run generates them too, independently of any build', () => {

@@ -1,21 +1,30 @@
 import type { NextConfig } from 'next'
+import { PHASE_PRODUCTION_BUILD, PHASE_DEVELOPMENT_SERVER } from 'next/constants.js'
 import { generate } from './scripts/serve-docs.mjs'
 
 /**
- * Generate the served product docs (#2532) as Next loads its config, so they
- * exist for `next build` AND `next dev`.
+ * Generate the served product docs (#2532) while Next loads its config, so
+ * they exist for `next build` and `next dev`.
  *
- * Deliberately here rather than only in an npm `prebuild` hook. That hook fires
- * for `npm run build`, which is what CI uses — but a deployment whose build
- * command invokes `next build` directly would skip it, and every `/docs/*.md`
- * path would 404 in production with nothing failing. This repository has no
- * `vercel.json`, so the deployed build command is not knowable from the tree;
- * putting the call here means the answer stops mattering. Reviewer finding.
+ * Deliberately here rather than in an npm `prebuild` hook. That hook fires for
+ * `npm run build`, which is what CI uses — but a deployment whose build command
+ * invokes `next build` directly would skip it, and every `/docs/*.md` path
+ * would 404 in production with nothing failing. There is no `vercel.json` in
+ * this repository, so the deployed command is not knowable from the tree.
+ * Putting the call here makes the question stop mattering.
  *
- * Cheap and idempotent: four file reads and four writes, into a directory it
- * clears first.
+ * PHASE-GATED, and that is not a detail. `next start` ALSO loads this config —
+ * measured, not assumed: deleting `public/docs/` and starting the server
+ * without rebuilding put the four files back. So an unguarded call runs at
+ * SERVER START too, and this app builds with `output: 'standalone'`, where the
+ * deployed artifact need not contain the repository's `docs/` tree at all.
+ * There, `generate()` would throw on a missing source and take the server down
+ * on boot — strictly worse than the 404 it exists to prevent.
+ *
+ * Build and dev generate; a production server does not. Failure stays LOUD in
+ * the two phases where a missing or non-`current` source is a real defect.
  */
-generate()
+const GENERATING_PHASES = new Set<string>([PHASE_PRODUCTION_BUILD, PHASE_DEVELOPMENT_SERVER])
 
 const nextConfig: NextConfig = {
   output: 'standalone',
@@ -81,4 +90,7 @@ const nextConfig: NextConfig = {
   },
 }
 
-export default nextConfig
+export default function config(phase: string): NextConfig {
+  if (GENERATING_PHASES.has(phase)) generate()
+  return nextConfig
+}

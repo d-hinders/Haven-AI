@@ -25,6 +25,12 @@ interface Props {
    * confirming. Never overwrites allowances the user already added.
    */
   starterAllowance?: boolean
+  /**
+   * Open on an EXISTING setup instead of a blank flow (#2522). This is what
+   * `/agents?setup=<id>` passes: the link an agent hands its user to land them
+   * on that setup's current step.
+   */
+  resumeSetupId?: string | null
 }
 
 /**
@@ -41,6 +47,7 @@ export default function ConnectAgentModal({
   safeId,
   onSetupUpdated,
   starterAllowance = false,
+  resumeSetupId = null,
 }: Props) {
   const flow = useAgentConnectionSetup({
     open,
@@ -49,6 +56,7 @@ export default function ConnectAgentModal({
     safeId,
     onSetupUpdated,
     starterAllowance,
+    resumeSetupId,
   })
 
   if (!open) return null

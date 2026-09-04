@@ -27,6 +27,7 @@ import {
 import { normalizeAgentAllowances } from '../modules/agents/index.js'
 import { getChain } from '../domain/chains.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
+import { buildApprovalUrl, normalizeViaMarker } from '../domain/handoff-links.js'
 import {
   AGENT_APPROVAL_RELAY_JSON_SENTENCE,
   AGENT_APPROVAL_RELAY_PROSE_SENTENCE,
@@ -60,6 +61,12 @@ interface CreateSetupBody {
   local_mcp?: boolean
   /** Discovery-source slug for connect attribution (#2302); sanitized, never refused. */
   source?: string
+  /**
+   * Agent hand-off marker (#2522). `'agent'` when the link the user followed
+   * was pasted by an agent; anything else is dropped. Sanitized, never
+   * refused — attribution must not block a connect.
+   */
+  via?: string
   /**
    * Opt in to an L0 Agent Passport (#972), mirroring `POST /agents`'
    * `issue_passport`. Absent/false is the DEFAULT and normal case. Recorded on
@@ -253,6 +260,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
           challengeMessage,
           issuePassport: parsed.issuePassport,
           source: parsed.source,
+          via: parsed.via,
         },
         parsed.allowances,
       )
@@ -262,6 +270,9 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       return reply.code(201).send({
         setup_id: setupId,
         status: 'awaiting_connection',
+        // #2522: the same link the status response and the connector print, so
+        // dashboard, connector and agent all hand the human ONE URL.
+        approval_url: buildApprovalUrl(setupId),
         setup_token: setupToken,
         expires_at: expiresAt,
         connector_command: command,
@@ -335,6 +346,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     let setupChainId = 0
     let setupUserId = ''
     let setupSource: string | null = null
+    let setupVia: string | null = null
     try {
       await setups.inTransaction(async (tx) => {
         const setup = await setups.lockSetupByTokenHash(
@@ -398,6 +410,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         setupChainId = setup.safe_chain_id
         setupUserId = setup.user_id
         setupSource = setup.source ?? null
+        setupVia = setup.via ?? null
 
         agentId = await setups.insertPendingAgent(
           {
@@ -435,10 +448,17 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       // #2302: the discovery source recorded at CREATE rides the funnel event so
       // "attributed connects" and per-source time-to-first-payment are plain
       // SQL over onboarding_events — no join back to the setups table needed.
+      // #2522: the hand-off marker rides here as `handoff_via`, NOT as `via`.
+      // `via` is already taken and means something else — which CODE PATH
+      // created the agent (`'connection_setup'` here; absent from
+      // `POST /agents`' emission in routes/agents.ts, which is how the two are
+      // told apart today). Reusing it for "an agent pasted the link" would
+      // give one key two meanings and silently redefine every historical row.
       emitFunnelEvent(setupUserId, 'agent_created', {
         agent_id: agentId,
         via: 'connection_setup',
         ...(setupSource ? { source: setupSource } : {}),
+        ...(setupVia ? { handoff_via: setupVia } : {}),
       })
       emitFunnelEvent(setupUserId, 'allowance_granted', { agent_id: agentId, via: 'connection_setup' })
     } catch (err) {
@@ -711,6 +731,7 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
   localMcp: boolean
   issuePassport: boolean
   source: string | null
+  via: string | null
 } | null {
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   if (!name) {
@@ -748,6 +769,7 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
     localMcp: body.local_mcp === true,
     issuePassport: body.issue_passport === true,
     source: normalizeDiscoverySource(body.source),
+    via: normalizeViaMarker(body.via),
   }
 }
 
@@ -763,6 +785,7 @@ export function normalizeDiscoverySource(value: unknown): string | null {
   const slug = value.trim().toLowerCase()
   return /^[a-z0-9][a-z0-9_-]{0,31}$/.test(slug) ? slug : null
 }
+
 
 // The command-path runtimes: Claude Code, Codex, and Cowork (which runs
 // Claude Code's config). #1682 replaced #1672's collapsed 'agent' entry with
@@ -1005,6 +1028,9 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
   return {
     setup_id: setup.id,
     agent_id: setup.agent_id,
+    // #2522: stable across polls and identical to the create response's, so a
+    // link an agent pasted an hour ago still lands on the right step.
+    approval_url: buildApprovalUrl(setup.id),
     status: effectiveStatus(setup),
     expires_at: setup.setup_token_expires_at,
     agent: {

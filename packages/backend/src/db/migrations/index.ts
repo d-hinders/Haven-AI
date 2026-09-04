@@ -74,6 +74,7 @@ import * as paymentIntentsSettlementIndexes from './072_payment_intents_settleme
 import * as dropX402ResourceTables from './073_drop_x402_resource_tables.js'
 import * as agentConnectionSetupSource from './074_agent_connection_setup_source.js'
 import * as dropInertSafeRailSchema from './075_drop_inert_safe_rail_schema.js'
+import * as viaMarker from './076_via_marker.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -207,4 +208,5 @@ export const migrations: Migration[] = [
   dropX402ResourceTables,
   agentConnectionSetupSource,
   dropInertSafeRailSchema,
+  viaMarker,
 ]

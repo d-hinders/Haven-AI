@@ -19,10 +19,11 @@
 
 import { Check } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
+import { nextPathFromSearch } from '@/lib/discovery'
 import { displayName } from '@/lib/user'
 import { DEFAULT_CHAIN_ID, getChainConfig } from '@/lib/chains'
 import { useDeployableChains } from '@/hooks/useDeployableChains'
@@ -79,6 +80,18 @@ export default function OnboardingClient() {
     }
   }, [deployableChains, selectedChainId])
 
+  /**
+   * #2522: onboarding is the hop `next` has to survive. An agent pastes
+   * `/signup?next=/agents%3Fsetup%3D…`, the human signs up, creates an
+   * account here, and must land on the approval — not on the dashboard with
+   * the link forgotten. Read from `window.location.search` because this
+   * component has no Suspense boundary and every read below is client-only.
+   */
+  const nextPath = useMemo(
+    () => (typeof window === 'undefined' ? null : nextPathFromSearch(window.location.search)),
+    [],
+  )
+
   // Redirect if not logged in
   useEffect(() => {
     if (!loading && !user) {
@@ -91,14 +104,14 @@ export default function OnboardingClient() {
     if (loading || !user) return
     if (creationStartedRef.current || phase === 'success') return
     if (user.safes?.length > 0 || user.safe_address) {
-      router.replace('/dashboard')
+      router.replace(nextPath ?? '/dashboard')
     }
-  }, [loading, phase, router, user])
+  }, [loading, phase, router, user, nextPath])
 
   const goToDashboard = useCallback(() => {
     markJustOnboarded()
-    router.push('/dashboard')
-  }, [router])
+    router.push(nextPath ?? '/dashboard')
+  }, [router, nextPath])
 
   // Held in a ref so the auto-advance effect below depends on `phase` alone —
   // depending on the callback would restart the countdown on every unrelated

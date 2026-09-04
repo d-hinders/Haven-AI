@@ -262,6 +262,97 @@ describe('manual credential renderings (#2482)', () => {
   })
 })
 
+describe('resume from a hand-off link (#2522)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseAuth.mockReturnValue({ user: { safes: [SAFE] }, activeSafe: SAFE })
+    mockUseSafeDetails.mockReturnValue({ details: null, loading: false, error: null })
+    mockUseSafeOperationGate.mockReturnValue({ kind: 'ready' })
+    mockUsePublicClient.mockReturnValue({})
+    mockUseAccount.mockReturnValue({ address: undefined, chain: undefined })
+    mockUseActiveSigner.mockReturnValue({ type: 'eoa', address: '0x2222222222222222222222222222222222222222', walletClient: {} })
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+  })
+
+  const RESUME_ID = '11111111-2222-3333-4444-555555555555'
+
+  function renderResumed(resumeSetupId: string | null) {
+    return renderHook(() =>
+      useAgentConnectionSetup({
+        open: true,
+        onClose: vi.fn(),
+        safeAddress: SAFE.safe_address,
+        safeId: SAFE.id,
+        resumeSetupId,
+      }),
+    )
+  }
+
+  it('opens ON the connect step, not at "name your agent"', () => {
+    // The whole point of the link: the human arrives at the step that needs
+    // them, not at the top of a wizard for a setup that already exists.
+    const { result } = renderResumed(RESUME_ID)
+    expect(result.current.step).toBe('connect')
+    expect(result.current.resumed).toBe(true)
+  })
+
+  it('still opens at details with no resume id — the ordinary flow is unchanged', () => {
+    const { result } = renderResumed(null)
+    expect(result.current.step).toBe('details')
+    expect(result.current.resumed).toBe(false)
+  })
+
+  it('polls the resumed setup id', () => {
+    renderResumed(RESUME_ID)
+    expect(mockUseAgentConnectionSetupStatus).toHaveBeenCalledWith(
+      RESUME_ID,
+      expect.objectContaining({ enabled: true }),
+    )
+  })
+
+  it('does not poll, and stays at details, when no id was handed over', () => {
+    // Positive control for the assertion above: if the hook polled regardless,
+    // the `enabled: true` expectation would pass on a broken wiring too.
+    renderResumed(null)
+    expect(mockUseAgentConnectionSetupStatus).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ enabled: false }),
+    )
+  })
+
+  it('renders the step each setup status calls for', () => {
+    // The three the issue names, resolved through the real mapper.
+    expect(
+      resolveConnectStepView({ visibleStatus: 'awaiting_connection', installStatus: undefined, agentId: null }),
+    ).toEqual({ kind: 'waiting_for_connector' })
+    expect(
+      resolveConnectStepView({ visibleStatus: 'awaiting_wallet_approval', installStatus: CONFIGURED_INSTALL, agentId: 'agent-1' }),
+    ).toEqual({ kind: 'delegation_approval', agentId: 'agent-1' })
+    expect(
+      resolveConnectStepView({ visibleStatus: 'active', installStatus: CONFIGURED_INSTALL, agentId: 'agent-1' }),
+    ).toEqual({ kind: 'active' })
+  })
+
+  it('surfaces a foreign or unknown id as an error rather than an empty wait', () => {
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: null,
+      loading: false,
+      error: 'Setup not found',
+      refetch: vi.fn(),
+    })
+    const { result } = renderResumed(RESUME_ID)
+    expect(result.current.statusError).toBe('Setup not found')
+    // No status means no view to render — never a waiting screen that waits
+    // for a setup this owner does not have.
+    expect(result.current.connectView).toBeNull()
+  })
+})
+
 describe('useAgentConnectionSetup — rail awareness without rendering the modal', () => {
   beforeEach(() => {
     vi.clearAllMocks()

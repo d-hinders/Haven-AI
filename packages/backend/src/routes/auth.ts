@@ -5,6 +5,7 @@ import { authMiddleware } from '../middleware/auth.js'
 import { authRateLimit } from '../middleware/rate-limit.js'
 import { config } from '../config.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
+import { normalizeViaMarker } from '../domain/handoff-links.js'
 import {
   findUserCredentialsByEmail,
   findUserIdByEmail,
@@ -44,6 +45,12 @@ interface SignupBody {
   name: string
   email: string
   password: string
+  /**
+   * Agent hand-off marker (#2522). `'agent'` when the signup link was pasted
+   * by an agent; every other value is dropped. Sanitized, never refused —
+   * attribution must never cost someone an account.
+   */
+  via?: string
 }
 
 interface LoginBody {
@@ -122,8 +129,14 @@ export default async function authRoutes(
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
 
-    const user = await insertUser(normalizedName, normalizedEmail, passwordHash)
-    emitFunnelEvent(user.id, 'signed_up')
+    // #2522: `via` is sanitized to the enum `agent` or null. It rides the
+    // `signed_up` event as `handoff_via`, NOT as `via` — that key is already
+    // used in this funnel's metadata to name which CODE PATH created a record
+    // (see the `agent_created` emission in routes/agent-connection-setups.ts),
+    // and giving one key two meanings would silently redefine historical rows.
+    const via = normalizeViaMarker(request.body.via)
+    const user = await insertUser(normalizedName, normalizedEmail, passwordHash, via)
+    emitFunnelEvent(user.id, 'signed_up', via ? { handoff_via: via } : undefined)
 
     const token = app.jwt.sign(
       { sub: user.id, email: user.email },

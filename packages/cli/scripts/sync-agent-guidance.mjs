@@ -25,11 +25,25 @@ const here = dirname(fileURLToPath(import.meta.url))
 const SDK_SOURCE = join(here, '..', '..', 'sdk', 'src', 'agent-guidance.ts')
 const TARGET = join(here, '..', 'src', 'agent-guidance-text.ts')
 
-const source = await readFile(SDK_SOURCE, 'utf8')
-// The SDK module is plain consts plus one template literal that interpolates
-// the earlier consts. Evaluating it is what makes this a copy of the RESOLVED
-// string rather than of the template — the same thing the frontend pins.
-const runbook = new Function(`${source.replace(/^export /gm, '')}\nreturn HAVEN_AGENT_RUNBOOK_MD;`)()
+/**
+ * The canonical runbook, read from the SDK source.
+ *
+ * Exported so the parity test asserts against the SAME reader this generator
+ * writes from — one definition of "canonical" rather than two that can drift
+ * apart while both look right. (A direct `import` of the SDK module would be
+ * the obvious alternative and does not typecheck: the CLI's `rootDir` is its
+ * own `src`, and cross-package source imports fall outside it.)
+ */
+export async function readCanonicalRunbook() {
+  const source = await readFile(SDK_SOURCE, 'utf8')
+  // The SDK module is plain consts plus one template literal that interpolates
+  // the earlier consts. Evaluating it is what makes this a copy of the RESOLVED
+  // string rather than of the template — the same thing the frontend pins.
+  return new Function(`${source.replace(/^export /gm, '')}\nreturn HAVEN_AGENT_RUNBOOK_MD;`)()
+}
+
+const invokedDirectly = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
+const runbook = await readCanonicalRunbook()
 
 const header = `/**
  * The agent onboarding runbook — GENERATED, do not edit by hand.
@@ -46,6 +60,8 @@ const header = `/**
  */
 `
 
-const body = `${header}\nexport const HAVEN_AGENT_RUNBOOK_MD = ${JSON.stringify(runbook)}\n`
-await writeFile(TARGET, body)
-console.log(`wrote ${TARGET} (${Buffer.byteLength(runbook)} bytes of runbook)`)
+if (invokedDirectly) {
+  const body = `${header}\nexport const HAVEN_AGENT_RUNBOOK_MD = ${JSON.stringify(runbook)}\n`
+  await writeFile(TARGET, body)
+  console.log(`wrote ${TARGET} (${Buffer.byteLength(runbook)} bytes, ${runbook.length} UTF-16 units)`)
+}

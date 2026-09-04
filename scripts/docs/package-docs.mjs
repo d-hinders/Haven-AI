@@ -205,7 +205,14 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/cli/src/**'],
-    'last-verified': '2026-06-26',
+    // #2525: re-verified and EDITED — a new § *For agents and scripts* records
+    // the `--json` contract (one JSON value on stdout, prose on stderr, on every
+    // command including refusals), the six exit codes with what a caller should
+    // do about each, why a 401 resolves to 3 rather than 4, and `haven guide`.
+    // The Install/Usage/Config/Custody sections were re-read against the code
+    // and are unchanged; the opening "companion to the dashboard" framing is
+    // #2536's to rewrite, not this issue's. Scope: that section and this date.
+    'last-verified': '2026-09-04',
   },
   {
     doc: 'packages/mcp-server/README.md',

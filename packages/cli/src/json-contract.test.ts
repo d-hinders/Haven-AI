@@ -159,6 +159,92 @@ describe('--json contract, over every command', () => {
   })
 })
 
+describe('--json contract, success paths', () => {
+  // The refusal table above proves the failure half over every command. This
+  // proves the SUCCESS half over the commands that print something other than a
+  // plain payload — the export writers and the one command whose payload is a
+  // secret — because those are the paths that could put a second thing on
+  // stdout (haven-reviewer, finding 4 @ 2d43d255). Without these, the shared
+  // `data()`/`text()` plumbing is trusted rather than asserted.
+  const ROUTES: Record<string, unknown> = {
+    'GET /user/safes': { safes: [{ id: 's1', safe_address: '0xabc', chain_id: 8453, name: 'Ops', is_default: true }] },
+    'GET /balances/0xabc': { balances: [{ symbol: 'USDC', formatted: '10.00', balance: '10000000' }] },
+    'GET /agents': { agents: [{ id: 'a1', name: 'Payer', status: 'active' }] },
+    'GET /agents/a1': { id: 'a1', name: 'Payer', status: 'active', allowances: [] },
+    'GET /transactions': { transactions: [] },
+    'GET /catalog': { entries: [] },
+    'GET /contacts': { contacts: [] },
+    'GET /accounting/export': 'the SIE body',
+    'POST /agents/a1/rotate-key': { api_key: 'sk_agent_NEWKEY_NEVERREAL', api_key_prefix: 'sk_agent_' },
+    'POST /agents/a1/pause': {},
+    'POST /agents/a1/revoke': {},
+    'PUT /agents/a1': {},
+    'PUT /user/safes/s1': {},
+    'POST /contacts': { id: 'c1', name: 'Alice', address: '0xalice' },
+    'DELETE /contacts/c1': {},
+  }
+  function stubApi(): CliApi {
+    const resolve = (method: string, path: string) => {
+      const hit = ROUTES[`${method} ${path}`] ?? ROUTES[`${method} ${path.split('?')[0]}`]
+      if (hit === undefined) throw new CliApiError(`Unmocked ${method} ${path}`, 404)
+      return hit
+    }
+    return {
+      get: async <T,>(p: string) => resolve('GET', p) as T,
+      post: async <T,>(p: string) => resolve('POST', p) as T,
+      put: async <T,>(p: string) => resolve('PUT', p) as T,
+      del: async <T,>(p: string) => resolve('DELETE', p) as T,
+      getText: async (p: string) => resolve('GET', p) as string,
+    }
+  }
+
+  it.each([
+    ['wallets list', ['wallets', 'list']],
+    ['wallets balances', ['wallets', 'balances']],
+    ['agents list', ['agents', 'list']],
+    ['agents show', ['agents', 'show', 'a1']],
+    ['budget show', ['budget', 'show', 'a1']],
+    ['activity list', ['activity', 'list']],
+    ['activity export (csv)', ['activity', 'export']],
+    ['activity export (sie)', ['activity', 'export', '--format', 'sie']],
+    ['agents rotate-key', ['agents', 'rotate-key', 'a1']],
+    ['agents pause', ['agents', 'pause', 'a1']],
+    ['agents revoke', ['agents', 'revoke', 'a1', '--yes']],
+    ['agents rename', ['agents', 'rename', 'a1', 'New']],
+    ['wallets rename', ['wallets', 'rename', 's1', 'Ops']],
+    ['catalog list', ['catalog', 'list']],
+    ['contacts list', ['contacts', 'list']],
+    ['contacts add', ['contacts', 'add', 'Alice', '0xalice']],
+    ['contacts remove', ['contacts', 'remove', 'c1']],
+  ])('%s: success is one JSON value on stdout', async (_label, argv) => {
+    const { deps, out } = harness({ makeApi: () => stubApi() })
+    expect(await run([...argv, '--json'], deps)).toBe(EXIT.ok)
+    expect(() => soleJson(out)).not.toThrow()
+  })
+
+  it('the export writers keep the file body inside the one object', async () => {
+    for (const [argv, format] of [
+      [['activity', 'export', '--json'], 'csv'],
+      [['activity', 'export', '--format', 'sie', '--json'], 'sie'],
+    ] as const) {
+      const { deps, out } = harness({ makeApi: () => stubApi() })
+      await run([...argv], deps)
+      expect(soleJson(out)).toMatchObject({ ok: true, format })
+      expect(soleJson(out)).toHaveProperty('content')
+    }
+  })
+
+  it('rotate-key puts the key in the object and the warning on stderr', async () => {
+    const { deps, out, err } = harness({ makeApi: () => stubApi() })
+    await run(['agents', 'rotate-key', 'a1', '--json'], deps)
+    // The key is the payload, so it is on stdout by design — but as a field of
+    // the single object, with the sentence about it out of the way.
+    expect(soleJson(out)).toMatchObject({ api_key: 'sk_agent_NEWKEY_NEVERREAL' })
+    expect(err.join('\n')).toContain('shown once')
+    expect(err.join('\n')).not.toContain('sk_agent_NEWKEY_NEVERREAL')
+  })
+})
+
 describe('secret hygiene', () => {
   it('login never echoes the password or the token, in either mode', async () => {
     const api: CliApi = {

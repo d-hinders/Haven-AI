@@ -2,8 +2,10 @@ import { CliApiError } from './api.js'
 
 /**
  * Exit codes (#2525). Documented in README.md § For agents and scripts, and
- * asserted in `exit-codes.test.ts` — an agent branches on these, so they are a
- * contract rather than an implementation detail.
+ * asserted in `json-contract.test.ts` (every code, over the whole command list)
+ * and `commands.test.ts` (the individual commands that produce them) — an agent
+ * branches on these, so they are a contract rather than an implementation
+ * detail.
  */
 export const EXIT = {
   ok: 0,

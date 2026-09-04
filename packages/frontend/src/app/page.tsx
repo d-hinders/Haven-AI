@@ -140,6 +140,23 @@ export default function Home() {
                 </Button>
               </div>
 
+              {/*
+                Addressed to agents, server-rendered, and real page content —
+                a curl of this page sees it (#2521). The 2026-09-04 cold test
+                had to guess that /llms.txt existed.
+              */}
+              <p className="text-[13px] text-[var(--v2-ink-3)] mb-6 max-w-[520px]">
+                Haven gives an agent a budget instead of a wallet, enforced on-chain.
+                If you are an AI agent reading this for your user, start at{' '}
+                <a
+                  href="/llms.txt"
+                  className="underline underline-offset-2 text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
+                >
+                  /llms.txt
+                </a>
+                .
+              </p>
+
               <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
                 <span className="text-[12px] text-[var(--v2-ink-3)] mr-1">Integrates with</span>
                 {INTEGRATIONS.map((name) => (

@@ -433,7 +433,26 @@ jobs:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # 15, not 8 (#2556). Measured over 40 CI runs: the non-install portion of
+    # this job (type-check, design-lint, wire-type ratchet, baseline inventory,
+    # unit tests, build) is stable at 152-215s, while `npm ci` ranges 32-308s
+    # with a confirmed cache hit at BOTH ends -- a long tail, not a cache miss.
+    # At 8 minutes the worst observed run totalled 505s against a 480s limit and
+    # was killed mid-build, and a green run at 177s of install had 109s of
+    # headroom left. Since this is a required check, that tail blocked merges on
+    # diffs with nothing wrong with them.
+    #
+    # 15 matches the existing maximum in this file (`Install-path smoke`) and
+    # leaves the worst observed case (523s) well inside the budget. Raising the
+    # ceiling is the whole fix: a slow install is still slow, and it is a
+    # separate question whether to speed it up. Re-measure before lowering this.
+    #
+    # Reading a failure here: a timeout reports as `The operation was canceled`
+    # on whichever step was running, and `Lint, Type-check & Build` then fails in
+    # seconds with `Frontend checks result: cancelled`. That is a TIMEOUT, not a
+    # cancelled run -- compare step timings against this comment's figures before
+    # concluding the concurrency guard or a flake.
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4

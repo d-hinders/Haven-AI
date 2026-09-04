@@ -282,7 +282,8 @@ export const EXEMPT_PACKAGE_DOCS = {
     'Explains why one CI job exists. It names its own test file and workflow inline; the ' +
     'thing that catches its drift is the job going red, not a doc gate.',
   'packages/frontend/public/402.md':
-    'Agent-readable public artifact, served verbatim at haven.xyz/402.md (GTM Agent Discovery ' +
+    'Agent-readable public artifact, served verbatim at /402.md on whatever host it is '+
+    'deployed to (GTM Agent Discovery ' +
     'track). It mirrors packages/frontend/public/402/index.html, which carries the sync note; ' +
     'its audience is a model mid-task, so front-matter would be noise it pays tokens for.',
   'packages/frontend/src/lib/loop-harness/README.md':

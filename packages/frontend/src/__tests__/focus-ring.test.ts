@@ -214,13 +214,18 @@ function ringUses(): RingUse[] {
 }
 
 /**
- * The single documented exemption from `focus-visible:`. `layout.tsx`'s skip
+ * The single documented exemption from `focus-visible:`. The skip
  * link is `sr-only` until focused, so it is only ever reachable by keyboard and
  * the two selectors coincide; a dozen sibling `focus:` utilities reveal the
  * pill, and splitting the ring onto a different selector would give one element
  * two focus states. Named here so it stays a decision rather than drift.
  */
-const FOCUS_SELECTOR_EXEMPT = ['src/app/(authenticated)/layout.tsx']
+// The skip-to-content link, which is `sr-only` until focused and so is only
+// ever reachable by keyboard — its two deliberate departures are argued in the
+// file itself. Repointed by #2521, which moved the authenticated chrome out of
+// `src/app/(authenticated)/layout.tsx` so that layout could become a server
+// component and emit the `haven:auth` marker. The link did not change.
+const FOCUS_SELECTOR_EXEMPT = ['src/components/AuthenticatedShell.tsx']
 
 async function compileCss(classes: string[]): Promise<string> {
   const result = await postcss([

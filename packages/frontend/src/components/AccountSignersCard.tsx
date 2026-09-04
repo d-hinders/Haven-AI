@@ -255,7 +255,7 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
             hold. If an account ever has just one way to approve and that&apos;s lost, it can&apos;t
             be recovered — by you or by us. That&apos;s why the backup above matters.{' '}
             <a
-              href="https://docs.haven.xyz/product/account-recovery"
+              href="https://github.com/d-hinders/Haven-AI/blob/dev/docs/product/account-recovery.md"
               target="_blank"
               rel="noopener noreferrer"
               className="font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"

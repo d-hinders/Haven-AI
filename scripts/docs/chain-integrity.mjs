@@ -476,10 +476,14 @@ export function chainAnomalies(line, maxBytes = MAX_CHAIN_BYTES) {
 /**
  * Every governed doc whose chain line is over the advisory band (#2562).
  *
- * Governed = the same population `isDocPath` defines for the blocking check:
- * `docs/**` plus the root gravity files. A doc with no front-matter or no
- * `last-verified` line simply has no chain and is skipped — that is the
- * validator's business, not this one's.
+ * Governed = whatever `isDocPath` says, which is the same predicate the
+ * blocking path filters on. Enumerate candidates, then filter THROUGH it
+ * rather than restating its rule here: the first draft re-derived "`docs/**`
+ * plus the root gravity files, `.md` only" inline and asserted parity in this
+ * comment, which is true until someone adds an exclusion to `isDocPath` and
+ * only one of the two learns about it (review nit). A doc with no
+ * front-matter or no `last-verified` line simply has no chain and is skipped —
+ * that is the validator's business, not this one's.
  *
  * Sorted biggest-first, because the list is read as a queue. `overCeiling`
  * marks the rows that are past the hard limit too: those are already blocking
@@ -491,16 +495,15 @@ export async function chainSizeWarnings({
   warnBytes = WARN_CHAIN_BYTES,
   maxBytes = MAX_CHAIN_BYTES,
 } = {}) {
-  const rels = new Set(ROOT_DOCS)
+  const candidates = new Set(ROOT_DOCS)
   const docsDir = join(repoRoot, 'docs')
   if (existsSync(docsDir)) {
     for (const abs of await walk(docsDir)) {
-      const rel = relative(repoRoot, abs).split(sep).join('/')
-      if (rel.endsWith('.md')) rels.add(rel)
+      candidates.add(relative(repoRoot, abs).split(sep).join('/'))
     }
   }
   const warnings = []
-  for (const rel of rels) {
+  for (const rel of [...candidates].filter(isDocPath)) {
     const abs = join(repoRoot, rel)
     if (!existsSync(abs)) continue
     let raw

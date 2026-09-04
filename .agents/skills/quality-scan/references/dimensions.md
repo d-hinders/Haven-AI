@@ -297,9 +297,9 @@ compares **UTF-8 bytes** (`chainLineBytes`, i.e. `Buffer.byteLength`) of the
 line without its newline, which is `wc -c` minus one. It compared `line.length`
 — UTF-16 code units — while reporting "bytes" before that, and this recipe said
 so; the two differ by hundreds on a chain dense with em-dashes and arrows.
-#2562 also added a **non-blocking 40 KiB band** the gate prints for every
-governed doc on every run, so the "which chains are large" question now has a
-standing answer and this scan's job is the part the band does not do:
+#2562 also added a **non-blocking 40 KiB band**: the gate evaluates every
+governed doc on every run and prints the ones over it, so the "which chains are
+large" question now has a standing answer and this scan's job is the part the band does not do:
 duplicates, and the trend. On `893d74f6`: 92 docs;
 `mcp-runtime-compatibility.md` at 63,961 units of 65,536 (97.6%) one merge
 after its #2477 compaction — the doc `release-bump.mjs` re-pins on every

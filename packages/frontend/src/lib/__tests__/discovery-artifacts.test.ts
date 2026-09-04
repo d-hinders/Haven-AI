@@ -114,8 +114,10 @@ describe('discovery artifacts (#2520)', () => {
     // runbook prints the full connector command the backend builds, token flag
     // included (`npx -y @haven_ai/connect@alpha --setup …`), because an agent
     // reading it needs the shape it will be handed, not a command it could run
-    // as-is. Asserted so the exclusion above reads as a decision.
-    expect(read('for-agents.md')).toContain('npx -y @haven_ai/connect@alpha --setup')
+    // as-is — and the dist-tag stays a `<channel>` placeholder, because a
+    // published package must not hard-code one (#2423). Asserted so the
+    // exclusion above reads as a decision.
+    expect(read('for-agents.md')).toContain('npx -y @haven_ai/connect@<channel> --setup')
     for (const name of carriers) {
       expect(read(name), name).toContain('npx @haven_ai/connect@alpha')
     }

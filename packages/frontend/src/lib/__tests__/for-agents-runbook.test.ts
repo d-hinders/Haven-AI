@@ -97,11 +97,23 @@ describe('/for-agents.md (#2523)', () => {
     // recorded in the PR body). They are asserted so a later trim cannot
     // quietly reopen one.
     expect(served).toContain('one of the Haven MCP tools the connector wires into your runtime')
-    expect(served).toContain('--doctor')
+    expect(served).toContain('npx -y @haven_ai/connect@<channel> --doctor')
     expect(served).toContain('so the two-changes rule does not bind it')
     expect(served).toContain('"me" in them is your user, not Haven')
     expect(served).toContain('carries the approval link and the setup id')
     expect(served).toContain('no ETH: Haven sponsors the gas')
+  })
+
+  it('names no npm dist-tag of its own', () => {
+    // #2423's guard (scripts/release-bump.test.mjs) forbids a published package
+    // hard-coding a connector channel in a re-run hint, and this string ships
+    // inside @haven_ai/sdk. It matters twice over here: the served file is a
+    // committed artifact, so a baked-in channel would also fall out of parity
+    // with the SDK the moment release-bump.mjs rewrote the constant.
+    const hardCodedChannel = /@haven_ai\/connect@[a-z][a-z0-9-]*/
+    expect(hardCodedChannel.test(served)).toBe(false)
+    // Positive control: the same pattern on the shape it is meant to catch.
+    expect(hardCodedChannel.test('npx -y @haven_ai/connect@alpha --doctor')).toBe(true)
   })
 
   it('is advertised in the discovery surfaces an agent reads first', () => {
@@ -113,7 +125,7 @@ describe('/for-agents.md (#2523)', () => {
     // `npx -y <package> --setup <token> --api <url> --ack-local-tools`. The
     // example here must carry that flag set with an obviously fake token,
     // never a shorter command an agent might run as-is.
-    expect(served).toContain('npx -y @haven_ai/connect@alpha --setup EXAMPLE-SETUP-TOKEN-NOT-REAL')
+    expect(served).toContain('npx -y @haven_ai/connect@<channel> --setup EXAMPLE-SETUP-TOKEN-NOT-REAL')
     expect(served).toContain('--ack-local-tools')
     // The example is illustrative, and the page says so in as many words —
     // `shellQuote` leaves an ordinary token and URL unquoted, and the package

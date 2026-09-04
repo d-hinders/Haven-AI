@@ -48,10 +48,10 @@ Send these as your own message, `<host>` replaced by the host you fetched this f
 The setup prompt carries a **connector command** shaped like this:
 
 ```
-npx -y @haven_ai/connect@alpha --setup EXAMPLE-SETUP-TOKEN-NOT-REAL --api <api-url> --ack-local-tools
+npx -y @haven_ai/connect@<channel> --setup EXAMPLE-SETUP-TOKEN-NOT-REAL --api <api-url> --ack-local-tools
 ```
 
-Run the prompt's version, not this one: the token is one-time, the API URL is the backend's own, and the package tag differs by deployment. The rules below come from that prompt, so "me" in them is your user, not Haven.
+Run the prompt's version, not this one: the token is one-time, the API URL is the backend's own, and `<channel>` is the npm tag your prompt names — never a tag you pick. The rules below come from that prompt, so "me" in them is your user, not Haven.
 
 - If you are an AI agent running this command yourself rather than a human pasting it, you should append --json: the connector then emits one machine-readable, secret-free result object on stdout with progress on stderr, and returns promptly instead of blocking while it waits for the budget approval.
 - When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.
@@ -69,7 +69,7 @@ Call `haven_get_agent`, one of the Haven MCP tools the connector wires into your
 - `needs_approval` — the connector finished, nobody approved yet. Relay the approval link again; there is no queue to wait in.
 - `revoked` — the credential is not active; ask your user to create a new agent.
 
-`ready` covers hosted identity and the budget only, not your local signer. Check that with `npx -y @haven_ai/connect@alpha --doctor` — a separate command, so the two-changes rule does not bind it.
+`ready` covers hosted identity and the budget only, not your local signer. Check that with `npx -y @haven_ai/connect@<channel> --doctor`, the same tag your prompt named — a separate command, so the two-changes rule does not bind it.
 
 ## If you cannot open a browser
 

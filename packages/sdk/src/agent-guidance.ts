@@ -62,7 +62,14 @@ export const AGENT_COMMAND_MODIFICATION_SENTENCE =
  * The runbook, served at `/for-agents.md`.
  *
  * Every link is a same-origin path (#2520): resolve it against the host the
- * file was fetched from. `?next=` / `?via=agent` / `?setup=` are the hand-off
+ * file was fetched from. The connector's npm dist-tag is the placeholder
+ * `<channel>` rather than a literal, for two reasons that point the same way:
+ * a published package must not hard-code one (#2423, guarded by
+ * `scripts/release-bump.test.mjs`), and this string is committed as a static
+ * file, so baking in a channel `release-bump.mjs` later rewrites would put the
+ * served copy out of parity at exactly the moment nobody is reading it. The
+ * page tells the agent to run the command its setup prompt hands it, where the
+ * tag is real and deployment-correct. `?next=` / `?via=agent` / `?setup=` are the hand-off
  * link shapes from #2522.
  */
 export const HAVEN_AGENT_RUNBOOK_MD = `# Haven for agents — set your user up to let you pay
@@ -115,10 +122,10 @@ Send these as your own message, \`<host>\` replaced by the host you fetched this
 The setup prompt carries a **connector command** shaped like this:
 
 \`\`\`
-npx -y @haven_ai/connect@alpha --setup EXAMPLE-SETUP-TOKEN-NOT-REAL --api <api-url> --ack-local-tools
+npx -y @haven_ai/connect@<channel> --setup EXAMPLE-SETUP-TOKEN-NOT-REAL --api <api-url> --ack-local-tools
 \`\`\`
 
-Run the prompt's version, not this one: the token is one-time, the API URL is the backend's own, and the package tag differs by deployment. The rules below come from that prompt, so "me" in them is your user, not Haven.
+Run the prompt's version, not this one: the token is one-time, the API URL is the backend's own, and \`<channel>\` is the npm tag your prompt names — never a tag you pick. The rules below come from that prompt, so "me" in them is your user, not Haven.
 
 - ${AGENT_JSON_MODE_SENTENCE}
 - ${AGENT_APPROVAL_RELAY_JSON_SENTENCE}
@@ -136,7 +143,7 @@ Call \`haven_get_agent\`, one of the Haven MCP tools the connector wires into yo
 - \`needs_approval\` — the connector finished, nobody approved yet. Relay the approval link again; there is no queue to wait in.
 - \`revoked\` — the credential is not active; ask your user to create a new agent.
 
-\`ready\` covers hosted identity and the budget only, not your local signer. Check that with \`npx -y @haven_ai/connect@alpha --doctor\` — a separate command, so the two-changes rule does not bind it.
+\`ready\` covers hosted identity and the budget only, not your local signer. Check that with \`npx -y @haven_ai/connect@<channel> --doctor\`, the same tag your prompt named — a separate command, so the two-changes rule does not bind it.
 
 ## If you cannot open a browser
 

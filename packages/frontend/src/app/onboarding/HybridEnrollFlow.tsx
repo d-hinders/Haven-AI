@@ -28,6 +28,8 @@ import {
 import { rememberPasskeyCredentialOnDevice } from '@/lib/signer'
 import type { User } from '@/context/AuthContext'
 import { Button } from '@/components/ui/Button'
+import { classifyAgentUserAgent } from '@/lib/discovery'
+import { AgentPasskeyHandoff } from '@/components/onboarding/AgentHandoffNote'
 import { PASSKEY_REQUIRED_MESSAGE } from './copy'
 
 type Stage = 'idle' | 'creating_passkey' | 'creating_account' | 'done'
@@ -63,6 +65,43 @@ export default function HybridEnrollFlow({
   // onboarding has no wallet fallback to offer — so it gets the message and no
   // action, rather than a button that can only fail again.
   const [blocked, setBlocked] = useState(false)
+  /**
+   * #2524: whether the agent hand-off belongs on this step, and which of its
+   * two forms.
+   *
+   *   'wall'     — WebAuthn is not available here. Nothing can be created in
+   *                this browser, so the hand-off IS the step: agent line
+   *                first, then the human sentence beneath it.
+   *   'advisory' — the user agent is a known agent family but WebAuthn works.
+   *                The browser can create a passkey; it just must not be this
+   *                party creating it. Saying "cannot" would be false and
+   *                removing the button would strand a human whose browser
+   *                carries an odd UA, so the line sits above a live button.
+   *
+   * `null` until the effect runs — `PublicKeyCredential` and
+   * `navigator.userAgent` are client-only, so deciding during render would
+   * make the server and the first client render disagree.
+   *
+   * Detection is PROACTIVE, not post-failure: an agent that never presses the
+   * button never reaches the catch block, and telling it what to do only after
+   * it has tried is telling it too late.
+   */
+  const [handoffKind, setHandoffKind] = useState<'wall' | 'advisory' | null>(null)
+
+  useEffect(() => {
+    // Both markers, because they answer different questions and the flow needs
+    // both to be true: `PublicKeyCredential` is WebAuthn specifically, and
+    // `navigator.credentials` is what `createPasskey` reaches for (it throws
+    // PasskeyUnsupportedError without it).
+    const canCreatePasskey =
+      typeof window.PublicKeyCredential !== 'undefined' && Boolean(navigator.credentials)
+    if (!canCreatePasskey) {
+      setHandoffKind('wall')
+      setBlocked(true)
+      return
+    }
+    if (classifyAgentUserAgent(navigator.userAgent) !== null) setHandoffKind('advisory')
+  }, [])
 
   useEffect(() => {
     onCreatingChange?.(stage !== 'idle')
@@ -101,8 +140,13 @@ export default function HybridEnrollFlow({
       if (err instanceof PasskeyCancelledError) {
         message = 'The passkey prompt was cancelled.'
       } else if (err instanceof PasskeyUnsupportedError) {
-        message = PASSKEY_REQUIRED_MESSAGE
+        // The wall renders here, not through `onError` (#2524): the human
+        // sentence has to sit BENEATH the agent hand-off, and the host
+        // screen's alert is above this component. `message` stays empty so
+        // the same sentence is not also shown up there.
+        message = ''
         setBlocked(true)
+        setHandoffKind('wall')
       } else if (err instanceof ApiRequestError) {
         message = err.message
       }
@@ -111,13 +155,26 @@ export default function HybridEnrollFlow({
     }
   }
 
-  if (blocked) return null
+  const handoff = handoffKind ? (
+    <AgentPasskeyHandoff
+      path="/onboarding"
+      canCreatePasskey={handoffKind === 'advisory'}
+      humanMessage={PASSKEY_REQUIRED_MESSAGE}
+    />
+  ) : null
+
+  // An honest dead end: the hand-off is the whole content, and there is no
+  // button here that could only fail the same way (#1162).
+  if (blocked) return handoff
 
   if (stage === 'idle') {
     return (
-      <Button onClick={() => void start()} size="lg" className="w-full">
-        Create account with a passkey
-      </Button>
+      <div className="space-y-4">
+        {handoff}
+        <Button onClick={() => void start()} size="lg" className="w-full">
+          Create account with a passkey
+        </Button>
+      </div>
     )
   }
 

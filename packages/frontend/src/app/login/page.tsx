@@ -9,6 +9,7 @@ import { ApiRequestError } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { HavenMark } from '@/components/brand/HavenMark'
+import { AgentHandoffNote } from '@/components/onboarding/AgentHandoffNote'
 
 function LoginForm() {
   const { login, user, loading } = useAuth()
@@ -154,17 +155,32 @@ export default function LoginPage() {
         </div>
       </div>
 
-      <div className="relative z-10 flex-1 flex items-center justify-center px-6 py-16">
-        <Suspense
-          fallback={
-            <div className="flex items-center gap-3">
-              <div className="w-2 h-2 rounded-full bg-[var(--v2-brand)] animate-pulse" />
-              <span className="text-sm text-[var(--v2-ink-2)]">Loading...</span>
-            </div>
-          }
-        >
-          <LoginForm />
-        </Suspense>
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 py-16">
+        <div className="w-full max-w-sm">
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center gap-3">
+                <div className="w-2 h-2 rounded-full bg-[var(--v2-brand)] animate-pulse" />
+                <span className="text-sm text-[var(--v2-ink-2)]">Loading...</span>
+              </div>
+            }
+          >
+            <LoginForm />
+          </Suspense>
+
+          {/* #2524: an agent that reaches this form cannot get past it — the
+              password is the user's. Say so here rather than leaving the agent
+              to guess, and hand it the link to send.
+
+              OUTSIDE the Suspense boundary on purpose. `LoginForm` reads
+              `useSearchParams`, so everything inside the boundary is replaced
+              by the fallback in the server-rendered HTML — a `curl` of
+              `/login` sees "Loading…" and nothing else. This line has to be
+              real page content for an agent that never runs the JavaScript,
+              and it needs no search params to render, so it sits out here.
+              Verified against `.next/server/app/login.html`. */}
+          <AgentHandoffNote path="/login" />
+        </div>
       </div>
     </div>
   )

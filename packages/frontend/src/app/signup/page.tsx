@@ -11,6 +11,7 @@ import { ApiRequestError } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { HavenMark } from '@/components/brand/HavenMark'
+import { AgentHandoffNote } from '@/components/onboarding/AgentHandoffNote'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const MAX_EMAIL_LENGTH = 255
@@ -310,6 +311,12 @@ export default function SignupPage() {
                 Log in
               </Link>
             </p>
+
+            {/* #2524: the sidebar says an account is created "with a passkey or
+                your existing wallet" but never that a human has to be the one
+                doing it. An agent reading this page needs the hand-off, not the
+                feature list. */}
+            <AgentHandoffNote path="/signup" />
           </div>
 
           <div

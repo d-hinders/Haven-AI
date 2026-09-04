@@ -92,7 +92,8 @@ already-running host, which is why the restart guidance below matters.
 
 ## Retiring an old agent directory
 
-Re-running setup creates a NEW agent and retires nothing. Long-lived MCP hosts
+Re-running setup without `--replace` creates a NEW agent and retires nothing
+(with `--replace`, see [Running setup again](#running-setup-again)). Long-lived MCP hosts
 (gateways, TUI workers, editors, desktop apps) load their MCP wiring once, at
 process start — a host started before your latest setup keeps spawning the OLD
 agent's signer path forever, and when that directory is later removed the spawn

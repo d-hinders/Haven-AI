@@ -219,7 +219,9 @@ the live state of an environment is read from the environment, not from prose.
 - [ ] **5. `HAVEN_CONNECTOR_CHANNEL=dev` on the dev Railway *backend*
       service — only now.** Set earlier, the dashboard hands out a tag npm
       cannot resolve. The value must match `/^[a-z][a-z0-9-]{0,31}$/`
-      (`parseConnectorChannel`, `packages/backend/src/config.ts`); anything else
+      (`parseConnectorChannel`, `packages/backend/src/config.ts`); unrelated
+      backend configuration such as `HAVEN_OPS_TOKEN` does not affect this
+      package-selection path; anything else
       makes the backend **refuse to boot**, naming the variable, rather than
       fall back to `alpha`. Verify by creating a setup in the dev dashboard and
       reading `connector_package` in the response — `@haven_ai/connect@dev`.

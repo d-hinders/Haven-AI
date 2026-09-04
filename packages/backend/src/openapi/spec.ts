@@ -831,7 +831,7 @@ export const openapiSpec = {
       get: {
         tags: ['Health'],
         operationId: 'getHealth',
-        summary: 'Check backend and database health.',
+        summary: 'Check public backend and database health.',
         security: [],
         responses: {
           '200': {
@@ -850,6 +850,35 @@ export const openapiSpec = {
               },
             },
           },
+        },
+      },
+    },
+    '/health/ops': {
+      get: {
+        tags: ['Health'],
+        operationId: 'getOperationsHealth',
+        summary: 'Read operator-only backend diagnostics.',
+        description:
+          'Requires the deployment-configured `HAVEN_OPS_TOKEN` in `X-Haven-Ops-Token`. ' +
+          'Returns 404 when the token is not configured, so deployments do not expose diagnostics by default.',
+        security: [],
+        parameters: [
+          {
+            name: 'X-Haven-Ops-Token',
+            in: 'header',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Operator diagnostics.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/HealthOpsResponse' } },
+            },
+          },
+          '401': { ...errorResponse, description: 'The operator token is missing or invalid.' },
+          '404': { ...errorResponse, description: 'Operator diagnostics are not configured on this deployment.' },
         },
       },
     },
@@ -5704,10 +5733,16 @@ export const openapiSpec = {
             properties: {
               status: { type: 'string', enum: ['ok', 'error'] },
               latencyMs: { type: 'integer' },
-              error: { type: 'string' },
             },
             additionalProperties: false,
           },
+        },
+        additionalProperties: false,
+      },
+      HealthOpsResponse: {
+        type: 'object',
+        required: ['relayer', 'passport', 'trustProxy'],
+        properties: {
           relayer: {
             type: 'array',
             description:

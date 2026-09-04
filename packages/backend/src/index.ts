@@ -59,6 +59,7 @@ import safeDeployRoutes from './routes/safe-deploy.js'
 import safeExecRoutes from './routes/safe-exec.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
 import openapiRoutes from './routes/openapi.js'
+import { registerHealthRoutes } from './routes/health.js'
 import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import analyticsRoutes from './routes/analytics.js'
@@ -164,47 +165,12 @@ registerAgentToolAuditHooks(app)
 registerAgentLastSeenHook(app)
 
 // --- Routes ---
-app.get('/health', async (_request, reply) => {
-  const start = Date.now()
-  // Cached from the hourly relayer scan — never a live RPC read on a probe.
-  const relayer = getRelayerBalanceStatus()
-  // Passport configuration state (#1151). Pure env/config read, no chain or DB
-  // access. Booleans plus the already-published issuer address — never key
-  // material, never the schema UID. Reported on the degraded branch too: a
-  // passport misconfiguration is exactly the thing an operator is looking for
-  // when they curl /health, and losing it because Postgres is slow would repeat
-  // the failure this field exists to end.
-  const passport = passportReadiness()
-  // Trust-proxy state (#1670). The auth rate-limit tier arms only when the
-  // process actually READS a hop count > 0 — and whether it does is invisible
-  // from outside: on the first dev rollout the operator set the variable, the
-  // service kept answering, and 32 probe logins still went unthrottled because
-  // the running process predated the env change. This field ends that class of
-  // guessing. Not secret: the setting is documented in .env.example, and the
-  // hop count reveals topology no more than any traceroute would.
-  const trustProxy = { hops: config.trustProxyHops, authRateLimitArmed: config.trustProxyHops > 0 }
-  try {
-    await pool.query('SELECT 1')
-    const dbLatencyMs = Date.now() - start
-    return {
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      db: { status: 'ok', latencyMs: dbLatencyMs },
-      relayer,
-      passport,
-      trustProxy,
-    }
-  } catch (err) {
-    reply.status(503)
-    return {
-      status: 'degraded',
-      timestamp: new Date().toISOString(),
-      db: { status: 'error', error: err instanceof Error ? err.message : String(err) },
-      relayer,
-      passport,
-      trustProxy,
-    }
-  }
+registerHealthRoutes(app, {
+  checkDatabase: () => pool.query('SELECT 1'),
+  getRelayerStatus: getRelayerBalanceStatus,
+  getPassportStatus: passportReadiness,
+  trustProxyHops: config.trustProxyHops,
+  opsToken: config.opsToken,
 })
 
 // Public chain config (#679): which chains this environment serves account
@@ -438,9 +404,9 @@ const start = async () => {
     // Relayer balance monitor: hourly read-only scan of the relayer EOA's
     // native balance per served chain — structured warning + edge-triggered
     // webhook alert below the low-water mark, cached status served by
-    // /health. The relayer going dry previously surfaced only as failing
+    // /health/ops. The relayer going dry previously surfaced only as failing
     // payments. Deliberately NOT behind runIfLeader: the scan result feeds
-    // each replica's own /health response, and the alert edge-trigger is the
+    // each replica's own /health/ops response, and the alert edge-trigger is the
     // per-chain lowAlerted set inside the monitor, so duplicate alerts are
     // bounded by replica count only on the low→ok→low transition.
     const runRelayerMonitor = async () => {

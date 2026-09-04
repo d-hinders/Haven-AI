@@ -1132,8 +1132,34 @@ export interface AgentPaymentWarning {
  */
 export interface AgentNextStep {
   next_action: AgentPaymentNextAction
-  /** Fully-qualified tool name for the next call, when one exists. */
+  /**
+   * Claude-family namespaced tool name for the next call
+   * (`mcp__<server>__<tool>`), when one exists.
+   *
+   * **Namespaced with the DEFAULT server names**, which is the most the hosted
+   * server can know: local server names are the client's own config and never
+   * reach Haven. Two runtimes are already not the default — Codex names servers
+   * by config key (`haven`, `haven_signer`), and a connector run with
+   * `--name <slug>` wires `haven-<slug>` / `haven-signer-<slug>` (#1694). On
+   * either, this field and `next_tool_server` name a server the client does not
+   * have. Prefer {@link AgentNextStep.next_tool_server_role} plus
+   * {@link AgentNextStep.next_tool_name} whenever your servers are not the
+   * default pair; see #2550.
+   */
   next_tool?: string
+  /**
+   * The server half of `next_tool`, unprefixed — `haven` or `haven-signer`.
+   * Carries the same default-name caveat as `next_tool` (#1588, #2550).
+   */
+  next_tool_server?: string
+  /** The bare tool name, callable on whichever server plays the role below. */
+  next_tool_name?: string
+  /**
+   * Which of the CLIENT'S OWN servers to call (#2550). Runtime-neutral, and
+   * the field to resolve against when your server names are not the defaults —
+   * it names a role rather than a name the hosted server had to guess.
+   */
+  next_tool_server_role?: 'hosted' | 'signer'
   /** Small literal arguments for next_tool. Bulky fields are referenced by reason. */
   next_arguments?: Record<string, unknown>
   /** False when the agent should stop and involve the user before continuing. */

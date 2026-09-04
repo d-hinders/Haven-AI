@@ -209,9 +209,13 @@ export const GOVERNED_PACKAGE_DOCS = [
     // the `--json` contract (one JSON value on stdout, prose on stderr, on every
     // command including refusals), the six exit codes with what a caller should
     // do about each, why a 401 resolves to 3 rather than 4, and `haven guide`.
-    // The Install/Usage/Config/Custody sections were re-read against the code
-    // and are unchanged; the opening "companion to the dashboard" framing is
-    // #2536's to rewrite, not this issue's. Scope: that section and this date.
+    // Install, Config and Custody were re-read against the code and are
+    // unchanged. Usage was EDITED — two lines: `haven guide`, and a trailing
+    // comment on `haven whoami` naming what it now returns. (The first draft of
+    // this note said Usage was "re-read and unchanged", which was false of the
+    // one section it had edited — haven-doc-reviewer @ 514a2cc5.) The opening
+    // "companion to the dashboard" framing is #2536's to rewrite, not this
+    // issue's. Scope: those sections and this date.
     'last-verified': '2026-09-04',
   },
   {

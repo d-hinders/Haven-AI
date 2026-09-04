@@ -27,7 +27,10 @@
 // ## The two sets, and why both must be explicit
 //
 // Every `packages/**/*.md` must appear in exactly one of `GOVERNED_PACKAGE_DOCS`
-// or `EXEMPT_PACKAGE_DOCS`. A file in neither is a HARD ERROR naming the file —
+// or `EXEMPT_PACKAGE_DOCS` — except a path under `GENERATED_MARKDOWN_PREFIXES`
+// (#2532), which is excluded from the enumeration before this check runs
+// because a generated file has no decision for anyone to make.
+// A file in neither is a HARD ERROR naming the file —
 // that is the whole point. Making the enforced set bigger was never the fix;
 // making the BOUNDARY visible is, so that a new package README cannot land
 // silently outside both sets the way these thirteen did.

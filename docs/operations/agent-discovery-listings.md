@@ -13,7 +13,7 @@ covers:
   - packages/frontend/src/app/robots.txt/route.ts
   - packages/frontend/src/app/sitemap.xml/route.ts
   - packages/frontend/src/app/layout.tsx
-last-verified: "2026-09-04" # #2521: § *The artifacts* gains rows for `robots.txt`, `sitemap.xml` and the auth-wall marker, and the new § *Discovery hooks* records the four hooks and why the two generated artifacts are route handlers rather than files in `public/`. Scope: those additions and the four `covers:` entries above them. The URL column of the pre-existing rows is #2520's work, merged in beneath this and not re-read here; the registry checklist was not re-read either. Prior: #2520 (follow-up): the *Listing copy (canonical)* block one section below still said `haven.xyz/402` — found by haven-doc-reviewer, and my own scope sentence in the entry below had excluded exactly that part of the file. It cannot take a same-origin path (the copy is pasted into external registries and needs an absolute URL), and no production host is recorded here, so it now reads `<host>/402` with a paragraph saying it is unsubmittable until a domain is decided. Scope: that block and its new paragraph. Prior: #2520: § *The artifacts* URL column rewritten from the `haven.xyz` / `app.haven.xyz` / `docs.haven.xyz` hosts, none of which resolve, to same-origin paths; the section gains the same-origin rule, its guard test (added to `covers:` with this entry) and the one temporary off-site allow-list entry (product docs, until #2532). Scope: that table and the paragraph above the connect-one-liner rule — the one-liner rule itself is unchanged and still reads verbatim-everywhere, and the registry checklist below was not re-read. First entry on this chain; the file carried a bare date before.
+last-verified: "2026-09-04" # #2532: the paragraph naming the `github.com` allow-list entry as temporary "until #2532" was made false by #2532 itself — rewritten to past tense, recording that the entry is gone and `ALLOWED_HOSTS` now carries only npm. Adds why two in-app links (`AccountSignersCard`, `RecoveryNudge`) deliberately still point a human at the rendered document on GitHub: the served path is raw Markdown, which is right for an agent and worse for a person. Found by haven-doc-reviewer. Scope: that one paragraph and its new companion — the artifacts table, the discovery-hooks section, the registry checklist and the measurement section were not re-read. Prior: #2521: § *The artifacts* gains rows for `robots.txt`, `sitemap.xml` and the auth-wall marker, and the new § *Discovery hooks* records the four hooks and why the two generated artifacts are route handlers rather than files in `public/`. Scope: those additions and the four `covers:` entries above them. The URL column of the pre-existing rows is #2520's work, merged in beneath this and not re-read here; the registry checklist was not re-read either. Prior: #2520 (follow-up): the *Listing copy (canonical)* block one section below still said `haven.xyz/402` — found by haven-doc-reviewer, and my own scope sentence in the entry below had excluded exactly that part of the file. It cannot take a same-origin path (the copy is pasted into external registries and needs an absolute URL), and no production host is recorded here, so it now reads `<host>/402` with a paragraph saying it is unsubmittable until a domain is decided. Scope: that block and its new paragraph. Prior: #2520: § *The artifacts* URL column rewritten from the `haven.xyz` / `app.haven.xyz` / `docs.haven.xyz` hosts, none of which resolve, to same-origin paths; the section gains the same-origin rule, its guard test (added to `covers:` with this entry) and the one temporary off-site allow-list entry (product docs, until #2532). Scope: that table and the paragraph above the connect-one-liner rule — the one-liner rule itself is unchanged and still reads verbatim-everywhere, and the registry checklist below was not re-read. First entry on this chain; the file carried a bare date before.
 ---
 
 # Agent discovery listings — registry audit & cadence
@@ -45,10 +45,21 @@ an edit. `llms.txt` and `llms-full.txt` also state in one line that their links
 are paths on the serving host, since an agent may have been handed the text
 rather than the URL it came from.
 
-One allow-list entry is temporary and says so: the product docs have no served
-home until [#2532](https://github.com/d-hinders/Haven-AI/issues/2532) publishes
-them under `/docs/`, so `account-recovery` points at the public repository
-meanwhile. That entry leaving the allow-list is how you know #2532 finished.
+One allow-list entry WAS temporary and said so: the product docs had no served
+home, so `account-recovery` pointed at the public repository meanwhile, and the
+entry leaving the allow-list was named as the test that
+[#2532](https://github.com/d-hinders/Haven-AI/issues/2532) had finished.
+It has. #2532 serves four product docs from this origin under `/docs/`,
+`llms.txt` links the path instead of the repository, and `ALLOWED_HOSTS` in the
+guard test carries only `www.npmjs.com`. The artifacts are back to the rule
+with no exception: own-product links are same-origin paths.
+
+Two in-app links are a deliberate exception and are NOT the same case:
+`AccountSignersCard` and `RecoveryNudge` still send a signed-in human to the
+rendered document on GitHub. `/docs/account-recovery.md` is raw Markdown — the
+right answer for an agent and a worse one for a person, who would get an
+unrendered file. The same-origin rule governs the agent-readable artifacts;
+these two are product UI pointing a human at a rendered page.
 
 The connect one-liner is `npx @haven_ai/connect@alpha` **everywhere, verbatim** — agents copy exact strings. If the dist-tag ever changes, sweep every artifact above in one PR.
 

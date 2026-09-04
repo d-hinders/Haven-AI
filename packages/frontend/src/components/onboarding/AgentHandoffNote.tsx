@@ -37,8 +37,20 @@ import { nextPathFromSearch, viaMarkerFromSearch } from '@/lib/discovery'
 /** Where `/for-agents.md` lives (#2523). Same host, so a path is enough. */
 const RUNBOOK_PATH = '/for-agents.md'
 
+/**
+ * `overflow-wrap: anywhere` rather than `break-all` (design review, #2524).
+ * Both stop a long percent-encoded `next` from overflowing the card, but
+ * `break-all` breaks EAGERLY: on the common link — the bare origin plus
+ * `/signup`, with no `next` at all — it split "…/signu / p" mid-word in the
+ * rendered evidence. `anywhere` breaks inside a word only when there is no
+ * other option, so the short link wraps at a boundary and the pathological one
+ * still cannot overflow. On a browser without it (Safari < 15.4) the fallback
+ * is the pre-CSS behaviour, i.e. a long link can overflow this one tertiary
+ * line — stated rather than glossed, and judged the better trade against
+ * breaking every short link mid-word.
+ */
 const LINK_CLASS =
-  'underline underline-offset-2 break-all text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors'
+  'underline underline-offset-2 [overflow-wrap:anywhere] text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors'
 
 /**
  * Rebuild the current step's URL as something safe to hand to another person.

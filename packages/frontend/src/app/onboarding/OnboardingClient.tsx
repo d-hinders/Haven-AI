@@ -59,6 +59,9 @@ export default function OnboardingClient() {
 
   const [phase, setPhase] = useState<Phase>('create')
   const [creating, setCreating] = useState(false)
+  // #2524: the browser cannot create a passkey, so this screen is a dead end
+  // and stops presenting itself as a create flow.
+  const [blocked, setBlocked] = useState(false)
   const [error, setError] = useState('')
   const [selectedChainId, setSelectedChainId] = useState(DEFAULT_CHAIN_ID)
 
@@ -203,35 +206,43 @@ export default function OnboardingClient() {
                   Welcome, {name}
                 </span>
                 <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
-                  Create your Haven account
+                  {blocked ? 'Finish on another device' : 'Create your Haven account'}
                 </h1>
-                <p className="text-sm text-[var(--v2-ink-2)] leading-relaxed">
-                  {creating
-                    ? 'Setting up your account. Stay on this tab, it takes a few seconds.'
-                    : 'Your face or fingerprint approves everything: budgets, agents, changes. No wallet, no seed phrase, nothing to install.'}
-                </p>
+                {!blocked && (
+                  <p className="text-sm text-[var(--v2-ink-2)] leading-relaxed">
+                    {creating
+                      ? 'Setting up your account. Stay on this tab, it takes a few seconds.'
+                      : 'Your face or fingerprint approves everything: budgets, agents, changes. No wallet, no seed phrase, nothing to install.'}
+                  </p>
+                )}
               </div>
 
-              <div>
-                <label
-                  htmlFor="onboarding-network"
-                  className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
-                >
-                  Network
-                </label>
-                <Select
-                  id="onboarding-network"
-                  value={selectedChainId}
-                  disabled={creating}
-                  onChange={(e) => setSelectedChainId(Number(e.target.value))}
-                >
-                  {deployableChains.map((chain) => (
-                    <option key={chain.chainId} value={chain.chainId}>
-                      {chain.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+              {/* Hidden on the dead end (#2524): picking a network for an
+                  account this browser cannot create is a control that does
+                  nothing, and it reads as a working flow above a message that
+                  says the flow is over. */}
+              {!blocked && (
+                <div>
+                  <label
+                    htmlFor="onboarding-network"
+                    className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
+                  >
+                    Network
+                  </label>
+                  <Select
+                    id="onboarding-network"
+                    value={selectedChainId}
+                    disabled={creating}
+                    onChange={(e) => setSelectedChainId(Number(e.target.value))}
+                  >
+                    {deployableChains.map((chain) => (
+                      <option key={chain.chainId} value={chain.chainId}>
+                        {chain.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
 
               {error && (
                 <div
@@ -252,6 +263,7 @@ export default function OnboardingClient() {
                 user={user}
                 selectedChainId={selectedChainId}
                 onCreatingChange={handleCreatingChange}
+                onBlockedChange={setBlocked}
                 onComplete={(args) => {
                   void handleHybridComplete(args)
                 }}

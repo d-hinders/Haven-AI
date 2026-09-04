@@ -41,6 +41,14 @@ interface HybridEnrollFlowProps {
   onError: (message: string) => void
   /** Reports whether creation is in flight, so the host screen can settle. */
   onCreatingChange?: (creating: boolean) => void
+  /**
+   * Reports that this browser cannot create a passkey at all (#2524), so the
+   * host screen can stop offering a create flow it can no longer complete.
+   * Without it the screen keeps its "Create your Haven account" heading, its
+   * Face-ID promise and a live Network selector above a message saying none of
+   * that is possible — controls that do nothing on a dead end.
+   */
+  onBlockedChange?: (blocked: boolean) => void
 }
 
 function displayName(user: User): string {
@@ -59,6 +67,7 @@ export default function HybridEnrollFlow({
   onComplete,
   onError,
   onCreatingChange,
+  onBlockedChange,
 }: HybridEnrollFlowProps) {
   const [stage, setStage] = useState<Stage>('idle')
   // A browser without WebAuthn fails identically on every attempt, and
@@ -91,8 +100,19 @@ export default function HybridEnrollFlow({
   useEffect(() => {
     // Both markers, because they answer different questions and the flow needs
     // both to be true: `PublicKeyCredential` is WebAuthn specifically, and
-    // `navigator.credentials` is what `createPasskey` reaches for (it throws
-    // PasskeyUnsupportedError without it).
+    // `navigator.credentials` is what `createPasskey` reaches for.
+    //
+    // DRIFT WARNING (haven-reviewer, #2524). This is now the SECOND place that
+    // decides "can this browser create a passkey"; the first is
+    // `getCredentialsContainer()` in `lib/passkey.ts`, which throws
+    // `PasskeyUnsupportedError` on `!navigator.credentials` alone. This check
+    // is deliberately the stricter of the two — the `PublicKeyCredential`
+    // global is the canonical WebAuthn feature detection, and a browser with
+    // `navigator.credentials` but no `PublicKeyCredential` would otherwise
+    // reach `credentials.create()` and fail with the generic
+    // "Account setup failed" instead of the honest message. Keep the
+    // `navigator.credentials` half in step with that function: if its
+    // definition of unsupported changes, this must change with it.
     const canCreatePasskey =
       typeof window.PublicKeyCredential !== 'undefined' && Boolean(navigator.credentials)
     if (!canCreatePasskey) {
@@ -106,6 +126,10 @@ export default function HybridEnrollFlow({
   useEffect(() => {
     onCreatingChange?.(stage !== 'idle')
   }, [onCreatingChange, stage])
+
+  useEffect(() => {
+    onBlockedChange?.(blocked)
+  }, [onBlockedChange, blocked])
 
   async function start(): Promise<void> {
     setStage('creating_passkey')

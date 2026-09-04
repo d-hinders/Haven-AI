@@ -97,6 +97,25 @@ describe('AgentHandoffNote (#2524)', () => {
   })
 
   /**
+   * Aimed at a specific mutation (haven-reviewer, #2524): the two single-param
+   * cases above happen to be byte-identical to what an `href` echo produces,
+   * so neither goes red if the composition is replaced by
+   * `window.location.href`. This one cannot coincide — the correct output
+   * carries `next` and `via` in the composer's own order with a re-encoded
+   * `next`, and drops the third parameter entirely, so an echo, a dropped
+   * `via` and a dropped `next` each fail it.
+   */
+  it('carries `next` and `via` together, re-encoded, and nothing else', async () => {
+    setSearch('?via=agent&src=partner&next=%2Fagents%3Fsetup%3Dabc')
+    render(<AgentHandoffNote path="/signup" />)
+
+    const expected = `${window.location.origin}/signup?next=%2Fagents%3Fsetup%3Dabc&via=agent`
+    await waitFor(() => expect(screen.getByText(expected)).toBeTruthy())
+    expect(linkHref(expected)).toBe(expected)
+    expect(document.body.innerHTML).not.toContain('partner')
+  })
+
+  /**
    * An agent may read `/signup` with `curl`, so the sentence has to exist
    * before hydration. The absolute URL cannot — it needs `window` — so the
    * first render uses the caller's path, which is a relative link and exactly

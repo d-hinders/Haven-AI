@@ -73,6 +73,48 @@
 // `chain-integrity-backtest.mjs` turned up a deleted full stop, and a gate
 // that goes red over punctuation teaches people to route around it.
 //
+// ## #2562 — the ceiling measured one thing and reported another, and nothing
+// announced a chain BEFORE it hit
+//
+// Two defects, both about the size backstop rather than the containment rules.
+//
+// FIRST, `chainAnomalies` compared `line.length` — UTF-16 code units — while
+// naming the result `bytes` and failing with "chain line is N bytes". On a
+// chain full of em-dashes and arrows the two differ measurably: the
+// mcp-runtime-compatibility line was 65,448 code units and 65,719 bytes on
+// 2026-09-03, so the SAME line was under the limit by the measure enforced and
+// over it by the measure reported. Either is defensible; enforcing one while
+// reporting the other is not, and it put wrong numbers into #2563's first
+// framing and into #2562's own first draft. The measure is now UTF-8 bytes on
+// both sides, which is what `MAX_CHAIN_BYTES` was always named for and what
+// the file actually costs on disk.
+//
+// SECOND, the blocking ceiling is diff-scoped — the runner skips a doc whose
+// line is unchanged — so a chain crosses it SILENTLY and the cost lands on the
+// next unrelated contributor. Measured: #2557 was a TypeScript interface fix,
+// the coupling gate required a note on a doc 88 code units under the ceiling,
+// and a normal-length note pushed it over. Compacting 55 entries of someone
+// else's provenance is not work that belongs inside a type fix.
+//
+// So a NON-BLOCKING warning band (`WARN_CHAIN_BYTES`, 40 KiB) is evaluated
+// over EVERY governed doc on every run, changed or not, and printed. Three
+// properties, each deliberate:
+//
+//   - it does not block, at the band or above it. The ceiling stays the only
+//     hard stop, and it stays diff-scoped: failing a PR for the size of a doc
+//     it never touched is the same ambush one layer up.
+//   - it runs on every invocation, ahead of the promotion/push/no-base early
+//     returns. Those returns mean "this diff cannot be judged"; they say
+//     nothing about what the docs on disk weigh, and a push build to `dev` is
+//     exactly where a standing warning is cheapest to see.
+//   - it reads the working tree, not a git range. The question is "how big is
+//     this chain now", which has no base.
+//
+// What to do about a warning is a written rule rather than an invention at the
+// moment of tripping it: compact to the newest ~20 entries under a declared
+// `chain-reset(#N)`, in its own PR. See docs/contributing/docs-quality-system.md
+// § `last-verified` chain integrity.
+//
 // ## Escape hatch — named and logged, never silent
 //
 // A chain that genuinely needs compacting says so ON the line:
@@ -92,10 +134,10 @@
 
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
-import { REPO_ROOT, ROOT_DOCS } from './validate-frontmatter.mjs'
+import { REPO_ROOT, ROOT_DOCS, walk } from './validate-frontmatter.mjs'
 
 function arg(name) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
@@ -343,6 +385,31 @@ export function checkEntriesVerbatim(prevLine, nextLine) {
 export const MAX_CHAIN_BYTES = 64 * 1024
 
 /**
+ * The advisory band (#2562), at ~62% of the ceiling.
+ *
+ * Not a second wall: nothing fails here. It exists so a chain announces itself
+ * while compacting is still cheap and while the person reading the warning is
+ * not mid-PR on something else. 40 KiB was chosen against the live curve
+ * rather than as a round fraction — at the time it landed the three largest
+ * chains were 45.3 KB, 43.7 KB and 23.6 KB, so it names the two that are
+ * genuinely on the way to the ceiling and stays quiet about the one that was
+ * just compacted and has room for roughly 40 more verifications.
+ */
+export const WARN_CHAIN_BYTES = 40 * 1024
+
+/**
+ * The size of a chain line, in the unit the ceiling is named for (#2562).
+ *
+ * `line.length` counts UTF-16 code units; these lines are dense with
+ * em-dashes, arrows and typographic quotes, each of which costs three bytes
+ * and one code unit. The constant says BYTES and the failure message says
+ * bytes, so this is what both the comparison and the report use.
+ */
+export function chainLineBytes(line) {
+  return Buffer.byteLength(line, 'utf8')
+}
+
+/**
  * Pure core for the #2477 direction: the OPPOSITE failure of #1843, one entry
  * appearing twice where the check's containment rule can only see losses.
  *
@@ -378,10 +445,87 @@ export function chainAnomalies(line, maxBytes = MAX_CHAIN_BYTES) {
     duplicates.push({ head: headOfEntry(text), count, excerpt: text.slice(0, 96) })
   }
   duplicates.sort((a, b) => b.count - a.count)
+  const bytes = chainLineBytes(line)
   return {
     duplicates,
-    tooLarge: line.length > maxBytes ? { bytes: line.length, maxBytes } : null,
+    tooLarge: bytes > maxBytes ? { bytes, maxBytes } : null,
   }
+}
+
+/**
+ * Every governed doc whose chain line is over the advisory band (#2562).
+ *
+ * Governed = the same population `isDocPath` defines for the blocking check:
+ * `docs/**` plus the root gravity files. A doc with no front-matter or no
+ * `last-verified` line simply has no chain and is skipped — that is the
+ * validator's business, not this one's.
+ *
+ * Sorted biggest-first, because the list is read as a queue. `overCeiling`
+ * marks the rows that are past the hard limit too: those are already blocking
+ * for the next person to touch that doc, which is a materially different piece
+ * of news from "this one is getting large".
+ */
+export async function chainSizeWarnings({
+  repoRoot = REPO_ROOT,
+  warnBytes = WARN_CHAIN_BYTES,
+  maxBytes = MAX_CHAIN_BYTES,
+} = {}) {
+  const rels = new Set(ROOT_DOCS)
+  const docsDir = join(repoRoot, 'docs')
+  if (existsSync(docsDir)) {
+    for (const abs of await walk(docsDir)) {
+      const rel = relative(repoRoot, abs).split(sep).join('/')
+      if (rel.endsWith('.md')) rels.add(rel)
+    }
+  }
+  const warnings = []
+  for (const rel of rels) {
+    const abs = join(repoRoot, rel)
+    if (!existsSync(abs)) continue
+    let raw
+    try {
+      raw = await readFile(abs, 'utf8')
+    } catch {
+      continue
+    }
+    const line = lastVerifiedLine(raw)
+    if (!line) continue
+    const bytes = chainLineBytes(line)
+    if (bytes <= warnBytes) continue
+    warnings.push({ rel, bytes, warnBytes, maxBytes, overCeiling: bytes > maxBytes })
+  }
+  warnings.sort((a, b) => b.bytes - a.bytes || a.rel.localeCompare(b.rel))
+  return warnings
+}
+
+/**
+ * Print the band report. Non-blocking by construction: it returns nothing and
+ * the caller never branches on it. Silent when every chain is under the band,
+ * so a clean repo stays quiet rather than teaching people to skim the run log.
+ */
+export function reportChainSizeWarnings(warnings, log = console.log) {
+  if (warnings.length === 0) return
+  const kib = (n) => `${(n / 1024).toFixed(1)} KiB`
+  log(
+    `\n⚠ \`last-verified\` chain size: ${warnings.length} doc(s) over the ` +
+    `${kib(warnings[0].warnBytes)} advisory band (nothing is blocked by this):`,
+  )
+  for (const w of warnings) {
+    log(
+      `  - ${w.rel}: ${w.bytes} bytes (${kib(w.bytes)})` +
+      (w.overCeiling
+        ? ` — ALSO OVER the ${w.maxBytes}-byte ceiling: the next edit to this doc's chain is blocked until it is compacted`
+        : ''),
+    )
+  }
+  log(
+    'Compact a warned chain in its OWN pull request, keeping the newest ~20 entries ' +
+    'verbatim under a declared `chain-reset(#<issue>)`; the dropped entries stay ' +
+    'recoverable in `git log -p` on the file. Doing it here, now, is the point — the ' +
+    'alternative is that it lands on whoever next edits the doc for an unrelated ' +
+    'reason (#2562). The rule is in docs/contributing/docs-quality-system.md ' +
+    '§ `last-verified` chain integrity.\n',
+  )
 }
 
 function isDocPath(p) {
@@ -428,6 +572,12 @@ export function isPromotionPR(env = process.env) {
 }
 
 async function main() {
+  // #2562: the band is independent of the diff, so it runs BEFORE every early
+  // return below. Those returns all mean "this change cannot be judged against
+  // a base"; none of them means the docs on disk are fine, and the whole point
+  // of the band is to be seen by someone who is not mid-PR.
+  reportChainSizeWarnings(await chainSizeWarnings())
+
   if (isPromotionPR()) {
     console.log('Chain integrity: dev → main promotion — already checked on each dev PR.')
     return

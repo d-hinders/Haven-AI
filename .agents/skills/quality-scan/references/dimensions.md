@@ -266,8 +266,13 @@ shot; 36 Markdown files outside both docs-quality boundaries.
 
 **7. Chain health — headroom under the ceiling, and duplicates.** #2477's
 chain reached 774,483 bytes through concatenating merges; the gate now
-refuses a line over 64 KiB or carrying a duplicate entry, but only on the
-doc a PR changes — the scan reports headroom before it fails someone at push.
+refuses a line over 64 KiB or carrying a duplicate entry — and, since #2504, a
+prior entry whose text changed while its ref stayed (`checkEntriesVerbatim`).
+This block samples the first two only: the third needs a base to compare
+against, so it is the gate's question on a PR, not the scan's over a tree. Say
+so when reporting, or "chain health clean" reads as three answers when it is
+two. All three fire only on the doc a PR changes — the scan reports headroom
+before it fails someone at push.
 
 ```bash
 # Sample: every doc with a `last-verified` line, measured with the gate's own

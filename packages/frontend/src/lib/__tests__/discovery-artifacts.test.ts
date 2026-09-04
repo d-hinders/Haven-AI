@@ -58,6 +58,16 @@ function read(name: string): string {
  * "relativizing" a link by dropping `https:` instead of the whole origin, which
  * still leaves the browser fetching another host. Bare `//` forms are returned
  * with a scheme so `new URL()` can read their hostname.
+ *
+ * Known limit, deliberate: a host written with no scheme and no `//` at all
+ * ("see docs.haven.xyz for details") is not extracted, because in these files
+ * that is prose rather than a link. It costs nothing for the three named dead
+ * hosts — the substring check in the first test and the repo-wide `git grep`
+ * in the fifth both find a bare mention, proven by a reviewer who staged a
+ * scheme-less fixture and watched the grep test go red. So the only uncovered
+ * case is a NEW off-list host written bare. Widening the regex to bare domains
+ * would flag every prose mention of any dotted name, which is how a guard
+ * becomes something people route around.
  */
 export function absoluteUrls(text: string): string[] {
   return [...text.matchAll(/(?:https?:)?\/\/[^\s"'`)<>\]]+/g)]

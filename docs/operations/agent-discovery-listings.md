@@ -9,7 +9,11 @@ covers:
   - packages/frontend/src/middleware.ts
   - packages/frontend/src/lib/discovery.ts
   - packages/frontend/src/lib/__tests__/discovery-artifacts.test.ts
-last-verified: "2026-09-04" # #2520 (follow-up): the *Listing copy (canonical)* block one section below still said `haven.xyz/402` — found by haven-doc-reviewer, and my own scope sentence in the entry below had excluded exactly that part of the file. It cannot take a same-origin path (the copy is pasted into external registries and needs an absolute URL), and no production host is recorded here, so it now reads `<host>/402` with a paragraph saying it is unsubmittable until a domain is decided. Scope: that block and its new paragraph. Prior: #2520: § *The artifacts* URL column rewritten from the `haven.xyz` / `app.haven.xyz` / `docs.haven.xyz` hosts, none of which resolve, to same-origin paths; the section gains the same-origin rule, its guard test (added to `covers:` with this entry) and the one temporary off-site allow-list entry (product docs, until #2532). Scope: that table and the paragraph above the connect-one-liner rule — the one-liner rule itself is unchanged and still reads verbatim-everywhere, and the registry checklist below was not re-read. First entry on this chain; the file carried a bare date before.
+  - packages/frontend/src/lib/discovery-surfaces.ts
+  - packages/frontend/src/app/robots.txt/route.ts
+  - packages/frontend/src/app/sitemap.xml/route.ts
+  - packages/frontend/src/app/layout.tsx
+last-verified: "2026-09-04" # #2521: § *The artifacts* gains rows for `robots.txt`, `sitemap.xml` and the auth-wall marker, and the new § *Discovery hooks* records the four hooks and why the two generated artifacts are route handlers rather than files in `public/`. Scope: those additions and the four `covers:` entries above them. The URL column of the pre-existing rows is #2520's work, merged in beneath this and not re-read here; the registry checklist was not re-read either. Prior: #2520 (follow-up): the *Listing copy (canonical)* block one section below still said `haven.xyz/402` — found by haven-doc-reviewer, and my own scope sentence in the entry below had excluded exactly that part of the file. It cannot take a same-origin path (the copy is pasted into external registries and needs an absolute URL), and no production host is recorded here, so it now reads `<host>/402` with a paragraph saying it is unsubmittable until a domain is decided. Scope: that block and its new paragraph. Prior: #2520: § *The artifacts* URL column rewritten from the `haven.xyz` / `app.haven.xyz` / `docs.haven.xyz` hosts, none of which resolve, to same-origin paths; the section gains the same-origin rule, its guard test (added to `covers:` with this entry) and the one temporary off-site allow-list entry (product docs, until #2532). Scope: that table and the paragraph above the connect-one-liner rule — the one-liner rule itself is unchanged and still reads verbatim-everywhere, and the registry checklist below was not re-read. First entry on this chain; the file carried a bare date before.
 ---
 
 # Agent discovery listings — registry audit & cadence
@@ -25,6 +29,9 @@ Operational home of the **Agent Discovery (AEO) GTM track**, Phase 0 (strategy d
 | 402 page | `/402` | Human landing for the 402 moment. Mirror of `402.md` — **edit both together** (sync note in the HTML header). |
 | `402.md` | `/402.md` | Agent-readable mirror; token-cheap, answer-first. |
 | npm metadata | package.json of sdk / signer / mcp / connect / cli | Keywords + descriptions carry the category phrases (x402, agent-payments, budget, non-custodial). Ships on next `release:bump`; do not hand-edit versions (see `scripts/README.md`). |
+| `robots.txt` | `/robots.txt` | **Generated**, not a static file (`src/app/robots.txt/route.ts`). Names the agent-readable artifacts and `Disallow`s the authenticated prefixes. Update when a public artifact is added or an authenticated prefix appears — both come from `AUTHENTICATED_PREFIXES` in `src/lib/discovery-surfaces.ts`, so edit that list, not the template. |
+| `sitemap.xml` | `/sitemap.xml` | **Generated** (`src/app/sitemap.xml/route.ts`) from `PUBLIC_SURFACES` in `src/lib/discovery-surfaces.ts`. Add a public page → add it there. The guard test fails if an entry resolves to no route or file, or if an authenticated prefix reaches the list. |
+| Auth-wall marker | `<meta name="haven:auth" content="required">` | Emitted by `src/app/(authenticated)/layout.tsx` on every authenticated page, plus a `<noscript>` sentence. Lets a non-browser client tell a wall from a page — they all answer 200 with an SSR shell. Never add it to a public route; never remove it from an authenticated one. |
 
 **Own-product links in these artifacts are same-origin paths, never absolute hosts (#2520).**
 The URL column above is written that way for the same reason: the dev preview,
@@ -44,6 +51,19 @@ them under `/docs/`, so `account-recovery` points at the public repository
 meanwhile. That entry leaving the allow-list is how you know #2532 finished.
 
 The connect one-liner is `npx @haven_ai/connect@alpha` **everywhere, verbatim** — agents copy exact strings. If the dist-tag ever changes, sweep every artifact above in one PR.
+
+## Discovery hooks (#2521)
+
+The artifacts above are only worth having if an agent can *find* them. The 2026-09-04 cold test ([`agent-first-cold-test-2026-09-04.md`](../bug-reports/agent-first-cold-test-2026-09-04.md) §2 step 1, §3.2) found them by guessing the convention — nothing in the served HTML pointed anywhere. Four hooks now do:
+
+1. **`<link rel="alternate">` in the root layout** — `/llms.txt` (`text/plain`) and `/api/openapi.json` (`application/json`). Written as literal tags rather than Next `Metadata.alternates`, because Next resolves metadata URLs against `metadataBase` and would emit an absolute host; a **relative** href is correct on the dev preview, on production and on a future custom domain alike.
+2. **`/robots.txt`** — allows crawling, names the artifacts in a comment block, `Disallow`s the authenticated prefixes, and carries an absolute `Sitemap:` URL.
+3. **`/sitemap.xml`** — the public surfaces, absolute.
+4. **One server-rendered sentence on the landing page**, plus a **"For agents"** footer link. Real content in the HTML a `curl` sees, not a hidden element.
+
+**Why `robots.txt` and `sitemap.xml` are route handlers and not files in `public/`.** Both specs require *absolute* URLs — a relative `Sitemap:` line is silently ignored by crawlers, which is the same defect class as the dead hosts #2520 removed. Epic #2519's invariant forbids hardcoding a host. Taking the origin off the request satisfies both, with no env var to set per deployment and nothing to sweep if a custom domain is ever mapped.
+
+Guard test: `packages/frontend/src/lib/__tests__/discovery-surfaces.test.ts`.
 
 ## Registry & directory checklist
 

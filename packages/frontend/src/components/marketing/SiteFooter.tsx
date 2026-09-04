@@ -8,6 +8,10 @@ const COLS = [
       { label: 'How it works', href: '/how-it-works' },
       { label: 'x402', href: '/protocols/x402' },
       { label: 'MPP', href: '/protocols/mpp' },
+      // #2521: the agent-readable entry point, advertised where a person
+      // looking for it would look. Not a Next <Link> — /llms.txt is a static
+      // artifact, not an app route, so client-side navigation would 404.
+      { label: 'For agents', href: '/llms.txt', external: true },
     ],
   },
   {
@@ -46,12 +50,21 @@ export function SiteFooter() {
             <ul className="space-y-2">
               {col.links.map((link) => (
                 <li key={link.label}>
-                  <Link
-                    href={link.href}
-                    className="text-[13px] text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
-                  >
-                    {link.label}
-                  </Link>
+                  {'external' in link && link.external ? (
+                    <a
+                      href={link.href}
+                      className="text-[13px] text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
+                    >
+                      {link.label}
+                    </a>
+                  ) : (
+                    <Link
+                      href={link.href}
+                      className="text-[13px] text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
+                    >
+                      {link.label}
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>

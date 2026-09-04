@@ -4086,6 +4086,10 @@ describe('structured agent guidance (#1308)', () => {
     expect(result.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
     expect((result.data as { next_tool_server?: string }).next_tool_server).toBe('haven')
     expect((result.data as { next_tool_name?: string }).next_tool_name).toBe('haven_get_payment_status')
+    // #2550: both roles are emitted (haven-signer and haven), so the role field
+    // has to distinguish them. A field that only ever said "signer" would leave
+    // a client unable to tell "the other role" from "the field is missing".
+    expect((result.data as { next_tool_server_role?: string }).next_tool_server_role).toBe('hosted')
     expect(result.data.safe_to_continue).toBe(false)
   })
 })
@@ -6328,5 +6332,60 @@ describe('#2145: the hosted resume description gates on the live retry trigger',
     // as the next step. A revert to either earlier wording drops this literal.
     expect(description).toContain('Do NOT pass its x402_binding to')
     expect(description).toContain('haven_x402_sign_header')
+  })
+})
+
+/**
+ * #2550 — the next-step fields, pinned before and after adding a role.
+ *
+ * The defect: `next_tool` is a hardcoded literal naming the DEFAULT local
+ * server (`mcp__haven-signer__haven_sign`), and `next_tool_server` is parsed
+ * back out of that same literal. A connector run with `--name <slug>` wires
+ * `haven-signer-<slug>` instead, so both fields name a server that is not the
+ * one the user just set up — while the hosted instructions tell the agent to
+ * follow those fields FIRST. Observed on dev 2026-09-04 with `--name devtest`.
+ *
+ * The fix is deliberately ADDITIVE: `next_tool_server_role` is added, and the
+ * three existing fields are left byte-identical. The tests below are the two
+ * halves of that decision, and the first half is the one that matters most —
+ * an agent following `next_tool` on a default install must see exactly what it
+ * saw before, or fixing a named-install bug would have broken every default
+ * install to do it.
+ */
+describe('next-step fields (#2550)', () => {
+  it('CHARACTERIZATION: the three existing fields are unchanged on the signer path', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const result = ok<{
+      next_tool: string
+      next_tool_server: string
+      next_tool_name: string
+    }>(await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }))
+
+    // Byte-identical to pre-#2550. Do NOT "fix" these to the named form: the
+    // hosted server cannot know a client's slug, and changing them here would
+    // break every default install to serve the named minority.
+    expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
+    expect(result.data.next_tool_server).toBe('haven-signer')
+    expect(result.data.next_tool_name).toBe('haven_sign_x402')
+  })
+
+  it('adds next_tool_server_role so a named install can resolve the signer', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const result = ok<{ next_tool_server_role: string }>(
+      await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
+    )
+
+    // The role is what a `--name devtest` client resolves against: it looks
+    // for the signer among ITS OWN configured servers rather than trusting a
+    // name minted by a server that cannot see its config.
+    expect(result.data.next_tool_server_role).toBe('signer')
   })
 })

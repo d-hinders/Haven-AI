@@ -4,11 +4,13 @@ Haven is the buy-side control layer for AI-agent payments. Users and businesses 
 
 One line: give your agent a budget, not your wallet.
 
+> Links below are paths on this same host: resolve them against the URL you fetched this file from.
+
 ## The model
 
 - Agents are never wallets. Funds stay in the user's own smart account (a MetaMask Hybrid DeleGator). The agent holds a signed, revocable delegation — never funds, never keys.
 - Enforcement is on-chain. Budgets are enforced by audited on-chain policy modules (MetaMask Delegation Framework caveat enforcers: period budget, recipient pin, expiry) at execution time. An over-budget or off-policy payment does not get flagged — it reverts. This holds even if Haven itself were compromised or offline.
-- Provably non-custodial. Users can inspect and revoke every agent budget with nothing but a block explorer and their own wallet: https://haven.xyz/exit/
+- Provably non-custodial. Users can inspect and revoke every agent budget with nothing but a block explorer and their own wallet: /exit
 - Accountability built in. Every payment carries a receipt: which agent, what it bought, which policy allowed it, and the on-chain proof. Receipts export to bookkeeping (Fortnox first).
 
 ## How an agent pays (x402)
@@ -29,7 +31,7 @@ One line: give your agent a budget, not your wallet.
 
 ## Quickstart (owner)
 
-1. Create a Haven account at https://app.haven.xyz — one passkey prompt (Face ID / Touch ID), no seed phrase.
+1. Create a Haven account at the dashboard (`/`) — one passkey prompt (Face ID / Touch ID), no seed phrase.
 2. Create an agent and set its budget: how much, per what period, optionally pinned to a recipient.
 3. Connect the agent: copy the connect command from the dashboard into the agent's environment. The agent can now pay — only within the rules you set. Pause, tighten, or revoke at any time.
 
@@ -41,7 +43,7 @@ One line: give your agent a budget, not your wallet.
 
 ## Links
 
-- Your agent hit a 402: https://haven.xyz/402.md
-- Dashboard: https://app.haven.xyz
-- Independent exit (inspect/revoke without Haven): https://haven.xyz/exit/
+- Your agent hit a 402: /402.md
+- Dashboard: / (this host's root)
+- Independent exit (inspect/revoke without Haven): /exit
 - npm: https://www.npmjs.com/package/@haven_ai/connect (also @haven_ai/sdk, @haven_ai/mcp, @haven_ai/signer, @haven_ai/cli)

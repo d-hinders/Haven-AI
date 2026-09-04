@@ -59,7 +59,7 @@ export function RecoveryNudge() {
           </p>
           <div className="mt-3 flex items-center gap-4">
             <a
-              href="https://docs.haven.xyz/product/account-recovery"
+              href="https://github.com/d-hinders/Haven-AI/blob/dev/docs/product/account-recovery.md"
               target="_blank"
               rel="noopener noreferrer"
               className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"

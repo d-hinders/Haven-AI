@@ -6,8 +6,12 @@ covers:
   - .agents/skills/quality-scan/SKILL.md
   - .agents/skills/quality-scan/references/dimensions.md
   - .agents/skills/haven-agent-workflow/references/doc-reviewer.md
+  - .agents/skills/haven-agent-workflow/references/reviewer.md
+  - scripts/ci/review-isolation.mjs
+  - docs/operations/package-dev-channel.md
+  - packages/backend/src/openapi/spec.test.ts
   - docs/quality/issue-classification-2026-09.csv
-last-verified: "2026-09-04" # #2507: written from the classification in `docs/quality/issue-classification-2026-09.csv`; every figure in this doc was re-derived from that file or from `git`/`gh` at `fb0d5372` while writing, and the command sits next to each one. Scope: the whole document is new in this PR; nothing here is carried over unverified from the working artifact it replaces.
+last-verified: "2026-09-04" # #2507 (follow-up): applied both review passes. `covers:` widened by the four files the Guidelines table makes claims about (`reviewer.md`, `review-isolation.mjs`, `package-dev-channel.md`, `openapi/spec.test.ts`) — derived-vs-declared, found by haven-doc-reviewer. C3's "Landed in" claimed a rule that is not in `ship-next/SKILL.md`; it now says Not landed and cites #2512. G1 dropped its `quality-scan` block 2 half, which is a different mechanism. #2012 reclassified `rail-retirement` -> `security` (found by haven-reviewer reading the issue: a `safe-retirement:` title prefix is not a root cause), and every figure it moves is restated. The two readings of the grouped share no longer coincide (236 primary, 237 any-mention) and the doc now says so instead of claiming they agree. Scope: this whole document, re-derived at `fb0d5372`. Prior: #2507: written from the classification in `docs/quality/issue-classification-2026-09.csv`; every figure in this doc was re-derived from that file or from `git`/`gh` at `fb0d5372` while writing, and the command sits next to each one. Scope: the whole document is new in this PR; nothing here is carried over unverified from the working artifact it replaces.
 ---
 
 # The 600-issue retrospective (2026-09-03)
@@ -40,6 +44,13 @@ of 150 — because no label in the repository distinguishes "the code was
 wrong" from "something claimed a state that was not true". The result is
 `docs/quality/issue-classification-2026-09.csv`, one row per issue.
 
+**One correction the review found.** #2012 was first classified
+`rail-retirement` on the strength of its `safe-retirement:` title prefix; read
+in full it is a spend-authority defect — a QA seed that re-grants a budget to a
+revoked agent — and it is classified `security` here. A title prefix names the
+epic a piece of work happened under, not its root cause, and the classification
+had to be corrected once for exactly that reason.
+
 **Validation.** A 20-issue random sample was re-read against its assigned
 category by an independent pass; 19 of 20 agreed. The one disagreement was a
 `rail-retirement` issue also readable as `stale-doc` — a boundary case
@@ -48,18 +59,16 @@ does not move any figure below.
 
 **Multi-category rows.** 26 of the 600 rows carry two categories. The CSV
 records both: `category` is the primary one, `categories` the full
-pipe-separated list. The headline share is stable under either reading,
-which is why it is quoted below without a qualifier:
+pipe-separated list. Counts below say which reading they use:
 
 ```bash
 F=docs/quality/issue-classification-2026-09.csv
-# primary category only
-cut -d, -f2 "$F" | tail -n +2 | sort | uniq -c | sort -rn
-# every category mentioned
-tail -n +2 "$F" | cut -d, -f3 | tr '|' '\n' | sort | uniq -c | sort -rn
+cut -d, -f2 "$F" | tail -n +2 | sort | uniq -c | sort -rn          # primary only
+tail -n +2 "$F" | cut -d, -f3 | tr '|' '\n' | sort | uniq -c | sort -rn  # every category
 ```
 
-Both readings give the same 237 of 455 for the group in *The finding* below.
+Titles contain commas, so any count over the `title` column needs a real CSV
+reader rather than `cut`; the shell form silently undercounts.
 
 ## What the 600 are
 
@@ -76,28 +85,40 @@ awk -F, 'NR>1 && $2!="feature" && $2!="other"' \
 | `logic-bug` — the code did the wrong thing | 99 | 21.8% |
 | `false-instrument` — a check that could not fail, or reported what it never looked at | 86 | 18.9% |
 | `copy-ux` — wording, layout, or a confusing surface | 86 | 18.9% |
-| `rail-retirement` — residue of a removed rail | 64 | 14.1% |
+| `rail-retirement` — residue of a removed rail | 63 | 13.8% |
 | `stale-doc` — documentation describing a state that had changed | 48 | 10.5% |
 | `process` — the workflow itself misfired | 40 | 8.8% |
 | `flake` — environment, not code | 25 | 5.5% |
 | `contract-drift` — two declarations of one truth disagreeing | 18 | 4.0% |
-| `security` | 15 | 3.3% |
+| `security` | 16 | 3.5% |
 | *(not defects)* `feature` 139, `other` 6 | | |
 
 Counts in this table are "any category mentioned" (column 3), so the 26
 two-category rows are counted under both and the column does not sum to 455.
-The primary-category reading (column 2) gives 99 / 85 / 81 / 63 / 34 / 39 /
-25 / 16 / 13 for the same rows.
+The primary-category reading (column 2) gives 99 / 85 / 81 / 62 / 34 / 39 /
+25 / 16 / 14 for the same rows.
 
 **The finding.** Group the five categories that are all the same failure —
 something asserted a state that was not true — and they outweigh ordinary
-logic bugs by more than two to one:
+logic bugs by more than two to one. Counting *distinct issues*, since 26 rows
+carry two categories and the naive column sum would double-count them:
 
+```bash
+F=docs/quality/issue-classification-2026-09.csv
+# every category mentioned: 237 distinct issues of 455 = 52.1%
+python3 -c "
+import csv
+L={'false-instrument','rail-retirement','stale-doc','process','contract-drift'}
+d=[r for r in csv.DictReader(open('$F')) if r['category'] not in ('feature','other')]
+print(len([r for r in d if set(r['categories'].split('|')) & L]), 'of', len(d))"
+# primary category only: 236 of 455 = 51.9%
+awk -F, 'NR>1 && ($2=="false-instrument"||$2=="rail-retirement"||$2=="stale-doc"||$2=="process"||$2=="contract-drift")' "$F" | wc -l
 ```
-false-instrument 86 + rail-retirement 64 + stale-doc 48 + process 40 + contract-drift 18
-  => 237 distinct issues of 455  =  52.1%
-logic-bug                                       =>  99 of 455  =  21.8%
-```
+
+The two readings differ by exactly one issue (#2012, whose primary category is
+`security` and whose secondary is `false-instrument`), so the share is 51.9%
+or 52.1% depending on the reading. Logic bugs are 99 of 455 = 21.8% under
+both.
 
 Half of what this repository files is not "the code is wrong". It is **the
 instruments are lying** — a guard that cannot fail, a number that was true
@@ -116,12 +137,14 @@ step was performed. The code half is the smaller half.
    predated the last edit (#2421); a file count that moved 27 → 30 → 32 → 33
    inside one PR (#2423).
 4. **Removals that left their claims behind.** The Safe rail's deletion took
-   four slices; its residue is 63 issues in this window
+   four slices; its residue is 62 issues in this window
    (`awk -F, 'NR>1 && $2=="rail-retirement"' docs/quality/issue-classification-2026-09.csv | wc -l`
-   → 63; 64 counting the one row where it is the secondary category), across docs, comments, package READMEs,
+   → 62; 63 counting the row where it is the secondary category), across docs, comments, package READMEs,
    OpenAPI descriptions, fixtures, mocks and QA seeds.
 5. **"Still" as a boundary marker.** 36 issue titles in the window contain
-   the word *still* (`jq -r '.[].title' … | grep -ci still`). Each one is the
+   the word *still*. Titles contain commas, so the count needs a CSV reader:
+   `python3 -c "import csv;print(sum('still' in r['title'].lower() for r in csv.DictReader(open('docs/quality/issue-classification-2026-09.csv'))))"`
+   → 36; `cut -d, -f7 | grep -ci still` undercounts to 32. Each one is the
    previous sweep's edge, found by hand afterwards.
 6. **Reviews that read the wrong tree.** A `cp -R` of a worktree copies a
    `.git` pointer file, so the reviewer's git commands read the live builder
@@ -175,7 +198,7 @@ see it is enforced rather than merely written down.
 |---|---|---|
 | **C1** | A removal PR ships with a claim sweep, and the sweep's commands are in the body. | `ship-next` *Implement*, `doc-reviewer` §2 |
 | **C2** | Schedule the residue at the start, and gate the retired vocabulary in CI so the epic can finish. | `quality-scan` block 4 |
-| **C3** | When a title says "still", widen the net — do not just fix the instance. | `ship-next` *Implement* |
+| **C3** | When a title says "still", widen the net — do not just fix the instance. | **Not landed.** Checked at `fb0d5372`: no such rule in `ship-next/SKILL.md`, `doc-reviewer.md` or `quality-scan`. Filed as #2512 rather than claimed. |
 
 ### D — Reviews
 
@@ -205,7 +228,7 @@ see it is enforced rather than merely written down.
 
 | | Guideline | Landed in |
 |---|---|---|
-| **G1** | One source, generated consumers. Where the second copy cannot be generated, round-trip it. | `openapi/spec.test.ts`, `quality-scan` block 2 |
+| **G1** | One source, generated consumers. Where the second copy cannot be generated, round-trip it. | `packages/backend/src/openapi/spec.test.ts` (`quality-scan` block 2 checks a doc's `covers:` against its body, which is a different mechanism, not this one) |
 
 ## What this wave is not
 

@@ -234,7 +234,7 @@ number,category,categories,state,created,labels,title
 2020,rail-retirement,rail-retirement,CLOSED,2026-08-25,enhancement|money-path|area:backend|area:sdk,safe-retirement: retire the agent_allowances surface — GET /agents reads it for ALL agents before the account_type branch
 2017,logic-bug,logic-bug,CLOSED,2026-08-25,code-quality,Approvers badge infers 'Wallet' from the absence of a Haven passkey row
 2016,flake,flake,CLOSED,2026-08-25,qa-failure,qa-dev money-flow failed (2026-08-25)
-2012,rail-retirement,rail-retirement|false-instrument,CLOSED,2026-08-24,code-quality|area:backend,safe-retirement: the QA seed reuses a REVOKED agent and grants it a fresh budget
+2012,security,security|false-instrument,CLOSED,2026-08-24,code-quality|area:backend,safe-retirement: the QA seed reuses a REVOKED agent and grants it a fresh budget
 2011,rail-retirement,rail-retirement,CLOSED,2026-08-24,enhancement|area:backend,safe-retirement: qa-dev still hard-requires a legacy QA identity that can no longer be created
 2007,rail-retirement,rail-retirement,CLOSED,2026-08-24,enhancement|area:backend,"safe-retirement: the qa-agent seed still creates its Safe through POST /user/safes, which has answered 410 since #1984"
 2006,false-instrument,false-instrument,CLOSED,2026-08-24,code-quality|area:frontend,No committed way to LOOK at 320px: the evidence harness renders 1280/390 only

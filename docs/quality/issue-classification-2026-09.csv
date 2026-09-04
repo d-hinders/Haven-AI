@@ -1,0 +1,601 @@
+number,category,categories,state,created,labels,title
+2486,copy-ux,copy-ux,OPEN,2026-09-03,code-quality|area:backend,"Connect setup prompt: the closing ""tell me to approve the budget"" sentence duplicates the --json relay and fires even when no approval is needed"
+2485,flake,flake,OPEN,2026-09-03,qa-failure,qa-dev money-flow failed (2026-09-03)
+2484,feature,feature,OPEN,2026-09-03,area:sdk,"Connect: skip the approval wait on non-TTY prose runs, and put budget details + wallet label in the approve-budget CTA"
+2483,feature,feature,OPEN,2026-09-03,area:backend,Setup prompt: agent-run setups should append --json and immediately relay the approval instruction to the user
+2482,copy-ux,copy-ux,OPEN,2026-09-03,money-path|area:frontend,"Connect: make the server-side credential path findable and friendly — it is a supported integration, not a confession"
+2477,false-instrument,false-instrument,CLOSED,2026-09-03,code-quality|area:docs|area:ci,"last-verified chains are silently duplicating on merge, and chain-integrity.mjs cannot see it"
+2473,logic-bug,logic-bug,CLOSED,2026-09-03,money-path|area:frontend,"""Add budget"" on the agent page does nothing for an agent with no budget — the grant form's token list is derived from budgets that don't exist yet"
+2472,logic-bug,logic-bug,CLOSED,2026-09-03,money-path|area:frontend|area:backend,Manual credential fallback dead-ends at finalizing_local and can never reach budget approval
+2469,rail-retirement,rail-retirement,CLOSED,2026-09-03,code-quality|money-path|area:backend,"safe-retirement: rename ChainRail off the retired-rail name, and delete the four dead x402-authorization exports"
+2468,feature,feature,CLOSED,2026-09-03,code-quality|area:frontend|area:docs,Delete the /investor-briefing page — investor material now goes out via the dataroom
+2466,stale-doc,stale-doc,OPEN,2026-09-02,area:docs,docs: finish the connector-channel @alpha audit (the sites #2422 deliberately left)
+2464,false-instrument,false-instrument,CLOSED,2026-09-02,code-quality|area:frontend|area:ci,"screenshot capture-manifest stamps the last commit, not what was actually rendered — a dirty tree makes its provenance claim unfalsifiable"
+2459,rail-retirement,rail-retirement,CLOSED,2026-09-02,area:frontend,Delete the zero-caller optDownToLegacyRail e2e helper and decide the legacySafe cascade
+2457,false-instrument,false-instrument,CLOSED,2026-09-02,code-quality|area:docs|area:ci,"docs:coupling names the doc when covered code changes, but never the covered file when the doc's claim goes stale"
+2455,process,process,OPEN,2026-09-02,code-quality|area:docs,"agent workflow: the ""reviewer gets a disposable copy"" rule is not enforceable — reviewers can and do read the live worktree"
+2449,flake,flake,CLOSED,2026-09-02,qa-failure,qa-dev money-flow failed (2026-09-02)
+2448,stale-doc,stale-doc|rail-retirement,CLOSED,2026-09-02,code-quality|area:frontend,"/design-system showcase still teaches the retired ""x402 payment"" transaction-row title"
+2445,false-instrument,false-instrument,CLOSED,2026-09-02,code-quality,"qa-agent: x402-erc7710-fresh-agent reads getCode once, unpolled, against a different RPC node than the backend used"
+2444,false-instrument,false-instrument,OPEN,2026-09-02,code-quality|operator-verify,"qa-agent: x402-delegation-3009 declares PASS while the payment is still on the delegate, poisoning its neighbour's money proof"
+2443,flake,flake,CLOSED,2026-09-02,qa-failure,qa-dev money-flow failed (2026-09-02)
+2433,copy-ux,copy-ux,CLOSED,2026-09-02,area:frontend,"Extract the inline danger alert into a primitive — it is hand-written in 8 files, past #901's 2nd-occurrence rule"
+2432,copy-ux,copy-ux,CLOSED,2026-09-02,area:frontend,"Account removal is called ""Remove account"", ""Delete {name}?"" and ""Delete account"" in three consecutive steps"
+2427,stale-doc,stale-doc,CLOSED,2026-09-02,code-quality|area:docs|area:ci,deployment_status runs DO report headBranch=dev — the 'a Railway deployment has no branch' premise in the gate docs is measured false (design unaffected)
+2426,false-instrument,false-instrument,CLOSED,2026-09-02,code-quality|ci-health,🩺 A CI guard has stopped proving its guarantee
+2425,feature,feature,OPEN,2026-09-02,area:docs,docs: package dev-channel runbook + operator steps; update release/branch-flow/dev-environment docs
+2424,feature,feature,OPEN,2026-09-02,area:sdk|area:mcp|area:connect,connect: local runtime-spec override (`HAVEN_SIGNER_SPEC` etc.) so a developer can install an unpublished signer/SDK/MCP build
+2423,feature,feature,OPEN,2026-09-02,area:sdk|area:mcp|area:connect,sdk/connect/signer/mcp-server: derive every `connect@alpha` re-run hint from one build-time channel constant
+2422,feature,feature,CLOSED,2026-09-02,area:frontend|area:backend,backend: make the connector handout channel-aware (`HAVEN_CONNECTOR_CHANNEL`) so the dev dashboard hands out `npx @haven_ai/connect@dev`
+2421,feature,feature,CLOSED,2026-09-02,area:sdk|area:mcp|area:ci,publish.yml: publish `0.0.0-dev.<ts>.<sha>` snapshots under the `dev` dist-tag on every package-touching push to `dev`
+2420,feature,feature,OPEN,2026-09-02,epic|area:frontend|area:backend|area:sdk|area:mcp|area:docs|area:connect|area:ci,Epic: dev channel for the published npm packages (dev-branch snapshots under the `dev` dist-tag)
+2418,flake,flake,CLOSED,2026-09-02,code-quality|area:backend,db-harness: orphaned test_w<N> schemas make every warm resetDb() pay a ~100ms catalog scan — reap them at startup under the worker advisory lock
+2416,logic-bug,logic-bug,CLOSED,2026-09-02,money-path|area:backend,"Budget build reports ""Revoked agents cannot receive new budget delegations"" for an in-flight re-key on a healthy agent"
+2415,logic-bug,logic-bug,CLOSED,2026-09-02,money-path|area:backend,Budget activation holds an agent row lock across an RPC call — move the delegate-address derivation off the locked path
+2414,logic-bug,logic-bug,CLOSED,2026-09-02,area:frontend,Unlinking an account with a live budget delegation fails silently — the new 409 has no frontend handling
+2413,rail-retirement,rail-retirement,CLOSED,2026-09-02,money-path|area:frontend|area:backend|area:docs,"safe-retirement: stop rendering legacy Safe accounts at the single funnel, then delete every account_type branch behind it"
+2411,logic-bug,logic-bug,CLOSED,2026-09-02,qa-failure,qa-dev money-flow failed (2026-09-02)
+2408,contract-drift,contract-drift,CLOSED,2026-09-02,code-quality|area:backend,"allowanceHumanAmount can discriminate the two wire shapes — formatTokenValue guarantees '0' or <int>.<2–6 digits>, so the pattern can reject atomic values"
+2404,false-instrument,false-instrument,CLOSED,2026-09-02,code-quality|area:ci,qa-freshness: let the promotion gate SEE the deployment_status post-deploy runs — its query is `--branch dev` and a Railway deployment has no branch
+2403,false-instrument,false-instrument,CLOSED,2026-09-02,code-quality|area:docs,"demo-merchant: pin the remaining `assertExtensionsEchoed` branches the README claims (non-object echo, dropped/empty keys, HTTP 402 body + `X-PAYMENT` alias)"
+2400,contract-drift,contract-drift,CLOSED,2026-09-01,code-quality|area:backend,Two allowance emitters cannot be pinned by the spec as written — DashboardAgentAllowance.allowanceAmount is a bare string and PUT /agents/{id} answers an open envelope
+2397,false-instrument,false-instrument,CLOSED,2026-09-01,code-quality,"demo-merchant: pin ""x402Version mismatch with a perfect extensions echo is still refused"" with a unit test"
+2395,stale-doc,stale-doc,CLOSED,2026-09-01,code-quality|area:mcp|area:docs,Two comments still name the haven_x402_authorize alias that #2394 deletes — signer core.ts JSDoc and package-docs.mjs
+2393,stale-doc,stale-doc,CLOSED,2026-09-01,code-quality|area:sdk,"SKILL.md tells agents haven_pay takes ""recipient"" — the declared field is ""to"""
+2392,contract-drift,contract-drift,CLOSED,2026-09-01,code-quality|area:backend,Two more allowance emitters lack an expectMatchesSpec round trip — /dashboard/overview and POST /agents — and the emitter list names a route that does not exist
+2389,stale-doc,stale-doc,CLOSED,2026-09-01,code-quality|area:docs,design-system.md body still says the visual gate renders /design-system only — the §9 row #2318 fixed now contradicts it
+2387,stale-doc,stale-doc,CLOSED,2026-09-01,code-quality|area:docs,"branch-and-release-flow.md teaches the closing keyword by illustration only, with no bare-emit rule"
+2385,stale-doc,stale-doc,CLOSED,2026-09-01,code-quality|area:docs,Docs teach the backticked closing keyword the template just stopped using
+2384,false-instrument,false-instrument,CLOSED,2026-09-01,,qa-agent: pin the erc7710 scenarios' authorize body so dropping `paymentRequired` fails a unit test
+2383,stale-doc,stale-doc,CLOSED,2026-09-01,area:docs,demo-merchant README: document the advertised `haven-demo` extensions and the enforced x402 v2 echo
+2382,process,process,CLOSED,2026-09-01,area:docs,PR template: the backticked `Closes #<n>` placeholder never closes the issue
+2375,stale-doc,stale-doc,CLOSED,2026-09-01,code-quality|area:docs,"docs-quality-system.md names design-system.md's last-verified chain ""oldest-first""; it reads newest-first"
+2374,copy-ux,copy-ux,CLOSED,2026-09-01,code-quality|area:frontend,"/accounts: the card's ""set as default"" star is an unlabelled icon, now permanently visible on touch"
+2373,logic-bug,logic-bug,CLOSED,2026-09-01,code-quality|money-path|area:sdk,"x402: erc7710 prepare never sends paymentRequired, so the settle echo has nothing to echo"
+2372,flake,flake,CLOSED,2026-09-01,qa-failure,qa-dev money-flow failed (2026-09-01)
+2366,contract-drift,contract-drift,OPEN,2026-09-01,code-quality|area:sdk|area:mcp,"mcp-server + mcp: converge the local and hosted argument spellings, and give the hosted quote a request body"
+2365,stale-doc,stale-doc,CLOSED,2026-09-01,code-quality|area:mcp|area:docs,tools.ts:426 argues the haven_complete_mcp_tool strictness exclusion from a premise #2359 made false
+2363,stale-doc,stale-doc,CLOSED,2026-09-01,code-quality|area:mcp,STRICT_INPUT_TOOLS' comment still says the shipped SKILL.md 'says' a sentence #2353 deleted
+2361,contract-drift,contract-drift,CLOSED,2026-09-01,money-path|area:backend|area:sdk|area:mcp,x402 v2: echo the challenge's resource and extensions in the payment payload (spec MUST)
+2360,other,other,CLOSED,2026-09-01,money-path,x402: CoinGecko rejects Haven payments at its CDP facilitator — investigation record and remaining probes
+2357,copy-ux,copy-ux,CLOSED,2026-09-01,code-quality|area:frontend,"Transaction row titles render ""Machine payment demo"" and a bare ""x402 payment"" on primary surfaces"
+2356,copy-ux,copy-ux,CLOSED,2026-09-01,code-quality|area:frontend,"Transaction rows render ""<agent> delegate"" on the dashboard and transactions table, an advanced-copy term on a primary surface"
+2354,flake,flake,CLOSED,2026-09-01,code-quality|area:backend,"A warm resetDb() still loses to contention — 5000ms under load, 647ms alone"
+2353,stale-doc,stale-doc,OPEN,2026-09-01,code-quality|money-path|area:sdk|area:mcp,SKILL.md tells agents to pass haven_complete_mcp_tool a payment_required it has never declared
+2349,contract-drift,contract-drift,CLOSED,2026-09-01,code-quality|area:mcp,"mcp-server: strict input, batch 3 — decide the remaining fourteen hosted tools, and guard the decision"
+2348,contract-drift,contract-drift,CLOSED,2026-09-01,code-quality|money-path|area:sdk|area:mcp,"mcp-server: strict input, batch 2 — the four tools where the local MCP teaches a different argument name"
+2347,security,security,CLOSED,2026-09-01,code-quality,"Two surviving ""Haven authorises"" attribution inversions outside the shipped skill copy (mcp-server/tools.ts, signer/core.ts)"
+2343,contract-drift,contract-drift,CLOSED,2026-09-01,code-quality|money-path|area:backend|area:mcp,"x402 guided catalog purchase: merchant-call-context returns mcp_transport with camelCase innards, so settle refuses its own rehydrated value"
+2341,logic-bug,logic-bug,CLOSED,2026-09-01,code-quality|money-path|area:sdk|area:mcp,"x402 erc7710: the #2289 dual header exceeds the merchant's header limit — HTTP 431, every erc7710 settlement broken"
+2340,flake,flake,CLOSED,2026-09-01,qa-failure,qa-dev money-flow failed (2026-09-01)
+2334,security,security,CLOSED,2026-08-31,code-quality|area:frontend,"Downloadable SKILL.md says ""the amount Haven authorizes"", inverting the CASP attribution rule (agent-skill-bundle.ts / skill-content.ts)"
+2333,false-instrument,false-instrument,CLOSED,2026-08-31,code-quality|area:frontend|area:ci,Two more rendered-copy modules under src/lib are unscanned by the copy lint: passkeyLabels.ts and transaction-labels.ts / transaction-presentation.tsx
+2332,copy-ux,copy-ux,CLOSED,2026-08-31,code-quality|area:frontend,"passkey.ts:93 carries a banned copy phrase (""WebAuthn credential"") in a thrown Error that is not user-rendered today"
+2330,stale-doc,stale-doc,CLOSED,2026-08-31,code-quality|money-path|area:sdk|area:mcp,x402 v2: every MANUAL-retry instruction still names X-PAYMENT only — the original bug survives on the path Haven prescribes
+2329,flake,flake,CLOSED,2026-08-31,code-quality,"resetDb()-first backend tests time out under CI contention — flaky required check, no timeout budget on the harness reset"
+2328,false-instrument,false-instrument,CLOSED,2026-08-31,code-quality,GET /machine-payments/allowances has no expectMatchesSpec round trip for AllowanceSummary
+2327,false-instrument,false-instrument,CLOSED,2026-08-31,code-quality,operator-verify close guard false-positives on a PR that declares it is NOT in operator-verify mode
+2325,copy-ux,copy-ux,CLOSED,2026-08-31,code-quality|area:frontend,/agents: at 390 the MCP server-name chip is cut to `haven…` because the last-activity stamp is `shrink-0`
+2323,false-instrument,false-instrument,CLOSED,2026-08-31,code-quality|area:docs|area:ci,"docs:coupling is satisfied by a shard the author writes, so a parent doc's body is never re-read — #2274 shipped a false CASP sentence past a green gate"
+2321,process,process,OPEN,2026-08-31,code-quality|area:docs|area:ci|operator-verify,Repo CI config checks is not a required status check — gated only through one untested shell line in the aggregator
+2320,false-instrument,false-instrument,CLOSED,2026-08-31,code-quality|area:ci,"operator-verify guard reads only the PR body, so PR #2314's own commit message closed #2268 — the second time, by the fix"
+2319,flake,flake,CLOSED,2026-08-31,code-quality|area:frontend,Four modal suites time out only under full-suite load — the attributed cause accounts for 146ms of a 214s delta
+2318,false-instrument,false-instrument,CLOSED,2026-08-31,code-quality|area:frontend|area:ci,"Visual regression blocks on /design-system alone, so a green tick says nothing about any product screen"
+2317,false-instrument,false-instrument,CLOSED,2026-08-31,code-quality|area:frontend|area:ci,"frontend-copy-lint scans only app/ and components/, so the required copy check sees none of agent-skill-bundle.ts — user-downloadable prose"
+2313,rail-retirement,rail-retirement|stale-doc,CLOSED,2026-08-31,code-quality|area:docs,safe-retirement: three docs in three directories still reason about the retired approval queue as live (#1989 residue)
+2312,contract-drift,contract-drift,CLOSED,2026-08-31,code-quality|money-path|area:mcp,mcp-server: only one hosted tool parses strictly — the other twenty silently strip undeclared arguments
+2310,process,process,CLOSED,2026-08-31,code-quality|area:docs,"npm: the `latest` dist-tag on all five @haven_ai packages points at an ancient version, so #2242's false security claim is still the published signer README"
+2307,false-instrument,false-instrument,CLOSED,2026-08-31,code-quality|money-path|area:backend,56 unfalsifiable money-path guards: the backend test tree mocks five symbols that rails/allowance-module.ts does not export
+2302,feature,feature,CLOSED,2026-08-31,code-quality,Agent-discovery analytics: agent-crawler logging + connect source attribution
+2301,feature,feature,CLOSED,2026-08-31,code-quality,GTM Agent Discovery (AEO) Phase 0: agent-readable discovery artifacts
+2300,false-instrument,false-instrument,CLOSED,2026-08-31,code-quality|money-path|area:mcp|area:docs,"money-path: packages/mcp-server/** is absent from the globs, yet tools.ts decides whether a funding userop is relayed and in what order"
+2298,other,other,CLOSED,2026-08-31,code-quality|area:frontend,Decision: no visual baseline for an agent card's budget amount on /agents — the fixture ships a shape the live route does not send
+2295,contract-drift,contract-drift,CLOSED,2026-08-31,code-quality,"allowance_amount carries two wire shapes under one field name — atomic on AgentConnectionAllowance, human-decimal on AgentAllowance"
+2293,logic-bug,logic-bug,CLOSED,2026-08-31,money-path|area:backend,sweep: lower the 1 USDC floor to 0.01 — it strands ordinary x402 micropayments
+2292,feature,feature,CLOSED,2026-08-31,money-path|area:backend|area:sdk|area:mcp,x402: no way for an agent to report a plain-HTTP merchant retry outcome
+2291,logic-bug,logic-bug,CLOSED,2026-08-31,money-path|area:sdk|area:mcp|area:docs,x402 signer: haven_sign_x402 consumes the binding its own guidance tells you to reuse
+2290,logic-bug,logic-bug,CLOSED,2026-08-31,money-path|area:backend|area:mcp,x402: funded-but-unsettled resume is a dead end — retry_original_x402_request cannot be acted on
+2289,logic-bug,logic-bug,CLOSED,2026-08-31,money-path|area:sdk|area:mcp|area:docs,x402: send PAYMENT-SIGNATURE alongside X-PAYMENT on every merchant retry
+2288,feature,feature,CLOSED,2026-08-31,epic|money-path|area:backend|area:sdk|area:mcp,"Epic: x402 v2 merchant leg — wrong header name, and an unreachable recovery path"
+2286,feature,feature,CLOSED,2026-08-31,documentation,Docs staleness audit (weekly)
+2284,rail-retirement,rail-retirement,CLOSED,2026-08-31,code-quality|area:frontend,"e2e: is the connected-EOA collapsed WalletButton state reachable for any spend-capable user, now that the Safe rail is retired?"
+2283,logic-bug,logic-bug,CLOSED,2026-08-31,code-quality|area:frontend,"/agents renders a delegation agent's budget as ""250.000000 USDC"" — formatConfiguredAllowance throws on the decimal string the live rail emits"
+2282,logic-bug,logic-bug,CLOSED,2026-08-31,bug|money-path|area:backend|area:mcp,x402 quote-first settle: funding relayed before merchant-context check; snake_case mcp_transport required but camelCase silently ignored
+2279,feature,feature,CLOSED,2026-08-31,area:sdk,"Connect: print the approve-budget CTA when the dashboard button actually unlocks, and give the approval wait loop elapsed-time/timeout visibility"
+2278,copy-ux,copy-ux,CLOSED,2026-08-31,area:backend,"Setup prompt: say the connect command needs network access, so sandboxed agent harnesses escalate on the first attempt"
+2276,process,process,CLOSED,2026-08-31,code-quality|area:docs,"ship-next: `Closes #<issue>` is unconditional, so operator-verify mode cannot keep its issue open"
+2274,rail-retirement,rail-retirement,CLOSED,2026-08-31,code-quality|money-path|area:backend,retired-rail accounts are told which assets they can pay with before they are told the rail is gone — /payments and /x402/authorize
+2273,process,process,CLOSED,2026-08-31,code-quality|area:ci|operator-verify,Consider moving the post-deploy QA trigger in-repo via `deployment_status` — Railway does create real GitHub Deployments
+2271,false-instrument,false-instrument,CLOSED,2026-08-31,code-quality|area:ci,"qa-dev post-deploy trigger: a manual confirmation dispatch is indistinguishable from a real one, so the freshness alarm can be muted by curl"
+2268,process,process,CLOSED,2026-08-31,code-quality|area:ci|operator-verify,The `dev-deployed` post-deploy QA trigger has never fired — freshness rests on the nightly cron alone
+2266,rail-retirement,rail-retirement,CLOSED,2026-08-31,code-quality|area:frontend|area:backend,safe-retirement: copy and dead-code sweep — the residue a user or contributor actually reads
+2265,rail-retirement,rail-retirement|stale-doc,CLOSED,2026-08-31,code-quality|area:docs,safe-retirement: five live doc sections still present the approval queue and the AllowanceModule two-leg as current
+2264,rail-retirement,rail-retirement,CLOSED,2026-08-31,code-quality|area:frontend|area:backend|ci-health,"safe-retirement: the CI harness pins the retired rail — e2e fixture default, phantom ratchet entries, dead smoke query, missing money-path entry"
+2263,rail-retirement,rail-retirement,CLOSED,2026-08-31,code-quality|money-path|area:backend,"safe-retirement: drop the inert schema and fix the user_safes.execution_rail default, which still points at the retired rail"
+2262,rail-retirement,rail-retirement,CLOSED,2026-08-31,code-quality|money-path|area:backend|area:sdk,"safe-retirement: the SDK's 'approved' branch still says wait, and the OpenAPI schema layer still declares the queue"
+2261,rail-retirement,rail-retirement,CLOSED,2026-08-31,code-quality|area:frontend,safe-retirement: delete PasskeyEnrollFlow — the dead onboarding flow #1989 deferred to itself
+2260,rail-retirement,rail-retirement,CLOSED,2026-08-31,code-quality|area:backend,safe-retirement: remove contracts.allowanceModule from the shared chain registry (depends on #2257 #2258 #2259)
+2259,rail-retirement,rail-retirement,CLOSED,2026-08-31,code-quality|money-path|area:backend,safe-retirement: delete the backend legacy connect-approval half and the last two AllowanceModule readers (depends on #2258)
+2258,rail-retirement,rail-retirement,CLOSED,2026-08-31,code-quality|area:frontend,"safe-retirement: delete the legacy Safe agent surfaces from the dashboard — connect, budget, manage and revoke"
+2257,rail-retirement,rail-retirement,CLOSED,2026-08-31,code-quality|money-path|area:backend,"safe-retirement: delete the Haven-as-merchant x402 resource surface (routes, tables, AllowanceModule verifier)"
+2253,stale-doc,stale-doc,CLOSED,2026-08-31,code-quality|area:docs,`--unwire` has no entry of its own in the connector subcommand list of mcp-runtime-compatibility.md
+2251,copy-ux,copy-ux,CLOSED,2026-08-30,code-quality|area:frontend,"/agents: the agent card cannot shrink below ~399px, so at 390 it overflows its grid track and is clipped"
+2247,stale-doc,stale-doc|security,CLOSED,2026-08-30,code-quality|money-path,"signer: the gasless-sweep destination check is conditional on the local credential, but its code comment claims it is unconditional"
+2246,copy-ux,copy-ux,CLOSED,2026-08-30,code-quality|area:frontend,UsingYourAgentInfo.tsx still carries two avoid-listed CASP product-copy phrases; its tracker (#2063) closed without fixing them
+2245,rail-retirement,rail-retirement,CLOSED,2026-08-30,code-quality|money-path|area:backend,"POST /x402/authorize: a caller-supplied settlementScheme diverts a retired-rail account off the #1986 410, into a 400 saying the retired rail settles via EIP-3009"
+2244,stale-doc,stale-doc,CLOSED,2026-08-30,code-quality|area:docs,Re-verify docs/regulatory/casp-risk-guardrails.md against the code (worst-ranked contract doc: 55 commits since last-verified 2026-08-26)
+2243,stale-doc,stale-doc,CLOSED,2026-08-30,code-quality|area:docs,"Re-verify packages/signer/README.md against the code (most stale governed doc, last-verified 2026-06-03)"
+2242,security,security,OPEN,2026-08-30,code-quality|area:docs|operator-verify,"packages/signer/README.md asserts a false security property: ""the signer makes no network calls"" (untrue since #1263)"
+2241,copy-ux,copy-ux,CLOSED,2026-08-30,code-quality|area:frontend,/accounts: the card's set-active / set-default controls are hover-only and under the touch-target floor
+2237,copy-ux,copy-ux,CLOSED,2026-08-30,code-quality|area:frontend,AgentCard's title row still uses the pre-#2223 non-wrapping idiom for name + status badge
+2236,copy-ux,copy-ux,CLOSED,2026-08-30,code-quality|area:frontend,/accounts: the card's hover actions are ~102px wide but the title row reserves only 48px
+2235,copy-ux,copy-ux,CLOSED,2026-08-30,code-quality|area:frontend,/accounts: the wrapped `default` badge lands alone on its own line — decide where the badges belong
+2230,copy-ux,copy-ux,CLOSED,2026-08-30,code-quality|area:frontend,"AgentCard and the agent-detail banner say ""Paused in Haven"" in two different sentences"
+2226,false-instrument,false-instrument,CLOSED,2026-08-30,code-quality|ci-health,🩺 A scheduled CI guard has stopped proving its guarantee
+2225,false-instrument,false-instrument,CLOSED,2026-08-30,code-quality|area:frontend,"screenshot fixture: /portfolio and /balances are address-blind, so two accounts render byte-identical balances"
+2224,rail-retirement,rail-retirement|copy-ux,CLOSED,2026-08-30,code-quality|area:frontend,"AgentCard: an on-chain AllowanceModule budget is captioned ""Configured in Haven"" when its account is not the active one"
+2223,copy-ux,copy-ux,CLOSED,2026-08-30,code-quality|area:frontend,/accounts: account name truncates when a second account brings the Active/default badges into the title row
+2218,false-instrument,false-instrument,CLOSED,2026-08-30,code-quality|area:frontend,"Update-visual-baselines runs --update-snapshots=all, so every dispatch can silently re-bless baselines that were not failing"
+2216,copy-ux,copy-ux,CLOSED,2026-08-29,code-quality|area:frontend,"AgentCard's warning callouts paint title AND body in --v2-warning, while ApprovalRequiredBanner reserves the tint for the icon"
+2214,logic-bug,logic-bug,CLOSED,2026-08-29,enhancement|money-path|area:backend,pre-#2094 intents (delegation_hash NULL) are excluded from the settlement sweep silently — never counted or logged as unresolved
+2213,logic-bug,logic-bug,CLOSED,2026-08-29,bug|money-path|area:backend,settlement sweep reports a payment 'completed' when no machine_payment_evidence row landed — re-creates #2117 silently and irreversibly
+2211,flake,flake,CLOSED,2026-08-29,code-quality|area:backend,resetDb() cost grows with every migration — any real-DB test resetting more than once will hit the same wall
+2209,flake,flake,CLOSED,2026-08-29,code-quality|area:backend,Flake: passport-rail-eligibility 'SQL and TS predicates agree' times out at the 5s default under a scoped parallel run
+2208,false-instrument,false-instrument,CLOSED,2026-08-29,code-quality|area:backend,No CI job re-proves the advisory-lock deadlock end to end (40P01 against CREATE INDEX CONCURRENTLY)
+2204,flake,flake,CLOSED,2026-08-29,code-quality|area:frontend,screenshot harness: the /agents desktop capture is not deterministic — observed 80px shorter in 1 of 4 identical runs
+2203,copy-ux,copy-ux,CLOSED,2026-08-29,code-quality|area:frontend,"agent detail: the ""Recover funds"" button is a ~24px tap target — the smallest control on a money-recovery path"
+2202,false-instrument,false-instrument,CLOSED,2026-08-29,code-quality|area:frontend,screenshot fixture: agent-ops claims account_type null while sharing a delegator_hybrid safe with two other agents
+2200,process,process,CLOSED,2026-08-29,code-quality|area:docs,money-path: coupling-gate.mjs is the CASP shard requirement's control surface and is on no list
+2198,flake,flake,CLOSED,2026-08-29,code-quality|area:backend,Test harness holds a BLOCKING advisory lock across runMigrations — deadlocks the first non-transactional migration
+2196,copy-ux,copy-ux,CLOSED,2026-08-29,code-quality|area:frontend,"agent detail: the recoverable-funds banner and the payment that caused it are a full screen apart, with nothing linking them"
+2195,copy-ux,copy-ux,CLOSED,2026-08-29,code-quality|area:frontend,"stranded-funds copy: two screens describe the same reconciliation event in two different sentences, both singular"
+2194,false-instrument,false-instrument,CLOSED,2026-08-29,code-quality|area:frontend,"screenshot fixture: the ""Recoverable funds"" banner renders from a delegate-balance response the API cannot emit"
+2192,false-instrument,false-instrument,CLOSED,2026-08-29,code-quality|area:docs,Coupling gate: a money-path PR can satisfy the CASP contract-doc gate by editing an OLD shard instead of writing its own
+2191,process,process,CLOSED,2026-08-29,code-quality|area:docs,"CASP changelog: three byte-identical copies of the #1403 shard, two with copy-suffix filenames"
+2188,process,process,CLOSED,2026-08-29,code-quality|area:docs,"Docs: state that a merged CASP shard is immutable, and how to correct one"
+2187,false-instrument,false-instrument,CLOSED,2026-08-29,code-quality|area:sdk,"Connect: delete the unreachable --rekey-finish api-key guard, or make args.ts delegate to it"
+2186,flake,flake,CLOSED,2026-08-28,qa-failure,qa-dev money-flow failed (2026-08-28)
+2184,logic-bug,logic-bug,CLOSED,2026-08-28,code-quality|area:sdk,"Connect: --rekey, --doctor and --unwire lose their failure entirely under --json (stderr-only, empty stdout)"
+2179,process,process,CLOSED,2026-08-28,test,connect test suite writes into the real ~/.hermes when HERMES_HOME is exported — Hermes-path tests must clear it
+2175,logic-bug,logic-bug,CLOSED,2026-08-28,area:sdk|area:docs,Repro the field-reported haven-reset tombstone failure (no TOMBSTONE.json written) — code says it cannot fail silently
+2174,feature,feature,CLOSED,2026-08-28,area:sdk|area:docs,Connect: emit installed-clients scan results as a non-selecting hint in the runtime_undetermined --json refusal
+2173,feature,feature,CLOSED,2026-08-28,area:sdk|area:docs,Connect: add hosted_mcp_url + superseded_agent_ids to the --json outcome and persist the terminal outcome to a recovery file
+2170,stale-doc,stale-doc,CLOSED,2026-08-28,code-quality|area:docs,autonomous-pr-loop.md's ruleset inventory describes three rulesets and one that no longer exists
+2169,feature,feature,CLOSED,2026-08-28,enhancement|code-quality|area:connect,connect writes runtime config but cannot un-wire it — removal leaves the MCP pair and the Hermes env key behind
+2168,feature,feature,CLOSED,2026-08-28,code-quality|area:docs,haven-reset has no verified Hermes procedure — the canonical reset skill refuses the runtime that most needs it
+2165,process,process,CLOSED,2026-08-28,code-quality|area:docs,Nothing stops a dev → main promotion being squash-merged — the branch-and-release rule is prose only
+2164,false-instrument,false-instrument,CLOSED,2026-08-28,code-quality|money-path|area:docs,qa-freshness fails on every release by construction — the bump rewrites SIGNER_VERSION after the QA run
+2163,process,process,CLOSED,2026-08-28,enhancement|code-quality|area:docs,"ship-next: add a stopping rule for self-inflicted rework, and stop writing assertions over prose"
+2159,feature,feature,CLOSED,2026-08-28,area:qa,feat(qa-agent): scenario for the x402 eip3009 funded-but-undelivered crash shape (#2145)
+2155,logic-bug,logic-bug,CLOSED,2026-08-28,,connect: tombstone record dies with a deleted agent dir — mirror it under ~/.haven/tombstones so removal keeps a surviving record
+2151,process,process,CLOSED,2026-08-28,code-quality|area:docs,Promotion checklist says nothing about a migration's lock duration on a hot table
+2150,feature,feature,CLOSED,2026-08-28,code-quality|area:backend,"Migration runner has no per-migration transactional opt-out, so CREATE INDEX CONCURRENTLY is impossible"
+2147,false-instrument,false-instrument,CLOSED,2026-08-28,code-quality|area:frontend,"screenshot fixture: no row seeds needs_attention, so the unsettled-payment banner's specific copy is never captured"
+2145,logic-bug,logic-bug,CLOSED,2026-08-28,bug|money-path|area:backend|area:sdk,"x402: a payment that funded but never reached the merchant reports `next_action: none` — ""The payment is confirmed"""
+2140,rail-retirement,rail-retirement|stale-doc,CLOSED,2026-08-27,enhancement|area:docs,safe-retirement: two QA instructions tell a tester (and a live QA agent) to expect an approval queue that cannot occur
+2138,rail-retirement,rail-retirement|stale-doc,CLOSED,2026-08-27,enhancement|area:docs,safe-retirement: the Agent Passport product doc tells merchants a passport means on-chain enforcement — false for a legacy-rail agent that can still hold one
+2136,feature,feature,CLOSED,2026-08-27,enhancement|area:backend|area:docs,erc7710 passive observation: absorb the coverage from PR #2134 that #2135 did not carry
+2131,rail-retirement,rail-retirement|stale-doc,CLOSED,2026-08-27,enhancement|area:sdk,safe-retirement: agent-facing guidance advertises an x402 resume trigger that nothing can emit
+2130,rail-retirement,rail-retirement|stale-doc,CLOSED,2026-08-27,enhancement|area:docs,"safe-retirement: two live architecture-doc sections still present the approval queue as reachable (07-edge-signer, 06-hosted-mcp-connect-flow)"
+2126,false-instrument,false-instrument,CLOSED,2026-08-27,code-quality|area:frontend,screenshot fixture: pay-1/pay-2 seed a payment_flow_status machinePaymentLifecycle cannot produce
+2124,stale-doc,stale-doc,CLOSED,2026-08-27,code-quality|area:docs,docs-quality-system.md does not mention the queue-framing census — the two gates get confused for each other
+2121,rail-retirement,rail-retirement|stale-doc,CLOSED,2026-08-27,enhancement|area:docs,safe-retirement: 04-x402-payment-sequence.md presents the deleted approval queue as reachable on the live rail
+2120,rail-retirement,rail-retirement,CLOSED,2026-08-27,area:frontend,safe-retirement: finish #2106 — dead approval presentation logic and fabricated approval state in fixtures
+2118,rail-retirement,rail-retirement,CLOSED,2026-08-27,enhancement|money-path|area:backend,safe-retirement: the approval-keyed evidence/reconciliation SQL builders are now fully unreachable
+2117,logic-bug,logic-bug,CLOSED,2026-08-27,bug|money-path|area:backend|area:sdk,Fortnox reporting feed: a 7710 payment is invisible forever when the settlement hash is never reported — passive settlement observation needed (#2092 residual)
+2116,process,process,CLOSED,2026-08-27,code-quality|area:docs,ship-next: post-merge health check can read a stale head SHA when auto-merge updates the branch
+2115,rail-retirement,rail-retirement|stale-doc,CLOSED,2026-08-27,enhancement|area:backend|area:sdk,safe-retirement: the payment-status response still tells agents to wait for an approval that cannot arrive
+2110,rail-retirement,rail-retirement|contract-drift,CLOSED,2026-08-27,enhancement|area:backend,safe-retirement: passport controls.rail documents an 'allowance' value the emitter can never produce
+2108,flake,flake,CLOSED,2026-08-27,area:frontend,screenshot harness cannot capture on a cold worktree: 90s readiness timeout vs a 315-448s cold `next dev`
+2107,rail-retirement,rail-retirement|process,CLOSED,2026-08-27,enhancement|area:backend,"safe-retirement: gate retired-rail prose in CI, so the epic can actually finish"
+2106,rail-retirement,rail-retirement|copy-ux,CLOSED,2026-08-27,enhancement|area:frontend,safe-retirement: the dashboard tells delegation users their agent has no on-chain limits
+2105,rail-retirement,rail-retirement|contract-drift,CLOSED,2026-08-27,enhancement|area:backend,safe-retirement: the OpenAPI spec documents the retired rail as the live contract
+2103,rail-retirement,rail-retirement|stale-doc,CLOSED,2026-08-27,enhancement|area:docs,safe-retirement: backend-worker role instructions tell agents to route over-allowance spend to approval
+2102,rail-retirement,rail-retirement|stale-doc,CLOSED,2026-08-27,enhancement|area:docs,safe-retirement: hosted-MCP and connect-flow docs still describe the approval queue as live
+2101,rail-retirement,rail-retirement|stale-doc,CLOSED,2026-08-27,enhancement|area:mcp,safe-retirement: hosted MCP + local MCP runtime prose still offers a pending_approval outcome
+2100,rail-retirement,rail-retirement|stale-doc,CLOSED,2026-08-27,enhancement|area:sdk,safe-retirement: SDK tool descriptions still name the Safe AllowanceModule as the spend path
+2098,stale-doc,stale-doc,CLOSED,2026-08-27,code-quality|area:mcp,Stale comment: haven_resume_x402_payment says an over-budget erc7710 authorize returns pending_signature
+2097,logic-bug,logic-bug,CLOSED,2026-08-26,bug|money-path|area:frontend|area:backend,"Transaction history: erc7710 rows render ""Payment sent by you"" for agent-initiated payments — initiator semantics and record format must be scheme-agnostic"
+2095,logic-bug,logic-bug,CLOSED,2026-08-26,code-quality|area:backend,Index payment_intents.tx_hash — the erc7710 replay guard sequential-scans on every confirm
+2094,logic-bug,logic-bug,CLOSED,2026-08-26,code-quality|money-path|area:backend,erc7710: make the settlement child intent-unique so a settlement can be attributed exactly
+2092,logic-bug,logic-bug,CLOSED,2026-08-26,bug|money-path|area:backend|area:sdk,"erc7710 payments never produce evidence — invisible to Fortnox sync, receipts, and transaction history; make settlement reporting scheme-agnostic"
+2091,feature,feature,CLOSED,2026-08-26,area:sdk|area:docs,Connect --json: runtime_undetermined refusal must carry allowed runtime values machine-readably (Codex setup deadlock)
+2089,rail-retirement,rail-retirement|copy-ux,CLOSED,2026-08-26,enhancement|area:frontend,safe-retirement: /design-system EmptyState showcase cards still carry approvals copy
+2088,process,process,CLOSED,2026-08-26,enhancement|area:docs,docs: Markdown under packages/** is outside the docs-quality system entirely
+2087,rail-retirement,rail-retirement,CLOSED,2026-08-26,enhancement|area:backend,safe-retirement: qa-agent pilot scripts drive routes that now answer 410/400
+2086,rail-retirement,rail-retirement|copy-ux,CLOSED,2026-08-26,enhancement|area:mcp,safe-retirement: MCP consent copy describes the retired rail's approval queue as the live spend gate
+2085,rail-retirement,rail-retirement,CLOSED,2026-08-26,enhancement|area:backend,"safe-retirement: unreachable `approval_request` branches in modules/mpp/{evidence,reconciliation}.ts"
+2084,rail-retirement,rail-retirement,CLOSED,2026-08-26,enhancement|area:backend,safe-retirement: drop the inert `allowance_nonce_watermarks` table
+2082,rail-retirement,rail-retirement,CLOSED,2026-08-26,enhancement|money-path|area:backend,safe-retirement: erc7710 authorize pre-checks the remaining budget — fail-fast refusal before a signable child is built
+2081,feature,feature,CLOSED,2026-08-26,area:qa,feat(qa-agent): preflight should report the delegation treasury balance
+2080,rail-retirement,rail-retirement,CLOSED,2026-08-26,area:qa,chore(qa-agent): retire or port the session-rail pilot scripts (dead since #834)
+2077,rail-retirement,rail-retirement,CLOSED,2026-08-26,code-quality|area:qa,fix(qa-agent): throwaway identity sends retired `allowances` to POST /agents (400)
+2074,flake,flake,CLOSED,2026-08-26,qa-failure,qa-dev money-flow failed (2026-08-26)
+2073,copy-ux,copy-ux,CLOSED,2026-08-26,code-quality|area:frontend,Signer gate: name the wrong-wallet state distinctly (follow-up to #2068)
+2068,logic-bug,logic-bug,CLOSED,2026-08-25,code-quality|area:frontend,Signer precedence: connected-EOA branch never checks the wallet IS the account's owner
+2067,copy-ux,copy-ux,CLOSED,2026-08-25,code-quality|area:frontend,Wallet-menu popover: bound the disclosure variant's height against the hero/banner stack
+2063,rail-retirement,rail-retirement|copy-ux,CLOSED,2026-08-25,code-quality|area:frontend,Queue-and-approve framing survives in product copy and agent-facing handoff text outside /design-system
+2055,rail-retirement,rail-retirement,CLOSED,2026-08-25,enhancement|money-path|area:backend,safe-retirement: drop approval_requests — delete the residual approvals surface and re-anchor its readers
+2054,logic-bug,logic-bug,CLOSED,2026-08-25,code-quality|area:sdk|area:mcp,haven_pay_mcp_tool and haven_prepare_catalog_purchase cannot pay an erc7710-ONLY merchant (buildX402Quote hard-throws)
+2051,security,security,CLOSED,2026-08-25,money-path|area:sdk|area:mcp,Merchant-controlled payment_required bypasses the user's max_amount cap on erc7710 (measured: 900 USDC authorized against a 1 USDC cap)
+2049,false-instrument,false-instrument,CLOSED,2026-08-25,code-quality|money-path|area:backend,test(casp): the Red Line #4 structural guard misses namespace and dynamic imports
+2048,rail-retirement,rail-retirement,CLOSED,2026-08-25,code-quality|area:backend,test: six suites still vi.mock a module #1987 deleted (allowance-nonce-watermarks)
+2046,false-instrument,false-instrument,CLOSED,2026-08-25,code-quality,"Tooltip's 1000ms touch-to-mouse suppression window is asserted, not measured"
+2044,false-instrument,false-instrument,CLOSED,2026-08-25,code-quality|money-path|area:backend,"casp: three unfalsifiable spies in the Red Line #4 regulatory suite — an empty-set guard, not a cosmetic one"
+2043,copy-ux,copy-ux,CLOSED,2026-08-25,code-quality,"McpServerName's ""not recorded"" explanation is essential copy behind a hover-only tooltip"
+2041,logic-bug,logic-bug,CLOSED,2026-08-25,money-path|area:sdk|area:mcp,Generic plain-HTTP x402 (haven_pay_x402_quote) cannot reach erc7710 — always takes the EIP-3009 funding leg
+2038,copy-ux,copy-ux,CLOSED,2026-08-25,code-quality,"Tooltip content is unreachable by touch and keyboard, and cannot wrap"
+2036,false-instrument,false-instrument,CLOSED,2026-08-25,code-quality|area:frontend,"Capture harness cannot tell a rendered route from one still showing ""Loading…"""
+2030,feature,feature,CLOSED,2026-08-25,area:docs,Decide Haven's position on AP2 (Google's Agent Payments Protocol)
+2027,logic-bug,logic-bug,CLOSED,2026-08-25,code-quality|money-path|area:backend,POST /safe/exec broadcasts twice with no durable outbound record — decide whether the exec and its passkey-signer deploy earn one
+2025,logic-bug,logic-bug,CLOSED,2026-08-25,money-path|area:backend,A revoked agent can still be granted and activated a fresh budget delegation — loadOwnedDelegationAgent never selects a.status
+2023,logic-bug,logic-bug,CLOSED,2026-08-25,money-path|area:backend,Over-budget is NOT refused at authorize on erc7710 — the preferred scheme returns 201 pending_signature for any amount
+2021,rail-retirement,rail-retirement,CLOSED,2026-08-25,question|money-path|area:backend,"safe-retirement: approval_requests — DECISION needed, dropping it contradicts ""accounts/history stay READABLE"" and 500s GET /transactions on every rail"
+2020,rail-retirement,rail-retirement,CLOSED,2026-08-25,enhancement|money-path|area:backend|area:sdk,safe-retirement: retire the agent_allowances surface — GET /agents reads it for ALL agents before the account_type branch
+2017,logic-bug,logic-bug,CLOSED,2026-08-25,code-quality,Approvers badge infers 'Wallet' from the absence of a Haven passkey row
+2016,flake,flake,CLOSED,2026-08-25,qa-failure,qa-dev money-flow failed (2026-08-25)
+2012,security,security|false-instrument,CLOSED,2026-08-24,code-quality|area:backend,safe-retirement: the QA seed reuses a REVOKED agent and grants it a fresh budget
+2011,rail-retirement,rail-retirement,CLOSED,2026-08-24,enhancement|area:backend,safe-retirement: qa-dev still hard-requires a legacy QA identity that can no longer be created
+2007,rail-retirement,rail-retirement,CLOSED,2026-08-24,enhancement|area:backend,"safe-retirement: the qa-agent seed still creates its Safe through POST /user/safes, which has answered 410 since #1984"
+2006,false-instrument,false-instrument,CLOSED,2026-08-24,code-quality|area:frontend,No committed way to LOOK at 320px: the evidence harness renders 1280/390 only
+2004,rail-retirement,rail-retirement,CLOSED,2026-08-24,enhancement|money-path|area:backend,safe-retirement: re-base CASP Red Line #4 onto the delegation rail — prove the caveat enforcers are the final gate
+2002,stale-doc,stale-doc,CLOSED,2026-08-24,code-quality|area:frontend|area:docs,design-system.md § 6 has no rule for permanently-open showcase copies of dialog/overlay primitives
+1999,logic-bug,logic-bug,CLOSED,2026-08-24,code-quality|area:frontend,"Table's responsive collapse is viewport-keyed, but the variable that matters is container width"
+1998,flake,flake,CLOSED,2026-08-24,code-quality,"Frontend browser smoke can fail at collection for an unbuilt @haven_ai/core, the same latent gap #1996 fixed in the visual gate"
+1995,logic-bug,logic-bug,CLOSED,2026-08-24,code-quality|area:frontend,AllowanceBar decides the reset from CHAIN time but formats the countdown from the DEVICE clock
+1994,logic-bug,logic-bug,CLOSED,2026-08-24,code-quality|area:backend,PUT /user/safe writes the legacy mirror and the user_safes row in two un-transacted queries
+1993,rail-retirement,rail-retirement,CLOSED,2026-08-24,enhancement|area:backend|area:docs,safe-retirement: residue audit — repo-wide sweep and a guard that nothing routes to the legacy rail
+1992,rail-retirement,rail-retirement|stale-doc,CLOSED,2026-08-24,enhancement|area:docs,"safe-retirement: product docs — CLAUDE.md component model, README non-custody, security model"
+1991,rail-retirement,rail-retirement,CLOSED,2026-08-24,enhancement|area:docs,safe-retirement: regulatory rewrite — CASP guardrails re-based on the delegation rail
+1990,rail-retirement,rail-retirement,CLOSED,2026-08-24,enhancement|money-path|area:backend,safe-retirement: DB migration — drop safe_approver_metadata (agent_allowances + approval_requests split out to #2020/#2021)
+1989,rail-retirement,rail-retirement,CLOSED,2026-08-24,enhancement|area:frontend,safe-retirement: frontend deletion — legacy Safe surfaces
+1988,rail-retirement,rail-retirement,CLOSED,2026-08-24,enhancement|money-path|area:backend,safe-retirement: backend deletion B — safe-deploy/exec/approvers routes and deployers
+1987,rail-retirement,rail-retirement,CLOSED,2026-08-24,enhancement|money-path|area:backend,safe-retirement: backend deletion A — AllowanceModule rail and allowance-nonce machinery
+1986,rail-retirement,rail-retirement,CLOSED,2026-08-24,enhancement|money-path|area:backend,safe-retirement: fail closed — HTTP 410 on payments and x402 for the allowance_module rail
+1985,rail-retirement,rail-retirement,CLOSED,2026-08-24,enhancement|money-path|area:backend,safe-retirement: on-chain cleanup — wind down the relayer-owned Safe and revoke stale allowances
+1984,rail-retirement,rail-retirement,CLOSED,2026-08-24,enhancement|money-path|area:frontend|area:backend,"safe-retirement: close the inflow — disable Safe deploy/import, Hybrid-only onboarding"
+1982,stale-doc,stale-doc,CLOSED,2026-08-24,code-quality|area:frontend,"WalletPopover's `presentational` role swap is mis-justified in its comments — the live reason is the raw DOM query, not screen-reader exposure"
+1980,logic-bug,logic-bug,CLOSED,2026-08-24,code-quality|area:frontend,UnmanagedDelegateCard became reachable with #1971 and offers no way to revoke — while /custody tells the user to do exactly that
+1975,false-instrument,false-instrument,CLOSED,2026-08-24,code-quality|area:frontend,WalletPopover's presentational escape hatch is guarded by review only — one test would make it self-enforcing
+1971,false-instrument,false-instrument,CLOSED,2026-08-24,code-quality|area:frontend,"Screenshot fixture is on a chain the app has no wagmi transport for, so every on-chain surface captures its empty branch"
+1969,logic-bug,logic-bug,CLOSED,2026-08-24,area:frontend,A user with no device-marker passkey gets no passkey signer at all — useActiveSigner never reaches the Hybrid branch
+1968,process,process,CLOSED,2026-08-24,area:docs,"Record the reviewer verdict in the PR body, and let a clean design re-review re-arm auto-merge on its own"
+1961,feature,feature,CLOSED,2026-08-24,documentation,Docs staleness audit (weekly)
+1959,security,security,CLOSED,2026-08-23,area:backend,DNS-TXT ownership path has no IP-literal refusal — the well-known path's second floor does not exist there
+1956,copy-ux,copy-ux,CLOSED,2026-08-23,code-quality|area:frontend,"`/investor-briefing` shows two identical ""Contact the team"" CTAs in the first screenful"
+1955,copy-ux,copy-ux,CLOSED,2026-08-23,code-quality|area:frontend,`/investor-briefing`'s sticky-header CTA is a 36px touch target on mobile
+1954,copy-ux,copy-ux,CLOSED,2026-08-23,code-quality|area:frontend,Three more decorative trailing arrows on the landing page carry no `aria-hidden`
+1952,logic-bug,logic-bug,CLOSED,2026-08-23,area:frontend,WalletButton hides 'Signing with' in exactly the case an arbitrary passkey is about to sign
+1947,rail-retirement,rail-retirement|stale-doc,CLOSED,2026-08-23,area:frontend|area:docs,"/design-system teaches the queue-and-approve model unscoped — it is false on the delegation rail, the base for new accounts"
+1946,copy-ux,copy-ux,CLOSED,2026-08-23,code-quality|area:frontend,"DelegationSendModal, contacts and ComingSoonModal put their action rows inside ui/Modal's scroll body instead of the footer prop"
+1945,copy-ux,copy-ux,CLOSED,2026-08-23,code-quality|area:frontend,"Four --v2-shadow-* tokens paint nothing: shadow-[var(...)] compiles to a shadow COLOUR, so Cards, Modal panels and popovers render flat"
+1944,false-instrument,false-instrument,CLOSED,2026-08-23,code-quality|area:frontend,WalletButton's collapsed connected-avatar and wrong-network states have no rendered evidence
+1943,flake,flake,CLOSED,2026-08-23,code-quality|area:frontend,"screenshot.mjs intermittently fails /design-system's full-page capture with ""scroll root #main-content not found"""
+1940,copy-ux,copy-ux,CLOSED,2026-08-23,code-quality|area:frontend,Decorative trailing arrows on marketing CTAs carry no `aria-hidden`
+1939,false-instrument,false-instrument,CLOSED,2026-08-23,code-quality|area:frontend,`npm run screenshot` cannot capture any marketing route — every capture comes back a deleted blank
+1937,copy-ux,copy-ux,CLOSED,2026-08-23,area:frontend,Backup & recovery card's loadError renders neutral — an unknown recovery posture looks like an empty panel
+1936,false-instrument,false-instrument,CLOSED,2026-08-23,code-quality|area:frontend,"Route capture: `#main-content` not found is a ProtectedRoute race, and its error message blames the shell instead"
+1935,false-instrument,false-instrument,CLOSED,2026-08-23,code-quality|area:frontend,Screenshot scenario: EditAgentModal's budget list has no rendered evidence at any commit
+1933,other,other,CLOSED,2026-08-23,code-quality|area:frontend,Device-marker passkey selector is implemented twice: delegationPasskeySigner inlines what signer.ts's hybridPasskeyOnDevice already does
+1930,false-instrument,false-instrument,CLOSED,2026-08-23,code-quality|area:frontend,Four surfaces from #1924 are unreachable from the fixture layer: file the gap instead of synthesising
+1927,false-instrument,false-instrument,CLOSED,2026-08-23,code-quality|area:docs,delegation-rail-security-model.md's passkey-selection claim is verified against the wrong file — lib/delegationPasskeySigner.ts is uncovered
+1924,false-instrument,false-instrument,CLOSED,2026-08-23,code-quality|area:frontend,"AgentPanel EmptyStates, AgentCard warning banners, ErrorBoundary and UnmanagedDelegateCard have no rendered evidence anywhere"
+1923,copy-ux,copy-ux,CLOSED,2026-08-23,code-quality|area:frontend,Two functionally identical 'remove budget row' icon buttons sit on different icon rungs (12 vs 14)
+1916,false-instrument,false-instrument,CLOSED,2026-08-23,code-quality|area:docs,delegation-rail-security-model.md's covers: still misses the signer-management and owner-send clients
+1915,logic-bug,logic-bug,CLOSED,2026-08-23,code-quality|area:sdk|area:mcp,connect/doctor: a directory holding only rekey-pending.json is invisible to --doctor
+1911,security,security,CLOSED,2026-08-23,code-quality|area:sdk|area:mcp,connect/doctor: an abandoned re-key holds live private-key material and nothing reports it
+1910,logic-bug,logic-bug,CLOSED,2026-08-23,code-quality|area:sdk|area:mcp,"connect: --repair rewrites the BARE MCP pair for a named agent, clobbering the wrong entries"
+1909,copy-ux,copy-ux,CLOSED,2026-08-23,area:frontend,"AgentCard's action row: the archived branch's focus ring has zero bottom clearance, and 'Restore to list' wraps on Linux desktop"
+1905,false-instrument,false-instrument,CLOSED,2026-08-23,code-quality,"The money-path list guards a 12-line re-export shim while the real machine-payment logic sits in packages/core, unlisted"
+1904,other,other,CLOSED,2026-08-23,code-quality,"The general 'fifth copy' detector #1899 sketched cannot be threshold-tuned — measured, and what to do instead"
+1903,false-instrument,false-instrument,CLOSED,2026-08-23,area:docs,The money-path glob list has no frontend paths at all — the client that picks a signing scheme is invisible to it
+1899,false-instrument,false-instrument,CLOSED,2026-08-23,code-quality,Nothing stops a FOURTH copy of the money-path list — the bidirectional guard only knows the copies that existed when it was written
+1898,false-instrument,false-instrument,CLOSED,2026-08-23,area:docs,"delegation-rail-security-model.md's covers: misses the re-key CLIENT, so §6a's own subject cannot trip the coupling gate"
+1897,false-instrument,false-instrument,CLOSED,2026-08-23,code-quality,modules/machine-payments/** is a dead glob on the money-path list — the directory does not exist
+1896,false-instrument,false-instrument,CLOSED,2026-08-23,code-quality,"packages/signer/** is money-path nowhere, while packages/sdk/src/signer.ts is — the edge signer holds the delegate key"
+1893,copy-ux,copy-ux,CLOSED,2026-08-23,code-quality|area:frontend,"ui/Modal's scrolling body has no continuation cue, and #1887 made that the only thing pointing at the forward action"
+1892,false-instrument,false-instrument,CLOSED,2026-08-23,area:docs,ship-next's money-path file list omits routes/agent-rekey.ts — half the union is silently inert for that route
+1890,logic-bug,logic-bug,CLOSED,2026-08-23,money-path|area:frontend,dashboard: use the re-key revoke's signature_scheme — unblock passkey owners and drop the lying local type
+1888,process,process,CLOSED,2026-08-23,code-quality|area:frontend,"Every screenshot run rm -rf's the last one, and it cost a design review its largest claim"
+1887,copy-ux,copy-ux,CLOSED,2026-08-23,code-quality|area:frontend,"What #1879's corrected clip guard newly exposed: a 1060px mobile scroll on a destructive step, and an undiagnosed 66px residual"
+1886,false-instrument,false-instrument,CLOSED,2026-08-23,code-quality|area:frontend,measureHiddenBelowFold has no durable regression gate — and the obvious jsdom test cannot fail
+1885,false-instrument,false-instrument,CLOSED,2026-08-23,code-quality|area:docs,chain-sweep.mjs cannot see a `chain-reset` declared on today's line — the two #1496 docs will be re-triaged forever
+1882,process,process,CLOSED,2026-08-23,code-quality|area:docs,Seven more docs carry an unrestored `last-verified` chain break — the #1876 sweep result
+1880,false-instrument,false-instrument,CLOSED,2026-08-22,area:frontend,/design-system shows only ApprovalRequiredBanner's neutral tone — the warning and danger steps of the ladder are uncatalogued
+1879,false-instrument,false-instrument,CLOSED,2026-08-22,area:frontend,"shoot()'s clip guard measures the target it is handed, so every getByRole('dialog') capture reports zero — 38 PNGs at risk, measured"
+1878,logic-bug,logic-bug,CLOSED,2026-08-22,area:frontend|area:backend|area:mcp,"The wiring slug never reaches Haven, so the dashboard cannot show which harness entry is which agent"
+1877,copy-ux,copy-ux,CLOSED,2026-08-22,area:frontend,"The sidebar popover's inset focus ring is pixel-flush against the popover's own border — #1831's residual, now measured"
+1876,process,process,CLOSED,2026-08-22,area:docs,ship-playbooks/frontend.md's last-verified chain dropped #1447 — a pre-existing break that will ambush the next editor
+1874,stale-doc,stale-doc,CLOSED,2026-08-22,code-quality,ci.yml's `ci_config_checks` step name under-describes what it runs
+1873,false-instrument,false-instrument,CLOSED,2026-08-22,area:frontend,The driven focus gate reaches 6 of #1831's 11 indicators — the other 5 need agent states the fixture never renders
+1870,logic-bug,logic-bug,CLOSED,2026-08-22,money-path|area:backend,"Re-key's revoke leg is signing-scheme-blind — a passkey-owned account cannot complete a re-key, and nothing says so"
+1869,stale-doc,stale-doc,CLOSED,2026-08-22,code-quality|area:docs,docs-quality-system.md still documents the same-day suppression that #1824 removed
+1868,logic-bug,logic-bug,CLOSED,2026-08-22,money-path|area:backend,"A re-key abandoned after the revoke wedges the agent's in-flight slot permanently, and abandoning does not restore its authority"
+1867,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,White-on-brand CTA pattern: two of its three instances carry no focus-visible treatment at all
+1863,false-instrument,false-instrument,CLOSED,2026-08-22,area:frontend,The sidebar capture covers its resting state only — #1831's eleven focus indicators are still seen by no capture
+1858,stale-doc,stale-doc,CLOSED,2026-08-22,code-quality|area:docs,"design-system.md § 5 says icons are 14/16/20px 'exactly'; 34 of 114 sized call sites are not, incl. eight arbitrary-value sizes"
+1857,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,"Ten raw arrows across seven gated files bypass lucide, incl. the shared Address primitive"
+1856,false-instrument,false-instrument,CLOSED,2026-08-22,code-quality|area:frontend,SendModal's review step has never been screenshotted — no URL reaches it and no scenario exists
+1854,false-instrument,false-instrument,CLOSED,2026-08-22,code-quality|area:docs,Coupling gate flags the QA run-report template on every visual-baseline regeneration
+1852,logic-bug,logic-bug,CLOSED,2026-08-22,area:frontend,"ReceiveFundsModal throws on an unresolved chain, and names the network with full confidence when it does render"
+1850,process,process,CLOSED,2026-08-22,code-quality,"BASELINE_PUSH_TOKEN is unset, so every baseline regeneration deadlocks the open PR"
+1849,logic-bug,logic-bug,CLOSED,2026-08-22,money-path|area:backend,planCarry conflates the period the meter was read in with the period we issue into — a boundary crossing can leave an agent with zero authority for a period it was owed a full budget in
+1847,logic-bug,logic-bug,CLOSED,2026-08-22,,A re-key today leaves the passport attestation anchored to the retired delegate — #1698 merged ahead of #1699
+1846,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,ConfiguredAllowanceRow's bar is always 100% full and now looks like a spend meter
+1844,logic-bug,logic-bug|security,CLOSED,2026-08-22,area:frontend,AddFundsModal defaults an unresolved chain to Base mainnet — in the deposit copy and the onramp URL
+1843,false-instrument,false-instrument,CLOSED,2026-08-22,,"A deleted doc paragraph passes every gate we have — the coupling gate asks whether a doc was touched, never whether it still says what it said"
+1840,stale-doc,stale-doc,CLOSED,2026-08-22,,design-system.md § 5 claims arrow chevrons come from lucide; TransactionMovement renders a unicode →
+1833,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,Dashboard mobile: transaction rows overlap — a fixed 72px height against a layout that only splits at sm:
+1830,stale-doc,stale-doc,CLOSED,2026-08-22,code-quality|area:frontend,"Button variant=""tertiary"" is undocumented in the design system Buttons table"
+1827,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,Transaction-history showcase title wraps to five lines in a 71px measure at exactly 768px
+1826,process,process,CLOSED,2026-08-22,code-quality|area:docs,Decide whether packages/cli/src/** belongs in CASP covers: (found while shipping #1739)
+1824,false-instrument,false-instrument,CLOSED,2026-08-22,code-quality|area:docs,The coupling gate's same-day suppression hides real doc/code mismatches — a date stamped by unrelated work silences every other PR that day
+1820,false-instrument,false-instrument,CLOSED,2026-08-22,code-quality|area:frontend,Visual gate scope-captures the top bar but not the sidebar — the other half of the same chrome
+1819,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,Destructive controls with no focus ring at all: Sidebar logout and AgentCard revoke/remove
+1818,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,"TopBar's background compiles to nothing: an opacity modifier on a bare var() colour, for the third time"
+1817,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,"Button variant=""danger"" focuses brand: the solid-fill half of the destructive tone rule"
+1816,process,process,CLOSED,2026-08-22,code-quality|area:frontend,playwright.config.ts reuses whatever is on :3000 — a local e2e run in one worktree can test another branch's app
+1815,stale-doc,stale-doc,CLOSED,2026-08-22,code-quality|area:docs,"README's release recipe says ""merge to main"", which the dev-gate would reject — a release PR aimed at main fails by design"
+1813,other,other,CLOSED,2026-08-22,area:frontend,HostedConnectCard has no production call site — an orphaned second connect surface with its own runtime picker
+1809,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,Destructive icon button in contacts hovers danger but focuses brand (the last sibling from #1792)
+1805,false-instrument,false-instrument,CLOSED,2026-08-22,code-quality|area:frontend,"Visual regression cannot see the whole TopBar: 0.5% of a 29,012px-tall capture is a 56,573px budget"
+1803,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,"TopBar is over-subscribed at 320px: something must be dropped, not squeezed"
+1801,process,process,CLOSED,2026-08-22,code-quality,"Concurrent sessions share one scratchpad, so PR bodies can be overwritten mid-flight by another session"
+1800,process,process,CLOSED,2026-08-22,code-quality|area:frontend,npm run screenshot binds port 3111 in every worktree — a second session captures the other branch's app and the PNGs look plausible
+1797,false-instrument,false-instrument,CLOSED,2026-08-22,code-quality|area:frontend,Dialog overflow guard never runs at a mobile viewport
+1795,stale-doc,stale-doc,CLOSED,2026-08-22,area:docs,"scripts/README.md contradicts itself on the package count — ""four published packages"" at the top, ""all five"" further down"
+1793,feature,feature,CLOSED,2026-08-22,code-quality|area:backend|area:docs,"No operations runbook for the stuck-revoke alarm, which is now the only signal for an unconverged revocation"
+1792,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,Destructive icon buttons disagree on focus-ring tone: AgentBudgetCard hovers danger but focuses brand
+1791,process,process,CLOSED,2026-08-22,money-path|area:docs,"The documented manual-publish fallback strands @haven_ai/cli — 4 of 5 packages, on the path used mid-incident"
+1790,feature,feature,CLOSED,2026-08-22,money-path|area:docs,release-bump could write the Supported Runtime Manifest re-pin it already verifies
+1789,process,process,CLOSED,2026-08-22,area:docs,"CASP release shards are named for a PR number that does not exist yet, and the two docs disagree on the convention"
+1788,process,process,CLOSED,2026-08-22,code-quality|money-path|area:docs,release-bump.mjs signs off by telling you to run npm publish by hand — and names four of the five packages
+1787,stale-doc,stale-doc,CLOSED,2026-08-22,area:docs,Two gravity files describe qa-freshness as weaker than it is — one calls hotfix/* a bypass when a money-path hotfix blocks outright
+1779,false-instrument,false-instrument,CLOSED,2026-08-22,code-quality|area:frontend,Mobile-shell guards measure relative to boxes that move with the defect — three specs missed a 32px shift of the whole app shell
+1777,process,process,CLOSED,2026-08-22,code-quality|area:frontend,BASELINE_PUSH_TOKEN deadlock has cost four sessions a step each — Update visual baselines cannot push to a PR branch
+1774,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,"TransactionMovement strands its arrow on its own line below ~180px, and drives a ~230px transaction row on mobile"
+1773,false-instrument,false-instrument,CLOSED,2026-08-22,code-quality|area:frontend,Horizontal-overflow guards are blind to content inside fixed-position modals
+1772,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,/transactions content region overflows its scroll box at 393px — the table has no overflow-x-auto wrapper
+1771,false-instrument,false-instrument,CLOSED,2026-08-22,code-quality|area:frontend,expectNoHorizontalOverflow cannot fail on any authenticated route — the shell clips before the document grows
+1768,false-instrument,false-instrument,CLOSED,2026-08-22,code-quality|area:frontend,No mobile viewport has gating CI coverage — chromium-mobile only runs on manual dispatch
+1767,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,Mobile sidebar toggle is not aligned with the spacer TopBar reserves for it
+1766,copy-ux,copy-ux,CLOSED,2026-08-22,code-quality|area:frontend,Mobile sidebar toggle has a 32px tap target against the documented 44px rule
+1763,false-instrument,false-instrument,CLOSED,2026-08-21,code-quality|area:backend,"A local run with no database exits 0 with the real-DB suites skipped, and the only warning is at import time"
+1761,false-instrument,false-instrument,CLOSED,2026-08-21,code-quality|area:backend,"ops-probe-standalone's 120s spawnSync budget is thin, and its timeout fails as a misleading output assertion"
+1760,false-instrument,false-instrument,CLOSED,2026-08-21,code-quality|area:frontend,"Visual-regression tolerance absorbs real deltas, so /design-system baselines are stale — and the debt lands on a later PR"
+1758,logic-bug,logic-bug,CLOSED,2026-08-21,code-quality|money-path|area:backend,A revoke that mines after its wait expires leaves revocation_status permanently pending
+1757,feature,feature,CLOSED,2026-08-21,code-quality|area:backend,Extract a shared bounded-confirmation-wait helper once the outstanding tx.wait sites land
+1756,logic-bug,logic-bug,CLOSED,2026-08-21,code-quality|money-path|area:sdk,SDK delegate sweep's wait(1) has no timeout — a stuck sweep hangs the user's agent forever
+1755,logic-bug,logic-bug,CLOSED,2026-08-21,code-quality|money-path|area:backend,Safe proxy deployer broadcasts with a bare tx.wait() and no durable record (safe-proxy-deployer; the safe-deployer half is buried by #1988)
+1754,logic-bug,logic-bug,CLOSED,2026-08-21,code-quality|money-path|area:backend,"POST /safe/exec's bare tx.wait() reports a confirmation timeout to the user as ""reverted on-chain"""
+1753,logic-bug,logic-bug,CLOSED,2026-08-21,code-quality|money-path|area:backend,POST /safe/deploy awaits a bare tx.wait() inside an open Postgres transaction
+1750,copy-ux,copy-ux,CLOSED,2026-08-21,code-quality|area:frontend,Transaction-history row title collapses to one or two words per line at 390px when a status badge sits inline
+1749,copy-ux,copy-ux,CLOSED,2026-08-21,bug|code-quality|area:frontend,"Mobile ""Open sidebar"" toggle is unreachable behind TopBar — primary nav may be unopenable under 1024px"
+1746,copy-ux,copy-ux,CLOSED,2026-08-21,code-quality|area:frontend,"Focus rings split into two families: form fields use focus:/ring-2/20 with no offset, everything else focus-visible:/ring-2/30 with offset-2"
+1745,logic-bug,logic-bug,CLOSED,2026-08-21,money-path|area:backend,"issuePassport presumes a pending attest was dropped and re-mints, so a fee-stuck anchor can produce two live credentials"
+1743,logic-bug,logic-bug,CLOSED,2026-08-21,money-path|area:backend,A stuck passport_attest blocks the relayer nonce lane with no automated recovery
+1742,logic-bug,logic-bug,CLOSED,2026-08-21,code-quality|money-path|area:backend,"revokeOnChain still calls a bare, unbounded tx.wait() and treats every wait error as a revert"
+1741,copy-ux,copy-ux,CLOSED,2026-08-21,code-quality|area:frontend,Focus rings are visible but still under WCAG 3:1 — brand/30 computes ~1.6:1 on white
+1739,process,process,CLOSED,2026-08-21,code-quality|area:docs,"Decide whether release plumbing (release-bump.mjs, publish.yml) owes a CASP perimeter shard"
+1738,false-instrument,false-instrument,CLOSED,2026-08-21,code-quality|area:frontend,/design-system visual regression compares ~5% of the page: everything below the fold renders blank in captures
+1736,false-instrument,false-instrument,CLOSED,2026-08-21,code-quality|area:docs,"casp-risk-guardrails covers: is missing rails/hybrid-provisioning.ts, so deploy/outbound-record changes are never gated"
+1735,logic-bug,logic-bug,CLOSED,2026-08-21,code-quality|money-path|area:backend,"Passport anchor's wait timeout is treated as a revert, so a still-mineable attest closes its record failed"
+1726,copy-ux,copy-ux,CLOSED,2026-08-21,code-quality|area:frontend,Button size=&quot;sm&quot; is a 36px tap target — under the comfortable minimum on mobile
+1725,false-instrument,false-instrument,CLOSED,2026-08-21,code-quality|area:frontend,Screenshot scenario: Backup &amp; recovery card's loadError and one-way warning states have no rendered evidence
+1722,logic-bug,logic-bug,CLOSED,2026-08-21,code-quality|money-path|area:backend,"Hybrid deploy's tx.wait() is unbounded, so the advisory-lock connection hold has no ceiling"
+1721,stale-doc,stale-doc,CLOSED,2026-08-21,code-quality|area:backend|area:docs,"delegation-rail-vendor-ops: a drained relayer now blocks PAYMENTS, not just grants (stale since #1667)"
+1720,feature,feature,CLOSED,2026-08-21,enhancement|area:frontend|area:backend|area:docs,Connect modal: remove the runtime picker — one setup command for every environment
+1719,feature,feature,CLOSED,2026-08-21,enhancement|area:frontend|area:backend|area:sdk|area:docs,"Connector: resolve the runtime itself — env detection → agent self-report → installed-app prompt → refuse, with a real failure vocabulary"
+1717,feature,feature,CLOSED,2026-08-21,epic|backend,Epic: Verified Payable Directory — self-service merchant catalogue ingestion (seller discovery)
+1716,feature,feature,CLOSED,2026-08-21,area:sdk|area:mcp|area:docs,Catalog MCP/SDK: verified discovery + agent-side submission
+1715,feature,feature,CLOSED,2026-08-21,area:frontend|area:backend,Catalog UI: self-submission flow + verified badges
+1714,feature,feature,CLOSED,2026-08-21,area:backend,"Catalog ingestion: entry lifecycle, re-verification cadence + retention"
+1713,feature,feature,CLOSED,2026-08-21,area:backend,Catalog ingestion: SSRF-hardened verification probe (leader-locked)
+1712,feature,feature,CLOSED,2026-08-21,area:backend,Catalog ingestion: domain-ownership proof (well-known token + DNS TXT)
+1711,feature,feature,CLOSED,2026-08-21,area:backend,Catalog ingestion: public submission queue + endpoint
+1710,copy-ux,copy-ux,CLOSED,2026-08-21,bug|area:frontend|area:docs,Design tokens: sweep the last 13 bg-*/text-* occurrences and add a design-lint rule so the pattern cannot return
+1709,copy-ux,copy-ux,CLOSED,2026-08-21,bug|area:frontend,Design tokens: convert the 94 dead border-*/N tinted-border classes
+1708,copy-ux,copy-ux,CLOSED,2026-08-21,bug|area:frontend,"Design tokens: make var()-backed colours alpha-capable, and restore the brand focus ring (68 dead ring-* classes)"
+1707,feature,feature,CLOSED,2026-08-21,enhancement|area:frontend,Frontend: render Settlement (EIP-3009 / ERC-7710) in the expanded x402 transaction detail
+1706,feature,feature,CLOSED,2026-08-21,enhancement|money-path|area:backend,Backend: thread machine_metadata settlement_scheme through the confirmed-x402 transaction feed + tests
+1705,feature,feature,CLOSED,2026-08-21,enhancement|money-path|area:backend,Backend: add settlementScheme (eip3009|erc7710) to TransactionBase + regenerate API types
+1704,feature,feature,CLOSED,2026-08-21,enhancement|epic|money-path|area:frontend|area:backend,Epic: Surface the settlement scheme (EIP-3009 vs ERC-7710) in the dashboard transaction feed
+1702,feature,feature,CLOSED,2026-08-21,area:docs,"docs: agent key rotation, and the line between it and account recovery"
+1701,feature,feature,CLOSED,2026-08-21,area:frontend,"dashboard: replace signing key, and make the wiring slug legible"
+1700,feature,feature,CLOSED,2026-08-21,area:sdk|area:mcp,connect: --rekey client flow (in-place credential rewrite)
+1699,feature,feature,CLOSED,2026-08-21,area:frontend|area:backend,passport: re-anchor on re-key with continuous standing
+1698,feature,feature,CLOSED,2026-08-21,money-path|area:backend,"backend: re-key an agent — revoke-before-issue, meter carry, credential rotation"
+1697,feature,feature,CLOSED,2026-08-21,area:sdk|area:mcp,"connect/doctor: per-agent inventory, multi-agent aware"
+1696,feature,feature,CLOSED,2026-08-21,area:sdk|area:mcp,connect: --name wiring slug end to end
+1695,feature,feature,CLOSED,2026-08-21,area:sdk|area:mcp,connect: multi-entry runtime config writers — a named MCP pair per agent
+1694,feature,feature,CLOSED,2026-08-21,epic|area:frontend|area:backend|area:sdk|area:mcp|area:docs,"Epic: Re-key an agent, and run several agents in one harness"
+1693,false-instrument,false-instrument,CLOSED,2026-08-21,code-quality|area:frontend,Screenshot scenario: Backup & recovery card unobstructed (both viewports)
+1690,security,security,CLOSED,2026-08-21,money-path|area:backend|area:sdk|area:mcp,signer: x402 expected context carries no payer identity — the signer cannot detect it is signing another agent's quote
+1688,logic-bug,logic-bug,CLOSED,2026-08-21,area:sdk|area:mcp,connect/doctor: a re-run silently orphans the previous agent — a stale host keeps spending as it
+1686,logic-bug,logic-bug,CLOSED,2026-08-21,code-quality,Keyed advisory lock holds a shared-pool connection across a chain round-trip
+1685,copy-ux,copy-ux,CLOSED,2026-08-21,bug|epic|area:frontend,"Epic: opacity modifiers on var()-backed colour tokens compile to nothing — 175 dead classes, incl. every focus ring"
+1684,copy-ux,copy-ux,CLOSED,2026-08-21,bug|area:frontend,"Connect agent modal: invisible step-ticker connectors, duplicated copy, and the full-bleed Done button"
+1682,feature,feature,CLOSED,2026-08-21,enhancement|area:frontend|area:backend|area:sdk|area:docs,Connect modal: name-first runtime picker — pick your app by name; modality becomes a row property (follow-up to #1672)
+1681,logic-bug,logic-bug,CLOSED,2026-08-21,,Stale haven-signer MCP path after agent recreation causes permanent 5-min 'Connection closed' park loop in long-lived hosts
+1680,logic-bug,logic-bug,CLOSED,2026-08-21,code-quality,Auth rate limits don't bind across replicas — the per-process store makes the ceiling N× the documented one
+1679,copy-ux,copy-ux,CLOSED,2026-08-21,area:frontend|area:backend|area:docs,"Passkey terminology: replace ""Face ID / Touch ID"" credential names with ""Passkey · added {date}"" across dashboard + onboarding"
+1674,false-instrument,false-instrument,CLOSED,2026-08-21,code-quality,QA: cover a FRESH agent whose first-ever payment is erc7710 (counterfactual delegate account)
+1673,logic-bug,logic-bug,CLOSED,2026-08-21,code-quality|area:backend,ensureHybridDeployed: serialize concurrent deploys of the same counterfactual account
+1672,feature,feature,CLOSED,2026-08-21,bug|area:frontend|area:sdk,Connect: detection-first runtime — drop --runtime from the generated setup prompt so the user never has to pick correctly
+1670,security,security,CLOSED,2026-08-21,code-quality,Auth routes have no rate limiting — blocked on the trustProxy decision
+1669,copy-ux,copy-ux,CLOSED,2026-08-21,bug|area:backend,Catalog: label the stranded-funds test fixture so agents know it will not settle
+1667,logic-bug,logic-bug,CLOSED,2026-08-21,bug|money-path|area:backend,erc7710: a fresh agent's first payment fails InvalidEOASignature — the settlement child's delegator (delegate hybrid account) is never deployed
+1663,logic-bug,logic-bug,CLOSED,2026-08-21,code-quality|area:sdk|area:mcp,release-bump.mjs pollutes package-lock.json with spurious dev/peer metadata — hand-repaired in three consecutive releases
+1654,security,security,CLOSED,2026-08-20,code-quality,POST /auth/signup is an explicit account-enumeration oracle (409 vs 201)
+1646,security,security,CLOSED,2026-08-20,code-quality|area:backend,Login leaks account existence through timing: bcrypt runs only when the user exists
+1640,security,security,CLOSED,2026-08-20,code-quality|area:backend,"The Fortnox OAuth state token is a full-access Bearer credential for 10 minutes, and it travels in a URL"
+1638,process,process,CLOSED,2026-08-20,code-quality,CI routing: a non-ASCII path is quoted by git and routes NOWHERE
+1630,logic-bug,logic-bug,CLOSED,2026-08-20,code-quality,x402 receipts: amount_human formats every token with 6 decimals
+1627,feature,feature,CLOSED,2026-08-20,,CI: Reduce ci.yml to orchestration over classifier outputs
+1626,feature,feature,CLOSED,2026-08-20,,CI: Add routing completeness enforcement for root guards
+1625,feature,feature,CLOSED,2026-08-20,,CI: Encode package dependency propagation from one table
+1624,feature,feature,CLOSED,2026-08-20,,CI: Introduce a declarative root-guard ownership manifest
+1623,feature,feature,CLOSED,2026-08-20,,CI: Characterize the package-to-job routing matrix
+1622,feature,feature,CLOSED,2026-08-20,,CI: Extract the change classifier into a dependency-free tested script
+1621,feature,feature,CLOSED,2026-08-20,epic,Epic: Make CI change routing declarative and executable
+1620,feature,feature,CLOSED,2026-08-20,money-path|area:sdk,SDK: Finish the HavenClient compatibility facade and cross-protocol contracts
+1619,feature,feature,CLOSED,2026-08-20,money-path|area:sdk,SDK: Extract the erc7710 no-funding-leg lifecycle
+1618,feature,feature,CLOSED,2026-08-20,money-path|area:sdk,SDK: Extract the EIP-3009 x402 funding-leg lifecycle
+1617,feature,feature,CLOSED,2026-08-20,money-path|area:sdk,SDK: Extract account/read and sweep APIs from HavenClient
+1616,feature,feature,CLOSED,2026-08-20,money-path|area:sdk|area:mcp,SDK/MCP: Extract paid MCP merchant transport from HavenClient
+1615,feature,feature,CLOSED,2026-08-20,money-path|area:sdk,SDK: Extract generic Haven HTTP transport and payment/status mapping
+1614,feature,feature,CLOSED,2026-08-20,area:sdk,SDK: Add HavenClient characterization seams and a growth guard
+1613,feature,feature,CLOSED,2026-08-20,epic|money-path|area:sdk|area:mcp,Epic: Decompose HavenClient into protocol-owned SDK modules
+1609,flake,flake,CLOSED,2026-08-19,code-quality,CI: cache Playwright browsers and drop the per-run apt-get — the Azure apt-mirror flake killed four required-check runs on 2026-08-19
+1607,process,process,CLOSED,2026-08-19,code-quality|area:docs,"ship-next: correct two false CI-waiting claims, add outbound files to the money-path list, flake triage; refresh sdk playbook"
+1605,stale-doc,stale-doc,CLOSED,2026-08-19,code-quality,Correct stale 'until #N' code comments that claim to wait for work that already shipped
+1602,feature,feature,CLOSED,2026-08-19,code-quality|area:docs,"quality-scan: guard-effectiveness dimension, reproducible measurement blocks, probed-clean baselines, disposition trigger"
+1593,feature,feature,CLOSED,2026-08-19,code-quality,connect: harden the LOCAL MCP runtime install like #1586 did the signer's
+1592,copy-ux,copy-ux,CLOSED,2026-08-19,money-path|area:backend,backend: normalize catalog price_display — drop the redundant $ prefix on token-denominated prices
+1591,feature,feature,CLOSED,2026-08-19,area:sdk|area:mcp,"mcp: slim tool descriptions — shared guidance into server instructions, issue archaeology out of agent-visible text"
+1590,copy-ux,copy-ux,CLOSED,2026-08-19,area:sdk|area:mcp,sdk/mcp: name it spend_authority_readiness — readiness does not cover the local signer
+1589,feature,feature,CLOSED,2026-08-19,area:sdk|area:connect,connect: --doctor and --repair — end-to-end setup diagnosis without a hand-built MCP client
+1588,feature,feature,CLOSED,2026-08-19,money-path|area:sdk|area:mcp,mcp: runtime-neutral next_tool — add next_tool_server/next_tool_name so non-Claude runtimes can resolve the signer
+1587,feature,feature,CLOSED,2026-08-19,area:sdk|area:connect,connect: handshake-probe the local signer in the hosted topology before reporting success
+1586,logic-bug,logic-bug,CLOSED,2026-08-19,area:sdk|area:connect,"connect: harden the signer preinstall — generous npm timeout, loud failure, no silent npx fallback"
+1585,feature,feature,CLOSED,2026-08-19,epic,Epic: Codex Desktop agent feedback — signer runtime reliability and cross-runtime payment UX
+1578,logic-bug,logic-bug,CLOSED,2026-08-19,money-path|area:mcp|area:docs,Make demo-merchant MCP sessions recover across process restarts
+1572,copy-ux,copy-ux,CLOSED,2026-08-19,enhancement|area:frontend|area:connect,Connect flow step 3 shows two names for one gate: 'Confirm agent rules' header over 'approve the budget' body
+1569,logic-bug,logic-bug,CLOSED,2026-08-18,bug|area:sdk|area:connect,connect: Claude Code local-stdio re-run leaves the runtime wired to the previous agent's MCP wrapper
+1562,false-instrument,false-instrument,CLOSED,2026-08-18,code-quality|area:backend,db-harness: a worker schema missing a table silently falls through to shared public
+1559,feature,feature,CLOSED,2026-08-18,area:backend,"Outbound-tx queue: cross-replica leasing, retire the in-process lock, re-point the scan"
+1558,feature,feature,CLOSED,2026-08-18,area:backend,Outbound-tx queue: leader-locked bump/replacement worker
+1557,feature,feature,CLOSED,2026-08-18,money-path|area:backend,Outbound-tx queue: sweep submits through the queue (money-path)
+1556,feature,feature,CLOSED,2026-08-18,area:backend,Outbound-tx queue: hybrid-provisioning + passport submit through the queue
+1555,feature,feature,CLOSED,2026-08-18,area:backend,Outbound-tx queue: migration + repository for outbound_txs
+1554,feature,feature,CLOSED,2026-08-18,epic|money-path|area:backend,Epic: durable outbound-tx queue — retire the 'interim' in-process relayer serialisation
+1550,copy-ux,copy-ux,CLOSED,2026-08-18,area:mcp,"Demo merchant answers in Swedish unconditionally — English default, locale option, and a summary-only result mode"
+1549,feature,feature,CLOSED,2026-08-18,money-path|area:mcp,Compact the x402 prepare responses — trim duplicated payment blocks and the static signer_compatibility essay
+1548,feature,feature,CLOSED,2026-08-18,area:mcp,Document the missing-cap convention for guided purchases: no user-stated cap → cap at the live quote
+1547,logic-bug,logic-bug,CLOSED,2026-08-18,money-path|area:mcp,"haven_prepare_catalog_purchase bypasses the #1450 erc7710 preference — wire the selector; update the QA leg's money proof, suggested_tool, and signer pre-check text in the same change"
+1546,logic-bug,logic-bug,CLOSED,2026-08-18,bug|code-quality|area:backend|attestation,Agent Passport EAS submissions bypass withRelayerSendLock — unserialised traffic on the shared relayer nonce lane
+1545,feature,feature,CLOSED,2026-08-18,enhancement|area:backend|area:sdk|area:docs|area:connect,docs: surface the connect --json structured-output mode to orchestrating agents
+1544,feature,feature,CLOSED,2026-08-18,enhancement|test|area:sdk|area:connect,connect: characterize re-run behavior against an already-configured workspace
+1543,feature,feature,CLOSED,2026-08-18,enhancement|area:frontend|area:sdk|area:connect,Shrink the window before budget approval unlocks in the dashboard during connect setup
+1542,copy-ux,copy-ux,CLOSED,2026-08-18,enhancement|area:sdk|area:connect,"connect: completion next-steps must reflect the approval outcome, one name for the approval gate, and say why a restart is needed"
+1541,feature,feature,CLOSED,2026-08-18,enhancement|epic|area:sdk|area:connect,Epic: Connect-flow fixes from the 2026-08-18 agent-driven setup field test
+1538,copy-ux,copy-ux,CLOSED,2026-08-18,code-quality|area:connect,[withdrawn] connect: next-steps tell the user to approve a budget the connector just celebrated approving
+1534,false-instrument,false-instrument,CLOSED,2026-08-18,bug|test|area:qa,Money-flow QA retry is not idempotent — attempt 2 inherits attempt 1's settled state
+1533,logic-bug,logic-bug,CLOSED,2026-08-18,bug|money-path|area:backend,Dev relayer reuses a stale nonce — legacy-rail payments fail NONCE_EXPIRED
+1531,feature,feature,CLOSED,2026-08-18,code-quality|area:docs,"agent-qa.md: document what an agent session cannot see, and the artifacts to ask for on a money-flow failure"
+1530,false-instrument,false-instrument,CLOSED,2026-08-18,code-quality,"qa-dev has no preflight: it verifies credentials are configured, never that the resources they spend are available"
+1529,flake,flake,CLOSED,2026-08-18,qa-failure,qa-dev money-flow failed (2026-08-18)
+1526,process,process,CLOSED,2026-08-17,code-quality|area:mcp,"packages/mcp-server exact-pins @haven_ai/sdk where a private workspace consumer must use ""*"""
+1521,logic-bug,logic-bug,CLOSED,2026-08-17,code-quality|money-path|area:sdk,Two genuine purchases of the same item within 5 minutes collapse into one payment — the second fails with an unfunded authorization
+1515,logic-bug,logic-bug,CLOSED,2026-08-17,code-quality|money-path|area:qa,Demo merchant can take payment and return 402: in-memory settle state lost on restart causes a second transferWithAuthorization
+1508,logic-bug,logic-bug,CLOSED,2026-08-17,bug|money-path|area:backend|area:mcp,erc7710 settle fails on the DEFAULT hosted topology — completeX402MerchantCall is structurally 3009-only
+1500,process,process,CLOSED,2026-08-16,enhancement|area:docs,"Agent sessions reuse one long-lived branch, which manufactures the merge conflicts"
+1496,process,process,CLOSED,2026-08-16,code-quality,last-verified prepend notes guarantee merge conflicts between concurrent PRs
+1488,process,process,CLOSED,2026-08-15,enhancement|area:docs,"new-task: the assignee rule reads as a claim, and epic sub-issues are linked the expensive way"
+1487,process,process,CLOSED,2026-08-15,enhancement|area:docs,"ship-next: the loop cannot see inbound dependencies, a blocked promotion, or an epic it just finished"
+1482,logic-bug,logic-bug,CLOSED,2026-08-15,code-quality,/payments/:id/sign does not shape-check prepared_user_op across schemes
+1478,contract-drift,contract-drift,CLOSED,2026-08-15,code-quality,Four unpinned network→chain-id maps; drift refuses valid payments
+1476,security,security,CLOSED,2026-08-15,code-quality,haven_sign can sign a delegation-shaped payload with no binding check
+1474,feature,feature,CLOSED,2026-08-15,code-quality,Backend: emit a signed expected context for the erc7710 settlement child
+1472,contract-drift,contract-drift,CLOSED,2026-08-15,code-quality,"The merchant-visible payer is the delegate account, which no API surface names"
+1471,contract-drift,contract-drift,CLOSED,2026-08-15,code-quality,SDK accepts the 'base-sepolia' network literal that the backend rejects
+1469,logic-bug,logic-bug,CLOSED,2026-08-15,code-quality,A null hole in accepts[] crashes x402 option selection instead of refusing
+1464,logic-bug,logic-bug,CLOSED,2026-08-15,code-quality,"Malformed uuid path params surface as a 500, not a documented 4xx"
+1459,stale-doc,stale-doc,CLOSED,2026-08-15,area:docs,Docs: correct the stale erc7710 claims in dev-environment.md
+1458,feature,feature,CLOSED,2026-08-15,demo-ready|money-path|area:mcp|area:docs,Ops: enable and canary erc7710 on the prod demo merchant (Base mainnet)
+1457,feature,feature,CLOSED,2026-08-15,test|area:sdk|area:mcp,QA: erc7710 settlement through the hosted/SDK topology
+1456,feature,feature,CLOSED,2026-08-15,enhancement|money-path|area:mcp,Hosted MCP: erc7710 through haven_pay_mcp_tool and haven_prepare_catalog_purchase
+1455,feature,feature,CLOSED,2026-08-15,enhancement|money-path|area:sdk|area:mcp,Signer: sign the erc7710 settlement child under the expected-binding discipline
+1454,feature,feature,CLOSED,2026-08-15,enhancement|money-path|area:sdk,SDK: an erc7710 settlement path (authorize → sign child → settle)
+1453,feature,feature,CLOSED,2026-08-15,enhancement|money-path|area:sdk,SDK: erc7710-aware x402 payment-option selection
+1452,feature,feature,CLOSED,2026-08-15,enhancement|money-path|area:sdk,SDK: sign the eip712_delegation settlement child
+1451,feature,feature,CLOSED,2026-08-15,enhancement|area:docs,Record the erc7710-preferred settlement-scheme decision
+1450,feature,feature,CLOSED,2026-08-15,enhancement|epic|money-path|area:sdk|area:mcp|area:docs,Epic: Make erc7710 a fully supported settlement path
+1447,feature,feature,CLOSED,2026-08-15,enhancement|area:frontend,Shrink-only ratchet for hand-written wire-shape interfaces
+1446,contract-drift,contract-drift,CLOSED,2026-08-15,enhancement|area:backend,Backfill the OpenAPI spec for the 18 undocumented route files
+1445,contract-drift,contract-drift,CLOSED,2026-08-15,enhancement|area:frontend,Frontend consumes the generated wire types instead of hand-written duplicates
+1444,feature,feature,CLOSED,2026-08-15,enhancement|area:backend,Assert real responses against the spec schema for documented routes
+1443,feature,feature,CLOSED,2026-08-15,enhancement|area:backend,Route-coverage gate: fail when a registered route has no OpenAPI operation
+1442,contract-drift,contract-drift,CLOSED,2026-08-15,enhancement|epic|area:frontend|area:backend,Epic: the API contract is declared three times and checked across none of the boundaries
+1441,flake,flake,CLOSED,2026-08-15,qa-failure,qa-dev money-flow failed (2026-08-15)
+1440,feature,feature,OPEN,2026-08-14,enhancement|epic|money-path,Epic: retire the Safe rail entirely (safe-retirement)
+1437,logic-bug,logic-bug,CLOSED,2026-08-14,bug|area:frontend,"Remove-agent dialog has two unrecoverable failure paths (batch cap, cross-tab revoke)"
+1436,logic-bug,logic-bug,CLOSED,2026-08-14,bug|money-path|area:backend,Archive can file away a delegation-rail agent whose on-chain budget is still live
+1431,copy-ux,copy-ux,CLOSED,2026-08-14,area:frontend,"AgentRulesSummary: align row labels and helper tier across connect review, agent detail, and design-system"
+1426,copy-ux,copy-ux,CLOSED,2026-08-14,area:connect,"Connector describes weekly/monthly budgets in raw minutes, diverging from the dashboard"
+1423,logic-bug,logic-bug,CLOSED,2026-08-14,backend|money-path,Reconcile revoke-all crash-window orphans + cap the batch size
+1418,copy-ux,copy-ux,CLOSED,2026-08-14,area:frontend,Step 4 stacks two progress trackers since the modal chrome unification
+1411,feature,feature,CLOSED,2026-08-14,area:frontend,"Connect flow steps 1-3: bring Details, Policy and Review up to the standard step 4 now meets"
+1410,feature,feature,CLOSED,2026-08-14,area:frontend|area:docs,Design-system foundations for the connect flow: Checkbox and Textarea primitives
+1409,feature,feature,CLOSED,2026-08-14,area:frontend,Screenshot fixture for the connect modal: capture step 4 at any connection stage
+1408,feature,feature,CLOSED,2026-08-14,area:frontend,"Epic: Connect agent flow — one coherent experience, built on the design system"
+1406,copy-ux,copy-ux,CLOSED,2026-08-14,area:frontend,"The app has two modal idioms: grow ui/Modal to cover real dialogs, then migrate the hand-rolled ones"
+1404,logic-bug,logic-bug,CLOSED,2026-08-13,area:frontend,Connect setup status polling stops permanently after a single failed read
+1403,logic-bug,logic-bug,CLOSED,2026-08-13,bug|money-path|area:frontend|area:backend,Sweep is unreachable for revoked/removed agents — delegate-balance 404s the moment an agent is revoked
+1402,logic-bug,logic-bug,CLOSED,2026-08-13,bug|enhancement|money-path|area:frontend,"Agents: one ""Remove agent"" action on the delegation rail + populate the Removed section (regression from #1080)"
+1401,logic-bug,logic-bug,CLOSED,2026-08-13,bug|money-path|area:backend,Archive agents instead of hard-deleting them — DELETE 500s on any agent with payment history and cascades away audit trail
+1400,feature,feature,CLOSED,2026-08-13,enhancement|money-path|area:backend,Delegation rail: revoke all of an agent's active budget delegations in one signature
+1399,copy-ux,copy-ux,CLOSED,2026-08-13,area:frontend|area:docs,Connect waiting screen: the status slot is never empty and never alarms early
+1398,feature,feature,CLOSED,2026-08-13,enhancement|test|money-path|area:backend|area:sdk|area:mcp|area:docs,hardening(mcp): reject malformed X-PAYMENT headers before hosted funding relay
+1397,feature,feature,CLOSED,2026-08-13,enhancement|test|money-path|area:sdk|area:mcp|area:docs,feat(mcp): expose a read-only quote for arbitrary paid MCP tools
+1394,copy-ux,copy-ux,CLOSED,2026-08-13,area:frontend,Connect agent approved screen: give the ending a designed shape
+1393,copy-ux,copy-ux,CLOSED,2026-08-13,area:frontend,"Connect flow adoption sweep: Card shells, disclosure chevrons, one radius, one type scale"
+1392,copy-ux,copy-ux,CLOSED,2026-08-13,area:frontend,"Connect agent step-4 shell: one spacing rhythm, slack distributed, silhouette held"
+1391,copy-ux,copy-ux,CLOSED,2026-08-13,area:frontend|area:docs,"Connect agent waiting screen: one status voice over time, one action hierarchy"
+1386,logic-bug,logic-bug,CLOSED,2026-08-13,money-path|area:frontend|area:sdk|area:docs,fix(connect): report local setup before waiting for budget approval
+1381,copy-ux,copy-ux,CLOSED,2026-08-13,area:frontend,Connect agent step 2: drop the budget draft card — it appears on first keystroke and shifts the content below it
+1379,logic-bug,logic-bug,CLOSED,2026-08-13,area:frontend|area:sdk,fix(connect): run the published npm CLI and recover stalled registration
+1378,logic-bug,logic-bug,CLOSED,2026-08-13,money-path|area:frontend|area:backend|area:sdk,fix(connect): prevent npx no-op setup and surface stalled registration recovery
+1377,feature,feature,CLOSED,2026-08-13,area:frontend|area:backend|area:sdk,"Connect agent modal: rename, single-USDC budget step, cohesive step 4 with no content shift, and agent-side progress messages"
+1372,flake,flake,CLOSED,2026-08-12,area:backend,Backend real-DB test harness flakes at vitest's default 10s hook timeout
+1370,flake,flake,CLOSED,2026-08-12,qa-failure,qa-dev money-flow failed (2026-08-12)
+1366,process,process,CLOSED,2026-08-12,enhancement|area:docs,proc: eliminate the PR-goes-DIRTY-mid-CI race — merge queue on dev + shard the CASP changelog
+1365,logic-bug,logic-bug,CLOSED,2026-08-12,enhancement|area:backend|area:docs,fix(reporting): ledger 'skipped' status is unreachable and deleted-in-Fortnox invoices have no recovery path
+1362,feature,feature,CLOSED,2026-08-12,enhancement|area:frontend|area:backend|area:docs,"feat(reporting): Fortnox visibility — surface invoice ref in dashboard, read-back verification, operations runbook"
+1360,security,security,CLOSED,2026-08-12,enhancement|money-path|area:backend|area:sdk,harden(x402): funding-shape derivation should prefer server-truth delegate address over client payTo
+1355,feature,feature,CLOSED,2026-08-12,enhancement|test|money-path|area:backend|area:sdk|area:mcp|area:docs,feat(signer): true payment_id-only signing — carry payment_required in the fetched sign context
+1352,feature,feature,CLOSED,2026-08-12,,Lower agent-runtime Node floor from 24 to 22 (oldest supported LTS)
+1351,feature,feature,CLOSED,2026-08-12,enhancement|test|money-path|area:sdk|area:mcp|area:docs,feat(mcp): make purchase caps unambiguous for human USDC amounts
+1350,feature,feature,CLOSED,2026-08-12,enhancement|test|area:backend|area:sdk|area:mcp|area:docs,feat(catalog): make agent product discovery searchable and category-normalized
+1349,feature,feature,CLOSED,2026-08-12,enhancement|test|money-path|area:sdk|area:mcp|area:docs,feat(x402): return a compact normalized Haven purchase summary
+1348,feature,feature,CLOSED,2026-08-12,enhancement|test|money-path|area:sdk|area:mcp|area:docs,perf(x402): reduce avoidable round trips in guided catalog purchases
+1347,feature,feature,CLOSED,2026-08-12,enhancement|test|area:sdk|area:docs,feat(connect): add a redacted structured completion and recovery contract
+1346,feature,feature,CLOSED,2026-08-12,enhancement|test|area:sdk|area:docs,feat(connect): make completion handoff runtime-aware and actionable
+1341,process,process,CLOSED,2026-08-12,code-quality|area:docs,Teach ship-next to use the agent coordination channel
+1340,flake,flake,CLOSED,2026-08-12,qa-failure,qa-dev money-flow failed (2026-08-12)
+1337,false-instrument,false-instrument,CLOSED,2026-08-11,code-quality,Contract-doc coupling gate fails on empty diffs ('nothing was verified')
+1332,feature,feature,CLOSED,2026-08-11,enhancement|area:sdk|area:mcp,Runtime-parity for agent guidance: install the Haven skill (or equivalent) for Codex and Hermes
+1330,feature,feature,CLOSED,2026-08-11,enhancement|test|area:sdk|area:mcp|area:docs,Store Hermes hosted-MCP credential in its native .env
+1328,rail-retirement,rail-retirement,CLOSED,2026-08-11,money-path|area:backend|area:sdk|area:mcp|area:docs,Retire the legacy MPP demo merchant flow
+1326,feature,feature,CLOSED,2026-08-11,enhancement|test|area:sdk|area:mcp|area:docs,Add Hermes Agent as a first-class @haven_ai/connect runtime
+1321,logic-bug,logic-bug,CLOSED,2026-08-11,money-path|area:sdk|area:mcp,fix(mcp): handshake hosted paid-MCP quote probes
+1319,false-instrument,false-instrument,CLOSED,2026-08-11,money-path|area:backend,Delegation-rail preflight: test the degrade path + surface the #1145 RPC-fallback nuance
+1312,feature,feature,CLOSED,2026-08-11,enhancement|mcp|sdk|backend|test|money-path|area:backend|area:sdk|area:mcp,x402 catalog purchases: add end-to-end agent-path QA scenario
+1311,feature,feature,CLOSED,2026-08-11,documentation|enhancement|mcp|sdk|money-path|area:sdk|area:mcp|area:docs,x402 MCP tools: compress agent-facing descriptions around the critical path
+1310,feature,feature,CLOSED,2026-08-11,enhancement|mcp|sdk|backend|money-path|area:backend|area:sdk|area:mcp,x402 settlement responses: include post-purchase allowance summary
+1309,feature,feature,CLOSED,2026-08-11,enhancement|mcp|sdk|signer|money-path|area:sdk|area:mcp,x402 signer compatibility: make support checks machine-readable and automatic
+1308,feature,feature,CLOSED,2026-08-11,enhancement|mcp|sdk|backend|money-path|area:backend|area:sdk|area:mcp,"x402 MCP tools: return structured next_action, agent_summary, and warnings"
+1307,feature,feature,CLOSED,2026-08-11,enhancement|mcp|sdk|backend|signer|money-path|area:backend|area:sdk|area:mcp,x402 MCP purchase: compact sign and settle continuation by payment_id
+1306,feature,feature,CLOSED,2026-08-11,enhancement|mcp|sdk|backend|money-path|area:backend|area:sdk|area:mcp,x402 catalog purchase: add guided preflight by catalog_id
+1305,feature,feature,CLOSED,2026-08-11,enhancement|epic|mcp|sdk|backend|demo-ready|money-path,Epic: Guided catalog purchase flow for x402 MCP agents
+1301,feature,feature,CLOSED,2026-08-11,enhancement|mcp,Local MCP parity: base-URL merchant endpoint discovery (#1271) in packages/mcp
+1300,logic-bug,logic-bug,CLOSED,2026-08-11,money-path|area:sdk,Bound the merchant probe fetch in quoteX402 with a timeout
+1297,logic-bug,logic-bug,CLOSED,2026-08-11,,Fix demo merchant catalog discovery for dev/prod agents
+1289,other,other,OPEN,2026-08-10,coordination,🤝 Agent coordination channel (standing)
+1288,false-instrument,false-instrument,CLOSED,2026-08-10,money-path|area:backend,Prove the x402 rail-scoping clause behaviorally on the real-Postgres suite
+1279,false-instrument,false-instrument,CLOSED,2026-08-10,code-quality,Demo merchant: test gaps + nits from the correctness audit
+1278,logic-bug,logic-bug,CLOSED,2026-08-10,bug,Demo merchant: a genuinely reverted settlement tx can never be retried (retry loop re-confirms the dead hash)
+1275,feature,feature,CLOSED,2026-08-10,enhancement|mcp|sdk|money-path,x402 agent purchase: make max_amount cap guidance explicit and enforce before signing
+1274,feature,feature,CLOSED,2026-08-10,enhancement|mcp|demo-ready,x402 demo merchant: expose stable machine-readable product metadata
+1273,feature,feature,CLOSED,2026-08-10,enhancement|mcp|demo-ready,x402 demo merchant: return structured purchase summary for agent reporting
+1272,feature,feature,CLOSED,2026-08-10,enhancement|mcp|sdk|signer|money-path,x402 agent purchase: compact signer handoff and hide bulky typed-data by default
+1271,feature,feature,CLOSED,2026-08-10,enhancement|mcp|backend|demo-ready,x402 agent purchase: auto-discover merchant MCP endpoints from base URLs
+1270,feature,feature,CLOSED,2026-08-10,enhancement|epic|mcp|sdk|backend|demo-ready|money-path,Epic: Improve the agent x402 purchase experience
+1264,logic-bug,logic-bug,CLOSED,2026-08-10,bug|money-path,Delegation-rail signing payload cannot survive model-mediated transport in some agent runtimes — design a byte-free signing path
+1263,logic-bug,logic-bug,CLOSED,2026-08-10,bug,x402 MCP delegation payment still fails: agents must re-emit typed_data_b64 manually
+1256,logic-bug,logic-bug,CLOSED,2026-08-10,bug|money-path|area:sdk,x402 merchant header fails facilitator verify: validBefore has zero forward margin (all merchants with maxTimeoutSeconds ≥ ~elapsed latency)
+1255,logic-bug,logic-bug,CLOSED,2026-08-10,bug,x402 demo merchant purchase fails: delegation typed-data digest mismatch
+1254,logic-bug,logic-bug,CLOSED,2026-08-10,bug|mcp|signer|money-path,"Direct-rail (haven_pay) drops typed_data for delegation accounts — hosted MCP strips it, edge signer ignores it → AA24 on-chain"
+1251,logic-bug,logic-bug,CLOSED,2026-08-10,bug|backend|money-path,MPP entry points fall through to LEGACY coverage for delegation-rail agents — manufacturing unexecutable approvals
+1250,feature,feature,CLOSED,2026-08-10,,Update demo merchant MCP to expose x402 products in dev/prod with EIP-3009 and ERC-7710 settlement options
+1248,feature,feature,CLOSED,2026-08-10,documentation,Docs staleness audit (weekly)

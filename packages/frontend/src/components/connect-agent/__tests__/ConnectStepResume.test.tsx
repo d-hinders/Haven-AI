@@ -126,6 +126,60 @@ describe('ConnectStep resumed from a hand-off link (#2522)', () => {
     expect(screen.getByText(/Research agent/i)).toBeInTheDocument()
   })
 
+  it('a stale or mistyped link says so instead of showing an empty body', () => {
+    // Second review round. `resolveConnectStepView` returns null with no
+    // status, so this rendered chrome over nothing — the first round's defect
+    // reached by the likeliest route in practice, not by a named status.
+    render(
+      <ConnectStep
+        flow={resumedFlow({
+          setupStatus: undefined,
+          connectView: null,
+          statusError: 'We could not load this agent setup.',
+        })}
+      />,
+    )
+    expect(screen.getByText(/We could not open this setup/i)).toBeInTheDocument()
+    expect(screen.getByText(/may belong to a different Haven account/i)).toBeInTheDocument()
+  })
+
+  it.each(['expired', 'cancelled', 'failed'] as const)(
+    '%s on a resumed link offers Close, never "Create a new setup"',
+    (kind) => {
+      // "Create a new setup" drops the user on the REVIEW step, and a resumed
+      // session never filled in details or policy — it would post an unnamed,
+      // budget-less setup against whichever wallet the viewer defaults to.
+      const restartFromReview = vi.fn()
+      render(
+        <ConnectStep
+          flow={resumedFlow({
+            setupStatus: { ...STATUS, status: kind },
+            connectView: { kind },
+            restartFromReview,
+          })}
+        />,
+      )
+      expect(screen.queryByRole('button', { name: /Create a new setup/i })).not.toBeInTheDocument()
+      expect(restartFromReview).not.toHaveBeenCalled()
+    },
+  )
+
+  it('a NON-resumed terminal state still offers it — the ordinary flow is unchanged', () => {
+    // Positive control: the three cases above prove nothing if the action was
+    // simply removed for everyone.
+    render(
+      <ConnectStep
+        flow={resumedFlow({
+          setup: { setup_id: STATUS.setup_id, expires_at: STATUS.expires_at },
+          resumed: false,
+          setupStatus: { ...STATUS, status: 'expired' },
+          connectView: { kind: 'expired' },
+        })}
+      />,
+    )
+    expect(screen.getByRole('button', { name: /Create a new setup/i })).toBeInTheDocument()
+  })
+
   it('still renders nothing when there is neither a setup nor a resume', () => {
     // Positive control: the guard must still be able to say no, or the three
     // assertions above prove nothing about it.

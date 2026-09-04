@@ -35,6 +35,48 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
   // status on that path, so the modal opened with chrome and a blank body.
   if (!setup && !resumed) return null
 
+  // #2522, second review round: a resumed session whose status never loads.
+  // `resolveConnectStepView` returns null when there is no status, so without
+  // this the modal renders chrome over an empty body — the same failure the
+  // first round found, reached by a different route, and by the likeliest
+  // route in practice: a stale or mistyped hand-off link.
+  //
+  // The poll behind this retries forever by design (#1404, so a live connect
+  // survives a dropped request); that decision is not disturbed here. What
+  // changes is that the surface stops staying silent about it.
+  //
+  // DEVIATION from the issue's wording, recorded rather than glossed: the
+  // acceptance criterion says a foreign or unknown id shows not-found "and no
+  // modal". Not-found INSIDE the modal is what ships, because the alternative
+  // leaves someone who followed a link looking at an unchanged agents page
+  // with no account of what happened.
+  if (resumed && flow.statusError && !setupStatus) {
+    return (
+      <ConnectStepShell phase="halted" stateKey="resume_not_found">
+        <SetupStatusState
+          title="We could not open this setup"
+          body="The link may be out of date, or this setup may belong to a different Haven account. Ask the agent for a fresh link."
+          tone="warning"
+          primaryLabel="Close"
+          onPrimary={flow.handleClose}
+        />
+      </ConnectStepShell>
+    )
+  }
+
+  /**
+   * Terminal states offer "Create a new setup", which drops the user on the
+   * REVIEW step — and a resumed session never filled in the details or policy
+   * steps, so name and budget are empty there and the submit button does not
+   * gate on either. It would post an unnamed, budget-less setup against
+   * whichever wallet the viewer happens to default to, not the one this setup
+   * was for. Second review round; on this path the only honest action is to
+   * close and go back to the agent that sent the link.
+   */
+  const terminalPrimary = resumed
+    ? { label: 'Close', onPress: flow.handleClose }
+    : null
+
   // #1672: once the connector has run, the setup status carries the runtime it
   // DETECTED in the executing environment. Runtime-specific copy (restart
   // guidance, the Codex Desktop note) keys off this.
@@ -126,8 +168,8 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           badgeLabel="Expired"
           body="Create a new setup prompt, then paste the fresh prompt into your agent environment."
           tone="warning"
-          primaryLabel="Create a new setup"
-          onPrimary={() => flow.restartFromReview()}
+          primaryLabel={terminalPrimary?.label ?? 'Create a new setup'}
+          onPrimary={terminalPrimary?.onPress ?? (() => flow.restartFromReview())}
           secondaryLabel="Close"
           onSecondary={flow.handleClose}
         />
@@ -139,8 +181,8 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           badgeLabel="Cancelled"
           body="This setup can no longer connect an agent. Create a new setup prompt when you are ready."
           tone="neutral"
-          primaryLabel="Create a new setup"
-          onPrimary={() => flow.restartFromReview({ clearCancelled: true })}
+          primaryLabel={terminalPrimary?.label ?? 'Create a new setup'}
+          onPrimary={terminalPrimary?.onPress ?? (() => flow.restartFromReview({ clearCancelled: true }))}
           secondaryLabel="Close"
           onSecondary={flow.handleClose}
         />
@@ -152,8 +194,8 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           badgeLabel="Failed"
           body={setupStatus?.failure_reason ?? 'Create a new setup prompt and try again.'}
           tone="danger"
-          primaryLabel="Create a new setup"
-          onPrimary={() => flow.restartFromReview()}
+          primaryLabel={terminalPrimary?.label ?? 'Create a new setup'}
+          onPrimary={terminalPrimary?.onPress ?? (() => flow.restartFromReview())}
           secondaryLabel="Close"
           onSecondary={flow.handleClose}
         />

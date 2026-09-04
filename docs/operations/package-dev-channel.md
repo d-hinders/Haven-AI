@@ -15,7 +15,7 @@ covers:
   - packages/connect/src/doctor.ts
   - packages/connect/src/cli.ts
   - packages/connect/src/args.ts
-last-verified: "2026-09-03" # #2486: re-verified, NOT edited. The strict coupling gate implicated this doc because PR #2502 edits `packages/backend/src/routes/agent-connection-setups.ts` (added to covers: by #2497). The one claim this doc makes about that file — `connector_package` is built from `config.connectorChannel` at import time — was re-read against #2502's diff, which changes `buildSetupPrompt`'s closing sentence and nothing on the `connector_package` path. Claim holds; no body change. Scope: that one claim only. Prior: #2425: written against the merged slices, not the epic text — `publish.yml`, `scripts/release-snapshot-version.mjs` and `scripts/release-channel.mjs` (#2463), `parseConnectorChannel` in `packages/backend/src/config.ts` (#2467), `packages/sdk/src/connector-channel.ts` and `packages/mcp-server/src/connector-channel.ts` (#2492), and `packages/connect/src/runtime-spec-override.ts` as merged by PR #2495 (`fceb0891`, #2424). The one measured publish it quotes is run 33772207035 on `fd49e1a3`, as recorded in the #2420 comment thread on 2026-09-03. No deployment state is asserted anywhere in the body: the operator checklist is unticked by design. covers: was widened on review (haven-reviewer at a5349eed): the first draft listed five files while the body states the behaviour of twelve — parseConnectorChannel (config.ts), connector_package (agent-connection-setups.ts), doctor.ts, cli.ts, release-channel.mjs and release-bump.mjs were uncovered (and, on the second pass, args.ts — the file that actually parses --version and --doctor, which cli.ts only dispatches after), so a change to any of them would never have re-implicated this contract doc.
+last-verified: "2026-09-04" # #2420 rollout: added § "First rollout — 2026-09-04", a dated record of the epic's operator steps. Deliberately does NOT tick the checklist above — its preamble says the boxes stay unticked because live environment state is read from the environment, and a ticked box would assert a Railway variable nothing keeps true. Evidence is split into measured (steps 2-4, re-run for this edit: ancestor check on 709f87f3, four publish.yml runs, `npm view` dist-tags on all five) and owner-reported (steps 1, 5, 6 — an npmjs.com settings page and two Railway variables, none of which this repository can observe). Step 8 is recorded as NOT verified rather than assumed. Also records that the published @dev SDK bundle carries HAVEN_CONNECTOR_CHANNEL = "dev", read from the tarball, and links #2515 for the README gap the rollout surfaced. Scope: the new section and this note ONLY — the mechanism sections (what @dev is, the loop, the single-developer override, the checklist, failure modes) were NOT re-verified in this pass. Prior: #2486: re-verified, NOT edited. The strict coupling gate implicated this doc because PR #2502 edits `packages/backend/src/routes/agent-connection-setups.ts` (added to covers: by #2497). The one claim this doc makes about that file — `connector_package` is built from `config.connectorChannel` at import time — was re-read against #2502's diff, which changes `buildSetupPrompt`'s closing sentence and nothing on the `connector_package` path. Claim holds; no body change. Scope: that one claim only. Prior: #2425: written against the merged slices, not the epic text — `publish.yml`, `scripts/release-snapshot-version.mjs` and `scripts/release-channel.mjs` (#2463), `parseConnectorChannel` in `packages/backend/src/config.ts` (#2467), `packages/sdk/src/connector-channel.ts` and `packages/mcp-server/src/connector-channel.ts` (#2492), and `packages/connect/src/runtime-spec-override.ts` as merged by PR #2495 (`fceb0891`, #2424). The one measured publish it quotes is run 33772207035 on `fd49e1a3`, as recorded in the #2420 comment thread on 2026-09-03. No deployment state is asserted anywhere in the body: the operator checklist is unticked by design. covers: was widened on review (haven-reviewer at a5349eed): the first draft listed five files while the body states the behaviour of twelve — parseConnectorChannel (config.ts), connector_package (agent-connection-setups.ts), doctor.ts, cli.ts, release-channel.mjs and release-bump.mjs were uncovered (and, on the second pass, args.ts — the file that actually parses --version and --doctor, which cli.ts only dispatches after), so a change to any of them would never have re-implicated this contract doc.
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -233,6 +233,51 @@ the live state of an environment is read from the environment, not from prose.
       the *Preview* scope that sets `NEXT_PUBLIC_HAVEN_ENV=dev` needs no change.
 - [ ] **8. Production stays unset**, everywhere the variable exists. Unset (or
       empty) means `alpha`, byte-for-byte the pre-#2422 handout.
+
+## First rollout — 2026-09-04 (history, not live state)
+
+The checklist above stays unticked on purpose, for the reason its own preamble
+gives: it describes the mechanism, and an environment's live state is read from
+the environment. This section is the complementary thing — a **dated record of
+one rollout**, which cannot go stale because it does not claim to be current. If
+you are asking "is the dev environment on `@dev` right now", the answer is not
+here; run step 5's verification against the environment.
+
+**Two kinds of evidence below, deliberately not merged.** *Measured* means a
+command was run and its output read. *Owner-reported* means the repository
+cannot see it — a Railway variable and an npmjs.com settings page are both
+outside anything a check can reach — and the line records who said so, not a
+fact the repo verified. Rolling the second into the first is how a doc starts
+asserting an environment it has never observed.
+
+| # | Step | 2026-09-04 | Evidence |
+|---|---|---|---|
+| 1 | Trusted Publisher entries | done | **Owner-reported.** All five checked on npmjs.com: repository `d-hinders/Haven-AI`, workflow `publish.yml`, environment field empty. The entries are immutable once created ("to change them, delete it and create a new one"), so this should not need rechecking. |
+| 2 | Publishing slice on `dev` | done | **Measured.** `git merge-base --is-ancestor 709f87f3 origin/dev` → yes (PR #2463). |
+| 3 | A package-touching push ran the workflow | done | **Measured.** Four successful `publish.yml` runs on `dev`, 2026-09-03: `fd49e1a` (#2423), `fceb089` (#2424), `2309084` (#2494), `893d74f` (#2425). |
+| 4 | Registry shows `dev` on all five | done | **Measured.** `dev` → `0.0.0-dev.202609031827.893d74f` on sdk, signer, mcp, connect and cli — one version across all five. `alpha` unchanged at `0.1.34-alpha.0`, i.e. the prod channel was not touched. |
+| 5 | `HAVEN_CONNECTOR_CHANNEL=dev` on the dev **backend** | done | **Owner-reported**, from the Railway variables pane. |
+| 6 | Same variable on the dev **hosted MCP** | done | **Owner-reported**, added and redeployed 2026-09-04. It was absent until then, so between step 5 and this the environment was split — the dashboard handed out `@dev` while the hosted MCP's own re-run hints still named `@alpha`. |
+| 7 | Vercel: nothing | n/a | No frontend variable exists to set. |
+| 8 | Production stays unset | not verified | **Neither measured nor reported.** An ongoing invariant rather than a step that completes, and nothing in this repository can observe it. |
+
+**One thing the rollout proved that no checklist step asks for.** The published
+`@haven_ai/sdk@dev` tarball carries `HAVEN_CONNECTOR_CHANNEL = "dev"` in its
+built bundle — read out of the tarball, not inferred from the source. That is
+the whole of #2423 demonstrated through the real release path: `release-bump.mjs`
+derived the channel, rewrote the constant, and the artifact shipped naming the
+channel it was published under. The corresponding `dist/` contains **no**
+hard-coded `@haven_ai/connect@<tag>` string at all, because the spec is
+assembled at runtime from that constant — which is also why
+`verify-connect-bundle.mjs` executes the bundle rather than grepping it.
+
+**A known gap this rollout surfaced ([#2515](https://github.com/d-hinders/Haven-AI/issues/2515)).**
+The package READMEs are not channel-aware. `packages/connect/README.md` still
+writes `npx @haven_ai/connect@alpha` in ten command examples and
+`packages/signer/README.md` in one, and `README.md` ships inside each tarball,
+so the `@dev` package's npm landing page tells its reader to install the
+production connector. The code half is correct; only the prose disagrees with
+the artifact it ships in.
 
 ## Ongoing: what accumulates, and what to leave alone
 

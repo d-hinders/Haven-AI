@@ -8,7 +8,11 @@ covers:
   - packages/frontend/public/402.md
   - packages/frontend/src/middleware.ts
   - packages/frontend/src/lib/discovery.ts
-last-verified: "2026-08-31"
+  - packages/frontend/src/lib/discovery-surfaces.ts
+  - packages/frontend/src/app/robots.txt/route.ts
+  - packages/frontend/src/app/sitemap.xml/route.ts
+  - packages/frontend/src/app/layout.tsx
+last-verified: "2026-09-04" # #2521: added the robots.txt / sitemap.xml / auth-marker rows below and the four `covers:` entries above. Scope: § *The artifacts* and the new § *Discovery hooks* only. The URL column of the pre-existing rows still reads `haven.xyz` and is deliberately UNTOUCHED — that rewrite is #2520's, in flight on a parallel branch, and editing it here would conflict for no reason. Prior: (no note recorded)
 ---
 
 # Agent discovery listings — registry audit & cadence
@@ -24,8 +28,24 @@ Operational home of the **Agent Discovery (AEO) GTM track**, Phase 0 (strategy d
 | 402 page | `haven.xyz/402/` | Human landing for the 402 moment. Mirror of `402.md` — **edit both together** (sync note in the HTML header). |
 | `402.md` | `haven.xyz/402.md` | Agent-readable mirror; token-cheap, answer-first. |
 | npm metadata | package.json of sdk / signer / mcp / connect / cli | Keywords + descriptions carry the category phrases (x402, agent-payments, budget, non-custodial). Ships on next `release:bump`; do not hand-edit versions (see `scripts/README.md`). |
+| `robots.txt` | `/robots.txt` | **Generated**, not a static file (`src/app/robots.txt/route.ts`). Names the agent-readable artifacts and `Disallow`s the authenticated prefixes. Update when a public artifact is added or an authenticated prefix appears — both come from `AUTHENTICATED_PREFIXES` in `src/lib/discovery-surfaces.ts`, so edit that list, not the template. |
+| `sitemap.xml` | `/sitemap.xml` | **Generated** (`src/app/sitemap.xml/route.ts`) from `PUBLIC_SURFACES` in `src/lib/discovery-surfaces.ts`. Add a public page → add it there. The guard test fails if an entry resolves to no route or file, or if an authenticated prefix reaches the list. |
+| Auth-wall marker | `<meta name="haven:auth" content="required">` | Emitted by `src/app/(authenticated)/layout.tsx` on every authenticated page, plus a `<noscript>` sentence. Lets a non-browser client tell a wall from a page — they all answer 200 with an SSR shell. Never add it to a public route; never remove it from an authenticated one. |
 
 The connect one-liner is `npx @haven_ai/connect@alpha` **everywhere, verbatim** — agents copy exact strings. If the dist-tag ever changes, sweep every artifact above in one PR.
+
+## Discovery hooks (#2521)
+
+The artifacts above are only worth having if an agent can *find* them. The 2026-09-04 cold test ([`agent-first-cold-test-2026-09-04.md`](../bug-reports/agent-first-cold-test-2026-09-04.md) §2 step 1, §3.2) found them by guessing the convention — nothing in the served HTML pointed anywhere. Four hooks now do:
+
+1. **`<link rel="alternate">` in the root layout** — `/llms.txt` (`text/plain`) and `/api/openapi.json` (`application/json`). Written as literal tags rather than Next `Metadata.alternates`, because Next resolves metadata URLs against `metadataBase` and would emit an absolute host; a **relative** href is correct on the dev preview, on production and on a future custom domain alike.
+2. **`/robots.txt`** — allows crawling, names the artifacts in a comment block, `Disallow`s the authenticated prefixes, and carries an absolute `Sitemap:` URL.
+3. **`/sitemap.xml`** — the public surfaces, absolute.
+4. **One server-rendered sentence on the landing page**, plus a **"For agents"** footer link. Real content in the HTML a `curl` sees, not a hidden element.
+
+**Why `robots.txt` and `sitemap.xml` are route handlers and not files in `public/`.** Both specs require *absolute* URLs — a relative `Sitemap:` line is silently ignored by crawlers, which is the same defect class as the dead hosts #2520 is fixing. Epic #2519's invariant forbids hardcoding a host. Taking the origin off the request satisfies both, with no env var to set per deployment and nothing to sweep if a custom domain is ever mapped.
+
+Guard test: `packages/frontend/src/lib/__tests__/discovery-surfaces.test.ts`.
 
 ## Registry & directory checklist
 

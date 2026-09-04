@@ -22,7 +22,14 @@ Haven connects agents through MCP (hosted, keyless) plus a local signer. Payment
 ## Trust and verification
 
 - [Independent exit tool](/exit): inspect and revoke every agent budget with only a wallet and a public RPC — works even if Haven disappears
-- [Account recovery](https://github.com/d-hinders/Haven-AI/blob/dev/docs/product/account-recovery.md): signer-set management and recovery model
+- [Account recovery](/docs/account-recovery.md): signer-set management and recovery model
+
+## Docs
+
+- [Account recovery](/docs/account-recovery.md): signer set, backup signers, and what is unrecoverable
+- [Agent key rotation](/docs/agent-key-rotation.md): re-keying a lost or exposed delegate key without re-onboarding
+- [Agent Passport](/docs/agent-passport.md): the signed attestation that an agent was issued, bound, governed and is revocable
+- [Delegation rail security model](/docs/security-model.md): what the on-chain envelope enforces, and what it does not
 
 ## Optional
 

@@ -1,5 +1,16 @@
-import type { FastifyRequest } from 'fastify'
 import { config } from '../config.js'
+
+/**
+ * Just the headers this module reads — deliberately NOT `FastifyRequest`.
+ *
+ * `domain/` may not import the web framework (`domain-stays-pure`, see
+ * docs/architecture/10-module-boundaries.md), and the dependency lint caught
+ * the first version doing exactly that. The fix is the honest one rather than
+ * an exemption: this logic never needed a request object, only three header
+ * values, and taking them directly makes it pure, framework-free and testable
+ * without constructing a fake request.
+ */
+export type ForwardedHeaders = Record<string, string | string[] | undefined>
 
 /**
  * The public origin this backend is being reached at (#2530).
@@ -46,12 +57,12 @@ import { config } from '../config.js'
  * sets `HAVEN_API_URL` to exactly that. That is a stated fact rather than an
  * inference, which is the right shape for something a client will call.
  */
-export function apiBaseUrl(request: FastifyRequest): string {
+export function apiBaseUrl(headers: ForwardedHeaders): string {
   const env = process.env.HAVEN_API_URL ?? process.env.PUBLIC_API_URL
   if (env) return env.replace(/\/+$/, '')
 
-  const forwardedHost = config.trustProxyHops > 0 ? trustedEntry(request, 'x-forwarded-host') : null
-  const host = forwardedHost ?? request.headers.host ?? `localhost:${process.env.PORT ?? 3001}`
+  const forwardedHost = config.trustProxyHops > 0 ? trustedEntry(headers, 'x-forwarded-host') : null
+  const host = forwardedHost ?? asString(headers.host) ?? `localhost:${process.env.PORT ?? 3001}`
 
   // The SCHEME is not gated on proxy trust, and the asymmetry is deliberate.
   // The host is the spoofable TARGET — it decides where a client is told to
@@ -80,7 +91,7 @@ export function apiBaseUrl(request: FastifyRequest): string {
   // scheme on a correct host yields a URL that simply fails against a
   // TLS-only origin. Raised by review; confirming the edge overwrites this
   // header is an infra question this repository cannot answer.
-  const proto = leftmostEntry(request, 'x-forwarded-proto')
+  const proto = leftmostEntry(headers, 'x-forwarded-proto')
   const scheme = proto ?? 'http'
   return `${scheme}://${host}`.replace(/\/+$/, '')
 }
@@ -103,22 +114,28 @@ export function apiBaseUrl(request: FastifyRequest): string {
  * A header arriving as a repeated field (an array) is treated the same way —
  * flattened first, so `a, b` and `['a', 'b']` cannot disagree.
  */
-function trustedEntry(request: FastifyRequest, name: string): string | null {
-  const entries = headerEntries(request, name)
+function trustedEntry(headers: ForwardedHeaders, name: string): string | null {
+  const entries = headerEntries(headers, name)
   if (entries.length === 0) return null
   const hops = Math.max(config.trustProxyHops, 1)
   return entries[Math.max(entries.length - hops, 0)] || null
 }
 
 /** The leftmost entry — what the ORIGINAL client sent. See the scheme's read. */
-function leftmostEntry(request: FastifyRequest, name: string): string | null {
-  return headerEntries(request, name)[0] ?? null
+function leftmostEntry(headers: ForwardedHeaders, name: string): string | null {
+  return headerEntries(headers, name)[0] ?? null
 }
 
 /** A forwarded header's entries, in order, with a repeated field flattened. */
-function headerEntries(request: FastifyRequest, name: string): string[] {
-  const raw = request.headers[name]
+function headerEntries(headers: ForwardedHeaders, name: string): string[] {
+  const raw = headers[name]
   const flat = Array.isArray(raw) ? raw.join(',') : raw
   if (typeof flat !== 'string') return []
   return flat.split(',').map((part) => part.trim()).filter(Boolean)
+}
+
+/** A single header value, or null when it is absent or repeated-as-array. */
+function asString(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0] ?? null
+  return typeof value === 'string' ? value : null
 }

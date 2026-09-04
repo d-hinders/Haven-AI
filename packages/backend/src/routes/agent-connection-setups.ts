@@ -251,7 +251,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         parsed.allowances,
       )
 
-      const apiUrl = apiBaseUrl(request)
+      const apiUrl = apiBaseUrl(request.headers)
       const command = buildConnectorCommand(setupToken, apiUrl, parsed.localMcp)
       return reply.code(201).send({
         setup_id: setupId,
@@ -1151,7 +1151,7 @@ function joinApprovedActions(actions: string[]): string {
 export function hostedMcpUrl(request: FastifyRequest): string {
   const explicit = process.env.HAVEN_HOSTED_MCP_URL ?? process.env.NEXT_PUBLIC_HAVEN_MCP_URL
   if (explicit) return explicit.replace(/\/+$/, '')
-  const self = apiBaseUrl(request)
+  const self = apiBaseUrl(request.headers)
   // A malformed self-URL (scheme-less HAVEN_API_URL, weird Host header) must
   // yield the ACTIONABLE config error, not a masked TypeError-500 (#1136
   // review) — treat unparseable as not-production.

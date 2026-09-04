@@ -29,7 +29,7 @@ import { apiBaseUrl } from '../domain/request-origin.js'
  */
 export default async function openapiRoutes(app: FastifyInstance): Promise<void> {
   app.get('/openapi.json', async (request, reply) => {
-    const live = apiBaseUrl(request)
+    const live = apiBaseUrl(request.headers)
     const documented = openapiSpec.servers.filter((entry) => entry.url !== live)
     return reply
       .header('cache-control', 'public, max-age=0, must-revalidate')

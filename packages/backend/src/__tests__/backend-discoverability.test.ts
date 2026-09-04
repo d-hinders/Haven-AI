@@ -20,8 +20,11 @@ import { openapiSpec } from '../openapi/spec.js'
  */
 
 describe('request origin', () => {
-  function req(headers: Record<string, string>, url = '/openapi.json') {
-    return { headers, url, raw: { url } } as never
+  // The helper takes HEADERS now, not a request — `domain/` may not import the
+  // web framework (`domain-stays-pure`), which the dependency lint caught. This
+  // stays as a named function so every case below reads the same.
+  function req(headers: Record<string, string | string[]>): Record<string, string | string[]> {
+    return headers
   }
 
   it('derives the origin from the request', () => {
@@ -120,9 +123,7 @@ describe('request origin', () => {
       try {
         ;(config as { trustProxyHops: number }).trustProxyHops = 1
         const asArray = { host: 'b.internal', 'x-forwarded-host': ['attacker.example', 'real-edge.test'] }
-        expect(apiBaseUrl({ headers: asArray, url: '/', raw: { url: '/' } } as never)).toBe(
-          'http://real-edge.test',
-        )
+        expect(apiBaseUrl(asArray)).toBe('http://real-edge.test')
       } finally {
         ;(config as { trustProxyHops: number }).trustProxyHops = original
       }

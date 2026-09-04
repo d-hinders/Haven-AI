@@ -33,7 +33,7 @@ covers:
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/frontend/next.config.ts
-last-verified: "2026-09-04" # #2530: new § *Discoverability from a bare URL* — the three unauthenticated surfaces, the request-derived `servers[0]`, the two things the origin helper deliberately does NOT do (the trust-gated host with an UNgated scheme, and the path prefix it cannot infer because the frontend rewrite strips `/api` before the backend sees it — measured as a 404, not assumed), the 401 `hint` with the two constraints it must not break (#1640 body identity; the uniform invalid-key string), and the public catalogue allow-list. Four new `covers:` entries — `packages/frontend/next.config.ts` added on review, since the path-prefix claim in this section is made true by that rewrite and nothing would have re-implicated the doc if it changed. The forwarded-header paragraph was also corrected on review: it claimed parity with `authRateLimit`, which gates on the same variable but hands SELECTION to `proxy-addr` counting from the right — the host now indexes from the trusted end for that reason, the scheme deliberately does not, and the accepted residue is stated rather than implied. Scope: that section and the front matter — the coverage tables, the drift check and the authority-boundaries section were not re-read. Prior: chain-reset(#2542): scoped re-count after the documented health routes; prior notes remain in git history.
+last-verified: "2026-09-04" # #2530: new § *Discoverability from a bare URL* — the three unauthenticated surfaces, the request-derived `servers[0]`, the two things the origin helper deliberately does NOT do (the trust-gated host with an UNgated scheme, and the path prefix it cannot infer because the frontend rewrite strips `/api` before the backend sees it — measured as a 404, not assumed), the 401 `hint` with the two constraints it must not break (#1640 body identity; the uniform invalid-key string), and the public catalogue allow-list. CI then caught two more, both mine: the generated `packages/core/src/api-types.ts` was stale against the spec fields this PR adds (regenerated), and `domain/request-origin.ts` imported Fastify, violating `domain-stays-pure` — fixed by taking headers rather than a request, which is recorded in the section above. Four new `covers:` entries — `packages/frontend/next.config.ts` added on review, since the path-prefix claim in this section is made true by that rewrite and nothing would have re-implicated the doc if it changed. The forwarded-header paragraph was also corrected on review: it claimed parity with `authRateLimit`, which gates on the same variable but hands SELECTION to `proxy-addr` counting from the right — the host now indexes from the trusted end for that reason, the scheme deliberately does not, and the accepted residue is stated rather than implied. Scope: that section and the front matter — the coverage tables, the drift check and the authority-boundaries section were not re-read. Prior: chain-reset(#2542): scoped re-count after the documented health routes; prior notes remain in git history.
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -70,6 +70,12 @@ listed as the documented second entry. The origin comes from
 `packages/backend/src/domain/request-origin.ts`, which is also what builds the
 connector command and the root document's own URLs — one answer, three
 surfaces.
+
+That helper takes **headers**, not a request object. `domain/` may not import
+the web framework (`domain-stays-pure`, doc 10), and the dependency lint caught
+the first version doing exactly that. Taking the three header values directly
+satisfies the boundary honestly rather than by exemption, and makes the
+function pure — its tests construct a plain object instead of a fake request.
 
 Two things that helper does **not** do, both recorded because they look like
 omissions:

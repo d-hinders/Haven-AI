@@ -192,7 +192,7 @@ registerHealthRoutes(app, {
  * backend describes the dev backend.
  */
 app.get('/', async (request) => {
-  const base = apiBaseUrl(request)
+  const base = apiBaseUrl(request.headers)
   return {
     name: 'haven-api',
     description:

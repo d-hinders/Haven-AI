@@ -21,11 +21,11 @@ the Haven dashboard hands out, which writes the MCP config and pins the
 runtime:
 
 ```sh
-npx @haven_ai/connect@alpha
+npx @haven_ai/connect@<channel>
 ```
 
-`@alpha` is the production channel and is the right answer unless your
-dashboard hands you a different one — **run the command that dashboard shows
+`<channel>` is a placeholder: production hands out `@alpha`, and it is the right
+answer unless your dashboard hands you a different one — **run the command that dashboard shows
 you**, which names the npm dist-tag that backend is paired with. This signer's
 own messages do the same: since [#2423](https://github.com/d-hinders/Haven-AI/issues/2423)
 every "rerun the connector" hint it prints names the channel THIS build was

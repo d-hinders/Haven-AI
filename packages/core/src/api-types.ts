@@ -28,6 +28,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What this service is, and where its machine-readable contract lives.
+         * @description Unauthenticated root document (#2530). An agent handed only a backend URL had nothing to read and had to guess the spec path. Deliberately thin and non-sensitive: names, paths, and which credential each door wants — no version or build identifier, which would fingerprint the deployment and buy an agent nothing.
+         */
+        get: operations["getApiRoot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -2435,6 +2455,29 @@ export type components = {
          * @enum {string}
          */
         AgentPaymentRail: "direct" | "x402" | "mpp" | "mpp_demo" | "mpp_crypto" | "stripe_deposit" | "spt";
+        ApiRootDocument: {
+            /** @enum {string} */
+            name: "haven-api";
+            description?: string;
+            /**
+             * Format: uri
+             * @description Absolute URL of this document, derived from the request — so the dev backend names the dev backend and a request through the frontend proxy names the proxy.
+             */
+            openapi: string;
+            /**
+             * Format: uri
+             * @description Agent-readable product docs.
+             */
+            docs?: string;
+            auth: {
+                /** @description How an agent credential is presented. */
+                agent: string;
+                /** @description How an owner session is obtained. */
+                owner: string;
+            };
+            /** Format: uri */
+            health: string;
+        };
         HealthResponse: {
             /** @enum {string} */
             status: "ok" | "degraded";
@@ -3679,6 +3722,26 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    getApiRoot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The API root document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiRootDocument"];
                 };
             };
         };

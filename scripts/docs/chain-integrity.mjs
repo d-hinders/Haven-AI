@@ -301,15 +301,18 @@ export function checkChain(prevLine, nextLine) {
  * The comparison form for #2504's containment test.
  *
  * "Byte-verbatim" is the rule the convention states, and it is very nearly the
- * rule this check enforces — but the replay over merged history (see
- * `chain-integrity-backtest.mjs`) turned up one hit that was a full stop
- * deleted from the end of an entry, against two that were real: an entry
- * truncated mid-sentence, and an entry deleted outright whose ref survived
- * only as a citation inside another entry. A gate that goes red over a
- * trailing period teaches people to route around it, and the two real defects
- * are both changes of MEANING, which no amount of whitespace or terminal
- * punctuation can disguise: a truncation ends the text early, so containment
- * still fails after this normalisation.
+ * rule this check enforces — but the replay over merged history turned up one
+ * hit that was a full stop deleted from the end of an entry, against real
+ * losses of chain text. A gate that goes red over a trailing period teaches
+ * people to route around it, while a real loss is a change of MEANING that no
+ * amount of whitespace or terminal punctuation can disguise: text that ends
+ * early still fails containment after this normalisation.
+ *
+ * The replay, its window and what each hit turned out to be are recorded once,
+ * in `docs/contributing/docs-quality-system.md` § `last-verified` chain
+ * integrity. This comment carried its own copy of that account and was wrong
+ * about two of the three hits for three commits running — the reason the
+ * figures now live in one place.
  *
  * So: collapse internal whitespace runs, and ignore trailing whitespace and a
  * single terminal `.` — nothing else. Any change to a word is still a finding.

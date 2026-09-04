@@ -305,7 +305,7 @@ test('#2504: ONE word changed inside a prior entry is a finding, named by its re
   assert.equal(altered[0].head, '#200')
 })
 
-test('#2504: a prior entry truncated mid-sentence is a finding — the real defect the replay found', () => {
+test('#2504: a prior entry truncated is a finding — the real defect the replay found', () => {
   const next = BASE_CHAIN.replace(
     'the beta paragraph verified; nothing else re-read.',
     'the beta paragraph verified.',

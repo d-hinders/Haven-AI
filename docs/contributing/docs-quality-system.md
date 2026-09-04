@@ -464,7 +464,8 @@ All three hits at saturation are genuine losses of chain text — the check foun
 two more than an earlier draft of this section credited it with:
 
 - `docs/product/agent-key-rotation.md` (PR #1964): entries `#1849` and `#1702`
-  truncated mid-sentence during a merge resolution.
+  truncated mid-entry during a merge resolution — each cut lands after a
+  terminating period, so the loss is a whole sentence, not a broken one.
 - `docs/quality/scan-ledger.md` (PR #1603): the prior entry **was** chained
   behind `Prior:`, and compressed while chaining — "the outbound-tx-queue
   finding (epic #1554, approved); both prior findings re-checked and excluded

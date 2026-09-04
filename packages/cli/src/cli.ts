@@ -1,68 +1,19 @@
 #!/usr/bin/env node
 
-import { emitKeypressEvents } from 'node:readline'
 import { run } from './commands.js'
-
-/** The three streams the prompt touches, injectable so a test can watch them. */
-export interface PromptStreams {
-  stdin: NodeJS.ReadStream
-  stdout: NodeJS.WriteStream
-  stderr: NodeJS.WriteStream
-}
+import { promptPasswordWith } from './prompt.js'
 
 /**
- * Read a password from the TTY without echoing it. Falls back to a plain line
- * read when stdin isn't a TTY (so piping `HAVEN_PASSWORD` or a heredoc still
- * works, though the env var is the documented non-interactive path).
+ * The bin entry, and deliberately nothing else.
  *
- * Exported and stream-injected for one reason: which stream the prompt writes
- * to is part of the `--json` contract, and asserting it needs a seam. It is
- * `stderr` — see the comment at the write.
+ * It used to also define `promptPasswordWith`, which meant importing this file
+ * to test that function EXECUTED the CLI — `run(process.argv.slice(2))` against
+ * vitest's own argv, ending in `process.exit(1)`. The suite still reported 102
+ * passing tests with one unhandled error beside them, which is exactly the
+ * shape of failure a `grep` for "Tests" hides (#2525 review round 3, caught by
+ * CI). An entry point that self-executes must not also be an import target, so
+ * the prompt lives in `prompt.ts` and this file only wires and runs.
  */
-export function promptPasswordWith(streams: PromptStreams): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const { stdin, stderr } = streams
-    if (!stdin.isTTY) {
-      let data = ''
-      stdin.setEncoding('utf8')
-      stdin.on('data', (chunk) => (data += chunk))
-      stdin.on('end', () => resolve(data.trim()))
-      stdin.on('error', reject)
-      return
-    }
-    // stderr, never stdout (#2525 review): under `--json` stdout carries one
-    // JSON value and nothing else, and a prompt written there would land ahead
-    // of it. A prompt is prose addressed to a human at a terminal, so stderr is
-    // where it belongs in both modes — the TTY still shows it.
-    stderr.write('Password: ')
-    emitKeypressEvents(stdin)
-    stdin.setRawMode(true)
-    let value = ''
-    const onKey = (char: string, key: { name?: string; ctrl?: boolean }) => {
-      if (key.name === 'return' || key.name === 'enter') {
-        cleanup()
-        stderr.write('\n')
-        resolve(value)
-      } else if (key.ctrl && key.name === 'c') {
-        cleanup()
-        stderr.write('\n')
-        reject(new Error('Cancelled'))
-      } else if (key.name === 'backspace') {
-        value = value.slice(0, -1)
-      } else if (char && !key.ctrl) {
-        value += char
-      }
-    }
-    function cleanup() {
-      stdin.setRawMode(false)
-      stdin.pause()
-      stdin.off('keypress', onKey)
-    }
-    stdin.resume()
-    stdin.on('keypress', onKey)
-  })
-}
-
 function promptPassword(): Promise<string> {
   return promptPasswordWith({ stdin: process.stdin, stdout: process.stdout, stderr: process.stderr })
 }

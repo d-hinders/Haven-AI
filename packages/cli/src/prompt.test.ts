@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { PassThrough } from 'node:stream'
-import { promptPasswordWith, type PromptStreams } from './cli.js'
+// `./prompt.js`, never `./cli.js`: cli.ts is the bin entry and runs the CLI on
+// import. Importing it here executed `run()` against vitest's argv and called
+// `process.exit(1)` — 102 tests still "passed" with an unhandled error beside
+// them, which CI failed on and a grep for "Tests" did not show.
+import { promptPasswordWith, type PromptStreams } from './prompt.js'
 
 /**
  * The password prompt is part of the `--json` contract (#2525 review, finding 1).

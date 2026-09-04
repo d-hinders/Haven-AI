@@ -43,6 +43,7 @@ The `/qa-explore-ui` command owns the exploration, the safety rules (dev/testnet
 ## Related
 
 - [`qa-explore-ui`](../../.claude/commands/qa-explore-ui.md) — the exploration command this cadence schedules.
+- [`agent-first-cold-test-2026-09-04.md`](../bug-reports/agent-first-cold-test-2026-09-04.md) — the **A0 baseline** for the cold-agent onboarding scenario ([#2538](https://github.com/d-hinders/Haven-AI/issues/2538)), a second discovery pass that joins this cadence: same weekly, non-gating, dev-only shape, but scored against that run rather than exploring the signed-in dashboard.
 - [`agent-qa.md`](agent-qa.md) — QA identity, funding, secrets, and stable dev targets.
 - [`e2e-qa-runbook.md`](e2e-qa-runbook.md) — the deterministic (Layer 1/2) QA that *does* gate, for contrast.
 - [`new-task`](../../.agents/skills/new-task/SKILL.md) / [`ship-next`](../../.agents/skills/ship-next/SKILL.md) — the backlog-file and burn-down halves of the loop.

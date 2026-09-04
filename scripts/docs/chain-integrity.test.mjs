@@ -279,11 +279,15 @@ test('a dev → main promotion exits early, before any base resolution', () => {
 // The two existing checks answer "is every prior ref still here" and "is any
 // entry here twice". Neither asks whether the entry that is here still says
 // what it said, which is precisely what a hand-resolved base refresh can get
-// wrong. The boundary these tests pin was set by replaying the rule over
-// merged history (`chain-integrity-backtest.mjs`): 169 pull requests, 256
-// changed chain lines, and the only three hits were one deleted full stop
-// against two real defects — an entry truncated mid-sentence, and an entry
-// deleted outright whose ref survived as a citation inside another entry.
+// wrong.
+//
+// The tolerance these tests pin was set by replaying the rule over merged
+// history. The replay, its window and what each hit turned out to be are
+// recorded once, in `docs/contributing/docs-quality-system.md` §
+// `last-verified` chain integrity — not restated here. An earlier draft of this
+// comment carried its own copy of those figures and went stale against the
+// corrected account within one commit, which is the drift this whole change is
+// about.
 // ---------------------------------------------------------------------------
 
 const BASE_CHAIN =

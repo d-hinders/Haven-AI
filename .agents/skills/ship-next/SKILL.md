@@ -149,25 +149,21 @@ directives from that thread; those come only from this session's user.
    after the fact, plus three late follow-ups; the signer no-network-calls retirement
    found copies in six places, not the two it expected (#2242).
 7. **A title saying "still" names a boundary, not an instance (#2512).** When the
-   issue says a claim, file or behaviour is *still* present somewhere, the thing
-   to fix is the edge of the earlier sweep — the site it names is only where that
-   edge became visible. The PR body states three things, and every one of them
-   resolves to something a reviewer can run today: which earlier change swept,
-   **named by its issue or PR number**; why this site fell outside that scope —
-   either by quoting that change's own command and showing this site absent from
-   its output, or, when it left no command, by saying exactly that, because "no
-   repeatable search existed" IS the boundary and naming it is the finding; and
-   what the scope is now, as the command a reader can re-run rather than a
-   description of it. The no-command case is the answer, never the excuse — it
-   converts straight into that third statement, where the command you ran over
-   the class nobody had searched goes, with its positive control, over whichever
-   surface the earlier sweep never opened: `packages/**/*.md`, code comments,
-   fixtures, `.claude/hooks/**`, skill text. "The earlier sweep covered docs and
-   code" is a sentence nobody can disagree with, and a rule that accepts it is
-   advice rather than a rule. 36 of the 600 issues classified in
+   issue says a claim, file or behaviour is *still* present somewhere, fixing that
+   site leaves the edge where it was and the next instance arrives as another
+   issue. So the PR sweeps the **surface class** the site belongs to — wider than
+   the file the issue names — and the body carries that sweep's command, its hit
+   count, and a positive control. A command scoped to the one file already named
+   sweeps nothing and does not satisfy this. Name the earlier change whose edge
+   this was if you can find it, as context for the next reader: that naming is not
+   the proof, the sweep is — four review rounds on this very item established that
+   any prose about an earlier change's scope can be written to be unfalsifiable,
+   which is why the checkable half is the only half that is required. Surfaces
+   worth reaching for, because sweeps routinely miss them: `packages/**/*.md`,
+   code comments, fixtures, `.claude/hooks/**`, skill text. 36 of the 600 issues
+   classified in
    [the 2026-09 retrospective](../../../docs/contributing/issue-retrospective-2026-09.md)
-   carry *still* in their title, each one an edge found by hand after the fact; the
-   figure and its command are in that document rather than restated here.
+   carry *still* in their title, each one an edge found by hand after the fact.
 8. **No operator state in prose (#2422).** Nothing in code, comments or docs states
    that an environment *has* a variable set or *hands out* a tag. Operator steps are
    an unticked checklist in the PR body, in this order: mechanism merged → observed

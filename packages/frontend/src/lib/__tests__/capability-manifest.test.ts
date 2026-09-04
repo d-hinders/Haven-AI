@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  backendBaseUrl,
   buildManifestFrom,
   MANIFEST_SCHEMA_VERSION,
   DEFERRED_MANIFEST_KEYS,
@@ -89,6 +90,41 @@ describe('capability manifest', () => {
     expect(manifest.hosted_mcp.url).toBe('https://mcp.test')
     expect(manifest.chains).toEqual(FACTS.chains)
     expect(manifest.api.openapi).toBe('https://api.test/openapi.json')
+  })
+
+  it('SSRF: the backend fetch target comes from configuration, never a request header', () => {
+    // Measured before it was fixed, not theorised: the first version fetched
+    // `${origin}/api/discovery`, and `curl -H 'x-forwarded-host: localhost:3154'`
+    // made the Next server issue a server-side request to that host — the
+    // listener logged it. A caller could have aimed it at a cloud metadata
+    // endpoint and read the reply back out of the manifest.
+    //
+    // The DISPLAYED origin is still request-derived; that is a string echoed
+    // to the caller who sent the header, the posture robots.txt and
+    // sitemap.xml already take. What must never be request-derived is a URL
+    // this server FETCHES.
+    process.env.NEXT_PUBLIC_API_URL = 'https://backend.configured.test'
+    try {
+      expect(backendBaseUrl()).toBe('https://backend.configured.test')
+      // The attacker-controlled origin does not appear in the fetch target.
+      expect(backendBaseUrl()).not.toContain('preview.test')
+      expect(backendBaseUrl()).not.toContain('169.254')
+    } finally {
+      delete process.env.NEXT_PUBLIC_API_URL
+    }
+  })
+
+  it('falls back to the local backend, and strips a trailing slash', () => {
+    // Same variable the `/api` rewrite in next.config.ts reads, so the manifest
+    // and the proxy cannot point at different backends.
+    delete process.env.NEXT_PUBLIC_API_URL
+    expect(backendBaseUrl()).toBe('http://localhost:3001')
+    process.env.NEXT_PUBLIC_API_URL = 'https://b.test/'
+    try {
+      expect(backendBaseUrl()).toBe('https://b.test')
+    } finally {
+      delete process.env.NEXT_PUBLIC_API_URL
+    }
   })
 
   it('degrades honestly when the backend is unreachable', () => {

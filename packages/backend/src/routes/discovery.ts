@@ -69,6 +69,12 @@ export default async function discoveryRoutes(app: FastifyInstance): Promise<voi
       // The body depends on how the request arrived (the origin is derived), so
       // a shared cache that does not key on that could hand one caller another
       // caller's host. Same reasoning as the served OpenAPI document.
+      //
+      // `x-forwarded-host` is listed even though `apiBaseUrl` does not read it
+      // TODAY — #2530 changes it to. An over-inclusive `Vary` costs one extra
+      // cache variant; an under-inclusive one is a correctness bug, so this is
+      // written for whichever of the two lands first rather than for the
+      // current tree alone.
       .header('cache-control', 'public, max-age=0, must-revalidate')
       .header('vary', 'host, x-forwarded-proto, x-forwarded-host')
       .send(buildDiscoveryDocument(request))

@@ -105,20 +105,55 @@ export function buildManifestFrom(origin: string, facts: DiscoveryFacts | null):
 }
 
 /**
+ * Where the backend actually is, from CONFIGURATION — never from a request.
+ *
+ * This is a server-side fetch target, and deriving it from `x-forwarded-host`
+ * was a server-side request forgery. Measured, not theorised: with the first
+ * version of this file, `curl /.well-known/haven.json -H 'x-forwarded-host:
+ * localhost:3154'` made the Next server issue `GET /api/discovery` to that
+ * host, and the listener logged the request. A caller could have pointed it at
+ * a cloud metadata endpoint or any internal service and read the reply back
+ * out of the manifest.
+ *
+ * The displayed origin below is still request-derived — that is only a string
+ * echoed to the caller who sent the header, the same posture `robots.txt` and
+ * `sitemap.xml` already take. What must never be request-derived is a URL this
+ * server FETCHES. The backend address is deployment configuration, and it is
+ * read from the same variable the `/api` rewrite in `next.config.ts` uses, so
+ * the two cannot point at different backends.
+ */
+function backendBaseUrl(): string {
+  return (process.env.NEXT_PUBLIC_API_URL || '').trim().replace(/\/+$/, '') || 'http://localhost:3001'
+}
+
+/** How long to wait for the backend before serving the static half. */
+const DISCOVERY_TIMEOUT_MS = 2000
+
+/**
  * Fetch the backend facts, tolerating their absence.
  *
  * A manifest that 500s because the backend is down tells an agent nothing; one
  * that omits the environment-dependent half still tells it where to sign up
- * and which docs to read. `chains: null` and `hosted_mcp.url: null` are
- * honest answers, and are distinguishable from a wrong one.
+ * and which docs to read. `chains: null` and `hosted_mcp.url: null` are honest
+ * answers, and are distinguishable from a wrong one.
+ *
+ * Bounded: an unbounded fetch inside a request handler lets a slow backend
+ * hold this route's connections open. `redirect: 'error'` because a discovery
+ * document should read its own backend, not follow it somewhere else.
  */
 export async function buildManifest(origin: string): Promise<CapabilityManifest> {
   let facts: DiscoveryFacts | null = null
   try {
-    const res = await fetch(`${origin}/api/discovery`, { cache: 'no-store' })
+    const res = await fetch(`${backendBaseUrl()}/discovery`, {
+      cache: 'no-store',
+      redirect: 'error',
+      signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
+    })
     if (res.ok) facts = (await res.json()) as DiscoveryFacts
   } catch {
-    // Backend unreachable — the static half of the manifest is still true.
+    // Backend unreachable, slow, or redirecting — the static half is still true.
   }
   return buildManifestFrom(origin, facts)
 }
+
+export { backendBaseUrl }

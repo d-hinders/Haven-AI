@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { lastVerifiedLine, issueRefs, checkChain, isPromotionPR, chainEntries, headOfEntry, chainAnomalies, checkEntriesVerbatim, normalizeEntryText, chainNoteBody, MAX_CHAIN_BYTES, WARN_CHAIN_BYTES, chainLineBytes, chainSizeWarnings, reportChainSizeWarnings } from './chain-integrity.mjs'
+import { lastVerifiedLine, issueRefs, checkChain, isPromotionPR, chainEntries, headOfEntry, chainAnomalies, checkEntriesVerbatim, normalizeEntryText, chainNoteBody, MAX_CHAIN_BYTES, WARN_CHAIN_BYTES, chainLineBytes, chainSizeWarnings, reportChainSizeWarnings, resolveWarnBytes } from './chain-integrity.mjs'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -494,19 +494,35 @@ test('#2562: the band is under the ceiling, so it fires before the hard stop', (
   assert.ok(WARN_CHAIN_BYTES < MAX_CHAIN_BYTES)
 })
 
+// These two drive the real CLI with `--warn-bytes=1`, so every governed doc is
+// over the band and the report is guaranteed. The first draft asserted against
+// the live `docs/` tree and went red the moment this same PR compacted the two
+// docs it was reading — a test that measures the repository rather than the
+// code. The property under test is placement, not repo content.
 test('#2562: the band prints on a PUSH build too — the early returns say nothing about disk', () => {
   // The three early returns (promotion, push, no base) all mean "this diff
   // cannot be judged". A push to `dev` is precisely where a standing warning
   // costs least to see, so the band runs ahead of them.
-  const r = runCli({ GITHUB_EVENT_NAME: 'push' })
+  const r = runCli({ GITHUB_EVENT_NAME: 'push' }, ['--warn-bytes=1'])
   assert.equal(r.code, 0)
   assert.match(r.out, /push build, no pull-request base — skipped/)
   assert.match(r.out, /chain size: \d+ doc\(s\) over the/)
+  // Placement, stated as an assertion rather than left to reading order: the
+  // band's report precedes the early return's own line in the output.
+  assert.ok(r.out.indexOf('chain size:') < r.out.indexOf('push build'))
 })
 
 test('#2562: the band prints on a dev → main promotion too, and still blocks nothing', () => {
-  const r = runCli({ GITHUB_HEAD_REF: 'dev', GITHUB_BASE_REF: 'main' })
+  const r = runCli({ GITHUB_HEAD_REF: 'dev', GITHUB_BASE_REF: 'main' }, ['--warn-bytes=1'])
   assert.equal(r.code, 0)
   assert.match(r.out, /promotion — already checked/)
   assert.match(r.out, /chain size: \d+ doc\(s\) over the/)
+  assert.ok(r.out.indexOf('chain size:') < r.out.indexOf('promotion'))
+})
+
+test('#2562: with no override the band is the 40 KiB default — the repo is not the fixture', () => {
+  assert.equal(resolveWarnBytes([]), WARN_CHAIN_BYTES)
+  assert.equal(resolveWarnBytes(['--warn-bytes=1']), 1)
+  assert.equal(resolveWarnBytes(['--warn-bytes=nonsense']), WARN_CHAIN_BYTES)
+  assert.equal(resolveWarnBytes(['--warn-bytes=-5']), WARN_CHAIN_BYTES)
 })

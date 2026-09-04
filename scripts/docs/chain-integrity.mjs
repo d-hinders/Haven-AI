@@ -131,6 +131,9 @@
 //   npm run docs:chain                       # part of `npm run docs:check`
 //   BASE_SHA=… HEAD_SHA=… node scripts/docs/chain-integrity.mjs   # CI
 //   node scripts/docs/chain-integrity.mjs --base=<ref>
+//   node scripts/docs/chain-integrity.mjs --warn-bytes=20480   # see what is NEXT
+//                                            in the queue, not only what is
+//                                            already over the 40 KiB band
 
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -398,6 +401,24 @@ export const MAX_CHAIN_BYTES = 64 * 1024
 export const WARN_CHAIN_BYTES = 40 * 1024
 
 /**
+ * The band, overridable per run: `--warn-bytes=<n>`.
+ *
+ * Two real uses, and a test property that falls out of them. An auditor can
+ * lower it to see which chains are next in the queue rather than only the ones
+ * already over 40 KiB; and this check's own tests can force the report on
+ * without depending on how large the repo's docs happen to be that week — the
+ * first version of those tests asserted against the live `docs/` tree and went
+ * red the moment this PR compacted the two docs they were reading, which is a
+ * test measuring the repository rather than the code.
+ */
+export function resolveWarnBytes(argv = process.argv) {
+  const hit = argv.find((a) => a.startsWith('--warn-bytes='))
+  if (!hit) return WARN_CHAIN_BYTES
+  const n = Number(hit.slice('--warn-bytes='.length))
+  return Number.isFinite(n) && n >= 0 ? n : WARN_CHAIN_BYTES
+}
+
+/**
  * The size of a chain line, in the unit the ceiling is named for (#2562).
  *
  * `line.length` counts UTF-16 code units; these lines are dense with
@@ -576,7 +597,7 @@ async function main() {
   // return below. Those returns all mean "this change cannot be judged against
   // a base"; none of them means the docs on disk are fine, and the whole point
   // of the band is to be seen by someone who is not mid-PR.
-  reportChainSizeWarnings(await chainSizeWarnings())
+  reportChainSizeWarnings(await chainSizeWarnings({ warnBytes: resolveWarnBytes() }))
 
   if (isPromotionPR()) {
     console.log('Chain integrity: dev → main promotion — already checked on each dev PR.')

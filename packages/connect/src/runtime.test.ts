@@ -2964,6 +2964,7 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     // The outcome says what happened locally and, by omission, nothing about the backend.
     expect(result.outcome.superseded_agent_ids).toEqual(['agent-old'])
     expect(result.outcome.superseded_agents_retired_locally).toBe(true)
+    expect(result.outcome.retired_agent_ids).toEqual(['agent-old'])
     const output = h.logs.join('\n')
     expect(output).toMatch(/Retired previous agent agent-old locally/)
     expect(output).toMatch(/NOT revoked/)
@@ -2982,7 +2983,25 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     await expect(stat(join(oldDir, 'TOMBSTONE.json'))).rejects.toThrow()
     await expect(stat(join(oldDir, 'signer.json'))).resolves.toBeDefined()
     expect(result.outcome.superseded_agents_retired_locally).toBe(false)
+    expect(result.outcome.retired_agent_ids).toEqual([])
     expect(h.logs.join('\n')).toMatch(/were NOT retired/)
+  })
+
+  it('REGRESSION (review): retired_agent_ids names only the collision set — a coexisting NAMED agent is listed as superseded but never retired', async () => {
+    // superseded_agent_ids is every OTHER directory (#1688), named agents
+    // included; the boolean read against that list would overclaim.
+    const root = await mkdtemp(join(tmpdir(), 'haven-2551-replace-named-'))
+    await seedDir(root, 'agent-old-uuid', liveBare('agent-old'))
+    const opsDir = await seedDir(root, 'ops', { ...liveBare('agent-ops'), 'signer-runtime.json': { server_name: 'ops', wrapper_path: '/w' } })
+    const h = harness(root)
+
+    const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true }, h.deps)
+
+    expect([...(result.outcome.superseded_agent_ids ?? [])].sort()).toEqual(['agent-old', 'agent-ops'])
+    expect(result.outcome.retired_agent_ids).toEqual(['agent-old'])
+    expect(result.outcome.superseded_agents_retired_locally).toBe(true)
+    await expect(stat(join(opsDir, 'TOMBSTONE.json'))).rejects.toThrow()
+    expect(JSON.parse(await readFile(join(opsDir, 'identity.json'), 'utf8')).api_key).toBe('sk_agent_agent-ops')
   })
 
   it('--replace on a clean machine is a harmless no-op — no prompt, no retirement, no outcome flag', async () => {
@@ -2992,6 +3011,7 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     const result = await runConnect({ ...baseOptions(root), replaceExistingWiring: true, interactive: true }, h.deps)
     expect(prompt).not.toHaveBeenCalled()
     expect(result.outcome.superseded_agents_retired_locally).toBeUndefined()
+    expect(result.outcome.retired_agent_ids).toBeUndefined()
     expect(result.outcome.superseded_agent_ids).toEqual([])
   })
 

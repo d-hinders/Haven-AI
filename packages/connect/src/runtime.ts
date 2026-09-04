@@ -157,8 +157,17 @@ export interface ConnectOutcome {
    * runtime install ended with an errorCode and the retirement was therefore
    * skipped, because the old wiring may still be the only working one. It
    * says nothing about the backend: nothing is revoked by the connector.
+   *
+   * `retired_agent_ids` names exactly WHICH directories that retirement
+   * reached — the collision set, and only the members whose tombstone and
+   * teardown both succeeded. It is deliberately a separate list from
+   * `superseded_agent_ids`, which is every OTHER directory on the machine
+   * (#1688) and so also names NAMED agents that coexist with the replaced
+   * bare pair and were never touched; reading the boolean against that list
+   * would overclaim (review finding on #2551).
    */
   superseded_agents_retired_locally?: boolean
+  retired_agent_ids?: readonly string[]
   /**
    * #2091, additive within schema_version 1: `message` is the redacted human
    * refusal (automation used to get code + next_action and nothing to act
@@ -682,6 +691,7 @@ async function executeConnect(
   // --unwire performs (#2169), so --doctor reads `retired`, not `superseded`.
   // Nothing is revoked: that stays the owner's action on the Haven agent page.
   let supersededAgentsRetiredLocally: boolean | undefined
+  const retiredAgentIds: string[] = []
   if (replacing) {
     if (runtimeInstall.errorCode) {
       supersededAgentsRetiredLocally = false
@@ -701,6 +711,7 @@ async function executeConnect(
             replacedBy: registration.agent_id,
           })
           await teardownLocalKeyMaterial(entry.directory, await readIdentityFile(entry.directory))
+          retiredAgentIds.push(entry.agentId)
           log(`Retired previous agent ${entry.agentId} locally: tombstoned, local key files removed.`)
         } catch (err) {
           supersededAgentsRetiredLocally = false
@@ -814,6 +825,7 @@ async function executeConnect(
     hostedMcpUrl: registration.hosted_mcp_url,
     supersededAgentIds,
     supersededAgentsRetiredLocally,
+    ...(replacing ? { retiredAgentIds } : {}),
     setupChallengeExpiresAt: setup.challenge.expires_at,
     approvalRequired: registration.agent_status === 'pending_approval',
   })
@@ -842,8 +854,9 @@ export function completionOutcome(input: {
   delegateAddress: string
   hostedMcpUrl?: string
   supersededAgentIds?: readonly string[]
-  /** #2551: only a replace run sets this; see the outcome field's doc comment. */
+  /** #2551: only a replace run sets these; see the outcome fields' doc comments. */
   supersededAgentsRetiredLocally?: boolean
+  retiredAgentIds?: readonly string[]
   setupChallengeExpiresAt?: string
   approvalRequired: boolean
 }): ConnectOutcome {
@@ -891,6 +904,7 @@ export function completionOutcome(input: {
     ...(input.supersededAgentsRetiredLocally !== undefined
       ? { superseded_agents_retired_locally: input.supersededAgentsRetiredLocally }
       : {}),
+    ...(input.retiredAgentIds ? { retired_agent_ids: input.retiredAgentIds } : {}),
     ...(input.setupChallengeExpiresAt ? { setup_challenge_expires_at: input.setupChallengeExpiresAt } : {}),
     ...(runtimeInstall.errorCode
       ? { error: { code: runtimeInstall.errorCode, next_action: nextAction } }

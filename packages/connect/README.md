@@ -174,7 +174,8 @@ tool. The object includes runtime/topology status,
 probe result, activation and next-action guidance, approval state/expiry (null
 when the backend does not provide an approval expiry), the two
 read-only verification tools, `hosted_mcp_url`, `superseded_agent_ids`, and —
-on a run that replaced existing wiring — `superseded_agents_retired_locally`. It
+on a run that replaced existing wiring — `superseded_agents_retired_locally`
+with `retired_agent_ids`. It
 contains no API key, private key, credential
 contents, full credential paths, or full delegate address. The same redacted
 object is available to library callers as `runConnect(...).outcome`; the older
@@ -191,11 +192,15 @@ re-run mints a NEW agent, and without `--replace` retires nothing, so those
 older agents still hold live API and signing keys — revoke them on the Haven
 agent page if you meant to replace them. Empty on a clean first run; an empty
 list is not a guarantee, since a scan that cannot read the credential root also
-yields one rather than failing a completed setup. On a `--replace` run,
-`superseded_agents_retired_locally: true` says every one of them was tombstoned
-and had its local key files removed (`false`: the install ended with an error
-code and the retirement was skipped); the field is absent on any other run and
-says nothing about the backend, where nothing is revoked.
+yields one rather than failing a completed setup. On a `--replace` run, `retired_agent_ids` names the
+directories that were actually tombstoned and had their local key files removed
+— **the collision set only**, never the whole `superseded_agent_ids` list, which
+also names named agents that coexist with the replaced bare pair and are
+untouched — and `superseded_agents_retired_locally` is `true` when that
+retirement covered every collision entry (`false`: the install ended with an
+error code and the retirement was skipped, or one entry failed). Both fields
+are absent on any other run and say nothing about the backend, where nothing is
+revoked.
 
 A `wiring_collision` refusal (a non-interactive bare setup over a live
 previous agent, #2551) carries `error.superseded_agent_ids` and
@@ -315,7 +320,8 @@ already-configured machine behaves as follows (characterized in
   performs — so `--doctor` reads it as `retired` rather than still
   spend-capable. If the install ends with an error code the retirement is
   **skipped**, because the old wiring may still be the only working one; the
-  outcome's `superseded_agents_retired_locally` says which happened. With
+  outcome's `superseded_agents_retired_locally` says which happened and
+  `retired_agent_ids` names exactly the directories it reached. With
   `--name`, each agent owns its own suffixed pair and they coexist; see
   [Running several agents in one runtime](#running-several-agents-in-one-runtime).
 - **The previous agent is not revoked by a re-run — with or without

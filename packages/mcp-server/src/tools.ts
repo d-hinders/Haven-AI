@@ -2729,6 +2729,20 @@ export function createToolHandlers(
  */
 const QUOTE_EXPIRES_SOON_MS = 120_000
 
+/**
+ * Default server name → the ROLE it plays, for `next_tool_server_role` (#2550).
+ *
+ * Keyed on the default names because those are what the `next_tool` literals
+ * carry; a client using `--name <slug>` reads the ROLE and resolves the server
+ * itself. An unrecognised server yields no role rather than a guess — a wrong
+ * role would be worse than an absent one, since the whole point of the field
+ * is to be trustworthy when the name is not.
+ */
+const NEXT_TOOL_SERVER_ROLES: Record<string, 'hosted' | 'signer'> = {
+  haven: 'hosted',
+  'haven-signer': 'signer',
+}
+
 function buildAgentGuidance(input: {
   nextAction: AgentNextStep['next_action']
   nextTool?: string
@@ -2746,12 +2760,33 @@ function buildAgentGuidance(input: {
   const parsedNextTool = input.nextTool
     ? /^mcp__([a-z0-9-]+)__([a-z0-9_]+)$/.exec(input.nextTool)
     : null
+  // #2550: the two fields above name the DEFAULT local servers, because a
+  // literal is all this process has — a connector run with `--name <slug>`
+  // wires `haven-<slug>` / `haven-signer-<slug>`, and nothing about that slug
+  // ever reaches Haven. So on a named install `next_tool` and
+  // `next_tool_server` both point at a server the client does not have, while
+  // the hosted instructions tell the agent to follow those fields FIRST.
+  //
+  // The role is the runtime-neutral answer: it says WHICH of the client's own
+  // servers to call, so the client resolves against config it can actually
+  // see. Deliberately ADDITIVE — the three fields above stay byte-identical,
+  // because every default install follows them correctly today and fixing a
+  // named-install bug must not break the majority case to do it. A client that
+  // ignores the role is exactly as correct, and exactly as broken, as before.
+  //
+  // Derived from the parsed server, not from a second literal beside each call
+  // site: one emission point cannot drift, and six hardcoded `next_tool`
+  // literals are what produced this defect.
+  const nextToolServerRole = parsedNextTool
+    ? NEXT_TOOL_SERVER_ROLES[parsedNextTool[1]]
+    : undefined
   return {
     next_action: input.nextAction,
     ...(input.nextTool ? { next_tool: input.nextTool } : {}),
     ...(parsedNextTool
       ? { next_tool_server: parsedNextTool[1], next_tool_name: parsedNextTool[2] }
       : {}),
+    ...(nextToolServerRole ? { next_tool_server_role: nextToolServerRole } : {}),
     ...(input.nextArguments ? { next_arguments: input.nextArguments } : {}),
     safe_to_continue: input.safeToContinue,
     reason: input.reason,

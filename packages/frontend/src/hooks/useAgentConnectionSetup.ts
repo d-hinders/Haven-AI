@@ -64,6 +64,17 @@ export interface UseAgentConnectionSetupOptions {
   onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void
   /** See ConnectAgentModal's prop of the same name. */
   starterAllowance?: boolean
+  /**
+   * Resume an EXISTING setup instead of creating a new one (#2522).
+   *
+   * This is what `/agents?setup=<id>` opens: an agent hands its user a link to
+   * the exact step, and the flow starts on the connect step reading that
+   * setup's live status rather than at "name your agent". There is no setup
+   * TOKEN on this path and there must not be — the token is a create-time
+   * secret, and the person following this link is here to approve a budget,
+   * not to re-run the connector.
+   */
+  resumeSetupId?: string | null
 }
 
 // ── Rail awareness (#1069 / #1070) ─────────────────────────────────
@@ -316,6 +327,7 @@ export function useAgentConnectionSetup({
   safeId: propSafeId,
   onSetupUpdated,
   starterAllowance = false,
+  resumeSetupId = null,
 }: UseAgentConnectionSetupOptions) {
   const { user, activeSafe } = useAuth()
   const userSafes = useMemo(() => user?.safes ?? [], [user?.safes])
@@ -338,7 +350,9 @@ export function useAgentConnectionSetup({
     null
 
   const [selectedSafeId, setSelectedSafeId] = useState<string | null>(initialSafeId)
-  const [step, setStep] = useState<SetupStep>('details')
+  // A resumed setup already exists, so the three authoring steps are behind
+  // the user and the flow opens on the connect step.
+  const [step, setStep] = useState<SetupStep>(resumeSetupId ? 'connect' : 'details')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [localMcp, setLocalMcp] = useState(false)
@@ -365,8 +379,12 @@ export function useAgentConnectionSetup({
   // #1069: branch the final step on the account's rail — see
   const walletName = selectedSafe?.name ?? activeSafe?.name ?? 'Selected Haven wallet'
   const walletNetworkName = getChainConfig(chainId).name
-  const statusQuery = useAgentConnectionSetupStatus(setup?.setup_id ?? null, {
-    enabled: open && Boolean(setup),
+  // A setup created in THIS session wins over a resumed id: the user who just
+  // clicked through the wizard is looking at their own new setup, not at
+  // whatever id happened to be in the URL that opened the page.
+  const statusSetupId = setup?.setup_id ?? resumeSetupId
+  const statusQuery = useAgentConnectionSetupStatus(statusSetupId, {
+    enabled: open && Boolean(statusSetupId),
   })
   const setupStatus = statusQuery.data
   const manualCredentialNeedsSave = Boolean(manualCredential && !manualCredentialAcknowledged)
@@ -713,6 +731,13 @@ export function useAgentConnectionSetup({
     // Connect step
     setup,
     setupStatus,
+    /**
+     * #2522: this flow is showing a setup it did not create, so there is no
+     * setup token and nothing to copy. A foreign or unknown id surfaces as
+     * `statusError` — the route answers 404 and the modal shows not-found
+     * rather than an empty waiting screen.
+     */
+    resumed: Boolean(resumeSetupId && !setup),
     statusLoading: statusQuery.loading,
     statusError: statusQuery.error,
     awaitingConnectionStage: statusQuery.awaitingConnectionStage,

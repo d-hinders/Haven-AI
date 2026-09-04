@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
+import { nextPathFromSearch, postAuthDestination, viaMarkerFromSearch } from '@/lib/discovery'
 import { ApiRequestError } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -100,12 +101,20 @@ export default function SignupPage() {
 
     setSubmitting(true)
     try {
-      const u = await signup(validation.name, validation.email, password)
-      if (u.safe_address) {
-        router.push('/dashboard')
-      } else {
-        router.push('/onboarding')
-      }
+      // #2522: read from `window.location.search` rather than
+      // `useSearchParams`, matching `useAgentConnectionSetup`'s existing use of
+      // the same source. This page has no Suspense boundary (login does), and
+      // both reads happen inside a submit handler — client-only, after
+      // hydration — so the hook would buy a restructure and nothing else.
+      const search = window.location.search
+      const next = nextPathFromSearch(search)
+      const u = await signup(
+        validation.name,
+        validation.email,
+        password,
+        viaMarkerFromSearch(search),
+      )
+      router.push(postAuthDestination(Boolean(u.safe_address), next))
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.message)

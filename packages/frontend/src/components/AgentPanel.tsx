@@ -2,7 +2,10 @@
 
 import { ChevronRight, CircleAlert, Clock, LoaderCircle, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { useCallback, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
+import { setupIdFromSearch } from '@/lib/discovery'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
 import ConnectAgentModal from './ConnectAgentModal'
 import EditAgentModal from './EditAgentModal'
@@ -36,9 +39,38 @@ export default function AgentPanel() {
     refetchAgents,
   } = panel
 
+  /**
+   * `/agents?setup=<id>` — the budget-approval hand-off link (#2522).
+   *
+   * An agent cannot approve a budget; a human must. So the agent pastes this
+   * link and the human lands on the exact step for that setup instead of being
+   * told to "go to Haven and approve the budget". A foreign or unknown id is
+   * not special-cased here: the modal opens, `GET /agent-connection-setups/:id`
+   * answers 404 for a setup that is not this owner's, and the flow renders its
+   * not-found state.
+   */
+  const router = useRouter()
+  const resumeSetupId = useMemo(
+    () => (typeof window === 'undefined' ? null : setupIdFromSearch(window.location.search)),
+    [],
+  )
+  const [resumeDismissed, setResumeDismissed] = useState(false)
+  const activeResumeSetupId = resumeDismissed ? null : resumeSetupId
+
+  const closeConnectModal = useCallback(() => {
+    panel.setConnectAgentOpen(false)
+    // Closing must also drop the deep link, or the modal reopens on the next
+    // render from a URL the user has just dismissed.
+    if (resumeSetupId) {
+      setResumeDismissed(true)
+      router.replace('/agents')
+    }
+  }, [panel, resumeSetupId, router])
+
 
   if (!safeAddress) {
-    return (
+  
+  return (
       <EmptyState
         icon={<BotIcon size={20} />}
         title="Create a Haven account to manage agents"
@@ -296,12 +328,13 @@ export default function AgentPanel() {
       )}
 
       <ConnectAgentModal
-        open={panel.connectAgentOpen}
-        onClose={() => panel.setConnectAgentOpen(false)}
+        open={panel.connectAgentOpen || Boolean(activeResumeSetupId)}
+        onClose={closeConnectModal}
         starterAllowance={panel.firstAgentSetup}
         safeAddress={safeAddress}
         safeId={panel.activeSafeId}
         onSetupUpdated={panel.handleSetupUpdated}
+        resumeSetupId={activeResumeSetupId}
       />
 
       {/* Edit agent modal */}

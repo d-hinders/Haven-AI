@@ -35,8 +35,28 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** Check backend and database health. */
+        /** Check public backend and database health. */
         get: operations["getHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health/ops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read operator-only backend diagnostics.
+         * @description Requires the deployment-configured `HAVEN_OPS_TOKEN` in `X-Haven-Ops-Token`. Returns 404 when the token is not configured, so deployments do not expose diagnostics by default.
+         */
+        get: operations["getOperationsHealth"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2424,10 +2444,11 @@ export type components = {
                 /** @enum {string} */
                 status: "ok" | "error";
                 latencyMs?: number;
-                error?: string;
             };
+        };
+        HealthOpsResponse: {
             /** @description Cached per-chain relayer gas balance from the hourly scan. Never a live RPC read. */
-            relayer?: {
+            relayer: {
                 chainId: number;
                 /** @example 0x1111111111111111111111111111111111111111 */
                 address: string;
@@ -2437,7 +2458,7 @@ export type components = {
                 checkedAt: string;
             }[];
             /** @description L0 Agent Passport configuration state (#1151). Booleans plus the published issuer address only — never key material, never the schema UID. A chain in `issuance_only` anchors passports no merchant can verify. */
-            passport?: {
+            passport: {
                 verification: {
                     configured: boolean;
                     issuer: string | null;
@@ -2452,7 +2473,7 @@ export type components = {
                 unverifiableChainIds: number[];
             };
             /** @description Trust-proxy state (#1670): the hop count the process actually read, and whether the per-IP auth rate-limit tier is therefore armed. Exists because the armed/disarmed split is otherwise invisible from outside — the tier deliberately returns NO limit when the proxy is untrusted, which a probe cannot tell apart from a variable the process never saw. */
-            trustProxy?: {
+            trustProxy: {
                 hops: number;
                 authRateLimitArmed: boolean;
             };
@@ -3687,6 +3708,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    getOperationsHealth: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Haven-Ops-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator diagnostics. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthOpsResponse"];
+                };
+            };
+            /** @description The operator token is missing or invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Operator diagnostics are not configured on this deployment. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };

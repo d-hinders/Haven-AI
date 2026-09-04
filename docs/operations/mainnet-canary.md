@@ -86,10 +86,12 @@ does not require any signing key or wallet credential.
 
 4. **Relayer funded + monitors alive + no reconciliation debt.**
 
-   Before deploying this change, set the same high-entropy `HAVEN_OPS_TOKEN`
-   on the dev and production Railway backend services. Export that value only
-   in the shell that runs this operator probe; without it, the probe fails
-   closed because it cannot read the private relayer diagnostics.
+   Set a high-entropy `HAVEN_OPS_TOKEN` on the dev Railway backend and verify
+   this change there first. Set the production service's token before its next
+   production deployment — it does not need a standalone deployment for this
+   check. Export the production value only in the shell that runs this operator
+   probe; without it, the probe fails closed because it cannot read the private
+   relayer diagnostics.
 
    ```bash
    HAVEN_API_URL=<prod backend URL> HAVEN_OPS_TOKEN=<operator token> npm run ops:check-mainnet-reconciliation -w packages/backend

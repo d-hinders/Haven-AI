@@ -107,6 +107,13 @@ export const SCAN_FILES = [
   // frontend download is the fallback. Covering only the fallback would be
   // this issue's own defect one package over.
   'packages/sdk/src/skill-content.ts',
+  // The agent onboarding runbook (#2523): canonical string in the SDK, served
+  // byte-identically as `packages/frontend/public/for-agents.md`. Both are
+  // named — the served file because it is what an agent actually fetches, the
+  // source because that is where a change is made. Scanning only one would be
+  // this allowlist's own defect: a copy the gate cannot see.
+  'packages/sdk/src/agent-guidance.ts',
+  'packages/frontend/public/for-agents.md',
 ]
 
 // ── The naming convention behind the allowlist (#2333) ───────────────────────

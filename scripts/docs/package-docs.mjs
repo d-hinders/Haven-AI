@@ -286,6 +286,12 @@ export const EXEMPT_PACKAGE_DOCS = {
     'deployed to (GTM Agent Discovery ' +
     'track). It mirrors packages/frontend/public/402/index.html, which carries the sync note; ' +
     'its audience is a model mid-task, so front-matter would be noise it pays tokens for.',
+  'packages/frontend/public/for-agents.md':
+    'Agent-readable public artifact, served verbatim at /for-agents.md (#2523, epic #2519). It is '+
+    'NOT hand-maintained: the canonical string is `HAVEN_AGENT_RUNBOOK_MD` in '+
+    '`packages/sdk/src/agent-guidance.ts`, and a byte-equality test pins this file to it, so the '+
+    'thing that catches drift is that test rather than a doc gate. Its audience is a model '+
+    'mid-task, so front-matter would be tokens it pays for and cannot use.',
   'packages/frontend/src/lib/loop-harness/README.md':
     'Rationale note for a differential-testing harness. The harness IS its own proof — if the ' +
     'invariant it describes stops holding, the harness fails, not the prose.',

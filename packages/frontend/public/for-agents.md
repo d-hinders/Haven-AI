@@ -16,7 +16,7 @@ Four of the six steps are your user's — each needs a human signature or a huma
 2. **HUMAN — fund it.** USDC on Base, to the address the dashboard shows.
 3. **HUMAN — create the agent, set its budget**, and paste you the **setup prompt** it hands back.
 4. **YOU — run the connector command** in that prompt (below). It makes your signing key locally, registering only the public address.
-5. **HUMAN — approve the budget** with their passkey, at the link you relay.
+5. **HUMAN — approve the budget** with their passkey, in the Haven tab they created the agent in: it advances to the approval step by itself once your run registers.
 6. **YOU — verify, then pay.**
 
 ## Hand-off scripts
@@ -39,9 +39,9 @@ Send these as your own message, `<host>` replaced by the host you fetched this f
 
 > On `<host>/agents`, create an agent for me and set a budget — say 25 USDC per day. That is the limit I cannot exceed. It hands back a setup prompt: paste it to me and I run it here.
 
-**At budget approval** (step 5) — relay the link the connector returns, verbatim, first:
+**At budget approval** (step 5) — the moment your run reports that approval is required, before anything else:
 
-> Setup is done on my side. Open <approval_url> and approve the budget with your passkey. Nothing can be spent until you do.
+> Setup is done on my side. Go back to the Haven tab where you created the agent — it should now be asking you to approve the budget. Approve it with your passkey; nothing can be spent until you do.
 
 ## What you run
 
@@ -59,14 +59,14 @@ Run the prompt's version, not this one: the token is one-time, the API URL is th
 - Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.
 - Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.
 
-If the approval wait times out, nothing is lost: the `--json` outcome carries the approval link and the setup id, so relay the link again or send your user `<host>/agents?setup=<setup-id>`.
+If the approval wait times out, nothing is lost — your agent is registered and the budget is still waiting to be approved. Ask your user to finish it in that same Haven tab. You cannot send them a direct link to it: the connector's outcome carries no URL and no setup id, so do not invent one.
 
 ## How to verify
 
 Call `haven_get_agent`, one of the Haven MCP tools the connector wires into your runtime in step 4. It returns identity plus `spend_authority_readiness`:
 
 - `ready` — a budget is live; you can pay.
-- `needs_approval` — the connector finished, nobody approved yet. Relay the approval link again; there is no queue to wait in.
+- `needs_approval` — the connector finished, nobody approved yet. Ask your user again, in their Haven tab; there is no queue to wait in.
 - `revoked` — the credential is not active; ask your user to create a new agent.
 
 `ready` covers hosted identity and the budget only, not your local signer. Check that with `npx -y @haven_ai/connect@<channel> --doctor`, the same tag your prompt named — a separate command, so the two-changes rule does not bind it.

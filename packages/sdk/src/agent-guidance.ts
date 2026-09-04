@@ -69,7 +69,20 @@ export const AGENT_COMMAND_MODIFICATION_SENTENCE =
  * file, so baking in a channel `release-bump.mjs` later rewrites would put the
  * served copy out of parity at exactly the moment nobody is reading it. The
  * page tells the agent to run the command its setup prompt hands it, where the
- * tag is real and deployment-correct. `?next=` / `?via=agent` / `?setup=` are the hand-off
+ * tag is real and deployment-correct.
+ *
+ * The budget-approval hand-off says "go back to your Haven tab", NOT "open this
+ * link", and that is a fact about the connector rather than a stylistic choice.
+ * `ConnectOutcome` (`packages/connect/src/runtime.ts`) carries
+ * `approval: { required, expires_at }` and nothing else about the approval: no
+ * URL, no setup id. `--json` prints that object alone
+ * (`packages/connect/src/cli.ts`), and the connector's own status poll
+ * (`GET /:setupId/connector-status`) answers `{ status, approved_budget }`, so
+ * #2560's `approval_url` never reaches the agent — it is on the setup-create
+ * and owner-authenticated status responses, which only the dashboard calls.
+ * An agent told to relay a link would have none to relay. #2528 is the slice
+ * that puts the link and the setup id in the outcome; when it lands, this
+ * paragraph and the two sentences it governs can become the link they describe. `?next=` / `?via=agent` / `?setup=` are the hand-off
  * link shapes from #2522.
  */
 export const HAVEN_AGENT_RUNBOOK_MD = `# Haven for agents — set your user up to let you pay
@@ -90,7 +103,7 @@ Four of the six steps are your user's — each needs a human signature or a huma
 2. **HUMAN — fund it.** USDC on Base, to the address the dashboard shows.
 3. **HUMAN — create the agent, set its budget**, and paste you the **setup prompt** it hands back.
 4. **YOU — run the connector command** in that prompt (below). It makes your signing key locally, registering only the public address.
-5. **HUMAN — approve the budget** with their passkey, at the link you relay.
+5. **HUMAN — approve the budget** with their passkey, in the Haven tab they created the agent in: it advances to the approval step by itself once your run registers.
 6. **YOU — verify, then pay.**
 
 ## Hand-off scripts
@@ -113,9 +126,9 @@ Send these as your own message, \`<host>\` replaced by the host you fetched this
 
 > On \`<host>/agents\`, create an agent for me and set a budget — say 25 USDC per day. That is the limit I cannot exceed. It hands back a setup prompt: paste it to me and I run it here.
 
-**At budget approval** (step 5) — relay the link the connector returns, verbatim, first:
+**At budget approval** (step 5) — the moment your run reports that approval is required, before anything else:
 
-> Setup is done on my side. Open <approval_url> and approve the budget with your passkey. Nothing can be spent until you do.
+> Setup is done on my side. Go back to the Haven tab where you created the agent — it should now be asking you to approve the budget. Approve it with your passkey; nothing can be spent until you do.
 
 ## What you run
 
@@ -133,14 +146,14 @@ Run the prompt's version, not this one: the token is one-time, the API URL is th
 - ${AGENT_COMMAND_MODIFICATION_SENTENCE}
 - ${AGENT_SECRET_HYGIENE_SENTENCE}
 
-If the approval wait times out, nothing is lost: the \`--json\` outcome carries the approval link and the setup id, so relay the link again or send your user \`<host>/agents?setup=<setup-id>\`.
+If the approval wait times out, nothing is lost — your agent is registered and the budget is still waiting to be approved. Ask your user to finish it in that same Haven tab. You cannot send them a direct link to it: the connector's outcome carries no URL and no setup id, so do not invent one.
 
 ## How to verify
 
 Call \`haven_get_agent\`, one of the Haven MCP tools the connector wires into your runtime in step 4. It returns identity plus \`spend_authority_readiness\`:
 
 - \`ready\` — a budget is live; you can pay.
-- \`needs_approval\` — the connector finished, nobody approved yet. Relay the approval link again; there is no queue to wait in.
+- \`needs_approval\` — the connector finished, nobody approved yet. Ask your user again, in their Haven tab; there is no queue to wait in.
 - \`revoked\` — the credential is not active; ask your user to create a new agent.
 
 \`ready\` covers hosted identity and the budget only, not your local signer. Check that with \`npx -y @haven_ai/connect@<channel> --doctor\`, the same tag your prompt named — a separate command, so the two-changes rule does not bind it.

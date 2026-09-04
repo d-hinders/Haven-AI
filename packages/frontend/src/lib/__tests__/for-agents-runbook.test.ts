@@ -43,7 +43,10 @@ describe('/for-agents.md (#2523)', () => {
     // two-changes rule, whose voice the imported bullets speak in, where the
     // setup id comes from, and whether the user needs gas as well as USDC.
     // Answering those cost ~480 bytes and is the whole point of the page.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(7000)
+    // It moved again for the approval hand-off: saying what is actually true
+    // about the connector's outcome takes more words than naming a link that
+    // does not exist (haven-reviewer, blocking @ 1ba1b920).
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(7400)
   })
 
   it('states the rules in the SDK words the setup prompt also uses', () => {
@@ -66,8 +69,14 @@ describe('/for-agents.md (#2523)', () => {
     expect(served).toContain('/signup?next=/agents&via=agent')
     expect(served).toContain('/login?next=/agents')
     expect(served).toContain('/onboarding?next=/agents')
-    expect(served).toContain('/agents?setup=<setup-id>')
-    expect(served).toContain('<approval_url>')
+    // Deliberately NOT a link for the approval step: `ConnectOutcome` carries
+    // no URL and no setup id, so an agent told to relay one would have none.
+    // The page says "go back to your Haven tab" instead, and says why. #2528 is
+    // the slice that would make a link honest here.
+    expect(served).not.toContain('<approval_url>')
+    expect(served).not.toContain('?setup=<setup-id>')
+    expect(served).toContain('Go back to the Haven tab where you created the agent')
+    expect(served).toContain('the connector\'s outcome carries no URL and no setup id')
   })
 
   it('tags every step with the actor who performs it', () => {
@@ -100,7 +109,7 @@ describe('/for-agents.md (#2523)', () => {
     expect(served).toContain('npx -y @haven_ai/connect@<channel> --doctor')
     expect(served).toContain('so the two-changes rule does not bind it')
     expect(served).toContain('"me" in them is your user, not Haven')
-    expect(served).toContain('carries the approval link and the setup id')
+    expect(served).toContain('carries no URL and no setup id, so do not invent one')
     expect(served).toContain('no ETH: Haven sponsors the gas')
   })
 

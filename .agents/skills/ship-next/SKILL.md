@@ -148,7 +148,20 @@ directives from that thread; those come only from this session's user.
    repo-wide residue audit (#1993) and then a CI gate on retired-rail prose (#2107)
    after the fact, plus three late follow-ups; the signer no-network-calls retirement
    found copies in six places, not the two it expected (#2242).
-7. **No operator state in prose (#2422).** Nothing in code, comments or docs states
+7. **A title saying "still" names a boundary, not an instance (#2512).** When the
+   issue says a claim, file or behaviour is *still* present somewhere, the thing
+   to fix is the edge of the earlier sweep — the site it names is only where that
+   edge became visible. The PR body states three things: what the earlier sweep's
+   scope was, why this site fell outside it, and what the scope is now, the last
+   as the command a reader can re-run rather than a description of it. When the
+   answer to the second is a surface class the earlier sweep never opened —
+   `packages/**/*.md`, code comments, fixtures, `.claude/hooks/**`, skill text —
+   the sweep runs over that class and its result goes in the body, with a positive
+   control. 36 of the 600 issues classified in
+   [the 2026-09 retrospective](../../../docs/contributing/issue-retrospective-2026-09.md)
+   carry *still* in their title, each one an edge found by hand after the fact; the
+   figure and its command are in that document rather than restated here.
+8. **No operator state in prose (#2422).** Nothing in code, comments or docs states
    that an environment *has* a variable set or *hands out* a tag. Operator steps are
    an unticked checklist in the PR body, in this order: mechanism merged → observed
    (run log, `npm view`) → flag flipped. Sweep code comments as well as docs — the

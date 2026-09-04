@@ -58,6 +58,31 @@ export function parseTrustProxyHops(raw: string | undefined): number {
 }
 
 /**
+ * Boot warning for the public Base Sepolia RPC default (#2511).
+ *
+ * When `RPC_URL_BASE_SEPOLIA` is unset, this process is writing on-chain legs
+ * through the SHARED public endpoint, so a provider-side outage there surfaces
+ * as qa-dev failures (502s whose body carries `URL: https://sepolia.base.org`)
+ * even though no Haven code changed — the exact shape run 33796886018
+ * produced, eight times. Logging ONCE at boot makes the default
+ * distinguishable from a configured value in the logs, the same way
+ * `parseTrustProxyHops` refuses to disarm silently. Empty/whitespace counts as
+ * unset, matching `optionalEnv`'s treatment and the Railway empty-string
+ * pattern `parseConnectorChannel` already documents.
+ */
+export function warnPublicBaseSepoliaRpc(resolved: string): string {
+  if (resolved !== 'https://sepolia.base.org') return resolved
+  // eslint-disable-next-line no-console
+  console.warn(
+    'RPC_URL_BASE_SEPOLIA is not set — using the PUBLIC endpoint https://sepolia.base.org. ' +
+    'When that shared endpoint has an outage, qa-dev fails on it (502 bodies carrying ' +
+    '`URL: https://sepolia.base.org`) instead of on a Haven defect. Set RPC_URL_BASE_SEPOLIA ' +
+    'to a dedicated provider endpoint to decouple this deployment from those outages.',
+  )
+  return resolved
+}
+
+/**
  * npm dist-tag the dashboard hands out in the connector setup command (#2422,
  * epic #2420).
  *
@@ -161,7 +186,9 @@ export const config = {
 
   // Chain-specific RPC URLs
   rpcUrlBase: optionalEnv('RPC_URL_BASE', 'https://mainnet.base.org'),
-  rpcUrlBaseSepolia: optionalEnv('RPC_URL_BASE_SEPOLIA', 'https://sepolia.base.org'),
+  rpcUrlBaseSepolia: warnPublicBaseSepoliaRpc(
+    optionalEnv('RPC_URL_BASE_SEPOLIA', 'https://sepolia.base.org'),
+  ),
 
   // Optional (features degrade gracefully without these)
   gnosisscanApiKey: process.env.GNOSISSCAN_API_KEY ?? '',

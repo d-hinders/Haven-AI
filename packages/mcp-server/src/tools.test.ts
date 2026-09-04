@@ -7,6 +7,7 @@ import {
   HavenClient,
   MerchantTimeoutError,
   SIGNER_UPDATE_FALLBACK,
+  type AgentNextStep,
 } from '@haven_ai/sdk'
 import { createToolHandlers, toolDescriptions, type ToolSuccess, type ToolPayload } from './tools.js'
 
@@ -1807,11 +1808,13 @@ describe('haven_prepare_catalog_purchase', () => {
       catalog_price_display: string
       catalog_price_is_indicative: boolean
       allowance: { rail: string; sufficient: boolean | null; remaining_atomic?: string; source: string }
-      next_action: string
-      next_tool: string
       next_arguments: Record<string, unknown>
       warnings: Array<{ code: string }>
-    }>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+      // #2557: the next-step fields come from the PUBLISHED contract rather
+      // than being restated here, so a field the SDK type forgets breaks this
+      // test instead of quietly needing a cast — which is how #1588's and
+      // #2550's fields both went missing.
+    } & AgentNextStep>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
 
     // The exact compact quote shape (#1272) — payment_id from the created intent.
     expect(result.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
@@ -1840,8 +1843,8 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(result.data.next_action).toBe(AgentPaymentNextAction.SignAndSubmitPayment)
     expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
     // #1588: the runtime-neutral pair rides along; next_tool stays byte-identical.
-    expect((result.data as { next_tool_server?: string }).next_tool_server).toBe('haven-signer')
-    expect((result.data as { next_tool_name?: string }).next_tool_name).toBe('haven_sign_x402')
+    expect(result.data.next_tool_server).toBe('haven-signer')
+    expect(result.data.next_tool_name).toBe('haven_sign_x402')
     expect(result.data.next_arguments).toEqual({ payment_id: X402_INTENT_RESPONSE.payment_id })
     // Catalog price matched the live quote — no CATALOG_PRICE_DIFFERS warning.
     expect(result.data.warnings.some((w) => w.code === 'CATALOG_PRICE_DIFFERS')).toBe(false)
@@ -2330,8 +2333,8 @@ describe('haven_prepare_catalog_purchase', () => {
       expect(res.data.settlement_scheme).toBe('erc7710')
       expect(res.data.settlement.funding_leg).toBe(false)
       expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign')
-      expect((res.data as { next_tool_server?: string }).next_tool_server).toBe('haven-signer')
-      expect((res.data as { next_tool_name?: string }).next_tool_name).toBe('haven_sign')
+      expect(res.data.next_tool_server).toBe('haven-signer')
+      expect(res.data.next_tool_name).toBe('haven_sign')
       expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710' })
       // The guided-path extras survive the scheme branch — this shape is the
       // SAME contract as the 3009 one, minus the funding leg.
@@ -2359,8 +2362,8 @@ describe('haven_prepare_catalog_purchase', () => {
       const res = await prepare(erc7710Header, AGENT_RESPONSE)
       expect(res.data.settlement_scheme).toBeUndefined()
       expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
-      expect((res.data as { next_tool_server?: string }).next_tool_server).toBe('haven-signer')
-      expect((res.data as { next_tool_name?: string }).next_tool_name).toBe('haven_sign_x402')
+      expect(res.data.next_tool_server).toBe('haven-signer')
+      expect(res.data.next_tool_name).toBe('haven_sign_x402')
       expect(xBody().settlementScheme).toBe('eip3009')
     })
 
@@ -4070,11 +4073,8 @@ describe('structured agent guidance (#1308)', () => {
     })
     const result = ok<{
       status: string
-      next_action: string
-      next_tool: string
-      safe_to_continue: boolean
       agent_summary: Record<string, unknown>
-    }>(await pay())
+    } & AgentNextStep>(await pay())
 
     // #2101: the authoritative field must say STOP, not wait. No live rail
     // mints this status (410 on the legacy rail per #1986; 403/502 at prepare
@@ -4084,12 +4084,12 @@ describe('structured agent guidance (#1308)', () => {
     expect(result.data.status).toBe('pending_approval')
     expect(result.data.next_action).toBe('stop_and_tell_user')
     expect(result.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
-    expect((result.data as { next_tool_server?: string }).next_tool_server).toBe('haven')
-    expect((result.data as { next_tool_name?: string }).next_tool_name).toBe('haven_get_payment_status')
+    expect(result.data.next_tool_server).toBe('haven')
+    expect(result.data.next_tool_name).toBe('haven_get_payment_status')
     // #2550: both roles are emitted (haven-signer and haven), so the role field
     // has to distinguish them. A field that only ever said "signer" would leave
     // a client unable to tell "the other role" from "the field is missing".
-    expect((result.data as { next_tool_server_role?: string }).next_tool_server_role).toBe('hosted')
+    expect(result.data.next_tool_server_role).toBe('hosted')
     expect(result.data.safe_to_continue).toBe(false)
   })
 })

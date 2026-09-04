@@ -2743,6 +2743,36 @@ const NEXT_TOOL_SERVER_ROLES: Record<string, 'hosted' | 'signer'> = {
   'haven-signer': 'signer',
 }
 
+/**
+ * The guidance envelope `buildAgentGuidance` emits: the next-step contract
+ * plus the two envelope fields that ride with it (#2557).
+ *
+ * Declared so the return below is BOUND to a type rather than inferred. The
+ * type had fallen behind the emission twice — `next_tool_server` /
+ * `next_tool_name` (#1588) and `next_tool_server_role` (#2550) were both
+ * emitted for a while before `AgentNextStep` mentioned them — because nothing
+ * connected the two.
+ *
+ * Local and unexported on purpose: `AgentNextStep` is the SDK's published
+ * next-step contract, while `agent_summary` and `warnings` are this server's
+ * envelope around it. Exporting a second public type for an internal shape
+ * would widen the SDK's surface to fix an internal binding.
+ *
+ * **What this does and does not catch** — measured, not assumed. A new
+ * property written DIRECTLY into the returned literal is an excess-property
+ * error. A property introduced through a conditional spread
+ * (`...(cond ? { x } : {})`) is NOT: TypeScript does not excess-property-check
+ * spread results, and every optional field here arrives that way. So this
+ * binds the shape without closing the exact hole the two drifts came through.
+ * It is worth having anyway — it makes `AgentNextStep` load-bearing instead of
+ * decorative, so a field REMOVED or RETYPED there breaks the build — but do
+ * not read it as a guarantee that the next added field cannot drift.
+ */
+type AgentGuidanceEnvelope = AgentNextStep & {
+  agent_summary: AgentPaymentSummary
+  warnings: AgentPaymentWarning[]
+}
+
 function buildAgentGuidance(input: {
   nextAction: AgentNextStep['next_action']
   nextTool?: string
@@ -2751,7 +2781,7 @@ function buildAgentGuidance(input: {
   reason: string
   summary: AgentPaymentSummary
   warnings?: AgentPaymentWarning[]
-}) {
+}): AgentGuidanceEnvelope {
   // #1588: next_tool is Claude-family namespaced (mcp__<server>__<tool>) and
   // kept byte-identical for existing clients; the pair below is the
   // runtime-neutral resolution — Codex names servers by config key

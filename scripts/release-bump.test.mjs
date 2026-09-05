@@ -1704,37 +1704,51 @@ test('#2580: an unchanged version is refused before the release PR merges', asyn
   assert.deepEqual(semver.calls[1], ['eq', '0.1.34-alpha.0', '0.1.34-alpha.0'])
 })
 
-test('#2580: production resolves the REAL semver — structurally, not by substring', async () => {
-  // The double above proves the rule's logic; this proves the rule is wired to a
-  // real comparator in the one place it runs for real.
-  //
-  // The FIRST version of this test was a substring scan for
-  // `node_modules', 'semver', 'index.js'` anywhere in the file, and
-  // `haven-reviewer` broke it by execution: it replaced `getSemver`'s body with
-  // a permissive object literal (`{ lt: () => false, eq: () => false, … }`)
-  // that refuses nothing, left the path string alive in an unused variable, and
-  // all 62 tests still passed. The commit message claimed this assertion stopped
-  // exactly that. It did not. So the check is now scoped to `getSemver`'s BODY
-  // and asserts its shape rather than the file's vocabulary.
+test('#2580: production resolves the REAL semver — by IDENTITY where deps exist', async () => {
+  // Two source-text versions of this assertion were defeated by `haven-reviewer`,
+  // each with a stub that satisfied the words while fabricating the comparator:
+  // an inline object literal with the path string parked in an unused variable,
+  // then an imported sibling module with the path string parked in a comment.
+  // A text scan cannot close that class, because what it inspects is not what
+  // runs. So the check now EXECUTES the resolution and compares the result for
+  // identity — a property no stub can forge without actually being the module.
+  const { resolveSemver } = await import('./release-version-order.mjs')
+
+  let real = null
+  try {
+    real = (await import(join(ROOT, 'node_modules', 'semver', 'index.js'))).default
+  } catch (err) {
+    assert.equal(err.code, 'ERR_MODULE_NOT_FOUND', `semver import failed unexpectedly: ${err.message}`)
+    // Dependency-free job: identity is unprovable here, so fall back to the
+    // scoped text scan. It is weaker — a sibling-module stub walks through it —
+    // but dropping it entirely was measurably worse: with only the identity
+    // check, a fabricated comparator is caught ZERO times in this condition,
+    // which is the one CI actually runs. Keeping both is strictly better than
+    // either alone.
+    const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+    assert.match(source, /return resolveSemver\(ROOT\)/, 'release-bump.mjs must delegate to resolveSemver')
+    assert.match(source, /backwardsVersionViolation\(currentVersion, newVersion.*await getSemver\(\)/)
+
+    const order = await readFile(join(ROOT, 'scripts', 'release-version-order.mjs'), 'utf8')
+    const fn = order.slice(order.indexOf('export async function resolveSemver('), order.length)
+    const body = fn.slice(0, fn.indexOf('\n}'))
+    assert.match(body, /const semverPath = join\(root, 'node_modules', 'semver', 'index\.js'\)/)
+    assert.match(body, /return \(await import\(semverPath\)\)\.default/)
+    assert.doesNotMatch(body, /\blt\s*:/, 'resolveSemver must not fabricate a comparator')
+    assert.doesNotMatch(body, /\beq\s*:/, 'resolveSemver must not fabricate a comparator')
+    return
+  }
+
+  assert.strictEqual(await resolveSemver(ROOT), real, 'resolveSemver must return the real semver module itself')
+
+  // And production must route through it, not around it.
   const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
-
-  const call = source.indexOf('backwardsVersionViolation(currentVersion, newVersion')
-  assert.notEqual(call, -1, 'release-bump.mjs no longer calls backwardsVersionViolation')
-  const callLine = source.slice(call, source.indexOf('\n', call))
-  assert.match(callLine, /await getSemver\(\)/, 'the production call must pass the resolved workspace semver')
-
-  // Isolate the function body, so nothing elsewhere in the file can satisfy it.
   const fnStart = source.indexOf('async function getSemver() {')
   assert.notEqual(fnStart, -1, 'getSemver was renamed or removed')
-  const body = source.slice(fnStart, source.indexOf('\n}', fnStart))
-
-  assert.match(body, /node_modules', 'semver', 'index\.js'/, 'getSemver must resolve the real package path')
-  assert.match(body, /return \(await import\(semverPath\)\)\.default/, 'getSemver must RETURN the imported module')
-  // The stub that defeated the old check: a returned object literal. `lt:` or
-  // `eq:` appearing as a property inside this body means the comparator is being
-  // fabricated rather than imported.
-  assert.doesNotMatch(body, /\blt\s*:/, 'getSemver must not fabricate a comparator')
-  assert.doesNotMatch(body, /\beq\s*:/, 'getSemver must not fabricate a comparator')
+  assert.match(source.slice(fnStart, source.indexOf('\n}', fnStart)), /return resolveSemver\(ROOT\)/)
+  const call = source.indexOf('backwardsVersionViolation(currentVersion, newVersion')
+  assert.notEqual(call, -1, 'release-bump.mjs no longer calls backwardsVersionViolation')
+  assert.match(source.slice(call, source.indexOf('\n', call)), /await getSemver\(\)/)
 })
 
 test('#2580: real semver agrees with the ordering the rule assumes — where deps exist', async () => {

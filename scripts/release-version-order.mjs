@@ -1,3 +1,5 @@
+import { join } from 'node:path'
+
 // Forward-only version rule for a release bump (#2580).
 //
 // Its own module, not a function inside release-bump.mjs, for the reason the
@@ -89,4 +91,35 @@ export function backwardsVersionViolation(current, next, { snapshot }, semver) {
   }
 
   return null
+}
+
+/**
+ * Resolve the workspace semver package (#2580).
+ *
+ * ## Why this lives here rather than staying a private helper in release-bump.mjs
+ *
+ * So a test can CALL it. `release-bump.mjs` runs `main()` at module scope, so
+ * nothing can import its internals — which meant the only way to assert that
+ * production gets the real comparator was to scan the file as text. Two
+ * successive text scans were defeated by `haven-reviewer`, each by a stub that
+ * satisfied the words while fabricating the comparator: first an inline object
+ * literal with the path string parked in an unused variable, then an imported
+ * sibling module with the path string parked in a comment. A text scan cannot
+ * close that, because the thing it inspects is not the thing that runs.
+ *
+ * Exported here, the resolution can be executed and its RESULT compared for
+ * identity against a separately imported `semver` — which no stub survives,
+ * because identity is not a property of the source text.
+ *
+ * The honest limit: that assertion needs `node_modules`, and the only CI job
+ * running this suite deliberately has none, so it is availability-gated. In the
+ * dependency-free job the wiring is still only textually checked. And no test
+ * binds an author who edits the tests — this guards against accidental drift,
+ * which is the actual failure mode, not against a determined author.
+ *
+ * @param {string} root workspace root, so a test need not guess it.
+ */
+export async function resolveSemver(root) {
+  const semverPath = join(root, 'node_modules', 'semver', 'index.js')
+  return (await import(semverPath)).default
 }

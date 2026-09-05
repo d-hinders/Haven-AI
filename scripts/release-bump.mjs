@@ -56,7 +56,7 @@ import {
   rewriteManifestTable,
 } from './release-manifest-doc.mjs'
 import { snapshotModeViolation } from './release-snapshot-version.mjs'
-import { backwardsVersionViolation } from './release-version-order.mjs'
+import { backwardsVersionViolation, resolveSemver } from './release-version-order.mjs'
 
 const execAsync = promisify(execFile)
 
@@ -135,10 +135,17 @@ const SOURCE_VERSION_CONSTANTS = [
 
 // ── Semver helpers ────────────────────────────────────────────────────────────
 
-/** Resolve the semver package from the workspace root node_modules. */
+/**
+ * Resolve the semver package from the workspace root node_modules.
+ *
+ * Delegates to `release-version-order.mjs` so a test can execute the same
+ * resolution and assert IDENTITY against a separately imported semver. It used
+ * to inline the import, which left only a source-text scan to prove production
+ * gets the real comparator — and `haven-reviewer` defeated two such scans in a
+ * row with fabricated comparators (#2580).
+ */
 async function getSemver() {
-  const semverPath = join(ROOT, 'node_modules', 'semver', 'index.js')
-  return (await import(semverPath)).default
+  return resolveSemver(ROOT)
 }
 
 const VALID_BUMP_TYPES = new Set(['patch', 'minor', 'major', 'prerelease'])

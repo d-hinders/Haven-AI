@@ -827,6 +827,29 @@ export const openapiSpec = {
         },
       },
     },
+    '/': {
+      get: {
+        tags: ['Health'],
+        operationId: 'getApiRoot',
+        summary: 'What this service is, and where its machine-readable contract lives.',
+        description:
+          'Unauthenticated root document (#2530). An agent handed only a backend URL had ' +
+          'nothing to read and had to guess the spec path. Deliberately thin and ' +
+          'non-sensitive: names, paths, and which credential each door wants — no version ' +
+          'or build identifier, which would fingerprint the deployment and buy an agent nothing.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'The API root document.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiRootDocument' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/health': {
       get: {
         tags: ['Health'],
@@ -5720,6 +5743,33 @@ export const openapiSpec = {
         type: 'string',
         enum: Object.values(AgentPaymentRail),
         description: 'Stable rail identifier for Haven agent payment states.',
+      },
+      ApiRootDocument: {
+        type: 'object',
+        required: ['name', 'openapi', 'auth', 'health'],
+        properties: {
+          name: { type: 'string', enum: ['haven-api'] },
+          description: { type: 'string' },
+          openapi: {
+            type: 'string',
+            format: 'uri',
+            description:
+              'Absolute URL of this document, derived from the request — so the dev backend ' +
+              'names the dev backend and a request through the frontend proxy names the proxy.',
+          },
+          docs: { type: 'string', format: 'uri', description: 'Agent-readable product docs.' },
+          auth: {
+            type: 'object',
+            required: ['agent', 'owner'],
+            properties: {
+              agent: { type: 'string', description: 'How an agent credential is presented.' },
+              owner: { type: 'string', description: 'How an owner session is obtained.' },
+            },
+            additionalProperties: false,
+          },
+          health: { type: 'string', format: 'uri' },
+        },
+        additionalProperties: false,
       },
       HealthResponse: {
         type: 'object',

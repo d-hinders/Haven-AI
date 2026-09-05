@@ -29,7 +29,11 @@ covers:
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
   - packages/backend/src/routes/safe-details.ts
-last-verified: "2026-09-04" # chain-reset(#2542): scoped re-count after the documented health routes; prior notes remain in git history.
+  - packages/backend/src/domain/request-origin.ts
+  - packages/backend/src/middleware/auth.ts
+  - packages/backend/src/middleware/agentAuth.ts
+  - packages/frontend/next.config.ts
+last-verified: "2026-09-04" # #2530: new § *Discoverability from a bare URL* — the three unauthenticated surfaces, the request-derived `servers[0]`, the two things the origin helper deliberately does NOT do (the trust-gated host with an UNgated scheme, and the path prefix it cannot infer because the frontend rewrite strips `/api` before the backend sees it — measured as a 404, not assumed), the 401 `hint` with the two constraints it must not break (#1640 body identity; the uniform invalid-key string), and the public catalogue allow-list. CI then caught two more, both mine: the generated `packages/core/src/api-types.ts` was stale against the spec fields this PR adds (regenerated), and `domain/request-origin.ts` imported Fastify, violating `domain-stays-pure` — fixed by taking headers rather than a request, which is recorded in the section above. Four new `covers:` entries — `packages/frontend/next.config.ts` added on review, since the path-prefix claim in this section is made true by that rewrite and nothing would have re-implicated the doc if it changed. The forwarded-header paragraph was also corrected on review: it claimed parity with `authRateLimit`, which gates on the same variable but hands SELECTION to `proxy-addr` counting from the right — the host now indexes from the trusted end for that reason, the scheme deliberately does not, and the accepted residue is stated rather than implied. Scope: that section and the front matter — the coverage tables, the drift check and the authority-boundaries section were not re-read. Prior: chain-reset(#2542): scoped re-count after the documented health routes; prior notes remain in git history.
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -42,6 +46,92 @@ Haven publishes the agent payment API as OpenAPI 3.1 JSON:
 The source of truth lives in
 [`packages/backend/src/openapi/spec.ts`](../../packages/backend/src/openapi/spec.ts)
 and is served by the backend at `/openapi.json`.
+
+## Discoverability from a bare URL (#2530)
+
+An agent handed only a backend URL has three things to read, none of which need
+a credential:
+
+| Surface | What it gives |
+| --- | --- |
+| `GET /` | The root document: what this service is, the absolute URL of its OpenAPI spec, which credential each door wants, and the health path. |
+| `GET /openapi.json` | The machine-readable contract. |
+| `GET /catalog` | The merchant catalogue, in a reduced public shape — see below. |
+
+**The root document is deliberately thin.** Names, paths, and credential
+guidance — no version, build identifier or environment name. A service banner
+that fingerprints the deployment is a gift to a scanner and buys an agent
+nothing.
+
+**`servers[0]` is derived from the request, not read from the static list.**
+The static list named the production Railway host first, always, so the dev
+backend served a spec telling clients to call production. Production stays
+listed as the documented second entry. The origin comes from
+`packages/backend/src/domain/request-origin.ts`, which is also what builds the
+connector command and the root document's own URLs — one answer, three
+surfaces.
+
+That helper takes **headers**, not a request object. `domain/` may not import
+the web framework (`domain-stays-pure`, doc 10), and the dependency lint caught
+the first version doing exactly that. Taking the three header values directly
+satisfies the boundary honestly rather than by exemption, and makes the
+function pure — its tests construct a plain object instead of a fake request.
+
+Two things that helper does **not** do, both recorded because they look like
+omissions:
+
+- It honours `x-forwarded-host` only when `TRUST_PROXY_HOPS > 0`, and reads the
+  entry that many hops **from the right**. Gating is not the whole job:
+  a forwarded header can be APPENDED to, so the leftmost entry is the one an
+  original client could have written, and reading index 0 would hand a
+  multi-hop deployment exactly the value an attacker controls. (An earlier
+  draft claimed parity with `authRateLimit` here. It gates on the same
+  variable, but hands selection to `proxy-addr`, which counts from the right —
+  the gating matched and the selection did not. A reviewer caught it.)
+- The **scheme** takes the LEFTMOST entry and is not gated, both deliberately
+  and for different reasons than the host. `x-forwarded-proto: https,http`
+  means the client reached the edge over https and an inner hop continued over
+  http, so a public URL should name the client's protocol; right-indexing it
+  would make a correct two-hop deployment advertise its own internal `http`.
+  And gating it would make every TLS-terminating deployment that has not set
+  the variable advertise `http://` for its own API.
+
+  **The residue is accepted, not closed, and is written here rather than
+  implied:** the scheme stays injectable. Its blast radius is bounded by the
+  host — the part that decides where a client is told to send its next request
+  — being both gated and right-indexed, so a downgraded scheme on a correct
+  host yields a URL that simply fails against a TLS-only origin. Confirming
+  that the edge overwrites this header is an infrastructure question this
+  repository cannot answer.
+- It cannot infer a path prefix. The frontend proxies `/api/:path*` and its
+  rewrite **strips** the prefix before the backend sees the path — measured:
+  `GET /api/openapi.json` against the backend is a 404. A deployment that wants
+  its spec to advertise `https://preview.example/api` sets `HAVEN_API_URL` to
+  exactly that. A stated fact, not an inference, is the right shape for
+  something a client will call.
+
+**401s name the credential they want.** `authMiddleware` and
+`agentAuthMiddleware` add a `hint` alongside the unchanged `error` string. Two
+constraints hold: the #1640 rule that a purpose-scoped token gets a body
+**identical** to a failed verification (the bodies are shared constants, so the
+identity is structural rather than remembered), and the uniformity of
+`Invalid or revoked API key` across archived, revoked, unknown-status and
+no-such-key — the hint must not say which, or it puts back the distinction the
+single error string exists to hide.
+
+**`GET /catalog` reads without a credential, in a reduced shape.** The
+catalogue is a discovery surface by design (#1717) and used to answer 401,
+which meant an agent could not find a payable merchant until after the
+onboarding the catalogue was supposed to lead to. The public shape is an
+**allow-list** (`PUBLIC_CATALOG_FIELDS`) and a test fails on any key outside
+it, so the exposure is reviewable as a list. It gives the endpoint **host**,
+not the full callable URL, and withholds prices and tool-invocation detail: an
+agent that intends to pay holds a credential by then. Every other catalogue
+route still requires one, and a caller presenting a **bad** credential still
+gets its 401 rather than a silent downgrade — serving a reduced answer to a
+revoked agent would hide the revocation from the only party who would notice.
+There is no per-agent or per-user data in `merchant_catalog` to leak; every
+column is merchant metadata, which somebody checked rather than assumed.
 
 ## Coverage
 

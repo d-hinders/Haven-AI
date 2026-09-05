@@ -172,19 +172,22 @@ export function sanitizeInstallStatus(value: unknown): Record<string, unknown> {
       status.superseded_agent_ids = null
     } else if (Array.isArray(field)) {
       status.superseded_agent_ids = field
-        // The count cap comes FIRST (#2561 review). Capping last still stored a
-        // bounded row, but it ran a trim and a secret-shape regex over every
-        // element of an arbitrarily long array before truncating — so the
-        // comment claiming the cap kept the work bounded was true of the row
-        // and not of the request. No test pins this ordering, and none can:
-        // the output is identical either way, so what changed is the work, not
-        // the result. Said plainly rather than implied by a passing suite.
-        .slice(0, 50)
         .filter((id): id is string => typeof id === 'string')
         .map((id) => id.trim())
         .filter((id) => id.length > 0 && !looksLikeRawPathOrSecret(id))
         // Same 120-character ceiling the string fields use.
         .map((id) => id.slice(0, 120))
+        // The count cap is LAST, and a round trip proved why. A review round
+        // asked for it first, to bound the per-element work; I moved it and
+        // called the change behaviour-preserving in this very comment. It is
+        // not: capping first looks at the raw first 50 entries only, so 60 junk
+        // entries followed by 40 real ids keep ZERO instead of 40 — measured,
+        // not argued. That is this feature's own failure mode — an agent the
+        // setup superseded going unoffered — on exactly the input a hostile
+        // client would send deliberately. The per-element work stays bounded by
+        // Fastify's body limit rather than by this cap, which is the honest
+        // statement of what the cap does and does not buy.
+        .slice(0, 50)
     }
   }
 

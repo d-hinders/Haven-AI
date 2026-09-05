@@ -19,13 +19,17 @@ const { mockRevoke, mockAgents } = vi.hoisted(() => ({
 }))
 
 const { mockState } = vi.hoisted(() => ({
-  mockState: { error: null as string | null, refetch: (() => {}) as () => void },
+  mockState: {
+    error: null as string | null,
+    loading: false,
+    refetch: (() => {}) as () => void,
+  },
 }))
 
 vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => ({
     agents: mockAgents.current,
-    loading: false,
+    loading: mockState.loading,
     error: mockState.error,
     refetch: mockState.refetch,
     revokeAgent: mockRevoke,
@@ -42,6 +46,7 @@ beforeEach(() => {
   mockAgents.current = OWNED
   mockRevoke.mockResolvedValue(undefined)
   mockState.error = null
+  mockState.loading = false
   mockState.refetch = vi.fn()
 })
 
@@ -112,6 +117,30 @@ describe('SupersededAgentsCard', () => {
 
       await userEvent.click(screen.getByRole('button', { name: /try again/i }))
       expect(mockState.refetch).toHaveBeenCalled()
+    })
+
+    it('stays visible while a retry is in flight, instead of vanishing', () => {
+      // `refetch` clears `error` synchronously before the request settles, so
+      // branching on the error alone made the card — and the button just
+      // clicked — disappear for the length of the retry. On a slow connection
+      // that reads as "the click did nothing".
+      mockAgents.current = []
+      mockState.error = null
+      mockState.loading = true
+      render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
+
+      expect(screen.getByText(/may have replaced an earlier agent/i)).toBeInTheDocument()
+      const button = screen.getByRole('button', { name: /checking/i })
+      expect(button).toBeDisabled()
+    })
+
+    it('stays silent while loading when nothing was reported', () => {
+      // The transient case that should NOT flash a card: no report, so there is
+      // nothing to be silent about yet.
+      mockAgents.current = []
+      mockState.loading = true
+      const { container } = render(<SupersededAgentsCard supersededAgentIds={[]} />)
+      expect(container).toBeEmptyDOMElement()
     })
 
     it('stays silent when the read fails but nothing was reported', () => {

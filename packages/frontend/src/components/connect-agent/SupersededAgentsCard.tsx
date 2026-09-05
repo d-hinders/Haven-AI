@@ -54,7 +54,7 @@ export function SupersededAgentsCard({
   /** Tri-state from `install_status`: list, `[]`, or `null`/absent. */
   supersededAgentIds?: readonly string[] | null
 }) {
-  const { agents, error, refetch, revokeAgent } = useAgents()
+  const { agents, loading, error, refetch, revokeAgent } = useAgents()
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [failed, setFailed] = useState<Record<string, string>>({})
@@ -79,7 +79,12 @@ export function SupersededAgentsCard({
   // Only reached when the connector actually named agents. A failed read with
   // nothing reported has nothing to be silent about.
   const reportedAny = (supersededAgentIds?.length ?? 0) > 0
-  if (offered.length === 0 && reportedAny && error) {
+  // `error || loading` rather than `error` alone (#2561 review round two).
+  // `refetch` clears `error` synchronously before the request settles, so
+  // branching on the error alone made the whole card — including the button
+  // just clicked — vanish for the length of the retry and come back only when
+  // it resolved. On a slow connection that reads as "the click did nothing".
+  if (offered.length === 0 && reportedAny && (error || loading)) {
     return (
       <Card>
         <Card.Section>
@@ -91,8 +96,8 @@ export function SupersededAgentsCard({
             them here. Nothing has changed either way.
           </p>
           <div className="mt-3">
-            <Button variant="ghost" size="sm" onClick={() => void refetch()}>
-              Try again
+            <Button variant="ghost" size="sm" disabled={loading} onClick={() => void refetch()}>
+              {loading ? 'Checking…' : 'Try again'}
             </Button>
           </div>
         </Card.Section>
@@ -100,10 +105,10 @@ export function SupersededAgentsCard({
     )
   }
 
-  // A load still in flight renders nothing rather than a skeleton: it is
-  // transient and resolves on its own, on a screen that has just finished
-  // celebrating a completed setup. The branch above is what keeps a FAILED
-  // load from looking the same.
+  // With nothing reported, a load in flight renders nothing rather than a
+  // skeleton: it is transient and resolves on its own, on a screen that has
+  // just finished celebrating a completed setup. The branch above is what
+  // keeps a FAILED load — and a retry of one — from looking the same.
   if (offered.length === 0) return null
 
   const pending = offered.find((agent) => agent.id === pendingId) ?? null

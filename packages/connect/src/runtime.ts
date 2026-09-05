@@ -1520,21 +1520,20 @@ function activationInstructionWithWhy(profile: RuntimeProfile): string {
 const RERUN_HINT = connectorRerunCommand()
 
 /**
- * Agent ids of every OTHER credential directory (#1688) — the agents this
- * run just superseded. Reads identity.json for the id; a directory that does
- * not parse is named by its directory name, because "I could not read it" is
- * still a directory the user should know exists.
- */
-/**
- * Every OTHER agent directory on this machine, or `null` when the scan could
- * not run.
+ * Agent ids of every OTHER credential directory (#1688) — the agents this run
+ * just superseded — or `null` when the scan could not run.
+ *
+ * Reads identity.json for the id; a directory that does not parse is named by
+ * its directory name, because "I could not read it" is still a directory the
+ * user should know exists.
  *
  * The `null` is the whole point of the signature (#2561). This used to return
  * `[]` for both "the credential root holds no other agent" and "the credential
  * root could not be read", and the outcome field's own doc comment had to warn
  * readers that emptiness was not a guarantee. A warning in prose cannot reach
  * a dashboard: rendering "nothing to revoke" for a machine nobody scanned
- * states something Haven does not know.
+ * states something Haven does not know. So the two cases are distinguishable
+ * at the source, where the difference is actually observed.
  *
  * What a NON-null return does and does not promise: the root was readable, not
  * that every entry under it was. A per-entry `stat` or read that fails is
@@ -1543,8 +1542,7 @@ const RERUN_HINT = connectorRerunCommand()
  * UNDER-report. That direction is the safe one — fewer revoke offers, never a
  * spurious one — but it is a limit of the success branch rather than a
  * guarantee, and saying so here is cheaper than a reader inferring the
- * opposite. So the two cases are distinguishable
- * at the source, where the difference is actually observed.
+ * opposite.
  */
 async function listOtherAgentIds(baseDir: string | undefined, currentDirectory: string): Promise<string[] | null> {
   const root = defaultCredentialRoot(baseDir)

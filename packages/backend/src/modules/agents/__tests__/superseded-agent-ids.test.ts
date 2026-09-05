@@ -64,6 +64,30 @@ describe('sanitizeInstallStatus — superseded_agent_ids (#2561)', () => {
     expect(ids[0]).toHaveLength(120)
   })
 
+  it('keeps valid ids that sit BEYOND the first 50 raw entries', () => {
+    // The regression a review round asked for and I shipped: capping the raw
+    // array before filtering looks at the first 50 entries only, so junk in
+    // front hides everything behind it. 60 non-strings followed by 40 real ids
+    // kept ZERO. That is this feature's own failure mode — a superseded agent
+    // going unoffered — reachable by a hostile client on purpose, so it is
+    // pinned rather than left to a comment.
+    const out = sanitizeInstallStatus({
+      superseded_agent_ids: [
+        ...Array.from({ length: 60 }, () => 42),
+        ...Array.from({ length: 40 }, (_, i) => `agt_${i}`),
+      ],
+    })
+    expect(out.superseded_agent_ids).toHaveLength(40)
+    expect((out.superseded_agent_ids as string[])[0]).toBe('agt_0')
+  })
+
+  it('still caps at 50 when there are more than 50 VALID ids', () => {
+    const out = sanitizeInstallStatus({
+      superseded_agent_ids: Array.from({ length: 80 }, (_, i) => `agt_${i}`),
+    })
+    expect(out.superseded_agent_ids).toHaveLength(50)
+  })
+
   it('refuses a non-array, non-null value instead of wrapping it', () => {
     // A bare string is the mistake most likely to be made by a future client,
     // and silently turning it into a one-element list would invent a fact.

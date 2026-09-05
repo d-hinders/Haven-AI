@@ -256,13 +256,22 @@ export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch 
           next_user_action: input.nextUserAction,
           error_code: input.errorCode ?? null,
           environment_label: input.environmentLabel,
-          // `?? null`, deliberately, and NOT the `input.x` shorthand the
-          // optional fields above use: `undefined` disappears from
-          // `JSON.stringify`, and an absent key means "unchanged" to the
-          // backend's jsonb merge. That is right for a probe result and wrong
-          // here — "the scan could not run" is a fact this report is making,
-          // not a fact it is declining to mention (#2561).
-          superseded_agent_ids: input.supersededAgentIds ?? null,
+          // Three states on the wire, and ABSENT is a fourth (#2561 review).
+          // `?? null` alone collapsed the fourth into the third: a report that
+          // simply had nothing to say — the early config-written ping, which
+          // fires before the scan has started — asserted "the scan could not
+          // run" instead of leaving the key alone. Inert today, because the
+          // complete report overwrites it seconds later and nothing reads the
+          // row in between; a landmine the moment any caller relies on
+          // "absent = unchanged", which is what the backend's jsonb merge
+          // means and what this field's own contract says.
+          //
+          // So: a caller that passes the field says something (`null` included,
+          // deliberately, since "could not run" is a claim worth making); a
+          // caller that omits it says nothing.
+          ...(input.supersededAgentIds !== undefined
+            ? { superseded_agent_ids: input.supersededAgentIds }
+            : {}),
         }),
       })
     },

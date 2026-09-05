@@ -160,21 +160,20 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           walletName={setupStatus?.haven_wallet.name ?? flow.approvalWalletLabel}
           chainId={setupStatus?.haven_wallet.chain_id ?? flow.approvalChainId}
           onClose={flow.handleClose}
-        />
-      )}
-
-      {connectView?.kind === 'active' && (
-        // AFTER the done state, not before it (haven-design-reviewer, #2561).
-        // Rendered beside it rather than inside it, because the offer is about
-        // agents this setup displaced rather than about the setup that
-        // succeeded — but placing it first made a "replaced / revoke" decision
-        // the first thing a reader met, pushing the money-clarity payoff
-        // (`SetupDoneState`'s grant line, deliberately the heading a reader
-        // lands on) into second place. The success is the news; this is the
-        // follow-up. It renders nothing unless the connector reported agents
-        // this owner actually has.
-        <SupersededAgentsCard
-          supersededAgentIds={setupStatus?.install_status?.superseded_agent_ids}
+          // Inside the done state, above its Done button — two rendered
+          // captures to get here (#2561). Placing the offer FIRST made a
+          // "replaced / revoke" decision the first thing a reader met, ahead
+          // of the grant line that screen exists to state. Placing it after
+          // the whole component put it below `Done`, where the one action a
+          // finished screen invites closes the modal past it. Above the
+          // button is the only spot that is both: the success stays the
+          // heading, and the follow-up is still read. It renders nothing
+          // unless the connector reported agents this owner actually has.
+          beforeDone={
+            <SupersededAgentsCard
+              supersededAgentIds={setupStatus?.install_status?.superseded_agent_ids}
+            />
+          }
         />
       )}
 

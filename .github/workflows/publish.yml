@@ -10,7 +10,10 @@ name: Publish packages
 #     gate — npm rejects republishing an existing version, so a normal commit
 #     that does not bump a version is a no-op here. The dist-tag is derived
 #     from the version: a prerelease publishes under its prerelease label
-#     (alpha), a stable version under latest.
+#     (alpha), a stable version under latest. A prerelease ALSO moves `latest`
+#     to itself afterwards (#2536), keeping its own tag — so `@alpha` still
+#     resolves and a bare `npm install`/`npx`, which reads `latest` and never
+#     the highest version number, stops serving a build from months ago.
 #
 #   push to `dev` → DEV channel (#2421, epic #2420). The job computes
 #     0.0.0-dev.<YYYYMMDDHHMM>.<shortsha>, runs `release-bump.mjs --snapshot`
@@ -47,6 +50,11 @@ name: Publish packages
 #      --snapshot — the other side of the same wall, keeping a snapshot version
 #      from being committed to a release branch and riding the dev → main
 #      promotion into alpha/latest.
+#   4. promote_latest() never calls `npm dist-tag add … latest` with a
+#      0.0.0-dev.* version (#2536). It examines the version shape before
+#      deciding anything, so the ARTIFACT is what the rule turns on; the
+#      channel then decides only whether an unexpected snapshot is a silent
+#      no-op (dev, where snapshots are ordinary) or a failure (anywhere else).
 #
 # The committed contract doc docs/operations/mcp-runtime-compatibility.md stays
 # PROD-only. Its Supported Runtime Manifest table is rewritten by the bump
@@ -270,8 +278,65 @@ jobs:
             return 0
           }
 
+          # ── Enforcement point 4 of 4 (#2536) ───────────────────────────────
+          # The owner decision this implements: "We should build it so the
+          # latest version of the packages is used. Not sure if we need a tag
+          # saying latest or if it will default to it. But we should not have
+          # users run old versions." (2026-09-04, recorded on #2536.)
+          #
+          # npm resolves a bare `npm install pkg` / `npx pkg` through the
+          # `latest` dist-tag, NEVER the highest version number. Publishing a
+          # prerelease under `alpha` therefore leaves `latest` wherever it last
+          # was — which is how a bare `npx @haven_ai/connect` came to install a
+          # build 34 releases old while `@alpha` was current.
+          #
+          # Called only after a publish this run actually performed. That is
+          # deliberate rather than incidental: re-running an OLD workflow run
+          # publishes nothing (every version is already on npm and skips), so
+          # tying the move to a real publish is what stops a re-run dragging
+          # `latest` backwards to an older release. It does NOT compare against
+          # the live `latest`, so a genuinely new publish of an OLDER release
+          # line would still move it down; the before-value is printed below so
+          # that shows up in the run log. The two cheap guards were measured and
+          # rejected — `sort -V` is not semver (it orders 1.0.0 before
+          # 1.0.0-alpha.1) and `semver` is only a hoisted transitive dep here.
+          promote_latest() {
+            pl_channel="$1"; pl_name="$2"; pl_version="$3"; pl_tag="$4"
+
+            # The snapshot shape is examined FIRST, before anything decides
+            # whether a move is wanted, so the artifact rather than the channel
+            # is what this turns on. Both answers are "do not touch latest";
+            # they differ only in whether the run should fail:
+            #   dev channel  → a snapshot is the ORDINARY case here. Nothing to
+            #                  move, nothing wrong. Silent no-op.
+            #   any other    → getting here with a snapshot is a defect in this
+            #                  file, and the run must say so.
+            # An earlier draft returned 1 for both and failed every dev publish
+            # — found by running the step, not by reading it.
+            case "$pl_version" in
+              0.0.0-dev.*)
+                [ "$pl_channel" = "prod" ] || return 0
+                echo "GUARD: refusing to move latest to snapshot version $pl_version — 0.0.0-dev.* must never reach alpha or latest" >&2
+                return 1
+                ;;
+            esac
+
+            # Snapshots aside, only the prod channel moves tags at all.
+            [ "$pl_channel" = "prod" ] || return 0
+
+            # A stable version was already published under `latest`.
+            [ "$pl_tag" = "latest" ] && return 0
+
+            # Informational only, and deliberately unable to fail the job: a
+            # transient registry read must not fail a publish that succeeded.
+            pl_before="$(npm view "$pl_name" dist-tags.latest 2>/dev/null || echo unknown)"
+            echo "→ Moving latest for $pl_name: ${pl_before:-none} → $pl_version (published under $pl_tag, which stays)"
+            npm dist-tag add "$pl_name@$pl_version" latest
+          }
+
           published_any=false
           failed=""
+          tag_failed=""
           results=""
 
           for pkg in sdk signer mcp connect cli; do
@@ -311,8 +376,17 @@ jobs:
 
             echo "→ Publishing $name@$version with --tag $tag"
             if npm publish -w "packages/$pkg" --tag "$tag" --access public; then
-              results="$results| \`$name\` | $version | published under \`$tag\` |"$'\n'
               published_any=true
+              if promote_latest "$channel" "$name" "$version" "$tag"; then
+                results="$results| \`$name\` | $version | published under \`$tag\` |"$'\n'
+              else
+                # The package IS live; only the tag move failed. Say exactly
+                # that, because "FAILED" next to a published version would send
+                # the next reader looking for a publish that did happen.
+                echo "✗ $name@$version published, but moving latest failed — continuing"
+                results="$results| \`$name\` | $version | published under \`$tag\`, **latest NOT moved** |"$'\n'
+                tag_failed="$tag_failed $name@$version"
+              fi
             else
               echo "✗ $name@$version failed to publish — continuing with the remaining packages"
               results="$results| \`$name\` | $version | **FAILED** — npm publish exited non-zero (see log) |"$'\n'
@@ -333,6 +407,13 @@ jobs:
           if [ -n "$failed" ]; then
             echo "ERROR: failed to publish:$failed"
             echo "Every other package was still attempted — anything not marked FAILED above is live or was already on npm."
+            exit 1
+          fi
+
+          if [ -n "$tag_failed" ]; then
+            echo "ERROR: published, but failed to move the latest dist-tag for:$tag_failed"
+            echo "Those versions ARE live under their own tag; only 'latest' still points elsewhere."
+            echo "Remedy, once per package: npm dist-tag add <name>@<version> latest"
             exit 1
           fi
 

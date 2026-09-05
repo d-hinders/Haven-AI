@@ -93,3 +93,4 @@
           - "scripts/ci/money-path.test.mjs"
           - "scripts/ci/qa-freshness.mjs"
           - "scripts/release-bump.mjs"
+          - "scripts/release-version-order.mjs"

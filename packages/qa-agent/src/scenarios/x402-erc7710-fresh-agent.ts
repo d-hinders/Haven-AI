@@ -179,7 +179,8 @@ export const x402Erc7710FreshAgent: Scenario = {
     // (#1667) — not as a side effect of redemption, which would revert first.
     //
     // POLLED to a deadline, like every other on-chain assertion in this suite
-    // (#2445). The harness reads `BASE_SEPOLIA_RPC` while the backend writes
+    // (#2445). The harness reads `QA_RPC_URL_BASE_SEPOLIA` (defaulting to the
+    // public endpoint) while the backend writes
     // through `RPC_URL_BASE_SEPOLIA` — two different nodes — against a deploy
     // the backend confirmed at ONE confirmation, so a single unpolled read can
     // land on a node that has not caught up yet.

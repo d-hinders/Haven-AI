@@ -240,6 +240,7 @@
     "scripts/ci/qa-freshness.mjs",
     "scripts/docs/coupling-gate.mjs",
     "scripts/docs/validate-frontmatter.mjs",
-    "scripts/release-bump.mjs"
+    "scripts/release-bump.mjs",
+    "scripts/release-version-order.mjs"
   ]
 }

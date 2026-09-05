@@ -60,7 +60,44 @@ haven agents rotate-key <id>             # new API key, shown once
 haven agents rename <id> <name>
 haven wallets rename <id> <name>
 haven contacts add <name> <address> | contacts remove <id>
+
+# set an agent up without the dashboard modal (#2527)
+haven agents connect --name <name> --budget <amount> --token USDC --period <minutes>
+haven agents connect --name <name> --budget 25 --token USDC --period 1440 --run
+haven agents connect --status <setupId> [--wait]
 ```
+
+### `haven agents connect`
+
+Does what the dashboard's connect modal does, from a terminal: creates the
+setup and prints the connector command, the approval link, and when the setup
+expires. `--budget` is in **whole tokens** as you would say it (`25` is 25
+USDC); the CLI reads the token's decimals from your wallet's own balances and
+converts, and it **refuses** an amount with more precision than the token has
+rather than rounding it away.
+
+The connector command is **printed, never composed** — it is the same string
+the dashboard shows for the same setup, because both render what the backend
+built. `--run` executes it for you as a child process with exactly `--json`
+appended and nothing else changed, streams the connector's output, and puts the
+thing you have to act on first.
+
+If the connector refuses — it cannot tell which runtime to wire, or the machine
+is already wired to a different agent — you get **exit 4** with the refusal
+object intact, including any ids or suggested name it carried. That is a
+message to relay to your user, not a problem to solve: `haven agents connect`
+deliberately has no `--replace` and no `--name` for the connector, because
+choosing between replacing an existing wiring and installing alongside it is
+the human's decision.
+
+Two flags the issue sketched and this does not have, so you are not left
+looking for them: **`--recipient`** (a recipient pin lives in the delegation's
+caveat enforcers and is set when the human approves the budget — no API field
+takes one here) and **`haven agents create`** (`POST /agents` requires a
+delegate address, and a CLI an agent drives must never hold a signing key —
+`connect` is the path that generates one locally, on your machine).
+
+Approving the budget stays with the human, in the browser, every time.
 
 Add `--json` to any read command for machine-readable output:
 

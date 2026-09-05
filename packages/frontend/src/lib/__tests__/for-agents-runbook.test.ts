@@ -59,7 +59,7 @@ describe('/for-agents.md (#2523)', () => {
     // rule list and left in the setup prompt alone (~440 bytes), on the
     // reasoning recorded above that export.
     //
-    // 7800 -> 8100 for #2526 (the page is 8063 bytes at this commit). The
+    // 7800 -> 8100 for #2526 (the page is 8289 bytes at this commit). The
     // device-code login is the one addition this page's own premise demands:
     // step 1 tells an agent it must not have the user's password, and until
     // now the page offered no alternative to asking for one. The 257 bytes buy
@@ -67,11 +67,20 @@ describe('/for-agents.md (#2523)', () => {
     // and its scope in both directions, key rotation included on the CANNOT
     // side — `rotate-key` was briefly allow-listed and the owner removed it on
     // 2026-09-05, so all three copies of this runbook say the same thing the
-    // approval screen does. Deliberately NOT added, and the reason
+    // approval screen does.
+    //
+    // 8100 -> 8400 for #2527 (the page is 8289 bytes at this commit). Step 3
+    // told an agent to wait for its human to build the setup in a dashboard;
+    // with a CLI session it can now do that step itself, and a runbook that
+    // does not say so sends the agent back to a browser it does not need. The
+    // 226 bytes buy the command, its four required flags and `--run`.
+    // Deliberately NOT added: the refusal contract and the `--status`/`--wait`
+    // shapes, which live in the CLI README where someone debugging a run is
+    // already looking. Deliberately NOT added, and the reason
     // the number stays this small: the full hand-off script (~600 bytes), on
     // the grounds that the CLI prints its own code and link, so an agent that
     // knows the command exists does not need this page to compose the message.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(8100)
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(8400)
   })
 
   it('states the rules in the SDK words the setup prompt also uses', () => {

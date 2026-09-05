@@ -1,5 +1,6 @@
 'use client'
 
+import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { Check, Download } from 'lucide-react'
 import { Button } from '../ui/Button'
@@ -115,6 +116,7 @@ export function SetupDoneState({
   budgets,
   walletName,
   chainId,
+  beforeDone,
   onClose,
 }: {
   runtime: string
@@ -127,6 +129,8 @@ export function SetupDoneState({
   walletName?: string | null
   /** Chain of that wallet — needed to resolve token decimals. */
   chainId?: number | null
+  /** Rendered directly above the Done button — see the comment at its use. */
+  beforeDone?: ReactNode
   onClose: () => void
 }) {
   const [downloading, setDownloading] = useState(false)
@@ -242,6 +246,14 @@ export function SetupDoneState({
           skip it and the tools never load, so setup looks silently broken.
           A to-do and a done-list do not share a list. */}
       {restartCopy && <ActionCallout>{restartCopy}</ActionCallout>}
+
+      {/* Anything the user should decide BEFORE dismissing. Rendered here
+          rather than after the button by the caller (#2561): a rendered
+          capture showed the superseded-agent offer sitting below `Done`,
+          where the one action a finished screen invites closes the modal
+          past it. Above the button it is still a follow-up to the grant
+          line — which stays the heading — and still gets read. */}
+      {beforeDone}
 
       <Button onClick={onClose} className="w-full">
         Done

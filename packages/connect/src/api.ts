@@ -91,6 +91,25 @@ export interface UpdateInstallStatusInput {
   nextUserAction: string
   errorCode?: string | null
   environmentLabel?: string
+  /**
+   * The other agent directories this machine holds, so the DASHBOARD can offer
+   * the owner a one-click revoke of what this setup superseded (#2561).
+   *
+   * A tri-state, and the middle case is why it is not a plain array:
+   *
+   * - a list  — the scan ran and found these;
+   * - `[]`    — the scan ran and found none;
+   * - `null` or absent — the scan could not run.
+   *
+   * The connector cannot revoke and must not: `POST /agents/:id/revoke` is
+   * owner-authenticated, and an agent credential retiring a sibling agent is
+   * the "agent editing its own authority" the re-key routes already refuse.
+   * So this reports, and a human clicks.
+   *
+   * `null` matters because the alternative is a dashboard telling somebody
+   * "nothing to revoke" about a machine nobody managed to read.
+   */
+  supersededAgentIds?: readonly string[] | null
 }
 
 export interface ConnectorContext {
@@ -237,6 +256,22 @@ export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch 
           next_user_action: input.nextUserAction,
           error_code: input.errorCode ?? null,
           environment_label: input.environmentLabel,
+          // Three states on the wire, and ABSENT is a fourth (#2561 review).
+          // `?? null` alone collapsed the fourth into the third: a report that
+          // simply had nothing to say — the early config-written ping, which
+          // fires before the scan has started — asserted "the scan could not
+          // run" instead of leaving the key alone. Inert today, because the
+          // complete report overwrites it seconds later and nothing reads the
+          // row in between; a landmine the moment any caller relies on
+          // "absent = unchanged", which is what the backend's jsonb merge
+          // means and what this field's own contract says.
+          //
+          // So: a caller that passes the field says something (`null` included,
+          // deliberately, since "could not run" is a claim worth making); a
+          // caller that omits it says nothing.
+          ...(input.supersededAgentIds !== undefined
+            ? { superseded_agent_ids: input.supersededAgentIds }
+            : {}),
         }),
       })
     },

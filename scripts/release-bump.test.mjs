@@ -1570,3 +1570,323 @@ test('#2536: a failed tag move fails the job WITHOUT claiming the publish failed
   assert.match(out, /npm dist-tag add <name>@<version> latest/, 'the remedy is printed')
   assert.doesNotMatch(out, /ERROR: failed to publish/, 'must not report a publish failure')
 })
+
+// ── #2580: a release bump only ever moves the version forward ────────────────
+//
+// The defect this closes sits one step earlier than the symptom. #2536 made
+// `publish.yml` move the `latest` dist-tag onto whatever it publishes, without
+// comparing against the live `latest` — so publishing a genuinely new version
+// of an OLDER release line would drag `latest` down to it. Catching a
+// backwards version HERE means it fails at the release PR, where a human is
+// already looking and the remedy is to type a different number, rather than
+// after publication where the remedy is a manual dist-tag repair.
+//
+// The rule is imported and CALLED. It lives in its own module precisely so it
+// can be — `release-bump.mjs` runs `main()` at import.
+
+// The semver DOUBLE, and why these tests do not import the real one.
+//
+// This suite runs in `Repo CI config checks`, which is deliberately
+// dependency-free — checkout, setup-node, no `npm ci` — because it must run on
+// every PR in seconds. Importing `node_modules/semver` from here passes on a
+// developer machine and fails in that job with ERR_MODULE_NOT_FOUND, which is
+// exactly how the first version of these tests broke CI.
+//
+// Removing the import is not a downgrade, because the real semver was never
+// what these tests should have been exercising. `backwardsVersionViolation`
+// does not implement version ordering; it DELEGATES ordering to the comparator
+// it is handed and decides what to do with the answer. Ordering is semver's
+// own well-tested behaviour, and re-asserting it here tested someone else's
+// library. What is genuinely this module's to get wrong is the part a double
+// pins precisely: which comparator it calls, IN WHICH ARGUMENT ORDER, and
+// whether the snapshot flag short-circuits before either is consulted. An
+// arguments-swapped `lt(current, next)` is the most likely real bug in this
+// file, and the real semver would have let it through in half the cases while
+// looking green.
+// The rule self-checks its comparator with known-answer probes and fails CLOSED
+// if they are wrong, so the double must answer THOSE truthfully while still
+// returning the configured verdict for the pair actually under test. Probe calls
+// are kept out of `calls`, so the argument-order assertions below still describe
+// the real question the rule asked rather than the warm-up.
+const PROBES = new Map([
+  ['1.0.0|2.0.0|lt', true],
+  ['2.0.0|1.0.0|lt', false],
+  ['1.0.0-alpha.1|1.0.0|lt', true],
+  ['1.0.0|1.0.0|eq', true],
+  ['1.0.0|2.0.0|eq', false],
+])
+
+function semverDouble({ lt = false, eq = false } = {}) {
+  const calls = []
+  const answer = (op, a, b, configured) => {
+    const probe = PROBES.get(`${a}|${b}|${op}`)
+    if (probe !== undefined) return probe
+    calls.push([op, a, b])
+    return configured
+  }
+  return {
+    calls,
+    lt(a, b) { return answer('lt', a, b, lt) },
+    eq(a, b) { return answer('eq', a, b, eq) },
+  }
+}
+
+test('#2580: a lower version is refused, and the message says what it would break', async () => {
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+  const semver = semverDouble({ lt: true })
+
+  // The scenario #2580 was filed for, in its own words.
+  const msg = backwardsVersionViolation('3.0.0', '2.5.1-alpha.0', { snapshot: false }, semver)
+  assert.ok(msg, 'a backwards bump must be refused')
+  assert.match(msg, /BACKWARDS/)
+  assert.match(msg, /latest/, 'the message must name the consequence, not just the rule')
+  assert.match(msg, /3\.0\.0/)
+  assert.match(msg, /2\.5\.1-alpha\.0/)
+
+  // ARGUMENT ORDER. `lt(next, current)` asks "is the new version below the old
+  // one" — the swapped form asks the opposite question and would refuse every
+  // legitimate forward bump while waving backwards ones through.
+  assert.deepEqual(semver.calls[0], ['lt', '2.5.1-alpha.0', '3.0.0'])
+})
+
+test('#2580: the prerelease → release transition is ALLOWED (the case a sort -V guard breaks)', async () => {
+  // The control half, and the reason `sort -V` was rejected in #2580: it orders
+  // `1.0.0` BEFORE `1.0.0-alpha.1`, so a guard built on it would refuse the 1.0
+  // release this repo is heading toward — the one release that matters most.
+  //
+  // What this test can prove and what it cannot: with a comparator reporting
+  // "not lower, not equal", the rule allows the bump. That the REAL comparator
+  // answers that way for `0.1.34-alpha.0 -> 1.0.0` is semver's precedence rule
+  // (a prerelease sorts below its own release), not this module's — and it is
+  // why the module is handed semver rather than a shell pipeline.
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+
+  for (const [current, next] of [
+    ['0.1.34-alpha.0', '1.0.0'],   // the exact pair #2580's acceptance criteria name
+    ['0.1.34-alpha.0', '0.1.34-alpha.1'],
+    ['0.1.34-alpha.0', '0.1.35-alpha.0'],
+    ['1.0.0-alpha.1', '1.0.0'],
+    ['0.1.9', '0.2.0'],
+  ]) {
+    const semver = semverDouble({ lt: false, eq: false })
+    assert.equal(
+      backwardsVersionViolation(current, next, { snapshot: false }, semver),
+      null,
+      `${current} -> ${next} must be allowed`,
+    )
+    // Both comparators are consulted before allowing — a rule that returned
+    // null without asking would pass this loop vacuously.
+    assert.deepEqual(semver.calls.map(c => c[0]), ['lt', 'eq'])
+  }
+})
+
+test('#2580: a SNAPSHOT is exempt — and exempt BEFORE the comparator is consulted', async () => {
+  // The half most likely to be got wrong, and it was got wrong once already:
+  // #2536's own workflow guard shipped a draft that refused a snapshot on every
+  // channel and would have failed every dev publish. `0.0.0-` sorts below every
+  // real version deliberately, so that no `^0.1.x` range can resolve to one.
+  // Applying a forward-only rule to it would close the dev channel.
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+
+  const snapshotV = '0.0.0-dev.202609021905.abc1234'
+
+  // `lt: true` is the hostile setting: a comparator that WOULD call this
+  // backwards. The snapshot flag must short-circuit above it, so the exemption
+  // cannot depend on how the version happens to compare.
+  const exempt = semverDouble({ lt: true, eq: true })
+  assert.equal(
+    backwardsVersionViolation('0.1.34-alpha.0', snapshotV, { snapshot: true }, exempt),
+    null,
+    'a snapshot run must not be refused for going "backwards"',
+  )
+  assert.deepEqual(exempt.calls, [], 'the snapshot exemption must precede any comparison')
+
+  // The positive control: the SAME version without --snapshot is refused, so
+  // the exemption is the flag doing work and not the version shape being
+  // waved through everywhere.
+  const checked = semverDouble({ lt: true })
+  assert.ok(
+    backwardsVersionViolation('0.1.34-alpha.0', snapshotV, { snapshot: false }, checked),
+    'the same version outside snapshot mode must still be refused',
+  )
+})
+
+test('#2580: an unchanged version is refused before the release PR merges', async () => {
+  // npm rejects republishing an existing version, so a no-op bump fails AFTER
+  // the PR has landed. Cheaper to say so here.
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+  const semver = semverDouble({ lt: false, eq: true })
+
+  const msg = backwardsVersionViolation('0.1.34-alpha.0', '0.1.34-alpha.0', { snapshot: false }, semver)
+  assert.ok(msg, 'a no-op bump must be refused')
+  assert.match(msg, /no-op/)
+  assert.deepEqual(semver.calls[1], ['eq', '0.1.34-alpha.0', '0.1.34-alpha.0'])
+})
+
+test('#2580: production resolves the REAL semver — structure ALWAYS, identity where deps exist', async () => {
+  // Five guards have stood here. All five were defeated by `haven-reviewer`, each
+  // by a stub that satisfied the guard's words while fabricating the comparator:
+  //   1. a whole-file substring scan → inline object literal, path string parked
+  //      in an unused variable;
+  //   2. a scan scoped to `getSemver`'s body → the fabrication moved into an
+  //      imported sibling module, path string parked in a comment;
+  //   3. a scan scoped to `resolveSemver`'s body rejecting `lt:`/`eq:` → ES6
+  //      SHORTHAND METHODS (`lt(a, b) { … }`), which carry no colon, wrapped in a
+  //      try/catch so identity still held whenever semver happened to exist.
+  //
+  // Two further evasions followed and are NOT closed by anything in this test:
+  //   4. keep the REAL module and mutate `.lt`/`.eq` on it after resolution —
+  //      identity is preserved, so the identity assertion below accepts it;
+  //   5. computed keys (`f['l'+'t']`) returned via `.then(ok, fail)` — no `catch`
+  //      keyword, no `lt:` spelling.
+  // Those are handled at RUNTIME instead, by the comparator self-check in
+  // `backwardsVersionViolation`, which fails closed. See the test below.
+  //
+  // Two lessons are encoded here. First, each fix was scoped too narrowly to the
+  // attack that prompted it, so the checks now reject the fabrication SHAPE
+  // (`lt` followed by `:` or `(`) rather than one spelling of it. An earlier
+  // version of this comment also claimed they "reject a swallowed import
+  // outright"; that was false, and the `catch` ban it referred to is gone.
+  // Second — the reason evasion 3 survived its first fix — the structural check
+  // used to run ONLY in the dependency-free branch, so with dependencies present
+  // nothing inspected the source at all. It now runs
+  // UNCONDITIONALLY, and identity is layered on top where it can be proven.
+  const { resolveSemver } = await import('./release-version-order.mjs')
+
+  // ── Always: structure ──────────────────────────────────────────────────────
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+  const fnStart = source.indexOf('async function getSemver() {')
+  assert.notEqual(fnStart, -1, 'getSemver was renamed or removed')
+  assert.match(source.slice(fnStart, source.indexOf('\n}', fnStart)), /return resolveSemver\(ROOT\)/)
+  const call = source.indexOf('backwardsVersionViolation(currentVersion, newVersion')
+  assert.notEqual(call, -1, 'release-bump.mjs no longer calls backwardsVersionViolation')
+  assert.match(source.slice(call, source.indexOf('\n', call)), /await getSemver\(\)/)
+
+  const order = await readFile(join(ROOT, 'scripts', 'release-version-order.mjs'), 'utf8')
+  const fn = order.slice(order.indexOf('export async function resolveSemver('))
+  const body = fn.slice(0, fn.indexOf('\n}'))
+  assert.match(body, /const semverPath = join\(root, 'node_modules', 'semver', 'index\.js'\)/)
+  assert.match(body, /return \(await import\(semverPath\)\)\.default/)
+  // `[:(]`, not `:` alone — a shorthand method has no colon.
+  assert.doesNotMatch(body, /\blt\s*[:(]/, 'resolveSemver must not fabricate a comparator')
+  assert.doesNotMatch(body, /\beq\s*[:(]/, 'resolveSemver must not fabricate a comparator')
+  // NOTE: there is deliberately no `catch` ban here any more. An earlier version
+  // banned the keyword outright, which `haven-reviewer` showed both evadable
+  // (`.then(onFulfilled, onRejected)` swallows a rejection without the word) and
+  // false-positive-prone (a `catch` that RE-THROWS with a better message is
+  // legitimate and would have tripped it). The swallow case is now handled where
+  // it actually matters — at runtime, by the comparator self-check in
+  // `backwardsVersionViolation`, which fails CLOSED. These remaining text checks
+  // are cheap accidental-drift detection, not a boundary.
+
+  // ── Where dependencies exist: identity ─────────────────────────────────────
+  // Identity is not a property of source text, so it defeats every stub that
+  // SUBSTITUTES a different object — but NOT one that keeps the real object and
+  // mutates its methods afterwards (evasion 4). It also cannot run in
+  // `Repo CI config checks`, which has no node_modules by design and is the only
+  // job running this file — which is why the structural half above is
+  // unconditional rather than a fallback, and why the runtime self-check exists.
+  let real = null
+  try {
+    real = (await import(join(ROOT, 'node_modules', 'semver', 'index.js'))).default
+  } catch (err) {
+    assert.equal(err.code, 'ERR_MODULE_NOT_FOUND', `semver import failed unexpectedly: ${err.message}`)
+    return
+  }
+  assert.strictEqual(await resolveSemver(ROOT), real, 'resolveSemver must return the real semver module itself')
+})
+
+test('#2580: a comparator that does not order versions is REFUSED, not trusted', async () => {
+  // The fix that ended a five-round arms race. Five successive STATIC guards on
+  // how the comparator is obtained were each defeated by a differently-spelled
+  // fabrication: an inline object literal, an imported sibling module, ES6
+  // shorthand methods, post-resolution mutation of the real module, and a
+  // `.then(onFulfilled, onRejected)` swallow. A text scan cannot win that,
+  // because what it inspects is not what runs.
+  //
+  // Every one of those stubs shared a property the text never looked at: it
+  // answered `false` to everything, so the rule silently ALLOWED a backwards
+  // release. The rule now probes its comparator with known-answer facts and
+  // refuses the bump when they are wrong — so the degenerate case is safe by
+  // construction rather than by detection, and it fails CLOSED.
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+
+  const permissive = [
+    ['inline object literal', { lt: () => false, eq: () => false }],
+    ['ES6 shorthand methods', { lt(a, b) { return false }, eq(a, b) { return false } }],
+    ['computed-key fallback', (() => { const f = {}; f['l' + 't'] = () => false; f['e' + 'q'] = () => false; return f })()],
+    ['always-true comparator', { lt: () => true, eq: () => true }],
+  ]
+  for (const [name, semver] of permissive) {
+    const msg = backwardsVersionViolation('3.0.0', '2.5.1-alpha.0', { snapshot: false }, semver)
+    assert.ok(msg, `${name}: a broken comparator must not silently allow a backwards bump`)
+    assert.match(msg, /self-check/, `${name}: and the refusal must say why`)
+  }
+
+  // A snapshot is still exempt BEFORE the self-check, so a missing install cannot
+  // break the dev channel — the exemption's whole point.
+  assert.equal(
+    backwardsVersionViolation('0.1.34-alpha.0', '0.0.0-dev.202609021905.abc1234', { snapshot: true }, { lt: () => false, eq: () => false }),
+    null,
+  )
+})
+
+test('#2580: real semver agrees with the ordering the rule assumes — where deps exist', async () => {
+  // The coverage the double genuinely COSTS, restored where it can be, and named
+  // where it cannot. `haven-reviewer` was right that switching to a double lost
+  // something real: nothing was left proving that the actual pinned semver orders
+  // Haven's OWN version pairs the way this rule assumes — above all
+  // `0.1.34-alpha.0 -> 1.0.0`, the pair #2580's acceptance criteria name and the
+  // pair `sort -V` gets wrong.
+  //
+  // It cannot run in `Repo CI config checks`, which has no `node_modules` by
+  // design and is the only job that runs this file. So it is availability-gated,
+  // and the gate is LOUD: when semver is absent the test still runs and asserts
+  // the reason, rather than vanishing from the count. A skipped test that reports
+  // nothing is how a suite starts passing vacuously.
+  const semverPath = join(ROOT, 'node_modules', 'semver', 'index.js')
+  let semver = null
+  try {
+    semver = (await import(semverPath)).default
+  } catch (err) {
+    assert.equal(err.code, 'ERR_MODULE_NOT_FOUND', `semver import failed for an unexpected reason: ${err.message}`)
+    return // dependency-free job: nothing to assert, and nothing silently skipped
+  }
+
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+
+  // Allowed, under the REAL comparator.
+  for (const [current, next] of [
+    ['0.1.34-alpha.0', '1.0.0'],
+    ['1.0.0-alpha.1', '1.0.0'],
+    ['0.1.34-alpha.0', '0.1.34-alpha.1'],
+    ['0.1.9', '0.2.0'],
+  ]) {
+    assert.equal(
+      backwardsVersionViolation(current, next, { snapshot: false }, semver),
+      null,
+      `real semver must allow ${current} -> ${next}`,
+    )
+  }
+
+  // Refused, under the REAL comparator.
+  assert.ok(backwardsVersionViolation('3.0.0', '2.5.1-alpha.0', { snapshot: false }, semver), 'backwards')
+  assert.ok(backwardsVersionViolation('1.0.0', '1.0.0-alpha.1', { snapshot: false }, semver), 'the sort -V trap, inverted')
+  assert.ok(backwardsVersionViolation('0.1.34-alpha.0', '0.1.34-alpha.0', { snapshot: false }, semver), 'no-op')
+})
+
+
+test('#2580: release-bump.mjs actually CALLS the rule, after the snapshot flag is known', async () => {
+  // Reachability, not presence. The guard must run where `snapshot` has been
+  // parsed — it is read at `--snapshot` AFTER nextVersion() computes the
+  // version — and still before anything is written to the tree.
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+
+  const snapshotParse = source.indexOf("const snapshot = process.argv.includes('--snapshot')")
+  const call = source.indexOf('backwardsVersionViolation(currentVersion, newVersion')
+  const firstWrite = source.indexOf('header(\'Changes to be applied\')')
+
+  assert.notEqual(call, -1, 'release-bump.mjs no longer calls backwardsVersionViolation')
+  assert.ok(snapshotParse !== -1 && snapshotParse < call, 'the call must come after --snapshot is parsed')
+  assert.ok(call < firstWrite, 'the call must come before the run starts reporting changes')
+})

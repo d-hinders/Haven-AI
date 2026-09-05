@@ -135,6 +135,14 @@ interface InstallStatusBody {
   next_user_action?: string
   error_code?: string | null
   environment_label?: string
+  /**
+   * #2561. Tri-state: a list (scanned, found these), `[]` (scanned, none), or
+   * `null` (the scan could not run). Sanitised by `sanitizeInstallStatus`,
+   * which shapes the ids but does not believe them — the connector falls back
+   * to a directory name when an `identity.json` will not parse, so ownership
+   * is resolved against the caller's own agents when the status is read.
+   */
+  superseded_agent_ids?: string[] | null
 }
 
 
@@ -1120,7 +1128,12 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
 // "does this picked id need the flag spelled out?" — and with no picked id and
 // no flag, nothing asked it. LOCAL_MCP_RUNTIMES stays because it still has a
 // live caller in validateCreateBody.
-function buildConnectorCommand(setupToken: string, apiUrl: string, localMcp = false): string {
+// Exported for the parity test (#2527). `haven agents connect` prints the
+// `connector_command` this returns rather than composing its own, so the CLI's
+// command and the dashboard's are the same string from the same builder — not
+// two constructions that would have to be kept in agreement. The test asserts
+// that shared origin; exporting is what lets it.
+export function buildConnectorCommand(setupToken: string, apiUrl: string, localMcp = false): string {
   const args = [
     `npx -y ${CONNECTOR_PACKAGE}`,
     `--setup ${shellQuote(setupToken)}`,

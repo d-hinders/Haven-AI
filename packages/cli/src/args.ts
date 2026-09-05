@@ -7,6 +7,10 @@ export interface ParsedArgs {
     help: boolean
     /** #2526: print the code and exit instead of polling for approval. */
     noWait: boolean
+    /** #2527: run the printed connector command as a child process. */
+    run: boolean
+    /** #2527: poll `agents connect --status` until it settles. */
+    wait: boolean
     version: boolean
     yes: boolean
     api?: string
@@ -20,12 +24,27 @@ export interface ParsedArgs {
     from?: string
     to?: string
     company?: string
+    /** #2527 */
+    name?: string
+    budget?: string
+    token?: string
+    period?: number
+    status?: string
+    /**
+     * #2527: deliberately absent — `--recipient`. The issue sketched one, and
+     * neither `POST /agents` nor `POST /agent-connection-setups` has a field to
+     * put it in: a recipient pin lives in the delegation's caveat enforcers and
+     * is set when the human approves the budget. A flag accepted here would
+     * either be silently dropped or invent a wire field, and a budget control
+     * that looks applied and is not is worse than one you cannot ask for.
+     */
   }
 }
 
 const VALUE_FLAGS = new Set([
   '--api', '--email', '--safe', '--agent', '--limit', '--offset', '--direction',
   '--format', '--from', '--to', '--company',
+  '--name', '--budget', '--token', '--period', '--status',
 ])
 
 /**
@@ -34,7 +53,9 @@ const VALUE_FLAGS = new Set([
  */
 export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = []
-  const flags: ParsedArgs['flags'] = { json: false, help: false, version: false, yes: false, noWait: false }
+  const flags: ParsedArgs['flags'] = {
+    json: false, help: false, version: false, yes: false, noWait: false, run: false, wait: false,
+  }
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -43,12 +64,23 @@ export function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === '--version' || arg === '-v') flags.version = true
     else if (arg === '--yes' || arg === '-y') flags.yes = true
     else if (arg === '--no-wait') flags.noWait = true
+    else if (arg === '--run') flags.run = true
+    else if (arg === '--wait') flags.wait = true
     else if (VALUE_FLAGS.has(arg)) {
       const value = argv[++i]
       if (value === undefined || value.startsWith('--')) {
         throw new Error(`Missing value for ${arg}`)
       }
       if (arg === '--api') flags.api = value
+      else if (arg === '--name') flags.name = value
+      else if (arg === '--budget') flags.budget = value
+      else if (arg === '--token') flags.token = value
+      else if (arg === '--status') flags.status = value
+      else if (arg === '--period') {
+        const n = Number(value)
+        if (!Number.isInteger(n) || n < 0) throw new Error('--period must be a whole number of minutes')
+        flags.period = n
+      }
       else if (arg === '--email') flags.email = value
       else if (arg === '--safe') flags.safe = value
       else if (arg === '--agent') flags.agent = value

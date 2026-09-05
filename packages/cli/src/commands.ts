@@ -7,6 +7,15 @@ import { EXIT, HavenCliError, UsageError, toFailure, type ExitCode } from './err
 import { createOutput, type Output } from './output.js'
 import { HAVEN_AGENT_RUNBOOK_MD } from './agent-guidance-text.js'
 import { sessionExpiry } from './token.js'
+import { parseTokenAmount } from './amount.js'
+import {
+  isRefusal,
+  nodeSpawner,
+  relayLine,
+  runConnector,
+  type ConnectorOutcome,
+  type Spawner,
+} from './connect-runner.js'
 
 // Hosted Haven backend. Override with `--api <url>` or HAVEN_API_URL (e.g. a
 // local backend at http://localhost:3001, or your own domain once self-hosted).
@@ -22,6 +31,8 @@ export interface RunDeps {
   promptPassword?: () => Promise<string>
   /** #2526: injected so the device poll loop is testable without real time. */
   sleep?: (ms: number) => Promise<void>
+  /** #2527: injected so `--run` is testable without spawning a real process. */
+  spawner?: Spawner
   out?: (line: string) => void
   err?: (line: string) => void
   env?: NodeJS.ProcessEnv
@@ -32,6 +43,7 @@ interface ResolvedDeps {
   makeApi: (baseUrl: string, token?: string) => CliApi
   promptPassword: () => Promise<string>
   sleep: (ms: number) => Promise<void>
+  spawner: Spawner
   out: (line: string) => void
   err: (line: string) => void
   env: NodeJS.ProcessEnv
@@ -53,7 +65,7 @@ export const COMMANDS = [
   'login', 'logout', 'whoami', 'guide',
   'wallets list', 'wallets balances', 'wallets rename',
   'agents list', 'agents show', 'agents pause', 'agents resume', 'agents revoke',
-  'agents rotate-key', 'agents rename',
+  'agents rotate-key', 'agents rename', 'agents connect',
   'budget show',
   'activity list', 'activity export',
   'catalog list',
@@ -74,6 +86,23 @@ interface Txn {
 }
 interface CatalogEntry { name: string; category: string; rail: string; price_display?: string | null; status: string }
 interface Contact { id: string; name: string; address: string }
+interface BalanceToken { symbol: string; address: string | null; decimals: number }
+interface CreateSetupResponse {
+  setup_id: string
+  status: string
+  approval_url: string
+  expires_at: string
+  connector_command: string
+  connector_package: string
+  setup_prompt: string
+}
+interface SetupStatus {
+  setup_id: string
+  status: string
+  agent_id: string | null
+  approval_url: string
+  expires_at: string
+}
 
 /** Entry point. Returns a process exit code; never throws for expected errors. */
 export async function run(argv: string[], deps: RunDeps = {}): Promise<number> {
@@ -92,6 +121,7 @@ export async function run(argv: string[], deps: RunDeps = {}): Promise<number> {
     makeApi: deps.makeApi ?? ((baseUrl, token) => createCliApi({ baseUrl, token })),
     promptPassword: deps.promptPassword ?? (() => Promise.reject(new Error('No password input available'))),
     sleep: deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms))),
+    spawner: deps.spawner ?? nodeSpawner,
     out,
     err,
     env: deps.env ?? process.env,
@@ -139,6 +169,7 @@ async function dispatch(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
     case 'wallets balances': return cmdWalletsBalances(args, d)
     case 'agents list': return cmdAgentsList(args, d)
     case 'agents show': return cmdAgentsShow(args, d)
+    case 'agents connect': return cmdAgentsConnect(args, d)
     case 'agents pause': return cmdAgentLifecycle(args, d, 'pause')
     case 'agents resume': return cmdAgentLifecycle(args, d, 'resume')
     case 'agents revoke': return cmdAgentRevoke(args, d)
@@ -618,6 +649,196 @@ async function cmdCatalogList(args: ParsedArgs, d: ResolvedDeps): Promise<number
         ),
   )
   return EXIT.ok
+}
+
+
+// ── Connect (#2527) ─────────────────────────────────────────────────
+
+/**
+ * Resolve the wallet this setup belongs to, and the token's decimals.
+ *
+ * The decimals are READ from the backend rather than kept in a table here.
+ * `GET /balances/:safeAddress` lists every token the chain is configured for —
+ * zero balance included — with its address and decimals, which is the same
+ * registry the dashboard modal reads. A local table would be a second source
+ * of truth for a number that decides a budget's magnitude, and it would drift
+ * silently the first time a chain gained a token.
+ */
+async function resolveWalletAndToken(
+  args: ParsedArgs,
+  api: CliApi,
+  symbol: string,
+): Promise<{ safeId: string; token: BalanceToken }> {
+  const { safes } = await api.get<{ safes: Safe[] }>('/user/safes')
+  if (safes.length === 0) {
+    throw new HavenCliError('No wallet on this account yet — finish onboarding first.', EXIT.refused)
+  }
+  const safe = args.flags.safe
+    ? safes.find((s) => s.id === args.flags.safe || s.safe_address === args.flags.safe)
+    : (safes.find((s) => s.is_default) ?? safes[0])
+  if (!safe) throw new UsageError(`No wallet matches --safe ${args.flags.safe}`)
+
+  // `chain_id` is REQUIRED here, not decorative. The same account address is
+  // provisioned on every supported chain, so a wallet address usually owns more
+  // than one ownership row — and `GET /balances/:address` answers
+  // `400 chain_id required` rather than guessing when it finds more than one
+  // (`routes/balances.ts`). `wallets balances` has always passed it; this call
+  // omitted it and would have failed for exactly the ordinary multi-chain
+  // account (haven-reviewer, #2527).
+  const { balances } = await api.get<{ balances: BalanceToken[] }>(
+    `/balances/${safe.safe_address}?chain_id=${safe.chain_id}`,
+  )
+  const wanted = symbol.trim().toUpperCase()
+  const token = balances.find((b) => b.symbol.toUpperCase() === wanted)
+  if (!token) {
+    const known = balances.map((b) => b.symbol).join(', ')
+    throw new UsageError(`Unknown token ${symbol} on this wallet's chain. Available: ${known || 'none'}`)
+  }
+  return { safeId: safe.id, token }
+}
+
+/** Poll a setup until it leaves the states that are still in flight. */
+const SETTLED = new Set(['active', 'expired', 'cancelled', 'failed'])
+
+async function pollSetup(
+  api: CliApi,
+  setupId: string,
+  d: ResolvedDeps,
+  wait: boolean,
+): Promise<SetupStatus> {
+  let status = await api.get<SetupStatus>(`/agent-connection-setups/${setupId}`)
+  if (!wait) return status
+  // Bounded by the setup's own expiry rather than a local guess, so the loop
+  // cannot outlive the thing it is watching.
+  const deadline = new Date(status.expires_at).getTime()
+  while (!SETTLED.has(status.status) && Date.now() < deadline) {
+    await d.sleep(5000)
+    status = await api.get<SetupStatus>(`/agent-connection-setups/${setupId}`)
+  }
+  return status
+}
+
+/**
+ * `haven agents connect` — the connect flow without the dashboard modal.
+ *
+ * Three shapes: create a setup, `--status <id>` to read one, and `--run` to
+ * additionally execute the connector command the backend printed.
+ *
+ * The command is PRINTED, never composed. `connector_command` comes back from
+ * `POST /agent-connection-setups` and is emitted verbatim, which is what makes
+ * it byte-identical to the dashboard's for the same setup — they are the same
+ * string from the same builder, not two constructions that have to be kept in
+ * agreement.
+ */
+async function cmdAgentsConnect(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
+  const { api } = await authed(args, d)
+
+  if (args.flags.status) {
+    const status = await pollSetup(api, args.flags.status, d, args.flags.wait)
+    emit(d, args.flags.json, status, () =>
+      [
+        `setup ${status.setup_id}: ${status.status}`,
+        status.agent_id ? `agent: ${status.agent_id}` : null,
+        SETTLED.has(status.status) ? null : `approve: ${status.approval_url}`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    )
+    return EXIT.ok
+  }
+
+  const name = args.flags.name?.trim()
+  if (!name) throw new UsageError('Usage: haven agents connect --name <name> --budget <amount> --token USDC --period <minutes>')
+  if (!args.flags.budget || !args.flags.token || args.flags.period === undefined) {
+    throw new UsageError('--budget, --token and --period are required (period is whole minutes; 0 means one-time)')
+  }
+
+  const { safeId, token } = await resolveWalletAndToken(args, api, args.flags.token)
+  const amount = parseTokenAmount(args.flags.budget, token.decimals, token.symbol)
+  if (!amount.ok) throw new UsageError(amount.message)
+
+  const setup = await api.post<CreateSetupResponse>('/agent-connection-setups', {
+    name,
+    safe_id: safeId,
+    allowances: [
+      {
+        token_address: token.address ?? '0x0000000000000000000000000000000000000000',
+        token_symbol: token.symbol,
+        // ATOMIC on the way in, human on the way back (#2295). Converted here
+        // exactly once, from the decimals the backend just told us.
+        allowance_amount: amount.atomic,
+        reset_period_min: args.flags.period,
+      },
+    ],
+    // How this setup was made, for connect attribution (#2302). The route
+    // already accepts any slug, so nothing backend-side had to change.
+    source: 'cli',
+    // #2522: the hand-off marker, set only when an agent is driving this CLI
+    // and says so. Never inferred — a guess here mislabels a human's own run.
+    ...(d.env.HAVEN_AGENT_DRIVEN === '1' ? { via: 'agent' } : {}),
+  })
+
+  if (!args.flags.run) {
+    emit(d, args.flags.json, setup, () =>
+      [
+        'Run this where the agent runs:',
+        '',
+        setup.connector_command,
+        '',
+        `Then approve the budget: ${setup.approval_url}`,
+        `Setup ${setup.setup_id} expires ${setup.expires_at}.`,
+      ].join('\n'),
+    )
+    return EXIT.ok
+  }
+
+  // `--run`: execute the printed command with `--json` appended and nothing
+  // else changed. The connector's stderr is streamed as it arrives — a run can
+  // take minutes and that is the only progress anyone sees.
+  const run = await runConnector(setup.connector_command, d.spawner, (chunk) => d.err(chunk.trimEnd()))
+  const relay = relayLine(run.outcome)
+  const merged = {
+    setup_id: setup.setup_id,
+    approval_url: setup.approval_url,
+    connector_command: setup.connector_command,
+    connector_exit_code: run.exitCode,
+    outcome: run.outcome,
+    relay,
+  }
+
+  if (isRefusal(run.outcome)) {
+    // Exit 4 with the refusal carried whole. Recognised by the presence of
+    // `error`, never by matching a code — a refusal the connector adds later
+    // reaches the user through this same path with no CLI change.
+    emitConnectResult(d, args.flags.json, merged, relay)
+    return EXIT.refused
+  }
+  if (!run.outcome) {
+    throw new HavenCliError(
+      `The connector produced no outcome (exit ${run.exitCode}).${run.stdoutNoise ? ` Output: ${run.stdoutNoise}` : ''}`,
+      run.exitCode === 0 ? EXIT.failed : EXIT.failed,
+    )
+  }
+  emitConnectResult(d, args.flags.json, merged, relay)
+  return EXIT.ok
+}
+
+/**
+ * Print a `--run` result with the relay line FIRST under prose (#2483's
+ * one-gate rule): whatever the human has to act on outranks the record of what
+ * happened, because a link buried under an outcome dump is a link nobody sees.
+ */
+function emitConnectResult(
+  d: ResolvedDeps,
+  json: boolean,
+  merged: { relay: string | null; outcome: ConnectorOutcome | null; setup_id: string },
+  relay: string | null,
+): void {
+  emit(d, json, merged, () =>
+    [relay, relay ? '' : null, `setup ${merged.setup_id}: ${merged.outcome?.outcome ?? 'unknown'}`]
+      .filter((line) => line !== null)
+      .join('\n'),
+  )
 }
 
 // ── Contacts ────────────────────────────────────────────────────────

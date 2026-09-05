@@ -374,8 +374,9 @@ describe('delivery is a different question from dust (#2444)', () => {
     // deliberately says "not sub-floor dust", so match the pass phrasing.
     expect(r.detail).not.toMatch(/left by design/)
 
-    // #2445's lesson, applied here: the harness reads BASE_SEPOLIA_RPC while
-    // the backend writes through RPC_URL_BASE_SEPOLIA, so a lagging node
+    // #2445's lesson, applied here: the harness reads QA_RPC_URL_BASE_SEPOLIA
+    // (defaulting to the public endpoint) while the backend writes through
+    // RPC_URL_BASE_SEPOLIA, so a lagging node
     // produces a reading identical to an unsettled merchant leg. The message
     // must offer both, or triage goes at the bridge for a propagation delay.
     // Asserted on the string this run actually produced, not on the source

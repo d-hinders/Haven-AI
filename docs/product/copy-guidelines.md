@@ -480,10 +480,23 @@ artifact that was already self-consistent.
 ([#2576](https://github.com/d-hinders/Haven-AI/issues/2576)).** #2533 swept the
 eleven surfaces it named: the repo README, the five package READMEs,
 `llms.txt`, `llms-full.txt`, `402.md`, `402/index.html` and `for-agents.md`.
-**52 occurrences of "setup command" across 21 other files remain** — the
-dashboard connect modal, the connector's own printed strings and six operations
-docs — measured at the time of writing with the command in #2576, which also
-carries the positive control. They are not oversights; they are outside that
+Occurrences of the retired terms remain outside it — the dashboard connect
+modal, the connector's own printed strings and the operations docs. The figure
+is **54 occurrences across 23 files**, and the command is inline rather than in
+the follow-up issue so the number is re-derivable from this page alone (a count
+whose scope lives elsewhere is a count nobody can check — that was a
+`haven-reviewer` finding on this PR, which reproduced 48/23 under different
+exclusions and could not tell whether the difference was drift or curation):
+
+```
+grep -rn "setup command\|connect command" \
+  packages/frontend/src packages/connect/src packages/cli/src \
+  docs/operations docs/architecture \
+  --include=*.ts --include=*.tsx --include=*.md
+```
+
+Positive control for that reader: `grep -rn "connector command" packages/frontend/public README.md` returns 9, so a
+zero above would mean the sweep landed rather than that the command is broken. They are not oversights; they are outside that
 issue's stated file list, and two of them need a judgement rather than a rename
 (the connector refuses a consumed setup *token*, where "setup" may be the right
 word). Treat the table as the destination and #2576 as the remaining distance.

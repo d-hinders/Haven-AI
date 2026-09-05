@@ -579,7 +579,7 @@ async function executeConnect(
     if (dead) throw dead
     if (isExpiredSetupChallenge(err)) {
       throw new Error(
-        'The Haven setup challenge expired while connecting. Return to Haven, start a fresh connection, and run its new Connect command. Do not reuse or paste credentials.',
+        'The Haven setup challenge expired while connecting. Return to Haven, start a fresh connection, and run its new connector command. Do not reuse or paste credentials.',
       )
     }
     throw err
@@ -1230,7 +1230,7 @@ function deadSetupTokenError(err: unknown): ConnectError | null {
     'setup_challenge_expired_or_invalid',
     'This Haven setup token is expired or invalid — tokens are single-use and expire 30 minutes after ' +
       'the dashboard issues them, and a mistyped token reads the same way. Return to Haven, start a ' +
-      'fresh connection, and run its new Connect command. No local credentials were written.',
+      'fresh connection, and run its new connector command. No local credentials were written.',
     'return_to_haven_for_fresh_setup',
   )
 }
@@ -1463,7 +1463,7 @@ export function completionHandoffLines(
   }
   if (result.errorCode) {
     return [
-      'Recovery: runtime setup is not complete. Resolve the reported problem, then return to Haven for a fresh connection and run its new Connect command. Do not manually edit runtime config or paste credentials into prompts, logs, or config.',
+      'Recovery: runtime setup is not complete. Resolve the reported problem, then return to Haven for a fresh connection and run its new connector command. Do not manually edit runtime config or paste credentials into prompts, logs, or config.',
     ]
   }
 

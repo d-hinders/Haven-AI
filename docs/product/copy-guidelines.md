@@ -504,22 +504,29 @@ pull request, which reproduced 48/23 against the author's 54/23 under different
 exclusions and could not tell drift from curation):
 
 ```
-grep -rn "setup command\|connect command" \
+grep -rni "setup command\|connect command" \
   packages/frontend/src packages/connect/src packages/cli/src \
-  docs/operations docs/architecture \
-  --include=*.ts --include=*.tsx --include=*.md
+  docs/operations docs/architecture .env.example \
+  --include=*.ts --include=*.tsx --include=*.md --include=.env.example
 ```
 
-It returned **54 across 23 files** before #2576. After it, the same command
-returns **6**, and every one of the six is a `last-verified:` front-matter line
-this sweep itself wrote — an audit note quoting the retired term in order to
-say which term was replaced. Filter them out and the live-copy figure is **0**:
+**Note the `-i` and the `.env.example`.** #2576's issue printed this command
+without either, and both omissions hid real sites: three connector-printed
+strings in `packages/connect/src/runtime.ts` said "**C**onnect command" with a
+capital C, and one operator comment in `.env.example` lives outside every path
+the original command listed. A case-sensitive sweep for a term that starts
+sentences is a sweep that reports clean while missing every sentence-initial
+use — found by `haven-doc-reviewer`, not by the author.
+
+It returned **58 across 24 files** before #2576 (the original case-sensitive
+form returned 54 across 23, missing the four sites the note above describes).
+After the sweep the same command returns **6**, and every one of the six is a
+`last-verified:` front-matter line this sweep itself wrote — an audit note
+quoting the retired term in order to say which term was replaced. Filter those
+out and the live-copy figure is **0**: append
 
 ```
-grep -rn "setup command\|connect command" \
-  packages/frontend/src packages/connect/src packages/cli/src \
-  docs/operations docs/architecture \
-  --include=*.ts --include=*.tsx --include=*.md | grep -v ':last-verified:'
+| grep -v ':last-verified:'
 ```
 
 Both numbers are stated because the first one is what a future reader actually

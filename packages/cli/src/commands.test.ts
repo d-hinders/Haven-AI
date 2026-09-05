@@ -414,3 +414,269 @@ describe('haven login — device flow', () => {
     expect(calls).toEqual(['POST /auth/login'])
   })
 })
+
+describe('agents connect (#2527)', () => {
+  const SAFES = { safes: [{ id: 's1', safe_address: '0xsafe', chain_id: 84532, name: 'Wallet', is_default: true }] }
+  const BALANCES = {
+    balances: [
+      { symbol: 'ETH', address: null, decimals: 18 },
+      { symbol: 'USDC', address: '0xusdc', decimals: 6 },
+    ],
+  }
+  const SETUP = {
+    setup_id: 'set-1',
+    status: 'awaiting_connection',
+    approval_url: 'https://app.haven.example/connect/set-1',
+    expires_at: '2026-09-06T00:00:00.000Z',
+    connector_command: "npx -y @haven_ai/connect@alpha --setup 'hv_setup_abc' --api 'https://api.test' --ack-local-tools",
+    connector_package: '@haven_ai/connect@alpha',
+    setup_prompt: '# rules',
+  }
+
+  /** Fake API that RECORDS request bodies — the wire shape is the assertion. */
+  function recordingApi(routes: Record<string, unknown>) {
+    const bodies: { path: string; body: unknown }[] = []
+    const api = {
+      calls: [] as string[],
+      get: async <T,>(path: string) => {
+        api.calls.push(`GET ${path}`)
+        const hit = routes[`GET ${path}`] ?? routes[`GET ${path.split('?')[0]}`]
+        if (hit === undefined) throw new CliApiError(`Unmocked GET ${path}`, 404)
+        return hit as T
+      },
+      post: async <T,>(path: string, body?: unknown) => {
+        api.calls.push(`POST ${path}`)
+        bodies.push({ path, body })
+        const hit = routes[`POST ${path}`]
+        if (hit === undefined) throw new CliApiError(`Unmocked POST ${path}`, 404)
+        return hit as T
+      },
+      put: async <T,>() => ({}) as T,
+      del: async <T,>() => ({}) as T,
+      getText: async () => '',
+    }
+    return { api: api as unknown as CliApi & { calls: string[] }, bodies }
+  }
+
+  const ROUTES = {
+    'GET /user/safes': SAFES,
+    'GET /balances/0xsafe': BALANCES,
+    'POST /agent-connection-setups': SETUP,
+  }
+
+  const CONNECT_ARGV = [
+    'agents', 'connect', '--name', 'demo', '--budget', '25', '--token', 'USDC', '--period', '1440',
+  ]
+
+  it('sends the budget as ATOMIC units, with decimals read from the backend', async () => {
+    // The field is atomic on the way in and human on the way back (#2295).
+    // 25 USDC at 6 decimals is 25000000 — a wrong power of ten here is a
+    // budget wrong by a factor of a million.
+    const { api, bodies } = recordingApi(ROUTES)
+    const { deps } = harness({ makeApi: () => api })
+    const code = await run([...CONNECT_ARGV, '--json'], deps)
+
+    expect(code).toBe(0)
+    const body = bodies[0].body as { allowances: { allowance_amount: string; token_address: string }[] }
+    expect(body.allowances[0].allowance_amount).toBe('25000000')
+    expect(body.allowances[0].token_address).toBe('0xusdc')
+    // Decimals came from GET /balances, not from a table in the CLI.
+    expect(api.calls).toContain('GET /balances/0xsafe')
+  })
+
+  it('records source=cli, and sends via ONLY when an agent says it is driving', async () => {
+    const first = recordingApi(ROUTES)
+    await run([...CONNECT_ARGV, '--json'], harness({ makeApi: () => first.api }).deps)
+    expect(first.bodies[0].body).toMatchObject({ source: 'cli' })
+    expect(first.bodies[0].body).not.toHaveProperty('via')
+
+    const second = recordingApi(ROUTES)
+    await run(
+      [...CONNECT_ARGV, '--json'],
+      harness({ makeApi: () => second.api, env: { HAVEN_AGENT_DRIVEN: '1' } }).deps,
+    )
+    expect(second.bodies[0].body).toMatchObject({ source: 'cli', via: 'agent' })
+  })
+
+  it('PRINTS the backend command rather than composing one', async () => {
+    // This is what makes it byte-identical to the dashboard modal's: both
+    // render the same string from the same builder. A CLI that rebuilt the
+    // command would have to be kept in agreement with the backend forever.
+    const { api } = recordingApi(ROUTES)
+    const { deps, out } = harness({ makeApi: () => api })
+    await run([...CONNECT_ARGV], deps)
+    expect(out.join('\n')).toContain(SETUP.connector_command)
+  })
+
+  it('refuses a budget with more precision than the token has', async () => {
+    const { api } = recordingApi(ROUTES)
+    const { deps, err } = harness({ makeApi: () => api })
+    const code = await run(['agents', 'connect', '--name', 'd', '--budget', '1.9999999', '--token', 'USDC', '--period', '0'], deps)
+    expect(code).toBe(2)
+    expect(err.join('\n')).toMatch(/USDC supports up to 6 decimal places/)
+  })
+
+  it('refuses a token the wallet chain does not have, naming what it does', async () => {
+    const { api } = recordingApi(ROUTES)
+    const { deps, err } = harness({ makeApi: () => api })
+    const code = await run(['agents', 'connect', '--name', 'd', '--budget', '1', '--token', 'DAI', '--period', '0'], deps)
+    expect(code).toBe(2)
+    expect(err.join('\n')).toMatch(/Unknown token DAI.*ETH, USDC/s)
+  })
+
+  describe('--run', () => {
+    const spawnerFor = (stdout: string, exitCode = 0) => {
+      const seen: { command: string; args: string[] }[] = []
+      const spawner = async (command: string, args: string[]) => {
+        seen.push({ command, args })
+        return { stdout, stderr: '', exitCode }
+      }
+      return { spawner: spawner as never, seen }
+    }
+
+    it('runs the connector with exactly --json appended and exits 0', async () => {
+      const { api } = recordingApi(ROUTES)
+      const { spawner, seen } = spawnerFor('{"schema_version":1,"outcome":"complete"}')
+      const { deps } = harness({ makeApi: () => api, spawner })
+      const code = await run([...CONNECT_ARGV, '--run', '--json'], deps)
+
+      expect(code).toBe(0)
+      expect(seen[0].args.at(-1)).toBe('--json')
+      expect(seen[0].args.filter((a) => a === '--json')).toHaveLength(1)
+    })
+
+    it('surfaces a connector REFUSAL as exit 4 with the object embedded', async () => {
+      const refusal = JSON.stringify({
+        schema_version: 1,
+        outcome: 'failed',
+        error: {
+          code: 'runtime_undetermined',
+          next_action: 'rerun_connect_with_explicit_runtime',
+          message: 'Could not tell which runtime to wire',
+          allowed_runtimes: ['claude-code', 'codex'],
+        },
+      })
+      const { api } = recordingApi(ROUTES)
+      const { spawner } = spawnerFor(refusal, 1)
+      const { deps, out } = harness({ makeApi: () => api, spawner })
+      const code = await run([...CONNECT_ARGV, '--run', '--json'], deps)
+
+      expect(code).toBe(4)
+      const payload = JSON.parse(out[0]) as { outcome: { error: { allowed_runtimes: string[] } }; relay: string }
+      expect(payload.outcome.error.allowed_runtimes).toEqual(['claude-code', 'codex'])
+      expect(payload.relay).toContain('rerun_connect_with_explicit_runtime')
+    })
+
+    it('exits 4 for a refusal code that did not exist when this CLI was written', async () => {
+      // The guard behind the boundary note on #2527: a refusal is recognised
+      // by the presence of `error`, never by matching a code, so a refusal the
+      // connector adds later still reaches the human as a refusal rather than
+      // as a success. A mutation that enumerated the two known codes here
+      // passed every other test in this file, which is why this one exists.
+      const future = JSON.stringify({
+        schema_version: 1,
+        outcome: 'failed',
+        error: {
+          code: 'some_refusal_invented_next_year',
+          next_action: 'do_the_new_thing',
+          message: 'Something new happened',
+        },
+      })
+      const { api } = recordingApi(ROUTES)
+      const { spawner } = spawnerFor(future, 1)
+      const { deps, out } = harness({ makeApi: () => api, spawner })
+      const code = await run([...CONNECT_ARGV, '--run', '--json'], deps)
+
+      expect(code).toBe(4)
+      const payload = JSON.parse(out[0]) as { relay: string }
+      expect(payload.relay).toContain('do_the_new_thing')
+    })
+
+    it('puts the approval instruction FIRST in prose (#2483 one gate)', async () => {
+      // A link buried under an outcome dump is a link nobody acts on.
+      const outcome = JSON.stringify({
+        schema_version: 1,
+        outcome: 'action_required',
+        approval: { required: true, url: 'https://app.haven.example/connect/set-1' },
+      })
+      const { api } = recordingApi(ROUTES)
+      const { spawner } = spawnerFor(outcome)
+      const { deps, out } = harness({ makeApi: () => api, spawner })
+      await run([...CONNECT_ARGV, '--run'], deps)
+
+      expect(out[0].split('\n')[0]).toContain('https://app.haven.example/connect/set-1')
+    })
+
+    it('does not run the connector at all without --run', async () => {
+      const { api } = recordingApi(ROUTES)
+      const { spawner, seen } = spawnerFor('{"outcome":"complete"}')
+      const { deps } = harness({ makeApi: () => api, spawner })
+      await run([...CONNECT_ARGV], deps)
+      expect(seen).toHaveLength(0)
+    })
+  })
+
+  describe('--status', () => {
+    it('reads a setup and reports its state', async () => {
+      const { api } = recordingApi({
+        'GET /agent-connection-setups/set-1': {
+          setup_id: 'set-1', status: 'awaiting_connection', agent_id: null,
+          approval_url: SETUP.approval_url, expires_at: SETUP.expires_at,
+        },
+      })
+      const { deps, out } = harness({ makeApi: () => api })
+      const code = await run(['agents', 'connect', '--status', 'set-1', '--json'], deps)
+      expect(code).toBe(0)
+      expect(JSON.parse(out[0])).toMatchObject({ setup_id: 'set-1', status: 'awaiting_connection' })
+    })
+
+    it('--wait polls until the setup settles', async () => {
+      const states = ['awaiting_connection', 'awaiting_wallet_approval', 'active']
+      let i = 0
+      const api = {
+        calls: [],
+        get: async <T,>() => ({
+          setup_id: 'set-1',
+          status: states[Math.min(i++, states.length - 1)],
+          agent_id: i >= 3 ? 'agt-1' : null,
+          approval_url: SETUP.approval_url,
+          // Far enough ahead that the deadline is never what stops the loop —
+          // the settled status has to be.
+          expires_at: new Date(Date.now() + 600_000).toISOString(),
+        }) as T,
+        post: async <T,>() => ({}) as T,
+        put: async <T,>() => ({}) as T,
+        del: async <T,>() => ({}) as T,
+        getText: async () => '',
+      } as unknown as CliApi
+      const sleep = vi.fn(async () => undefined)
+      const { deps, out } = harness({ makeApi: () => api, sleep })
+      const code = await run(['agents', 'connect', '--status', 'set-1', '--wait', '--json'], deps)
+
+      expect(code).toBe(0)
+      expect(JSON.parse(out[0])).toMatchObject({ status: 'active', agent_id: 'agt-1' })
+      expect(sleep).toHaveBeenCalled()
+    })
+
+    it('--wait stops at the setup\'s own expiry rather than looping forever', async () => {
+      // The loop is bounded by the thing it is watching, not by a local guess.
+      const api = {
+        calls: [],
+        get: async <T,>() => ({
+          setup_id: 'set-1', status: 'awaiting_connection', agent_id: null,
+          approval_url: SETUP.approval_url,
+          expires_at: new Date(Date.now() - 1000).toISOString(),
+        }) as T,
+        post: async <T,>() => ({}) as T,
+        put: async <T,>() => ({}) as T,
+        del: async <T,>() => ({}) as T,
+        getText: async () => '',
+      } as unknown as CliApi
+      const sleep = vi.fn(async () => undefined)
+      const { deps } = harness({ makeApi: () => api, sleep })
+      const code = await run(['agents', 'connect', '--status', 'set-1', '--wait', '--json'], deps)
+      expect(code).toBe(0)
+      expect(sleep).not.toHaveBeenCalled()
+    })
+  })
+})

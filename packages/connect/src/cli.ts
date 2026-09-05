@@ -342,6 +342,12 @@ export async function runCli(
         // machine-readable code, never block on stdin. runConnect additionally
         // requires a real TTY before it prompts.
         interactive: !parsed.json,
+        // #2528: reported to the backend at register, so the funnel can tell a
+        // machine-readable run from a narrated one. Read from the SAME
+        // `parsed.json` the three flags above use, rather than inferred later
+        // from `waitForApproval` — that flag is already false for a prose run
+        // with no TTY (#2484), so inferring would mislabel real prose runs.
+        runMode: parsed.json ? 'json' : 'prose',
       },
       {
         log: (message) => (parsed.json ? io.stderr : io.stdout)(`${message}\n`),

@@ -39,7 +39,9 @@ Send these as your own message, `<host>` replaced by the host you fetched this f
 
 > On `<host>/agents`, create an agent for me and set a budget — say 25 USDC per day. That is the limit I cannot exceed. It hands back a setup prompt: paste it to me and I run it here.
 
-**At budget approval** (step 5) — the moment your run reports that approval is required, before anything else:
+**At budget approval** (step 5) — the moment your run reports that approval is required, before anything else. Send the first if your run carried `approval.url`, the second if it did not.
+
+> Setup is done on my side. Approve the budget here: <approval.url>. Approve it with your passkey; nothing can be spent until you do.
 
 > Setup is done on my side. Go back to the Haven tab where you created the agent — it should now be asking you to approve the budget. Approve it with your passkey; nothing can be spent until you do.
 
@@ -54,12 +56,12 @@ npx -y @haven_ai/connect@<channel> --setup EXAMPLE-SETUP-TOKEN-NOT-REAL --api <a
 Run the prompt's version, not this one: the token is one-time, the API URL is the backend's own, and `<channel>` is the npm tag your prompt names — never a tag you pick. The rules below come from that prompt, so "me" in them is your user, not Haven.
 
 - If you are an AI agent running this command yourself rather than a human pasting it, you should append --json: the connector then emits one machine-readable, secret-free result object on stdout with progress on stderr, and returns promptly instead of blocking while it waits for the budget approval.
-- When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.
-- If you ran the command without --json, the connector waits for the approval itself and prints its next steps when it finishes: relay the budget-approval instruction to me — return to Haven and approve this agent's budget — only if those printed next steps still ask for it. If they report the budget as already approved, there is nothing for me to approve.
+- When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — if the outcome carries approval.url, give me that link; otherwise tell me to return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Never build that link yourself: relay the one the outcome gave you or none at all. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.
+- If you ran the command without --json, the connector waits for the approval itself and prints its next steps when it finishes: relay the budget-approval instruction to me — the approval link if those steps printed one, otherwise that you need to return to Haven and approve this agent's budget — only if those printed next steps still ask for it. If they report the budget as already approved, there is nothing for me to approve.
 - Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.
 - Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.
 
-If the approval wait times out, nothing is lost — your agent is registered and the budget is still waiting to be approved. Ask your user to finish it in that same Haven tab. You cannot send them a direct link to it: the connector's outcome carries no URL and no setup id, so do not invent one.
+If the approval wait times out, nothing is lost — your agent is registered and the budget is still waiting to be approved. Send your user the `approval.url` your run reported, or, if it carried none, ask them to finish it in that same Haven tab. The outcome carries no setup id, so never assemble an approval link out of parts — relay the whole one it gave you or none at all.
 
 ## How to verify
 
@@ -73,7 +75,7 @@ Call `haven_get_agent`, one of the Haven MCP tools the connector wires into your
 
 ## If you cannot open a browser
 
-Nothing here needs you to. Steps 1-3 are links: hand your user the full `<host>/…` URL and ask them to say when it is done. Step 5 is not a link — it is the tab they already have open, as above. Then poll `haven_get_agent` until it reads `ready`. Do not route around the sign-in wall — it makes the account theirs, not yours.
+Nothing here needs you to. Steps 1-3 are links: hand your user the full `<host>/…` URL and ask them to say when it is done. Step 5 is a link only when your run reported one in `approval.url` — otherwise it is the tab they already have open, as above. Then poll `haven_get_agent` until it reads `ready`. Do not route around the sign-in wall — it makes the account theirs, not yours.
 
 ## Vocabulary
 

@@ -2599,6 +2599,11 @@ export type components = {
             api_key_hash: string;
             api_key_prefix: string;
             runtime?: string;
+            /**
+             * @description #2528: how the connector was invoked — 'json' when `--json` was passed, 'prose' otherwise. The connector is the only party that can report this: the request is identical over the wire either way. Optional, because a connector older than #2528 sends nothing and registers unchanged; an unrecognised value is refused with 400 rather than stored, since this dimension segments the onboarding funnel and a value nothing recognises must not enter it silently. Case and surrounding whitespace are normalised before storage.
+             * @enum {string}
+             */
+            run_mode?: "json" | "prose";
             connector_version?: string;
             connector_context?: components["schemas"]["AgentConnectionConnector"];
             install_capabilities?: {
@@ -2623,6 +2628,8 @@ export type components = {
             hosted_mcp_url: string;
             /** @enum {string} */
             next_action: "return_to_haven_for_wallet_approval";
+            /** Format: uri */
+            approval_url: string;
             /** @description True when the setup opted in and its chain issues L0 passports. */
             passport_requested?: boolean;
         };

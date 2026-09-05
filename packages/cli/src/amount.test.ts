@@ -10,12 +10,21 @@ import { parseTokenAmount } from './amount.js'
  * written out: each is what `parseUnits(input, decimals).toString()` returns
  * for the same pair.
  *
- * Those expectations were MEASURED, not reasoned about: every vector here was
- * run through the real `parseUnits` in the frontend workspace, where viem is
- * installed, and all twenty agreed. Recorded because a hand-written table of
- * expected values is a claim about another library until somebody executes it,
- * and this one decides a budget — wrong by 10^6 is wrong by a factor of a
- * million. Re-run that check if a vector is ever added or changed.
+ * Those expectations were MEASURED, not reasoned about: every vector in the
+ * table below, plus the further value asserted at the end of this file, was run
+ * through the real `parseUnits` in the frontend workspace where viem is
+ * installed — 18 distinct (value, decimals) pairs, all agreeing. Recorded
+ * because a hand-written table of expected values is a claim about another
+ * library until somebody executes it, and this one decides a budget: wrong by
+ * 10^6 is wrong by a factor of a million. Re-run that check if a vector is
+ * added or changed.
+ *
+ * An earlier version of this note said "all twenty", which was the line count
+ * of the throwaway parity script (it repeated two pairs) rather than the number
+ * of vectors here. haven-doc-reviewer counted the table and found 17. The
+ * measurement was real; the number describing it was not, which is the same
+ * defect class as an instrument that cannot fail — so the count now names what
+ * can be counted from this file.
  */
 
 describe('parseTokenAmount', () => {

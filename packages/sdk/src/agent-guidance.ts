@@ -92,6 +92,16 @@ export const AGENT_COMMAND_MODIFICATION_SENTENCE =
  * `approval_url` the register response returns, so the agent relays a
  * destination instead of "return to Haven".
  *
+ * The step-5 hand-off is TWO blockquotes, not one with the alternative in
+ * brackets. It was the bracket form briefly, to save ~110 bytes against the
+ * size ceiling, and haven-design-reviewer was right to push back: this
+ * section's own header says "Send these as your own message", so every other
+ * script in it is paste-ready. A bracketed either/or inside the quote makes
+ * the agent perform text surgery on something presented as copyable — and a
+ * naive relay ships the raw brackets to the human, which reads as broken
+ * rather than as a choice. Two quotes cost bytes and buy back the property
+ * the section is built on. Do not re-compress this to save them.
+ *
  * `AGENT_WIRING_COLLISION_RELAY_SENTENCE` is deliberately NOT in this page's
  * rule list, though it IS in the setup prompt (#2551 via #2567). This page's
  * list is already a curated subset of the prompt's — it omits the network and
@@ -153,9 +163,11 @@ Send these as your own message, \`<host>\` replaced by the host you fetched this
 
 > On \`<host>/agents\`, create an agent for me and set a budget — say 25 USDC per day. That is the limit I cannot exceed. It hands back a setup prompt: paste it to me and I run it here.
 
-**At budget approval** (step 5) — the moment your run reports that approval is required, before anything else. Use your run's \`approval.url\` if it carried one; otherwise send the sentence in brackets:
+**At budget approval** (step 5) — the moment your run reports that approval is required, before anything else. Send the first if your run carried \`approval.url\`, the second if it did not.
 
-> Setup is done on my side. Approve the budget here: <approval.url> [or: Go back to the Haven tab where you created the agent — it should now be asking you to approve the budget]. Approve it with your passkey; nothing can be spent until you do.
+> Setup is done on my side. Approve the budget here: <approval.url>. Approve it with your passkey; nothing can be spent until you do.
+
+> Setup is done on my side. Go back to the Haven tab where you created the agent — it should now be asking you to approve the budget. Approve it with your passkey; nothing can be spent until you do.
 
 ## What you run
 

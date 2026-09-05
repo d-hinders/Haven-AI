@@ -47,7 +47,7 @@ describe('/for-agents.md (#2523)', () => {
     // about the connector's outcome takes more words than naming a link that
     // does not exist (haven-reviewer, blocking @ 1ba1b920).
     //
-    // 7400 → 7800 for #2528 (the page is 7705 bytes at this commit), and the
+    // 7400 → 7800 for #2528 (the page is 7781 bytes at this commit), and the
     // two things NOT done to avoid it are the
     // reason the number is defensible. `approval.url` made the hand-off
     // conditional, so the page now has to carry BOTH branches — the link and

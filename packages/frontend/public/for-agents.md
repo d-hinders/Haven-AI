@@ -39,9 +39,11 @@ Send these as your own message, `<host>` replaced by the host you fetched this f
 
 > On `<host>/agents`, create an agent for me and set a budget — say 25 USDC per day. That is the limit I cannot exceed. It hands back a setup prompt: paste it to me and I run it here.
 
-**At budget approval** (step 5) — the moment your run reports that approval is required, before anything else. Use your run's `approval.url` if it carried one; otherwise send the sentence in brackets:
+**At budget approval** (step 5) — the moment your run reports that approval is required, before anything else. Send the first if your run carried `approval.url`, the second if it did not.
 
-> Setup is done on my side. Approve the budget here: <approval.url> [or: Go back to the Haven tab where you created the agent — it should now be asking you to approve the budget]. Approve it with your passkey; nothing can be spent until you do.
+> Setup is done on my side. Approve the budget here: <approval.url>. Approve it with your passkey; nothing can be spent until you do.
+
+> Setup is done on my side. Go back to the Haven tab where you created the agent — it should now be asking you to approve the budget. Approve it with your passkey; nothing can be spent until you do.
 
 ## What you run
 

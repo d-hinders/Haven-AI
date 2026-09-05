@@ -122,11 +122,44 @@ describe('device approval screen', () => {
       expect(screen.getByText(/did not start this from your own terminal/i)).toBeInTheDocument()
     })
 
-    it('says so plainly when the client sent no label', async () => {
+    it('treats a MISSING label as a reason to deny, not a neutral fact', async () => {
+      // A real CLI normally sends a name, so its absence is the strongest
+      // signal on the screen — it should not read with the same calm weight as
+      // a name the reader can recognise (haven-design-reviewer, #2526).
       mockSearchParams.get.mockReturnValue('ABCD-2345')
       respond({ label: null })
       render(<DeviceApprovalClient />)
       expect(await screen.findByText(/an unnamed program/i)).toBeInTheDocument()
+      expect(screen.getByText(/reason to deny/i)).toBeInTheDocument()
+    })
+
+    it('lets a long unbroken label break anywhere', async () => {
+      // A jsdom test cannot measure layout, so this pins the CONTRACT and says
+      // so: `break-words` alone did not break a single unbroken token, and the
+      // mobile capture showed the label pushing the banner wider than its card
+      // and sliding "if you did not start this, deny it" out of view — with a
+      // string the attacker chooses. The rendered proof is the
+      // `device-approval-hostile` screenshot scenario; this only fails if
+      // somebody reverts the class.
+      mockSearchParams.get.mockReturnValue('ABCD-2345')
+      const hostile = 'A'.repeat(70)
+      respond({ label: hostile })
+      render(<DeviceApprovalClient />)
+      const label = await screen.findByText(hostile)
+      expect(label.className).toContain('[overflow-wrap:anywhere]')
+    })
+
+    it('moves focus to the requester panel when the step changes', async () => {
+      // The submit button is one node whose label flips Continue -> Approve, so
+      // a keyboard or screen-reader user holding focus would be left on a
+      // button that silently changed meaning. Focus lands on the panel that
+      // names the requester instead, which reads it out before the decision.
+      mockSearchParams.get.mockReturnValue('ABCD-2345')
+      respond()
+      render(<DeviceApprovalClient />)
+      const panel = await screen.findByTestId('device-client-label')
+      await waitFor(() => expect(panel).toHaveFocus())
+      expect(panel).toHaveAttribute('aria-live', 'polite')
     })
 
     it('submits the code the LABEL belongs to, not whatever is in the box', async () => {

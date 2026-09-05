@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { ApprovalRequiredBanner } from '@/components/haven/ApprovalRequiredBanner'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
@@ -104,6 +105,12 @@ export default function DeviceApprovalClient() {
   // — so the person lands already looking at what they are being asked to
   // approve. Guarded by a ref rather than the effect's deps: this must run
   // once for the code the page opened with, and never re-fire as they retype.
+  // Moved to when the review panel appears — see the panel's own comment.
+  const reviewPanel = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (outcome.kind === 'reviewing') reviewPanel.current?.focus()
+  }, [outcome.kind])
+
   const autoLookedUp = useRef(false)
   useEffect(() => {
     const initial = searchParams.get('code')?.trim()
@@ -193,22 +200,35 @@ export default function DeviceApprovalClient() {
             </div>
 
             {reviewing && (
+              // `ApprovalRequiredBanner`, not a hand-rolled tinted div: this is
+              // the one block on the page carrying attacker-chosen text and the
+              // sentence that should stop a wrong approval, and a flat
+              // `--v2-surface` tint reads as a resting shade rather than a
+              // notice. `warning` is literal here, not decorative.
+              //
+              // Focusable and announced, because the step change is silent
+              // otherwise: the submit button is one node whose label flips from
+              // Continue to Approve, so a keyboard or screen-reader user could
+              // be left focused on a button that quietly changed meaning. Focus
+              // moves here instead, which reads the requester out before the
+              // decision — the same order the sighted screen enforces.
               <div
+                ref={reviewPanel}
+                tabIndex={-1}
+                aria-live="polite"
                 data-testid="device-client-label"
-                className="rounded-lg bg-[var(--v2-surface)] px-4 py-3"
+                className="focus-visible:outline-none"
               >
-                <p className="text-xs font-medium text-[var(--v2-ink-2)] mb-1">
-                  {/* Named as the requester's own claim. Haven checks that this
-                      text is bounded and control-character-free, and vouches
-                      for nothing beyond that. */}
-                  The request says it is from
-                </p>
-                <p className="text-sm font-medium text-[var(--v2-ink)] break-words">
-                  {reviewing.clientLabel?.trim() ? reviewing.clientLabel : 'An unnamed program'}
-                </p>
-                <p className="text-xs text-[var(--v2-ink-2)] mt-2">
-                  If you did not start this from your own terminal just now, deny it.
-                </p>
+                <ApprovalRequiredBanner title="The request says it is from" tone="warning">
+                  <p className="text-sm font-medium text-[var(--v2-ink)] [overflow-wrap:anywhere]">
+                    {reviewing.clientLabel?.trim() ? reviewing.clientLabel : 'An unnamed program'}
+                  </p>
+                  <p className="mt-2">
+                    {reviewing.clientLabel?.trim()
+                      ? 'If you did not start this from your own terminal just now, deny it.'
+                      : 'It sent no name. A CLI you started yourself normally sends one, so treat an unnamed request as a reason to deny.'}
+                  </p>
+                </ApprovalRequiredBanner>
               </div>
             )}
 
@@ -246,10 +266,15 @@ export default function DeviceApprovalClient() {
                     ? 'Checking…'
                     : 'Continue'}
               </Button>
+              {/* `ghost`, not `tertiary`. Tertiary is the system's weakest
+                  variant — borderless muted text — and pairing it against a
+                  filled primary Approve weights this screen toward granting,
+                  on the one screen built to stop a rushed approval. Ghost
+                  keeps a border, so Deny reads as a real second option. */}
               {reviewing && (
                 <Button
                   type="button"
-                  variant="tertiary"
+                  variant="ghost"
                   disabled={busy}
                   onClick={() => void decide(reviewing, true)}
                 >

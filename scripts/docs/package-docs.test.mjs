@@ -13,6 +13,7 @@ import {
   GOVERNED_PACKAGE_DOCS,
   EXEMPT_PACKAGE_DOCS,
   enumeratePackageDocs,
+  GENERATED_MARKDOWN_PREFIXES,
   checkPackageDocBoundary,
   packageDocRecords,
   boundaryScopeNotes,
@@ -209,5 +210,35 @@ test('governed files really exist on disk (path typo control)', async () => {
   }
   for (const path of Object.keys(EXEMPT_PACKAGE_DOCS)) {
     await access(join(REPO_ROOT, path))
+  }
+})
+
+test('enumeratePackageDocs skips generated Markdown output (#2532)', () => {
+  // The boundary asks a person which side of the docs-quality system a file
+  // sits on. Generated output has no such decision: it is not in git and does
+  // not exist in a fresh checkout, and the exemption map errors on a path that
+  // does not exist — so registering it is not even available as an answer.
+  const walked = [
+    'packages/frontend/public/docs/account-recovery.md',
+    'packages/frontend/public/docs/security-model.md',
+    'packages/sdk/README.md',
+  ]
+  assert.deepEqual(enumeratePackageDocs(walked), ['packages/sdk/README.md'])
+})
+
+test('enumeratePackageDocs still catches an editable doc under the same package (#2532)', () => {
+  // Positive control: the exclusion is a PREFIX, not "anything under
+  // packages/frontend". A real new doc must still be decided about.
+  const walked = ['packages/frontend/public/llms-notes.md', 'packages/frontend/CONTRIBUTING.md']
+  assert.deepEqual(enumeratePackageDocs(walked), [
+    'packages/frontend/CONTRIBUTING.md',
+    'packages/frontend/public/llms-notes.md',
+  ])
+})
+
+test('every generated prefix names a directory, not a file (#2532)', () => {
+  for (const prefix of GENERATED_MARKDOWN_PREFIXES) {
+    assert.ok(prefix.endsWith('/'), `${prefix} must end with a slash to be a directory prefix`)
+    assert.ok(prefix.startsWith('packages/'), `${prefix} must be inside packages/`)
   }
 })

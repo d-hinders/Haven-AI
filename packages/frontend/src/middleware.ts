@@ -70,6 +70,7 @@ export const config = {
   matcher: [
     '/llms.txt',
     '/llms-full.txt',
+    '/docs/:path*',
     '/402',
     '/402/:path*',
     '/402.md',

@@ -1,6 +1,7 @@
 'use client'
 
 import { ArrowLeftRight, Bot, ChevronRight, DollarSign, ShieldCheck, Wallet } from 'lucide-react'
+import { AgentOnboardingPromptCard } from '@/components/connect-agent/AgentOnboardingPromptCard'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
@@ -187,6 +188,15 @@ function ConnectedAgentsSection({
               </div>
             }
           />
+          {/* #2535: the agent-driven alternative, offered only where it can
+              actually succeed. Gated on the SAME two conditions the "Connect
+              agent" button is: without an account the prompt's first sentence
+              ("I have a Haven account") is false, and on a retired-rail account
+              `haven agents connect` cannot complete — either way it would hand
+              an agent a job it must fail. */}
+          {hasAccounts && canConnectAgents ? (
+            <AgentOnboardingPromptCard className="mt-6" />
+          ) : null}
         </div>
       ) : (
         <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">

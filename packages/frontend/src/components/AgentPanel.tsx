@@ -14,6 +14,7 @@ import { BotIcon } from './agent-panel/agent-display'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { Skeleton } from './ui/Skeleton'
+import { AgentOnboardingPromptCard } from './connect-agent/AgentOnboardingPromptCard'
 
 /**
  * The agents panel's shell: header, list layout, empty states, and modals.
@@ -223,6 +224,15 @@ export default function AgentPanel() {
           }
         />
       )}
+
+      {/* #2535: the agent-driven alternative to the button above. Rendered on the
+          same condition, so a user who would rather hand the whole job to an
+          agent has something to paste before they ever open the modal. */}
+      {!loading &&
+        agents.length === 0 &&
+        !agentsError &&
+        !finalizingAgent &&
+        !finalizeTimedOut && <AgentOnboardingPromptCard className="mt-4" />}
 
       {!loading && agents.length === 0 && agentsError ? (
         <EmptyState

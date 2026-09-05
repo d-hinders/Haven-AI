@@ -2447,6 +2447,26 @@ export const openapiSpec = {
         },
       },
     },
+    '/user/safes/{safeId}/funding': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getSafeFunding',
+        summary: 'Machine-readable funding facts for one Safe: what to fund, with what, where, and how much.',
+        description:
+          'Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user\'s own wallet or exchange — and this is the single source an agent (or the dashboard\'s empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token\'s balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any token balance ≥ its minimum). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id (the delegation-rail account).' }],
+        responses: {
+          '200': {
+            description: 'The funding picture for the linked Safe.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/FundingResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
     // The approver routes that lived here — GET /user/safes/known-approvers,
     // GET|POST /user/safes/{safeId}/approvers, POST
     // /user/safes/{safeId}/approvers/tx and DELETE
@@ -7476,6 +7496,52 @@ export const openapiSpec = {
         required: ['balances'],
         properties: {
           balances: { type: 'array', items: { $ref: '#/components/schemas/BalanceItem' }, description: 'Native token first, then ERC-20s in registry order. Never empty.' },
+        },
+        additionalProperties: false,
+      },
+      FundingToken: {
+        type: 'object',
+        required: ['symbol', 'address', 'decimals', 'balance_human', 'minimum_useful_human'],
+        properties: {
+          symbol: { type: 'string' },
+          address: { ...address, description: "The token contract. (A funding token is always an ERC-20 — the chain-native asset is reported under `native`, not here.)" },
+          decimals: { type: 'integer' },
+          balance_human: { type: 'string', description: "Human-decimal balance via formatTokenValue — '0' or <int>.<2–6 fraction digits>; '0' on balance-RPC failure." },
+          minimum_useful_human: {
+            type: ['string', 'null'],
+            description: "Documented per-token constant from @haven_ai/core — the smallest amount worth moving for this token (one small x402 payment plus headroom). A CONSTANT, not a policy: not a spend limit, not a minimum balance check. null when no constant is documented for the symbol; then `funded` ignores the token.",
+          },
+        },
+        additionalProperties: false,
+      },
+      FundingResponse: {
+        type: 'object',
+        required: ['account_address', 'chain', 'tokens', 'native', 'funded'],
+        properties: {
+          account_address: { ...address, description: 'Where the human sends funds — the linked Safe address.' },
+          chain: {
+            type: 'object',
+            required: ['id', 'name', 'explorer_url'],
+            properties: {
+              id: { type: 'integer' },
+              name: { type: 'string' },
+              explorer_url: { type: 'string' },
+            },
+            additionalProperties: false,
+          },
+          tokens: { type: 'array', items: { $ref: '#/components/schemas/FundingToken' }, description: 'The chain\'s ERC-20s in registry order (native excluded — see `native`).' },
+          native: {
+            type: 'object',
+            required: ['symbol', 'balance_human', 'needed'],
+            properties: {
+              symbol: { type: 'string' },
+              balance_human: { type: 'string' },
+              needed: { type: 'boolean', description: 'Always false: gas is relay-sponsored (UserOps), so the funding instruction never asks for ETH/xDAI.' },
+            },
+            additionalProperties: false,
+          },
+          faucet_url: { type: 'string', description: 'Present ONLY on testnets, from the chain registry — where a HUMAN gets dev funds. Haven never calls a faucet. Absent (not null) on mainnets.' },
+          funded: { type: 'boolean', description: 'True when ANY token balance ≥ its `minimum_useful_human` constant. Native gas is not part of the question.' },
         },
         additionalProperties: false,
       },

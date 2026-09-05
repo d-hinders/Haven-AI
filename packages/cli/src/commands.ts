@@ -3,7 +3,7 @@ import { createCliApi, CliApiError, type CliApi } from './api.js'
 import { createSessionStore, type Session, type SessionStore } from './session.js'
 import { chainName, table, truncateAddress } from './format.js'
 import { toCsv } from './csv.js'
-import { EXIT, UsageError, toFailure, type ExitCode } from './errors.js'
+import { EXIT, HavenCliError, UsageError, toFailure, type ExitCode } from './errors.js'
 import { createOutput, type Output } from './output.js'
 import { HAVEN_AGENT_RUNBOOK_MD } from './agent-guidance-text.js'
 import { sessionExpiry } from './token.js'
@@ -20,6 +20,8 @@ export interface RunDeps {
   /** Build an API client; injected so tests can stub the backend. */
   makeApi?: (baseUrl: string, token?: string) => CliApi
   promptPassword?: () => Promise<string>
+  /** #2526: injected so the device poll loop is testable without real time. */
+  sleep?: (ms: number) => Promise<void>
   out?: (line: string) => void
   err?: (line: string) => void
   env?: NodeJS.ProcessEnv
@@ -29,6 +31,7 @@ interface ResolvedDeps {
   sessionStore: SessionStore
   makeApi: (baseUrl: string, token?: string) => CliApi
   promptPassword: () => Promise<string>
+  sleep: (ms: number) => Promise<void>
   out: (line: string) => void
   err: (line: string) => void
   env: NodeJS.ProcessEnv
@@ -88,6 +91,7 @@ export async function run(argv: string[], deps: RunDeps = {}): Promise<number> {
     sessionStore: deps.sessionStore ?? createSessionStore(),
     makeApi: deps.makeApi ?? ((baseUrl, token) => createCliApi({ baseUrl, token })),
     promptPassword: deps.promptPassword ?? (() => Promise.reject(new Error('No password input available'))),
+    sleep: deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms))),
     out,
     err,
     env: deps.env ?? process.env,
@@ -184,10 +188,99 @@ async function cmdGuide(_args: ParsedArgs, d: ResolvedDeps): Promise<number> {
 
 // ── Auth ────────────────────────────────────────────────────────────
 
+interface DeviceStart {
+  device_code: string
+  user_code: string
+  verification_url: string
+  expires_in: number
+  interval: number
+}
+
+/**
+ * Browser-approved login (#2526), the DEFAULT for `haven login`.
+ *
+ * The reason this is the default and the password path is not: an agent drives
+ * this CLI, and an agent must never hold its user's password. The cold-test
+ * agent correctly refused to type one. This asks the human instead — the agent
+ * pastes a link, and every signature stays with the person.
+ *
+ * Under `--json` the first object is emitted BEFORE polling starts, so an agent
+ * can hand its user the link immediately rather than after the flow completes.
+ */
+async function deviceLogin(args: ParsedArgs, d: ResolvedDeps, baseUrl: string): Promise<number> {
+  const api = d.makeApi(baseUrl)
+  const label = d.env.HAVEN_CLIENT_LABEL ?? `Haven CLI on ${d.env.HOSTNAME ?? 'this machine'}`
+  const start = await api.post<DeviceStart>('/auth/device/start', { client_label: label })
+
+  const deadline = Date.now() + start.expires_in * 1000
+  // Emitted first, not last: the whole point is that the agent can pass the
+  // link on while the poll runs.
+  d.o.data(
+    {
+      ok: true,
+      verification_url: start.verification_url,
+      user_code: start.user_code,
+      expires_at: new Date(deadline).toISOString(),
+    },
+    () =>
+      `Open ${start.verification_url}\nand approve the code ${start.user_code}.\n` +
+      `It expires in ${Math.round(start.expires_in / 60)} minutes.`,
+  )
+
+  if (args.flags.noWait) return EXIT.ok
+
+  // The server names the interval; the client does not invent one. `slow_down`
+  // widens it, which is the only backoff signal this flow has.
+  let interval = start.interval * 1000
+  for (;;) {
+    if (Date.now() >= deadline) {
+      throw new HavenCliError('The code expired before it was approved.', EXIT.notAuthenticated)
+    }
+    await d.sleep(interval)
+    let res: { token: string; user: Session['user'] } | null = null
+    try {
+      res = await api.post<{ token: string; user: Session['user'] }>('/auth/device/token', {
+        device_code: start.device_code,
+      })
+    } catch (err) {
+      const code = deviceErrorCode(err)
+      if (code === 'authorization_pending') continue
+      if (code === 'slow_down') {
+        interval += 5000
+        continue
+      }
+      if (code === 'access_denied') {
+        throw new HavenCliError('The request was denied.', EXIT.refused)
+      }
+      if (code === 'expired_token') {
+        throw new HavenCliError('The code expired before it was approved.', EXIT.notAuthenticated)
+      }
+      throw err
+    }
+    await d.sessionStore.save({ token: res.token, apiBaseUrl: baseUrl, user: res.user })
+    emit(
+      d,
+      args.flags.json,
+      { ok: true, email: res.user.email, expires_at: sessionExpiry(res.token), user: res.user, apiBaseUrl: baseUrl },
+      () => `Signed in as ${res!.user.email}.`,
+    )
+    return EXIT.ok
+  }
+}
+
+/** The RFC 8628 error slug in a 400 body, or null. */
+function deviceErrorCode(err: unknown): string | null {
+  const body = (err as { body?: { error?: unknown } } | undefined)?.body
+  return typeof body?.error === 'string' ? body.error : null
+}
+
 async function cmdLogin(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   const email = args.flags.email ?? d.env.HAVEN_EMAIL
+  // #2526: the browser flow is the DEFAULT. `--email` (or HAVEN_EMAIL) keeps
+  // the password path for a human who wants it — it is not removed, it is no
+  // longer what an agent gets by asking for `login`.
   if (!email) {
-    throw new UsageError('An email is required.', 'Pass --email <address>, or set HAVEN_EMAIL.')
+    return deviceLogin(args, d, baseUrlFor(args, d, null))
   }
   const password = d.env.HAVEN_PASSWORD ?? (await d.promptPassword())
   if (!password) {

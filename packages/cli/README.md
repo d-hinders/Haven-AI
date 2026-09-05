@@ -65,6 +65,38 @@ human goes to stderr. That holds for refusals too, which is the half a caller
 cannot work around: parse stdout, branch on the exit code, and read stderr only
 when a person is watching.
 
+### Signing in without a password (#2526)
+
+`haven login` starts a **browser-approved** flow by default. It prints a link
+and a code; a human opens the link, sees what the session may do, and approves.
+There is no password anywhere in that path, which is the point: an agent
+driving this CLI must never hold its user's password.
+
+```bash
+haven login --json
+# {"ok":true,"verification_url":"https://app.haven…/device?code=ABCD-2345",
+#  "user_code":"ABCD-2345","expires_at":"…"}
+```
+
+Under `--json` that object is printed **before** polling begins, so an agent
+can hand its user the link immediately rather than after the flow completes.
+Add `--no-wait` to stop there and poll later; without it the CLI waits at the
+interval the server names, widening it when the server says `slow_down`.
+
+Exit codes carry the outcome an agent acts on: **3** when the code expired
+(ask for a new one), **4** when the human denied it (stop asking).
+
+`haven login --email <address>` keeps the password path for a human who wants
+it. It is not removed — it is simply no longer what an agent gets by asking to
+log in.
+
+**What the approved session can do.** Create and manage agents, set up a
+connection, and read your account. **What it cannot:** sign anything, approve a
+budget, change signers, re-key an agent, move funds, or change credentials. The
+allow-list lives in `packages/backend/src/middleware/owner-cli.ts`, and a
+census test asserts every registered route is either on it or refusing — so a
+route added tomorrow refuses until somebody decides otherwise.
+
 ```bash
 haven agents list --json                 # success: the payload, unchanged
 haven agents show missing --json         # failure: one object, still parseable

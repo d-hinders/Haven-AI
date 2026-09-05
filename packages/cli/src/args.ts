@@ -5,6 +5,8 @@ export interface ParsedArgs {
   flags: {
     json: boolean
     help: boolean
+    /** #2526: print the code and exit instead of polling for approval. */
+    noWait: boolean
     version: boolean
     yes: boolean
     api?: string
@@ -32,7 +34,7 @@ const VALUE_FLAGS = new Set([
  */
 export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = []
-  const flags: ParsedArgs['flags'] = { json: false, help: false, version: false, yes: false }
+  const flags: ParsedArgs['flags'] = { json: false, help: false, version: false, yes: false, noWait: false }
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -40,6 +42,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === '--help' || arg === '-h') flags.help = true
     else if (arg === '--version' || arg === '-v') flags.version = true
     else if (arg === '--yes' || arg === '-y') flags.yes = true
+    else if (arg === '--no-wait') flags.noWait = true
     else if (VALUE_FLAGS.has(arg)) {
       const value = argv[++i]
       if (value === undefined || value.startsWith('--')) {

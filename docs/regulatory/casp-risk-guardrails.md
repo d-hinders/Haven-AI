@@ -62,7 +62,7 @@ covers:
   - .github/workflows/publish.yml
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-02" # #2300: § *What `covers:` must span* gains the measured-floor paragraph — the #1899 pin now asserts 31 of 47 globs after `packages/mcp-server/src/**` joined the money-path list, and this document already covered that path, so no `covers:` change was needed (floor, not ceiling, running the direction money.md § 2 predicted). Scope: that section only; nothing else in this document was re-verified. Full analysis in docs/regulatory/casp-changelog/2026-09-02-2300.md. Prior: #2246: § Product Copy Rules — the "Known compliance gap" paragraph is DELETED, because the gap it disclosed is fixed in the same change. Its two avoid-listed phrases ("Haven signs and settles the payment.", "Haven gave you the private key.") were live in `packages/frontend/src/components/UsingYourAgentInfo.tsx`, a file this doc `covers:` by exact path; both are gone and both are now literals in the frontend copy lint, so the rule is enforced rather than disclosed. Scope: that paragraph only — the Use/Avoid lists themselves are unchanged, and nothing else in this document was re-verified. Full analysis in docs/regulatory/casp-changelog/2026-09-01-2246.md. Prior: #2274: the #2245 "Current state" note under Core Design Principle corrected — it listed token resolution among the rail-INDEPENDENT checks still preceding the x402 rail 410, which #2274 moved below the gate on that route and on POST /payments together. Scope: that blockquote only; the rest of Core Design Principle was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
+last-verified: "2026-09-05" # #2526: the #1826 CLI section said the CLI holds "a user JWT, the same credential the dashboard holds". That is now true only of the `--email` path. The DEFAULT path is a device-code login minting a `purpose: owner_cli` token scoped to an allow-list (agents, connect setups, read-only account context — never signer changes, re-keying, credentials, provisioning, transfers or delegation activation), so the section now names two credential shapes and points at `docs/security/delegation-rail-security-model.md` § 9 for the scope. The credential-change reasoning is unchanged and applies to both; what the narrower one bounds is the blast radius. Also records that rotating an agent API key IS on that allow-list, so the existing sentence about printing a freshly rotated key holds for the scoped token too. Scope: that section only. Amended in the same PR on the owner decision of 2026-09-05: `rotate-key` was removed from the allow-list, so this section now says a device-code session cannot reach it and the rotated-key sentence describes the `--email` path alone. Prior: #2300: § *What `covers:` must span* gains the measured-floor paragraph — the #1899 pin now asserts 31 of 47 globs after `packages/mcp-server/src/**` joined the money-path list, and this document already covered that path, so no `covers:` change was needed (floor, not ceiling, running the direction money.md § 2 predicted). Scope: that section only; nothing else in this document was re-verified. Full analysis in docs/regulatory/casp-changelog/2026-09-02-2300.md. Prior: #2246: § Product Copy Rules — the "Known compliance gap" paragraph is DELETED, because the gap it disclosed is fixed in the same change. Its two avoid-listed phrases ("Haven signs and settles the payment.", "Haven gave you the private key.") were live in `packages/frontend/src/components/UsingYourAgentInfo.tsx`, a file this doc `covers:` by exact path; both are gone and both are now literals in the frontend copy lint, so the rule is enforced rather than disclosed. Scope: that paragraph only — the Use/Avoid lists themselves are unchanged, and nothing else in this document was re-verified. Full analysis in docs/regulatory/casp-changelog/2026-09-01-2246.md. Prior: #2274: the #2245 "Current state" note under Core Design Principle corrected — it listed token resolution among the rail-INDEPENDENT checks still preceding the x402 rail 410, which #2274 moved below the gate on that route and on POST /payments together. Scope: that blockquote only; the rest of Core Design Principle was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -1120,13 +1120,29 @@ was inside the perimeter.
 discipline — name the event coverage gates — the gated event is an *edit to the
 CLI's command surface*, never a user running `haven agents revoke`. Two things
 about that edit are perimeter-relevant even for a thin client. It holds a **user
-JWT, the same credential the dashboard holds** (`session.ts` says so), owner-only
-at 0600, and sends it as a Bearer token to whatever `baseUrlFor` resolves —
+JWT**, owner-only at 0600, and sends it as a Bearer token to whatever `baseUrlFor` resolves —
 which reads a user-supplied `--api-url` flag first. An edit that logged the
 token, loosened those perms, or widened where it is sent is a credential change,
 and Red Line 3 treats a credential as a payment instrument. And it prints a
 freshly rotated agent API key to stdout. That is a real, bounded surface, and it
 is the honest one — not "the CLI can retire an agent's authority".
+
+**Since #2526 there are two credential shapes, not one, and the difference is
+scope.** `haven login --email` still mints the ordinary session — the same
+credential the dashboard holds. The default path now has no password in it at
+all: a device-code flow the human approves in the browser, minting a token that
+carries `purpose: owner_cli` and reaches only the routes on the allow-list in
+`packages/backend/src/middleware/owner-cli.ts` — agents, connect setups and
+read-only account context, never signer changes, re-keying, credentials,
+provisioning, transfers, or delegation activation. Both are Bearer tokens sent
+to whatever `baseUrlFor` resolves, so the credential-change reasoning above
+applies unchanged to both; what the narrower one bounds is the blast radius if
+it leaks. The scope and its enforcement are recorded in
+`docs/security/delegation-rail-security-model.md` § 9. Rotating an agent's API
+key is NOT on that allow-list (owner decision, 2026-09-05, after it was briefly
+scoped in), so the sentence above about the CLI printing a freshly rotated key
+describes the `--email` session only — a device-code session cannot reach that
+route at all.
 
 **The money-path list did not need widening, and #1826's blocker dissolves on
 inspection.** The issue held that this doc "binds its `covers:` maintenance to

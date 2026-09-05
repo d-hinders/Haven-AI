@@ -64,6 +64,7 @@ export const AUTH_MARKED_PREFIXES = [
   '/custody',
   '/dashboard',
   '/design-system',
+  '/device',
   '/profile',
   '/reporting',
   '/settings',

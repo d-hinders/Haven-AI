@@ -36,6 +36,26 @@ export class UsageError extends Error {
   }
 }
 
+/**
+ * A failure that already knows its exit code (#2526).
+ *
+ * The device flow's outcomes are not exceptions in the usual sense — a denied
+ * approval and an expired code are ordinary, expected answers — but they must
+ * still exit non-zero with the RIGHT code, because that is the contract an
+ * agent reads. Carrying the code on the error keeps the decision at the place
+ * that knows the outcome rather than in a string match downstream.
+ */
+export class HavenCliError extends Error {
+  readonly exit: ExitCode
+  readonly hint?: string
+  constructor(message: string, exit: ExitCode, hint?: string) {
+    super(message)
+    this.name = 'HavenCliError'
+    this.exit = exit
+    this.hint = hint
+  }
+}
+
 export interface Failure {
   code: FailureCode
   exit: ExitCode
@@ -58,6 +78,19 @@ export interface Failure {
 export function toFailure(err: unknown): Failure {
   if (err instanceof UsageError) {
     return { code: 'usage', exit: EXIT.usage, message: err.message, hint: err.hint }
+  }
+  if (err instanceof HavenCliError) {
+    // The error already decided; this only translates the number to its slug,
+    // so the JSON body and the exit code still come off one object.
+    const code: FailureCode =
+      err.exit === EXIT.notAuthenticated
+        ? 'not_authenticated'
+        : err.exit === EXIT.refused
+          ? 'refused'
+          : err.exit === EXIT.network
+            ? 'network'
+            : 'failed'
+    return { code, exit: err.exit, message: err.message, hint: err.hint }
   }
   if (err instanceof CliApiError) {
     if (err.status === 0) {

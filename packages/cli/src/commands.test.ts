@@ -52,10 +52,13 @@ function harness(over: Partial<RunDeps> = {}) {
 }
 
 describe('run — auth gating', () => {
-  it('requires a session for read commands (exit 2)', async () => {
+  it('requires a session for read commands (exit 3)', async () => {
+    // #2525 moved this from 2 to 3: 2 now means "the command line was wrong",
+    // and "you are not logged in" is a different thing a caller acts on
+    // differently (run `haven login`, don't fix the argv).
     const { deps, err } = harness({ sessionStore: memoryStore(null) })
     const code = await run(['wallets', 'list'], deps)
-    expect(code).toBe(2)
+    expect(code).toBe(3)
     expect(err.join('\n')).toMatch(/Not authenticated/)
   })
 
@@ -67,7 +70,8 @@ describe('run — auth gating', () => {
 
   it('reports unknown commands', async () => {
     const { deps, err } = harness()
-    expect(await run(['frobnicate'], deps)).toBe(1)
+    // An unknown command is a usage error (2), not a generic failure (1).
+    expect(await run(['frobnicate'], deps)).toBe(2)
     expect(err.join('\n')).toMatch(/Unknown command/)
   })
 })
@@ -92,7 +96,7 @@ describe('login', () => {
 
   it('errors clearly without an email', async () => {
     const { deps, err } = harness({ sessionStore: memoryStore(null), env: {} })
-    expect(await run(['login'], deps)).toBe(1)
+    expect(await run(['login'], deps)).toBe(2)
     expect(err.join('\n')).toMatch(/email/i)
   })
 })
@@ -156,7 +160,8 @@ describe('read commands', () => {
   it('errors when activity --safe matches no wallet', async () => {
     const api = fakeApi({ 'GET /user/safes': { safes: [] } })
     const { deps, err } = harness({ makeApi: () => api })
-    expect(await run(['activity', 'list', '--safe', 'nope'], deps)).toBe(1)
+    // A --safe that matches nothing is a bad argument: usage (2).
+    expect(await run(['activity', 'list', '--safe', 'nope'], deps)).toBe(2)
     expect(err.join('\n')).toContain('No wallet matches')
   })
 
@@ -205,7 +210,8 @@ describe('management commands (backend-only)', () => {
   it('refuses to revoke without --yes and never calls the API', async () => {
     const api = fakeApi({ 'POST /agents/a1/revoke': {} })
     const { deps, err } = harness({ makeApi: () => api })
-    expect(await run(['agents', 'revoke', 'a1'], deps)).toBe(1)
+    // Missing --yes is a usage error: the command line needs one more flag.
+    expect(await run(['agents', 'revoke', 'a1'], deps)).toBe(2)
     expect(api.calls).not.toContain('POST /agents/a1/revoke')
     expect(err.join('\n')).toMatch(/--yes/)
   })
@@ -261,7 +267,10 @@ describe('management commands (backend-only)', () => {
       getText: async () => { throw new CliApiError('Account is locked', 403) },
     }
     const { deps, err } = harness({ makeApi: () => failing })
-    expect(await run(['agents', 'list'], deps)).toBe(1)
+    // 403 is the backend refusing an authenticated caller: exit 4, distinct
+    // from 3 (log in again) and from 1 (something else broke). The message is
+    // still echoed verbatim — that half is unchanged.
+    expect(await run(['agents', 'list'], deps)).toBe(4)
     expect(err.join('\n')).toContain('Account is locked')
   })
 })

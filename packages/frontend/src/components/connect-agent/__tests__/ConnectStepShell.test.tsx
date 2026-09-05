@@ -23,6 +23,13 @@ const SETUP = {
   expires_at: EXPIRES_AT,
   status: 'awaiting_connection',
   connector_command: 'npx @haven_ai/connect@alpha --token hv_setup_test',
+  // #2522: REQUIRED on the create response, mirroring the backend. Required
+  // rather than optional for the same reason `connector_package` is — an
+  // optional field pushes a URL-assembling fallback back into every client —
+  // and the cost of that choice is exactly this: every fixture standing in for
+  // a real create response has to carry it, which is the type system saying
+  // the contract is real.
+  approval_url: 'https://app.example.test/agents?setup=setup-1',
   // #2422: the spec on its own, mirroring what the backend now returns.
   connector_package: '@haven_ai/connect@alpha',
 } satisfies CreateSetupResponse

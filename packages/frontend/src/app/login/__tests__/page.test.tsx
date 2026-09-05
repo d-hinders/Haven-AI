@@ -102,4 +102,22 @@ describe('LoginPage', () => {
       expect(screen.getByText('Invalid email or password.')).toBeInTheDocument()
     })
   })
+
+  /**
+   * #2524: the hand-off line an agent needs on this page. The line's own
+   * behaviour is covered in
+   * `components/onboarding/__tests__/AgentHandoffNote.test.tsx`; what this
+   * asserts is that the page still MOUNTS it, which is the part a refactor of
+   * this file can silently drop.
+   */
+  it('carries the agent hand-off line (#2524)', async () => {
+    render(<LoginPage />)
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(`${window.location.origin}/login`).closest('a'),
+      ).toHaveAttribute('href', `${window.location.origin}/login`),
+    )
+    expect(screen.getByText(/Setting up for someone else, or an AI agent\?/)).toBeInTheDocument()
+  })
 })

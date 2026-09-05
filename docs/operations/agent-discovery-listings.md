@@ -6,6 +6,8 @@ covers:
   - packages/frontend/public/llms-full.txt
   - packages/frontend/public/402/index.html
   - packages/frontend/public/402.md
+  - packages/frontend/public/for-agents.md
+  - packages/sdk/src/agent-guidance.ts
   - packages/frontend/src/middleware.ts
   - packages/frontend/src/lib/discovery.ts
   - packages/frontend/src/lib/__tests__/discovery-artifacts.test.ts
@@ -13,10 +15,18 @@ covers:
   - packages/frontend/src/app/robots.txt/route.ts
   - packages/frontend/src/app/sitemap.xml/route.ts
   - packages/frontend/src/app/layout.tsx
+<<<<<<< HEAD
   - packages/frontend/src/lib/capability-manifest.ts
   - packages/frontend/src/app/.well-known/haven.json/route.ts
   - packages/backend/src/routes/discovery.ts
-last-verified: "2026-09-04" # #2531: § *The artifacts* gains two rows — the `/.well-known/haven.json` capability manifest and the backend `GET /discovery` it draws its environment-dependent half from — plus the rule that a manifest key must never name a 404, which is why two keys the issue specified (`docs.for_agents`, `dashboard.device_approval`) are deliberately absent until #2523 and the device-code flow land; they are recorded as data so a test asserts their absence. Also records the degrade-rather-than-refuse behaviour and why no connector channel is ever guessed. Also records the fetch-target rule: a URL the server FETCHES is never request-derived. The first version of the manifest fetched the backend at an `x-forwarded-host`-derived origin, which is a server-side request forgery; caught before merge by running the attack and watching a listener on the injected host receive it, and closed by reading the backend address from configuration. A second review round then closed the REFLECTION too, rather than documenting it: own-origin fields are relative paths now, so no caller-supplied host reaches `dashboard.signup` — verified by running the attack and finding the injected host nowhere in the served document. Three new `covers:` entries. Scope: that table and the new paragraphs — the discovery-hooks section, the registry checklist and the measurement section were not re-read. Prior: #2521: § *The artifacts* gains rows for `robots.txt`, `sitemap.xml` and the auth-wall marker, and the new § *Discovery hooks* records the four hooks and why the two generated artifacts are route handlers rather than files in `public/`. Scope: those additions and the four `covers:` entries above them. The URL column of the pre-existing rows is #2520's work, merged in beneath this and not re-read here; the registry checklist was not re-read either. Prior: #2520 (follow-up): the *Listing copy (canonical)* block one section below still said `haven.xyz/402` — found by haven-doc-reviewer, and my own scope sentence in the entry below had excluded exactly that part of the file. It cannot take a same-origin path (the copy is pasted into external registries and needs an absolute URL), and no production host is recorded here, so it now reads `<host>/402` with a paragraph saying it is unsubmittable until a domain is decided. Scope: that block and its new paragraph. Prior: #2520: § *The artifacts* URL column rewritten from the `haven.xyz` / `app.haven.xyz` / `docs.haven.xyz` hosts, none of which resolve, to same-origin paths; the section gains the same-origin rule, its guard test (added to `covers:` with this entry) and the one temporary off-site allow-list entry (product docs, until #2532). Scope: that table and the paragraph above the connect-one-liner rule — the one-liner rule itself is unchanged and still reads verbatim-everywhere, and the registry checklist below was not re-read. First entry on this chain; the file carried a bare date before.
+last-verified: "2026-09-05" # #2531: § *The artifacts* gains two rows — the `/.well-known/haven.json` capability manifest and the backend `GET /discovery` it draws its environment-dependent half from — plus the rule that a manifest key must never name a 404, which is why two keys the issue specified (`docs.for_agents`, `dashboard.device_approval`) are deliberately absent until #2523 and the device-code flow land; they are recorded as data so a test asserts their absence. Also records the degrade-rather-than-refuse behaviour and why no connector channel is ever guessed. Also records the fetch-target rule: a URL the server FETCHES is never request-derived. The first version of the manifest fetched the backend at an `x-forwarded-host`-derived origin, which is a server-side request forgery; caught before merge by running the attack and watching a listener on the injected host receive it, and closed by reading the backend address from configuration. A second review round then closed the REFLECTION too, rather than documenting it: own-origin fields are relative paths now, so no caller-supplied host reaches `dashboard.signup` — verified by running the attack and finding the injected host nowhere in the served document. Three new `covers:` entries. Scope: that table and the new paragraphs — the discovery-hooks section, the registry checklist and the measurement section were not re-read. Prior: #2523: § *The artifacts* gains the `/for-agents.md` row, and `covers:` gains that file plus `packages/sdk/src/agent-guidance.ts` — the canonical string it is generated from, so a change to the runbook re-implicates this doc rather than only a change to the served copy. The same-origin rule and the connect one-liner rule below were re-read against the new artifact and hold: every link in it is a path, and it prints the full `npx -y @haven_ai/connect@alpha --setup …` command the backend builds rather than the bare one-liner (the guard test now asserts both halves). Scope: that row, those two `covers:` entries and this note ONLY — the registry checklist and the measurement section were not re-read. Prior: #2522: new § *Hand-off links and the `via=agent` marker* under *Measurement* — the four link shapes with their sync rules, the two open-redirect cases that an origin check alone does NOT catch (`/..//evil.com` resolving same-origin to a protocol-relative pathname; a tab stripped during parsing), the enum-not-slug rule for `via`, and the metadata-key collision that decided the design: the funnel already uses `via` to name which CODE PATH created a record, so the hand-off marker rides as `handoff_via` and reusing `via` would have silently redefined every historical row. Five new `covers:` entries — widened on review: `lib/discovery.ts` and `routes/auth.ts` are the source of truth for the frontend sanitiser and the signup wiring this section describes, and neither was declared in the first draft. Migration 076 is deliberately NOT covered: a landed migration never changes, so coupling it buys nothing. Two review rounds. haven-reviewer found the resumed connect step rendering a blank body and, on re-review, two more states reachable only because this change added the resume path — a stale link showing chrome over nothing, and terminal states offering "Create a new setup" where that would post an unnamed, budget-less setup; the table row now records the not-found deviation from the issue's "no modal". haven-doc-reviewer found the login row claiming `&via=agent` works there — it does not, and should not; that row and a new paragraph now record the asymmetry and its two reasons. Scope: that new section and the front matter — § *The artifacts*, § *Discovery hooks* and the registry checklist were read against this diff and are unchanged, and the #2302 `?src=` half of *Measurement* is untouched. Prior: #2521: § *The artifacts* gains rows for `robots.txt`, `sitemap.xml` and the auth-wall marker, and the new § *Discovery hooks* records the four hooks and why the two generated artifacts are route handlers rather than files in `public/`. Scope: those additions and the four `covers:` entries above them. The URL column of the pre-existing rows is #2520's work, merged in beneath this and not re-read here; the registry checklist was not re-read either. Prior: #2520 (follow-up): the *Listing copy (canonical)* block one section below still said `haven.xyz/402` — found by haven-doc-reviewer, and my own scope sentence in the entry below had excluded exactly that part of the file. It cannot take a same-origin path (the copy is pasted into external registries and needs an absolute URL), and no production host is recorded here, so it now reads `<host>/402` with a paragraph saying it is unsubmittable until a domain is decided. Scope: that block and its new paragraph. Prior: #2520: § *The artifacts* URL column rewritten from the `haven.xyz` / `app.haven.xyz` / `docs.haven.xyz` hosts, none of which resolve, to same-origin paths; the section gains the same-origin rule, its guard test (added to `covers:` with this entry) and the one temporary off-site allow-list entry (product docs, until #2532). Scope: that table and the paragraph above the connect-one-liner rule — the one-liner rule itself is unchanged and still reads verbatim-everywhere, and the registry checklist below was not re-read. First entry on this chain; the file carried a bare date before.
+=======
+  - packages/backend/src/domain/handoff-links.ts
+  - packages/backend/src/routes/auth.ts
+  - packages/frontend/src/lib/__tests__/handoff-links.test.ts
+  - packages/backend/src/infra/repositories/__tests__/handoff-attribution.test.ts
+last-verified: "2026-09-04" # #2523: § *The artifacts* gains the `/for-agents.md` row, and `covers:` gains that file plus `packages/sdk/src/agent-guidance.ts` — the canonical string it is generated from, so a change to the runbook re-implicates this doc rather than only a change to the served copy. The same-origin rule and the connect one-liner rule below were re-read against the new artifact and hold: every link in it is a path, and it prints the full `npx -y @haven_ai/connect@alpha --setup …` command the backend builds rather than the bare one-liner (the guard test now asserts both halves). Scope: that row, those two `covers:` entries and this note ONLY — the registry checklist and the measurement section were not re-read. Prior: #2522: new § *Hand-off links and the `via=agent` marker* under *Measurement* — the four link shapes with their sync rules, the two open-redirect cases that an origin check alone does NOT catch (`/..//evil.com` resolving same-origin to a protocol-relative pathname; a tab stripped during parsing), the enum-not-slug rule for `via`, and the metadata-key collision that decided the design: the funnel already uses `via` to name which CODE PATH created a record, so the hand-off marker rides as `handoff_via` and reusing `via` would have silently redefined every historical row. Five new `covers:` entries — widened on review: `lib/discovery.ts` and `routes/auth.ts` are the source of truth for the frontend sanitiser and the signup wiring this section describes, and neither was declared in the first draft. Migration 076 is deliberately NOT covered: a landed migration never changes, so coupling it buys nothing. Two review rounds. haven-reviewer found the resumed connect step rendering a blank body and, on re-review, two more states reachable only because this change added the resume path — a stale link showing chrome over nothing, and terminal states offering "Create a new setup" where that would post an unnamed, budget-less setup; the table row now records the not-found deviation from the issue's "no modal". haven-doc-reviewer found the login row claiming `&via=agent` works there — it does not, and should not; that row and a new paragraph now record the asymmetry and its two reasons. Scope: that new section and the front matter — § *The artifacts*, § *Discovery hooks* and the registry checklist were read against this diff and are unchanged, and the #2302 `?src=` half of *Measurement* is untouched. Prior: #2521: § *The artifacts* gains rows for `robots.txt`, `sitemap.xml` and the auth-wall marker, and the new § *Discovery hooks* records the four hooks and why the two generated artifacts are route handlers rather than files in `public/`. Scope: those additions and the four `covers:` entries above them. The URL column of the pre-existing rows is #2520's work, merged in beneath this and not re-read here; the registry checklist was not re-read either. Prior: #2520 (follow-up): the *Listing copy (canonical)* block one section below still said `haven.xyz/402` — found by haven-doc-reviewer, and my own scope sentence in the entry below had excluded exactly that part of the file. It cannot take a same-origin path (the copy is pasted into external registries and needs an absolute URL), and no production host is recorded here, so it now reads `<host>/402` with a paragraph saying it is unsubmittable until a domain is decided. Scope: that block and its new paragraph. Prior: #2520: § *The artifacts* URL column rewritten from the `haven.xyz` / `app.haven.xyz` / `docs.haven.xyz` hosts, none of which resolve, to same-origin paths; the section gains the same-origin rule, its guard test (added to `covers:` with this entry) and the one temporary off-site allow-list entry (product docs, until #2532). Scope: that table and the paragraph above the connect-one-liner rule — the one-liner rule itself is unchanged and still reads verbatim-everywhere, and the registry checklist below was not re-read. First entry on this chain; the file carried a bare date before.
+>>>>>>> origin/dev
 ---
 
 # Agent discovery listings — registry audit & cadence
@@ -31,8 +41,12 @@ Operational home of the **Agent Discovery (AEO) GTM track**, Phase 0 (strategy d
 | `llms-full.txt` | `/llms-full.txt` | Single-file overview. Update on product-model changes (rails, settlement schemes, onboarding flow). |
 | 402 page | `/402` | Human landing for the 402 moment. Mirror of `402.md` — **edit both together** (sync note in the HTML header). |
 | `402.md` | `/402.md` | Agent-readable mirror; token-cheap, answer-first. |
+<<<<<<< HEAD
 | capability manifest | `/.well-known/haven.json` | **Generated, never hand-edited.** The same environment as JSON for an agent's code. Its environment-dependent half comes from the backend's `GET /discovery`, so a connector-channel or hosted-MCP change propagates instead of being restated. Adding a key is non-breaking; removing one or changing its meaning bumps `schema_version`. |
 | discovery facts | `GET /discovery` (backend) | Public, read-only, unauthenticated. Re-serves values that are already public elsewhere — never per-user or per-agent data, no relayer address, nothing from `/health`. A test enumerates the keys, so adding one is a decision. |
+=======
+| `for-agents.md` | `/for-agents.md` | The onboarding runbook written to an agent whose user has no account (#2523). **Not hand-edited**: it is generated byte-identically from `HAVEN_AGENT_RUNBOOK_MD` in `packages/sdk/src/agent-guidance.ts`, which is also where the setup prompt's rule sentences live — edit there, and a parity test fails if the served file drifts. |
+>>>>>>> origin/dev
 | npm metadata | package.json of sdk / signer / mcp / connect / cli | Keywords + descriptions carry the category phrases (x402, agent-payments, budget, non-custodial). Ships on next `release:bump`; do not hand-edit versions (see `scripts/README.md`). |
 | `robots.txt` | `/robots.txt` | **Generated**, not a static file (`src/app/robots.txt/route.ts`). Names the agent-readable artifacts and `Disallow`s the authenticated prefixes. Update when a public artifact is added or an authenticated prefix appears — both come from `AUTHENTICATED_PREFIXES` in `src/lib/discovery-surfaces.ts`, so edit that list, not the template. |
 | `sitemap.xml` | `/sitemap.xml` | **Generated** (`src/app/sitemap.xml/route.ts`) from `PUBLIC_SURFACES` in `src/lib/discovery-surfaces.ts`. Add a public page → add it there. The guard test fails if an entry resolves to no route or file, or if an authenticated prefix reaches the list. |
@@ -185,6 +199,75 @@ GROUP BY 1;
 ```
 
 The sanitization rule lives in TWO places by design — `normalizeDiscoverySource` (backend route) and `parseDiscoverySource` (frontend `lib/discovery.ts`) — keep them identical.
+
+### Hand-off links and the `via=agent` marker (#2522)
+
+An agent cannot approve a budget, sign up, or complete onboarding — a human
+must. So every human-only step is a link the agent can paste, and each one
+carries `via=agent` so the funnel it drives is measurable rather than inferred.
+
+| Link | Shape | Sync rule |
+|---|---|---|
+| Signup with a return target | `/signup?next=<same-origin path>&via=agent` | `next` SURVIVES onboarding — that is the contract. Adding a new post-auth redirect means routing it through `postAuthDestination`, never a bare `/dashboard`. |
+| Login with a return target | `/login?next=<same-origin path>` | Same sanitiser, same helper. **No `via` here, deliberately** — see below. |
+| Onboarding resume | `/onboarding?next=<same-origin path>` | Carried in the URL by `postAuthDestination`; onboarding's completion and its already-has-an-account redirect both honour it. |
+| Budget approval for a setup | `/agents?setup=<setupId>` | Opens the connect modal on the step that setup's live status calls for. The canonical form is `approval_url` from setup create **and** status — print that, never a hand-assembled URL. A stale or foreign id renders a not-found state **inside** the modal (deviation from the issue's "no modal", so someone who followed a link is told what happened). |
+
+**`next` is an open-redirect boundary, and an origin check alone does not close
+it.** Two cases, measured with the real URL parser rather than reasoned about,
+and both live in `packages/frontend/src/lib/__tests__/handoff-links.test.ts`:
+
+- `/..//evil.com` resolves to the **same** origin — the origin check passes —
+  but its pathname is `//evil.com`, which a browser reads as a
+  protocol-relative URL. `sanitizeNextPath` therefore tests the leading slashes
+  of the RESULT, not only of the input.
+- `/foo<TAB>bar` is silently stripped to `/foobar` while parsing, so the string
+  that was checked is not the string that gets resolved. Control characters are
+  **refused**, never stripped: a stripper has to be right about every character
+  a parser removes, and being wrong once reopens the redirect.
+
+**`via` is carried on signup, not on login, and that asymmetry is deliberate.**
+`POST /auth/signup` accepts the marker; `login()` does not, and nothing on the
+login path reads it. Two reasons, and neither is an oversight: a returning user
+never re-fires `signed_up`, so there is no funnel event for the marker to ride;
+and `users.via` records first touch — writing it at every login would let the
+most recent link overwrite how the account was actually acquired, which is the
+opposite of what the measurement is for. A `via=agent` on a login URL is
+therefore inert, and the shape column above omits it rather than implying
+parity with the signup row.
+
+**`via` is an ENUM (`agent` or absent), not a slug like `source`.** It answers
+one closed question — did an agent produce this link — and the agent-driven
+funnel is segmented on it, so a free-text field would let whoever writes a link
+write anything into that metric. Sanitised in TWO places by design, the same as
+`source`: `normalizeViaMarker` (`packages/backend/src/domain/handoff-links.ts`)
+and `parseViaMarker` (frontend `lib/discovery.ts`) — keep them identical.
+
+It is stored on `users.via` and `agent_connection_setups.via` (migration 076)
+and rides the `signed_up` and `agent_created` funnel events as **`handoff_via`**.
+
+> **Not `via`, and this is the trap to avoid re-stepping in.** That metadata key
+> already exists and means something else — which CODE PATH created the record
+> (`'connection_setup'` from the connect flow; absent from `POST /agents`,
+> which is how the two are told apart today). Reusing it would give one key two
+> meanings and silently redefine every historical row. A real-DB test
+> (`handoff-attribution.test.ts`) pins both keys surviving one emission.
+
+```sql
+-- Agent-driven share of signups
+SELECT COALESCE(via, 'human') AS origin, COUNT(*) AS signups
+FROM users GROUP BY 1 ORDER BY signups DESC;
+
+-- Agent-driven share of the funnel, from what the agent PASTED —
+-- never from a user agent, which says what the client claimed to be and is
+-- wrong by construction here: the human arrives in an ordinary browser.
+SELECT event,
+       COUNT(DISTINCT user_id) FILTER (WHERE metadata->>'handoff_via' = 'agent') AS agent_driven,
+       COUNT(DISTINCT user_id) AS total
+FROM onboarding_events
+WHERE event IN ('signed_up', 'agent_created')
+GROUP BY 1;
+```
 
 ## Follow-ups
 

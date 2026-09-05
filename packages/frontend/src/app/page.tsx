@@ -134,7 +134,7 @@ export default function Home() {
               </p>
 
               <div className="flex flex-wrap items-center gap-3 mb-10">
-                <Button href="/signup" size="lg" trailingIcon>Get early access</Button>
+                <Button href="/signup" size="lg" trailingIcon>Create your account</Button>
                 <Button href="/how-it-works" variant="ghost" size="lg">
                   See how it works
                 </Button>
@@ -371,7 +371,7 @@ export default function Home() {
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <BrandBandButton href="/signup" trailingArrow>
-              Get early access
+              Create your account
             </BrandBandButton>
             <BrandBandButton href="/how-it-works" variant="translucent">
               Read the technical overview

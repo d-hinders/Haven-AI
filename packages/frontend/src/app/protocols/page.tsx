@@ -106,7 +106,7 @@ export default function ProtocolsPage() {
             </h2>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Button href="/signup" size="lg" trailingIcon>Get early access</Button>
+            <Button href="/signup" size="lg" trailingIcon>Create your account</Button>
             <Button href="/how-it-works" variant="ghost" size="lg">How it works</Button>
           </div>
         </div>

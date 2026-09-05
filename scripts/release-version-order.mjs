@@ -33,10 +33,25 @@
  *     repo version IS the newest version, and the scenario above is caught
  *     without any network call.
  *
- * **What that does not catch**, stated as a documented limit rather than a
- * discovered one: a long-lived release branch whose `package.json` genuinely
- * sits below the published `latest`. No such branch and no LTS scheme exists
- * here; if one is introduced, this baseline has to be revisited.
+ * **What this does NOT catch, and the trigger is more ordinary than it first
+ * looks.** Any state where `package.json` sits below the live `latest` defeats
+ * the comparison. `haven-reviewer` supplied the realistic path on the #2580
+ * pull request, and it needs no exotic branching:
+ *
+ *   3.0.9 -> 4.0.0 is released and published; `latest` is 4.0.0.
+ *   A bug is found and the team REVERTS the merge — one `git revert`, an
+ *   ordinary emergency move. `package.json` reads 3.0.9 again.
+ *   The next hotfix bumps patch: 3.0.9 -> 3.0.10. Forward, locally. Allowed.
+ *   Publishing it drags `latest` from 4.0.0 down to 3.0.10 — precisely the
+ *   defect this rule exists to prevent.
+ *
+ * A first draft of this comment said the gap needed "a long-lived release
+ * branch", which undersold it. The operational answer is in
+ * `docs/contributing/branch-and-release-flow.md`: do not revert a published
+ * release bump — cut a forward version that includes the revert. Detecting it
+ * here would need the published `latest`, i.e. the network read rejected
+ * above; comparing against git tags instead was considered and left for a
+ * separate decision, since tags are absent in a shallow CI clone.
  *
  * ## Snapshots are exempt, and that is the half most likely to be got wrong
  *

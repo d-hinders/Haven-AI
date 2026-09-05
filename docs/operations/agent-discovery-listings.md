@@ -205,10 +205,16 @@ Two things about that choice, both deliberate:
   and a registry read would make a deterministic release tool fail on a flaky
   network or an air-gapped run. Haven has one release line and `hotfix/*`
   branches from `main`, so the repo version IS the newest version and #2580's
-  scenario is caught without a network call. **What it does not catch:** a
-  long-lived release branch whose `package.json` genuinely sits below the
-  published `latest`. No such branch and no LTS scheme exists here; introducing
-  one means revisiting this baseline.
+  scenario is caught without a network call. **What it does not catch, and the
+  trigger is more ordinary than "a different release line" suggests:** any state
+  where `package.json` sits below the live `latest`. `haven-reviewer` supplied
+  the realistic path — release 4.0.0, publish it, then `git revert` the merge
+  when a bug turns up, and `package.json` reads 3.0.9 again while `latest` is
+  4.0.0; the next patch bump to 3.0.10 is forward *locally* and drags `latest`
+  down when published. The operational answer is a rule, not a check:
+  [`branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
+  now says do not revert a published release bump — cut forward with the revert
+  included.
 - **Dev-channel snapshots are exempt.** `0.0.0-dev.*` sorts below every real
   version by construction, so a forward-only rule applied to it would close the
   dev channel. That exact conflation was shipped once in #2536's own workflow

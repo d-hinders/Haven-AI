@@ -1603,12 +1603,31 @@ test('#2536: a failed tag move fails the job WITHOUT claiming the publish failed
 // arguments-swapped `lt(current, next)` is the most likely real bug in this
 // file, and the real semver would have let it through in half the cases while
 // looking green.
+// The rule self-checks its comparator with known-answer probes and fails CLOSED
+// if they are wrong, so the double must answer THOSE truthfully while still
+// returning the configured verdict for the pair actually under test. Probe calls
+// are kept out of `calls`, so the argument-order assertions below still describe
+// the real question the rule asked rather than the warm-up.
+const PROBES = new Map([
+  ['1.0.0|2.0.0|lt', true],
+  ['2.0.0|1.0.0|lt', false],
+  ['1.0.0-alpha.1|1.0.0|lt', true],
+  ['1.0.0|1.0.0|eq', true],
+  ['1.0.0|2.0.0|eq', false],
+])
+
 function semverDouble({ lt = false, eq = false } = {}) {
   const calls = []
+  const answer = (op, a, b, configured) => {
+    const probe = PROBES.get(`${a}|${b}|${op}`)
+    if (probe !== undefined) return probe
+    calls.push([op, a, b])
+    return configured
+  }
   return {
     calls,
-    lt(a, b) { calls.push(['lt', a, b]); return lt },
-    eq(a, b) { calls.push(['eq', a, b]); return eq },
+    lt(a, b) { return answer('lt', a, b, lt) },
+    eq(a, b) { return answer('eq', a, b, eq) },
   }
 }
 
@@ -1741,10 +1760,14 @@ test('#2580: production resolves the REAL semver — structure ALWAYS, identity 
   // `[:(]`, not `:` alone — a shorthand method has no colon.
   assert.doesNotMatch(body, /\blt\s*[:(]/, 'resolveSemver must not fabricate a comparator')
   assert.doesNotMatch(body, /\beq\s*[:(]/, 'resolveSemver must not fabricate a comparator')
-  // A swallowed import is the other half of evasion 3: resolveSemver must fail
-  // LOUDLY when semver is missing, never degrade to a comparator that refuses
-  // nothing. The shard's argument depends on that failure being a local error.
-  assert.doesNotMatch(body, /\bcatch\b/, 'resolveSemver must not swallow a failed semver import')
+  // NOTE: there is deliberately no `catch` ban here any more. An earlier version
+  // banned the keyword outright, which `haven-reviewer` showed both evadable
+  // (`.then(onFulfilled, onRejected)` swallows a rejection without the word) and
+  // false-positive-prone (a `catch` that RE-THROWS with a better message is
+  // legitimate and would have tripped it). The swallow case is now handled where
+  // it actually matters — at runtime, by the comparator self-check in
+  // `backwardsVersionViolation`, which fails CLOSED. These remaining text checks
+  // are cheap accidental-drift detection, not a boundary.
 
   // ── Where dependencies exist: identity ─────────────────────────────────────
   // Identity is not a property of source text, so no stub survives it. It cannot
@@ -1759,6 +1782,41 @@ test('#2580: production resolves the REAL semver — structure ALWAYS, identity 
     return
   }
   assert.strictEqual(await resolveSemver(ROOT), real, 'resolveSemver must return the real semver module itself')
+})
+
+test('#2580: a comparator that does not order versions is REFUSED, not trusted', async () => {
+  // The fix that ended a five-round arms race. Five successive STATIC guards on
+  // how the comparator is obtained were each defeated by a differently-spelled
+  // fabrication: an inline object literal, an imported sibling module, ES6
+  // shorthand methods, post-resolution mutation of the real module, and a
+  // `.then(onFulfilled, onRejected)` swallow. A text scan cannot win that,
+  // because what it inspects is not what runs.
+  //
+  // Every one of those stubs shared a property the text never looked at: it
+  // answered `false` to everything, so the rule silently ALLOWED a backwards
+  // release. The rule now probes its comparator with known-answer facts and
+  // refuses the bump when they are wrong — so the degenerate case is safe by
+  // construction rather than by detection, and it fails CLOSED.
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+
+  const permissive = [
+    ['inline object literal', { lt: () => false, eq: () => false }],
+    ['ES6 shorthand methods', { lt(a, b) { return false }, eq(a, b) { return false } }],
+    ['computed-key fallback', (() => { const f = {}; f['l' + 't'] = () => false; f['e' + 'q'] = () => false; return f })()],
+    ['always-true comparator', { lt: () => true, eq: () => true }],
+  ]
+  for (const [name, semver] of permissive) {
+    const msg = backwardsVersionViolation('3.0.0', '2.5.1-alpha.0', { snapshot: false }, semver)
+    assert.ok(msg, `${name}: a broken comparator must not silently allow a backwards bump`)
+    assert.match(msg, /self-check/, `${name}: and the refusal must say why`)
+  }
+
+  // A snapshot is still exempt BEFORE the self-check, so a missing install cannot
+  // break the dev channel — the exemption's whole point.
+  assert.equal(
+    backwardsVersionViolation('0.1.34-alpha.0', '0.0.0-dev.202609021905.abc1234', { snapshot: true }, { lt: () => false, eq: () => false }),
+    null,
+  )
 })
 
 test('#2580: real semver agrees with the ordering the rule assumes — where deps exist', async () => {

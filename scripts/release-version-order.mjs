@@ -71,6 +71,43 @@ import { join } from 'node:path'
 export function backwardsVersionViolation(current, next, { snapshot }, semver) {
   if (snapshot) return null
 
+  // Self-check the comparator before trusting it, and FAIL CLOSED if it misbehaves.
+  //
+  // This exists because five rounds of review defeated five successive *static*
+  // guards on how the comparator is obtained — an inline object literal, an
+  // imported sibling module, ES6 shorthand methods, post-resolution mutation of
+  // the real module, and a `.then(onFulfilled, onRejected)` swallow. Every fix
+  // was another regex, and every regex had another spelling around it. A text
+  // scan cannot win that, because what it inspects is not what runs.
+  //
+  // So the question moves to runtime and changes shape: not "where did this
+  // comparator come from" but "does it actually answer correctly". Every stub in
+  // that series answered `false` to everything, which is what made them
+  // dangerous — a comparator that never objects silently allows a backwards
+  // release. All of them fail the three known-answer probes below, and the
+  // failure REFUSES the bump rather than allowing it, so the degenerate case is
+  // safe by construction instead of by detection.
+  //
+  // The probes are ordinary semver facts, not a fingerprint of the package, so a
+  // genuine alternative implementation passes and only a broken or fabricated one
+  // fails. This does not make the rule tamper-proof — nothing does against an
+  // author editing this file — but it removes the one failure mode that was both
+  // reachable by accident and silent.
+  if (
+    semver.lt('1.0.0', '2.0.0') !== true ||
+    semver.lt('2.0.0', '1.0.0') !== false ||
+    semver.lt('1.0.0-alpha.1', '1.0.0') !== true ||
+    semver.eq('1.0.0', '1.0.0') !== true ||
+    semver.eq('1.0.0', '2.0.0') !== false
+  ) {
+    return (
+      'Refusing to bump: the semver comparator failed its self-check.\n' +
+      '  `resolveSemver` returned something that does not order versions correctly, so this ' +
+      'script cannot tell a forward bump from a backwards one and will not guess.\n' +
+      '  Usually this means dependencies are not installed — run `npm ci` and try again.'
+    )
+  }
+
   if (semver.lt(next, current)) {
     return (
       `Refusing to bump BACKWARDS: ${current} -> ${next}.\n` +

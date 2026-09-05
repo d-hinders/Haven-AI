@@ -124,6 +124,48 @@ describe('parseOutcome', () => {
     expect(outcome).toMatchObject({ outcome: 'complete' })
   })
 
+  it('finds the outcome when noise SHARES its line', () => {
+    // The gap the second review round found: the multi-line fix still lost an
+    // object that had text before or after it on the same line, which is
+    // exactly what interleaved child-process writes produce. Same failure mode
+    // as before — a real refusal reported as no outcome at all.
+    for (const stream of [
+      'npm notice {"outcome":"complete"}\n',
+      '{"outcome":"complete"}trailing text\n',
+      'before {"outcome":"complete"} after\n',
+    ]) {
+      const { outcome } = parseOutcome(stream)
+      expect(outcome, stream).toMatchObject({ outcome: 'complete' })
+    }
+  })
+
+  it('takes the LAST object when two share one line', () => {
+    const { outcome } = parseOutcome('{"outcome":"failed"}{"outcome":"complete"}\n')
+    expect(outcome).toMatchObject({ outcome: 'complete' })
+  })
+
+  it('never returns a non-object, because a candidate can only start at {', () => {
+    // The scanner anchors on `{`, so `JSON.parse` cannot hand back an array or
+    // a scalar. This pins that property rather than a defensive check: the
+    // code carried an `Array.isArray` guard too, and a mutation removing it
+    // passed the entire suite — it was unreachable, and an unreachable guard
+    // reads like protection while proving nothing.
+    expect(parseOutcome('[1,2,3]\n').outcome).toBeNull()
+    expect(parseOutcome('["a","b"]\n').outcome).toBeNull()
+    expect(parseOutcome('42\n').outcome).toBeNull()
+    expect(parseOutcome('"a string"\n').outcome).toBeNull()
+
+    // What this deliberately does NOT promise: an object nested inside an
+    // array is still found, because the scanner looks for balanced OBJECTS
+    // anywhere in the stream and treats everything around them as noise —
+    // which is the same rule that lets it survive `npm notice {...}`. Asserted
+    // rather than left as a surprise, since the alternative is bracket-context
+    // tracking that would buy nothing: the connector emits one object, and an
+    // array of outcomes would degrade to the last one rather than to a wrong
+    // one.
+    expect(parseOutcome('[{"outcome":"complete"}]\n').outcome).toMatchObject({ outcome: 'complete' })
+  })
+
   it('keeps an unterminated object as readable noise rather than dropping it', () => {
     const { outcome, noise } = parseOutcome('{\n  "outcome": "fail')
     expect(outcome).toBeNull()

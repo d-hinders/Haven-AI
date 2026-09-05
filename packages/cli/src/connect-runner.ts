@@ -158,79 +158,85 @@ export const nodeSpawner: Spawner = (command, args, onStderr) =>
 /**
  * Find the connector's outcome object in its stdout.
  *
- * The contract is one JSON object on stdout under `--json`, but this does not
- * assume the whole stream is that object: a stray line from a package manager
- * on the `npx` path would otherwise make a successful run unreadable, so the
- * LAST balanced object wins. Nor does it assume the object is on ONE line —
- * that assumption held for today's connector and nothing enforced it, and a
- * pretty-printed refusal would have been reported as no outcome at all.
+ * The contract is one JSON object on stdout under `--json`. This assumes none
+ * of the things that contract does not actually say: not that the object is
+ * the whole stream (a package manager on the `npx` path writes its own lines),
+ * not that it is on one line (a pretty-printed object), and not that it is
+ * alone on its line (`npm notice {...}`). Each of those assumptions turned a
+ * real refusal into "no outcome" in an earlier version. The LAST balanced
+ * object wins.
  */
 export function parseOutcome(stdout: string): { outcome: ConnectorOutcome | null; noise: string } {
-  const lines = stdout.split('\n')
   const noise: string[] = []
   let outcome: ConnectorOutcome | null = null
 
-  // Accumulates a candidate object across lines. The contract is one JSON
-  // object on stdout, and today the connector writes it compact — but nothing
-  // in this repository ENFORCES that, and a line-oriented parser silently
-  // swallows a pretty-printed object into `noise`, turning a real refusal into
-  // "the connector produced no outcome" (haven-reviewer, #2527). Depth
-  // counting costs a few lines and removes the assumption.
-  let buffer: string[] = []
+  // A scanner over the WHOLE stream, not over lines. Two assumptions died
+  // here, both of them unstated until a reviewer looked: that the object is on
+  // one line (a pretty-printed refusal was swallowed), and that the object is
+  // ALONE on its line (`npm notice {...}` or a trailing word dropped it the
+  // same way). Both regressed a real refusal to "the connector produced no
+  // outcome", losing the exit code and the `next_action` a caller branches on.
+  // Anything outside a balanced object is noise; the LAST balanced object
+  // wins, so a stray object from a package manager cannot displace the
+  // outcome.
   let depth = 0
+  let start = -1
   let inString = false
   let escaped = false
+  let plain = ''
 
-  const consume = (text: string) => {
-    for (const ch of text) {
-      if (inString) {
-        if (escaped) escaped = false
-        else if (ch === '\\') escaped = true
-        else if (ch === '"') inString = false
-        continue
+  for (let i = 0; i < stdout.length; i += 1) {
+    const ch = stdout[i]
+
+    if (depth === 0) {
+      if (ch === '{') {
+        depth = 1
+        start = i
+        inString = false
+        escaped = false
+      } else {
+        plain += ch
       }
-      if (ch === '"') inString = true
-      else if (ch === '{') depth += 1
-      else if (ch === '}') depth -= 1
-    }
-  }
-
-  for (const line of lines) {
-    const text = line.trim()
-    if (!text) continue
-
-    if (depth === 0 && !text.startsWith('{')) {
-      noise.push(text)
       continue
     }
 
-    buffer.push(text)
-    consume(text)
-
-    if (depth <= 0) {
-      // A balanced candidate. The LAST one wins, so a stray object printed by
-      // a package manager on the `npx` path cannot displace the outcome.
-      try {
-        const parsed = JSON.parse(buffer.join('\n')) as unknown
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          outcome = parsed as ConnectorOutcome
-        } else {
-          noise.push(...buffer)
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === '{') depth += 1
+    else if (ch === '}') {
+      depth -= 1
+      if (depth === 0) {
+        const candidate = stdout.slice(start, i + 1)
+        try {
+          // No `Array.isArray` check here, deliberately. A candidate always
+          // starts at `{`, so `JSON.parse` can only return an object — the
+          // anchor IS the guarantee. An earlier version carried the array
+          // check as well and a mutation removing it passed the whole suite,
+          // because it was unreachable: a guard nothing can violate reads like
+          // protection while proving nothing, which is the shape this file has
+          // already been wrong about once.
+          outcome = JSON.parse(candidate) as ConnectorOutcome
+        } catch {
+          plain += candidate
         }
-      } catch {
-        noise.push(...buffer)
+        start = -1
       }
-      buffer = []
-      depth = 0
-      inString = false
-      escaped = false
     }
   }
 
-  // An object that never closed is not an outcome; keep it readable instead of
-  // dropping it, so a truncated stream still says something.
-  if (buffer.length > 0) noise.push(...buffer)
+  // An object that never closed is not an outcome; keep it readable rather
+  // than dropping it, so a truncated stream still says something.
+  if (depth > 0 && start >= 0) plain += stdout.slice(start)
 
+  for (const line of plain.split('\n')) {
+    const text = line.trim()
+    if (text) noise.push(text)
+  }
   return { outcome, noise: noise.join('\n') }
 }
 

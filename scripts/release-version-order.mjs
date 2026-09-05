@@ -113,9 +113,13 @@ export function backwardsVersionViolation(current, next, { snapshot }, semver) {
  *
  * The honest limit: that assertion needs `node_modules`, and the only CI job
  * running this suite deliberately has none, so it is availability-gated. In the
- * dependency-free job the wiring is still only textually checked. And no test
- * binds an author who edits the tests — this guards against accidental drift,
- * which is the actual failure mode, not against a determined author.
+ * dependency-free job the wiring is only textually checked — and a text scan can
+ * be evaded from THIS FILE alone, without touching a test: a third reviewer
+ * attack used shorthand methods (`lt(a, b) { … }`, no colon) inside a `catch`,
+ * and slipped past a regex written for `lt:`. So do not read the checks below as
+ * a boundary. They guard against accidental drift, which is the real failure
+ * mode for a release script run by hand; a determined author is out of scope and
+ * always was.
  *
  * @param {string} root workspace root, so a test need not guess it.
  */

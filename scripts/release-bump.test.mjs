@@ -1704,44 +1704,27 @@ test('#2580: an unchanged version is refused before the release PR merges', asyn
   assert.deepEqual(semver.calls[1], ['eq', '0.1.34-alpha.0', '0.1.34-alpha.0'])
 })
 
-test('#2580: production resolves the REAL semver — by IDENTITY where deps exist', async () => {
-  // Two source-text versions of this assertion were defeated by `haven-reviewer`,
-  // each with a stub that satisfied the words while fabricating the comparator:
-  // an inline object literal with the path string parked in an unused variable,
-  // then an imported sibling module with the path string parked in a comment.
-  // A text scan cannot close that class, because what it inspects is not what
-  // runs. So the check now EXECUTES the resolution and compares the result for
-  // identity — a property no stub can forge without actually being the module.
+test('#2580: production resolves the REAL semver — structure ALWAYS, identity where deps exist', async () => {
+  // Four guards have stood here. Three were defeated by `haven-reviewer`, each
+  // by a stub that satisfied the guard's words while fabricating the comparator:
+  //   1. a whole-file substring scan → inline object literal, path string parked
+  //      in an unused variable;
+  //   2. a scan scoped to `getSemver`'s body → the fabrication moved into an
+  //      imported sibling module, path string parked in a comment;
+  //   3. a scan scoped to `resolveSemver`'s body rejecting `lt:`/`eq:` → ES6
+  //      SHORTHAND METHODS (`lt(a, b) { … }`), which carry no colon, wrapped in a
+  //      try/catch so identity still held whenever semver happened to exist.
+  //
+  // Two lessons are encoded below. First, each fix was scoped too narrowly to the
+  // attack that prompted it, so the checks now reject the fabrication SHAPE
+  // (`lt` followed by `:` or `(`) rather than one spelling of it, and reject a
+  // swallowed import outright. Second — the reason evasion 3 survived its first
+  // fix — the structural check used to run ONLY in the dependency-free branch, so
+  // with dependencies present nothing inspected the source at all. It now runs
+  // UNCONDITIONALLY, and identity is layered on top where it can be proven.
   const { resolveSemver } = await import('./release-version-order.mjs')
 
-  let real = null
-  try {
-    real = (await import(join(ROOT, 'node_modules', 'semver', 'index.js'))).default
-  } catch (err) {
-    assert.equal(err.code, 'ERR_MODULE_NOT_FOUND', `semver import failed unexpectedly: ${err.message}`)
-    // Dependency-free job: identity is unprovable here, so fall back to the
-    // scoped text scan. It is weaker — a sibling-module stub walks through it —
-    // but dropping it entirely was measurably worse: with only the identity
-    // check, a fabricated comparator is caught ZERO times in this condition,
-    // which is the one CI actually runs. Keeping both is strictly better than
-    // either alone.
-    const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
-    assert.match(source, /return resolveSemver\(ROOT\)/, 'release-bump.mjs must delegate to resolveSemver')
-    assert.match(source, /backwardsVersionViolation\(currentVersion, newVersion.*await getSemver\(\)/)
-
-    const order = await readFile(join(ROOT, 'scripts', 'release-version-order.mjs'), 'utf8')
-    const fn = order.slice(order.indexOf('export async function resolveSemver('), order.length)
-    const body = fn.slice(0, fn.indexOf('\n}'))
-    assert.match(body, /const semverPath = join\(root, 'node_modules', 'semver', 'index\.js'\)/)
-    assert.match(body, /return \(await import\(semverPath\)\)\.default/)
-    assert.doesNotMatch(body, /\blt\s*:/, 'resolveSemver must not fabricate a comparator')
-    assert.doesNotMatch(body, /\beq\s*:/, 'resolveSemver must not fabricate a comparator')
-    return
-  }
-
-  assert.strictEqual(await resolveSemver(ROOT), real, 'resolveSemver must return the real semver module itself')
-
-  // And production must route through it, not around it.
+  // ── Always: structure ──────────────────────────────────────────────────────
   const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
   const fnStart = source.indexOf('async function getSemver() {')
   assert.notEqual(fnStart, -1, 'getSemver was renamed or removed')
@@ -1749,6 +1732,33 @@ test('#2580: production resolves the REAL semver — by IDENTITY where deps exis
   const call = source.indexOf('backwardsVersionViolation(currentVersion, newVersion')
   assert.notEqual(call, -1, 'release-bump.mjs no longer calls backwardsVersionViolation')
   assert.match(source.slice(call, source.indexOf('\n', call)), /await getSemver\(\)/)
+
+  const order = await readFile(join(ROOT, 'scripts', 'release-version-order.mjs'), 'utf8')
+  const fn = order.slice(order.indexOf('export async function resolveSemver('))
+  const body = fn.slice(0, fn.indexOf('\n}'))
+  assert.match(body, /const semverPath = join\(root, 'node_modules', 'semver', 'index\.js'\)/)
+  assert.match(body, /return \(await import\(semverPath\)\)\.default/)
+  // `[:(]`, not `:` alone — a shorthand method has no colon.
+  assert.doesNotMatch(body, /\blt\s*[:(]/, 'resolveSemver must not fabricate a comparator')
+  assert.doesNotMatch(body, /\beq\s*[:(]/, 'resolveSemver must not fabricate a comparator')
+  // A swallowed import is the other half of evasion 3: resolveSemver must fail
+  // LOUDLY when semver is missing, never degrade to a comparator that refuses
+  // nothing. The shard's argument depends on that failure being a local error.
+  assert.doesNotMatch(body, /\bcatch\b/, 'resolveSemver must not swallow a failed semver import')
+
+  // ── Where dependencies exist: identity ─────────────────────────────────────
+  // Identity is not a property of source text, so no stub survives it. It cannot
+  // run in `Repo CI config checks`, which has no node_modules by design and is
+  // the only job running this file — which is exactly why the structural half
+  // above is unconditional rather than a fallback.
+  let real = null
+  try {
+    real = (await import(join(ROOT, 'node_modules', 'semver', 'index.js'))).default
+  } catch (err) {
+    assert.equal(err.code, 'ERR_MODULE_NOT_FOUND', `semver import failed unexpectedly: ${err.message}`)
+    return
+  }
+  assert.strictEqual(await resolveSemver(ROOT), real, 'resolveSemver must return the real semver module itself')
 })
 
 test('#2580: real semver agrees with the ordering the rule assumes — where deps exist', async () => {

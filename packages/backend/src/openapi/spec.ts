@@ -3651,6 +3651,13 @@ export const openapiSpec = {
         parameters: [
           { name: 'from', in: 'query', schema: { type: 'string' }, description: 'Date; defaults to 30 days before `to`.' },
           { name: 'to', in: 'query', schema: { type: 'string' }, description: 'Date; defaults to now.' },
+          {
+            name: 'segment',
+            in: 'query',
+            schema: { type: 'string', enum: ['via', 'run_mode'] },
+            description:
+              "Split the same steps by one dimension (#2529), added as `segments` alongside the unsegmented `steps`. `via` is the agent hand-off marker — it reads the funnel metadata key `handoff_via`, NOT the key literally named `via`, which predates it and records which CODE PATH created the record ('connection_setup' from the connect flow). Segmenting on that one would answer 'connection_setup' for every connect-modal agent and look like a working metric. `run_mode` is how the connector was invoked ('json' | 'prose', #2528). Attribution is resolved once PER USER from the earliest event in the window carrying the key, then carried across every step: only `signed_up` and `agent_created` write these keys, so a per-event split would report zero agent-driven first payments and read as 'agents never convert'. A user with no value for the key lands in the `unattributed` group — for `run_mode` that means a connector predating #2528, which is NOT the same fact as a `prose` run; the same definition is repeated on `segments.value` so a consumer reading only one of the two fields still learns it. Omitting the parameter returns the unsegmented body unchanged; an unrecognised value is a 400 rather than a silent fall-back to unsegmented.",
+          },
         ],
         responses: {
           '200': {
@@ -3681,6 +3688,31 @@ export const openapiSpec = {
                     medianTtfpMs: { type: ['integer', 'null'], description: 'Median signup→first-settled-payment in ms. Null when nobody has completed it in the window.' },
                     from: { type: 'string', format: 'date-time', description: 'The resolved window start.' },
                     to: { type: 'string', format: 'date-time', description: 'The resolved window end.' },
+                    segment: { type: 'string', enum: ['via', 'run_mode'], description: 'Echoed back only when the request asked for a split. Absent otherwise, together with `segments`.' },
+                    segments: {
+                      type: 'array',
+                      description:
+                        "Present only when `segment` was requested. One entry per distinct value of that dimension, each carrying the SAME seven steps as the unsegmented `steps`, so a group reads exactly like a funnel. Sorted alphabetically with `unattributed` last — that bucket means the user has no value for the key at all, which for `run_mode` is a connector predating #2528 and is NOT the same fact as 'prose'. Summing a step across groups equals the unsegmented count for that step.",
+                      items: {
+                        type: 'object',
+                        required: ['value', 'steps'],
+                        properties: {
+                          value: { type: 'string', description: "The dimension's value for this group, or 'unattributed' when the user carries none." },
+                          steps: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              required: ['event', 'users', 'conversionFromPrev'],
+                              properties: {
+                                event: { type: 'string', enum: ['signed_up', 'safe_deployed', 'safe_imported', 'agent_created', 'allowance_granted', 'safe_funded', 'first_payment_settled'] },
+                                users: { type: 'integer', description: 'DISTINCT users in this group who reached this step.' },
+                                conversionFromPrev: { type: ['number', 'null'], description: 'Null when the predecessor step counted zero users in THIS group — which includes the three permanently-zero retired stages, so the step after each of them is null by construction rather than by absence of data.' },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
                   },
                 },
               },

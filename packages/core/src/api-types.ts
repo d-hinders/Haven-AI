@@ -9902,6 +9902,8 @@ export interface operations {
                 from?: string;
                 /** @description Date; defaults to now. */
                 to?: string;
+                /** @description Split the same steps by one dimension (#2529), added as `segments` alongside the unsegmented `steps`. `via` is the agent hand-off marker — it reads the funnel metadata key `handoff_via`, NOT the key literally named `via`, which predates it and records which CODE PATH created the record ('connection_setup' from the connect flow). Segmenting on that one would answer 'connection_setup' for every connect-modal agent and look like a working metric. `run_mode` is how the connector was invoked ('json' | 'prose', #2528). Attribution is resolved once PER USER from the earliest event in the window carrying the key, then carried across every step: only `signed_up` and `agent_created` write these keys, so a per-event split would report zero agent-driven first payments and read as 'agents never convert'. A user with no value for the key lands in the `unattributed` group — for `run_mode` that means a connector predating #2528, which is NOT the same fact as a `prose` run; the same definition is repeated on `segments.value` so a consumer reading only one of the two fields still learns it. Omitting the parameter returns the unsegmented body unchanged; an unrecognised value is a 400 rather than a silent fall-back to unsegmented. */
+                segment?: "via" | "run_mode";
             };
             header?: never;
             path?: never;
@@ -9939,6 +9941,24 @@ export interface operations {
                          * @description The resolved window end.
                          */
                         to: string;
+                        /**
+                         * @description Echoed back only when the request asked for a split. Absent otherwise, together with `segments`.
+                         * @enum {string}
+                         */
+                        segment?: "via" | "run_mode";
+                        /** @description Present only when `segment` was requested. One entry per distinct value of that dimension, each carrying the SAME seven steps as the unsegmented `steps`, so a group reads exactly like a funnel. Sorted alphabetically with `unattributed` last — that bucket means the user has no value for the key at all, which for `run_mode` is a connector predating #2528 and is NOT the same fact as 'prose'. Summing a step across groups equals the unsegmented count for that step. */
+                        segments?: {
+                            /** @description The dimension's value for this group, or 'unattributed' when the user carries none. */
+                            value: string;
+                            steps: {
+                                /** @enum {string} */
+                                event: "signed_up" | "safe_deployed" | "safe_imported" | "agent_created" | "allowance_granted" | "safe_funded" | "first_payment_settled";
+                                /** @description DISTINCT users in this group who reached this step. */
+                                users: number;
+                                /** @description Null when the predecessor step counted zero users in THIS group — which includes the three permanently-zero retired stages, so the step after each of them is null by construction rather than by absence of data. */
+                                conversionFromPrev: number | null;
+                            }[];
+                        }[];
                     };
                 };
             };

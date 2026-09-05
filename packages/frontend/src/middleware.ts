@@ -11,6 +11,15 @@ import { classifyAgentUserAgent } from './lib/discovery'
  * User-Agent classifies as a known AI agent/crawler family, emit ONE
  * structured log line and pass the request through untouched.
  *
+ * #2529 extends the matcher to the FUNNEL pages as well, and that widening
+ * comes with a limit that has to be stated wherever the series is read: this
+ * log is a LOWER BOUND on crawler-style agents, never the agent-driven share.
+ * `classifyAgentUserAgent` matches crawler families by User-Agent needle, and
+ * a Claude Code session driving onboarding fetches with an ordinary browser
+ * UA — the exact scenario epic #2519 exists for classifies as NOT an agent.
+ * The headline number comes from `via=agent` (#2522) and `run_mode` (#2528),
+ * which record what the agent PASTED rather than what a client claimed to be.
+ *
  * Deliberately log-based, not a database write: these are unauthenticated
  * public fetches, and an ingest endpoint keyed by nothing would be an abuse
  * surface on a money-path backend. Vercel's log pipeline (query on
@@ -41,9 +50,23 @@ export function middleware(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  // Exactly the agent-discovery surfaces — nothing else pays the middleware
-  // invocation cost, and app routes keep their existing (middleware-free)
-  // behaviour.
+  // The agent-discovery surfaces plus the funnel pages an agent hands its
+  // human (#2529). Still an explicit list, not a catch-all: everything absent
+  // from it pays no middleware invocation cost and keeps its existing
+  // (middleware-free) behaviour.
+  //
+  // The second group is a deliberate widening of the first group's rule. These
+  // are ordinary app routes, so before #2529 a crawler fetching `/signup` was
+  // invisible; the funnel pages are exactly where an agent-driven visit shows
+  // up, so leaving them unobserved left the cheapest signal on the floor.
+  //
+  // `/device` (C1, #2526) does not exist yet and answers 404 today. Listed
+  // anyway, and the distinction is what makes that safe: a matcher OBSERVES a
+  // fetch, it does not ADVERTISE a surface. Nothing tells an agent to go
+  // there — `PUBLIC_SURFACES`, robots.txt and the sitemap are all unchanged —
+  // so this cannot reproduce the "key pointing at a 404" defect #2520
+  // removed. Until #2526 lands it logs probes, which is signal rather than a
+  // broken promise, and the day the route ships it is already observed.
   matcher: [
     '/llms.txt',
     '/llms-full.txt',
@@ -52,5 +75,10 @@ export const config = {
     '/402.md',
     '/robots.txt',
     '/sitemap.xml',
+    '/signup',
+    '/login',
+    '/onboarding',
+    '/for-agents.md',
+    '/device',
   ],
 }

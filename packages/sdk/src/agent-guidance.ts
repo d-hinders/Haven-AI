@@ -73,6 +73,51 @@ export const AGENT_COMMAND_MODIFICATION_SENTENCE =
   'Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.'
 
 /**
+ * The prompt the dashboard hands a signed-in user to paste to their agent
+ * (#2535, B5), for the WHOLE setup rather than one step.
+ *
+ * The connect modal's `setup_prompt` covers a single action — run the
+ * connector — and a user only reaches it after building the setup by hand.
+ * Someone who arrives at Haven first and wants their agent to do the rest has
+ * nothing to paste until then. This is that missing thing.
+ *
+ * ## Why it lives here rather than beside the modal's prompt
+ *
+ * Same reason the sentences above do: two agent-facing prompts that state the
+ * same rules in different words is how an agent ends up choosing which to
+ * believe. This one reuses those sentences verbatim rather than paraphrasing
+ * them, so the rules have one wording wherever an agent meets them.
+ *
+ * ## What it deliberately does NOT contain
+ *
+ * No token, no setup id, no credential — unlike the connect prompt, which
+ * carries a one-shot secret. That is what makes it safe to render on an empty
+ * dashboard before any setup exists, which is the whole point of the card.
+ *
+ * `<host>` is a literal placeholder, matching the runbook's own convention.
+ * The dashboard substitutes its own origin before showing it, so what the user
+ * copies is ready to paste; nothing here builds a link from a guess.
+ */
+export const AGENT_SETUP_PROMPT_MD = `I have a Haven account and I am signed in at <host>. Set up an agent for yourself so you can pay for things on my behalf, within a budget I approve.
+
+Read <host>/for-agents.md first — it is written for you and explains the whole flow, including which steps only I can do.
+
+Then:
+
+1. Sign in from your terminal: \`npx @haven_ai/cli login\`. It prints a short code and a link. Give me BOTH, and tell me to check the link says the request is from the label your terminal printed. I approve it in my browser; you never see my password and never ask for it.
+2. Create the agent and its connection setup: \`haven agents connect --name <a name you propose> --budget <the amount I state> --token USDC --period <minutes>\`. Ask me for the budget and the period if I have not said; do not choose them for me.
+3. Run the connector command that prints, exactly as printed with \`--json\` appended, and relay its approval link to me.
+4. Once I have approved the budget, verify with the \`haven_get_agent\` tool and tell me what it says.
+
+${AGENT_SECRET_HYGIENE_SENTENCE}
+
+${AGENT_APPROVAL_RELAY_JSON_SENTENCE}
+
+${AGENT_COMMAND_MODIFICATION_SENTENCE}
+
+I keep every signature. You never sign anything, never approve a budget, and never move money — you set things up and hand me the two decisions that are mine.`
+
+/**
  * The agent-facing section every published README carries (#2533, A6).
  *
  * ONE string, six copies, one instrument. All five npm READMEs plus the repo

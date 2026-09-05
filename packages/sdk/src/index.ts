@@ -21,6 +21,7 @@ export {
   AGENT_README_SECTION_MD,
   AGENT_WIRING_COLLISION_RELAY_SENTENCE,
   AGENT_COMMAND_MODIFICATION_SENTENCE,
+  AGENT_SETUP_PROMPT_MD,
 } from './agent-guidance.js'
 
 // The npm dist-tag every published package's "re-run the connector" hint names

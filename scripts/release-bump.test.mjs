@@ -1125,7 +1125,7 @@ test('the guard is called before every publish, and outside the failure isolatio
  * A guard that is skipped, backgrounded, or deleted shows up here as
  * PUBLISHES THAT SHOULD NOT EXIST, whatever the source text looks like.
  */
-function runPublishLoop(workflow, { channel, version, tag }) {
+function runPublishLoop(workflow, { channel, version, tag, distTagExit = 0 }) {
   const dir = join(tmpdir(), `haven-2421-loop-${randomUUID()}`)
   mkdirSync(join(dir, 'bin'), { recursive: true })
   for (const p of ['sdk', 'signer', 'mcp', 'connect', 'cli']) {
@@ -1139,7 +1139,7 @@ function runPublishLoop(workflow, { channel, version, tag }) {
   writeFileSync(log, '')
   writeFileSync(
     join(dir, 'bin', 'npm'),
-    `#!/bin/sh\necho "$@" >> "${log}"\ncase "$1" in\n  view) exit 1 ;;\n  *) exit 0 ;;\nesac\n`,
+    `#!/bin/sh\necho "$@" >> "${log}"\ncase "$1" in\n  view) exit 1 ;;\n  dist-tag) exit ${distTagExit} ;;\n  *) exit 0 ;;\nesac\n`,
   )
   spawnSync('chmod', ['+x', join(dir, 'bin', 'npm')])
   const summary = join(dir, 'summary.md')
@@ -1158,11 +1158,55 @@ function runPublishLoop(workflow, { channel, version, tag }) {
   else delete env.HAVEN_PUBLISH_TAG
 
   const r = spawnSync('bash', [file], { cwd: dir, encoding: 'utf8', env })
-  const published = readFileSync(log, 'utf8')
-    .split('\n')
-    .filter((l) => l.startsWith('publish'))
+  const calls = readFileSync(log, 'utf8').split('\n')
+  const published = calls.filter((l) => l.startsWith('publish'))
+  // #2536: every `npm dist-tag add <pkg>@<v> latest` the step actually made.
+  // Read from the same recorder as `published`, so a guard that is skipped,
+  // backgrounded or deleted shows up here as a TAG MOVE THAT SHOULD NOT EXIST
+  // — whatever the source text says.
+  const distTags = calls.filter((l) => l.startsWith('dist-tag'))
   rmSync(dir, { recursive: true, force: true })
-  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, published }
+  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, published, distTags }
+}
+
+/**
+ * Run the lifted `promote_latest()` with a STUBBED npm on PATH.
+ *
+ * Not a convenience. The first version of this test ran the real `npm`, which
+ * issued a live `PUT https://registry.npmjs.org/.../dist-tags/latest` against a
+ * real package and was stopped only by a 401. A unit test for a guard must not
+ * be one credential away from mutating the registry it is describing.
+ */
+function runPromoteLatest(script, args) {
+  const dir = join(tmpdir(), `haven-2536-pl-${randomUUID()}`)
+  mkdirSync(join(dir, 'bin'), { recursive: true })
+  const log = join(dir, 'npm.log')
+  writeFileSync(log, '')
+  writeFileSync(join(dir, 'bin', 'npm'), `#!/bin/sh\necho "$@" >> "${log}"\nexit 0\n`)
+  spawnSync('chmod', ['+x', join(dir, 'bin', 'npm')])
+  try {
+    const r = runBash(script, { args, env: { PATH: `${join(dir, 'bin')}:${process.env.PATH}` } })
+    return { ...r, calls: readFileSync(log, 'utf8').split('\n').filter(Boolean) }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+/** `promote_latest()` lifted out of the publish step and invoked (#2536). */
+function promoteLatestScript(workflow) {
+  const step = stepRunScript(workflow, 'Publish packages whose version is not yet on npm')
+  const start = step.indexOf('promote_latest() {')
+  assert.notEqual(start, -1, 'the publish step no longer defines promote_latest()')
+  const rest = step.slice(start).split('\n')
+  const collected = []
+  let depth = 0
+  for (const line of rest) {
+    collected.push(line)
+    depth += (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length
+    if (depth === 0 && collected.length > 1) break
+  }
+  assert.equal(depth, 0, 'could not find the end of promote_latest()')
+  return `set -euo pipefail\n${collected.join('\n')}\npromote_latest "$1" "$2" "$3" "$4"\n`
 }
 
 test('GUARD 2/3 (behavioural): a forbidden combination PUBLISHES NOTHING (#2421)', async () => {
@@ -1370,4 +1414,125 @@ test('no published package still hard-codes a connector channel in a re-run hint
     'these files hard-code a connector channel instead of rendering it from ' +
       `${CONNECTOR_CHANNEL_CONSTANT} (#2423): ${findings.join(', ')}`,
   )
+})
+
+// ── #2536: `latest` follows the newest published release ─────────────────────
+//
+// The owner decision these prove: "We should build it so the latest version of
+// the packages is used… we should not have users run old versions." npm
+// resolves a bare `npm install` / `npx` through the `latest` dist-tag and never
+// through the highest version number, so publishing a prerelease under `alpha`
+// alone leaves `latest` where it was — which is how a bare
+// `npx @haven_ai/connect` came to install a build 34 releases old.
+//
+// Every assertion below is on what the step ACTUALLY CALLED, recorded by the
+// stub `npm` on PATH, not on the workflow's source text.
+
+test('#2536: a prod prerelease publishes under alpha AND moves latest to itself', async () => {
+  const { code, published, distTags } = runPublishLoop(await publishWorkflow(), {
+    channel: 'prod',
+    version: REAL_V,
+    tag: null,
+  })
+
+  assert.equal(code, 0, 'the run must succeed')
+  assert.equal(published.length, 5, 'all five packages publish')
+  for (const line of published) {
+    assert.match(line, /--tag alpha\b/, `the prerelease tag is kept: ${line}`)
+  }
+
+  // The point of the change.
+  assert.equal(distTags.length, 5, 'latest moves for all five packages')
+  for (const p of ['sdk', 'signer', 'mcp', 'connect', 'cli']) {
+    assert.ok(
+      distTags.some((l) => l === `dist-tag add @haven_ai/${p}@${REAL_V} latest`),
+      `expected latest to move for @haven_ai/${p}; got ${JSON.stringify(distTags)}`,
+    )
+  }
+})
+
+test('#2536: a STABLE prod version moves nothing — npm publish already set latest', async () => {
+  // Not a nicety. A redundant `dist-tag add` would be a second, unguarded
+  // route to the same tag, and the guard reading `$tag` is what keeps the two
+  // paths from disagreeing.
+  const { code, published, distTags } = runPublishLoop(await publishWorkflow(), {
+    channel: 'prod',
+    version: '0.2.0',
+    tag: null,
+  })
+
+  assert.equal(code, 0)
+  assert.equal(published.length, 5)
+  for (const line of published) assert.match(line, /--tag latest\b/)
+  assert.deepEqual(distTags, [], 'a stable release needs no tag move')
+})
+
+test('#2536: the dev channel NEVER touches latest', async () => {
+  // The invariant the whole file is built around, extended to the new step:
+  // a snapshot may reach only the `dev` dist-tag.
+  const { code, published, distTags } = runPublishLoop(await publishWorkflow(), {
+    channel: 'dev',
+    version: SNAPSHOT_V,
+    tag: 'dev',
+  })
+
+  assert.equal(code, 0)
+  assert.equal(published.length, 5, 'snapshots still publish')
+  for (const line of published) assert.match(line, /--tag dev\b/)
+  assert.deepEqual(distTags, [], 'a snapshot must never reach latest')
+})
+
+test('#2536 GUARD 4/4: a snapshot never reaches latest — refused on prod, no-op on dev', async () => {
+  // The distinction is the whole of this guard, and an earlier draft got it
+  // wrong in a way only execution caught: it refused a snapshot on EVERY
+  // channel, which failed every dev publish, because on the dev channel a
+  // snapshot version is the ordinary case. Both rows below end with `latest`
+  // untouched; they differ in whether the run survives.
+  const script = promoteLatestScript(await publishWorkflow())
+
+  const refused = runPromoteLatest(script, ['prod', '@haven_ai/sdk', SNAPSHOT_V, 'alpha'])
+  assert.notEqual(refused.code, 0, 'a snapshot on the prod channel must be refused')
+  assert.match(refused.out, /GUARD:/, 'the refusal must say why')
+  assert.deepEqual(refused.calls, [], 'a refused call must reach npm not at all')
+
+  const devNoop = runPromoteLatest(script, ['dev', '@haven_ai/sdk', SNAPSHOT_V, 'dev'])
+  assert.equal(devNoop.code, 0, `a snapshot on the dev channel is ordinary, got: ${devNoop.out}`)
+  assert.doesNotMatch(devNoop.out, /GUARD:/, 'the ordinary dev path must not print a guard refusal')
+  assert.deepEqual(devNoop.calls, [], 'the dev no-op must move no tag')
+
+  // A non-snapshot version on a non-prod channel. Unreachable through the
+  // publish loop — `assert_publish_allowed` refuses that pair before any
+  // publish — so a loop-level mutation test cannot see the line that handles
+  // it, and one that dropped the line survived. Asked directly, it is
+  // load-bearing: without it this row moves `latest` from the dev channel.
+  const devReal = runPromoteLatest(script, ['dev', '@haven_ai/sdk', REAL_V, 'alpha'])
+  assert.equal(devReal.code, 0, `a non-prod channel is a no-op, got: ${devReal.out}`)
+  assert.deepEqual(devReal.calls, [], 'only the prod channel may move latest')
+
+  // The control half — a guard that refuses everything protects nothing.
+  const allowed = runPromoteLatest(script, ['prod', '@haven_ai/sdk', REAL_V, 'alpha'])
+  assert.equal(allowed.code, 0, `a real prerelease must be allowed, got: ${allowed.out}`)
+  assert.deepEqual(
+    allowed.calls,
+    [`dist-tag add @haven_ai/sdk@${REAL_V} latest`],
+    'the allowed path must make exactly the one tag move',
+  )
+})
+
+test('#2536: a failed tag move fails the job WITHOUT claiming the publish failed', async () => {
+  // The state this reports is real and specific: the package is live under its
+  // own tag and only `latest` is stale. Calling that "FAILED" would send the
+  // next reader hunting for a publish that did happen.
+  const { code, out, published } = runPublishLoop(await publishWorkflow(), {
+    channel: 'prod',
+    version: REAL_V,
+    tag: null,
+    distTagExit: 1,
+  })
+
+  assert.notEqual(code, 0, 'the job must fail so the stale tag is not silent')
+  assert.equal(published.length, 5, 'the packages did publish')
+  assert.match(out, /failed to move the latest dist-tag/i)
+  assert.match(out, /npm dist-tag add <name>@<version> latest/, 'the remedy is printed')
+  assert.doesNotMatch(out, /ERROR: failed to publish/, 'must not report a publish failure')
 })

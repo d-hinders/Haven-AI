@@ -119,24 +119,56 @@ describe('SupersededAgentsCard', () => {
       expect(mockState.refetch).toHaveBeenCalled()
     })
 
-    it('stays visible while a retry is in flight, instead of vanishing', () => {
-      // `refetch` clears `error` synchronously before the request settles, so
-      // branching on the error alone made the card — and the button just
-      // clicked — disappear for the length of the retry. On a slow connection
-      // that reads as "the click did nothing".
+    it('says NOTHING on a first load that has not finished', () => {
+      // The bug this replaces, and the worst of the session: the retry fix
+      // branched on `useAgents`' `loading`, which is `true` on first mount
+      // before anything has failed — so a freshly completed setup announced
+      // that the agent list could not be read. A false claim, on the one
+      // screen this whole flow exists to make trustworthy.
+      //
+      // Worse, the test that stood here ASSERTED that as correct. It set
+      // exactly this state and expected the error card. A test can enshrine a
+      // defect as thoroughly as it can catch one.
       mockAgents.current = []
       mockState.error = null
       mockState.loading = true
+      const { container } = render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
+      expect(container).toBeEmptyDOMElement()
+    })
+
+    it('stays visible while a RETRY it started is in flight', async () => {
+      // The real case the loading branch was reaching for: `refetch` clears
+      // `error` synchronously before the request settles, so branching on the
+      // error alone made the card — and the button just clicked — vanish.
+      // Keyed on this card's own retry rather than on any load in flight.
+      mockAgents.current = []
+      mockState.error = 'We could not load connected agents.'
+      // The mock must CLEAR the error the way the real `fetchAgents` does —
+      // synchronously, before the request settles. Without that this test
+      // passes on `error` alone and proves nothing about the retry flag: a
+      // mutation removing the flag survived until this line existed.
+      let release: () => void = () => {}
+      mockState.refetch = vi.fn(() => {
+        mockState.error = null
+        return new Promise<void>((resolve) => { release = () => resolve() })
+      })
       render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
 
+      await userEvent.click(screen.getByRole('button', { name: /try again/i }))
+      const busy = await screen.findByRole('button', { name: /checking/i })
+      expect(busy).toBeDisabled()
       expect(screen.getByText(/may have replaced an earlier agent/i)).toBeInTheDocument()
-      const button = screen.getByRole('button', { name: /checking/i })
-      expect(button).toBeDisabled()
+
+      // A retry that succeeds resolves into the truth it found — here, the
+      // offer it could not show before. It does not return to a "Try again"
+      // it no longer needs.
+      mockAgents.current = OWNED
+      release()
+      expect(await screen.findByRole('button', { name: 'Revoke Research agent' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /try again|checking/i })).not.toBeInTheDocument()
     })
 
     it('stays silent while loading when nothing was reported', () => {
-      // The transient case that should NOT flash a card: no report, so there is
-      // nothing to be silent about yet.
       mockAgents.current = []
       mockState.loading = true
       const { container } = render(<SupersededAgentsCard supersededAgentIds={[]} />)

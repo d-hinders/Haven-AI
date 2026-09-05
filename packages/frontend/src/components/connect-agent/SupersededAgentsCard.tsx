@@ -54,10 +54,16 @@ export function SupersededAgentsCard({
   /** Tri-state from `install_status`: list, `[]`, or `null`/absent. */
   supersededAgentIds?: readonly string[] | null
 }) {
-  const { agents, loading, error, refetch, revokeAgent } = useAgents()
+  const { agents, error, refetch, revokeAgent } = useAgents()
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [failed, setFailed] = useState<Record<string, string>>({})
+  // Set only by THIS card's own Try again. `useAgents`' `loading` cannot stand
+  // in for it: it is `true` on first mount too, before anything has failed, so
+  // branching on it made a fresh completed setup announce that the agent list
+  // could not be read — a false claim on the one screen this flow exists to
+  // make trustworthy, and one an earlier test of mine asserted as correct.
+  const [retrying, setRetrying] = useState(false)
 
   // The intersection, not the report. An agent already revoked is dropped too
   // — offering to revoke it again is an action with no effect.
@@ -79,12 +85,14 @@ export function SupersededAgentsCard({
   // Only reached when the connector actually named agents. A failed read with
   // nothing reported has nothing to be silent about.
   const reportedAny = (supersededAgentIds?.length ?? 0) > 0
-  // `error || loading` rather than `error` alone (#2561 review round two).
+  // `error || retrying`, and the second half is deliberately NOT `loading`.
   // `refetch` clears `error` synchronously before the request settles, so
-  // branching on the error alone made the whole card — including the button
-  // just clicked — vanish for the length of the retry and come back only when
-  // it resolved. On a slow connection that reads as "the click did nothing".
-  if (offered.length === 0 && reportedAny && (error || loading)) {
+  // branching on the error alone made the card — including the button just
+  // clicked — vanish for the length of the retry. Branching on `loading`
+  // instead fixed that and broke something worse: `loading` starts `true`, so
+  // the card claimed a failed read on every first mount. Only a retry this
+  // card started keeps it on screen.
+  if (offered.length === 0 && reportedAny && (error || retrying)) {
     return (
       <Card>
         <Card.Section>
@@ -96,8 +104,16 @@ export function SupersededAgentsCard({
             them here. Nothing has changed either way.
           </p>
           <div className="mt-3">
-            <Button variant="ghost" size="sm" disabled={loading} onClick={() => void refetch()}>
-              {loading ? 'Checking…' : 'Try again'}
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={retrying}
+              onClick={() => {
+                setRetrying(true)
+                void refetch().finally(() => setRetrying(false))
+              }}
+            >
+              {retrying ? 'Checking…' : 'Try again'}
             </Button>
           </div>
         </Card.Section>
@@ -105,10 +121,10 @@ export function SupersededAgentsCard({
     )
   }
 
-  // With nothing reported, a load in flight renders nothing rather than a
-  // skeleton: it is transient and resolves on its own, on a screen that has
-  // just finished celebrating a completed setup. The branch above is what
-  // keeps a FAILED load — and a retry of one — from looking the same.
+  // A first load in flight renders nothing — no skeleton, and above all no
+  // claim about a read that has not finished. It resolves on its own, on a
+  // screen that has just finished celebrating a completed setup. The branch
+  // above speaks only for a read that actually failed, or a retry of one.
   if (offered.length === 0) return null
 
   const pending = offered.find((agent) => agent.id === pendingId) ?? null

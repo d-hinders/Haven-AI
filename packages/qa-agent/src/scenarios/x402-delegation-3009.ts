@@ -403,8 +403,9 @@ export const x402Delegation3009: Scenario = {
 
     if (verdict.undelivered) {
       // Say only what this read supports (#2444, on the pattern #2445 set).
-      // The harness reads BASE_SEPOLIA_RPC while the backend writes through
-      // RPC_URL_BASE_SEPOLIA — two different nodes — so "the merchant leg has
+      // The harness reads QA_RPC_URL_BASE_SEPOLIA (defaulting to the public
+      // endpoint) while the backend writes through RPC_URL_BASE_SEPOLIA — two
+      // different nodes — so "the merchant leg has
       // not settled" is a conclusion this balance cannot reach on its own. A
       // node that has not caught up produces the identical reading. Both
       // possibilities still fail the scenario, because both mean this run

@@ -445,8 +445,9 @@ export const MARK_SETUP_REGISTERED_SQL = `UPDATE agent_connection_setups
              api_key_prefix = $5,
              connector_version = COALESCE($6, connector_version),
              runtime = COALESCE($7, runtime),
-             connector_context = $8::jsonb,
-             install_status = $9::jsonb,
+             run_mode = COALESCE($8, run_mode),
+             connector_context = $9::jsonb,
+             install_status = $10::jsonb,
              setup_token_consumed_at = NOW(),
              updated_at = NOW()
          WHERE id = $1`
@@ -460,6 +461,12 @@ export async function markSetupRegistered(
     apiKeyPrefix: string
     connectorVersion: string | null
     runtime: string | null
+    /**
+     * #2528: `'json'` | `'prose'` | null. COALESCEd like `runtime` above, so a
+     * connector that does not send it leaves whatever is there rather than
+     * nulling it — the older-connector case.
+     */
+    runMode: string | null
     connectorContext: unknown
     installStatus: unknown
   },
@@ -473,6 +480,7 @@ export async function markSetupRegistered(
     input.apiKeyPrefix,
     input.connectorVersion,
     input.runtime,
+    input.runMode,
     JSON.stringify(input.connectorContext),
     JSON.stringify(input.installStatus),
   ])

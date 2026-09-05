@@ -3131,6 +3131,108 @@ describe('existing-agent wiring collision at setup (#2551)', () => {
     expect(result.outcome.superseded_agents_retired_locally).toBeUndefined()
   })
 
+  /**
+   * #2528: the approval link and the run mode.
+   *
+   * Both ride the harness above, whose `registerSetup` stub returns the shape
+   * the backend returns. The approval-link tests set `approval_url` on that
+   * stub; the older-backend test deliberately does not, which is the whole
+   * point of the field being optional.
+   */
+  describe('#2528: approval link and run_mode', () => {
+    const APPROVAL_URL = 'https://app.haven.example/agents?setup=setup-2551'
+
+    function harnessWithApprovalUrl(root: string, url?: string) {
+      const h = harness(root)
+      h.api.registerSetup = vi.fn(async (input: RegisterSetupInput) => ({
+        setup_id: 'setup-2551',
+        agent_id: 'agent-new',
+        status: 'connected_local',
+        agent_status: 'pending_approval',
+        api_key_prefix: input.apiKeyPrefix,
+        api_key_scope: 'setup_pending',
+        delegate_address: input.delegateAddress.toLowerCase(),
+        hosted_mcp_url: 'https://mcp.haven.example/v1',
+        next_action: 'return_to_haven_for_wallet_approval',
+        ...(url ? { approval_url: url } : {}),
+      }))
+      return h
+    }
+
+    it('carries the backend approval link into the --json outcome', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-2528-url-'))
+      const h = harnessWithApprovalUrl(root, APPROVAL_URL)
+      const result = await runConnect({ ...baseOptions(root), runMode: 'json' }, h.deps)
+
+      expect(result.outcome.approval).toEqual({
+        required: true,
+        expires_at: null,
+        url: APPROVAL_URL,
+      })
+      // Additive: the version does NOT move for a new optional field, matching
+      // #2173, #2174, #2551, #2091 and #2279 on this same object.
+      expect(result.outcome.schema_version).toBe(1)
+    })
+
+    it('omits approval.url entirely when the backend does not send one', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-2528-nourl-'))
+      const h = harnessWithApprovalUrl(root, undefined)
+      const result = await runConnect({ ...baseOptions(root), runMode: 'json' }, h.deps)
+
+      // A backend older than #2528. Absent, not null and not an empty string:
+      // a consumer must be able to tell "no link available" from "a link".
+      expect('url' in result.outcome.approval).toBe(false)
+      expect(result.outcome.approval.required).toBe(true)
+    })
+
+    it('prints the link in the prose next-steps instead of "Return to Haven"', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-2528-prose-'))
+      const lines: string[] = []
+      const h = harnessWithApprovalUrl(root, APPROVAL_URL)
+      await runConnect({ ...baseOptions(root), runMode: 'prose' }, {
+        ...h.deps,
+        log: (m: string) => lines.push(m),
+      })
+
+      const joined = lines.join('\n')
+      expect(joined).toContain(`Approve the budget at ${APPROVAL_URL}`)
+      // The sentence the link replaces must be gone, not merely accompanied —
+      // two instructions for one action is what the link was meant to end.
+      expect(joined).not.toContain('Return to Haven and approve the budget')
+    })
+
+    it('keeps the old prose when the backend sends no link', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-2528-prose-old-'))
+      const lines: string[] = []
+      const h = harnessWithApprovalUrl(root, undefined)
+      await runConnect({ ...baseOptions(root), runMode: 'prose' }, {
+        ...h.deps,
+        log: (m: string) => lines.push(m),
+      })
+
+      const joined = lines.join('\n')
+      expect(joined).toContain('Return to Haven and approve the budget')
+      expect(joined).not.toContain('undefined')
+    })
+
+    it('reports run_mode json to the backend when the caller says json', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-2528-rm-json-'))
+      const h = harnessWithApprovalUrl(root, APPROVAL_URL)
+      await runConnect({ ...baseOptions(root), runMode: 'json' }, h.deps)
+
+      expect(h.api.registerSetup.mock.calls[0][0].runMode).toBe('json')
+    })
+
+    it('defaults run_mode to prose when the caller says nothing', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-2528-rm-default-'))
+      const h = harnessWithApprovalUrl(root, APPROVAL_URL)
+      // `baseOptions` sets no runMode — the library-caller case.
+      await runConnect(baseOptions(root), h.deps)
+
+      expect(h.api.registerSetup.mock.calls[0][0].runMode).toBe('prose')
+    })
+  })
+
   it('a clean first run is byte-for-byte unchanged: bare names, no prompt, no new outcome field', async () => {
     const root = await mkdtemp(join(tmpdir(), 'haven-2551-clean-'))
     const prompt = vi.fn()

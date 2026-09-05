@@ -78,8 +78,8 @@ permissions require action by the Safe owner outside Haven.
    with `--json`, which only the connector can report and which segments the
    onboarding funnel; refused with 400 if it is anything else). No private key
    or plaintext API key is registered. The response returns `approval_url`
-   (#2528), the same same-origin link to this setup's budget approval that
-   create and status already return — a page address, carrying no token.
+   (#2528), the same-origin link to this setup's budget approval that create
+   and status already return — a page address, carrying no token.
 5. The user approves, in the modal, with one signature — and that signature is
    the authority. On the delegation rail it is the budget delegation itself,
    granted at the same step of the same flow; the agent cannot spend until that

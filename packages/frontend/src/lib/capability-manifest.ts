@@ -27,7 +27,9 @@ export const MANIFEST_SCHEMA_VERSION = 1
  * that silently drifts back in.
  */
 export const DEFERRED_MANIFEST_KEYS = {
-  'docs.for_agents': { path: '/for-agents.md', lands_in: 2523 },
+  // `docs.for_agents` used to be here, waiting on #2523. That issue merged and
+  // `/for-agents.md` is now a real surface, so the key is present — the entry
+  // leaving this map is the mechanism working exactly as it was built to.
   'dashboard.device_approval': { path: '/device', lands_in: 2526 },
 } as const
 
@@ -117,6 +119,9 @@ export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null)
     },
     chains: facts?.chains ?? null,
     docs: {
+      // #2523 landed: the runbook written for the agent rather than the owner,
+      // and the first thing it should read.
+      for_agents: '/for-agents.md',
       llms: '/llms.txt',
       llms_full: '/llms-full.txt',
       pay_402: '/402.md',

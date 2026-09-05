@@ -87,9 +87,14 @@ describe('capability manifest', () => {
     // Recorded as data rather than as a comment so this is assertable: the
     // omissions are deliberate, and adding one is an edit somebody makes.
     const manifest = buildManifestFrom(ORIGIN, FACTS) as unknown as Record<string, Record<string, unknown>>
-    expect(manifest.docs).not.toHaveProperty('for_agents')
     expect(manifest.dashboard).not.toHaveProperty('device_approval')
-    expect(Object.keys(DEFERRED_MANIFEST_KEYS)).toEqual(['docs.for_agents', 'dashboard.device_approval'])
+    expect(Object.keys(DEFERRED_MANIFEST_KEYS)).toEqual(['dashboard.device_approval'])
+    // #2523 landed while this PR was open, so `/for-agents.md` is a real
+    // surface now and the key is PRESENT. Its entry leaving the deferred map
+    // is the mechanism working as built — a key appears exactly when the thing
+    // it names starts answering.
+    expect(manifest.docs).toHaveProperty('for_agents')
+    expect(manifest.docs.for_agents).toBe('/for-agents.md')
     for (const entry of Object.values(DEFERRED_MANIFEST_KEYS)) {
       expect(entry.lands_in).toBeGreaterThan(0)
     }

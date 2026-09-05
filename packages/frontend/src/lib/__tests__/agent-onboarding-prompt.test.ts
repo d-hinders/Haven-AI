@@ -36,6 +36,16 @@ describe('the onboarding prompt (#2535)', () => {
   it('carries the shared rules verbatim, not paraphrased', () => {
     // Both sentences are also in buildSetupPrompt (routes/agent-connection-setups.ts),
     // so an agent cannot be told two different versions of the same rule.
+    //
+    // The OTHER half of that binding lives in the backend suite
+    // (`agent-connection-setups.test.ts`, which asserts buildSetupPrompt includes
+    // the same constants). Neither test alone proves the two prompts agree —
+    // together they do, because both are pinned to the same source. What NEITHER
+    // covers, stated so it is not mistaken for proved: containment shows a rule is
+    // PRESENT, never that a rule the setup prompt states is missing here. This
+    // prompt deliberately omits four of them (local-key, network-access,
+    // json-mode, prose-relay) and defers to /for-agents.md, which it tells the
+    // agent to read first — a judgement, not something a substring test checked.
     expect(AGENT_ONBOARDING_PROMPT).toContain(AGENT_APPROVAL_RELAY_JSON_SENTENCE)
     expect(AGENT_ONBOARDING_PROMPT).toContain(AGENT_SECRET_HYGIENE_SENTENCE)
   })

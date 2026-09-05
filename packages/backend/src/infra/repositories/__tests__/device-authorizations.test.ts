@@ -9,6 +9,7 @@ import {
   createDeviceAuthorization,
   denyDeviceAuthorization,
   findByDeviceCode,
+  findPendingByUserCode,
   generateUserCode,
   hashCode,
   normalizeUserCode,
@@ -178,5 +179,54 @@ describeDb('device authorizations (#2526)', () => {
     const drawn = Array.from({ length: 200 }, () => generateUserCode()).join('')
     expect(drawn).not.toMatch(/[01ILOU]/)
     expect(new Set(drawn.replace(/-/g, '')).size).toBeGreaterThan(10)
+  })
+
+  it('the approval screen can read a PENDING grant by its user code', async () => {
+    // The read the screen makes before it offers a button. It must find the
+    // label, because a screen that shows the approver nothing about the
+    // requester gives them nothing to recognise as wrong.
+    const { userCode } = await pending('Haven CLI on a laptop')
+    const found = await findPendingByUserCode(userCode)
+    expect(found?.client_label).toBe('Haven CLI on a laptop')
+  })
+
+  it('the lookup normalizes case and dashes, like approve does', async () => {
+    // Same input handling as the decision, or a code that previews cleanly
+    // could still fail to approve.
+    const { userCode } = await pending()
+    const mangled = userCode.replace(/-/g, '').toLowerCase()
+    expect(await findPendingByUserCode(mangled)).not.toBeNull()
+  })
+
+  it('the lookup refuses every grant approve would also refuse', async () => {
+    // It must never preview something that cannot then be decided — and, more
+    // to the point, it must not become the oracle the uniform 404 exists to
+    // deny. Wrong, expired, already-approved and denied all answer null.
+    expect(await findPendingByUserCode(generateUserCode())).toBeNull()
+
+    const expired = generateUserCode()
+    await createDeviceAuthorization({
+      userCode: expired,
+      deviceCode: randomUUID(),
+      clientLabel: 'stale',
+      expiresAt: new Date(Date.now() - 1000),
+    })
+    expect(await findPendingByUserCode(expired)).toBeNull()
+
+    const { userCode: approved } = await pending()
+    await approveDeviceAuthorization(approved, (await insertUser('Owner', email(), 'x', null)).id)
+    expect(await findPendingByUserCode(approved)).toBeNull()
+
+    const { userCode: refused } = await pending()
+    await denyDeviceAuthorization(refused)
+    expect(await findPendingByUserCode(refused)).toBeNull()
+  })
+
+  it('the lookup does not decide anything', async () => {
+    // It is a read. If it mutated, opening the link would spend the grant.
+    const { userCode, deviceCode } = await pending()
+    await findPendingByUserCode(userCode)
+    await findPendingByUserCode(userCode)
+    expect((await findByDeviceCode(deviceCode))?.status).toBe('pending')
   })
 })

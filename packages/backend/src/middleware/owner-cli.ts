@@ -15,7 +15,16 @@ import type { FastifyReply, FastifyRequest } from 'fastify'
  * an agent-driven token can sign something. An allow-list inverts that: a new
  * route refuses until a person puts it here, which is a decision with a name on
  * it. `owner-cli-route-census.test.ts` discovers every registered route and
- * asserts there is no third state — allow-listed, or refusing.
+ * measures what `routeAllowsOwnerCli` actually answers for each, checks that
+ * every entry here is real and behind `authMiddleware`, and holds the list
+ * against an independent opinion about which path shapes are authority.
+ *
+ * That is deliberately NOT phrased as "it asserts there is no third state",
+ * which is what this comment used to say. The no-third-state property is
+ * structural — `isOwnerCliAllowed` returns a boolean and nothing falls through
+ * — and the assertion that claimed to prove it was written in terms of
+ * `isOwnerCliAllowed` itself, so it reduced to `!X && X` and could not fail.
+ * A test written in terms of the thing it checks cannot check it.
  *
  * ## What is deliberately absent
  *
@@ -66,7 +75,15 @@ export const OWNER_CLI_ALLOWED_ROUTES: readonly AllowedRoute[] = [
   // hand its user an approval link.
   { method: 'POST', path: '/agent-connection-setups' },
   { method: 'GET', path: '/agent-connection-setups/{setupId}' },
-  { method: 'GET', path: '/agent-connection-setups/{setupId}/connector-status' },
+  // `GET /agent-connection-setups/{setupId}/connector-status` was on this list
+  // and is deliberately NOT: it never reaches `authMiddleware` at all. It is
+  // gated by `authenticateConnectorStatusRequest`, which demands a literal
+  // `sk_agent_...` key, so an owner token gets that route's own 401 from a
+  // different code path and the entry granted precisely nothing. A list entry
+  // that grants nothing is worse than no entry — it reads as coverage. The
+  // owner-facing `GET /agent-connection-setups/{setupId}` above is the read a
+  // CLI session actually has, and the census test now refuses any entry whose
+  // route is not behind `authMiddleware`, so this cannot come back silently.
   // Read-only account context.
   { method: 'GET', path: '/user/safes' },
   // Also corrected from the issue's text: balances are served under their own

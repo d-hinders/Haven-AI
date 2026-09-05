@@ -13,6 +13,7 @@ import {
   createDeviceAuthorization,
   denyDeviceAuthorization,
   findByDeviceCode,
+  findPendingByUserCode,
   generateUserCode,
   purgeExpired,
   redeemDeviceAuthorization,
@@ -271,6 +272,34 @@ export default async function authRoutes(
         expires_in: Math.floor(DEVICE_CODE_TTL_MS / 1000),
         interval: 5,
       })
+    },
+  )
+
+  // POST /auth/device/lookup — what is this code asking for? Read-only, and
+  // the reason the approval screen can show a human anything at all about the
+  // requester before they decide. Same session requirement and same uniform
+  // 404 as `approve`: a preview that distinguished wrong from expired from
+  // already-decided would be an enumeration oracle wearing a different name.
+  //
+  // It is absent from the owner_cli allow-list for the same reason `approve`
+  // is — a CLI session must not be able to inspect pending grants either.
+  app.post<{ Body: { user_code?: string } }>(
+    '/device/lookup',
+    { preHandler: authMiddleware, config: { ...authRateLimit(trustProxyHops, 'device_lookup') } },
+    async (request, reply) => {
+      const userCode = typeof request.body?.user_code === 'string' ? request.body.user_code : ''
+      if (!userCode.trim()) {
+        return reply.code(400).send({ error: 'user_code is required' })
+      }
+
+      const row = await findPendingByUserCode(userCode)
+      if (!row) {
+        return reply.code(404).send({ error: 'No pending approval for that code' })
+      }
+      // Deliberately narrow: the label and how long they have to decide. The
+      // row's id, timestamps and eventual user_id are nothing the approver
+      // needs and nothing this screen should carry.
+      return { client_label: row.client_label, expires_at: row.expires_at }
     },
   )
 

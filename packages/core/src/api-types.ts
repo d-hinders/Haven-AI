@@ -88,6 +88,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/auth/device/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read what a pending CLI login is asking for, before deciding.
+         * @description Requires an ordinary owner session, like `approve`, and is likewise absent from the owner-CLI allow-list. It exists so the approval screen can show the requester's own `client_label` BEFORE the button rather than after it: every code looks alike, so the label is the only thing that lets a human notice they are being asked to approve somebody else's login. The label is attacker-controlled text — bounded and stripped of control characters on the way in, and rendered as text, never as markup, on the way out. Wrong, expired and already-decided codes all answer 404 alike, so this is not an enumeration oracle.
+         */
+        post: operations["lookupDeviceAuthorization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/device/approve": {
         parameters: {
             query?: never;
@@ -3911,6 +3931,44 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DeviceAuthorizationStart"];
                 };
+            };
+        };
+    };
+    lookupDeviceAuthorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description As shown to the human; case and dashes are ignored. */
+                    user_code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The pending grant's label and expiry — deliberately nothing else. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        client_label?: string | null;
+                        /** Format: date-time */
+                        expires_at?: string;
+                    };
+                };
+            };
+            /** @description No pending approval for that code. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

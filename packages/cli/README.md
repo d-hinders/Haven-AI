@@ -68,7 +68,8 @@ when a person is watching.
 ### Signing in without a password (#2526)
 
 `haven login` starts a **browser-approved** flow by default. It prints a link
-and a code; a human opens the link, sees what the session may do, and approves.
+and a code; a human opens the link, sees who is asking — the `client_label` the
+CLI sent — and what the session may do, then approves.
 There is no password anywhere in that path, which is the point: an agent
 driving this CLI must never hold its user's password.
 
@@ -90,12 +91,18 @@ Exit codes carry the outcome an agent acts on: **3** when the code expired
 it. It is not removed — it is simply no longer what an agent gets by asking to
 log in.
 
-**What the approved session can do.** Create and manage agents, set up a
+**What the approved session can do.** Create and manage agents — including
+issuing an agent a new API key, which stops the old one working — set up a
 connection, and read your account. **What it cannot:** sign anything, approve a
-budget, change signers, re-key an agent, move funds, or change credentials. The
-allow-list lives in `packages/backend/src/middleware/owner-cli.ts`, and a
-census test asserts every registered route is either on it or refusing — so a
-route added tomorrow refuses until somebody decides otherwise.
+budget, change signers, move funds, change your credentials, or re-key an
+agent's delegate key (`/agents/:id/rekey/*`, which is a different thing from
+rotating its API key and is not on the list). The allow-list lives in
+`packages/backend/src/middleware/owner-cli.ts`; a route that is not on it
+refuses, because #1640 already refuses every purpose-carrying token everywhere
+and this is a single opt-in exception. A census test measures what the
+enforcement actually answers for every registered route, refuses an entry whose
+route does not exist or is not behind `authMiddleware`, and holds the list
+against an independent opinion about which path shapes are authority.
 
 ```bash
 haven agents list --json                 # success: the payload, unchanged

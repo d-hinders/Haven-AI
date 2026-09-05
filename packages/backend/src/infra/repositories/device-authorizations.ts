@@ -143,6 +143,36 @@ export async function findByDeviceCode(
 }
 
 /**
+ * The approval screen's read: what is this code asking for?
+ *
+ * A human cannot notice a phishing-shaped approval on a screen that shows them
+ * nothing about the requester, so the label the CLI sent has to reach the page
+ * BEFORE the decision, not in the response to it. This is that read, and it
+ * mutates nothing — deciding is still `approve`/`deny`.
+ *
+ * It matches the same three conditions those two do (`pending`, unexpired,
+ * correct hash) so it cannot show a preview for a grant they would refuse.
+ * Its route is authenticated and rate-limited, and answers 404 for wrong,
+ * expired and already-decided codes alike, exactly as `approve` does: a
+ * preview that told them apart would be the enumeration oracle the uniform
+ * 404 exists to deny.
+ */
+export async function findPendingByUserCode(
+  userCode: string,
+  db: Executor = pool,
+): Promise<DeviceAuthorizationRow | null> {
+  const result = await db.query<DeviceAuthorizationRow>(
+    `SELECT id, user_id, status, client_label, created_at, expires_at, approved_at
+       FROM device_authorizations
+      WHERE user_code_hash = $1
+        AND status = 'pending'
+        AND expires_at > NOW()`,
+    [hashCode(normalizeUserCode(userCode))],
+  )
+  return result.rows[0] ?? null
+}
+
+/**
  * Claim an approved grant, exactly once.
  *
  * SINGLE USE is enforced by the `status = 'approved'` predicate inside the

@@ -177,12 +177,17 @@ export const publicIssuerRateLimit = {
  */
 export function authRateLimit(
   trustProxyHops: number,
-  route: 'signup' | 'login' | 'device_start' | 'device_token',
+  route: 'signup' | 'login' | 'device_start' | 'device_token' | 'device_lookup',
 ): { rateLimit?: { max: number; timeWindow: string } } {
   if (trustProxyHops <= 0) return {}
   return {
     rateLimit: {
-      // #2526's two tiers sit either side of login, for opposite reasons.
+      // #2526's three tiers sit either side of login, for opposite reasons.
+      //
+      // `device_lookup` is the only one behind a session, so its bucket is a
+      // signed-in caller rather than the open internet. It is still tighter
+      // than login: an approver types one code, and the endpoint's one job is
+      // to answer questions about codes somebody else generated.
       //
       // `device_start` mints a user code a human will type, so it is the
       // guessing surface: tighter than signup, because nobody needs ten CLI
@@ -194,7 +199,16 @@ export function authRateLimit(
       // a limit near login's would 429 the happy path. It is deliberately the
       // loosest of the four, and it is not the guessing surface: the device
       // code is 32 random bytes, not eight typed characters.
-      max: route === 'signup' ? 10 : route === 'device_start' ? 5 : route === 'device_token' ? 200 : 30,
+      max:
+        route === 'signup'
+          ? 10
+          : route === 'device_start'
+            ? 5
+            : route === 'device_token'
+              ? 200
+              : route === 'device_lookup'
+                ? 20
+                : 30,
       timeWindow: '1 minute',
     },
   }

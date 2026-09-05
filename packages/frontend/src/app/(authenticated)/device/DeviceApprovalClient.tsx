@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -8,7 +8,17 @@ import { Input } from '@/components/ui/Input'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { api, ApiRequestError } from '@/lib/api'
 
-type Outcome = { kind: 'idle' } | { kind: 'approved' } | { kind: 'denied' } | { kind: 'error'; message: string }
+type Pending = { clientLabel: string | null }
+
+type Outcome =
+  | { kind: 'idle' }
+  | { kind: 'reviewing'; pending: Pending }
+  | { kind: 'approved' }
+  | { kind: 'denied' }
+  | { kind: 'error'; message: string }
+
+const UNKNOWN_CODE =
+  'That code is not waiting for approval. It may have expired, already been used, or been typed wrong — ask for a fresh one.'
 
 /**
  * The approval screen for a device-code CLI login (#2526).
@@ -17,30 +27,77 @@ type Outcome = { kind: 'idle' } | { kind: 'approved' } | { kind: 'denied' } | { 
  * a session to something they cannot see, so the screen says plainly what that
  * session can and cannot do. The scope is not a summary of the allow-list — it
  * is the two halves that matter to the person deciding.
+ *
+ * ## Why the code is looked up before it is decided
+ *
+ * The decision is deliberately TWO steps, and collapsing them would defeat the
+ * point. The attack this flow has to survive is not code theft — it is a
+ * stranger starting their own device login and getting a signed-in victim to
+ * open `/device?code=<the stranger's code>`. Every code looks alike, so the
+ * only thing that can make a wrong approval noticeable is the requester's own
+ * label, shown BEFORE the button. A screen that approved first and reported
+ * the label afterwards would tell the victim what they had just given away.
+ *
+ * The label is attacker-controlled text, so it is rendered as text and nothing
+ * else — never `dangerouslySetInnerHTML`, never a link — and it is captioned
+ * as something the requester supplied rather than something Haven vouches for.
  */
 export default function DeviceApprovalClient() {
   const searchParams = useSearchParams()
   const [code, setCode] = useState(searchParams.get('code') ?? '')
-  const [submitting, setSubmitting] = useState<'approve' | 'deny' | null>(null)
+  const [submitting, setSubmitting] = useState<'lookup' | 'approve' | 'deny' | null>(null)
   const [outcome, setOutcome] = useState<Outcome>({ kind: 'idle' })
+
+  const failed = useCallback((err: unknown) => {
+    // The backend answers 404 for a wrong, expired or already-decided code
+    // alike, so codes cannot be enumerated. The copy here has to be equally
+    // undiscriminating, or the screen leaks what the API refused to.
+    setOutcome({
+      kind: 'error',
+      message:
+        err instanceof ApiRequestError && err.status === 404
+          ? UNKNOWN_CODE
+          : 'Something went wrong. Try again.',
+    })
+  }, [])
+
+  const lookup = useCallback(
+    async (userCode: string) => {
+      setSubmitting('lookup')
+      setOutcome({ kind: 'idle' })
+      try {
+        const res = await api.post<{ client_label: string | null }>('/auth/device/lookup', {
+          user_code: userCode,
+        })
+        setOutcome({ kind: 'reviewing', pending: { clientLabel: res.client_label ?? null } })
+      } catch (err) {
+        failed(err)
+      } finally {
+        setSubmitting(null)
+      }
+    },
+    [failed],
+  )
+
+  // A code arriving in the link is the ordinary path — the CLI prints that URL
+  // — so the person lands already looking at what they are being asked to
+  // approve. Guarded by a ref rather than the effect's deps: this must run
+  // once for the code the page opened with, and never re-fire as they retype.
+  const autoLookedUp = useRef(false)
+  useEffect(() => {
+    const initial = searchParams.get('code')?.trim()
+    if (!initial || autoLookedUp.current) return
+    autoLookedUp.current = true
+    void lookup(initial)
+  }, [searchParams, lookup])
 
   async function decide(deny: boolean) {
     setSubmitting(deny ? 'deny' : 'approve')
-    setOutcome({ kind: 'idle' })
     try {
       await api.post('/auth/device/approve', { user_code: code, ...(deny ? { deny: true } : {}) })
       setOutcome({ kind: deny ? 'denied' : 'approved' })
     } catch (err) {
-      // The backend answers 404 for a wrong, expired or already-decided code
-      // alike, so codes cannot be enumerated. The copy here has to be equally
-      // undiscriminating, or the screen leaks what the API refused to.
-      setOutcome({
-        kind: 'error',
-        message:
-          err instanceof ApiRequestError && err.status === 404
-            ? 'That code is not waiting for approval. It may have expired, already been used, or been typed wrong — ask for a fresh one.'
-            : 'Something went wrong. Try again.',
-      })
+      failed(err)
     } finally {
       setSubmitting(null)
     }
@@ -48,18 +105,19 @@ export default function DeviceApprovalClient() {
 
   if (outcome.kind === 'approved' || outcome.kind === 'denied') {
     return (
-      <>
-        <PageHeader
-          title={outcome.kind === 'approved' ? 'CLI access approved' : 'CLI access denied'}
-          subtitle={
-            outcome.kind === 'approved'
-              ? 'You can close this page. The command line picks it up within a few seconds.'
-              : 'Nothing was granted. You can close this page.'
-          }
-        />
-      </>
+      <PageHeader
+        title={outcome.kind === 'approved' ? 'CLI access approved' : 'CLI access denied'}
+        subtitle={
+          outcome.kind === 'approved'
+            ? 'You can close this page. The command line picks it up within a few seconds.'
+            : 'Nothing was granted. You can close this page.'
+        }
+      />
     )
   }
+
+  const reviewing = outcome.kind === 'reviewing' ? outcome.pending : null
+  const busy = submitting !== null
 
   return (
     <>
@@ -74,7 +132,8 @@ export default function DeviceApprovalClient() {
             className="flex flex-col gap-5"
             onSubmit={(event) => {
               event.preventDefault()
-              void decide(false)
+              if (reviewing) void decide(false)
+              else void lookup(code)
             }}
           >
             {/* `Input` carries no `label` prop; the pattern here is the one
@@ -89,12 +148,38 @@ export default function DeviceApprovalClient() {
               <Input
                 id="device-user-code"
                 value={code}
-                onChange={(event) => setCode(event.target.value)}
+                onChange={(event) => {
+                  setCode(event.target.value)
+                  // Editing the code invalidates what was looked up. Leaving
+                  // the old label on screen next to a new code is exactly the
+                  // mismatch this whole step exists to prevent.
+                  if (outcome.kind !== 'idle') setOutcome({ kind: 'idle' })
+                }}
                 placeholder="XXXX-XXXX"
                 autoComplete="off"
                 spellCheck={false}
               />
             </div>
+
+            {reviewing && (
+              <div
+                data-testid="device-client-label"
+                className="rounded-lg bg-[var(--v2-surface)] px-4 py-3"
+              >
+                <p className="text-xs font-medium text-[var(--v2-ink-2)] mb-1">
+                  {/* Named as the requester's own claim. Haven checks that this
+                      text is bounded and control-character-free, and vouches
+                      for nothing beyond that. */}
+                  The request says it is from
+                </p>
+                <p className="text-sm font-medium text-[var(--v2-ink)] break-words">
+                  {reviewing.clientLabel?.trim() ? reviewing.clientLabel : 'An unnamed program'}
+                </p>
+                <p className="text-xs text-[var(--v2-ink-2)] mt-2">
+                  If you did not start this from your own terminal just now, deny it.
+                </p>
+              </div>
+            )}
 
             {/*
               The scope, in the two halves a person deciding actually needs.
@@ -103,13 +188,14 @@ export default function DeviceApprovalClient() {
             */}
             <div className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
               <p className="mb-2">
-                <strong className="text-[var(--v2-ink)]">It can</strong> create and manage agents,
-                set up a connection, and read your account — wallets, activity and transactions.
+                <strong className="text-[var(--v2-ink)]">It can</strong> create and manage agents —
+                including issuing an agent a new API key, which stops the old one working — set up
+                a connection, and read your account: wallets, activity and transactions.
               </p>
               <p>
                 <strong className="text-[var(--v2-ink)]">It cannot</strong> sign anything, approve a
-                budget, change your signers, re-key an agent, move funds, or change your
-                credentials. Approving a budget stays with you, here.
+                budget, change your signers, move funds, or change your credentials. Approving a
+                budget stays with you, here.
               </p>
             </div>
 
@@ -120,17 +206,25 @@ export default function DeviceApprovalClient() {
             )}
 
             <div className="flex gap-3">
-              <Button type="submit" disabled={!code.trim() || submitting !== null}>
-                {submitting === 'approve' ? 'Approving…' : 'Approve'}
+              <Button type="submit" disabled={!code.trim() || busy}>
+                {reviewing
+                  ? submitting === 'approve'
+                    ? 'Approving…'
+                    : 'Approve'
+                  : submitting === 'lookup'
+                    ? 'Checking…'
+                    : 'Continue'}
               </Button>
-              <Button
-                type="button"
-                variant="tertiary"
-                disabled={!code.trim() || submitting !== null}
-                onClick={() => void decide(true)}
-              >
-                {submitting === 'deny' ? 'Denying…' : 'Deny'}
-              </Button>
+              {reviewing && (
+                <Button
+                  type="button"
+                  variant="tertiary"
+                  disabled={busy}
+                  onClick={() => void decide(true)}
+                >
+                  {submitting === 'deny' ? 'Denying…' : 'Deny'}
+                </Button>
+              )}
             </div>
           </form>
         </Card.Section>

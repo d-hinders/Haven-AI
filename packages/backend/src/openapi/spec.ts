@@ -916,6 +916,54 @@ export const openapiSpec = {
         },
       },
     },
+    '/auth/device/lookup': {
+      post: {
+        tags: ['Auth'],
+        operationId: 'lookupDeviceAuthorization',
+        summary: 'Read what a pending CLI login is asking for, before deciding.',
+        description:
+          'Requires an ordinary owner session, like `approve`, and is likewise absent from ' +
+          'the owner-CLI allow-list. It exists so the approval screen can show the ' +
+          'requester\'s own `client_label` BEFORE the button rather than after it: every ' +
+          'code looks alike, so the label is the only thing that lets a human notice they ' +
+          'are being asked to approve somebody else\'s login. The label is attacker-' +
+          'controlled text — bounded and stripped of control characters on the way in, and ' +
+          'rendered as text, never as markup, on the way out. Wrong, expired and ' +
+          'already-decided codes all answer 404 alike, so this is not an enumeration oracle.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['user_code'],
+                properties: {
+                  user_code: { type: 'string', description: 'As shown to the human; case and dashes are ignored.' },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The pending grant\'s label and expiry — deliberately nothing else.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    client_label: { type: 'string', nullable: true },
+                    expires_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          '404': { description: 'No pending approval for that code.' },
+        },
+      },
+    },
     '/auth/device/approve': {
       post: {
         tags: ['Auth'],

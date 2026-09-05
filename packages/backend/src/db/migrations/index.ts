@@ -76,6 +76,7 @@ import * as agentConnectionSetupSource from './074_agent_connection_setup_source
 import * as dropInertSafeRailSchema from './075_drop_inert_safe_rail_schema.js'
 import * as viaMarker from './076_via_marker.js'
 import * as setupRunMode from './077_setup_run_mode.js'
+import * as deviceAuthorizations from './078_device_authorizations.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -211,4 +212,5 @@ export const migrations: Migration[] = [
   dropInertSafeRailSchema,
   viaMarker,
   setupRunMode,
+  deviceAuthorizations,
 ]

@@ -9,7 +9,7 @@ import {
   HUMAN_ONLY_STEPS,
   type DiscoveryFacts,
 } from '../capability-manifest'
-import { PUBLIC_SURFACES } from '../discovery-surfaces'
+import { AUTH_MARKED_PREFIXES, PUBLIC_SURFACES } from '../discovery-surfaces'
 
 /**
  * The capability manifest at `/.well-known/haven.json` (#2531).
@@ -46,10 +46,19 @@ describe('capability manifest', () => {
     // The rule. A key naming a 404 is worse than a missing key: an agent
     // cannot tell "not offered here" from "offered and broken", which is the
     // defect #2520 spent a pull request removing from the artifacts.
+    //
+    // "Answers" is not the same as "is public", and #2526 is what forced the
+    // distinction: `/device` is behind the auth wall, because a human has to
+    // be signed in to approve a CLI session. The manifest may legitimately
+    // name it — that IS where the human goes. What it must never name is a
+    // path that is in NEITHER list, which is exactly a 404.
     const paths = manifestPaths(buildManifestFrom(ORIGIN, FACTS))
     expect(paths.length).toBeGreaterThan(3)
+    const answers = (path: string) =>
+      (PUBLIC_SURFACES as readonly string[]).includes(path) ||
+      (AUTH_MARKED_PREFIXES as readonly string[]).includes(path)
     for (const path of paths) {
-      expect(PUBLIC_SURFACES, `${path} is advertised but is not a public surface`).toContain(path)
+      expect(answers(path), `${path} is advertised but answers nowhere`).toBe(true)
     }
   })
 
@@ -58,7 +67,9 @@ describe('capability manifest', () => {
     // or a broken extractor.
     const paths = manifestPaths({ docs: { bogus: '/not-a-real-surface' } })
     expect(paths).toEqual(['/not-a-real-surface'])
+    // In NEITHER list — which is what the widened rule must still refuse.
     expect(PUBLIC_SURFACES).not.toContain('/not-a-real-surface')
+    expect(AUTH_MARKED_PREFIXES).not.toContain('/not-a-real-surface')
   })
 
   it('REFLECTION: own-origin fields are paths, so no caller-supplied host reaches them', () => {
@@ -87,17 +98,30 @@ describe('capability manifest', () => {
     // Recorded as data rather than as a comment so this is assertable: the
     // omissions are deliberate, and adding one is an edit somebody makes.
     const manifest = buildManifestFrom(ORIGIN, FACTS) as unknown as Record<string, Record<string, unknown>>
-    expect(manifest.dashboard).not.toHaveProperty('device_approval')
-    expect(Object.keys(DEFERRED_MANIFEST_KEYS)).toEqual(['dashboard.device_approval'])
-    // #2523 landed while this PR was open, so `/for-agents.md` is a real
-    // surface now and the key is PRESENT. Its entry leaving the deferred map
-    // is the mechanism working as built — a key appears exactly when the thing
-    // it names starts answering.
-    expect(manifest.docs).toHaveProperty('for_agents')
+    // Both deferred keys have now landed with the changes that added their
+    // surfaces — `docs.for_agents` with #2523, `dashboard.device_approval`
+    // with #2526 — so the map is EMPTY and both keys are present. A key
+    // appears exactly when the thing it names starts answering, never because
+    // somebody remembered to check.
+    expect(Object.keys(DEFERRED_MANIFEST_KEYS)).toEqual([])
     expect(manifest.docs.for_agents).toBe('/for-agents.md')
-    for (const entry of Object.values(DEFERRED_MANIFEST_KEYS)) {
+    expect(manifest.dashboard.device_approval).toBe('/device')
+    for (const entry of Object.values(DEFERRED_MANIFEST_KEYS) as Array<{ lands_in: number }>) {
       expect(entry.lands_in).toBeGreaterThan(0)
     }
+  })
+
+  it('a deferred key would still be enforced if one existed', () => {
+    // The map is empty now, so the case above cannot fail for the right
+    // reason any more. This is the positive control: the RULE it encodes —
+    // a key must not name a path that is not a public surface — still holds
+    // against the manifest as built.
+    const paths = manifestPaths(buildManifestFrom(ORIGIN, FACTS))
+    expect(paths).toContain('/for-agents.md')
+    expect(PUBLIC_SURFACES).toContain('/for-agents.md')
+    // `/device` is deliberately NOT a public surface — it is behind the auth
+    // wall — so the manifest names it without claiming it is public.
+    expect(PUBLIC_SURFACES).not.toContain('/device')
   })
 
   it('names the human-only steps, in order', () => {

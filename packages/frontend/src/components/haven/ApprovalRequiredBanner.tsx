@@ -73,8 +73,27 @@ export function ApprovalRequiredBanner({
         >
           <Icon icon={styles.icon} className="h-3.5 w-3.5" />
         </div>
-        <div>
-          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h3>
+        {/* `min-w-0` is load-bearing, not tidying (#2526). A flex child's
+            default `min-width: auto` refuses to shrink below its content's
+            intrinsic width, so a long unbroken string — a hostile
+            `client_label` on /device, an address, a URL — pushes the banner
+            wider than its parent and slides the rest of the sentence out of
+            view. On the device-approval screen the sentence pushed off-screen
+            was "if you did not start this, deny it", which an attacker chooses
+            the string for. Caught in a mobile capture, not by a test. */}
+        <div className="min-w-0">
+          {/* The title needs the wrap too, not just the body. `min-w-0` above
+              lets the column shrink; without a break rule an unbroken token in
+              the TITLE still overflows it. Not hypothetical:
+              `ReplaceSigningKeyModal` passes `${agentName} cannot pay right
+              now`, and an agent name is free user text bounded only by the
+              API's 80-character ceiling — the same ceiling the /device hostile
+              label hits. That banner is `tone="danger"` on an irreversible
+              re-key, so the sentence it would push out of view is the one that
+              says the budget is not restored and this cannot be restarted. */}
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)] [overflow-wrap:anywhere]">
+            {title}
+          </h3>
           <div className={`${compact ? 'text-xs' : 'text-sm'} mt-1 leading-relaxed text-[var(--v2-ink-2)]`}>
             {children}
           </div>

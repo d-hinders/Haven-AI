@@ -456,6 +456,65 @@ Use this mapping when replacing technical language with product-facing language.
 | `x402` / `mpp_demo` as a transaction ROW TITLE | Agent payment / Machine payment — the protocol name belongs on the detail drawer, not the row people scan (#2357) |
 | Connected or recipient wallet address | Wallet address when the control or destination distinction matters |
 
+### Agent-facing vocabulary — one term each ([#2533](https://github.com/d-hinders/Haven-AI/issues/2533))
+
+Four things in the connect flow had two or three names each across the
+agent-readable artifacts, the package READMEs and `/how-it-works`. The cold
+test found an agent reading "connect command" in `llms.txt`, "connector
+command" in `for-agents.md` and "setup command" in the connect README, and
+having to decide whether those were one thing or three.
+
+**These are the names. They are not new — they are `for-agents.md`'s own
+Vocabulary table, which shipped with the runbook (#2523), promoted to canonical
+rather than replaced.** Picking a fresh set would have meant editing the one
+artifact that was already self-consistent.
+
+| Thing | The term | Never |
+| --- | --- | --- |
+| The text the dashboard hands the user to paste to their agent | **setup prompt** | connect prompt, setup text |
+| The `npx -y @haven_ai/connect@…` line the agent runs | **connector command** | connect command, setup command, connection command |
+| The agent's API key, `sk_agent_…`, written to `~/.haven` | **agent credential** | `sk_live_…` (a different product's shape and never Haven's), agent key, API token |
+| The agent's signing key, made locally and never sent anywhere | **delegate key** | signing key (ambiguous — the user also signs), private key |
+
+**Scope, stated because the table above reads wider than it is enforced
+([#2576](https://github.com/d-hinders/Haven-AI/issues/2576)).** #2533 swept the
+eleven surfaces it named: the repo README, the five package READMEs,
+`llms.txt`, `llms-full.txt`, `402.md`, `402/index.html` and `for-agents.md`.
+Occurrences of the retired terms remain outside it — the dashboard connect
+modal, the connector's own printed strings and the operations docs. The figure
+is **54 occurrences across 23 files**, and the command is inline rather than in
+the follow-up issue so the number is re-derivable from this page alone (a count
+whose scope lives elsewhere is a count nobody can check — that was a
+`haven-reviewer` finding on this PR, which reproduced 48/23 under different
+exclusions and could not tell whether the difference was drift or curation):
+
+```
+grep -rn "setup command\|connect command" \
+  packages/frontend/src packages/connect/src packages/cli/src \
+  docs/operations docs/architecture \
+  --include=*.ts --include=*.tsx --include=*.md
+```
+
+Positive control for that reader: `grep -rn "connector command" packages/frontend/public README.md` returns 9, so a
+zero above would mean the sweep landed rather than that the command is broken. They are not oversights; they are outside that
+issue's stated file list, and two of them need a judgement rather than a rename
+(the connector refuses a consumed setup *token*, where "setup" may be the right
+word). Treat the table as the destination and #2576 as the remaining distance.
+
+Two boundaries this table does **not** cross:
+
+- **`npx -y @haven_ai/connect@<channel>` stays verbatim** wherever it appears.
+  The rule renames the *thing*, never the command (epic #2519 invariant).
+- **"Haven credential"** in user-facing copy still means the whole setup bundle
+  and keeps its existing row in the mapping table below. It is not a third name
+  for the agent credential; the audiences differ, and `/how-it-works` speaks to
+  the user while `for-agents.md` speaks to the agent.
+
+The canonical section every published README carries is one exported string,
+`AGENT_README_SECTION_MD` in `packages/sdk/src/agent-guidance.ts`, pinned across
+all six copies by `packages/sdk/src/agent-guidance.test.ts`. Edit the constant,
+never a README copy — the shared-prose rule this epic follows throughout.
+
 ## Enforcement
 
 These guidelines are enforced on frontend copy, not just documented. `npm run lint:copy` (`scripts/frontend-copy-lint.mjs`) scans user-facing source (`packages/frontend/src/app/**` + `components/**`) for the unambiguous **multi-word** banned phrases drawn from this guide and **fails the PR on any new occurrence** (#902). It is deliberately conservative — only multi-word phrases, never bare words like "safe"/"owner"/"deploy" — so false positives stay near zero. Its `BANNED` list is a superset of the mapping table (it also covers e.g. "policy engine", "smart contract wallet", "webauthn credential"), and it does **not** reach `packages/backend/**` or the i18n catalogs under `src/lib/i18n/messages/**` — rules about strings that live there are documentation-only.

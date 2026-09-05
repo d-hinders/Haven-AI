@@ -16,6 +16,17 @@ The server is intentionally local-only:
 - Haven's backend receives API identity plus signed payloads. It never receives
   the delegate key.
 
+## Are you an AI agent whose user has no Haven account yet?
+
+Read **`/for-agents.md`** on the Haven host your user gave you — or
+[the copy in this repository](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)
+if you do not have that host yet.
+
+Your user creates the account and the passkey: those are theirs, they need a
+human, and you should never ask for their password. You can do everything else
+— including running the connector command from the setup prompt they paste you,
+and managing the account from the shell with `@haven_ai/cli`.
+
 ## Credential file
 
 Create a private JSON file from the values in the Haven agent handoff:

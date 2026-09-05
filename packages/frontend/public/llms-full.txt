@@ -24,7 +24,7 @@ One line: give your agent a budget, not your wallet.
 ## Integration surface
 
 - Hosted MCP (keyless): the agent authenticates with a credential that cannot move funds; tools include haven_get_agent, haven_pay, haven_quote_x402, haven_get_allowances. Signing happens only in the local signer.
-- Local connector: run the connect command from the dashboard (npx @haven_ai/connect@alpha) — it installs the MCP runtime and generates the agent signing key locally, registering only the public address.
+- Local connector: run the connector command from the dashboard (npx @haven_ai/connect@alpha) — it installs the MCP runtime and generates the agent signing key locally, registering only the public address.
 - TypeScript SDK: @haven_ai/sdk for direct integration (payments, x402 quote/pay/resume, allowances).
 - CLI: @haven_ai/cli for terminal-native management.
 - Runtime-agnostic: works with Claude, GPT-based agents, custom scripts, and orchestration frameworks. No assumptions about where the agent runs.
@@ -33,7 +33,7 @@ One line: give your agent a budget, not your wallet.
 
 1. Create a Haven account at the dashboard (`/`) — one passkey prompt (Face ID / Touch ID), no seed phrase.
 2. Create an agent and set its budget: how much, per what period, optionally pinned to a recipient.
-3. Connect the agent: copy the connect command from the dashboard into the agent's environment. The agent can now pay — only within the rules you set. Pause, tighten, or revoke at any time.
+3. Connect the agent: copy the connector command from the dashboard into the agent's environment. The agent can now pay — only within the rules you set. Pause, tighten, or revoke at any time.
 
 ## What Haven is not
 

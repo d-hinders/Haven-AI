@@ -108,4 +108,22 @@ describe('SignupPage', () => {
     expect(screen.getByText('Enter a valid email address.')).toBeInTheDocument()
     expect(mockSignup).not.toHaveBeenCalled()
   })
+
+  /**
+   * #2524: the hand-off line an agent needs on this page. The line's own
+   * behaviour is covered in
+   * `components/onboarding/__tests__/AgentHandoffNote.test.tsx`; what this
+   * asserts is that the page still MOUNTS it, which is the part a refactor of
+   * this file can silently drop.
+   */
+  it('carries the agent hand-off line (#2524)', async () => {
+    render(<SignupPage />)
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(`${window.location.origin}/signup`).closest('a'),
+      ).toHaveAttribute('href', `${window.location.origin}/signup`),
+    )
+    expect(screen.getByText(/Setting up for someone else, or an AI agent\?/)).toBeInTheDocument()
+  })
 })

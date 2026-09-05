@@ -156,7 +156,7 @@ export async function updateCurrencyPreference(
 export const FIND_USER_ID_BY_EMAIL_SQL = 'SELECT id FROM users WHERE email = $1'
 
 export const INSERT_USER_SQL =
-  'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email, created_at'
+  'INSERT INTO users (name, email, password_hash, via) VALUES ($1, $2, $3, $4) RETURNING id, name, email, created_at'
 
 export const FIND_USER_CREDENTIALS_BY_EMAIL_SQL =
   'SELECT id, name, email, password_hash, wallet_address, safe_address, currency_preference FROM users WHERE email = $1'
@@ -202,9 +202,20 @@ export async function insertUser(
   name: string,
   normalisedEmail: string,
   passwordHash: string,
+  /**
+   * Agent hand-off marker (#2522): `'agent'` when this signup came from a link
+   * an agent pasted, else null. Required rather than optional so a new caller
+   * has to decide; passing `null` is the ordinary answer.
+   */
+  via: string | null,
   db: Executor = pool,
 ): Promise<NewUserRow> {
-  const result = await db.query<NewUserRow>(INSERT_USER_SQL, [name, normalisedEmail, passwordHash])
+  const result = await db.query<NewUserRow>(INSERT_USER_SQL, [
+    name,
+    normalisedEmail,
+    passwordHash,
+    via,
+  ])
   return result.rows[0]
 }
 

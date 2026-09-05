@@ -2,7 +2,9 @@
 
 import { ChevronRight, CircleAlert, Clock, LoaderCircle, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { useCallback, useMemo, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
+import { setupIdFromSearch } from '@/lib/discovery'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
 import ConnectAgentModal from './ConnectAgentModal'
 import EditAgentModal from './EditAgentModal'
@@ -36,9 +38,49 @@ export default function AgentPanel() {
     refetchAgents,
   } = panel
 
+  /**
+   * `/agents?setup=<id>` — the budget-approval hand-off link (#2522).
+   *
+   * An agent cannot approve a budget; a human must. So the agent pastes this
+   * link and the human lands on the exact step for that setup instead of being
+   * told to "go to Haven and approve the budget". A foreign or unknown id is
+   * not special-cased here: the modal opens, `GET /agent-connection-setups/:id`
+   * answers 404 for a setup that is not this owner's, and the flow renders its
+   * not-found state.
+   *
+   * `setup` is a SHARED parameter: `?setup=first` already means "auto-open the
+   * connect flow for this user's first agent" (#352). The two do not collide —
+   * that handler tests for the literal `'first'` and `parseSetupId` accepts
+   * only a UUID — and `lib/__tests__/handoff-links.test.ts` pins both halves so a
+   * future loosening of either shape fails a test rather than a user.
+   */
+  const resumeSetupId = useMemo(
+    () => (typeof window === 'undefined' ? null : setupIdFromSearch(window.location.search)),
+    [],
+  )
+  const [resumeDismissed, setResumeDismissed] = useState(false)
+  const activeResumeSetupId = resumeDismissed ? null : resumeSetupId
+
+  const closeConnectModal = useCallback(() => {
+    panel.setConnectAgentOpen(false)
+    if (!resumeSetupId) return
+    // `resumeDismissed` is what actually keeps the modal shut; the URL tidy is
+    // cosmetic, so it uses `history.replaceState` rather than the Next router.
+    // A router navigation would re-render the page to change nothing, and
+    // reaching for `useRouter` here would make every AgentPanel test mount an
+    // app router to render a panel that does not navigate.
+    setResumeDismissed(true)
+    try {
+      window.history.replaceState(null, '', '/agents')
+    } catch {
+      // A URL that stays tidy is not worth a thrown render.
+    }
+  }, [panel, resumeSetupId])
+
 
   if (!safeAddress) {
-    return (
+  
+  return (
       <EmptyState
         icon={<BotIcon size={20} />}
         title="Create a Haven account to manage agents"
@@ -296,12 +338,13 @@ export default function AgentPanel() {
       )}
 
       <ConnectAgentModal
-        open={panel.connectAgentOpen}
-        onClose={() => panel.setConnectAgentOpen(false)}
+        open={panel.connectAgentOpen || Boolean(activeResumeSetupId)}
+        onClose={closeConnectModal}
         starterAllowance={panel.firstAgentSetup}
         safeAddress={safeAddress}
         safeId={panel.activeSafeId}
         onSetupUpdated={panel.handleSetupUpdated}
+        resumeSetupId={activeResumeSetupId}
       />
 
       {/* Edit agent modal */}

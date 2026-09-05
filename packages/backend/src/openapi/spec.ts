@@ -5940,6 +5940,12 @@ export const openapiSpec = {
             description:
               'Discovery-source slug for connect attribution (#2302) — e.g. 402-page, registry, template, skill. Sanitized server-side; a malformed value is stored as null rather than refused.',
           },
+          via: {
+            type: 'string',
+            enum: ['agent'],
+            description:
+              'Agent hand-off marker (#2522). Present when the link the user followed was pasted by an agent. An ENUM, not a slug like `source`: it answers one closed question and the agent-driven funnel is segmented on it, so a free-text field would let a link author write anything into that metric. Sanitized server-side; any other value is stored as null rather than refused.',
+          },
         },
         additionalProperties: false,
       },
@@ -5953,6 +5959,7 @@ export const openapiSpec = {
           'connector_command',
           'connector_package',
           'setup_prompt',
+          'approval_url',
         ],
         properties: {
           setup_id: uuid,
@@ -5983,6 +5990,19 @@ export const openapiSpec = {
            */
           connector_package: { type: 'string', pattern: '^@haven_ai/connect@[a-z][a-z0-9-]{0,31}$' },
           setup_prompt: { type: 'string' },
+          /**
+           * #2522: the link that lands a human on this setup's budget
+           * approval. ABSOLUTE, against the same-origin rule the discovery
+           * artifacts follow (#2520), because the connector prints it into a
+           * terminal and an agent pastes it into a chat — a bare path resolves
+           * against nothing there. The host is `FRONTEND_URL`, never a literal.
+           *
+           * REQUIRED for the same reason `connector_package` is: the backend
+           * always emits it, and an optional field pushes a URL-assembling
+           * fallback back into every client, which is the restatement this
+           * field exists to remove.
+           */
+          approval_url: { type: 'string', format: 'uri' },
         },
         additionalProperties: false,
       },
@@ -6092,10 +6112,13 @@ export const openapiSpec = {
           'connector_package',
           'install_status',
           'approval',
+          'approval_url',
         ],
         properties: {
           setup_id: uuid,
           agent_id: { anyOf: [uuid, { type: 'null' }] },
+          /** #2522: identical to the create response's, and stable across polls. */
+          approval_url: { type: 'string', format: 'uri' },
           status: { $ref: '#/components/schemas/AgentConnectionSetupState' },
           expires_at: isoDateTime,
           agent: {

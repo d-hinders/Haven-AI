@@ -8,6 +8,7 @@ Haven connects agents through MCP (hosted, keyless) plus a local signer. Payment
 
 ## Start here
 
+- [You are an AI agent and your user has no Haven account yet](/for-agents.md): the sequence, which steps are the human's, and exactly what to say at each hand-off
 - [Your agent hit a 402 — how to pay it](/402.md): what HTTP 402 means and how an agent pays it with a budget, not a wallet
 - [Dashboard](/): create an account (one passkey prompt), create an agent, set its budget, get the connect command
 

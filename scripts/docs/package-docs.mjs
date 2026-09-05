@@ -208,7 +208,18 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/cli/src/**'],
-    'last-verified': '2026-06-26',
+    // #2525: re-verified and EDITED — a new § *For agents and scripts* records
+    // the `--json` contract (one JSON value on stdout, prose on stderr, on every
+    // command including refusals), the six exit codes with what a caller should
+    // do about each, why a 401 resolves to 3 rather than 4, and `haven guide`.
+    // Install, Config and Custody were re-read against the code and are
+    // unchanged. Usage was EDITED — two lines: `haven guide`, and a trailing
+    // comment on `haven whoami` naming what it now returns. (The first draft of
+    // this note said Usage was "re-read and unchanged", which was false of the
+    // one section it had edited — haven-doc-reviewer @ 514a2cc5.) The opening
+    // "companion to the dashboard" framing is #2536's to rewrite, not this
+    // issue's. Scope: those sections and this date.
+    'last-verified': '2026-09-04',
   },
   {
     doc: 'packages/mcp-server/README.md',
@@ -289,6 +300,12 @@ export const EXEMPT_PACKAGE_DOCS = {
     'deployed to (GTM Agent Discovery ' +
     'track). It mirrors packages/frontend/public/402/index.html, which carries the sync note; ' +
     'its audience is a model mid-task, so front-matter would be noise it pays tokens for.',
+  'packages/frontend/public/for-agents.md':
+    'Agent-readable public artifact, served verbatim at /for-agents.md (#2523, epic #2519). It is '+
+    'NOT hand-maintained: the canonical string is `HAVEN_AGENT_RUNBOOK_MD` in '+
+    '`packages/sdk/src/agent-guidance.ts`, and a byte-equality test pins this file to it, so the '+
+    'thing that catches drift is that test rather than a doc gate. Its audience is a model '+
+    'mid-task, so front-matter would be tokens it pays for and cannot use.',
   'packages/frontend/src/lib/loop-harness/README.md':
     'Rationale note for a differential-testing harness. The harness IS its own proof — if the ' +
     'invariant it describes stops holding, the harness fails, not the prose.',

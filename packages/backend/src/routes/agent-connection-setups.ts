@@ -1154,7 +1154,7 @@ function buildSetupPrompt(command: string, apiUrl: string): string {
   return [
     'Please connect this workspace to Haven.',
     '',
-    `I approve running this exact Haven setup command. It may ${joinApprovedActions(approvedActions)}.`,
+    `I approve running this exact Haven connector command. It may ${joinApprovedActions(approvedActions)}.`,
     '',
     'Run this exact command:',
     '',

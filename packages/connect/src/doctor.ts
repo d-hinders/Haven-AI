@@ -708,7 +708,7 @@ async function checksForAgent(
         label: 'Signer stdio handshake',
         ok: false,
         detail: 'The local-tools consent is not acknowledged, so the signer refuses to start (by design).',
-        repair: `Run: ${RERUN} --ack-local-tools --setup <token>  (or re-run your original setup command with --ack-local-tools).`,
+        repair: `Run: ${RERUN} --ack-local-tools --setup <token>  (or re-run your original connector command with --ack-local-tools).`,
       })
     } else {
       const probe: LocalMcpProbeResult = await (deps.probeSignerTools ?? probeLocalMcpTools)(
@@ -1167,7 +1167,7 @@ export async function runRepair(
           ok: false,
           messages: [
             `The config at ${configPath} is the LOCAL-stdio topology (--local). Repair currently rewrites only the hosted+signer shape and will not touch it.`,
-            'Re-run your original setup command (with --local) to repair a local-stdio install.',
+            'Re-run your original connector command (with --local) to repair a local-stdio install.',
           ],
         }
       }

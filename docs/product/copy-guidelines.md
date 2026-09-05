@@ -476,17 +476,32 @@ artifact that was already self-consistent.
 | The agent's API key, `sk_agent_…`, written to `~/.haven` | **agent credential** | `sk_live_…` (a different product's shape and never Haven's), agent key, API token |
 | The agent's signing key, made locally and never sent anywhere | **delegate key** | signing key (ambiguous — the user also signs), private key |
 
-**Scope, stated because the table above reads wider than it is enforced
+**Where this is enforced, and where it is only written
 ([#2576](https://github.com/d-hinders/Haven-AI/issues/2576)).** #2533 swept the
-eleven surfaces it named: the repo README, the five package READMEs,
-`llms.txt`, `llms-full.txt`, `402.md`, `402/index.html` and `for-agents.md`.
-Occurrences of the retired terms remain outside it — the dashboard connect
-modal, the connector's own printed strings and the operations docs. The figure
-is **54 occurrences across 23 files**, and the command is inline rather than in
-the follow-up issue so the number is re-derivable from this page alone (a count
-whose scope lives elsewhere is a count nobody can check — that was a
-`haven-reviewer` finding on this PR, which reproduced 48/23 under different
-exclusions and could not tell whether the difference was drift or curation):
+eleven artifacts it named; #2576 swept the rest of the class — the dashboard
+connect modal, the connector's own printed strings, the setup prompt's consent
+line and the operations docs. The scope caveat that stood here is gone because
+the sweep caught up with the table, not because a checker now watches every
+surface. Two of the four rows have an instrument; two do not:
+
+- **`connect command` / `setup command` are blocked** by the frontend copy lint
+  (`scripts/frontend-copy-lint.mjs`, `BANNED`), which is a required check. It
+  reads `src/app`, `src/components` and the named prose files in `SCAN_FILES`
+  — so the connect modal and both copies of the downloadable skill are covered,
+  and `src/hooks`, `packages/connect/src`, `packages/backend/src` and every
+  `*.test.ts` are **not**: `walk()` skips test files by name and the scan trees
+  are frontend-only.
+- **`setup prompt`, `agent credential` and `delegate key` have no checker.** A
+  literal matcher cannot catch the absence of a term, and the retired spellings
+  for those rows (`agent key`, `signing key`, `private key`) have legitimate
+  uses in the same files. Human review is the control, as it is for the
+  attribution rules below.
+
+Re-derive the class at any head with the command the sweep used, which is
+inline so the count can be checked from this page (a count whose scope lives
+elsewhere is a count nobody can check — a `haven-reviewer` finding on the #2533
+pull request, which reproduced 48/23 against the author's 54/23 under different
+exclusions and could not tell drift from curation):
 
 ```
 grep -rn "setup command\|connect command" \
@@ -495,11 +510,14 @@ grep -rn "setup command\|connect command" \
   --include=*.ts --include=*.tsx --include=*.md
 ```
 
-Positive control for that reader: `grep -rn "connector command" packages/frontend/public README.md` returns 9, so a
-zero above would mean the sweep landed rather than that the command is broken. They are not oversights; they are outside that
-issue's stated file list, and two of them need a judgement rather than a rename
-(the connector refuses a consumed setup *token*, where "setup" may be the right
-word). Treat the table as the destination and #2576 as the remaining distance.
+It returned 54 across 23 files before #2576 and **0** after. Positive control
+for that reader: `grep -rn "connector command" packages/frontend/public README.md`
+returns 9, so a zero above means the sweep landed rather than that the command
+is broken. Note what the command itself cannot see — it does not read
+`packages/backend/src`, where the setup prompt's own consent line lived, or
+`docs/**` outside those two folders. Dated records keep the old wording on
+purpose: the CASP changelog shards, `docs/archive/**` and the cold-test report
+are evidence of what was said at the time.
 
 Two boundaries this table does **not** cross:
 

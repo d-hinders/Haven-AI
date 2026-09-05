@@ -506,7 +506,7 @@ async function configureClaudeCode(
       restartRequired: true,
       messages: [
         `Could not update Claude Code MCP config: ${err instanceof Error ? err.message : String(err)}`,
-        'Install Claude Code or rerun the Haven setup command inside a Claude Code terminal.',
+        'Install Claude Code or rerun the Haven connector command inside a Claude Code terminal.',
       ],
       errorCode: 'claude_code_config_failed',
     }
@@ -617,7 +617,7 @@ async function configureClaudeCodeHosted(
       restartRequired: true,
       messages: [
         `Could not update Claude Code MCP config: ${err instanceof Error ? err.message : String(err)}`,
-        'Install Claude Code or rerun the Haven setup command inside a Claude Code terminal.',
+        'Install Claude Code or rerun the Haven connector command inside a Claude Code terminal.',
       ],
       errorCode: 'claude_code_config_failed',
     }

@@ -22,7 +22,7 @@ touches mainnet funds.
 ## Act 0 — Pre-demo setup (do this the day before)
 
 1. **Agent + signer connected** (the production default topology):
-   run the setup command the dashboard hands you on the demo laptop — since
+   run the connector command the dashboard hands you on the demo laptop — since
    #2422 the connector package it names is per-deployment (its
    `connector_package` field), so copy it rather than pinning a channel by hand;
    this runbook runs against **dev**, where that need not be `@alpha` — hosted MCP + local

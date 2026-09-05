@@ -216,7 +216,7 @@ Isolation rules that are non-negotiable for a payments product:
   isolating testnet from mainnet keys, though the deployed posture shares one
   key (see above).
 - **Connector channel** — `HAVEN_CONNECTOR_CHANNEL` on the dev **backend**
-  selects the npm dist-tag the dashboard's setup command hands out (#2422, epic
+  selects the npm dist-tag the dashboard's connector command hands out (#2422, epic
   #2420), and the same variable on the dev **hosted MCP** selects the tag its
   own "re-run the connector" hints name (#2423). Unset or empty means `alpha`;
   production leaves it unset, so the production handout is untouched by the

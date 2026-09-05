@@ -81,7 +81,7 @@ for the wire contract and the custody invariant.
 1. Railway → Service → **Networking → Custom Domain** → add `mcp.<your-domain>`.
 2. Add the displayed `CNAME` record at your DNS provider.
 3. Wait for Railway to issue a cert (TLS automatic).
-4. Update the frontend connect command generator to point at the custom domain.
+4. Update the frontend connector command generator to point at the custom domain.
 
 ## Local development
 

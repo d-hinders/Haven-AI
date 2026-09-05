@@ -44,7 +44,7 @@ npx -y @haven_ai/connect@<channel> --setup hv_setup_... --api https://api.haven.
 ```
 
 `<channel>`, `hv_setup_...` and `https://api.haven.example` are all
-placeholders — production hands out `@alpha`. Run the setup command your dashboard hands you with
+placeholders — production hands out `@alpha`. Run the connector command your dashboard hands you with
 `--ack-local-tools --local` appended: since #2422 the package in that command
 is per-deployment — the backend's setup response names it in
 `connector_package` — and a connector pinned by hand to another channel

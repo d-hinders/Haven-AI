@@ -206,7 +206,7 @@ check on in-flight payments. Do not poll in a tight loop.
 - Never ask the user for private keys. Signing happens only in the local Haven
   signer; the hosted Haven tools never receive the signing key. If a tool
   reports a missing or invalid credential, tell the user to re-run the Haven
-  setup command.
+  connector command.
 
 ## Failure handling
 

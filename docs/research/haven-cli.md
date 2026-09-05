@@ -45,7 +45,7 @@ should be scriptable (`--json`) and reuse the existing SDK + backend, not fork
 logic.
 
 Audience (recommended primary): **power users / developers** who live in the
-terminal and run agents there already (they ran the connect command from a
+terminal and run agents there already (they ran the connector command from a
 shell). The
 dashboard stays the home for first-time onboarding and anything needing a
 browser wallet.

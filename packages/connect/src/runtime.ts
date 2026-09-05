@@ -405,7 +405,7 @@ async function executeConnect(
   const generateKey = deps.generateKey ?? generateDelegateKey
   const generateLocalApiKey = deps.generateApiKey ?? generateAgentApiKey
   // #1672: detection-first runtime resolution, BEFORE any side effect — the
-  // setup command no longer carries --runtime, and a hint that contradicts a
+  // connector command no longer carries --runtime, and a hint that contradicts a
   // confident detection must not write another client's config. Refusing here
   // keeps the #1161 discipline: no half-created agent, no burned setup token.
   //
@@ -1048,7 +1048,7 @@ async function resolveWiringCollision(
         'wiring_collision_declined',
         `Setup stopped at your request: this machine is already wired to ${supersededIds(collision)} and you chose ` +
           'neither to replace that wiring nor to install alongside it. Nothing was written: no agent was created, ' +
-          'no credentials were stored, and the Haven setup token is still unused. Run the setup command again with ' +
+          'no credentials were stored, and the Haven setup token is still unused. Run the connector command again with ' +
           `--replace to re-point haven / haven-signer at the new agent, or with --name <slug> (e.g. --name ${collision.suggestedServerName}) ` +
           'to install alongside.',
         'rerun_connect_with_replace_or_name',

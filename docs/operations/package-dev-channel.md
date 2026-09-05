@@ -193,7 +193,7 @@ below), and deploys from `dev` like the backend.
 For iterating on the signer, SDK or local MCP faster than a merge cycle, the
 connector accepts a **local runtime-spec override** (#2424): set
 `HAVEN_SIGNER_SPEC`, `HAVEN_SDK_SPEC` or `HAVEN_MCP_SPEC` in the shell that runs
-the setup command to anything `npm install` accepts for that package — a
+the connector command to anything `npm install` accepts for that package — a
 checkout (`file:/abs/path/to/packages/signer`), an `npm pack` tarball, or an
 explicit version — and setup, `--doctor --repair` and `--rekey-finish` install
 *that* instead of the pinned manifest sibling. The dashboard's command is

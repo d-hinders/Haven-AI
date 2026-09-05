@@ -379,7 +379,7 @@ the `ConnectError` vocabulary rather than the regex ladder.
 | `runtime_force_unrecognized` | `--runtime-force` names something unknown | Re-run with a valid name |
 | `runtime_no_installed_clients` | Interactive terminal, but no client Haven can configure is installed | Re-run with `--runtime <name>`, or `other` |
 | `runtime_prompt_aborted` | Ctrl-C / EOF at the prompt, or three invalid answers | Re-run and choose, or pass `--runtime` to skip the prompt |
-| `runtime_config_unreadable` | The chosen client's config file exists but is not parseable JSON/YAML | Fix (or move aside) the named file, then `--doctor --repair --runtime <name>` — **not** the setup command |
+| `runtime_config_unreadable` | The chosen client's config file exists but is not parseable JSON/YAML | Fix (or move aside) the named file, then `--doctor --repair --runtime <name>` — **not** the connector command |
 | `wiring_collision` ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)) | A **bare** (no `--name`) setup on a machine whose credential root already holds a bare-pair directory with a usable key — what `--doctor` calls `wired` or `superseded` — and no interactive terminal to ask | **Relay to the human**, who chooses: re-run with `--replace` (re-point `haven` / `haven-signer`, retire the previous directory locally) or with `--name <slug>` (install alongside; `error.suggested_name` proposes one). An agent following the setup prompt must not add either flag itself |
 | `wiring_collision_declined` | The same collision at an interactive terminal, and the user chose neither | Re-run with `--replace` or `--name <slug>` |
 
@@ -418,7 +418,7 @@ identically on every re-run until the file itself is fixed. Parsing happens
 **before** the write, so the file is left byte-identical. Codex keeps its own
 older `codex_config_invalid` for the same class.
 
-Its recovery is `--repair`, **not** a re-run of the setup command, and the
+Its recovery is `--repair`, **not** a re-run of the connector command, and the
 reason is the ordering: this failure lands after `registerSetup` consumed the
 one-shot setup token, so the pasted command now 409s at `/resolve`, and
 starting a fresh connection instead would mint a SECOND agent
@@ -427,7 +427,7 @@ rewrites exactly this config from the credentials already on disk — no token,
 no new agent — so it is what both the connector's message and the dashboard's
 status helper point at.
 
-Accordingly, the dashboard's generated setup command carries **no `--runtime`
+Accordingly, the dashboard's generated connector command carries **no `--runtime`
 flag at all** ([#1720](https://github.com/d-hinders/Haven-AI/issues/1720)).
 Every user gets the identical command; the connector resolves the runtime with
 the ladder above and reports it back through the setup status, and the
@@ -448,7 +448,7 @@ must stay actionable under `--json` (below).
 The dashboard asks nothing about the runtime. It never had a way to answer:
 a browser sees no environment markers, no installed clients and no live agent,
 while the connector sees all three. So the question moved to the component that
-can answer it, and every user now gets a **byte-identical** setup command.
+can answer it, and every user now gets a **byte-identical** connector command.
 
 `#1682` had made the picker a flat list of nine product names, replacing
 `#1672`'s single collapsed "AI agent (Claude Code, Codex, Cowork)" row. That
@@ -498,7 +498,7 @@ know still refuses before any side effect — since #1719 as
 `runtime_unrecognized`, naming the values it does know.
 
 Pre-run, the dashboard knows nothing about the environment, so the "your app
-may ask you to approve running the setup command" heads-up shows for everyone
+may ask you to approve running the connector command" heads-up shows for everyone
 during the waiting state, sharpening to app-specific wording once the
 connector's resolve reports the detected runtime. `--doctor`/`--repair` still
 require an explicit `--runtime` (they examine a stored config, which is a
@@ -1194,7 +1194,7 @@ what each server's instructions say and why they differ in length.
   message names your version and how to upgrade. Upgrade Node and rerun setup.
   If setup succeeded but the signer now refuses to start, the runtime launching
   it is on an older Node than the shell you upgraded.
-- **Local MCP runtime install failed:** rerun the setup command. It will reuse
+- **Local MCP runtime install failed:** rerun the connector command. It will reuse
   local credentials and install the pinned runtime into `~/.haven/mcp-runtime`,
   falling back from the user's default npm cache to `~/.haven/npm-cache` if the
   global cache is unusable.
@@ -1205,7 +1205,7 @@ what each server's instructions say and why they differ in length.
   install at its 120s `startup_timeout_sec`, leaving corrupted `_npx` dirs).
   There is no silent npx fallback anymore. The install budget is 10 minutes
   with console heartbeats; on failure, address the cause (network, npm cache)
-  and rerun the setup command your backend hands out (its `connector_package`;
+  and rerun the connector command your backend hands out (its `connector_package`;
   `@alpha` in production — see the version-skew section above, #2422).
 - **Claude Code does not show Haven:** run `claude mcp get haven` and confirm
   it points at the wrapper path. If `add-json` is unavailable, the connector

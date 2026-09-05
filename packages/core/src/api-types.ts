@@ -28,6 +28,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/": {
     "/discovery": {
         parameters: {
             query?: never;
@@ -36,6 +37,10 @@ export type paths = {
             cookie?: never;
         };
         /**
+         * What this service is, and where its machine-readable contract lives.
+         * @description Unauthenticated root document (#2530). An agent handed only a backend URL had nothing to read and had to guess the spec path. Deliberately thin and non-sensitive: names, paths, and which credential each door wants — no version or build identifier, which would fingerprint the deployment and buy an agent nothing.
+         */
+        get: operations["getApiRoot"];
          * Public, read-only facts an agent client needs to configure itself.
          * @description The environment as data (#2531): which connector package this deployment hands out, which hosted MCP it points at, which chains it serves, and where its spec is. Every value is already public elsewhere — this route re-serves them together so the frontend capability manifest does not restate the backend's env logic. Never per-user or per-agent data, no relayer address, nothing from /health.
          */
@@ -2455,6 +2460,28 @@ export type components = {
          * @enum {string}
          */
         AgentPaymentRail: "direct" | "x402" | "mpp" | "mpp_demo" | "mpp_crypto" | "stripe_deposit" | "spt";
+        ApiRootDocument: {
+            /** @enum {string} */
+            name: "haven-api";
+            description?: string;
+            /**
+             * Format: uri
+             * @description Absolute URL of this document, derived from the request — so the dev backend names the dev backend and a request through the frontend proxy names the proxy.
+             */
+            openapi: string;
+            /**
+             * Format: uri
+             * @description Agent-readable product docs.
+             */
+            docs?: string;
+            auth: {
+                /** @description How an agent credential is presented. */
+                agent: string;
+                /** @description How an owner session is obtained. */
+                owner: string;
+            };
+            /** Format: uri */
+            health: string;
         DiscoveryDocument: {
             /** @description Null when this deployment has none configured — a discovery document that refuses is less useful than one that says so, so the connect handout's configuration error is reported here rather than propagated as a 500. */
             hosted_mcp_url: string | null;
@@ -3732,6 +3759,7 @@ export interface operations {
             };
         };
     };
+    getApiRoot: {
     getDiscovery: {
         parameters: {
             query?: never;
@@ -3741,12 +3769,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The API root document. */
             /** @description Public deployment facts. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/json": components["schemas"]["ApiRootDocument"];
                     "application/json": components["schemas"]["DiscoveryDocument"];
                 };
             };

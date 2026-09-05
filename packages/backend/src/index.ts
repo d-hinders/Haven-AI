@@ -1,5 +1,6 @@
 // config.ts loads dotenv and validates required env vars — import first
 import { config } from './config.js'
+import { apiBaseUrl } from './domain/request-origin.js'
 import { httpErrorHandler } from './infra/http-error-handler.js'
 
 import Fastify, { type FastifyRequest } from 'fastify'
@@ -176,6 +177,43 @@ registerHealthRoutes(app, {
   getPassportStatus: passportReadiness,
   trustProxyHops: config.trustProxyHops,
   opsToken: config.opsToken,
+})
+
+/**
+ * API root document (#2530).
+ *
+ * `GET /` answered 404, so an agent handed only a backend URL had nothing to
+ * read and no way to find the spec — the 2026-09-04 cold test guessed
+ * `/openapi.json` correctly and a less lucky agent would not. This is the one
+ * unauthenticated document that says what this service is and where its
+ * machine-readable contract lives.
+ *
+ * Deliberately thin and entirely non-sensitive: names, paths, and which
+ * credential each door wants. No version, no environment name, no build
+ * identifier — a service banner that fingerprints the deployment is a gift to
+ * a scanner and buys an agent nothing.
+ *
+ * The origin is derived from the request, not from a literal, so the dev
+ * backend describes the dev backend.
+ */
+app.get('/', async (request) => {
+  const base = apiBaseUrl(request.headers)
+  return {
+    name: 'haven-api',
+    description:
+      'Haven is the buy-side control layer for AI-agent payments: an agent spends within an ' +
+      'owner-set, on-chain-enforced budget. Haven never holds funds and the agent never holds a key.',
+    openapi: `${base}/openapi.json`,
+    // #2523 (B1) publishes `/for-agents.md`, the runbook written for the agent
+    // rather than the owner. Until it exists this points at `llms.txt`, which
+    // does — naming a path that 404s is the defect #2520 spent a PR removing.
+    docs: `${config.frontendUrl.replace(/\/+$/, '')}/llms.txt`,
+    auth: {
+      agent: 'Bearer sk_agent_… (or X-API-Key). Provision with `npx @haven_ai/connect@alpha`.',
+      owner: 'Dashboard session, or `haven login`.',
+    },
+    health: `${base}/health`,
+  }
 })
 
 // Public chain config (#679): which chains this environment serves account

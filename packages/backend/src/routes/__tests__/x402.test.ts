@@ -222,7 +222,13 @@ describe('x402 routes', () => {
     })
 
     expect(response.statusCode).toBe(401)
-    expect(response.json()).toEqual({ error: 'Missing or invalid API key' })
+    // #2530: `error` is unchanged; a `hint` was ADDED naming which credential
+    // this route wants. Asserted as "the error is exactly this, and a hint
+    // exists" rather than by pinning the hint's wording here — the wording is
+    // owned by `backend-discoverability.test.ts`, and restating it in every
+    // route test is how one edit turns into a dozen failures.
+    expect(response.json().error).toBe('Missing or invalid API key')
+    expect(typeof response.json().hint).toBe('string')
   })
 
   it('leaves the retired Haven-as-merchant resource surface as ordinary 404s (#2257)', async () => {

@@ -602,7 +602,7 @@ async function writeJsonRuntimeConfig(
       messages: unreadable
         ? [
             `Could not update ${configTargetLabel(input.runtime)}: ${err.message}.`,
-            `Nothing was written to ${err.configPath}. Fix the JSON there (or move the file aside), then run \`${REPAIR_COMMAND_PREFIX} ${input.runtime}\` to write the Haven entries from the credentials already stored on this machine. Do not re-run the setup command: its token is already used.`,
+            `Nothing was written to ${err.configPath}. Fix the JSON there (or move the file aside), then run \`${REPAIR_COMMAND_PREFIX} ${input.runtime}\` to write the Haven entries from the credentials already stored on this machine. Do not re-run the connector command: its setup token is already used.`,
           ]
         : [`Could not update ${configTargetLabel(input.runtime)}: ${err instanceof Error ? err.message : String(err)}`],
       errorCode: unreadable ? 'runtime_config_unreadable' : 'runtime_config_write_failed',
@@ -670,7 +670,7 @@ async function writeHermesConfig(input: RuntimeConfigInput, deps: RuntimeConfigW
       messages: unreadable
         ? [
             `Could not update Hermes Agent config: ${err.message}.`,
-            `Nothing was written to ${err.configPath}. Fix the YAML there (or move the file aside), then run \`${REPAIR_COMMAND_PREFIX} hermes\` to write the Haven entries from the credentials already stored on this machine. Do not re-run the setup command: its token is already used.`,
+            `Nothing was written to ${err.configPath}. Fix the YAML there (or move the file aside), then run \`${REPAIR_COMMAND_PREFIX} hermes\` to write the Haven entries from the credentials already stored on this machine. Do not re-run the connector command: its setup token is already used.`,
           ]
         : [recoveryIncomplete
           ? 'Could not update Hermes Agent config. Recovery did not complete; inspect the Hermes configuration before retrying.'

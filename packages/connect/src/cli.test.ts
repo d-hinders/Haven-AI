@@ -48,6 +48,53 @@ describe('structured Connect CLI output', () => {
   })
 })
 
+describe('wiring-collision refusal under --json (#2551)', () => {
+  // The refusal is a RELAY instruction: the ids the human needs and the
+  // proposed --name ride structurally, because --json discards the prose.
+  it('carries superseded_agent_ids and suggested_name in the record, mirrors the message to stderr, exits 1', async () => {
+    const stdout: string[] = []
+    const stderr: string[] = []
+    const spy = vi.spyOn(runtime, 'runConnect').mockRejectedValue(
+      new ConnectError(
+        'wiring_collision',
+        'already wired to agent-old — relay this to your user',
+        'relay_wiring_collision_to_user',
+        { supersededAgentIds: ['agent-old'], suggestedServerName: 'payment-agent' },
+      ),
+    )
+    try {
+      const exitCode = await runCli(
+        ['--setup', 'hv_setup_x', '--api', 'https://api.haven.example', '--json'],
+        { stdout: (message) => stdout.push(message), stderr: (message) => stderr.push(message) },
+      )
+      expect(exitCode).toBe(1)
+      expect(stdout).toHaveLength(1)
+      expect(JSON.parse(stdout[0])).toMatchObject({
+        outcome: 'failed',
+        error: {
+          code: 'wiring_collision',
+          next_action: 'relay_wiring_collision_to_user',
+          superseded_agent_ids: ['agent-old'],
+          suggested_name: 'payment-agent',
+        },
+      })
+      expect(stderr.join('')).toContain('relay this to your user')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('a parse-time --replace/--name contradiction is one JSON refusal on stdout', async () => {
+    const stdout: string[] = []
+    const exitCode = await runCli(
+      ['--setup', 'hv_setup_x', '--replace', '--name', 'ops', '--json'],
+      { stdout: (message) => stdout.push(message), stderr: () => undefined },
+    )
+    expect(exitCode).toBe(1)
+    expect(JSON.parse(stdout[0])).toMatchObject({ outcome: 'failed', error: { code: 'connect_failed' } })
+  })
+})
+
 describe('--json wiring for the approval wait (#1377 D)', () => {
   // The one-line pass-through the review flagged as untested: flipping this
   // boolean would make automation runs block for the full 3-minute bound.
@@ -67,6 +114,34 @@ describe('--json wiring for the approval wait (#1377 D)', () => {
     // #2484: prose stays UNDEFINED so runConnect's stdout-TTY narration gate
     // decides (a non-TTY prose run skips the wait; a real terminal waits).
     expect(seen).toEqual([false, undefined])
+  })
+})
+
+describe('--json wiring for run_mode (#2528)', () => {
+  // haven-reviewer, non-blocking finding on #2528: the two sibling
+  // pass-throughs above (`waitForApproval`, `interactive`) each have a test
+  // pinning the CLI flag to the option, and `runMode` did not — every other
+  // run_mode test calls `runConnect` directly with an explicit option and
+  // never goes through this ternary, so an inverted one would have shipped
+  // silently. The blast radius is telemetry rather than authority, which is
+  // why it is a gap and not a defect; it is still the kind of line that is
+  // only ever wrong in one direction and never noticed.
+  it('reports run_mode json under --json and prose without it', async () => {
+    const seen: Array<string | undefined> = []
+    const spy = vi.spyOn(runtime, 'runConnect').mockImplementation(async (options) => {
+      seen.push(options.runMode)
+      return { outcome: { schema_version: 1, outcome: 'complete' } } as never
+    })
+    try {
+      const io = { stdout: () => undefined, stderr: () => undefined }
+      await runCli(['--setup', 'hv_setup_x', '--api', 'https://api.haven.example', '--json'], io)
+      await runCli(['--setup', 'hv_setup_x', '--api', 'https://api.haven.example'], io)
+    } finally {
+      spy.mockRestore()
+    }
+    // Both arms asserted in one expectation: a test that only pinned the
+    // --json arm would pass against a ternary hard-coded to 'json'.
+    expect(seen).toEqual(['json', 'prose'])
   })
 })
 

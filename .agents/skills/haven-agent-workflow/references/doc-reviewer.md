@@ -48,10 +48,10 @@ A bump records the re-read scope and what was **NOT** re-verified; a stamp witho
 
 ## 7. Chain ceiling (#2477)
 
-`scripts/docs/chain-integrity.mjs` fails a `last-verified` line over `MAX_CHAIN_BYTES` (65,536, measured as `line.length`). Measure any doc you would have bumped, and say when it is near the ceiling; never propose an entry that would exceed it (#2477: `mcp-runtime-compatibility.md` at 63,961 / 65,536).
+`scripts/docs/chain-integrity.mjs` fails a `last-verified` line over `MAX_CHAIN_BYTES` (65,536), measured in **UTF-8 bytes** since [#2562](https://github.com/d-hinders/Haven-AI/issues/2562) — it compared `line.length` (UTF-16 code units) while reporting "bytes" before that, and the two differ by hundreds on a chain dense with em-dashes and arrows. Measure any doc you would have bumped, and say when it is near the ceiling; never propose an entry that would exceed it. Since #2562 a **non-blocking 40 KiB band** also names every governed doc on its way there, on every run — if the doc you are bumping is already warned, say so in your findings rather than adding to it silently.
 
 ```bash
-node -e 'const l=require("fs").readFileSync(process.argv[1],"utf8").split("\n").find(x=>x.startsWith("last-verified:"));console.log(l.length,"of 65536")' <doc>
+node -e 'import("./scripts/docs/chain-integrity.mjs").then(async m=>{const fs=await import("node:fs");const l=m.lastVerifiedLine(fs.readFileSync(process.argv[1],"utf8"));console.log(m.chainLineBytes(l),"of",m.MAX_CHAIN_BYTES,"bytes; band",m.WARN_CHAIN_BYTES)})' <doc>
 ```
 
 ## What NOT to flag

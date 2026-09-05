@@ -283,7 +283,7 @@ function promptAbortedError(reason: string): ConnectError {
   return new ConnectError(
     'runtime_prompt_aborted',
     `Runtime not chosen (${reason}). Nothing was written: no agent was created, no credentials were stored, and the Haven setup token is still unused. ` +
-      'Run the setup command again, or pass --runtime <name> to skip the prompt.',
+      'Run the connector command again, or pass --runtime <name> to skip the prompt.',
     'rerun_connect_and_choose_a_runtime',
   )
 }
@@ -297,7 +297,11 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-function defaultPromptIo(): PromptIo {
+/**
+ * The readline-backed prompt IO, shared with the #2551 wiring-collision prompt
+ * so the two interactive rungs cannot drift on Ctrl-C / EOF handling.
+ */
+export function defaultPromptIo(): PromptIo {
   return {
     write: (text) => process.stdout.write(text),
     question: (query) =>

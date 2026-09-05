@@ -282,7 +282,7 @@ import("./scripts/docs/chain-integrity.mjs").then(async (m) => {
   const fs = await import("node:fs"); const cp = await import("node:child_process")
   const files = cp.execFileSync("git", ["ls-files", "docs/*.md", "docs/**/*.md", "README.md", "CLAUDE.md", "AGENTS.md", "ABOUT_HAVEN.md"]).toString().trim().split("\n")
   const rows = []
-  for (const f of files) { const line = m.lastVerifiedLine(fs.readFileSync(f, "utf8")); if (!line) continue; const a = m.chainAnomalies(line); rows.push({ f, bytes: line.length, pct: (100 * line.length / m.MAX_CHAIN_BYTES).toFixed(1), dups: a.duplicates.length }) }
+  for (const f of files) { const line = m.lastVerifiedLine(fs.readFileSync(f, "utf8")); if (!line) continue; const a = m.chainAnomalies(line); rows.push({ f, bytes: m.chainLineBytes(line), pct: (100 * m.chainLineBytes(line) / m.MAX_CHAIN_BYTES).toFixed(1), dups: a.duplicates.length }) }
   rows.sort((a, b) => b.bytes - a.bytes)
   console.log("docs:", rows.length, "ceiling:", m.MAX_CHAIN_BYTES, "with duplicates:", rows.filter((r) => r.dups).length)
   for (const r of rows.slice(0, 5)) console.log(r.bytes, r.pct + "%", "dups=" + r.dups, r.f)
@@ -292,9 +292,17 @@ import("./scripts/docs/chain-integrity.mjs").then(async (m) => {
 Clean: no line above 80% of `MAX_CHAIN_BYTES` and `with duplicates: 0`.
 Report the top five with their headroom, and every doc carrying duplicates —
 those are latent gate failures waiting for the next editor. State the unit:
-the guard compares `line.length`, i.e. UTF-16 code units of the line without
-its newline, so quote that and not `wc -c` (which counts bytes plus the
-newline and reads 64,231 for the same line). On `893d74f6`: 92 docs;
+since [#2562](https://github.com/d-hinders/Haven-AI/issues/2562) the guard
+compares **UTF-8 bytes** (`chainLineBytes`, i.e. `Buffer.byteLength`) of the
+line without its newline, which is `wc -c` minus one. It compared `line.length`
+— UTF-16 code units — while reporting "bytes" before that, and this recipe said
+so; the two differ by hundreds on a chain dense with em-dashes and arrows.
+#2562 also added a **non-blocking 40 KiB band**: the gate evaluates every
+governed doc on every run and prints the ones over it, so the "which chains are
+large" question now has a standing answer and this scan's job is the part the band does not do:
+duplicates, and the trend. On `893d74f6`: 92 docs;
 `mcp-runtime-compatibility.md` at 63,961 units of 65,536 (97.6%) one merge
 after its #2477 compaction — the doc `release-bump.mjs` re-pins on every
 release; `05-agent-api-openapi.md` carries 31 duplicate entries among 66.
+(Those historical figures are in the old unit, which is why they are anchored
+to a commit.)

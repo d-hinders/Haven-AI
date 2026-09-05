@@ -161,7 +161,7 @@ const data = await fetch(url, {
           <p className="text-[15px] text-[var(--v2-ink-2)] mb-8">
             Rules, limits, and receipts included. Keys optional.
           </p>
-          <Button href="/signup" size="lg" trailingIcon>Get early access</Button>
+          <Button href="/signup" size="lg" trailingIcon>Create your account</Button>
         </div>
       </section>
 

@@ -1,5 +1,6 @@
 // config.ts loads dotenv and validates required env vars — import first
 import { config } from './config.js'
+import { apiBaseUrl } from './domain/request-origin.js'
 import { httpErrorHandler } from './infra/http-error-handler.js'
 
 import Fastify, { type FastifyRequest } from 'fastify'
@@ -15,6 +16,7 @@ import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './infra/relay
 import { runIfLeader, LEADER_LOCK_KEYS } from './platform/leader-lock.js'
 import { SETTLEMENT_SWEEP_INTERVAL_MS } from './modules/x402/index.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './domain/chains.js'
+import discoveryRoutes from './routes/discovery.js'
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
 import balanceRoutes from './routes/balances.js'
@@ -59,6 +61,7 @@ import safeDeployRoutes from './routes/safe-deploy.js'
 import safeExecRoutes from './routes/safe-exec.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
 import openapiRoutes from './routes/openapi.js'
+import { registerHealthRoutes } from './routes/health.js'
 import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import analyticsRoutes from './routes/analytics.js'
@@ -150,6 +153,10 @@ setRateLimitDegradedReporter((reason) => {
 })
 
 await app.register(openapiRoutes)
+// #2531: the public, read-only facts an agent's code needs — the same values
+// the setup handout computes, so a channel or hosted-MCP change propagates to
+// the frontend manifest instead of being restated there.
+await app.register(discoveryRoutes)
 
 // Capture X-Haven-MCP-Tool header and write an agent_tool_invocations row
 // whenever an authenticated agent request advertises an MCP tool name. Must
@@ -164,46 +171,48 @@ registerAgentToolAuditHooks(app)
 registerAgentLastSeenHook(app)
 
 // --- Routes ---
-app.get('/health', async (_request, reply) => {
-  const start = Date.now()
-  // Cached from the hourly relayer scan — never a live RPC read on a probe.
-  const relayer = getRelayerBalanceStatus()
-  // Passport configuration state (#1151). Pure env/config read, no chain or DB
-  // access. Booleans plus the already-published issuer address — never key
-  // material, never the schema UID. Reported on the degraded branch too: a
-  // passport misconfiguration is exactly the thing an operator is looking for
-  // when they curl /health, and losing it because Postgres is slow would repeat
-  // the failure this field exists to end.
-  const passport = passportReadiness()
-  // Trust-proxy state (#1670). The auth rate-limit tier arms only when the
-  // process actually READS a hop count > 0 — and whether it does is invisible
-  // from outside: on the first dev rollout the operator set the variable, the
-  // service kept answering, and 32 probe logins still went unthrottled because
-  // the running process predated the env change. This field ends that class of
-  // guessing. Not secret: the setting is documented in .env.example, and the
-  // hop count reveals topology no more than any traceroute would.
-  const trustProxy = { hops: config.trustProxyHops, authRateLimitArmed: config.trustProxyHops > 0 }
-  try {
-    await pool.query('SELECT 1')
-    const dbLatencyMs = Date.now() - start
-    return {
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      db: { status: 'ok', latencyMs: dbLatencyMs },
-      relayer,
-      passport,
-      trustProxy,
-    }
-  } catch (err) {
-    reply.status(503)
-    return {
-      status: 'degraded',
-      timestamp: new Date().toISOString(),
-      db: { status: 'error', error: err instanceof Error ? err.message : String(err) },
-      relayer,
-      passport,
-      trustProxy,
-    }
+registerHealthRoutes(app, {
+  checkDatabase: () => pool.query('SELECT 1'),
+  getRelayerStatus: getRelayerBalanceStatus,
+  getPassportStatus: passportReadiness,
+  trustProxyHops: config.trustProxyHops,
+  opsToken: config.opsToken,
+})
+
+/**
+ * API root document (#2530).
+ *
+ * `GET /` answered 404, so an agent handed only a backend URL had nothing to
+ * read and no way to find the spec — the 2026-09-04 cold test guessed
+ * `/openapi.json` correctly and a less lucky agent would not. This is the one
+ * unauthenticated document that says what this service is and where its
+ * machine-readable contract lives.
+ *
+ * Deliberately thin and entirely non-sensitive: names, paths, and which
+ * credential each door wants. No version, no environment name, no build
+ * identifier — a service banner that fingerprints the deployment is a gift to
+ * a scanner and buys an agent nothing.
+ *
+ * The origin is derived from the request, not from a literal, so the dev
+ * backend describes the dev backend.
+ */
+app.get('/', async (request) => {
+  const base = apiBaseUrl(request.headers)
+  return {
+    name: 'haven-api',
+    description:
+      'Haven is the buy-side control layer for AI-agent payments: an agent spends within an ' +
+      'owner-set, on-chain-enforced budget. Haven never holds funds and the agent never holds a key.',
+    openapi: `${base}/openapi.json`,
+    // #2523 (B1) publishes `/for-agents.md`, the runbook written for the agent
+    // rather than the owner. Until it exists this points at `llms.txt`, which
+    // does — naming a path that 404s is the defect #2520 spent a PR removing.
+    docs: `${config.frontendUrl.replace(/\/+$/, '')}/llms.txt`,
+    auth: {
+      agent: 'Bearer sk_agent_… (or X-API-Key). Provision with `npx @haven_ai/connect@alpha`.',
+      owner: 'Dashboard session, or `haven login`.',
+    },
+    health: `${base}/health`,
   }
 })
 
@@ -438,9 +447,9 @@ const start = async () => {
     // Relayer balance monitor: hourly read-only scan of the relayer EOA's
     // native balance per served chain — structured warning + edge-triggered
     // webhook alert below the low-water mark, cached status served by
-    // /health. The relayer going dry previously surfaced only as failing
+    // /health/ops. The relayer going dry previously surfaced only as failing
     // payments. Deliberately NOT behind runIfLeader: the scan result feeds
-    // each replica's own /health response, and the alert edge-trigger is the
+    // each replica's own /health/ops response, and the alert edge-trigger is the
     // per-chain lowAlerted set inside the monitor, so duplicate alerts are
     // bounded by replica count only on the low→ok→low transition.
     const runRelayerMonitor = async () => {

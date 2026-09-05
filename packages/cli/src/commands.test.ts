@@ -52,10 +52,13 @@ function harness(over: Partial<RunDeps> = {}) {
 }
 
 describe('run — auth gating', () => {
-  it('requires a session for read commands (exit 2)', async () => {
+  it('requires a session for read commands (exit 3)', async () => {
+    // #2525 moved this from 2 to 3: 2 now means "the command line was wrong",
+    // and "you are not logged in" is a different thing a caller acts on
+    // differently (run `haven login`, don't fix the argv).
     const { deps, err } = harness({ sessionStore: memoryStore(null) })
     const code = await run(['wallets', 'list'], deps)
-    expect(code).toBe(2)
+    expect(code).toBe(3)
     expect(err.join('\n')).toMatch(/Not authenticated/)
   })
 
@@ -67,7 +70,8 @@ describe('run — auth gating', () => {
 
   it('reports unknown commands', async () => {
     const { deps, err } = harness()
-    expect(await run(['frobnicate'], deps)).toBe(1)
+    // An unknown command is a usage error (2), not a generic failure (1).
+    expect(await run(['frobnicate'], deps)).toBe(2)
     expect(err.join('\n')).toMatch(/Unknown command/)
   })
 })
@@ -90,10 +94,18 @@ describe('login', () => {
     expect(out.join('\n')).not.toContain('hunter2')
   })
 
-  it('errors clearly without an email', async () => {
-    const { deps, err } = harness({ sessionStore: memoryStore(null), env: {} })
-    expect(await run(['login'], deps)).toBe(1)
-    expect(err.join('\n')).toMatch(/email/i)
+  it('#2526 changed this: no email is the DEVICE FLOW, not a usage error', async () => {
+    // This case used to assert exit 2 and a message about `--email`. That was
+    // the old contract, and the change is deliberate: an agent driving this
+    // CLI must never hold its user's password, so `login` with no email now
+    // starts the browser-approved flow instead of refusing. The password path
+    // is still there behind `--email`, and is covered below.
+    //
+    // Recorded as a contract change rather than deleted, so a reader who
+    // remembers the old behaviour finds out why it moved.
+    const { deps } = harness({ sessionStore: memoryStore(null), env: {} })
+    const code = await run(['login'], deps)
+    expect(code).not.toBe(2)
   })
 })
 
@@ -156,7 +168,8 @@ describe('read commands', () => {
   it('errors when activity --safe matches no wallet', async () => {
     const api = fakeApi({ 'GET /user/safes': { safes: [] } })
     const { deps, err } = harness({ makeApi: () => api })
-    expect(await run(['activity', 'list', '--safe', 'nope'], deps)).toBe(1)
+    // A --safe that matches nothing is a bad argument: usage (2).
+    expect(await run(['activity', 'list', '--safe', 'nope'], deps)).toBe(2)
     expect(err.join('\n')).toContain('No wallet matches')
   })
 
@@ -205,7 +218,8 @@ describe('management commands (backend-only)', () => {
   it('refuses to revoke without --yes and never calls the API', async () => {
     const api = fakeApi({ 'POST /agents/a1/revoke': {} })
     const { deps, err } = harness({ makeApi: () => api })
-    expect(await run(['agents', 'revoke', 'a1'], deps)).toBe(1)
+    // Missing --yes is a usage error: the command line needs one more flag.
+    expect(await run(['agents', 'revoke', 'a1'], deps)).toBe(2)
     expect(api.calls).not.toContain('POST /agents/a1/revoke')
     expect(err.join('\n')).toMatch(/--yes/)
   })
@@ -261,7 +275,142 @@ describe('management commands (backend-only)', () => {
       getText: async () => { throw new CliApiError('Account is locked', 403) },
     }
     const { deps, err } = harness({ makeApi: () => failing })
-    expect(await run(['agents', 'list'], deps)).toBe(1)
+    // 403 is the backend refusing an authenticated caller: exit 4, distinct
+    // from 3 (log in again) and from 1 (something else broke). The message is
+    // still echoed verbatim — that half is unchanged.
+    expect(await run(['agents', 'list'], deps)).toBe(4)
     expect(err.join('\n')).toContain('Account is locked')
+  })
+})
+
+/**
+ * Browser-approved login (#2526).
+ *
+ * The poll loop is where this can go quietly wrong: a client that invents its
+ * own interval, ignores `slow_down`, or reports the wrong exit code leaves an
+ * agent unable to tell "keep waiting" from "give up". Each of those is a case
+ * here, and the clock is injected so they run in no time at all.
+ */
+describe('haven login — device flow', () => {
+  const START = {
+    device_code: 'dev-code-abc',
+    user_code: 'ABCD-2345',
+    verification_url: 'https://app.test/device?code=ABCD-2345',
+    expires_in: 600,
+    interval: 5,
+  }
+
+  function deviceApi(tokenResponses: Array<unknown | CliApiError>) {
+    const calls: string[] = []
+    let i = 0
+    const api = {
+      calls,
+      get: async () => { throw new CliApiError('unused', 404) },
+      post: async (path: string) => {
+        calls.push(`POST ${path}`)
+        if (path === '/auth/device/start') return START as never
+        if (path === '/auth/device/token') {
+          const next = tokenResponses[Math.min(i, tokenResponses.length - 1)]
+          i += 1
+          if (next instanceof CliApiError) throw next
+          return next as never
+        }
+        throw new CliApiError(`Unmocked POST ${path}`, 404)
+      },
+    } as unknown as CliApi & { calls: string[] }
+    return api
+  }
+
+  const pending = () => new CliApiError('authorization_pending', 400, { error: 'authorization_pending' })
+  const slowDown = () => new CliApiError('slow_down', 400, { error: 'slow_down' })
+  const denied = () => new CliApiError('access_denied', 400, { error: 'access_denied' })
+  const expired = () => new CliApiError('expired_token', 400, { error: 'expired_token' })
+
+  function deps(api: CliApi, store = memoryStore(), slept: number[] = []): RunDeps {
+    return {
+      sessionStore: store,
+      makeApi: () => api,
+      out: () => {},
+      err: () => {},
+      env: { HAVEN_API_URL: 'https://api.test', HOSTNAME: 'test-host' },
+      sleep: async (ms: number) => { slept.push(ms) },
+    }
+  }
+
+  it('is the DEFAULT — no --email means no password is ever asked for', async () => {
+    const api = deviceApi([{ token: 'jwt', user: USER }])
+    const store = memoryStore()
+    const promptPassword = vi.fn()
+    const code = await run(['login'], { ...deps(api, store), promptPassword })
+    expect(code).toBe(0)
+    expect(promptPassword).not.toHaveBeenCalled()
+    expect(api.calls[0]).toBe('POST /auth/device/start')
+    expect(store.value?.token).toBe('jwt')
+  })
+
+  it('--no-wait prints the link and stops, without polling', async () => {
+    // What an agent uses when it wants to hand the link over and get on with
+    // something else. A poll here would block the agent on its own user.
+    const api = deviceApi([])
+    const code = await run(['login', '--no-wait'], deps(api))
+    expect(code).toBe(0)
+    expect(api.calls).toEqual(['POST /auth/device/start'])
+  })
+
+  it('emits the link BEFORE polling under --json', async () => {
+    const lines: string[] = []
+    const api = deviceApi([pending(), { token: 'jwt', user: USER }])
+    await run(['login', '--json'], { ...deps(api), out: (l) => lines.push(l) })
+    const first = JSON.parse(lines[0])
+    expect(first.verification_url).toBe(START.verification_url)
+    expect(first.user_code).toBe('ABCD-2345')
+    // The token is never echoed — not in the first object, not in the last.
+    expect(lines.join('\n')).not.toContain('jwt')
+  })
+
+  it('keeps polling on authorization_pending, at the interval the SERVER named', async () => {
+    const slept: number[] = []
+    const api = deviceApi([pending(), pending(), { token: 'jwt', user: USER }])
+    const code = await run(['login'], deps(api, memoryStore(), slept))
+    expect(code).toBe(0)
+    expect(slept).toEqual([5000, 5000, 5000])
+  })
+
+  it('widens the interval on slow_down instead of hammering', async () => {
+    const slept: number[] = []
+    const api = deviceApi([slowDown(), { token: 'jwt', user: USER }])
+    await run(['login'], deps(api, memoryStore(), slept))
+    expect(slept).toEqual([5000, 10000])
+  })
+
+  it('a DENIED request exits 4 — refused, not "try again"', async () => {
+    // The distinction an agent acts on: refused means stop asking.
+    const api = deviceApi([denied()])
+    expect(await run(['login'], deps(api))).toBe(4)
+  })
+
+  it('an EXPIRED code exits 3 — not authenticated, so a retry is the answer', async () => {
+    const api = deviceApi([expired()])
+    expect(await run(['login'], deps(api))).toBe(3)
+  })
+
+  it('--email still takes the password path, unchanged', async () => {
+    // The human route is not removed; it is no longer what an agent gets by
+    // asking for `login`.
+    const calls: string[] = []
+    const api = {
+      calls,
+      get: async () => { throw new CliApiError('unused', 404) },
+      post: async (path: string) => {
+        calls.push(`POST ${path}`)
+        return { token: 'jwt', user: USER } as never
+      },
+    } as unknown as CliApi & { calls: string[] }
+    const code = await run(['login', '--email', 'ada@example.com'], {
+      ...deps(api),
+      env: { HAVEN_API_URL: 'https://api.test', HAVEN_PASSWORD: 'hunter2' },
+    })
+    expect(code).toBe(0)
+    expect(calls).toEqual(['POST /auth/login'])
   })
 })

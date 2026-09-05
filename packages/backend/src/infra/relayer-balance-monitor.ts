@@ -9,7 +9,7 @@
  * payments, because `warnIfRelayerLow` was a bare console.warn that the
  * payment path never called.
  *
- * The last scan is cached in module state so `/health` can report relayer
+ * The last scan is cached in module state so `/health/ops` can report relayer
  * status without a live RPC read on every probe. Read-only — never moves
  * funds and never blocks a payment.
  */

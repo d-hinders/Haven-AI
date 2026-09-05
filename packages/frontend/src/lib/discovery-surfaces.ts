@@ -33,8 +33,13 @@ export const PUBLIC_SURFACES = [
   '/protocols/mpp',
   '/402',
   '/402.md',
+  '/for-agents.md',
   '/llms.txt',
   '/llms-full.txt',
+  '/docs/account-recovery.md',
+  '/docs/agent-key-rotation.md',
+  '/docs/agent-passport.md',
+  '/docs/security-model.md',
   '/exit',
   '/signup',
   '/login',
@@ -59,6 +64,7 @@ export const AUTH_MARKED_PREFIXES = [
   '/custody',
   '/dashboard',
   '/design-system',
+  '/device',
   '/profile',
   '/reporting',
   '/settings',
@@ -114,6 +120,7 @@ export function buildRobotsTxt(origin: string): string {
 #   /llms.txt          what Haven is, and where to start
 #   /llms-full.txt     the model, the x402 flow, the integration surface
 #   /402.md            your agent hit a 402 — how to pay it
+#   /for-agents.md     you are the agent and your user has no account yet
 #   /api/openapi.json  the full OpenAPI 3.1 spec
 
 User-agent: *

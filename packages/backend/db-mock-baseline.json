@@ -1,7 +1,4 @@
 {
-  "packages/backend/src/__tests__/health.test.ts": {
-    "db-mock": 1
-  },
   "packages/backend/src/infra/__tests__/delegate-balance-monitor.test.ts": {
     "db-mock": 1,
     "positional": 20
@@ -215,7 +212,7 @@
   },
   "packages/backend/src/routes/__tests__/x402-consolidation.characterization.test.ts": {
     "db-mock": 1,
-    "positional": 17
+    "positional": 15
   },
   "packages/backend/src/routes/__tests__/x402-delegation.test.ts": {
     "db-mock": 1,
@@ -223,6 +220,6 @@
   },
   "packages/backend/src/routes/__tests__/x402.test.ts": {
     "db-mock": 1,
-    "positional": 30
+    "positional": 13
   }
 }

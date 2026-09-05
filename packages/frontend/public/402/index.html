@@ -65,7 +65,7 @@
     <ol class="steps">
       <li><b>Create a Haven account</b><span class="muted">One passkey prompt at <a href="/?src=402">the Haven dashboard</a> — no seed phrase, non-custodial. Your funds stay in an account you control.</span></li>
       <li><b>Create an agent and set its budget</b><span class="muted">For example 50 USDC per day, optionally pinned to one recipient. Anything outside the budget is refused on-chain — the agent cannot bypass the limit.</span></li>
-      <li><b>Connect the agent</b><span class="muted">Copy the connect command from the dashboard into the agent's environment:</span>
+      <li><b>Connect the agent</b><span class="muted">Copy the connector command from the dashboard into the agent's environment:</span>
         <pre><code>npx @haven_ai/connect@alpha</code></pre>
         <span class="muted">It installs the Haven MCP runtime (hosted, keyless) and generates the agent's signing key locally — the key never leaves the machine. Then retry the 402: quoted against the live budget, signed locally, paid with a receipt.</span></li>
     </ol>

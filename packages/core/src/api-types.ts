@@ -28,6 +28,126 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What this service is, and where its machine-readable contract lives.
+         * @description Unauthenticated root document (#2530). An agent handed only a backend URL had nothing to read and had to guess the spec path. Deliberately thin and non-sensitive: names, paths, and which credential each door wants — no version or build identifier, which would fingerprint the deployment and buy an agent nothing.
+         */
+        get: operations["getApiRoot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/discovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public, read-only facts an agent client needs to configure itself.
+         * @description The environment as data (#2531): which connector package this deployment hands out, which hosted MCP it points at, which chains it serves, and where its spec is. Every value is already public elsewhere — this route re-serves them together so the frontend capability manifest does not restate the backend's env logic. Never per-user or per-agent data, no relayer address, nothing from /health.
+         */
+        get: operations["getDiscovery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/device/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin a browser-approved CLI login (#2526).
+         * @description RFC 8628-shaped device authorization. Unauthenticated: this is where a CLI begins, so that an agent driving it never has to hold its user's password. Returns a user code the human types at `verification_url` and a device code the client polls with. Both are stored hashed; the grant expires in 10 minutes.
+         */
+        post: operations["startDeviceAuthorization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/device/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read what a pending CLI login is asking for, before deciding.
+         * @description Requires an ordinary owner session, like `approve`, and is likewise absent from the owner-CLI allow-list. It exists so the approval screen can show the requester's own `client_label` BEFORE the button rather than after it: every code looks alike, so the label is the only thing that lets a human notice they are being asked to approve somebody else's login. The label is attacker-controlled text — bounded and stripped of control characters on the way in, and rendered as text, never as markup, on the way out. Wrong, expired and already-decided codes all answer 404 alike, so this is not an enumeration oracle.
+         */
+        post: operations["lookupDeviceAuthorization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/device/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or deny a pending CLI login (dashboard session only).
+         * @description Requires an ordinary owner session. An `owner_cli` token is deliberately NOT accepted here — a CLI session approving further CLI sessions would turn one human approval into an unbounded grant. A wrong, expired or already-decided code all answer 404 alike, so codes cannot be enumerated by a signed-in caller.
+         */
+        post: operations["approveDeviceAuthorization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/device/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Poll for the session token once a human has approved.
+         * @description Unauthenticated by design: the device code IS the credential. Answers `authorization_pending` until approved, then the session token exactly once — redemption is a single-use claim, so a poll loop that fires twice mints one session, not two. The token carries `purpose: owner_cli`, which every authenticated route refuses unless it is on the owner-CLI allow-list (`middleware/owner-cli.ts`): agents, connect setups and read-only account context — never signer changes, re-keying, credentials, provisioning, transfers, or delegation build/activate/revoke. The human keeps every signature.
+         */
+        post: operations["redeemDeviceAuthorization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -35,8 +155,28 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** Check backend and database health. */
+        /** Check public backend and database health. */
         get: operations["getHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health/ops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read operator-only backend diagnostics.
+         * @description Requires the deployment-configured `HAVEN_OPS_TOKEN` in `X-Haven-Ops-Token`. Returns 404 when the token is not configured, so deployments do not expose diagnostics by default.
+         */
+        get: operations["getOperationsHealth"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2415,6 +2555,54 @@ export type components = {
          * @enum {string}
          */
         AgentPaymentRail: "direct" | "x402" | "mpp" | "mpp_demo" | "mpp_crypto" | "stripe_deposit" | "spt";
+        ApiRootDocument: {
+            /** @enum {string} */
+            name: "haven-api";
+            description?: string;
+            /**
+             * Format: uri
+             * @description Absolute URL of this document, derived from the request — so the dev backend names the dev backend and a request through the frontend proxy names the proxy.
+             */
+            openapi: string;
+            /**
+             * Format: uri
+             * @description Agent-readable product docs.
+             */
+            docs?: string;
+            auth: {
+                /** @description How an agent credential is presented. */
+                agent: string;
+                /** @description How an owner session is obtained. */
+                owner: string;
+            };
+            /** Format: uri */
+            health: string;
+        };
+        DiscoveryDocument: {
+            /** @description Null when this deployment has none configured — a discovery document that refuses is less useful than one that says so, so the connect handout's configuration error is reported here rather than propagated as a 500. */
+            hosted_mcp_url: string | null;
+            /** @description Why the URL is null, when it is. */
+            hosted_mcp_note?: string;
+            connector_package: string;
+            /** Format: uri */
+            openapi_url: string;
+            chains: {
+                deployable: number[];
+                supported: number[];
+            };
+        };
+        DeviceAuthorizationStart: {
+            /** @description The client's bearer credential for polling. Stored hashed. */
+            device_code: string;
+            /** @description Typed by the human. 8 characters from an unambiguous alphabet. */
+            user_code: string;
+            /** Format: uri */
+            verification_url: string;
+            /** @description Seconds. 600. */
+            expires_in: number;
+            /** @description Seconds between polls. 5. */
+            interval: number;
+        };
         HealthResponse: {
             /** @enum {string} */
             status: "ok" | "degraded";
@@ -2424,10 +2612,11 @@ export type components = {
                 /** @enum {string} */
                 status: "ok" | "error";
                 latencyMs?: number;
-                error?: string;
             };
+        };
+        HealthOpsResponse: {
             /** @description Cached per-chain relayer gas balance from the hourly scan. Never a live RPC read. */
-            relayer?: {
+            relayer: {
                 chainId: number;
                 /** @example 0x1111111111111111111111111111111111111111 */
                 address: string;
@@ -2437,7 +2626,7 @@ export type components = {
                 checkedAt: string;
             }[];
             /** @description L0 Agent Passport configuration state (#1151). Booleans plus the published issuer address only — never key material, never the schema UID. A chain in `issuance_only` anchors passports no merchant can verify. */
-            passport?: {
+            passport: {
                 verification: {
                     configured: boolean;
                     issuer: string | null;
@@ -2452,7 +2641,7 @@ export type components = {
                 unverifiableChainIds: number[];
             };
             /** @description Trust-proxy state (#1670): the hop count the process actually read, and whether the per-IP auth rate-limit tier is therefore armed. Exists because the armed/disarmed split is otherwise invisible from outside — the tier deliberately returns NO limit when the proxy is untrusted, which a probe cannot tell apart from a variable the process never saw. */
-            trustProxy?: {
+            trustProxy: {
                 hops: number;
                 authRateLimitArmed: boolean;
             };
@@ -2524,6 +2713,11 @@ export type components = {
             issue_passport?: boolean;
             /** @description Discovery-source slug for connect attribution (#2302) — e.g. 402-page, registry, template, skill. Sanitized server-side; a malformed value is stored as null rather than refused. */
             source?: string;
+            /**
+             * @description Agent hand-off marker (#2522). Present when the link the user followed was pasted by an agent. An ENUM, not a slug like `source`: it answers one closed question and the agent-driven funnel is segmented on it, so a free-text field would let a link author write anything into that metric. Sanitized server-side; any other value is stored as null rather than refused.
+             * @enum {string}
+             */
+            via?: "agent";
         };
         CreateAgentConnectionSetupResponse: {
             /** Format: uuid */
@@ -2535,6 +2729,8 @@ export type components = {
             connector_command: string;
             connector_package: string;
             setup_prompt: string;
+            /** Format: uri */
+            approval_url: string;
         };
         ResolveAgentConnectionSetupRequest: {
             setup_token: string;
@@ -2571,6 +2767,11 @@ export type components = {
             api_key_hash: string;
             api_key_prefix: string;
             runtime?: string;
+            /**
+             * @description #2528: how the connector was invoked — 'json' when `--json` was passed, 'prose' otherwise. The connector is the only party that can report this: the request is identical over the wire either way. Optional, because a connector older than #2528 sends nothing and registers unchanged; an unrecognised value is refused with 400 rather than stored, since this dimension segments the onboarding funnel and a value nothing recognises must not enter it silently. Case and surrounding whitespace are normalised before storage.
+             * @enum {string}
+             */
+            run_mode?: "json" | "prose";
             connector_version?: string;
             connector_context?: components["schemas"]["AgentConnectionConnector"];
             install_capabilities?: {
@@ -2595,6 +2796,8 @@ export type components = {
             hosted_mcp_url: string;
             /** @enum {string} */
             next_action: "return_to_haven_for_wallet_approval";
+            /** Format: uri */
+            approval_url: string;
             /** @description True when the setup opted in and its chain issues L0 passports. */
             passport_requested?: boolean;
         };
@@ -2602,6 +2805,8 @@ export type components = {
             /** Format: uuid */
             setup_id: string;
             agent_id?: string | null;
+            /** Format: uri */
+            approval_url: string;
             status: components["schemas"]["AgentConnectionSetupState"];
             /** Format: date-time */
             expires_at?: string;
@@ -3662,6 +3867,176 @@ export interface operations {
             };
         };
     };
+    getApiRoot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The API root document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiRootDocument"];
+                };
+            };
+        };
+    };
+    getDiscovery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public deployment facts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscoveryDocument"];
+                };
+            };
+        };
+    };
+    startDeviceAuthorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description What the client calls itself, shown on the approval screen. Free text from an unauthenticated caller: bounded and stripped of control characters server-side, and rendered as text, never as markup. */
+                    client_label?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description A pending grant. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceAuthorizationStart"];
+                };
+            };
+        };
+    };
+    lookupDeviceAuthorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description As shown to the human; case and dashes are ignored. */
+                    user_code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The pending grant's label and expiry — deliberately nothing else. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        client_label?: string | null;
+                        /** Format: date-time */
+                        expires_at?: string;
+                    };
+                };
+            };
+            /** @description No pending approval for that code. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    approveDeviceAuthorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description As shown to the human; case and dashes are ignored. */
+                    user_code: string;
+                    /** @description Deny instead of approving. */
+                    deny?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The grant's new state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No pending approval for that code. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    redeemDeviceAuthorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    device_code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The owner-CLI session token. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description authorization_pending | slow_down | expired_token | access_denied. An unknown code and an expired one answer alike, so one cannot be used to probe the other. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     getHealth: {
         parameters: {
             query?: never;
@@ -3687,6 +4062,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    getOperationsHealth: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Haven-Ops-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator diagnostics. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthOpsResponse"];
+                };
+            };
+            /** @description The operator token is missing or invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Operator diagnostics are not configured on this deployment. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
@@ -9813,6 +10240,8 @@ export interface operations {
                 from?: string;
                 /** @description Date; defaults to now. */
                 to?: string;
+                /** @description Split the same steps by one dimension (#2529), added as `segments` alongside the unsegmented `steps`. `via` is the agent hand-off marker — it reads the funnel metadata key `handoff_via`, NOT the key literally named `via`, which predates it and records which CODE PATH created the record ('connection_setup' from the connect flow). Segmenting on that one would answer 'connection_setup' for every connect-modal agent and look like a working metric. `run_mode` is how the connector was invoked ('json' | 'prose', #2528). Attribution is resolved once PER USER from the earliest event in the window carrying the key, then carried across every step: only `signed_up` and `agent_created` write these keys, so a per-event split would report zero agent-driven first payments and read as 'agents never convert'. A user with no value for the key lands in the `unattributed` group — for `run_mode` that means a connector predating #2528, which is NOT the same fact as a `prose` run; the same definition is repeated on `segments.value` so a consumer reading only one of the two fields still learns it. Omitting the parameter returns the unsegmented body unchanged; an unrecognised value is a 400 rather than a silent fall-back to unsegmented. */
+                segment?: "via" | "run_mode";
             };
             header?: never;
             path?: never;
@@ -9850,6 +10279,24 @@ export interface operations {
                          * @description The resolved window end.
                          */
                         to: string;
+                        /**
+                         * @description Echoed back only when the request asked for a split. Absent otherwise, together with `segments`.
+                         * @enum {string}
+                         */
+                        segment?: "via" | "run_mode";
+                        /** @description Present only when `segment` was requested. One entry per distinct value of that dimension, each carrying the SAME seven steps as the unsegmented `steps`, so a group reads exactly like a funnel. Sorted alphabetically with `unattributed` last — that bucket means the user has no value for the key at all, which for `run_mode` is a connector predating #2528 and is NOT the same fact as 'prose'. Summing a step across groups equals the unsegmented count for that step. */
+                        segments?: {
+                            /** @description The dimension's value for this group, or 'unattributed' when the user carries none. */
+                            value: string;
+                            steps: {
+                                /** @enum {string} */
+                                event: "signed_up" | "safe_deployed" | "safe_imported" | "agent_created" | "allowance_granted" | "safe_funded" | "first_payment_settled";
+                                /** @description DISTINCT users in this group who reached this step. */
+                                users: number;
+                                /** @description Null when the predecessor step counted zero users in THIS group — which includes the three permanently-zero retired stages, so the step after each of them is null by construction rather than by absence of data. */
+                                conversionFromPrev: number | null;
+                            }[];
+                        }[];
                     };
                 };
             };

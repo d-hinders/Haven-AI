@@ -13,6 +13,7 @@ Run an exploratory QA pass as the agent, using **this session's own model** (no 
    `npx -y <connector_package> --setup <QA setup token> --api <dev backend URL>`
    where `<connector_package>` is the `connector_package` value on that backend's own setup response (it is also the package named inside its `connector_command`). Since #2422 the dev backend's channel is set by `HAVEN_CONNECTOR_CHANNEL` and is **not necessarily `@alpha`** — pinning the alpha tag by hand against a `@dev` backend installs a signer that skews against it, which is the `x402_expected_context_version` refusal epic #2420 exists to make testable.
    (The QA setup token + dev backend URL are owner-provisioned — see `docs/operations/agent-qa.md` "QA identity, funding & secrets". If you don't have them, stop and ask; do not invent credentials.)
+   If the connector refuses with `wiring_collision` ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)) — this machine already holds a spend-capable Haven agent on the bare `haven` / `haven-signer` pair — **relay the refusal to the owner and stop**; do not add `--replace` or `--name` on your own. The refusal names the superseded agent ids and proposes a `--name`. On the dedicated QA runner, where the previous QA agent is the only agent, the owner's usual answer is `--replace` (which also retires the old directory locally); on a developer machine it is `--name`.
 3. If the signer fails to connect or you need a clean slate, run `/haven-reset` first, then retry step 2.
 
 ## Phase 2 — Confirm wiring (do not skip)

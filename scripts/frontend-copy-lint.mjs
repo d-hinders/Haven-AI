@@ -107,6 +107,13 @@ export const SCAN_FILES = [
   // frontend download is the fallback. Covering only the fallback would be
   // this issue's own defect one package over.
   'packages/sdk/src/skill-content.ts',
+  // The agent onboarding runbook (#2523): canonical string in the SDK, served
+  // byte-identically as `packages/frontend/public/for-agents.md`. Both are
+  // named — the served file because it is what an agent actually fetches, the
+  // source because that is where a change is made. Scanning only one would be
+  // this allowlist's own defect: a copy the gate cannot see.
+  'packages/sdk/src/agent-guidance.ts',
+  'packages/frontend/public/for-agents.md',
 ]
 
 // ── The naming convention behind the allowlist (#2333) ───────────────────────
@@ -201,6 +208,28 @@ export const BANNED = [
   ['passkey signer', 'secure passkey'],
   ['enroll signer', 'save your sign-in method'],
   ['webauthn credential', 'secure passkey'],
+  // ── The agent-facing vocabulary (#2533, swept by #2576) ────────────────────
+  // `copy-guidelines.md` § Agent-facing vocabulary names one term for the
+  // `npx -y @haven_ai/connect@…` line: **connector command**. #2533 swept the
+  // eleven agent-readable artifacts, #2576 the rest of the class — the connect
+  // modal, the connector's own printed strings, the setup prompt's consent line
+  // and the operations docs.
+  //
+  // Measured before adding, at the head that added them: ZERO occurrences of
+  // either phrase across the whole scanned set (SCAN_DIRS + SCAN_FILES), so no
+  // baseline entry and no false-positive cost. Both fire on the pre-sweep files.
+  //
+  // **Read the coverage honestly, because it is narrower than the rule.** This
+  // gate scans `src/app`, `src/components` and the SCAN_FILES prose list, so it
+  // holds the connect modal and both copies of the downloadable skill. It does
+  // NOT hold `src/hooks`, `packages/connect/src` or `packages/backend/src`
+  // (outside its trees), nor any `*.test.ts` (`walk` skips them by name) — the
+  // sweep reached those by hand and nothing re-checks them. The other two rows
+  // of that table (`setup prompt`, `agent credential`) get no entry at all: a
+  // literal matcher cannot catch a term's ABSENCE, and their retired spellings
+  // ("agent key", "signing key") have legitimate uses in the same files.
+  ['setup command', 'connector command'],
+  ['connect command', 'connector command'],
   // ── Attribution phrases (#2334) ────────────────────────────────────────────
   // Not terminology: these are CASP attribution inversions — copy that makes
   // Haven the party granting spend authority, when the authority is the

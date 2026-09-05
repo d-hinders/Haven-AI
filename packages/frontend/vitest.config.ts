@@ -9,6 +9,8 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/__tests__/setup.ts'],
+    // Build output that tests assert on — see the file's own comment (#2532).
+    globalSetup: ['./vitest.global-setup.ts'],
     include: ['src/**/__tests__/**/*.test.{ts,tsx}'],
   },
   resolve: {

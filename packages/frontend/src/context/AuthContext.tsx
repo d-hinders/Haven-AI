@@ -67,7 +67,7 @@ interface AuthState {
   activeSafe: UserSafe | null
   passkeys: ListPasskeysResponse['passkeys']
   setActiveSafe: (safe: UserSafe) => void
-  signup: (name: string, email: string, password: string) => Promise<User>
+  signup: (name: string, email: string, password: string, via?: string | null) => Promise<User>
   login: (email: string, password: string) => Promise<User>
   logout: () => void
   updateUser: (partial: Partial<User>) => void
@@ -214,11 +214,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [hydratePasskeys, syncActiveSafe])
 
   const signup = useCallback(
-    async (name: string, email: string, password: string): Promise<User> => {
+    // `via` is the #2522 agent hand-off marker. Optional and omitted when
+    // absent rather than sent as null: the backend sanitises it to the enum
+    // `agent` or null either way, and an absent field keeps the request shape
+    // identical to what every existing caller sends.
+    async (name: string, email: string, password: string, via?: string | null): Promise<User> => {
       const res = await api.post<AuthResponse>('/auth/signup', {
         name,
         email,
         password,
+        ...(via ? { via } : {}),
       })
       localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, res.token)
       setToken(res.token)

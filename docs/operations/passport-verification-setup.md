@@ -5,7 +5,7 @@ covers:
   - packages/backend/src/modules/passport/readiness.ts
   - packages/backend/src/modules/passport/receipt.ts
   - packages/backend/src/routes/passport-verify.ts
-last-verified: "2026-08-08"
+last-verified: "2026-09-04" # #2542: § Check the state now directs passport diagnostics to operator-only /health/ops with HAVEN_OPS_TOKEN; the public probe no longer exposes this configuration. The smoke procedure is otherwise unchanged.
 ---
 
 # Passport verification setup
@@ -92,11 +92,14 @@ Restart the service — the signer is installed at boot.
 
 ## Check the state
 
-`GET /health` reports it without credentials. Booleans plus the already-published
-issuer address only — no key material, no schema UID:
+`GET /health/ops` reports it to an operator using `HAVEN_OPS_TOKEN`. The public
+`GET /health` deliberately carries only status, timestamp, and database health.
+The diagnostics contain booleans plus the already-published issuer address only
+— no key material, no schema UID:
 
 ```bash
-curl -s https://havenbackend-dev-8b95.up.railway.app/health | jq .passport
+curl -s -H "X-Haven-Ops-Token: $HAVEN_OPS_TOKEN" \
+  https://havenbackend-dev-8b95.up.railway.app/health/ops | jq .passport
 ```
 
 ```json

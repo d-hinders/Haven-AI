@@ -1917,6 +1917,56 @@ function connectorRepairHintScenarios() {
 
 export const SCENARIOS = {
   /**
+   * #2526: the /device approval screen's REVIEWING state — the one that shows
+   * attacker-chosen text and the two decision buttons.
+   *
+   * A plain route capture cannot reach it. The screen is deliberately two
+   * steps (`DeviceApprovalClient.tsx`): the requester's `client_label` is
+   * looked up and shown BEFORE any Approve button exists, because every device
+   * code looks alike and the label is the only thing that lets a human notice
+   * they are approving a stranger's login. So a route-only capture shows the
+   * empty form and nothing that matters — which is exactly what
+   * `haven-design-reviewer` found when it went looking for evidence.
+   *
+   * Two variants, because the risk lives at both ends. The ordinary one is
+   * what a real CLI sends. The hostile one is the 80-character ceiling the
+   * backend enforces (`routes/auth.ts` bounds and strips control characters),
+   * with no spaces, which is the string most likely to break the layout — the
+   * label renders with `break-words` and this is what proves it.
+   */
+  ...Object.fromEntries(
+    [
+      ['device-approval', 'Haven CLI on antonio-mbp', 'the label a real client sends'],
+      ['device-approval-hostile', 'A'.repeat(60) + '-verylongunbrokenclientname', 'the 80-char ceiling, unbroken'],
+      ['device-approval-unnamed', null, 'no label at all — the strongest reason to deny'],
+    ].map(([name, label, why]) => [
+      name,
+      {
+        description: `The /device approval screen after lookup: ${why} (#2526)`,
+        api(apiPath) {
+          if (apiPath === '/auth/device/lookup') {
+            return { client_label: label, expires_at: '2026-09-05T12:00:00.000Z' }
+          }
+          return undefined
+        },
+        async run({ page, vp, shoot }) {
+          await page.goto(`${BASE_URL}/device?code=ABCD-2345`, {
+            waitUntil: 'networkidle',
+            timeout: 60_000,
+          })
+          await dismissMobileSidebar(page, vp)
+          const main = page.locator('main')
+          await main.waitFor({ timeout: 30_000 })
+          // Wait for the state the capture exists for, not a timer: Approve
+          // only exists once the lookup has answered.
+          await page.getByRole('button', { name: 'Approve', exact: true }).waitFor({ timeout: 20_000 })
+          await shoot(main, 'state')
+        },
+      },
+    ]),
+  ),
+
+  /**
    * #2043: the agent list with NOTHING unrecorded — the note's absent half.
    *
    * The present half needs no scenario: the shared fixture's `agent-retired`
@@ -2525,7 +2575,7 @@ export const SCENARIOS = {
           setup_prompt: [
             'Please connect this workspace to Haven.',
             '',
-            `I approve running this exact Haven setup command. It may download and execute the published npm package @haven_ai/connect@alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.`,
+            `I approve running this exact Haven connector command. It may download and execute the published npm package @haven_ai/connect@alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.`,
             '',
             'Run this exact command:',
             '',

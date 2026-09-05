@@ -71,6 +71,12 @@ export interface SetupRow {
   issue_passport: boolean
   /** Discovery-source slug recorded at create (#2302); null = organic/untagged. */
   source: string | null
+  /**
+   * Agent hand-off marker (#2522): `'agent'` when the link that produced this
+   * setup was pasted by an agent, else null. An ENUM, not a slug like
+   * `source` — see `normalizeViaMarker`.
+   */
+  via: string | null
 }
 
 export interface AllowanceRow {
@@ -108,7 +114,7 @@ function setupSelectSql(where: string): string {
                  s.challenge_expires_at, s.delegate_address, s.proof_signature,
                  s.api_key_prefix, s.connector_version, s.connector_context,
                  s.install_status, s.approval_status, s.safe_tx_hash, s.tx_hash,
-                 s.failure_reason, s.issue_passport, s.source,
+                 s.failure_reason, s.issue_passport, s.source, s.via,
                  us.safe_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
                  us.account_type
           FROM agent_connection_setups s
@@ -129,7 +135,7 @@ export const LOCK_SETUP_FOR_USER_SQL = `${FIND_SETUP_FOR_USER_SQL} FOR UPDATE OF
  * The install-status API-key lookup.
  *
  * Note this projection is NARROWER than `setupSelectSql`: it omits
- * `s.issue_passport`, `s.source` and `us.account_type`, so a `SetupRow` from
+ * `s.issue_passport`, `s.source`, `s.via` and `us.account_type`, so a `SetupRow` from
  * this function has those fields undefined. That divergence is pre-existing and is
  * preserved deliberately rather than tidied — the caller (`POST
  * /:setupId/install-status`) reads neither field, and widening a query is a
@@ -294,10 +300,10 @@ export const INSERT_SETUP_SQL = `INSERT INTO agent_connection_setups (
              id, user_id, safe_id, name, description, runtime, status,
              setup_token_hash, setup_token_prefix, setup_token_expires_at,
              challenge_id, challenge_message, challenge_expires_at, issue_passport,
-             source
+             source, via
            )
            VALUES ($1, $2, $3, $4, $5, $6, 'awaiting_connection',
-                   $7, $8, $9, $10, $11, $12, $13, $14)`
+                   $7, $8, $9, $10, $11, $12, $13, $14, $15)`
 
 export const INSERT_SETUP_ALLOWANCE_SQL = `INSERT INTO agent_connection_setup_allowances (
                setup_id, token_address, token_symbol, allowance_amount, reset_period_min
@@ -313,6 +319,12 @@ export interface NewSetup {
   runtime: string | null
   /** Discovery-source slug recorded at create (#2302); null = organic/untagged. */
   source: string | null
+  /**
+   * Agent hand-off marker (#2522): `'agent'` when the link that produced this
+   * setup was pasted by an agent, else null. An ENUM, not a slug like
+   * `source` — see `normalizeViaMarker`.
+   */
+  via: string | null
   setupTokenHash: string
   setupTokenPrefix: string
   expiresAt: string
@@ -353,6 +365,7 @@ export async function insertSetupWithAllowances(
       setup.expiresAt,
       setup.issuePassport,
       setup.source,
+      setup.via,
     ])
     for (const allowance of allowances) {
       await tx.query(INSERT_SETUP_ALLOWANCE_SQL, [
@@ -432,8 +445,9 @@ export const MARK_SETUP_REGISTERED_SQL = `UPDATE agent_connection_setups
              api_key_prefix = $5,
              connector_version = COALESCE($6, connector_version),
              runtime = COALESCE($7, runtime),
-             connector_context = $8::jsonb,
-             install_status = $9::jsonb,
+             run_mode = COALESCE($8, run_mode),
+             connector_context = $9::jsonb,
+             install_status = $10::jsonb,
              setup_token_consumed_at = NOW(),
              updated_at = NOW()
          WHERE id = $1`
@@ -447,6 +461,12 @@ export async function markSetupRegistered(
     apiKeyPrefix: string
     connectorVersion: string | null
     runtime: string | null
+    /**
+     * #2528: `'json'` | `'prose'` | null. COALESCEd like `runtime` above, so a
+     * connector that does not send it leaves whatever is there rather than
+     * nulling it — the older-connector case.
+     */
+    runMode: string | null
     connectorContext: unknown
     installStatus: unknown
   },
@@ -460,6 +480,7 @@ export async function markSetupRegistered(
     input.apiKeyPrefix,
     input.connectorVersion,
     input.runtime,
+    input.runMode,
     JSON.stringify(input.connectorContext),
     JSON.stringify(input.installStatus),
   ])

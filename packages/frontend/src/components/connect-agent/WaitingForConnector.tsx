@@ -85,8 +85,8 @@ export function WaitingForConnector({
             — additive, and the only part that was ever runtime-specific. */}
         <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
           {runtime === 'codex-desktop'
-            ? 'Codex Desktop may ask you to approve running the setup command. That is expected.'
-            : 'Your agent app may ask you to approve running the setup command. That is expected.'}
+            ? 'Codex Desktop may ask you to approve running the connector command. That is expected.'
+            : 'Your agent app may ask you to approve running the connector command. That is expected.'}
         </p>
       </div>
 
@@ -118,7 +118,7 @@ export function WaitingForConnector({
           <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
             {connectionStage === 'slow'
               ? 'Still going — a first run downloads the connector first, so it can take a minute or two.'
-              : 'Waiting for the agent to run the setup command. This usually takes a few seconds.'}
+              : 'Waiting for the agent to run the connector command. This usually takes a few seconds.'}
           </p>
         )}
         {connectionStage === 'recovery' && (
@@ -180,7 +180,7 @@ export function WaitingForConnector({
           and out of the "one click deeper than the harmless one" rationale
           that nested it there. That rationale was written when the manual
           credential was only ever a fallback for a local runtime that
-          failed. A server or hosted backend is not that: the setup command
+          failed. A server or hosted backend is not that: the connector command
           writes files under ~/.haven and edits a local MCP config, so it
           cannot run there at all, and the manual credential IS the supported
           integration path (it emits exactly the HAVEN_* values the SDK reads).
@@ -211,7 +211,7 @@ export function WaitingForConnector({
           {!manualCredential ? (
             <>
               <p className="leading-relaxed text-[var(--v2-ink-2)]">
-                When your agent runs on a server or hosted backend, the setup command cannot run there. Paste these values into the backend&rsquo;s secrets instead — an API key that identifies your agent and a private signing key the runtime uses to sign payments. The signing key is shown once.
+                When your agent runs on a server or hosted backend, the connector command cannot run there. Paste these values into the backend&rsquo;s secrets instead — an API key that identifies your agent and a private signing key the runtime uses to sign payments. The signing key is shown once.
               </p>
               {manualError && <InlineErrorNote>{manualError}</InlineErrorNote>}
               <Button

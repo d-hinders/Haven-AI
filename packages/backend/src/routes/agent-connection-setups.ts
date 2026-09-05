@@ -28,6 +28,25 @@ import { normalizeAgentAllowances } from '../modules/agents/index.js'
 import { getChain } from '../domain/chains.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import {
+  buildApprovalUrl,
+  isUnknownRunMode,
+  normalizeRunMode,
+  normalizeViaMarker,
+} from '../domain/handoff-links.js'
+import {
+  AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+  AGENT_APPROVAL_RELAY_PROSE_SENTENCE,
+  AGENT_COMMAND_MODIFICATION_SENTENCE,
+  AGENT_JSON_MODE_SENTENCE,
+  AGENT_LOCAL_KEY_SENTENCE,
+  AGENT_NETWORK_ACCESS_SENTENCE,
+  AGENT_SECRET_HYGIENE_SENTENCE,
+  AGENT_WIRING_COLLISION_RELAY_SENTENCE,
+} from '@haven_ai/sdk'
+// #2530: lifted to a shared helper — the root document and the OpenAPI
+// servers[] list need the identical answer.
+import { apiBaseUrl } from '../domain/request-origin.js'
+import {
   requestPassport,
   issuePassportBestEffort,
   isPassportConfigured,
@@ -51,6 +70,12 @@ interface CreateSetupBody {
   local_mcp?: boolean
   /** Discovery-source slug for connect attribution (#2302); sanitized, never refused. */
   source?: string
+  /**
+   * Agent hand-off marker (#2522). `'agent'` when the link the user followed
+   * was pasted by an agent; anything else is dropped. Sanitized, never
+   * refused — attribution must not block a connect.
+   */
+  via?: string
   /**
    * Opt in to an L0 Agent Passport (#972), mirroring `POST /agents`'
    * `issue_passport`. Absent/false is the DEFAULT and normal case. Recorded on
@@ -79,6 +104,13 @@ interface RegisterSetupBody extends ResolveSetupBody {
    * rather than being guessed at.
    */
   mcp_server_name?: string
+  /**
+   * #2528: `'json'` when the connector ran with `--json`, `'prose'` otherwise.
+   * The connector is the only party that knows — the request is identical over
+   * the wire either way. Absent from connectors older than #2528; an
+   * unrecognised value is a 400, never a silent null.
+   */
+  run_mode?: string
   connector_context?: unknown
   install_capabilities?: {
     can_write_runtime_config?: boolean
@@ -244,15 +276,19 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
           challengeMessage,
           issuePassport: parsed.issuePassport,
           source: parsed.source,
+          via: parsed.via,
         },
         parsed.allowances,
       )
 
-      const apiUrl = apiBaseUrl(request)
+      const apiUrl = apiBaseUrl(request.headers)
       const command = buildConnectorCommand(setupToken, apiUrl, parsed.localMcp)
       return reply.code(201).send({
         setup_id: setupId,
         status: 'awaiting_connection',
+        // #2522: the same link the status response and the connector print, so
+        // dashboard, connector and agent all hand the human ONE URL.
+        approval_url: buildApprovalUrl(setupId),
         setup_token: setupToken,
         expires_at: expiresAt,
         connector_command: command,
@@ -309,6 +345,14 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     if (!request.body?.setup_token || typeof request.body.setup_token !== 'string') {
       return reply.code(401).send({ error: 'Invalid setup token' })
     }
+    // #2528: refuse an unrecognised run_mode rather than storing it or
+    // coercing it to null. This dimension segments the onboarding funnel, so a
+    // value nothing recognises must not enter it silently — and a caller that
+    // sent one deserves to be told, not to have it dropped. Checked BEFORE the
+    // transaction, beside the other refusals that cost nothing.
+    if (isUnknownRunMode(request.body.run_mode)) {
+      return reply.code(400).send({ error: 'Unsupported run_mode' })
+    }
 
     // #1129: resolved BEFORE the transaction opens. A configuration error must
     // refuse the whole registration up front — never after the setup token has
@@ -326,6 +370,8 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     let setupChainId = 0
     let setupUserId = ''
     let setupSource: string | null = null
+    let setupVia: string | null = null
+    const runMode = normalizeRunMode(request.body.run_mode)
     try {
       await setups.inTransaction(async (tx) => {
         const setup = await setups.lockSetupByTokenHash(
@@ -389,6 +435,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         setupChainId = setup.safe_chain_id
         setupUserId = setup.user_id
         setupSource = setup.source ?? null
+        setupVia = setup.via ?? null
 
         agentId = await setups.insertPendingAgent(
           {
@@ -417,6 +464,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
             apiKeyPrefix,
             connectorVersion: stringOrNull(request.body.connector_version),
             runtime: stringOrNull(request.body.runtime),
+            runMode,
             connectorContext,
             installStatus: initialInstallStatus,
           },
@@ -426,10 +474,23 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       // #2302: the discovery source recorded at CREATE rides the funnel event so
       // "attributed connects" and per-source time-to-first-payment are plain
       // SQL over onboarding_events — no join back to the setups table needed.
+      // #2522: the hand-off marker rides here as `handoff_via`, NOT as `via`.
+      // `via` is already taken and means something else — which CODE PATH
+      // created the agent (`'connection_setup'` here; absent from
+      // `POST /agents`' emission in routes/agents.ts, which is how the two are
+      // told apart today). Reusing it for "an agent pasted the link" would
+      // give one key two meanings and silently redefine every historical row.
       emitFunnelEvent(setupUserId, 'agent_created', {
         agent_id: agentId,
         via: 'connection_setup',
         ...(setupSource ? { source: setupSource } : {}),
+        ...(setupVia ? { handoff_via: setupVia } : {}),
+        // #2528: sits next to `source` so "share of agent-driven setups that
+        // ran machine-readable" is one query over onboarding_events, with no
+        // join back to the setups table. Omitted, not null, when the connector
+        // predates the field — an absent key and a null read differently in
+        // the metadata JSON, and absent is the honest one.
+        ...(runMode ? { run_mode: runMode } : {}),
       })
       emitFunnelEvent(setupUserId, 'allowance_granted', { agent_id: agentId, via: 'connection_setup' })
     } catch (err) {
@@ -474,6 +535,12 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       api_key_scope: 'setup_pending',
       delegate_address: delegateAddress,
       hosted_mcp_url: hostedMcpUrlValue,
+      // #2528: the same link create and status already return, so the
+      // connector can print a URL instead of "return to Haven and approve" —
+      // and the agent relays a link rather than a sentence. Built from
+      // `config.frontendUrl`, same-origin, carrying no secret: the setup id is
+      // already in the connector's own outcome record.
+      approval_url: buildApprovalUrl(setupId),
       next_action: 'return_to_haven_for_wallet_approval',
       passport_requested: passportChainId != null,
     })
@@ -702,6 +769,7 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
   localMcp: boolean
   issuePassport: boolean
   source: string | null
+  via: string | null
 } | null {
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   if (!name) {
@@ -739,6 +807,7 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
     localMcp: body.local_mcp === true,
     issuePassport: body.issue_passport === true,
     source: normalizeDiscoverySource(body.source),
+    via: normalizeViaMarker(body.via),
   }
 }
 
@@ -754,6 +823,7 @@ export function normalizeDiscoverySource(value: unknown): string | null {
   const slug = value.trim().toLowerCase()
   return /^[a-z0-9][a-z0-9_-]{0,31}$/.test(slug) ? slug : null
 }
+
 
 // The command-path runtimes: Claude Code, Codex, and Cowork (which runs
 // Claude Code's config). #1682 replaced #1672's collapsed 'agent' entry with
@@ -996,6 +1066,9 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
   return {
     setup_id: setup.id,
     agent_id: setup.agent_id,
+    // #2522: stable across polls and identical to the create response's, so a
+    // link an agent pasted an hour ago still lands on the right step.
+    approval_url: buildApprovalUrl(setup.id),
     status: effectiveStatus(setup),
     expires_at: setup.setup_token_expires_at,
     agent: {
@@ -1061,6 +1134,15 @@ function buildConnectorCommand(setupToken: string, apiUrl: string, localMcp = fa
   return args.join(' ')
 }
 
+/**
+ * The setup prompt the dashboard hands the user to paste to their agent.
+ *
+ * #2523: the rule sentences are NOT written here any more — they live once, in
+ * `@haven_ai/sdk`'s `agent-guidance.ts`, because the `/for-agents.md` runbook
+ * states the same rules to the same reader. The comments below stay with the
+ * call sites they explain; the strings themselves are imported so the prompt and
+ * the runbook cannot say two different things about the same command.
+ */
 function buildSetupPrompt(command: string, apiUrl: string): string {
   const approvedActions = [
     `download and execute the published npm package ${CONNECTOR_PACKAGE}`,
@@ -1072,17 +1154,17 @@ function buildSetupPrompt(command: string, apiUrl: string): string {
   return [
     'Please connect this workspace to Haven.',
     '',
-    `I approve running this exact Haven setup command. It may ${joinApprovedActions(approvedActions)}.`,
+    `I approve running this exact Haven connector command. It may ${joinApprovedActions(approvedActions)}.`,
     '',
     'Run this exact command:',
     '',
     command,
     '',
-    'Network access is expected: this command downloads the npm package and contacts the Haven API, so if your environment is sandboxed, run it with network access enabled or request network access escalation; that changes the execution environment, not the command, and is not a third command modification.',
+    AGENT_NETWORK_ACCESS_SENTENCE,
     '',
-    'Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.',
+    AGENT_SECRET_HYGIENE_SENTENCE,
     '',
-    'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
+    AGENT_LOCAL_KEY_SENTENCE,
     '',
     // #1545 introduced this as one sentence of *discoverability* — the flag was
     // opt-in and the pasted command stayed the prose-mode default. #2483 turns
@@ -1095,20 +1177,27 @@ function buildSetupPrompt(command: string, apiUrl: string): string {
     // what hands the agent control back in time to say something. The prose
     // mode stays correct for a human pasting the command, so this is a SHOULD
     // addressed to agents, not a change to the command's default behaviour.
-    'If you are an AI agent running this command yourself rather than a human pasting it, you should append --json: the connector then emits one machine-readable, secret-free result object on stdout with progress on stderr, and returns promptly instead of blocking while it waits for the budget approval.',
+    AGENT_JSON_MODE_SENTENCE,
     // #2483: one gate at a time (the #1542 discipline) — the approval relay is
     // the FIRST thing the agent owes the user when the outcome says approval is
     // required, and any restart the outcome asks for is a separate, later
     // instruction. Merging the two hands the user two actions at once, and the
     // one they can actually do now is the approval.
-    'When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — return to Haven and approve this agent\'s budget — before verifying the connection, restarting anything, or any other step. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.',
+    AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+    // #2551, via #2567 → #2528: the third relay case. The prompt already names
+    // the other two occasions an agent must hand a decision back rather than
+    // act (approval required; the runtime refusal's one bounded retry), so a
+    // collision left unnamed is the one an agent resolves by guessing — and
+    // both guesses available to it, --replace and --name, change which agent
+    // holds spend authority on this machine.
+    AGENT_WIRING_COLLISION_RELAY_SENTENCE,
     // #1719: the old sentence said appending --json was the ONLY permitted
     // change, which forbade the one retry the connector now asks an agent for
     // by name. Exactly two changes are permitted, and the second is bounded to
     // a value the refusal itself listed — an agent must never invent a runtime
     // name, because the name selects which app gets an API key and a signing
     // key written into it.
-    'Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.',
+    AGENT_COMMAND_MODIFICATION_SENTENCE,
     '',
     // #1545: "budget" is the connect flow's one name for the approval gate —
     // the same word the connector's own wait loop and celebration use (#1542).
@@ -1128,22 +1217,13 @@ function buildSetupPrompt(command: string, apiUrl: string): string {
     // connector's printed next steps are the condition. Each mode now carries
     // its relay instruction exactly once — the --json sentence above, this
     // one here — and neither fires on an approval that is not needed.
-    "If you ran the command without --json, the connector waits for the approval itself and prints its next steps when it finishes: relay the budget-approval instruction to me — return to Haven and approve this agent's budget — only if those printed next steps still ask for it. If they report the budget as already approved, there is nothing for me to approve.",
+    AGENT_APPROVAL_RELAY_PROSE_SENTENCE,
   ].join('\n')
 }
 
 function joinApprovedActions(actions: string[]): string {
   if (actions.length <= 1) return actions[0] ?? ''
   return `${actions.slice(0, -1).join(', ')}, and ${actions[actions.length - 1]}`
-}
-
-function apiBaseUrl(request: FastifyRequest): string {
-  const env = process.env.HAVEN_API_URL ?? process.env.PUBLIC_API_URL
-  if (env) return env.replace(/\/+$/, '')
-  const host = request.headers.host ?? `localhost:${process.env.PORT ?? 3001}`
-  const proto = request.headers['x-forwarded-proto']
-  const scheme = typeof proto === 'string' && proto ? proto.split(',')[0] : 'http'
-  return `${scheme}://${host}`.replace(/\/+$/, '')
 }
 
 /**
@@ -1157,7 +1237,7 @@ function apiBaseUrl(request: FastifyRequest): string {
 export function hostedMcpUrl(request: FastifyRequest): string {
   const explicit = process.env.HAVEN_HOSTED_MCP_URL ?? process.env.NEXT_PUBLIC_HAVEN_MCP_URL
   if (explicit) return explicit.replace(/\/+$/, '')
-  const self = apiBaseUrl(request)
+  const self = apiBaseUrl(request.headers)
   // A malformed self-URL (scheme-less HAVEN_API_URL, weird Host header) must
   // yield the ACTIONABLE config error, not a masked TypeError-500 (#1136
   // review) — treat unparseable as not-production.

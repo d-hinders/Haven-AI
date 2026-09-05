@@ -827,11 +827,218 @@ export const openapiSpec = {
         },
       },
     },
+    '/': {
+      get: {
+        tags: ['Health'],
+        operationId: 'getApiRoot',
+        summary: 'What this service is, and where its machine-readable contract lives.',
+        description:
+          'Unauthenticated root document (#2530). An agent handed only a backend URL had ' +
+          'nothing to read and had to guess the spec path. Deliberately thin and ' +
+          'non-sensitive: names, paths, and which credential each door wants — no version ' +
+          'or build identifier, which would fingerprint the deployment and buy an agent nothing.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'The API root document.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiRootDocument' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/discovery': {
+      get: {
+        tags: ['Health'],
+        operationId: 'getDiscovery',
+        summary: 'Public, read-only facts an agent client needs to configure itself.',
+        description:
+          'The environment as data (#2531): which connector package this deployment hands ' +
+          'out, which hosted MCP it points at, which chains it serves, and where its spec ' +
+          'is. Every value is already public elsewhere — this route re-serves them together ' +
+          'so the frontend capability manifest does not restate the backend\'s env logic. ' +
+          'Never per-user or per-agent data, no relayer address, nothing from /health.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'Public deployment facts.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DiscoveryDocument' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/auth/device/start': {
+      post: {
+        tags: ['Auth'],
+        operationId: 'startDeviceAuthorization',
+        summary: 'Begin a browser-approved CLI login (#2526).',
+        description:
+          'RFC 8628-shaped device authorization. Unauthenticated: this is where a CLI begins, ' +
+          'so that an agent driving it never has to hold its user\'s password. Returns a user ' +
+          'code the human types at `verification_url` and a device code the client polls with. ' +
+          'Both are stored hashed; the grant expires in 10 minutes.',
+        security: [],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  client_label: {
+                    type: 'string',
+                    maxLength: 80,
+                    description:
+                      'What the client calls itself, shown on the approval screen. Free text ' +
+                      'from an unauthenticated caller: bounded and stripped of control ' +
+                      'characters server-side, and rendered as text, never as markup.',
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'A pending grant.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DeviceAuthorizationStart' } },
+            },
+          },
+        },
+      },
+    },
+    '/auth/device/lookup': {
+      post: {
+        tags: ['Auth'],
+        operationId: 'lookupDeviceAuthorization',
+        summary: 'Read what a pending CLI login is asking for, before deciding.',
+        description:
+          'Requires an ordinary owner session, like `approve`, and is likewise absent from ' +
+          'the owner-CLI allow-list. It exists so the approval screen can show the ' +
+          'requester\'s own `client_label` BEFORE the button rather than after it: every ' +
+          'code looks alike, so the label is the only thing that lets a human notice they ' +
+          'are being asked to approve somebody else\'s login. The label is attacker-' +
+          'controlled text — bounded and stripped of control characters on the way in, and ' +
+          'rendered as text, never as markup, on the way out. Wrong, expired and ' +
+          'already-decided codes all answer 404 alike, so this is not an enumeration oracle.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['user_code'],
+                properties: {
+                  user_code: { type: 'string', description: 'As shown to the human; case and dashes are ignored.' },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The pending grant\'s label and expiry — deliberately nothing else.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    client_label: { type: 'string', nullable: true },
+                    expires_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          '404': { description: 'No pending approval for that code.' },
+        },
+      },
+    },
+    '/auth/device/approve': {
+      post: {
+        tags: ['Auth'],
+        operationId: 'approveDeviceAuthorization',
+        summary: 'Approve or deny a pending CLI login (dashboard session only).',
+        description:
+          'Requires an ordinary owner session. An `owner_cli` token is deliberately NOT ' +
+          'accepted here — a CLI session approving further CLI sessions would turn one ' +
+          'human approval into an unbounded grant. A wrong, expired or already-decided code ' +
+          'all answer 404 alike, so codes cannot be enumerated by a signed-in caller.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['user_code'],
+                properties: {
+                  user_code: { type: 'string', description: 'As shown to the human; case and dashes are ignored.' },
+                  deny: { type: 'boolean', description: 'Deny instead of approving.' },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The grant\'s new state.' },
+          '404': { description: 'No pending approval for that code.' },
+        },
+      },
+    },
+    '/auth/device/token': {
+      post: {
+        tags: ['Auth'],
+        operationId: 'redeemDeviceAuthorization',
+        summary: 'Poll for the session token once a human has approved.',
+        description:
+          'Unauthenticated by design: the device code IS the credential. Answers ' +
+          '`authorization_pending` until approved, then the session token exactly once — ' +
+          'redemption is a single-use claim, so a poll loop that fires twice mints one ' +
+          'session, not two. The token carries `purpose: owner_cli`, which every ' +
+          'authenticated route refuses unless it is on the owner-CLI allow-list ' +
+          '(`middleware/owner-cli.ts`): agents, connect setups and read-only account ' +
+          'context — never signer changes, re-keying, credentials, provisioning, transfers, ' +
+          'or delegation build/activate/revoke. The human keeps every signature.',
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['device_code'],
+                properties: { device_code: { type: 'string' } },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The owner-CLI session token.' },
+          '400': {
+            description:
+              'authorization_pending | slow_down | expired_token | access_denied. An unknown ' +
+              'code and an expired one answer alike, so one cannot be used to probe the other.',
+          },
+        },
+      },
+    },
     '/health': {
       get: {
         tags: ['Health'],
         operationId: 'getHealth',
-        summary: 'Check backend and database health.',
+        summary: 'Check public backend and database health.',
         security: [],
         responses: {
           '200': {
@@ -850,6 +1057,35 @@ export const openapiSpec = {
               },
             },
           },
+        },
+      },
+    },
+    '/health/ops': {
+      get: {
+        tags: ['Health'],
+        operationId: 'getOperationsHealth',
+        summary: 'Read operator-only backend diagnostics.',
+        description:
+          'Requires the deployment-configured `HAVEN_OPS_TOKEN` in `X-Haven-Ops-Token`. ' +
+          'Returns 404 when the token is not configured, so deployments do not expose diagnostics by default.',
+        security: [],
+        parameters: [
+          {
+            name: 'X-Haven-Ops-Token',
+            in: 'header',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Operator diagnostics.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/HealthOpsResponse' } },
+            },
+          },
+          '401': { ...errorResponse, description: 'The operator token is missing or invalid.' },
+          '404': { ...errorResponse, description: 'Operator diagnostics are not configured on this deployment.' },
         },
       },
     },
@@ -3622,6 +3858,13 @@ export const openapiSpec = {
         parameters: [
           { name: 'from', in: 'query', schema: { type: 'string' }, description: 'Date; defaults to 30 days before `to`.' },
           { name: 'to', in: 'query', schema: { type: 'string' }, description: 'Date; defaults to now.' },
+          {
+            name: 'segment',
+            in: 'query',
+            schema: { type: 'string', enum: ['via', 'run_mode'] },
+            description:
+              "Split the same steps by one dimension (#2529), added as `segments` alongside the unsegmented `steps`. `via` is the agent hand-off marker — it reads the funnel metadata key `handoff_via`, NOT the key literally named `via`, which predates it and records which CODE PATH created the record ('connection_setup' from the connect flow). Segmenting on that one would answer 'connection_setup' for every connect-modal agent and look like a working metric. `run_mode` is how the connector was invoked ('json' | 'prose', #2528). Attribution is resolved once PER USER from the earliest event in the window carrying the key, then carried across every step: only `signed_up` and `agent_created` write these keys, so a per-event split would report zero agent-driven first payments and read as 'agents never convert'. A user with no value for the key lands in the `unattributed` group — for `run_mode` that means a connector predating #2528, which is NOT the same fact as a `prose` run; the same definition is repeated on `segments.value` so a consumer reading only one of the two fields still learns it. Omitting the parameter returns the unsegmented body unchanged; an unrecognised value is a 400 rather than a silent fall-back to unsegmented.",
+          },
         ],
         responses: {
           '200': {
@@ -3652,6 +3895,31 @@ export const openapiSpec = {
                     medianTtfpMs: { type: ['integer', 'null'], description: 'Median signup→first-settled-payment in ms. Null when nobody has completed it in the window.' },
                     from: { type: 'string', format: 'date-time', description: 'The resolved window start.' },
                     to: { type: 'string', format: 'date-time', description: 'The resolved window end.' },
+                    segment: { type: 'string', enum: ['via', 'run_mode'], description: 'Echoed back only when the request asked for a split. Absent otherwise, together with `segments`.' },
+                    segments: {
+                      type: 'array',
+                      description:
+                        "Present only when `segment` was requested. One entry per distinct value of that dimension, each carrying the SAME seven steps as the unsegmented `steps`, so a group reads exactly like a funnel. Sorted alphabetically with `unattributed` last — that bucket means the user has no value for the key at all, which for `run_mode` is a connector predating #2528 and is NOT the same fact as 'prose'. Summing a step across groups equals the unsegmented count for that step.",
+                      items: {
+                        type: 'object',
+                        required: ['value', 'steps'],
+                        properties: {
+                          value: { type: 'string', description: "The dimension's value for this group, or 'unattributed' when the user carries none." },
+                          steps: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              required: ['event', 'users', 'conversionFromPrev'],
+                              properties: {
+                                event: { type: 'string', enum: ['signed_up', 'safe_deployed', 'safe_imported', 'agent_created', 'allowance_granted', 'safe_funded', 'first_payment_settled'] },
+                                users: { type: 'integer', description: 'DISTINCT users in this group who reached this step.' },
+                                conversionFromPrev: { type: ['number', 'null'], description: 'Null when the predecessor step counted zero users in THIS group — which includes the three permanently-zero retired stages, so the step after each of them is null by construction rather than by absence of data.' },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
                   },
                 },
               },
@@ -5692,6 +5960,71 @@ export const openapiSpec = {
         enum: Object.values(AgentPaymentRail),
         description: 'Stable rail identifier for Haven agent payment states.',
       },
+      ApiRootDocument: {
+        type: 'object',
+        required: ['name', 'openapi', 'auth', 'health'],
+        properties: {
+          name: { type: 'string', enum: ['haven-api'] },
+          description: { type: 'string' },
+          openapi: {
+            type: 'string',
+            format: 'uri',
+            description:
+              'Absolute URL of this document, derived from the request — so the dev backend ' +
+              'names the dev backend and a request through the frontend proxy names the proxy.',
+          },
+          docs: { type: 'string', format: 'uri', description: 'Agent-readable product docs.' },
+          auth: {
+            type: 'object',
+            required: ['agent', 'owner'],
+            properties: {
+              agent: { type: 'string', description: 'How an agent credential is presented.' },
+              owner: { type: 'string', description: 'How an owner session is obtained.' },
+            },
+            additionalProperties: false,
+          },
+          health: { type: 'string', format: 'uri' },
+        },
+        additionalProperties: false,
+      },
+      DiscoveryDocument: {
+        type: 'object',
+        required: ['hosted_mcp_url', 'connector_package', 'openapi_url', 'chains'],
+        properties: {
+          hosted_mcp_url: {
+            anyOf: [{ type: 'string', format: 'uri' }, { type: 'null' }],
+            description:
+              'Null when this deployment has none configured — a discovery document that ' +
+              'refuses is less useful than one that says so, so the connect handout\'s ' +
+              'configuration error is reported here rather than propagated as a 500.',
+          },
+          hosted_mcp_note: { type: 'string', description: 'Why the URL is null, when it is.' },
+          connector_package: { type: 'string', pattern: '^@haven_ai/connect@[a-z][a-z0-9-]{0,31}$' },
+          openapi_url: { type: 'string', format: 'uri' },
+          chains: {
+            type: 'object',
+            required: ['deployable', 'supported'],
+            properties: {
+              deployable: { type: 'array', items: { type: 'integer' } },
+              supported: { type: 'array', items: { type: 'integer' } },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      DeviceAuthorizationStart: {
+        type: 'object',
+        required: ['device_code', 'user_code', 'verification_url', 'expires_in', 'interval'],
+        properties: {
+          device_code: { type: 'string', description: 'The client\'s bearer credential for polling. Stored hashed.' },
+          user_code: { type: 'string', description: 'Typed by the human. 8 characters from an unambiguous alphabet.' },
+          verification_url: { type: 'string', format: 'uri' },
+          expires_in: { type: 'integer', description: 'Seconds. 600.' },
+          interval: { type: 'integer', description: 'Seconds between polls. 5.' },
+        },
+        additionalProperties: false,
+      },
       HealthResponse: {
         type: 'object',
         required: ['status', 'timestamp', 'db'],
@@ -5704,10 +6037,16 @@ export const openapiSpec = {
             properties: {
               status: { type: 'string', enum: ['ok', 'error'] },
               latencyMs: { type: 'integer' },
-              error: { type: 'string' },
             },
             additionalProperties: false,
           },
+        },
+        additionalProperties: false,
+      },
+      HealthOpsResponse: {
+        type: 'object',
+        required: ['relayer', 'passport', 'trustProxy'],
+        properties: {
           relayer: {
             type: 'array',
             description:
@@ -5905,6 +6244,12 @@ export const openapiSpec = {
             description:
               'Discovery-source slug for connect attribution (#2302) — e.g. 402-page, registry, template, skill. Sanitized server-side; a malformed value is stored as null rather than refused.',
           },
+          via: {
+            type: 'string',
+            enum: ['agent'],
+            description:
+              'Agent hand-off marker (#2522). Present when the link the user followed was pasted by an agent. An ENUM, not a slug like `source`: it answers one closed question and the agent-driven funnel is segmented on it, so a free-text field would let a link author write anything into that metric. Sanitized server-side; any other value is stored as null rather than refused.',
+          },
         },
         additionalProperties: false,
       },
@@ -5918,6 +6263,7 @@ export const openapiSpec = {
           'connector_command',
           'connector_package',
           'setup_prompt',
+          'approval_url',
         ],
         properties: {
           setup_id: uuid,
@@ -5948,6 +6294,19 @@ export const openapiSpec = {
            */
           connector_package: { type: 'string', pattern: '^@haven_ai/connect@[a-z][a-z0-9-]{0,31}$' },
           setup_prompt: { type: 'string' },
+          /**
+           * #2522: the link that lands a human on this setup's budget
+           * approval. ABSOLUTE, against the same-origin rule the discovery
+           * artifacts follow (#2520), because the connector prints it into a
+           * terminal and an agent pastes it into a chat — a bare path resolves
+           * against nothing there. The host is `FRONTEND_URL`, never a literal.
+           *
+           * REQUIRED for the same reason `connector_package` is: the backend
+           * always emits it, and an optional field pushes a URL-assembling
+           * fallback back into every client, which is the restatement this
+           * field exists to remove.
+           */
+          approval_url: { type: 'string', format: 'uri' },
         },
         additionalProperties: false,
       },
@@ -6013,6 +6372,12 @@ export const openapiSpec = {
           api_key_hash: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
           api_key_prefix: { type: 'string', pattern: '^sk_agent_[0-9a-f]{3}$' },
           runtime: { type: 'string' },
+          run_mode: {
+            type: 'string',
+            enum: ['json', 'prose'],
+            description:
+              "#2528: how the connector was invoked — 'json' when `--json` was passed, 'prose' otherwise. The connector is the only party that can report this: the request is identical over the wire either way. Optional, because a connector older than #2528 sends nothing and registers unchanged; an unrecognised value is refused with 400 rather than stored, since this dimension segments the onboarding funnel and a value nothing recognises must not enter it silently. Case and surrounding whitespace are normalised before storage.",
+          },
           connector_version: { type: 'string' },
           connector_context: { $ref: '#/components/schemas/AgentConnectionConnector' },
           install_capabilities: {
@@ -6028,7 +6393,7 @@ export const openapiSpec = {
       },
       RegisterAgentConnectionSetupResponse: {
         type: 'object',
-        required: ['setup_id', 'agent_id', 'status', 'agent_status', 'api_key_prefix', 'api_key_scope', 'delegate_address', 'hosted_mcp_url', 'next_action'],
+        required: ['setup_id', 'agent_id', 'status', 'agent_status', 'api_key_prefix', 'api_key_scope', 'delegate_address', 'hosted_mcp_url', 'next_action', 'approval_url'],
         properties: {
           setup_id: uuid,
           agent_id: uuid,
@@ -6039,6 +6404,15 @@ export const openapiSpec = {
           delegate_address: address,
           hosted_mcp_url: { type: 'string', format: 'uri' },
           next_action: { type: 'string', enum: ['return_to_haven_for_wallet_approval'] },
+          /**
+           * #2528: the same absolute link the create (201) and status
+           * responses already return for this setup, so the connector can
+           * print a destination instead of "return to Haven and approve" and
+           * an agent relays a link rather than a sentence. Carries no secret —
+           * the setup id is already in the connector's own outcome record, and
+           * the setup TOKEN never appears in it.
+           */
+          approval_url: { type: 'string', format: 'uri' },
           passport_requested: {
             type: 'boolean',
             description: 'True when the setup opted in and its chain issues L0 passports.',
@@ -6057,10 +6431,13 @@ export const openapiSpec = {
           'connector_package',
           'install_status',
           'approval',
+          'approval_url',
         ],
         properties: {
           setup_id: uuid,
           agent_id: { anyOf: [uuid, { type: 'null' }] },
+          /** #2522: identical to the create response's, and stable across polls. */
+          approval_url: { type: 'string', format: 'uri' },
           status: { $ref: '#/components/schemas/AgentConnectionSetupState' },
           expires_at: isoDateTime,
           agent: {

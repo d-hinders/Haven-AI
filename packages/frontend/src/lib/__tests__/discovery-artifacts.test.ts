@@ -22,27 +22,31 @@ import { join } from 'node:path'
 
 const PUBLIC_DIR = join(__dirname, '../../../public')
 
-const ARTIFACTS = ['llms.txt', 'llms-full.txt', '402.md', '402/index.html'] as const
+const ARTIFACTS = [
+  'llms.txt',
+  'llms-full.txt',
+  '402.md',
+  '402/index.html',
+  // #2523: the agent onboarding runbook is served from the same directory and
+  // is read by the same client, so the same link rules bind it. Its content is
+  // pinned separately (for-agents-runbook.test.ts); what is asserted here is
+  // only that it cannot reintroduce a host nobody owns.
+  'for-agents.md',
+] as const
 
 /**
  * Hosts an artifact may link to. Everything else must be a same-origin path.
  *
- * `github.com` is here for one reason and is expected to leave: the product
- * docs have no served home until #2532 (A5) publishes them under `/docs/`, so
- * `account-recovery` points at the public repository in the meantime. When A5
- * lands, that link becomes `/docs/account-recovery.md` and this entry should
- * be deleted — the deletion is the test that A5 finished the job.
+ * `github.com` USED to be here, for one temporary reason: the product docs had
+ * no served home, so `account-recovery` pointed at the public repository. #2532
+ * serves them from this origin under `/docs/`, so the link is now a path and
+ * the entry is gone. Its deletion was the stated test that #2532 finished the
+ * job; this is that deletion.
+ *
+ * The artifacts under test are back to the rule with no exception: own-product
+ * links are same-origin paths, and the only off-site host is npm.
  */
-const ALLOWED_HOSTS = new Set(['www.npmjs.com', 'github.com'])
-
-/**
- * The single `github.com` URL the allow-list exists for. Asserted exactly,
- * because a host-scoped allow-list would let any future GitHub link inherit a
- * permission granted to one temporary one — the comment above would stay
- * written while stopping being true.
- */
-const TEMPORARY_GITHUB_LINK =
-  'https://github.com/d-hinders/Haven-AI/blob/dev/docs/product/account-recovery.md'
+const ALLOWED_HOSTS = new Set(['www.npmjs.com'])
 
 const DEAD_HOSTS = ['haven.xyz', 'app.haven.xyz', 'docs.haven.xyz']
 
@@ -100,6 +104,14 @@ describe('discovery artifacts (#2520)', () => {
     // one-liner into a file that has never had one.
     const carriers = ARTIFACTS.filter((name) => read(name).includes('npx @haven_ai/connect'))
     expect(carriers).toEqual(['llms-full.txt', '402.md', '402/index.html'])
+    // `for-agents.md` is deliberately NOT a carrier of the bare one-liner: the
+    // runbook prints the full connector command the backend builds, token flag
+    // included (`npx -y @haven_ai/connect@alpha --setup …`), because an agent
+    // reading it needs the shape it will be handed, not a command it could run
+    // as-is — and the dist-tag stays a `<channel>` placeholder, because a
+    // published package must not hard-code one (#2423). Asserted so the
+    // exclusion above reads as a decision.
+    expect(read('for-agents.md')).toContain('npx -y @haven_ai/connect@<channel> --setup')
     for (const name of carriers) {
       expect(read(name), name).toContain('npx @haven_ai/connect@alpha')
     }
@@ -113,11 +125,18 @@ describe('discovery artifacts (#2520)', () => {
     }
   })
 
-  it('allows exactly one github.com link, the temporary docs one', () => {
+  it('links NO github.com url — the temporary docs exception is retired (#2532)', () => {
+    // The product docs are served from this origin now. A GitHub link
+    // reappearing here means someone re-introduced the placeholder rather than
+    // adding a doc to the serve-docs allowlist.
     const githubLinks = ARTIFACTS.flatMap((name) =>
       absoluteUrls(read(name)).filter((url) => new URL(url).hostname === 'github.com'),
     )
-    expect(githubLinks).toEqual([TEMPORARY_GITHUB_LINK])
+    expect(githubLinks).toEqual([])
+  })
+
+  it('points account recovery at the served path', () => {
+    expect(read('llms.txt')).toContain('](/docs/account-recovery.md)')
   })
 
   it('no shipped frontend source links a domain we do not own', () => {

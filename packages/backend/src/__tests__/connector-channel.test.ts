@@ -127,7 +127,7 @@ describe('parseConnectorChannel — refusal (#2422)', () => {
     expect(message).toContain('alpha')
   })
 
-  it('refuses every shell metacharacter that could re-split the setup command', () => {
+  it('refuses every shell metacharacter that could re-split the connector command', () => {
     // The package spec is interpolated into `npx -y <spec> …` UNQUOTED
     // (`shellQuote` covers the token and the API URL, not the spec), and that
     // command is pasted into a real terminal. So this pattern is a shell

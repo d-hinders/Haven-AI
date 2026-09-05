@@ -200,7 +200,7 @@ export default function MPP() {
           <p className="text-[15px] text-[var(--v2-ink-2)] mb-8">
             Same rules model as x402. No card numbers in agent memory.
           </p>
-          <Button href="/signup" size="lg" trailingIcon>Get early access</Button>
+          <Button href="/signup" size="lg" trailingIcon>Create your account</Button>
         </div>
       </section>
 

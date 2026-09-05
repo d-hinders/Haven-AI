@@ -107,8 +107,9 @@ const RERUN = connectorRerunCommand()
  * Newest agent directory that holds an identity.json, plus every OTHER such
  * directory (#1688). The others used to be a cosmetic note ("N dirs found;
  * examining the newest") — which downgraded the exact fact that matters: a
- * re-run mints a fresh agent and retires nothing, so a directory this doctor
- * did NOT select can hold a key that still authenticates and still spends.
+ * re-run mints a fresh agent and, without `--replace` (#2551), retires
+ * nothing, so a directory this doctor did NOT select can hold a key that
+ * still authenticates and still spends.
  * The superseded_agents check now owns that fact; the note is gone.
  *
  * ## Three tells, not two (#1915)
@@ -707,7 +708,7 @@ async function checksForAgent(
         label: 'Signer stdio handshake',
         ok: false,
         detail: 'The local-tools consent is not acknowledged, so the signer refuses to start (by design).',
-        repair: `Run: ${RERUN} --ack-local-tools --setup <token>  (or re-run your original setup command with --ack-local-tools).`,
+        repair: `Run: ${RERUN} --ack-local-tools --setup <token>  (or re-run your original connector command with --ack-local-tools).`,
       })
     } else {
       const probe: LocalMcpProbeResult = await (deps.probeSignerTools ?? probeLocalMcpTools)(
@@ -935,8 +936,10 @@ export async function runDoctor(
   }
 
   // ── Superseded agents (#1688, now inventory-driven) ───────────────────────
-  // A re-run mints a NEW agent and retires nothing: the connector never
-  // deletes old directories, registration only collides on delegate address,
+  // A re-run mints a NEW agent and, without `--replace` (#2551), retires
+  // nothing: the connector never deletes old directories (a replace tombstones
+  // one and strips its keys, which is `retired` below), registration only
+  // collides on delegate address,
   // and cancel deliberately refuses to auto-revoke. Net effect: an MCP host
   // that started before the re-run keeps spending as the agent the user
   // believes they replaced — silently, because its old key still resolves.
@@ -1164,7 +1167,7 @@ export async function runRepair(
           ok: false,
           messages: [
             `The config at ${configPath} is the LOCAL-stdio topology (--local). Repair currently rewrites only the hosted+signer shape and will not touch it.`,
-            'Re-run your original setup command (with --local) to repair a local-stdio install.',
+            'Re-run your original connector command (with --local) to repair a local-stdio install.',
           ],
         }
       }

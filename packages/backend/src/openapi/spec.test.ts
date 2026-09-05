@@ -371,8 +371,18 @@ describe('openapiSpec', () => {
     })
 
     expect(response.statusCode).toBe(200)
-    expect(response.headers['cache-control']).toContain('max-age=300')
-    expect(response.json()).toEqual(openapiSpec)
+    // #2530: the body is no longer the static object byte-for-byte —
+    // `servers[0]` is derived from the request so a spec served by the dev
+    // backend stops telling clients to call production. Everything else is
+    // still the exact spec, which is what this case exists to pin.
+    expect(response.headers['cache-control']).toContain('must-revalidate')
+    const served = response.json()
+    expect({ ...served, servers: undefined }).toEqual({ ...openapiSpec, servers: undefined })
+    expect(served.servers[0].url).toMatch(/^http:\/\/localhost/)
+    // Production stays listed as a documented entry.
+    expect(served.servers.map((s: { url: string }) => s.url)).toContain(
+      'https://havenbackend-production-8a00.up.railway.app',
+    )
 
     await app.close()
   })

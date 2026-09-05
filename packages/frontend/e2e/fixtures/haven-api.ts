@@ -250,7 +250,7 @@ export async function mockHavenApi(page: Page) {
         setup_prompt: [
           'Please connect this workspace to Haven.',
           '',
-          'I approve running this exact Haven setup command. It may download and execute the published npm package @haven_ai/connect@alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.',
+          'I approve running this exact Haven connector command. It may download and execute the published npm package @haven_ai/connect@alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.',
           '',
           'Run this exact command:',
           '',
@@ -263,13 +263,14 @@ export async function mockHavenApi(page: Page) {
           'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
           '',
           'If you are an AI agent running this command yourself rather than a human pasting it, you should append --json: the connector then emits one machine-readable, secret-free result object on stdout with progress on stderr, and returns promptly instead of blocking while it waits for the budget approval.',
-          "When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.",
+          "When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — if the outcome carries approval.url, give me that link; otherwise tell me to return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Never build that link yourself: relay the one the outcome gave you or none at all. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.",
+          'If the connector refuses with wiring_collision, this machine is already wired to a different agent: relay that refusal to me with the superseded_agent_ids and suggested_name it carries, and let me choose whether to replace the existing wiring or add this agent alongside it. Never pick for me by adding --replace or --name yourself.',
           'Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.',
           '',
           // #2486: kept line-for-line equal to the backend's `buildSetupPrompt`
           // by a parity test in packages/backend/src/routes/__tests__/
           // agent-connection-setups.test.ts — edit the backend first.
-          "If you ran the command without --json, the connector waits for the approval itself and prints its next steps when it finishes: relay the budget-approval instruction to me — return to Haven and approve this agent's budget — only if those printed next steps still ask for it. If they report the budget as already approved, there is nothing for me to approve.",
+          "If you ran the command without --json, the connector waits for the approval itself and prints its next steps when it finishes: relay the budget-approval instruction to me — the approval link if those steps printed one, otherwise that you need to return to Haven and approve this agent's budget — only if those printed next steps still ask for it. If they report the budget as already approved, there is nothing for me to approve.",
         ].join('\n'),
       }, 201)
       return
@@ -941,7 +942,7 @@ export async function expectNoHorizontalOverflow(page: Page) {
  * scroller inside one of these dialogs will fail these specs.** The exclusion
  * above is purely geometric and does nothing for a properly-sized
  * `overflow-x-auto` wrapper. None of the three dialogs contains one today —
- * verified, not assumed — but a `CodeBlock` showing a setup command, or an
+ * verified, not assumed — but a `CodeBlock` showing a connector command, or an
  * `overflow-x-auto` element holding a full delegate address or tx hash, is a
  * plausible next addition to any of them, and it is exactly the idiom the
  * playbook recommends for #1772-shaped defects. The next author to add one

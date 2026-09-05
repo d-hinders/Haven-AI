@@ -410,12 +410,12 @@ describe('runtime config writers', () => {
     expect(messages).toContain(target)
     expect(messages).toContain('Fix the JSON there')
     // #1719 review: this fires AFTER registerSetup consumed the one-shot setup
-    // token, so "run the setup command again" is advice that lands on a 409 at
+    // token, so "run the connector command again" is advice that lands on a 409 at
     // /resolve. --repair rewrites this config from the stored credentials with
     // no token, and mints no second agent.
     expect(messages).toContain('--doctor --repair --runtime cursor')
-    expect(messages).toContain('its token is already used')
-    expect(messages).not.toMatch(/run the (Haven )?setup command again/i)
+    expect(messages).toContain('its setup token is already used')
+    expect(messages).not.toMatch(/run the (Haven )?connector command again/i)
     expect(messages).not.toContain('sk_other_do_not_echo')
     expect(messages).not.toContain(API_KEY)
   })
@@ -469,7 +469,7 @@ describe('runtime config writers', () => {
     expect(result.messages.join('\n')).not.toContain(malformed)
     expect(result.messages.join('\n')).toContain('Fix the YAML there')
     expect(result.messages.join('\n')).toContain('--doctor --repair --runtime hermes')
-    expect(result.messages.join('\n')).not.toMatch(/run the (Haven )?setup command again/i)
+    expect(result.messages.join('\n')).not.toMatch(/run the (Haven )?connector command again/i)
     expect(await readFile(target, 'utf8')).toBe(malformed)
     expect(await readFile(envTarget, 'utf8')).toBe('OTHER_MCP_TOKEN=unchanged\n')
   })

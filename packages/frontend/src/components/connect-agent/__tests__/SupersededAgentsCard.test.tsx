@@ -107,7 +107,7 @@ describe('SupersededAgentsCard', () => {
       expect(screen.getByText(/may have replaced an earlier agent/i)).toBeInTheDocument()
       expect(screen.getByText(/could not be loaded/i)).toBeInTheDocument()
       // It offers no revoke it cannot support, and says nothing changed.
-      expect(screen.queryByRole('button', { name: /^revoke$/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /^Revoke / })).not.toBeInTheDocument()
       expect(screen.getByText(/Nothing has changed either way/i)).toBeInTheDocument()
 
       await userEvent.click(screen.getByRole('button', { name: /try again/i }))
@@ -149,7 +149,7 @@ describe('SupersededAgentsCard', () => {
 
     it('asks for confirmation before revoking, and the first click does not revoke', async () => {
       render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
-      await userEvent.click(screen.getByRole('button', { name: /^revoke$/i }))
+      await userEvent.click(screen.getByRole('button', { name: 'Revoke Research agent' }))
 
       // A confirm step stands between the offer and the action.
       expect(await screen.findByText(/Revoke Research agent\?/i)).toBeInTheDocument()
@@ -166,7 +166,7 @@ describe('SupersededAgentsCard', () => {
       // confirmed a revoke. "Nothing happens without a deliberate click" was
       // not true for them.
       render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
-      await userEvent.click(screen.getByRole('button', { name: /^revoke$/i }))
+      await userEvent.click(screen.getByRole('button', { name: 'Revoke Research agent' }))
       await screen.findByRole('button', { name: /revoke agent/i })
 
       expect(screen.getByRole('button', { name: /keep it/i })).toHaveFocus()
@@ -177,7 +177,7 @@ describe('SupersededAgentsCard', () => {
 
     it('cancelling leaves the agent alone', async () => {
       render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
-      await userEvent.click(screen.getByRole('button', { name: /^revoke$/i }))
+      await userEvent.click(screen.getByRole('button', { name: 'Revoke Research agent' }))
       await userEvent.click(await screen.findByRole('button', { name: /keep it/i }))
       expect(mockRevoke).not.toHaveBeenCalled()
       // And the offer is still there — cancelling is not dismissing.
@@ -186,9 +186,13 @@ describe('SupersededAgentsCard', () => {
 
     it('revokes one agent per confirmation, never the whole list', async () => {
       render(<SupersededAgentsCard supersededAgentIds={['agt_old', 'agt_other']} />)
-      expect(screen.getAllByRole('button', { name: /^revoke$/i })).toHaveLength(2)
+      // Each button NAMES its agent. Two buttons both reading "Revoke" are
+      // indistinguishable in a screen reader's forms list, which is exactly
+      // the ambiguity that matters when the action is irreversible.
+      expect(screen.getByRole('button', { name: 'Revoke Research agent' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Revoke Ops agent' })).toBeInTheDocument()
 
-      await userEvent.click(screen.getAllByRole('button', { name: /^revoke$/i })[0])
+      await userEvent.click(screen.getByRole('button', { name: 'Revoke Research agent' }))
       await userEvent.click(await screen.findByRole('button', { name: /revoke agent/i }))
       await waitFor(() => expect(mockRevoke).toHaveBeenCalledTimes(1))
       expect(mockRevoke).toHaveBeenCalledWith('agt_old')
@@ -199,7 +203,7 @@ describe('SupersededAgentsCard', () => {
     // A shared banner would leave the user guessing across several agents.
     mockRevoke.mockRejectedValue(new Error('Agent not found'))
     render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
-    await userEvent.click(screen.getByRole('button', { name: /^revoke$/i }))
+    await userEvent.click(screen.getByRole('button', { name: 'Revoke Research agent' }))
     await userEvent.click(await screen.findByRole('button', { name: /revoke agent/i }))
 
     const alert = await screen.findByRole('alert')
@@ -210,7 +214,7 @@ describe('SupersededAgentsCard', () => {
 
   it('says the revoke is irreversible before it is taken', async () => {
     render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
-    await userEvent.click(screen.getByRole('button', { name: /^revoke$/i }))
+    await userEvent.click(screen.getByRole('button', { name: 'Revoke Research agent' }))
     expect(await screen.findByText(/cannot be undone/i)).toBeInTheDocument()
     expect(screen.getByText(/stops working immediately/i)).toBeInTheDocument()
   })

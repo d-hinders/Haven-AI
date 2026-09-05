@@ -152,18 +152,6 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
 
 
       {connectView?.kind === 'active' && (
-        // Rendered BESIDE the done state rather than inside it: the offer is
-        // about agents this setup displaced, not about the setup that just
-        // succeeded, and folding a spend-authority action into a completion
-        // celebration is how it gets clicked without being read (#2561). It
-        // renders nothing at all unless the connector reported agents this
-        // owner actually has.
-        <SupersededAgentsCard
-          supersededAgentIds={setupStatus?.install_status?.superseded_agent_ids}
-        />
-      )}
-
-      {connectView?.kind === 'active' && (
         <SetupDoneState
           runtime={effectiveRuntime}
           skillInstalled={Boolean(setupStatus?.install_status?.skill_installed)}
@@ -172,6 +160,21 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           walletName={setupStatus?.haven_wallet.name ?? flow.approvalWalletLabel}
           chainId={setupStatus?.haven_wallet.chain_id ?? flow.approvalChainId}
           onClose={flow.handleClose}
+        />
+      )}
+
+      {connectView?.kind === 'active' && (
+        // AFTER the done state, not before it (haven-design-reviewer, #2561).
+        // Rendered beside it rather than inside it, because the offer is about
+        // agents this setup displaced rather than about the setup that
+        // succeeded — but placing it first made a "replaced / revoke" decision
+        // the first thing a reader met, pushing the money-clarity payoff
+        // (`SetupDoneState`'s grant line, deliberately the heading a reader
+        // lands on) into second place. The success is the news; this is the
+        // follow-up. It renders nothing unless the connector reported agents
+        // this owner actually has.
+        <SupersededAgentsCard
+          supersededAgentIds={setupStatus?.install_status?.superseded_agent_ids}
         />
       )}
 

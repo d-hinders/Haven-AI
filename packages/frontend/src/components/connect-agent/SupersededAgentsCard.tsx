@@ -88,7 +88,7 @@ export function SupersededAgentsCard({
           </h3>
           <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">
             Your agent list could not be loaded, so Haven cannot show which — or offer to revoke
-            them here. Nothing has changed either way. Try again, or open the agents page.
+            them here. Nothing has changed either way.
           </p>
           <div className="mt-3">
             <Button variant="ghost" size="sm" onClick={() => void refetch()}>
@@ -162,6 +162,10 @@ export function SupersededAgentsCard({
                 <Button
                   variant="ghost"
                   size="sm"
+                  // Named per agent: a list of buttons all reading "Revoke" is
+                  // ambiguous in a screen reader's forms list, and the sibling
+                  // `AgentCard` already carries this exact fix.
+                  aria-label={`Revoke ${agent.name}`}
                   disabled={busyId !== null}
                   onClick={() => setPendingId(agent.id)}
                 >
@@ -186,7 +190,7 @@ export function SupersededAgentsCard({
               </p>
               <p className="mt-2">
                 Anything still running as this agent will start failing rather than stopping
-                quietly, which is the point.
+                quietly. That is expected, not a fault to chase.
               </p>
             </>
           }

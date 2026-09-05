@@ -827,6 +827,118 @@ export const openapiSpec = {
         },
       },
     },
+    '/auth/device/start': {
+      post: {
+        tags: ['Auth'],
+        operationId: 'startDeviceAuthorization',
+        summary: 'Begin a browser-approved CLI login (#2526).',
+        description:
+          'RFC 8628-shaped device authorization. Unauthenticated: this is where a CLI begins, ' +
+          'so that an agent driving it never has to hold its user\'s password. Returns a user ' +
+          'code the human types at `verification_url` and a device code the client polls with. ' +
+          'Both are stored hashed; the grant expires in 10 minutes.',
+        security: [],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  client_label: {
+                    type: 'string',
+                    maxLength: 80,
+                    description:
+                      'What the client calls itself, shown on the approval screen. Free text ' +
+                      'from an unauthenticated caller: bounded and stripped of control ' +
+                      'characters server-side, and rendered as text, never as markup.',
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'A pending grant.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DeviceAuthorizationStart' } },
+            },
+          },
+        },
+      },
+    },
+    '/auth/device/approve': {
+      post: {
+        tags: ['Auth'],
+        operationId: 'approveDeviceAuthorization',
+        summary: 'Approve or deny a pending CLI login (dashboard session only).',
+        description:
+          'Requires an ordinary owner session. An `owner_cli` token is deliberately NOT ' +
+          'accepted here — a CLI session approving further CLI sessions would turn one ' +
+          'human approval into an unbounded grant. A wrong, expired or already-decided code ' +
+          'all answer 404 alike, so codes cannot be enumerated by a signed-in caller.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['user_code'],
+                properties: {
+                  user_code: { type: 'string', description: 'As shown to the human; case and dashes are ignored.' },
+                  deny: { type: 'boolean', description: 'Deny instead of approving.' },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The grant\'s new state.' },
+          '404': { description: 'No pending approval for that code.' },
+        },
+      },
+    },
+    '/auth/device/token': {
+      post: {
+        tags: ['Auth'],
+        operationId: 'redeemDeviceAuthorization',
+        summary: 'Poll for the session token once a human has approved.',
+        description:
+          'Unauthenticated by design: the device code IS the credential. Answers ' +
+          '`authorization_pending` until approved, then the session token exactly once — ' +
+          'redemption is a single-use claim, so a poll loop that fires twice mints one ' +
+          'session, not two. The token carries `purpose: owner_cli`, which every ' +
+          'authenticated route refuses unless it is on the owner-CLI allow-list ' +
+          '(`middleware/owner-cli.ts`): agents, connect setups and read-only account ' +
+          'context — never signer changes, re-keying, credentials, provisioning, transfers, ' +
+          'or delegation build/activate/revoke. The human keeps every signature.',
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['device_code'],
+                properties: { device_code: { type: 'string' } },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The owner-CLI session token.' },
+          '400': {
+            description:
+              'authorization_pending | slow_down | expired_token | access_denied. An unknown ' +
+              'code and an expired one answer alike, so one cannot be used to probe the other.',
+          },
+        },
+      },
+    },
     '/health': {
       get: {
         tags: ['Health'],
@@ -5720,6 +5832,18 @@ export const openapiSpec = {
         type: 'string',
         enum: Object.values(AgentPaymentRail),
         description: 'Stable rail identifier for Haven agent payment states.',
+      },
+      DeviceAuthorizationStart: {
+        type: 'object',
+        required: ['device_code', 'user_code', 'verification_url', 'expires_in', 'interval'],
+        properties: {
+          device_code: { type: 'string', description: 'The client\'s bearer credential for polling. Stored hashed.' },
+          user_code: { type: 'string', description: 'Typed by the human. 8 characters from an unambiguous alphabet.' },
+          verification_url: { type: 'string', format: 'uri' },
+          expires_in: { type: 'integer', description: 'Seconds. 600.' },
+          interval: { type: 'integer', description: 'Seconds between polls. 5.' },
+        },
+        additionalProperties: false,
       },
       HealthResponse: {
         type: 'object',

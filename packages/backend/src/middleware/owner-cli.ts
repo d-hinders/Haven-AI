@@ -108,21 +108,46 @@ export function isOwnerCliRequest(request: FastifyRequest): boolean {
 }
 
 /**
- * Marker a route sets to opt INTO accepting an `owner_cli` token.
+ * Does the route this request matched accept an `owner_cli` token?
  *
- * Deliberately a route-config flag read by the shared middleware rather than a
- * second middleware a route could forget to chain after `authMiddleware`: one
- * door, one guard (#1640's lesson), and the census can see the decision in the
- * allow-list rather than having to model middleware composition.
+ * Read from the LIST above rather than from a per-route marker, and that is a
+ * deliberate departure from the issue's `allowOwnerCli(handlerOpts)` sketch.
+ *
+ * These modules attach auth with one `app.addHook('onRequest', authMiddleware)`
+ * for the whole module, so a marker would have to be added to ~22 individual
+ * registrations across nine files. That creates a failure this design does not
+ * have: a route on the list whose marker was forgotten (grants nothing, reads
+ * like coverage) or a marker on a route nobody listed (grants something nobody
+ * decided). Two sources of truth that must agree is a worse property than one
+ * that cannot disagree.
+ *
+ * It also makes the census test guard the REAL enforcement. If the list were a
+ * parallel document, the census would prove the document consistent while the
+ * middleware did something else.
+ *
+ * `allowOwnerCli()` is still exported for a route that wants the decision
+ * visible in its own file — it is additive, not an alternative: a route is
+ * allowed if the list says so OR it carries the marker.
+ */
+export function routeAllowsOwnerCli(request: FastifyRequest): boolean {
+  const config = (request.routeOptions?.config ?? {}) as { allowOwnerCli?: unknown }
+  if (config.allowOwnerCli === true) return true
+
+  const url = request.routeOptions?.url
+  if (typeof url !== 'string') return false
+  // Fastify reports `/agents/:id`; the list is written in the OpenAPI shape so
+  // the census can compare it to `fastifyPathToOpenApi` without a second
+  // normalisation rule to keep in step.
+  const openapiPath = url.replace(/:([A-Za-z0-9_]+)/g, '{$1}')
+  return isOwnerCliAllowed(request.method, openapiPath)
+}
+
+/**
+ * Marker a route may set to opt in from its own registration, for a decision
+ * worth reading where the route is declared. Additive to the list above.
  */
 export function allowOwnerCli(): { config: { allowOwnerCli: true } } {
   return { config: { allowOwnerCli: true } }
-}
-
-/** Read that marker back off the request's route config. */
-export function routeAllowsOwnerCli(request: FastifyRequest): boolean {
-  const config = (request.routeOptions?.config ?? {}) as { allowOwnerCli?: unknown }
-  return config.allowOwnerCli === true
 }
 
 /** Unused re-export guard so a future reply-typed helper has a home. */

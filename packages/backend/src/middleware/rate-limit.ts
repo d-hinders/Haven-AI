@@ -177,12 +177,24 @@ export const publicIssuerRateLimit = {
  */
 export function authRateLimit(
   trustProxyHops: number,
-  route: 'signup' | 'login',
+  route: 'signup' | 'login' | 'device_start' | 'device_token',
 ): { rateLimit?: { max: number; timeWindow: string } } {
   if (trustProxyHops <= 0) return {}
   return {
     rateLimit: {
-      max: route === 'signup' ? 10 : 30,
+      // #2526's two tiers sit either side of login, for opposite reasons.
+      //
+      // `device_start` mints a user code a human will type, so it is the
+      // guessing surface: tighter than signup, because nobody needs ten CLI
+      // logins a minute and each unclaimed code widens the window an attacker
+      // can walk.
+      //
+      // `device_token` is a POLL. The flow itself tells the client to come
+      // back every 5 seconds for up to 10 minutes — 120 legitimate calls — so
+      // a limit near login's would 429 the happy path. It is deliberately the
+      // loosest of the four, and it is not the guessing surface: the device
+      // code is 32 random bytes, not eight typed characters.
+      max: route === 'signup' ? 10 : route === 'device_start' ? 5 : route === 'device_token' ? 200 : 30,
       timeWindow: '1 minute',
     },
   }

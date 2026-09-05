@@ -1,4 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify'
+import { OWNER_CLI_PURPOSE, routeAllowsOwnerCli } from './owner-cli.js'
 
 /**
  * Dashboard session auth.
@@ -27,9 +28,22 @@ export async function authMiddleware(
   }
 
   const purpose = (request.user as { purpose?: unknown } | undefined)?.purpose
-  if (purpose !== undefined) {
-    // Deliberately the same body as a failed verification: which kind of token
-    // was presented is not something an unauthenticated caller needs told.
-    return reply.code(401).send({ error: 'Unauthorized' })
-  }
+  if (purpose === undefined) return
+
+  // #2526: ONE exception to #1640's blanket refusal, and it is an opt-IN.
+  //
+  // A device-code login mints an owner token carrying `purpose: 'owner_cli'`
+  // for a CLI an agent drives. A route accepts it only by setting the marker
+  // (`allowOwnerCli()` in its own registration); everything else — including
+  // every route added after this line was written — keeps refusing, because
+  // the default is still the refusal below.
+  //
+  // The check is `routeAllowsOwnerCli` AND the purpose being exactly
+  // `owner_cli`: an opted-in route must not thereby accept the Fortnox OAuth
+  // state token, whose whole point is that it is single-purpose.
+  if (purpose === OWNER_CLI_PURPOSE && routeAllowsOwnerCli(request)) return
+
+  // Deliberately the same body as a failed verification: which kind of token
+  // was presented is not something an unauthenticated caller needs told.
+  return reply.code(401).send({ error: 'Unauthorized' })
 }

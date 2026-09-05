@@ -28,6 +28,66 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/auth/device/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin a browser-approved CLI login (#2526).
+         * @description RFC 8628-shaped device authorization. Unauthenticated: this is where a CLI begins, so that an agent driving it never has to hold its user's password. Returns a user code the human types at `verification_url` and a device code the client polls with. Both are stored hashed; the grant expires in 10 minutes.
+         */
+        post: operations["startDeviceAuthorization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/device/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or deny a pending CLI login (dashboard session only).
+         * @description Requires an ordinary owner session. An `owner_cli` token is deliberately NOT accepted here — a CLI session approving further CLI sessions would turn one human approval into an unbounded grant. A wrong, expired or already-decided code all answer 404 alike, so codes cannot be enumerated by a signed-in caller.
+         */
+        post: operations["approveDeviceAuthorization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/device/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Poll for the session token once a human has approved.
+         * @description Unauthenticated by design: the device code IS the credential. Answers `authorization_pending` until approved, then the session token exactly once — redemption is a single-use claim, so a poll loop that fires twice mints one session, not two. The token carries `purpose: owner_cli`, which every authenticated route refuses unless it is on the owner-CLI allow-list (`middleware/owner-cli.ts`): agents, connect setups and read-only account context — never signer changes, re-keying, credentials, provisioning, transfers, or delegation build/activate/revoke. The human keeps every signature.
+         */
+        post: operations["redeemDeviceAuthorization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -2435,6 +2495,18 @@ export type components = {
          * @enum {string}
          */
         AgentPaymentRail: "direct" | "x402" | "mpp" | "mpp_demo" | "mpp_crypto" | "stripe_deposit" | "spt";
+        DeviceAuthorizationStart: {
+            /** @description The client's bearer credential for polling. Stored hashed. */
+            device_code: string;
+            /** @description Typed by the human. 8 characters from an unambiguous alphabet. */
+            user_code: string;
+            /** Format: uri */
+            verification_url: string;
+            /** @description Seconds. 600. */
+            expires_in: number;
+            /** @description Seconds between polls. 5. */
+            interval: number;
+        };
         HealthResponse: {
             /** @enum {string} */
             status: "ok" | "degraded";
@@ -3689,6 +3761,98 @@ export interface operations {
                         [key: string]: unknown;
                     };
                 };
+            };
+        };
+    };
+    startDeviceAuthorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description What the client calls itself, shown on the approval screen. Free text from an unauthenticated caller: bounded and stripped of control characters server-side, and rendered as text, never as markup. */
+                    client_label?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description A pending grant. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceAuthorizationStart"];
+                };
+            };
+        };
+    };
+    approveDeviceAuthorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description As shown to the human; case and dashes are ignored. */
+                    user_code: string;
+                    /** @description Deny instead of approving. */
+                    deny?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The grant's new state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No pending approval for that code. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    redeemDeviceAuthorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    device_code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The owner-CLI session token. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description authorization_pending | slow_down | expired_token | access_denied. An unknown code and an expired one answer alike, so one cannot be used to probe the other. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

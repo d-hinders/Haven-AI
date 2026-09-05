@@ -250,7 +250,7 @@ export async function mockHavenApi(page: Page) {
         setup_prompt: [
           'Please connect this workspace to Haven.',
           '',
-          'I approve running this exact Haven setup command. It may download and execute the published npm package @haven_ai/connect@alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.',
+          'I approve running this exact Haven connector command. It may download and execute the published npm package @haven_ai/connect@alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.',
           '',
           'Run this exact command:',
           '',
@@ -942,7 +942,7 @@ export async function expectNoHorizontalOverflow(page: Page) {
  * scroller inside one of these dialogs will fail these specs.** The exclusion
  * above is purely geometric and does nothing for a properly-sized
  * `overflow-x-auto` wrapper. None of the three dialogs contains one today —
- * verified, not assumed — but a `CodeBlock` showing a setup command, or an
+ * verified, not assumed — but a `CodeBlock` showing a connector command, or an
  * `overflow-x-auto` element holding a full delegate address or tx hash, is a
  * plausible next addition to any of them, and it is exactly the idiom the
  * playbook recommends for #1772-shaped defects. The next author to add one

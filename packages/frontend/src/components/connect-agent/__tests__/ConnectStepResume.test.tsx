@@ -86,7 +86,7 @@ describe('ConnectStep resumed from a hand-off link (#2522)', () => {
   it('awaiting_connection: says there is nothing to approve yet, and offers no connector command', () => {
     render(<ConnectStep flow={resumedFlow()} />)
     expect(screen.getByText(/Not connected yet/i)).toBeInTheDocument()
-    expect(screen.getByText(/Nothing to approve until the agent runs its setup command/i)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing to approve until the agent runs its connector command/i)).toBeInTheDocument()
     // The setup token is a create-time secret and this path has none. Handing
     // the approver a connector command would be handing them somebody else's
     // terminal step.

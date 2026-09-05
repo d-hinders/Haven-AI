@@ -26,7 +26,7 @@
  *   One env read inside the two `prepare*Runtime` functions covers all three;
  *   a flag would have to be plumbed through each argv parser and each result
  *   type separately, and the first one forgotten is a hole.
- * - The setup command is minted by the dashboard and pasted verbatim, often by
+ * - The connector command is minted by the dashboard and pasted verbatim, often by
  *   an agent. An override that lived in argv would have to be spliced into a
  *   command the developer did not write; an env var sits beside it.
  * - It is out of band by construction: an agent following the printed command

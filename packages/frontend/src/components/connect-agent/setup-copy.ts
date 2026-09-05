@@ -81,8 +81,8 @@ export function runtimeStatusHelper(
   }
   if (install.error_code === 'local_mcp_ack_required') return 'Haven tools need one-time acknowledgement before this agent can load them.'
   if (install.error_code === 'local_signer_ack_required') return 'Local signing needs one-time acknowledgement before this agent can load Haven tools.'
-  if (install.error_code === 'local_mcp_unsupported_node_version') return 'Update Node.js to version 22 or newer, then run the setup command again.'
-  if (install.error_code === 'local_mcp_runtime_install_failed') return 'The connector could not install Haven tools locally. Run the setup command again; it uses Haven-owned local storage.'
+  if (install.error_code === 'local_mcp_unsupported_node_version') return 'Update Node.js to version 22 or newer, then run the connector command again.'
+  if (install.error_code === 'local_mcp_runtime_install_failed') return 'The connector could not install Haven tools locally. Run the connector command again; it uses Haven-owned local storage.'
   if (install.error_code === 'codex_config_invalid') return 'Codex config needs a manual fix before Haven tools can be added.'
   // #1719: an unparseable config is not a retryable write failure — running
   // setup again fails identically until the file itself is fixed. It also
@@ -104,7 +104,7 @@ export function runtimeStatusHelper(
       'The agent client config on that machine could not be read, so Haven left it untouched. Fix the file the connector named, then '
     // The spec the server handed out: spell the whole command.
     if (connectorPackage) {
-      return `${lead}run \`npx ${connectorPackage} ${repairArgs}\` there — not the setup command, which this agent no longer needs.`
+      return `${lead}run \`npx ${connectorPackage} ${repairArgs}\` there — not the connector command from the setup prompt, which this agent no longer needs.`
     }
     // #2422 design review: rolling-deploy skew. Bare FLAGS are not an
     // instruction — the user has nothing to attach them to — and inventing a
@@ -119,17 +119,17 @@ export function runtimeStatusHelper(
     //      screen. The bug is pre-existing and out of scope, but the count is
     //      a choice made here, so the flags carry the only pair.
     //   2. The closing clause SUBSTITUTES and then names what not to do, in
-    //      that order. An earlier draft ended "not the setup command
+    //      that order. An earlier draft ended "not the connector command
     //      unchanged", which negates a different, unstated command in the same
     //      breath and parses only on a second read. #1719's guarantee — never
     //      send the user back through setup, whose token is spent and whose
     //      re-run mints a SECOND agent (#1688) — is carried by "rather than
-    //      re-running that setup command as-is".
-    return `${lead}re-run the same npx connector command you used for setup, with the flags \`${repairArgs}\` instead of --setup, rather than re-running that setup command as-is.`
+    //      re-running that connector command as-is".
+    return `${lead}re-run the same npx connector command you used for setup, with the flags \`${repairArgs}\` instead of --setup, rather than re-running that connector command as-is.`
   }
-  if (install.error_code === 'runtime_config_write_failed') return 'Haven could not update the agent client config on that machine. Check the connector output, then run the setup command again.'
-  if (install.error_code === 'claude_code_config_failed') return 'Claude Code did not accept the Haven tools entry. Run the setup command inside Claude Code again.'
-  if (install.error_code?.startsWith('local_mcp_probe_')) return 'The connector installed Haven tools, but the local check could not load them yet. Run the setup command again.'
+  if (install.error_code === 'runtime_config_write_failed') return 'Haven could not update the agent client config on that machine. Check the connector output, then run the connector command again.'
+  if (install.error_code === 'claude_code_config_failed') return 'Claude Code did not accept the Haven tools entry. Run the connector command inside Claude Code again.'
+  if (install.error_code?.startsWith('local_mcp_probe_')) return 'The connector installed Haven tools, but the local check could not load them yet. Run the connector command again.'
   if (install.error_code) return 'The connector stored credentials, but runtime setup needs a manual finish.'
   if (install.restart_required && install.local_mcp_configured && runtimeIsConfigured(install)) return 'After approval, restart the agent normally so it can load Haven tools.'
   if (install.restart_required && install.activation_command_available) return 'The connector prepared a restart command. Use it after approval so this agent can load Haven tools.'

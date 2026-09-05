@@ -2575,7 +2575,7 @@ export const SCENARIOS = {
           setup_prompt: [
             'Please connect this workspace to Haven.',
             '',
-            `I approve running this exact Haven setup command. It may download and execute the published npm package @haven_ai/connect@alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.`,
+            `I approve running this exact Haven connector command. It may download and execute the published npm package @haven_ai/connect@alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.`,
             '',
             'Run this exact command:',
             '',

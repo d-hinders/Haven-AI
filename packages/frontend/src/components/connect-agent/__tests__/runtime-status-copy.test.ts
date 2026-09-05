@@ -20,7 +20,7 @@ function installWith(errorCode: string): Install {
 /**
  * #1719: the connector's config-write failures split into a retryable one and
  * one that never becomes retryable. The dashboard has to say which, because
- * "run the setup command again" is advice that cannot work against a config
+ * "run the connector command again" is advice that cannot work against a config
  * file the user has to fix by hand first.
  */
 describe('runtimeStatusHelper for config failures (#1719)', () => {
@@ -34,7 +34,7 @@ describe('runtimeStatusHelper for config failures (#1719)', () => {
 
   it('sends an unreadable config to --repair, never back through setup', () => {
     // #1719 review: this failure happens after the agent is registered, so the
-    // setup token is spent. Telling the user to "run the setup command again"
+    // setup token is spent. Telling the user to "run the connector command again"
     // lands on a 409; starting a fresh connection mints a SECOND agent (#1688).
     //
     // #2422: the hint now has TWO branches (server-provided spec, and the
@@ -50,13 +50,13 @@ describe('runtimeStatusHelper for config failures (#1719)', () => {
 
     for (const helper of [withSpec, withoutSpec]) {
       expect(helper).toContain('--doctor --repair')
-      expect(helper).not.toMatch(/run the setup command again/i)
+      expect(helper).not.toMatch(/run the connector command again/i)
     }
 
     // Each branch words the warning to fit its own sentence shape; both say
     // "do not re-run setup as it stands".
-    expect(withSpec).toContain('not the setup command')
-    expect(withoutSpec).toContain('rather than re-running that setup command as-is')
+    expect(withSpec).toContain('not the connector command')
+    expect(withoutSpec).toContain('rather than re-running that connector command as-is')
   })
 
   it('spells the repair command WITH --runtime, because the parser requires it', () => {
@@ -79,7 +79,7 @@ describe('runtimeStatusHelper for config failures (#1719)', () => {
     const helper = runtimeStatusHelper(installWith('runtime_config_write_failed'))
 
     expect(helper).toContain('could not update')
-    expect(helper).toContain('run the setup command again')
+    expect(helper).toContain('run the connector command again')
     expect(helper).not.toContain('Fix the file')
   })
 
@@ -142,11 +142,17 @@ describe('runtimeStatusHelper takes the connector spec from the server (#2422)',
       '@haven_ai/connect@alpha',
     )
 
-    // Byte-for-byte the sentence this surface rendered before #2422.
+    // Byte-for-byte the sentence this surface renders. #2576 renamed the
+    // closing clause's noun to the canonical `connector command` and added
+    // "from the setup prompt", because the SUBSTITUTE it offers two clauses
+    // earlier is also an npx connector invocation: "not the connector command"
+    // on its own would negate the very thing it just told the user to run.
+    // What distinguishes the two is which one carries --setup, and the setup
+    // prompt is where that one comes from.
     expect(helper).toBe(
       'The agent client config on that machine could not be read, so Haven left it untouched. ' +
         'Fix the file the connector named, then run `npx @haven_ai/connect@alpha --doctor --repair --runtime cursor` ' +
-        'there — not the setup command, which this agent no longer needs.',
+        'there — not the connector command from the setup prompt, which this agent no longer needs.',
     )
   })
 
@@ -173,7 +179,7 @@ describe('runtimeStatusHelper takes the connector spec from the server (#2422)',
     expect(helper).toContain('--doctor --repair --runtime cursor')
     // It must still warn against re-running setup as it stands (#1719: the
     // token is spent and a fresh connection mints a second agent).
-    expect(helper).toContain('rather than re-running that setup command as-is')
+    expect(helper).toContain('rather than re-running that connector command as-is')
   })
 
   it('spends exactly ONE backtick pair on the fallback sentence', () => {

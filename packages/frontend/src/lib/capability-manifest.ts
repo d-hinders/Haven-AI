@@ -27,11 +27,16 @@ export const MANIFEST_SCHEMA_VERSION = 1
  * that silently drifts back in.
  */
 export const DEFERRED_MANIFEST_KEYS = {
-  // `docs.for_agents` used to be here, waiting on #2523. That issue merged and
-  // `/for-agents.md` is now a real surface, so the key is present — the entry
-  // leaving this map is the mechanism working exactly as it was built to.
-  'dashboard.device_approval': { path: '/device', lands_in: 2526 },
-} as const
+  // Empty, and that is the mechanism finishing rather than an oversight.
+  //
+  // `docs.for_agents` waited on #2523 and left when `/for-agents.md` started
+  // answering. `dashboard.device_approval` waited on #2526 and leaves with the
+  // change that adds `/device`. A key appears exactly when the thing it names
+  // starts answering — never because somebody remembered to check.
+  //
+  // The map stays, typed and asserted, so the next deferred key has a home and
+  // a test rather than a comment.
+} as const satisfies Record<string, { path: string; lands_in: number }>
 
 /** What the backend's `GET /discovery` contributes. */
 export interface DiscoveryFacts {
@@ -91,7 +96,9 @@ export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null)
       'Give an agent a budget, not your wallet. Agents pay x402 merchants within owner-set, ' +
       'on-chain-enforced limits; Haven never holds funds and the agent never holds a key.',
     human_only_steps: HUMAN_ONLY_STEPS,
-    dashboard: { signup: '/signup', login: '/login' },
+    // #2526 landed: the page where a human approves a CLI session an agent
+    // asked for. The one step in the whole flow an agent cannot do for itself.
+    dashboard: { signup: '/signup', login: '/login', device_approval: '/device' },
     api: {
       // Absolute: a different origin, and read from configuration — never from
       // a request header. Null when the backend could not be reached, which is

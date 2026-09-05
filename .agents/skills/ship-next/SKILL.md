@@ -510,6 +510,9 @@ you need the reasoning. Never edit one without the other — CI will not let you
   the command and window are in the JSON note);
 - `db/migrations/`;
 - the safeguard's own control surface — `scripts/release-bump.mjs`,
+  `scripts/release-version-order.mjs` (the forward-only version rule #2580 lifted
+  out of it — a rule that decides which version may reach npm belongs on the same
+  footing as the script that applies it),
   `scripts/ci/qa-freshness.mjs`, `scripts/ci/money-path.test.mjs`,
   `scripts/ci/money-path-restatement-scan.mjs`, `.github/CODEOWNERS`,
   `.github/money-path-globs.json`, `.github/workflows/publish.yml`,

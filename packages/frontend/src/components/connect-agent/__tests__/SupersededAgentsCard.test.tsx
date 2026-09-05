@@ -18,8 +18,18 @@ const { mockRevoke, mockAgents } = vi.hoisted(() => ({
   mockAgents: { current: [] as Array<{ id: string; name: string; status: string }> },
 }))
 
+const { mockState } = vi.hoisted(() => ({
+  mockState: { error: null as string | null, refetch: (() => {}) as () => void },
+}))
+
 vi.mock('@/hooks/useAgents', () => ({
-  useAgents: () => ({ agents: mockAgents.current, revokeAgent: mockRevoke }),
+  useAgents: () => ({
+    agents: mockAgents.current,
+    loading: false,
+    error: mockState.error,
+    refetch: mockState.refetch,
+    revokeAgent: mockRevoke,
+  }),
 }))
 
 const OWNED = [
@@ -31,6 +41,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockAgents.current = OWNED
   mockRevoke.mockResolvedValue(undefined)
+  mockState.error = null
+  mockState.refetch = vi.fn()
 })
 
 describe('SupersededAgentsCard', () => {
@@ -81,6 +93,35 @@ describe('SupersededAgentsCard', () => {
       }
     })
 
+    it('says so when the AGENT LIST could not be read, rather than going quiet', async () => {
+      // The mirror of this component's own rule, and the one it originally
+      // missed: it applies the scanned-vs-unscanned discipline to the report
+      // and then reads the owner's agents itself, a read that can fail. After
+      // it does, `agents` stays empty for good — and rendering nothing then
+      // looks exactly like "this setup replaced nothing", about a list we know
+      // is not empty.
+      mockAgents.current = []
+      mockState.error = 'We could not load connected agents.'
+      render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
+
+      expect(screen.getByText(/may have replaced an earlier agent/i)).toBeInTheDocument()
+      expect(screen.getByText(/could not be loaded/i)).toBeInTheDocument()
+      // It offers no revoke it cannot support, and says nothing changed.
+      expect(screen.queryByRole('button', { name: /^revoke$/i })).not.toBeInTheDocument()
+      expect(screen.getByText(/Nothing has changed either way/i)).toBeInTheDocument()
+
+      await userEvent.click(screen.getByRole('button', { name: /try again/i }))
+      expect(mockState.refetch).toHaveBeenCalled()
+    })
+
+    it('stays silent when the read fails but nothing was reported', () => {
+      // A failed read with nothing to say about has nothing to say.
+      mockAgents.current = []
+      mockState.error = 'We could not load connected agents.'
+      const { container } = render(<SupersededAgentsCard supersededAgentIds={[]} />)
+      expect(container).toBeEmptyDOMElement()
+    })
+
     it('ignores ids this owner does not have', () => {
       // The connector falls back to a DIRECTORY NAME when an identity.json
       // will not parse, so the report can name things that are not agents —
@@ -116,6 +157,22 @@ describe('SupersededAgentsCard', () => {
 
       await userEvent.click(screen.getByRole('button', { name: /revoke agent/i }))
       await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith('agt_old'))
+    })
+
+    it('opens the confirm with CANCEL focused, not the destructive button', async () => {
+      // The finding this fix closes: the shared dialog focused its confirm on
+      // open, and the modal focuses synchronously — so a keyboard user's second
+      // Enter, an ordinary reflex right after the Enter that opened it,
+      // confirmed a revoke. "Nothing happens without a deliberate click" was
+      // not true for them.
+      render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
+      await userEvent.click(screen.getByRole('button', { name: /^revoke$/i }))
+      await screen.findByRole('button', { name: /revoke agent/i })
+
+      expect(screen.getByRole('button', { name: /keep it/i })).toHaveFocus()
+      // And the reflex itself: Enter on the focused control cancels.
+      await userEvent.keyboard('{Enter}')
+      expect(mockRevoke).not.toHaveBeenCalled()
     })
 
     it('cancelling leaves the agent alone', async () => {

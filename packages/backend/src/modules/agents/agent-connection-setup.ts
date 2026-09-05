@@ -172,13 +172,19 @@ export function sanitizeInstallStatus(value: unknown): Record<string, unknown> {
       status.superseded_agent_ids = null
     } else if (Array.isArray(field)) {
       status.superseded_agent_ids = field
+        // The count cap comes FIRST (#2561 review). Capping last still stored a
+        // bounded row, but it ran a trim and a secret-shape regex over every
+        // element of an arbitrarily long array before truncating — so the
+        // comment claiming the cap kept the work bounded was true of the row
+        // and not of the request. No test pins this ordering, and none can:
+        // the output is identical either way, so what changed is the work, not
+        // the result. Said plainly rather than implied by a passing suite.
+        .slice(0, 50)
         .filter((id): id is string => typeof id === 'string')
         .map((id) => id.trim())
         .filter((id) => id.length > 0 && !looksLikeRawPathOrSecret(id))
-        // Same 120-character ceiling the string fields use, and a count cap so
-        // a malformed or hostile report cannot grow the row without bound.
+        // Same 120-character ceiling the string fields use.
         .map((id) => id.slice(0, 120))
-        .slice(0, 50)
     }
   }
 

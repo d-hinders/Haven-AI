@@ -1534,7 +1534,16 @@ const RERUN_HINT = connectorRerunCommand()
  * root could not be read", and the outcome field's own doc comment had to warn
  * readers that emptiness was not a guarantee. A warning in prose cannot reach
  * a dashboard: rendering "nothing to revoke" for a machine nobody scanned
- * states something Haven does not know. So the two cases are distinguishable
+ * states something Haven does not know.
+ *
+ * What a NON-null return does and does not promise: the root was readable, not
+ * that every entry under it was. A per-entry `stat` or read that fails is
+ * skipped — correct for a `.DS_Store`, and it also silently drops a real agent
+ * directory that is merely unreadable (a permission error, say). So a list can
+ * UNDER-report. That direction is the safe one — fewer revoke offers, never a
+ * spurious one — but it is a limit of the success branch rather than a
+ * guarantee, and saying so here is cheaper than a reader inferring the
+ * opposite. So the two cases are distinguishable
  * at the source, where the difference is actually observed.
  */
 async function listOtherAgentIds(baseDir: string | undefined, currentDirectory: string): Promise<string[] | null> {

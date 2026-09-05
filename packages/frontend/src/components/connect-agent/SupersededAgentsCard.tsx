@@ -54,7 +54,7 @@ export function SupersededAgentsCard({
   /** Tri-state from `install_status`: list, `[]`, or `null`/absent. */
   supersededAgentIds?: readonly string[] | null
 }) {
-  const { agents, revokeAgent } = useAgents()
+  const { agents, error, refetch, revokeAgent } = useAgents()
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [failed, setFailed] = useState<Record<string, string>>({})
@@ -70,6 +70,40 @@ export function SupersededAgentsCard({
     return agents.filter((agent) => reported.has(agent.id) && agent.status !== 'revoked')
   }, [supersededAgentIds, agents])
 
+  // The same discipline this component applies to the REPORT, applied to the
+  // other half of the intersection (#2561 review). The card reads the owner's
+  // agents itself, and that read can fail — after which `agents` stays empty
+  // for good. Rendering nothing then is a false silence: it looks exactly like
+  // "this setup replaced nothing", about a list we know is non-empty.
+  //
+  // Only reached when the connector actually named agents. A failed read with
+  // nothing reported has nothing to be silent about.
+  const reportedAny = (supersededAgentIds?.length ?? 0) > 0
+  if (offered.length === 0 && reportedAny && error) {
+    return (
+      <Card>
+        <Card.Section>
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
+            This setup may have replaced an earlier agent
+          </h3>
+          <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+            Your agent list could not be loaded, so Haven cannot show which — or offer to revoke
+            them here. Nothing has changed either way. Try again, or open the agents page.
+          </p>
+          <div className="mt-3">
+            <Button variant="ghost" size="sm" onClick={() => void refetch()}>
+              Try again
+            </Button>
+          </div>
+        </Card.Section>
+      </Card>
+    )
+  }
+
+  // A load still in flight renders nothing rather than a skeleton: it is
+  // transient and resolves on its own, on a screen that has just finished
+  // celebrating a completed setup. The branch above is what keeps a FAILED
+  // load from looking the same.
   if (offered.length === 0) return null
 
   const pending = offered.find((agent) => agent.id === pendingId) ?? null

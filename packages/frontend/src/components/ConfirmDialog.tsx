@@ -44,7 +44,15 @@ export default function ConfirmDialog({
 }: ConfirmDialogProps) {
   const cancelBtnRef = useRef<HTMLButtonElement>(null)
   const confirmBtnRef = useRef<HTMLButtonElement>(null)
-  const initialFocusRef = confirmDisabled ? cancelBtnRef : confirmBtnRef
+  // Focus lands on CANCEL for a danger dialog (#2561 review). The modal focuses
+  // its target synchronously on open, so focusing the destructive button meant
+  // a keyboard user's second Enter — an ordinary reflex right after the Enter
+  // that opened the dialog — confirmed it. That turns "nothing happens without
+  // a deliberate click" into a claim the component did not keep. A primary
+  // dialog still focuses its confirm: the reflex is only dangerous when the
+  // action is.
+  const initialFocusRef =
+    confirmDisabled || tone === 'danger' ? cancelBtnRef : confirmBtnRef
   const confirmButton = (
     <Button
       ref={confirmBtnRef}

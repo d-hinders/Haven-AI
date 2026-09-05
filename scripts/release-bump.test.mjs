@@ -1724,7 +1724,7 @@ test('#2580: an unchanged version is refused before the release PR merges', asyn
 })
 
 test('#2580: production resolves the REAL semver — structure ALWAYS, identity where deps exist', async () => {
-  // Four guards have stood here. Three were defeated by `haven-reviewer`, each
+  // Five guards have stood here. All five were defeated by `haven-reviewer`, each
   // by a stub that satisfied the guard's words while fabricating the comparator:
   //   1. a whole-file substring scan → inline object literal, path string parked
   //      in an unused variable;
@@ -1734,12 +1734,22 @@ test('#2580: production resolves the REAL semver — structure ALWAYS, identity 
   //      SHORTHAND METHODS (`lt(a, b) { … }`), which carry no colon, wrapped in a
   //      try/catch so identity still held whenever semver happened to exist.
   //
-  // Two lessons are encoded below. First, each fix was scoped too narrowly to the
+  // Two further evasions followed and are NOT closed by anything in this test:
+  //   4. keep the REAL module and mutate `.lt`/`.eq` on it after resolution —
+  //      identity is preserved, so the identity assertion below accepts it;
+  //   5. computed keys (`f['l'+'t']`) returned via `.then(ok, fail)` — no `catch`
+  //      keyword, no `lt:` spelling.
+  // Those are handled at RUNTIME instead, by the comparator self-check in
+  // `backwardsVersionViolation`, which fails closed. See the test below.
+  //
+  // Two lessons are encoded here. First, each fix was scoped too narrowly to the
   // attack that prompted it, so the checks now reject the fabrication SHAPE
-  // (`lt` followed by `:` or `(`) rather than one spelling of it, and reject a
-  // swallowed import outright. Second — the reason evasion 3 survived its first
-  // fix — the structural check used to run ONLY in the dependency-free branch, so
-  // with dependencies present nothing inspected the source at all. It now runs
+  // (`lt` followed by `:` or `(`) rather than one spelling of it. An earlier
+  // version of this comment also claimed they "reject a swallowed import
+  // outright"; that was false, and the `catch` ban it referred to is gone.
+  // Second — the reason evasion 3 survived its first fix — the structural check
+  // used to run ONLY in the dependency-free branch, so with dependencies present
+  // nothing inspected the source at all. It now runs
   // UNCONDITIONALLY, and identity is layered on top where it can be proven.
   const { resolveSemver } = await import('./release-version-order.mjs')
 
@@ -1770,10 +1780,12 @@ test('#2580: production resolves the REAL semver — structure ALWAYS, identity 
   // are cheap accidental-drift detection, not a boundary.
 
   // ── Where dependencies exist: identity ─────────────────────────────────────
-  // Identity is not a property of source text, so no stub survives it. It cannot
-  // run in `Repo CI config checks`, which has no node_modules by design and is
-  // the only job running this file — which is exactly why the structural half
-  // above is unconditional rather than a fallback.
+  // Identity is not a property of source text, so it defeats every stub that
+  // SUBSTITUTES a different object — but NOT one that keeps the real object and
+  // mutates its methods afterwards (evasion 4). It also cannot run in
+  // `Repo CI config checks`, which has no node_modules by design and is the only
+  // job running this file — which is why the structural half above is
+  // unconditional rather than a fallback, and why the runtime self-check exists.
   let real = null
   try {
     real = (await import(join(ROOT, 'node_modules', 'semver', 'index.js'))).default

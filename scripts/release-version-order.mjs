@@ -145,8 +145,20 @@ export function backwardsVersionViolation(current, next, { snapshot }, semver) {
  * close that, because the thing it inspects is not the thing that runs.
  *
  * Exported here, the resolution can be executed and its RESULT compared for
- * identity against a separately imported `semver` — which no stub survives,
- * because identity is not a property of the source text.
+ * identity against a separately imported `semver`. Identity is not a property of
+ * source text, so it defeats every stub that SUBSTITUTES a different object.
+ *
+ * It does NOT defeat a stub that keeps the real object and mutates its methods
+ * afterwards — a fourth evasion did exactly that, and a fifth swallowed the
+ * import via `.then(ok, fail)` with computed keys, beating a `catch` ban that was
+ * also false-positive-prone against a legitimate re-throw. An earlier version of
+ * this comment said "no stub survives it"; that was false. Identity bounds
+ * SUBSTITUTION, not post-resolution tampering.
+ *
+ * What actually closes the class is not here at all: `backwardsVersionViolation`
+ * probes its comparator with known-answer facts and REFUSES the bump when they
+ * are wrong. All five evasions answered `false` to everything and so fail closed
+ * there. Read the checks below as accidental-drift detection, not a boundary.
  *
  * The honest limit: that assertion needs `node_modules`, and the only CI job
  * running this suite deliberately has none, so it is availability-gated. In the

@@ -510,14 +510,31 @@ grep -rn "setup command\|connect command" \
   --include=*.ts --include=*.tsx --include=*.md
 ```
 
-It returned 54 across 23 files before #2576 and **0** after. Positive control
-for that reader: `grep -rn "connector command" packages/frontend/public README.md`
-returns 9, so a zero above means the sweep landed rather than that the command
-is broken. Note what the command itself cannot see — it does not read
-`packages/backend/src`, where the setup prompt's own consent line lived, or
-`docs/**` outside those two folders. Dated records keep the old wording on
-purpose: the CASP changelog shards, `docs/archive/**` and the cold-test report
-are evidence of what was said at the time.
+It returned **54 across 23 files** before #2576. After it, the same command
+returns **6**, and every one of the six is a `last-verified:` front-matter line
+this sweep itself wrote — an audit note quoting the retired term in order to
+say which term was replaced. Filter them out and the live-copy figure is **0**:
+
+```
+grep -rn "setup command\|connect command" \
+  packages/frontend/src packages/connect/src packages/cli/src \
+  docs/operations docs/architecture \
+  --include=*.ts --include=*.tsx --include=*.md | grep -v ':last-verified:'
+```
+
+Both numbers are stated because the first one is what a future reader actually
+gets, and a lone "0" here would make them think the sweep had regressed. A
+`last-verified` chain naming the term it retired is the chain doing its job;
+it is not residue, and it is why the retired phrase can never reach zero under
+the unfiltered command again.
+
+Positive control: `grep -rn "connector command" packages/frontend/public README.md`
+returns 9 both before and after, so the 0 above means the sweep landed rather
+than that the command is broken. Note what the command itself cannot see — it
+does not read `packages/backend/src`, where the setup prompt's own consent line
+lived, or `docs/**` outside those two folders. Dated records keep the old
+wording on purpose: the CASP changelog shards, `docs/archive/**` and the
+cold-test report are evidence of what was said at the time.
 
 Two boundaries this table does **not** cross:
 

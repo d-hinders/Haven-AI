@@ -52,13 +52,31 @@ export function AgentOnboardingPromptCard({ className }: { className?: string })
   }
 
   return (
-    <Card hover={false} className={className}>
+    // `overflow-hidden` is required by Card.Header, whose band must clip to the
+    // card's rounded corners (design-system page, § Card.Header). Without it the
+    // header's background renders square inside a rounded card.
+    <Card hover={false} className={`overflow-hidden ${className ?? ''}`.trim()}>
       <Card.Header
         title="Set up with your AI agent"
-        description="Paste this to an agent with a terminal and it can do the rest. You still approve the budget and fund the account — nothing spends without your signature."
+        description="Paste this to an agent with a terminal and it can do the setup. You still approve the budget and fund the account — nothing spends without your signature."
       />
-      <Card.Section>
-        <CopyBlock label="Prompt for your agent" value={prompt} copied={copied} onCopy={handleCopy} primary />
+      {/* A padded body, NOT a Card.Section: Card.Header already draws the
+          separating band, and Card.Section would add a second hairline border
+          under it. Its negative margins also assume a `p-5 md:p-6` parent Card,
+          which this one deliberately is not — the header owns the top region and
+          only the body below it is padded. */}
+      <div className="p-5 md:p-6">
+        {/* `nested`: this card IS the Card, so CopyBlock must not bring its own
+            (#2535, haven-design-reviewer — the default shell made this
+            Card > Card.Section > Card, and three deep on the dashboard). */}
+        <CopyBlock
+          label="Prompt for your agent"
+          value={prompt}
+          copied={copied}
+          onCopy={handleCopy}
+          primary
+          nested
+        />
         <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
           Want to read what your agent will do first?{' '}
           <a
@@ -71,7 +89,7 @@ export function AgentOnboardingPromptCard({ className }: { className?: string })
           </a>
           .
         </p>
-      </Card.Section>
+      </div>
     </Card>
   )
 }

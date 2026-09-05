@@ -117,6 +117,12 @@ describe('SupersededAgentsCard', () => {
 
       await userEvent.click(screen.getByRole('button', { name: /try again/i }))
       expect(mockState.refetch).toHaveBeenCalled()
+      // The default mock returns `undefined`, which is the shape that threw:
+      // the handler called `.finally` on it. Asserting the button recovers
+      // proves the handler survived rather than dying inside the click.
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /try again/i })).not.toBeDisabled(),
+      )
     })
 
     it('says NOTHING on a first load that has not finished', () => {

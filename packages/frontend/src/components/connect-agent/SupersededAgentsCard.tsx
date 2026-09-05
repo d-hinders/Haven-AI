@@ -110,7 +110,13 @@ export function SupersededAgentsCard({
               disabled={retrying}
               onClick={() => {
                 setRetrying(true)
-                void refetch().finally(() => setRetrying(false))
+                // `Promise.resolve(...)` because `refetch()`'s return is not
+                // this component's to assume. Calling `.finally` on it threw a
+                // TypeError for any caller whose refetch returns nothing —
+                // and the local suite still reported 1472 passing while doing
+                // it, because an unhandled rejection inside an onClick is not
+                // a failed assertion. CI was stricter and right.
+                void Promise.resolve(refetch()).finally(() => setRetrying(false))
               }}
             >
               {retrying ? 'Checking…' : 'Try again'}

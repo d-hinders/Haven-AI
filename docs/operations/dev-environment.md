@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-09-04" # chain-reset(#2542): scoped re-verification of the backend health-probe boundary; prior notes remain in git history.
+last-verified: "2026-09-05" # #2576: EDITED, scope = the one sentence describing what `HAVEN_CONNECTOR_CHANNEL` selects — "setup command" → **connector command**. Nothing about the dev environment, its services or its variables was re-verified. Prior: chain-reset(#2542): scoped re-verification of the backend health-probe boundary; prior notes remain in git history.
 ---
 
 # Dev environment

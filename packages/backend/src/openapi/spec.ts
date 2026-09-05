@@ -6068,6 +6068,12 @@ export const openapiSpec = {
           api_key_hash: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
           api_key_prefix: { type: 'string', pattern: '^sk_agent_[0-9a-f]{3}$' },
           runtime: { type: 'string' },
+          run_mode: {
+            type: 'string',
+            enum: ['json', 'prose'],
+            description:
+              "#2528: how the connector was invoked — 'json' when `--json` was passed, 'prose' otherwise. The connector is the only party that can report this: the request is identical over the wire either way. Optional, because a connector older than #2528 sends nothing and registers unchanged; an unrecognised value is refused with 400 rather than stored, since this dimension segments the onboarding funnel and a value nothing recognises must not enter it silently. Case and surrounding whitespace are normalised before storage.",
+          },
           connector_version: { type: 'string' },
           connector_context: { $ref: '#/components/schemas/AgentConnectionConnector' },
           install_capabilities: {
@@ -6083,7 +6089,7 @@ export const openapiSpec = {
       },
       RegisterAgentConnectionSetupResponse: {
         type: 'object',
-        required: ['setup_id', 'agent_id', 'status', 'agent_status', 'api_key_prefix', 'api_key_scope', 'delegate_address', 'hosted_mcp_url', 'next_action'],
+        required: ['setup_id', 'agent_id', 'status', 'agent_status', 'api_key_prefix', 'api_key_scope', 'delegate_address', 'hosted_mcp_url', 'next_action', 'approval_url'],
         properties: {
           setup_id: uuid,
           agent_id: uuid,
@@ -6094,6 +6100,15 @@ export const openapiSpec = {
           delegate_address: address,
           hosted_mcp_url: { type: 'string', format: 'uri' },
           next_action: { type: 'string', enum: ['return_to_haven_for_wallet_approval'] },
+          /**
+           * #2528: the same absolute link the create (201) and status
+           * responses already return for this setup, so the connector can
+           * print a destination instead of "return to Haven and approve" and
+           * an agent relays a link rather than a sentence. Carries no secret —
+           * the setup id is already in the connector's own outcome record, and
+           * the setup TOKEN never appears in it.
+           */
+          approval_url: { type: 'string', format: 'uri' },
           passport_requested: {
             type: 'boolean',
             description: 'True when the setup opted in and its chain issues L0 passports.',

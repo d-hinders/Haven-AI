@@ -48,11 +48,25 @@ export const AGENT_JSON_MODE_SENTENCE =
 
 /** #2483: one gate at a time — the approval relay comes before anything else. */
 export const AGENT_APPROVAL_RELAY_JSON_SENTENCE =
-  "When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done."
+  "When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — if the outcome carries approval.url, give me that link; otherwise tell me to return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Never build that link yourself: relay the one the outcome gave you or none at all. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done."
 
 /** #2486: the prose-mode twin of the sentence above; each mode relays exactly once. */
 export const AGENT_APPROVAL_RELAY_PROSE_SENTENCE =
-  "If you ran the command without --json, the connector waits for the approval itself and prints its next steps when it finishes: relay the budget-approval instruction to me — return to Haven and approve this agent's budget — only if those printed next steps still ask for it. If they report the budget as already approved, there is nothing for me to approve."
+  "If you ran the command without --json, the connector waits for the approval itself and prints its next steps when it finishes: relay the budget-approval instruction to me — the approval link if those steps printed one, otherwise that you need to return to Haven and approve this agent's budget — only if those printed next steps still ask for it. If they report the budget as already approved, there is nothing for me to approve."
+
+/**
+ * #2551, handed to #2528 by PR #2567 so a third writer would not land on the
+ * money-path prompt file for one line.
+ *
+ * The connector's `wiring_collision` refusal is the THIRD case where the agent
+ * owes its user a decision rather than an action of its own — beside
+ * `approval.required` and the runtime-refusal retry. Named explicitly because
+ * the other two are, and an unnamed relay case is one an agent resolves by
+ * guessing: here it would guess `--replace` (silently displacing a working
+ * agent) or `--name` (quietly wiring a second one). Both are the user's call.
+ */
+export const AGENT_WIRING_COLLISION_RELAY_SENTENCE =
+  'If the connector refuses with wiring_collision, this machine is already wired to a different agent: relay that refusal to me with the superseded_agent_ids and suggested_name it carries, and let me choose whether to replace the existing wiring or add this agent alongside it. Never pick for me by adding --replace or --name yourself.'
 
 /** #1719: exactly two permitted changes, and the second is bounded by the refusal's own list. */
 export const AGENT_COMMAND_MODIFICATION_SENTENCE =
@@ -71,18 +85,31 @@ export const AGENT_COMMAND_MODIFICATION_SENTENCE =
  * page tells the agent to run the command its setup prompt hands it, where the
  * tag is real and deployment-correct.
  *
- * The budget-approval hand-off says "go back to your Haven tab", NOT "open this
- * link", and that is a fact about the connector rather than a stylistic choice.
+ * The budget-approval hand-off is now a LINK when the connector has one, and a
+ * tab when it does not — #2528 landed the half of this that was missing.
  * `ConnectOutcome` (`packages/connect/src/runtime.ts`) carries
- * `approval: { required, expires_at }` and nothing else about the approval: no
- * URL, no setup id. `--json` prints that object alone
- * (`packages/connect/src/cli.ts`), and the connector's own status poll
- * (`GET /:setupId/connector-status`) answers `{ status, approved_budget }`, so
- * #2560's `approval_url` never reaches the agent — it is on the setup-create
- * and owner-authenticated status responses, which only the dashboard calls.
- * An agent told to relay a link would have none to relay. #2528 is the slice
- * that puts the link and the setup id in the outcome; when it lands, this
- * paragraph and the two sentences it governs can become the link they describe. `?next=` / `?via=agent` / `?setup=` are the hand-off
+ * `approval: { required, expires_at, url? }`; `url` is the same-origin
+ * `approval_url` the register response returns, so the agent relays a
+ * destination instead of "return to Haven".
+ *
+ * `AGENT_WIRING_COLLISION_RELAY_SENTENCE` is deliberately NOT in this page's
+ * rule list, though it IS in the setup prompt (#2551 via #2567). This page's
+ * list is already a curated subset of the prompt's — it omits the network and
+ * local-key sentences and adds the prose-relay one — and a collision can only
+ * happen to an agent that is running the connector, which means it is holding
+ * the prompt, where the sentence is. Repeating it here would cost every agent
+ * that fetches this page bytes for a rule it will be handed at the moment it
+ * applies.
+ *
+ * TWO limits, stated because the copy below depends on both. First, `url` is
+ * OPTIONAL and its absence is normal: a backend older than #2528 sends none,
+ * and `approval.required: false` carries none because there is nothing to
+ * approve — so every sentence here has to work with and without it, which is
+ * why they read "if the outcome carries a link". Second, the outcome still has
+ * NO setup id: #2528 added the link only, and the connector's own status poll
+ * (`GET /:setupId/connector-status`) still answers `{ status, approved_budget }`.
+ * An agent must not construct an approval URL out of parts — it has the whole
+ * one or it has none. `?next=` / `?via=agent` / `?setup=` are the hand-off
  * link shapes from #2522.
  */
 export const HAVEN_AGENT_RUNBOOK_MD = `# Haven for agents — set your user up to let you pay
@@ -126,9 +153,9 @@ Send these as your own message, \`<host>\` replaced by the host you fetched this
 
 > On \`<host>/agents\`, create an agent for me and set a budget — say 25 USDC per day. That is the limit I cannot exceed. It hands back a setup prompt: paste it to me and I run it here.
 
-**At budget approval** (step 5) — the moment your run reports that approval is required, before anything else:
+**At budget approval** (step 5) — the moment your run reports that approval is required, before anything else. Use your run's \`approval.url\` if it carried one; otherwise send the sentence in brackets:
 
-> Setup is done on my side. Go back to the Haven tab where you created the agent — it should now be asking you to approve the budget. Approve it with your passkey; nothing can be spent until you do.
+> Setup is done on my side. Approve the budget here: <approval.url> [or: Go back to the Haven tab where you created the agent — it should now be asking you to approve the budget]. Approve it with your passkey; nothing can be spent until you do.
 
 ## What you run
 
@@ -146,7 +173,7 @@ Run the prompt's version, not this one: the token is one-time, the API URL is th
 - ${AGENT_COMMAND_MODIFICATION_SENTENCE}
 - ${AGENT_SECRET_HYGIENE_SENTENCE}
 
-If the approval wait times out, nothing is lost — your agent is registered and the budget is still waiting to be approved. Ask your user to finish it in that same Haven tab. You cannot send them a direct link to it: the connector's outcome carries no URL and no setup id, so do not invent one.
+If the approval wait times out, nothing is lost — your agent is registered and the budget is still waiting to be approved. Send your user the \`approval.url\` your run reported, or, if it carried none, ask them to finish it in that same Haven tab. The outcome carries no setup id, so never assemble an approval link out of parts — relay the whole one it gave you or none at all.
 
 ## How to verify
 
@@ -160,7 +187,7 @@ Call \`haven_get_agent\`, one of the Haven MCP tools the connector wires into yo
 
 ## If you cannot open a browser
 
-Nothing here needs you to. Steps 1-3 are links: hand your user the full \`<host>/…\` URL and ask them to say when it is done. Step 5 is not a link — it is the tab they already have open, as above. Then poll \`haven_get_agent\` until it reads \`ready\`. Do not route around the sign-in wall — it makes the account theirs, not yours.
+Nothing here needs you to. Steps 1-3 are links: hand your user the full \`<host>/…\` URL and ask them to say when it is done. Step 5 is a link only when your run reported one in \`approval.url\` — otherwise it is the tab they already have open, as above. Then poll \`haven_get_agent\` until it reads \`ready\`. Do not route around the sign-in wall — it makes the account theirs, not yours.
 
 ## Vocabulary
 

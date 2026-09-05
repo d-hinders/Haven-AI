@@ -30,6 +30,32 @@ export function normalizeViaMarker(value: unknown): typeof VIA_AGENT | null {
 }
 
 /**
+ * How the connector was run, as the register call reports it (#2528).
+ *
+ * A closed two-value enum, sanitised the same way `via` is and for the same
+ * reason: this value segments a funnel metric, so anything that can reach the
+ * endpoint could otherwise write an arbitrary dimension into it. The route
+ * REFUSES an unrecognised value with 400 rather than storing it or silently
+ * coercing to null — a metric that quietly absorbs junk is worse than one that
+ * rejects it, because nothing downstream can tell the two apart. `undefined`
+ * (an older connector that does not send the field) is not a bad value and
+ * returns null, which is what the column already means.
+ */
+export const RUN_MODES = ['json', 'prose'] as const
+export type RunMode = (typeof RUN_MODES)[number]
+
+export function normalizeRunMode(value: unknown): RunMode | null {
+  if (typeof value !== 'string') return null
+  const v = value.trim().toLowerCase()
+  return (RUN_MODES as readonly string[]).includes(v) ? (v as RunMode) : null
+}
+
+/** Distinguishes "not sent" from "sent, but not a value we accept" (#2528). */
+export function isUnknownRunMode(value: unknown): boolean {
+  return value !== undefined && value !== null && normalizeRunMode(value) === null
+}
+
+/**
  * The link that lands a human on the budget approval for one setup.
  *
  * ABSOLUTE, deliberately, against the same-origin rule the discovery artifacts

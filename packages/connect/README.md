@@ -169,11 +169,11 @@ Pass `--json` when a launcher needs a machine-readable completion record. Connec
 writes progress and human recovery notes to stderr and exactly one JSON object
 to stdout, with `schema_version: 1` and `outcome` set to `complete`,
 `action_required`, or `failed`. Structured runs skip the interactive
-budget-approval wait so the record is emitted promptly; approve in the Haven
-dashboard whenever ready and verify later with the read-only `haven_get_agent`
+budget-approval wait so the record is emitted promptly; open `approval.url`
+whenever ready and verify later with the read-only `haven_get_agent`
 tool. The object includes runtime/topology status,
 probe result, activation and next-action guidance, approval state/expiry (null
-when the backend does not provide an approval expiry), the two
+when the backend does not provide an approval expiry) and `approval.url`, the two
 read-only verification tools, `hosted_mcp_url`, `superseded_agent_ids`, and —
 on a run that replaced existing wiring — `superseded_agents_retired_locally`
 with `retired_agent_ids`. It
@@ -181,6 +181,18 @@ contains no API key, private key, credential
 contents, full credential paths, or full delegate address. The same redacted
 object is available to library callers as `runConnect(...).outcome`; the older
 fields remain for additive compatibility.
+
+`approval.url` (#2528) is the absolute link to this setup's budget approval,
+returned by the backend at register. Present only when `approval.required` is
+`true` **and** the backend is new enough to send one — a deployment older than
+#2528 omits the key entirely, which is why a caller must test for it rather
+than assume it. In prose mode the same link replaces "Return to Haven" in the
+printed next steps. It carries no secret (the setup token never appears in it),
+and it is the ONLY approval link a caller should use: the outcome carries no
+setup id, so there is nothing to assemble one from — relay the whole link or
+none. The connector also reports `run_mode` (`json` or `prose`) to the backend
+at register, so Haven can tell an automated setup from a narrated one; it is
+sent, not returned, and appears in no output.
 
 `hosted_mcp_url` is the hosted MCP endpoint this run wired up — **not** the
 backend URL you passed as `--api`. The hosted MCP server is a separate

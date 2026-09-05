@@ -189,7 +189,10 @@ walls stand: a `0.0.0-dev.*` snapshot may still reach only the `dev` tag, and
 `promote_latest()` refuses to move `latest` onto one. The move is tied to a
 publish this run actually performed, so re-running an old workflow run (which
 publishes nothing, every version being on npm already) cannot drag `latest`
-backwards.
+backwards. It does not compare against the live `latest`, so a genuinely new
+publish of an *older* release line still would — see the #2536 CASP shard for
+why the two obvious guards (`sort -V`, which is not semver, and a transitive
+`semver` dependency) were measured and rejected.
 
 **One consequence worth stating rather than discovering.** While the train is
 on prereleases, `latest` points at a prerelease, so a bare `npm install` writes

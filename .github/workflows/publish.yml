@@ -294,7 +294,12 @@ jobs:
           # deliberate rather than incidental: re-running an OLD workflow run
           # publishes nothing (every version is already on npm and skips), so
           # tying the move to a real publish is what stops a re-run dragging
-          # `latest` backwards to an older release.
+          # `latest` backwards to an older release. It does NOT compare against
+          # the live `latest`, so a genuinely new publish of an OLDER release
+          # line would still move it down; the before-value is printed below so
+          # that shows up in the run log. The two cheap guards were measured and
+          # rejected — `sort -V` is not semver (it orders 1.0.0 before
+          # 1.0.0-alpha.1) and `semver` is only a hoisted transitive dep here.
           promote_latest() {
             pl_channel="$1"; pl_name="$2"; pl_version="$3"; pl_tag="$4"
 
@@ -322,7 +327,10 @@ jobs:
             # A stable version was already published under `latest`.
             [ "$pl_tag" = "latest" ] && return 0
 
-            echo "→ Moving latest to $pl_name@$pl_version (published under $pl_tag, which stays)"
+            # Informational only, and deliberately unable to fail the job: a
+            # transient registry read must not fail a publish that succeeded.
+            pl_before="$(npm view "$pl_name" dist-tags.latest 2>/dev/null || echo unknown)"
+            echo "→ Moving latest for $pl_name: ${pl_before:-none} → $pl_version (published under $pl_tag, which stays)"
             npm dist-tag add "$pl_name@$pl_version" latest
           }
 

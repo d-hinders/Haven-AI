@@ -1177,12 +1177,15 @@ function runPublishLoop(workflow, { channel, version, tag, distTagExit = 0 }) {
  * real package and was stopped only by a 401. A unit test for a guard must not
  * be one credential away from mutating the registry it is describing.
  */
-function runPromoteLatest(script, args) {
+function runPromoteLatest(script, args, { viewExit = 0 } = {}) {
   const dir = join(tmpdir(), `haven-2536-pl-${randomUUID()}`)
   mkdirSync(join(dir, 'bin'), { recursive: true })
   const log = join(dir, 'npm.log')
   writeFileSync(log, '')
-  writeFileSync(join(dir, 'bin', 'npm'), `#!/bin/sh\necho "$@" >> "${log}"\nexit 0\n`)
+  writeFileSync(
+    join(dir, 'bin', 'npm'),
+    `#!/bin/sh\necho "$@" >> "${log}"\ncase "$1" in\n  view) exit ${viewExit} ;;\n  *) exit 0 ;;\nesac\n`,
+  )
   spawnSync('chmod', ['+x', join(dir, 'bin', 'npm')])
   try {
     const r = runBash(script, { args, env: { PATH: `${join(dir, 'bin')}:${process.env.PATH}` } })
@@ -1512,11 +1515,42 @@ test('#2536 GUARD 4/4: a snapshot never reaches latest — refused on prod, no-o
   // The control half — a guard that refuses everything protects nothing.
   const allowed = runPromoteLatest(script, ['prod', '@haven_ai/sdk', REAL_V, 'alpha'])
   assert.equal(allowed.code, 0, `a real prerelease must be allowed, got: ${allowed.out}`)
+  // The full call sequence, not just the move. The `view` is the before-value
+  // printed into the run log so a backwards move is visible in the record
+  // (haven-reviewer, this PR): it is informational, must never fail the job,
+  // and must never be mistaken for a decision — there is exactly ONE
+  // `dist-tag` call and nothing branches on what the view returned.
   assert.deepEqual(
     allowed.calls,
-    [`dist-tag add @haven_ai/sdk@${REAL_V} latest`],
-    'the allowed path must make exactly the one tag move',
+    [`view @haven_ai/sdk dist-tags.latest`, `dist-tag add @haven_ai/sdk@${REAL_V} latest`],
+    'the allowed path reads the before-value, then makes exactly one tag move',
   )
+  assert.equal(
+    allowed.calls.filter((c) => c.startsWith('dist-tag')).length,
+    1,
+    'exactly one tag move, whatever the informational read returned',
+  )
+})
+
+test('#2536: a registry read that fails must not stop the tag move', async () => {
+  // The before-value printed into the run log is INFORMATIONAL. A transient
+  // `npm view` failure must never fail a publish that succeeded.
+  //
+  // Why this test is at the unit level and not through the publish loop: the
+  // loop calls `promote_latest` inside an `if`, and bash suppresses `errexit`
+  // for a function invoked as a condition — so a failing read is invisible
+  // there whatever the code does. Called directly, as here, `errexit` applies,
+  // which is the context that can actually punish a missing `|| echo unknown`.
+  // A mutation dropping it survives the loop-level test and dies here.
+  const script = promoteLatestScript(await publishWorkflow())
+
+  const r = runPromoteLatest(script, ['prod', '@haven_ai/sdk', REAL_V, 'alpha'], { viewExit: 1 })
+  assert.equal(r.code, 0, `a failed registry read must not fail the move, got: ${r.out}`)
+  assert.ok(
+    r.calls.includes(`dist-tag add @haven_ai/sdk@${REAL_V} latest`),
+    `the tag move must still happen; calls were ${JSON.stringify(r.calls)}`,
+  )
+  assert.match(r.out, /unknown/, 'the log records the before-value as unknown rather than blank')
 })
 
 test('#2536: a failed tag move fails the job WITHOUT claiming the publish failed', async () => {
